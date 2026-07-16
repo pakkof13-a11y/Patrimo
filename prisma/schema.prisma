@@ -1,0 +1,584 @@
+// Patrimo — PostgreSQL schema
+// Holdings from transactions; cash pockets (banks, envelopes) are explicit & optional.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth.js / NextAuth ───────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  /// Login unique (identifiant de connexion)
+  username      String    @unique
+  email         String    @unique
+  name          String?
+  passwordHash  String?
+  /// ADMIN = SuperUser · USER = compte isolé
+  role          String    @default("USER")
+  emailVerified DateTime?
+  image         String?
+  baseCurrency  String    @default("EUR")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts           Account[]
+  sessions           Session[]
+  platforms          Platform[]
+  assets             Asset[]
+  snapshots          PortfolioSnapshot[]
+  liabilities        Liability[]
+  bankAccounts            BankAccount[]
+  savingsAccounts         SavingsAccount[]
+  lifeInsurances          LifeInsurance[]
+  envelopeCash            EnvelopeCash[]
+  employeeSavingsLines    EmployeeSavingsLine[]
+  preciousMetalPositions  PreciousMetalPosition[]
+  privateEquityPositions  PrivateEquityPosition[]
+  crowdlendingPositions   CrowdlendingPosition[]
+  tangibleAssets          TangibleAsset[]
+
+  @@index([role])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Domain ───────────────────────────────────────────────────────────────────
+
+model Platform {
+  id            String   @id @default(cuid())
+  userId        String
+  name          String
+  /// COURTIER | EXCHANGE_CRYPTO | BANQUE | BLOCKCHAIN | …
+  type          String   @default("COURTIER")
+  /// Optional nuance, e.g. "Layer 1" | "Layer 2 / EVM" for blockchains
+  subtype       String?
+  logoKey       String?
+  logoUrl       String?
+  walletAddress String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assets           Asset[]
+  transactionsFrom Transaction[] @relation("TxPlatform")
+  transactionsTo   Transaction[] @relation("TxToPlatform")
+
+  @@index([userId])
+  @@index([userId, type])
+  @@unique([userId, name])
+}
+
+/// Sous-catégorie d’affichage (UI) — indépendante des calculs ledger / assetClass.
+enum AssetCategory {
+  EQUITY
+  ETF
+  BOND
+  MONEY_MARKET
+  FUND
+  REIT
+  CRYPTO
+  CASH_EQUIVALENT
+  SCPI
+  REAL_ESTATE_DIRECT
+  PRIVATE_EQUITY
+  COMMODITY
+  DERIVATIVE
+  OTHER
+  UNCLASSIFIED
+}
+
+model Asset {
+  id              String    @id @default(cuid())
+  userId          String
+  platformId      String
+  name            String
+  ticker          String?
+  /// Code ISIN (actions / ETF) — recherche & affichage
+  isin            String?
+  assetClass      String
+  /// Sous-catégorie UI (regroupement Positions) — n’affecte pas les calculs
+  category        AssetCategory @default(UNCLASSIFIED)
+  currency        String    @default("EUR")
+  /// ISO 3166-1 alpha-2 (US, DE, FR…) — WHT dividendes
+  countryCode     String?
+  /// Override taux prélèvement à la source 0–1 (null = table pays)
+  withholdingTaxRate Decimal? @db.Decimal(8, 6)
+  /// Fiscal / storage envelope: CTO | PEA | AV | CRYPTO | IMMOBILIER
+  accountType     String    @default("CTO")
+  priceProvider   String    @default("FINNHUB")
+  providerSymbol  String?
+  logoUrl         String?
+  notes           String?
+  manualPrice     Decimal?  @db.Decimal(28, 12)
+  /// Exit levels in asset native currency (long): auto-sell on price refresh
+  stopLoss        Decimal?  @db.Decimal(28, 12)
+  tp1             Decimal?  @db.Decimal(28, 12)
+  tp2             Decimal?  @db.Decimal(28, 12)
+  tp3             Decimal?  @db.Decimal(28, 12)
+  tp4             Decimal?  @db.Decimal(28, 12)
+  acquisitionDate DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform     Platform       @relation(fields: [platformId], references: [id], onDelete: Restrict)
+  transactions Transaction[]
+  priceQuote   PriceQuote?
+  priceHistory PriceHistory[]
+
+  @@index([userId])
+  @@index([platformId])
+  @@index([userId, assetClass])
+  @@index([userId, accountType])
+  @@index([userId, category])
+  @@index([isin])
+}
+
+model Transaction {
+  id     String @id @default(cuid())
+  userId String
+
+  type String
+
+  platformId   String
+  toPlatformId String?
+  assetId      String?
+
+  quantity  Decimal? @db.Decimal(28, 12)
+  unitPrice Decimal? @db.Decimal(28, 12)
+  fees      Decimal  @default(0) @db.Decimal(28, 12)
+
+  currency    String  @default("EUR")
+  fxRateToEur Decimal @default(1) @db.Decimal(20, 10)
+
+  grossAmountEur   Decimal @db.Decimal(28, 12)
+  feesEur          Decimal @default(0) @db.Decimal(28, 12)
+  netCashImpactEur Decimal @db.Decimal(28, 12)
+  /// Prélèvement à la source (WHT) en EUR — snapshot à la création
+  withholdingTaxEur  Decimal @default(0) @db.Decimal(28, 12)
+  /// Taux WHT appliqué (0–1), snapshot
+  withholdingTaxRate Decimal? @db.Decimal(8, 6)
+  /// Date de détachement (cours) — optionnel
+  exDate       DateTime?
+  /// Date de paiement cash (défaut = occurredAt)
+  paymentDate  DateTime?
+
+  occurredAt DateTime
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  platform   Platform  @relation("TxPlatform", fields: [platformId], references: [id], onDelete: Restrict)
+  toPlatform Platform? @relation("TxToPlatform", fields: [toPlatformId], references: [id], onDelete: Restrict)
+  asset      Asset?    @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@index([userId, occurredAt])
+  @@index([platformId, occurredAt])
+  @@index([assetId, occurredAt])
+  @@index([userId, type])
+}
+
+model PriceQuote {
+  id             String   @id @default(cuid())
+  assetId        String   @unique
+  priceNative    Decimal  @db.Decimal(28, 12)
+  nativeCurrency String   @default("EUR")
+  priceEur       Decimal  @db.Decimal(28, 12)
+  source         String
+  status         String   @default("OK")
+  lastUpdatedAt  DateTime
+  rawError       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+}
+
+model PriceHistory {
+  id         String   @id @default(cuid())
+  assetId    String
+  priceEur   Decimal  @db.Decimal(28, 12)
+  source     String
+  capturedAt DateTime @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId, capturedAt])
+}
+
+model PortfolioSnapshot {
+  id               String   @id @default(cuid())
+  userId           String
+  date             DateTime @default(now())
+  totalValueEur    Decimal  @db.Decimal(28, 12)
+  totalCostEur     Decimal  @db.Decimal(28, 12)
+  cashTotalEur     Decimal  @db.Decimal(28, 12)
+  realizedPnlEur   Decimal  @db.Decimal(28, 12)
+  unrealizedPnlEur Decimal  @db.Decimal(28, 12)
+  cashIncomeEur    Decimal  @db.Decimal(28, 12)
+  assetCount       Int
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+}
+
+/// Debts / crédits — amortissement dynamique + événements de vie
+model Liability {
+  id              String    @id @default(cuid())
+  userId          String
+  name            String
+  initialAmount   Decimal   @db.Decimal(28, 12)
+  remainingAmount Decimal   @db.Decimal(28, 12)
+  currency        String    @default("EUR")
+  interestRate    Decimal?  @db.Decimal(10, 6)
+  monthlyPayment  Decimal?  @db.Decimal(28, 12)
+  startDate       DateTime?
+  endDate         DateTime?
+  /// Day of month for automatic debit (1–31). Clamped to last day of short months.
+  paymentDay      Int?
+  /// Last payment-day date for which a monthly debit was applied
+  lastPaymentAppliedAt DateTime?
+  /// Free-text bank / lender name
+  bankName        String?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events LiabilityEvent[]
+
+  @@index([userId])
+}
+
+/// Lifecycle events: monthly debit, early repayment, payment amendment
+model LiabilityEvent {
+  id          String   @id @default(cuid())
+  liabilityId String
+  /// MONTHLY_DEBIT | EARLY_REPAYMENT_PARTIAL | EARLY_REPAYMENT_TOTAL | PAYMENT_CHANGE
+  type        String
+  amount      Decimal? @db.Decimal(28, 12)
+  /// Remaining capital after this event
+  remainingAfter Decimal? @db.Decimal(28, 12)
+  eventDate   DateTime
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  liability Liability @relation(fields: [liabilityId], references: [id], onDelete: Cascade)
+
+  @@index([liabilityId, eventDate])
+}
+
+// ─── Banques ──────────────────────────────────────────────────────────────────
+
+/// Compte courant — balance defaults 0, only counts in net worth if > 0
+model BankAccount {
+  id        String   @id @default(cuid())
+  userId    String
+  /// Bank label (dropdown list or free text stored as string)
+  bankName  String
+  balance   Decimal  @default(0) @db.Decimal(28, 12)
+  currency  String   @default("EUR")
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Livret d'épargne — intérêts planifiés (APR/APY × périodicité)
+model SavingsAccount {
+  id            String   @id @default(cuid())
+  userId        String
+  name          String
+  /// Principal / last booked balance (crédité aux dates de versement)
+  balance       Decimal  @default(0) @db.Decimal(28, 12)
+  /// Taux annuel saisi en % (ex. 3.0 = 3%) — interprété selon rateType
+  apyPercent    Decimal  @default(0) @db.Decimal(10, 6)
+  /// APR (linéaire) | APY (composé rétro-calculé)
+  rateType      String   @default("APY")
+  /// DAILY | WEEKLY | MONTHLY | YEARLY
+  payoutFrequency String @default("DAILY")
+  /// ISO weekday 1=Lundi … 7=Dimanche (WEEKLY)
+  payoutDayOfWeek Int?
+  /// Jour du mois 1–31 (MONTHLY / YEARLY)
+  payoutDayOfMonth Int?
+  /// Mois 1–12 (YEARLY)
+  payoutMonth   Int?
+  /// Dernier versement d'intérêts crédité au solde
+  lastPayoutAt  DateTime?
+  /// Horloge d'affichage (intérêts courus non encore versés)
+  lastAccruedAt DateTime @default(now())
+  currency      String   @default("EUR")
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── Assurance-Vie ────────────────────────────────────────────────────────────
+
+model LifeInsurance {
+  id        String    @id @default(cuid())
+  userId    String
+  insurer   String
+  openDate  DateTime?
+  /// Cash / fonds euro
+  cashEuro  Decimal   @default(0) @db.Decimal(28, 12)
+  currency  String    @default("EUR")
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user     User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products LifeInsuranceProduct[]
+
+  @@index([userId])
+}
+
+model LifeInsuranceProduct {
+  id               String   @id @default(cuid())
+  lifeInsuranceId  String
+  name             String
+  currentValue     Decimal  @default(0) @db.Decimal(28, 12)
+  currency         String   @default("EUR")
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  lifeInsurance LifeInsurance @relation(fields: [lifeInsuranceId], references: [id], onDelete: Cascade)
+
+  @@index([lifeInsuranceId])
+}
+
+// ─── Épargne salariale (PEE / PER / PERCO) ────────────────────────────────────
+
+/// Ligne de position FCPE (parts × VL) rattachée à un plan et un gestionnaire
+model EmployeeSavingsLine {
+  id     String @id @default(cuid())
+  userId String
+
+  /// PEE | PER | PERCO
+  planType String
+  /// Gestionnaire : Amundi, Natixis, AXA, Sharinbox…
+  manager  String
+  /// Nom du fonds (FCPE)
+  fundName String
+  /// Code ISIN (sync cours future)
+  isin     String?
+  /// Nombre de parts
+  units    Decimal @default(0) @db.Decimal(28, 12)
+  /// Valeur liquidative (NAV)
+  nav      Decimal @default(0) @db.Decimal(28, 12)
+  currency String  @default("EUR")
+
+  /// Origine des fonds : VOLUNTARY | INTERESTEMENT | PARTICIPATION | ABONDEMENT
+  sourceType String @default("VOLUNTARY")
+
+  /// Date d'origine du versement (base pour +5 ans PEE)
+  contributionDate DateTime?
+  /// Date de déblocage théorique (null si mode RETIREMENT)
+  unlockDate       DateTime?
+  /// DATE | RETIREMENT
+  unlockMode       String @default("DATE")
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, planType])
+  @@index([userId, manager])
+  @@index([isin])
+}
+
+// ─── Actifs alternatifs — Métaux précieux ─────────────────────────────────────
+
+/// Position or / argent / etc. (physique ou papier), hors ledger titres
+model PreciousMetalPosition {
+  id     String @id @default(cuid())
+  userId String
+
+  /// METAL | OTHER
+  assetKind String @default("METAL")
+  /// PHYSICAL | PAPER
+  format    String @default("PHYSICAL")
+  /// Ex. Napoléon 20F, Lingot 1 kg, Krugerrand
+  denomination String
+  /// Nombre de pièces / barres / unités
+  quantity     Decimal @default(0) @db.Decimal(28, 12)
+  /// Poids unitaire en grammes (convertir Oz → g côté app)
+  unitWeightG  Decimal @default(0) @db.Decimal(28, 12)
+  /// GRAM | OZ — unité saisie pour le poids unitaire
+  weightUnit   String  @default("GRAM")
+  /// Prix de revient unitaire (PRU)
+  purchasePriceUnit Decimal @default(0) @db.Decimal(28, 12)
+  /// Valeur actuelle totale de la ligne (saisie manuelle pour l'instant)
+  currentValue      Decimal @default(0) @db.Decimal(28, 12)
+  currency          String  @default("EUR")
+  /// Lieu de stockage (coffre, domicile, banque…)
+  storageLocation   String?
+  notes             String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, assetKind])
+  @@index([userId, format])
+}
+
+/// Private equity / non-coté (PME, startups, crowdequity…)
+model PrivateEquityPosition {
+  id     String @id @default(cuid())
+  userId String
+
+  /// Nom de la société
+  companyName String
+  sector      String?
+  /// CROWDEQUITY | CLUB_DEAL | DIRECT | HOLDING
+  peType      String  @default("DIRECT")
+  shares      Decimal @default(0) @db.Decimal(28, 12)
+  /// Prix d'acquisition par part
+  acquisitionPricePerShare Decimal @default(0) @db.Decimal(28, 12)
+  investmentDate DateTime?
+  /// Valorisation actuelle totale de la ligne (NAV manuelle)
+  currentNav     Decimal  @default(0) @db.Decimal(28, 12)
+  currency       String   @default("EUR")
+  notes          String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, peType])
+}
+
+/// Crowdlending / dette privée (prêts participatifs)
+model CrowdlendingPosition {
+  id     String @id @default(cuid())
+  userId String
+
+  projectName String
+  platform    String?
+  /// Capital investi
+  capitalInvested Decimal @default(0) @db.Decimal(28, 12)
+  /// Taux d'intérêt annuel en %
+  annualYieldPercent Decimal @default(0) @db.Decimal(10, 6)
+  /// Durée en mois
+  durationMonths Int @default(12)
+  /// IN_FINE | AMORTIZING
+  repaymentType String @default("IN_FINE")
+  startDate     DateTime?
+  /// Date d'échéance théorique
+  maturityDate  DateTime?
+  /// ACTIVE | LATE | REPAID | DEFAULT
+  status   String  @default("ACTIVE")
+  currency String  @default("EUR")
+  notes    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, status])
+}
+
+/// Objets de valeur / collection (montres, vins, art, auto…)
+model TangibleAsset {
+  id     String @id @default(cuid())
+  userId String
+
+  /// WATCHES | WINE | ART | AUTO | OTHER
+  category   String  @default("OTHER")
+  /// Marque ou artiste
+  brandOrArtist String
+  /// Modèle / nom de l'œuvre
+  modelName  String
+  /// Année ou millésime (texte libre)
+  yearOrVintage String?
+  purchasePrice Decimal @default(0) @db.Decimal(28, 12)
+  /// Valeur estimée actuelle (saisie manuelle)
+  estimatedValue Decimal @default(0) @db.Decimal(28, 12)
+  currency String @default("EUR")
+  hasCertificate Boolean @default(false)
+  notes    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, category])
+}
+
+// ─── Poches cash CTO / PEA / AV ───────────────────────────────────────────────
+
+/// Explicit cash pocket per fiscal envelope (not from ledger)
+model EnvelopeCash {
+  id        String   @id @default(cuid())
+  userId    String
+  /// CTO | PEA | AV
+  envelope  String
+  balance   Decimal  @default(0) @db.Decimal(28, 12)
+  /// PEA forced EUR at app layer
+  currency  String   @default("EUR")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, envelope])
+  @@index([userId])
+}

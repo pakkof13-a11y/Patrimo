@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://patrimo:patrimo@localhost:5432/patrimo?schema=public
+  AUTH_SECRET: ci-test-secret-not-for-production-0123456789abcdef
+  AUTH_URL: http://127.0.0.1:3000
+  NEXTAUTH_URL: http://127.0.0.1:3000
+  ALLOW_DEMO_FALLBACK: "true"
+  CI: "true"
+
+jobs:
+  quality:
+    name: Typecheck · Unit · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: patrimo
+          POSTGRES_PASSWORD: patrimo
+          POSTGRES_DB: patrimo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U patrimo -d patrimo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Database migrate + seed
+        run: |
+          npx prisma migrate deploy
+          npm run db:seed
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Lint (non-blocking)
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Production build
+        run: npm run build
+
+  e2e:
+    name: E2E Playwright
+    runs-on: ubuntu-latest
+    needs: quality
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: patrimo
+          POSTGRES_PASSWORD: patrimo
+          POSTGRES_DB: patrimo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U patrimo -d patrimo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma generate + migrate + seed
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+          npm run db:seed
+
+      - name: Production build
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7

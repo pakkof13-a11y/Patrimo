@@ -1,0 +1,358 @@
+@import "tailwindcss";
+
+/* Class-based dark mode for next-themes */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* Soft off-white / warm cream — easy on the eyes */
+  --background: #f7f6f3;
+  --background-gradient: linear-gradient(
+    165deg,
+    #ffffff 0%,
+    #f8f7f4 45%,
+    #f3f1ec 100%
+  );
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --primary: #0f766e;
+  --primary-foreground: #ffffff;
+  --muted: #f0efeb;
+  --muted-foreground: #3f3f46;
+  --border: #e4e2dc;
+  --success: #15803d;
+  --danger: #b91c1c;
+  --accent: #0ea5e9;
+  --input-bg: #ffffff;
+  --table-head: #faf9f7;
+  --ring: rgb(13 148 136 / 0.25);
+  --header-bg: rgba(255, 255, 255, 0.92);
+  --app-max-width: 2560px;
+}
+
+.dark {
+  /* Soft navy → deep slate blue — less tiring than pure black */
+  --background: #0c1526;
+  --background-gradient: linear-gradient(
+    165deg,
+    #0a1628 0%,
+    #0f1f38 40%,
+    #132038 70%,
+    #0e1a2e 100%
+  );
+  --foreground: #e8eef7;
+  --card: rgba(18, 30, 52, 0.92);
+  --card-foreground: #e8eef7;
+  --primary: #2dd4bf;
+  --primary-foreground: #042f2e;
+  --muted: #1a2740;
+  --muted-foreground: #94a3b8;
+  --border: rgba(148, 163, 184, 0.15);
+  --success: #34d399;
+  --danger: #f87171;
+  --accent: #38bdf8;
+  --input-bg: #0c1830;
+  --table-head: rgba(12, 24, 48, 0.9);
+  --ring: rgb(45 212 191 / 0.35);
+  --header-bg: rgba(12, 22, 40, 0.88);
+}
+
+body {
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  background: var(--background);
+  background-image: var(--background-gradient);
+  background-attachment: fixed;
+  color: var(--foreground);
+  min-height: 100vh;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Fluid shell: 95% of viewport, capped by --app-max-width (default 2560px) */
+.app-shell {
+  width: min(95%, var(--app-max-width, 2560px));
+  max-width: var(--app-max-width, 2560px);
+  margin-left: auto;
+  margin-right: auto;
+  /* Prevent flex grandchildren from forcing page-wide overflow */
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Prefer no horizontal page scroll; tables scroll internally only when needed */
+html {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+/* Sticky header — never wider than viewport */
+.app-header {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--header-bg);
+}
+
+/**
+ * Responsive data tables — horizontal scroll when columns exceed the card.
+ *
+ * Structure:
+ *   <div class="table-container-responsive">  <!-- or .table-fluid-wrap -->
+ *     <table class="table-fluid">…</table>
+ *   </div>
+ *
+ * Key rules:
+ * - Wrapper is width-capped (100% + min-width:0) so it cannot grow with the table
+ * - Table uses width: max-content so column min-widths are respected (no squeeze)
+ * - min-width: 100% keeps the table full-width when few columns are visible
+ */
+.table-container-responsive,
+.table-fluid-wrap {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0; /* allow shrink inside flex/grid parents */
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  /* Always reserve room for the scrollbar track when needed (avoids layout jump) */
+  scrollbar-gutter: stable;
+}
+
+.table-fluid {
+  /* Grow with content (sum of column min-widths) — triggers parent overflow-x */
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  table-layout: auto;
+  border-collapse: collapse;
+}
+
+.table-fluid th,
+.table-fluid td {
+  min-width: 6.5rem; /* ~104px default floor — never crush below this */
+  width: auto;
+  box-sizing: border-box;
+  /* Keep cells readable; avoid ugly mid-word wraps under compression */
+  white-space: nowrap;
+  vertical-align: middle;
+  /* Column separators — darker on light, lighter on dark (1px, box-sizing: border-box) */
+  border-right: 1px solid #cbd5e1; /* slate-300 */
+}
+
+.dark .table-fluid th,
+.dark .table-fluid td {
+  border-right-color: rgba(255, 255, 255, 0.12);
+}
+
+/* No trailing edge on the last column */
+.table-fluid th:last-child,
+.table-fluid td:last-child {
+  border-right: none;
+}
+
+.table-fluid th.col-tight,
+.table-fluid td.col-tight {
+  min-width: 5rem;
+}
+
+.table-fluid th.col-wide,
+.table-fluid td.col-wide {
+  min-width: 10rem;
+}
+
+/* Optional: allow wrap only when explicitly opted in */
+.table-fluid th.col-wrap,
+.table-fluid td.col-wrap {
+  white-space: normal;
+}
+
+/* Column header drag-and-drop reorder */
+.table-fluid th.col-dragging {
+  opacity: 0.45;
+}
+.table-fluid th.col-drag-over {
+  box-shadow: inset 3px 0 0 0 rgb(13 148 136);
+}
+.dark .table-fluid th.col-drag-over {
+  box-shadow: inset 3px 0 0 0 rgb(45 212 191);
+}
+.table-fluid th .col-drag-hint {
+  opacity: 0.35;
+  vertical-align: middle;
+  margin-right: 0.25rem;
+  cursor: grab;
+}
+.table-fluid th:hover .col-drag-hint {
+  opacity: 0.75;
+}
+
+/* Manual column resize (Excel-like) + flex-fill widths from JS */
+.table-fluid.table-col-resize {
+  table-layout: fixed;
+  /* width / min-width set inline (fill parent or grow past for overflow-x) */
+  max-width: none;
+}
+
+/* Floors come from inline minWidth (per-column meta); don't force 6.5rem here */
+.table-fluid.table-col-resize th,
+.table-fluid.table-col-resize td {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Holdings scroll host — always allow horizontal scroll when content overflows */
+.holdings-table-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.table-fluid th.col-header-resizable {
+  position: relative;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+.table-fluid td.col-cell-sized {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+  z-index: 2;
+}
+
+.col-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  right: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background 0.12s ease;
+}
+
+.table-fluid th:hover .col-resize-handle::after,
+.col-resize-handle:hover::after,
+.col-resize-handle.is-resizing::after {
+  background: rgb(13 148 136 / 0.85);
+}
+
+.dark .table-fluid th:hover .col-resize-handle::after,
+.dark .col-resize-handle:hover::after,
+.dark .col-resize-handle.is-resizing::after {
+  background: rgb(45 212 191 / 0.9);
+}
+
+body.col-resizing {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.card {
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  /* Contain wide tables: card stays viewport-width, scroll lives in .table-*-wrap */
+  max-width: 100%;
+  min-width: 0;
+}
+
+.dark .card {
+  box-shadow: 0 4px 24px rgb(0 0 0 / 0.25);
+  backdrop-filter: blur(8px);
+}
+
+.kpi-value {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.input {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+  background: var(--input-bg);
+  color: var(--foreground);
+}
+
+.input:focus {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: var(--muted);
+}
+
+.table-head {
+  background: var(--table-head);
+}
+
+.holdings-row {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.holdings-row:hover {
+  background: rgba(20, 184, 166, 0.06);
+}
+
+/* Expand / collapse control column — always visible under table-layout:fixed */
+.table-fluid.table-col-resize th.holdings-expand-col,
+.table-fluid.table-col-resize td.holdings-expand-col {
+  width: 44px;
+  min-width: 44px !important;
+  max-width: 44px;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+  overflow: visible;
+  white-space: nowrap;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--card);
+  box-shadow: 1px 0 0 0 var(--border);
+}
+
+.table-fluid.table-col-resize thead th.holdings-expand-col {
+  background: var(--table-head);
+  z-index: 4;
+}
+
+.holdings-row:hover td.holdings-expand-col {
+  background: var(--muted);
+}
+
+.dark .holdings-row:hover {
+  background: rgba(45, 212, 191, 0.08);
+}
+
+/* Recharts tooltip readable in dark */
+.recharts-default-tooltip {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
