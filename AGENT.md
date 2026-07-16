@@ -4,17 +4,17 @@ Ce fichier documente l’accès à l’instance de test déployée sur Vercel po
 
 ## URL de test
 
-> Renseignée après le premier déploiement Vercel (branche `staging`).
-
-- **Preview staging** : `https://<vercel-preview-url>`
+- **Production (test agent)** : https://patrimo-psi.vercel.app
 - **Health check** : `GET /api/health`
+- **Dépôt GitHub** : https://github.com/pakkof13-a11y/Patrimo (privé, branche `staging`)
 
 ## Authentification
 
 | Champ | Valeur |
 |-------|--------|
-| Email | `demo@patrimo.fr` |
+| Identifiant | `demo` (ou `demo@patrimo.fr`) |
 | Mot de passe | `demo1234` |
+| Admin (optionnel) | `admin` / voir seed Vercel |
 
 Page de connexion : `/login`
 
