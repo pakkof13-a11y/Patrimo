@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npx prisma migrate deploy && npm run db:seed && npm run build",
+  "buildCommand": "npx prisma db push --accept-data-loss && npm run db:seed && npm run build",
   "installCommand": "npm ci",
   "framework": "nextjs"
 }
