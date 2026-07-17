@@ -8,12 +8,23 @@ test.describe("Tableau de bord", () => {
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(/\/dashboard/);
 
-    await expect(page.getByText("Évolution de la valeur du portefeuille")).toBeVisible({
-      timeout: 20_000,
-    });
+    await expect(
+      page.getByTestId("portfolio-evolution-panel")
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Évolution du portefeuille")).toBeVisible();
     await expect(page.getByText("Allocation par classe")).toBeVisible();
-    await expect(page.getByText("Allocation par plateforme")).toBeVisible();
-    await expect(page.getByText("Patrimoine net (Actifs − Passifs)")).toBeVisible();
+    await expect(page.getByTestId("portfolio-summary-panel")).toBeVisible();
+    await expect(page.getByText("Synthèse patrimoniale")).toBeVisible();
+    // Vue Global par défaut : grille KPI 2×3
+    await expect(page.getByTestId("summary-global-kpis")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(
+      page.getByTestId("summary-global-kpis").getByText("Patrimoine net")
+    ).toBeVisible();
+    // Switch Plateformes
+    await page.getByTestId("summary-mode-platforms").click();
+    await expect(page.getByTestId("summary-platforms-view")).toBeVisible();
 
     // Recharts SVG present when data loads
     await expect(page.locator(".recharts-responsive-container").first()).toBeVisible({

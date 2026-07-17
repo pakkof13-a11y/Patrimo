@@ -1,33 +1,25 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  ResponsiveContainer,
-  Tooltip,
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Legend,
-} from "recharts";
-import { Stat } from "@/components/ui/kpi";
 import { NewsMacroPanel } from "@/components/dashboard/news-macro-panel";
+import type { PortfolioTickerProp } from "@/components/dashboard/market-calendar-panel";
+import { PortfolioEvolutionPanel } from "@/components/dashboard/portfolio-evolution-panel";
 import { AllocationClassPanel } from "@/components/dashboard/allocation-class-panel";
-import { formatCurrency, getAssetClassLabel } from "@/app/lib/utils";
+import { PortfolioSummaryPanel } from "@/components/dashboard/portfolio-summary-panel";
+import { DashboardActivation } from "@/components/dashboard/dashboard-activation";
+import {
+  DashboardQuickActions,
+  type DashboardNavTarget,
+} from "@/components/dashboard/dashboard-quick-actions";
+import { getAssetClassLabel, cn } from "@/app/lib/utils";
 import { type HistoryPoint, type PortfolioAllocation } from "@/app/lib/types/ui";
-import { useDisplay } from "@/components/layout/display-provider";
-
-type EvolutionRow = {
-  label: string;
-  date: string;
-  valeur: number;
-  cash: number;
-  positions: number;
-  isLive: boolean;
-};
+import {
+  dashboardBlocksFor,
+  resolveDashboardMaturity,
+  toOnboardingSignals,
+  type DashboardMaturity,
+  type DashboardMaturityInput,
+} from "@/app/lib/dashboard/maturity";
 
 type ClassSlice = { name: string; value: number };
 
@@ -37,39 +29,79 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function formatChartNumber(n: number): string {
-  return round2(n).toLocaleString("fr-FR", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  });
-}
+export type DashboardTabProps = {
+  baseCurrency: string;
+  summary?: Record<string, string | number>;
+  allocation?: PortfolioAllocation;
+  history: HistoryPoint[];
+  historyLoading?: boolean;
+  /** Compteurs pour maturité (si absents → dérivés des props data) */
+  maturityInput?: DashboardMaturityInput;
+  /** Override test / story */
+  maturityOverride?: DashboardMaturity;
+  /** Titres cotés pour le calendrier des résultats (priorité portefeuille) */
+  portfolioTickers?: PortfolioTickerProp[];
+  onAddPlatform?: () => void;
+  onImport?: () => void;
+  onAddTransaction?: () => void;
+  /** Navigation cockpit → vues métier */
+  onNavigate?: (target: DashboardNavTarget) => void;
+  showEveryStart?: boolean;
+  onShowEveryStartChange?: (v: boolean) => void;
+};
 
+/**
+ * Tableau de bord adaptatif :
+ * - empty / setup → activation (faible densité)
+ * - active → cockpit analytique complet
+ */
 export function DashboardTab({
   baseCurrency,
   summary,
   allocation,
   history,
   historyLoading,
-}: {
-  baseCurrency: string;
-  summary?: Record<string, string | number>;
-  allocation?: PortfolioAllocation;
-  history: HistoryPoint[];
-  historyLoading?: boolean;
-}) {
-  const { layoutWidth } = useDisplay();
+  maturityInput,
+  maturityOverride,
+  portfolioTickers = [],
+  onAddPlatform,
+  onImport,
+  onAddTransaction,
+  onNavigate,
+  showEveryStart,
+  onShowEveryStartChange,
+}: DashboardTabProps) {
+  const resolvedInput: DashboardMaturityInput = maturityInput ?? {
+    platformCount: 0,
+    transactionCount: 0,
+    holdingCount: (allocation?.byClass?.length ?? 0) > 0 ? 1 : 0,
+    historyPointCount: history.length,
+  };
+
+  const maturity =
+    maturityOverride ?? resolveDashboardMaturity(resolvedInput);
+  const blocks = dashboardBlocksFor(maturity);
+  const signals = toOnboardingSignals(resolvedInput);
+
+  function handleNav(target: DashboardNavTarget) {
+    if (onNavigate) {
+      onNavigate(target);
+      return;
+    }
+    if (target === "transaction") onAddTransaction?.();
+    if (target === "import") onImport?.();
+    if (target === "platforms") onAddPlatform?.();
+  }
 
   // Keep last non-empty allocation visible while holdings/history refetch mid-refresh
-  // so pie labels never flash empty / disappear until new data arrives.
-  const [stableAllocation, setStableAllocation] = useState<PortfolioAllocation | undefined>(
-    allocation
-  );
+  const [stableAllocation, setStableAllocation] = useState<
+    PortfolioAllocation | undefined
+  >(allocation);
 
   useEffect(() => {
     if (!allocation) return;
     const hasClass = (allocation.byClass?.length ?? 0) > 0;
     const hasPlat = (allocation.byPlatform?.length ?? 0) > 0;
-    // Only swap when we have real data — never clear mid-refresh
     if (hasClass || hasPlat) {
       setStableAllocation(allocation);
     }
@@ -95,233 +127,168 @@ export function DashboardTab({
     [displayAllocation?.byPlatform]
   );
 
-  // Sticky history: don't blank the evolution chart while a refetch is in flight
   const [stableHistory, setStableHistory] = useState<HistoryPoint[]>(history);
   useEffect(() => {
     if (history.length > 0) setStableHistory(history);
   }, [history]);
 
-  const evolutionChart: EvolutionRow[] = useMemo(
-    () =>
-      stableHistory.map((p) => ({
-        label: p.label,
-        date: p.date,
-        valeur: round2(p.totalValueBase),
-        cash: round2(p.cashTotalBase),
-        positions: round2(p.totalValueBase - p.cashTotalBase),
-        isLive: Boolean(p.isLive),
-      })),
-    [stableHistory]
-  );
-
   const showHistoryLoading =
-    Boolean(historyLoading) && stableHistory.length === 0 && history.length === 0;
+    Boolean(historyLoading) &&
+    stableHistory.length === 0 &&
+    history.length === 0;
+
+  const canActivate =
+    Boolean(onAddPlatform) &&
+    Boolean(onImport) &&
+    Boolean(onAddTransaction);
 
   return (
-    <div className="space-y-4">
-    <section
-      className={
-        layoutWidth === "ultra"
-          ? "grid min-w-0 gap-3 sm:gap-4 lg:grid-cols-2 xl:grid-cols-3"
-          : "grid min-w-0 gap-3 sm:gap-4 lg:grid-cols-2"
-      }
+    <div
+      className="section-stack"
+      data-testid="dashboard-tab"
+      data-maturity={maturity}
     >
-      <div
-        className={
-          layoutWidth === "ultra"
-            ? "card p-4 xl:col-span-3"
-            : "card p-4 lg:col-span-2"
-        }
-      >
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold">Évolution de la valeur du portefeuille</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Actifs + cash · snapshots quotidiens (mis à jour à chaque actualisation des prix)
-              {baseCurrency !== "EUR" ? " · conversion au taux du jour" : ""}
-            </p>
-          </div>
-          {evolutionChart.length > 1 && (
-            <div className="text-right text-xs text-slate-500 dark:text-slate-400">
-              {(() => {
-                const first = evolutionChart[0]?.valeur ?? 0;
-                const last = evolutionChart[evolutionChart.length - 1]?.valeur ?? 0;
-                const delta = last - first;
-                const pct = first > 0 ? (delta / first) * 100 : 0;
-                const up = delta >= 0;
-                return (
-                  <span
-                    className={
-                      up
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-red-600 dark:text-red-400"
-                    }
-                  >
-                    {up ? "+" : ""}
-                    {formatCurrency(delta, baseCurrency)} ({up ? "+" : ""}
-                    {pct.toFixed(1)} %) sur la période
-                  </span>
-                );
-              })()}
-            </div>
-          )}
-        </div>
-        <div className="h-72">
-          {showHistoryLoading ? (
-            <div className="flex h-full items-center justify-center text-sm text-slate-500">
-              Chargement de l&apos;historique…
-            </div>
-          ) : evolutionChart.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-500">
-              <p>Aucun historique pour le moment.</p>
-              <p className="text-xs">
-                Cliquez sur « Actualiser les prix » pour enregistrer un premier snapshot.
+      {/* —— 1. Activation (empty / setup) —— */}
+      {blocks.showOnboardingHero && canActivate && (
+        <DashboardActivation
+          maturity={maturity === "active" ? "setup" : maturity}
+          signals={signals}
+          onAddPlatform={onAddPlatform!}
+          onImport={onImport!}
+          onAddTransaction={onAddTransaction!}
+          showEveryStart={showEveryStart}
+          onShowEveryStartChange={onShowEveryStartChange}
+        />
+      )}
+
+      {/* —— 1b. Actions rapides (mature) —— */}
+      {blocks.showQuickActions && (
+        <DashboardQuickActions onNavigate={handleNav} />
+      )}
+
+      {maturity === "setup" && !blocks.showOnboardingHero && (
+        <p
+          className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--muted)]/50 px-3.5 py-2.5 text-xs leading-relaxed text-[var(--muted-foreground)]"
+          data-testid="dashboard-setup-hint"
+        >
+          Continuez le journal d&apos;opérations pour enrichir l&apos;analyse
+          patrimoniale (courbe, allocation, synthèse).
+        </p>
+      )}
+
+      {/* —— 2. Analyse patrimoniale (grille modulaire) —— */}
+      {(blocks.showEvolutionChart ||
+        blocks.showAllocations ||
+        blocks.showSecondaryStats) && (
+        <section
+          className="space-y-4"
+          data-testid="dashboard-portfolio-section"
+          aria-labelledby="dashboard-portfolio-heading"
+        >
+          <div className="flex flex-wrap items-end justify-between gap-2 px-0.5">
+            <div>
+              <h2
+                id="dashboard-portfolio-heading"
+                className="section-heading"
+              >
+                Votre patrimoine
+              </h2>
+              <p className="text-meta">
+                Évolution, allocation et synthèse en un coup d&apos;œil
               </p>
             </div>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={evolutionChart} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                  tickFormatter={(v: number) =>
-                    new Intl.NumberFormat("fr-FR", {
-                      notation: "compact",
-                      compactDisplay: "short",
-                      maximumFractionDigits: 1,
-                    }).format(v)
-                  }
-                  width={56}
-                />
-                <Tooltip
-                  formatter={(v, name) => [
-                    formatCurrency(Number(v ?? 0), baseCurrency),
-                    name === "valeur"
-                      ? "Valeur totale"
-                      : name === "cash"
-                        ? "Cash"
-                        : name === "positions"
-                          ? "Positions"
-                          : String(name),
-                  ]}
-                  labelFormatter={(_, payload) => {
-                    const p = payload?.[0]?.payload as { date?: string } | undefined;
-                    return p?.date
-                      ? new Intl.DateTimeFormat("fr-FR", {
-                          timeZone: "Europe/Paris",
-                          dateStyle: "medium",
-                        }).format(new Date(p.date))
-                      : "";
-                  }}
-                  contentStyle={{
-                    borderRadius: 12,
-                    border: "1px solid var(--border)",
-                    background: "var(--card)",
-                  }}
-                />
-                <Legend
-                  formatter={(value) =>
-                    value === "valeur"
-                      ? "Valeur totale (positions + cash)"
-                      : value === "cash"
-                        ? "Cash"
-                        : value
-                  }
-                />
-                <Line
-                  type="monotone"
-                  dataKey="valeur"
-                  name="valeur"
-                  stroke="#0f766e"
-                  strokeWidth={2.5}
-                  dot={{ r: 3, fill: "#0f766e" }}
-                  activeDot={{ r: 5 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="cash"
-                  name="cash"
-                  stroke="#0284c7"
-                  strokeWidth={1.5}
-                  strokeDasharray="4 4"
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </div>
+            {onNavigate && (
+              <button
+                type="button"
+                className="rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--primary)] transition hover:bg-[var(--primary-soft)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                data-testid="dashboard-link-positions"
+                onClick={() => handleNav("positions")}
+              >
+                Voir les positions →
+              </button>
+            )}
+          </div>
 
-      <AllocationClassPanel data={classChart} baseCurrency={baseCurrency} />
+          {/*
+            Desktop : 50/50 — évolution alignée en hauteur sur la colonne
+            Allocation + Plateforme (même système de cartes).
+          */}
+          <div
+            className={cn(
+              "grid min-w-0 gap-4",
+              blocks.showEvolutionChart && blocks.showAllocations
+                ? "lg:grid-cols-2 lg:items-stretch"
+                : blocks.showAllocations
+                  ? "sm:grid-cols-2"
+                  : ""
+            )}
+            data-testid="dashboard-analytics"
+          >
+            {blocks.showEvolutionChart && (
+              <div
+                className={cn(
+                  "min-w-0",
+                  blocks.showAllocations
+                    ? "flex lg:h-full"
+                    : "mx-auto w-full max-w-3xl xl:max-w-4xl"
+                )}
+              >
+                <PortfolioEvolutionPanel
+                  history={stableHistory}
+                  baseCurrency={baseCurrency}
+                  loading={showHistoryLoading}
+                  className={blocks.showAllocations ? "w-full" : undefined}
+                />
+              </div>
+            )}
 
-      <div className="card p-4">
-        <h3 className="mb-4 text-sm font-semibold">Allocation par plateforme</h3>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={platformChart}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
-              <YAxis
-                tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                tickFormatter={(v: number) => formatChartNumber(Number(v))}
+            {blocks.showAllocations && (
+              <div
+                className={cn(
+                  "flex min-w-0 flex-col gap-4",
+                  blocks.showEvolutionChart
+                    ? "lg:h-full"
+                    : "sm:col-span-2 sm:grid sm:grid-cols-2 sm:gap-4"
+                )}
+              >
+                <AllocationClassPanel
+                  data={classChart}
+                  baseCurrency={baseCurrency}
+                  compact
+                />
+                <PortfolioSummaryPanel
+                  baseCurrency={baseCurrency}
+                  summary={summary}
+                  platforms={platformChart}
+                  showGlobal={blocks.showSecondaryStats}
+                  className="flex-1"
+                />
+              </div>
+            )}
+
+            {/* Synthèse seule si allocations masquées mais stats actives */}
+            {blocks.showSecondaryStats && !blocks.showAllocations && (
+              <PortfolioSummaryPanel
+                baseCurrency={baseCurrency}
+                summary={summary}
+                platforms={platformChart}
+                showGlobal
               />
-              <Tooltip
-                formatter={(v) =>
-                  formatCurrency(round2(Number(v ?? 0)), baseCurrency)
-                }
-              />
-              <Bar
-                dataKey="value"
-                fill="#0f766e"
-                radius={[6, 6, 0, 0]}
-                animationDuration={0}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+            )}
+          </div>
+        </section>
+      )}
 
-      <div
-        className={
-          layoutWidth === "ultra"
-            ? "card grid gap-3 p-4 sm:grid-cols-2 xl:col-span-3 xl:grid-cols-4"
-            : "card grid gap-3 p-4 sm:grid-cols-2 lg:col-span-2"
-        }
-      >
-        <Stat
-          label="Patrimoine net (Actifs − Passifs)"
-          value={formatCurrency(String(summary?.netWorthBase ?? 0), baseCurrency)}
-        />
-        <Stat
-          label="P&L réalisé"
-          value={formatCurrency(
-            String(summary?.realizedPnlBase ?? summary?.realizedPnlEur ?? 0),
-            baseCurrency
-          )}
-        />
-        <Stat
-          label="Revenus cash"
-          value={formatCurrency(
-            String(summary?.cashIncomeBase ?? summary?.cashIncomeEur ?? 0),
-            baseCurrency
-          )}
-        />
-        <Stat
-          label="Performance totale (estim.)"
-          value={formatCurrency(
-            String(summary?.totalReturnBase ?? summary?.totalReturnEur ?? 0),
-            baseCurrency
-          )}
-        />
-      </div>
-    </section>
-
-    <NewsMacroPanel />
+      {/* —— 3. Contexte marché (zone distincte, sous le patrimoine) —— */}
+      {blocks.showNewsMacro && (
+        <section
+          className="pt-0.5"
+          data-testid="dashboard-market-section"
+          aria-label="Contexte marché"
+        >
+          <NewsMacroPanel portfolioTickers={portfolioTickers} compact />
+        </section>
+      )}
     </div>
   );
 }

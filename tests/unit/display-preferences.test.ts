@@ -15,9 +15,11 @@ import {
   preferredColumnMins,
   reorderColumnIds,
   resetHoldingsColumns,
+  sanitizeColumnOrder,
+  sanitizeColumnVisibility,
+  sanitizeLockedSizing,
   saveColumnOrder,
   saveColumnSizing,
-  saveColumnVisibility,
 } from "../../app/lib/display-preferences";
 
 describe("compareAssetNames", () => {
@@ -209,17 +211,28 @@ describe("localStorage column prefs", () => {
     );
   });
 
+  it("resets visibility when stored blob is corrupt", () => {
+    mem.set(
+      "patrimo.display.columns.holdings.v4",
+      JSON.stringify({ totally: "wrong", schema: 1 })
+    );
+    const fallback = defaultHoldingsVisibility();
+    const loaded = loadColumnVisibility("holdings", fallback);
+    expect(loaded).toEqual(fallback);
+    // corrupt key wiped
+    expect(mem.get("patrimo.display.columns.holdings.v4")).toBeUndefined();
+  });
+
+  it("resets order when stored value is not an array", () => {
+    mem.set(
+      "patrimo.display.columnOrder.holdings.v4",
+      JSON.stringify({ not: "array" })
+    );
+    expect(loadColumnOrder("holdings")).toEqual(defaultColumnOrder());
+  });
+
   it("ignores non-boolean visibility values", () => {
     const fallback = defaultHoldingsVisibility("standard");
-    saveColumnVisibility("holdings", {
-      ...fallback,
-      // @ts-expect-error intentional corrupt value
-      quantity: "yes",
-      currency: false,
-    });
-    // manually corrupt storage
-    const raw = mem.get("patrimo.display.columns.holdings.v4");
-    expect(raw).toBeTruthy();
     mem.set(
       "patrimo.display.columns.holdings.v4",
       JSON.stringify({ ...fallback, quantity: "yes", currency: false })
@@ -239,5 +252,51 @@ describe("localStorage column prefs", () => {
     const loaded = loadColumnVisibility("holdings", fallback);
     expect(loaded.name).toBe(true);
     expect(loaded.marketValueBase).toBe(true);
+  });
+});
+
+describe("sanitize column prefs", () => {
+  it("sanitizeColumnVisibility forces mandatory on", () => {
+    const fallback = defaultHoldingsVisibility();
+    const s = sanitizeColumnVisibility(
+      { name: false, currency: true, unknownCol: true },
+      fallback
+    );
+    expect(s).not.toBeNull();
+    expect(s!.name).toBe(true); // mandatory
+    expect(s!.currency).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(s, "unknownCol")
+    ).toBe(false);
+  });
+
+  it("sanitizeColumnVisibility returns null for unusable object", () => {
+    const fallback = defaultHoldingsVisibility();
+    expect(sanitizeColumnVisibility({ foo: "bar" }, fallback)).toBeNull();
+    expect(sanitizeColumnVisibility(null, fallback)).toBeNull();
+    expect(sanitizeColumnVisibility([], fallback)).toBeNull();
+  });
+
+  it("sanitizeColumnOrder dedupes and appends missing", () => {
+    const order = sanitizeColumnOrder(["quantity", "name", "quantity", "nope"]);
+    expect(order).not.toBeNull();
+    expect(order![0]).toBe("quantity");
+    expect(order![1]).toBe("name");
+    expect(order).toContain("ticker");
+    expect(order!.filter((x) => x === "quantity")).toHaveLength(1);
+  });
+
+  it("sanitizeLockedSizing clamps and drops junk", () => {
+    const s = sanitizeLockedSizing({
+      name: 10,
+      avgCostEur: 9999,
+      ghost: 100,
+      quantity: "nope",
+    });
+    expect(s).not.toBeNull();
+    expect(s!.name).toBe(columnMinWidth("name"));
+    expect(s!.avgCostEur).toBe(COLUMN_RESIZE_MAX);
+    expect(s!.ghost).toBeUndefined();
+    expect(s!.quantity).toBeUndefined();
   });
 });

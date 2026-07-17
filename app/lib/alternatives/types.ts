@@ -121,6 +121,18 @@ export type AlternativesPortfolioSlice = {
   slices: { id: string; name: string; value: number }[];
 };
 
+/**
+ * Payload unique pour le dashboard Alternatifs (1 HTTP au lieu d’un fan-out 5).
+ * Les sous-modules continuent d’utiliser leurs endpoints list pour le détail.
+ */
+export type AlternativesDashboardPayload = {
+  summary: AlternativesPortfolioSlice;
+  metals: PreciousMetalsSummary;
+  privateEquity: PrivateEquitySummary;
+  crowdlending: CrowdlendingSummary;
+  tangibles: TangibleAssetsSummary;
+};
+
 // ─── Private equity ───────────────────────────────────────────────────────────
 
 export const PE_TYPES = ["CROWDEQUITY", "CLUB_DEAL", "DIRECT", "HOLDING"] as const;

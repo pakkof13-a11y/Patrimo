@@ -9,7 +9,14 @@
 import { prisma } from "@/app/lib/prisma";
 import { d, zero } from "@/app/lib/money/decimal";
 import { convertToEurSync, getEurRates } from "@/app/lib/market/fx";
-import type { AlternativesPortfolioSlice } from "./types";
+import type {
+  AlternativesDashboardPayload,
+  AlternativesPortfolioSlice,
+} from "./types";
+import { listPreciousMetals } from "./precious-metals";
+import { listPrivateEquity } from "./private-equity";
+import { listCrowdlending } from "./crowdlending";
+import { listTangibles } from "./tangibles";
 
 function sumFieldEur(
   rows: Array<{ currency: string; value: string }>,
@@ -173,4 +180,28 @@ export async function getAlternativesPortfolioSlice(
     console.error("[alternatives] getAlternativesPortfolioSlice failed:", e);
     return EMPTY;
   }
+}
+
+/**
+ * Bundle dashboard : une seule réponse HTTP avec agrégat EUR + summaries par poche.
+ * Évite le fan-out client (5 requêtes) au mount de l’onglet Alternatifs.
+ */
+export async function getAlternativesDashboardBundle(
+  userId: string
+): Promise<AlternativesDashboardPayload> {
+  const [metals, pe, cl, tangibles, summary] = await Promise.all([
+    listPreciousMetals(userId),
+    listPrivateEquity(userId),
+    listCrowdlending(userId),
+    listTangibles(userId),
+    getAlternativesPortfolioSlice(userId),
+  ]);
+
+  return {
+    summary,
+    metals: metals.summary,
+    privateEquity: pe.summary,
+    crowdlending: cl.summary,
+    tangibles: tangibles.summary,
+  };
 }

@@ -1,14 +1,7 @@
 import "dotenv/config";
 import { Prisma, PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import {
-  ADMIN_EMAIL,
-  ADMIN_PASSWORD,
-  ADMIN_USERNAME,
-  DEMO_EMAIL,
-  DEMO_PASSWORD,
-  DEMO_USERNAME,
-} from "../app/lib/constants";
+import { loadSeedCredentials } from "../app/lib/env/seed-credentials";
 
 const prisma = new PrismaClient();
 
@@ -70,6 +63,16 @@ async function wipeUserData(userId: string) {
  * - E2E (`SEED_LIGHT=1` / `E2E=1`) : données sur **demo** (Playwright), admin sans portfolio.
  */
 async function main() {
+  const creds = loadSeedCredentials();
+  const {
+    adminUsername,
+    adminEmail,
+    adminPassword,
+    demoUsername,
+    demoEmail,
+    demoPassword,
+  } = creds;
+
   const LIGHT =
     process.env.SEED_LIGHT === "1" ||
     process.env.E2E === "1" ||
@@ -82,55 +85,55 @@ async function main() {
   );
 
   // ── SuperUser ADMIN ────────────────────────────────────────────────────────
-  const adminHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
+  const adminHash = await bcrypt.hash(adminPassword, 12);
   const admin = await prisma.user.upsert({
-    where: { email: ADMIN_EMAIL },
+    where: { email: adminEmail },
     update: {
-      username: ADMIN_USERNAME,
+      username: adminUsername,
       passwordHash: adminHash,
       role: "ADMIN",
       name: "SuperUser",
       baseCurrency: "EUR",
     },
     create: {
-      username: ADMIN_USERNAME,
-      email: ADMIN_EMAIL,
+      username: adminUsername,
+      email: adminEmail,
       name: "SuperUser",
       passwordHash: adminHash,
       role: "ADMIN",
       baseCurrency: "EUR",
     },
   });
-  console.log(`  SuperUser : ${ADMIN_USERNAME} (${admin.id})`);
+  console.log(`  SuperUser : ${adminUsername} (${admin.id})`);
 
   // ── Compte démo ────────────────────────────────────────────────────────────
-  const demoHash = await bcrypt.hash(DEMO_PASSWORD, 10);
+  const demoHash = await bcrypt.hash(demoPassword, 10);
   const demo = await prisma.user.upsert({
-    where: { email: DEMO_EMAIL },
+    where: { email: demoEmail },
     update: {
       passwordHash: demoHash,
       name: "Démo Patrimo",
       baseCurrency: "EUR",
-      username: DEMO_USERNAME,
+      username: demoUsername,
       role: "USER",
     },
     create: {
-      email: DEMO_EMAIL,
-      username: DEMO_USERNAME,
+      email: demoEmail,
+      username: demoUsername,
       name: "Démo Patrimo",
       passwordHash: demoHash,
       role: "USER",
       baseCurrency: "EUR",
     },
   });
-  console.log(`  Démo USER : ${DEMO_USERNAME} (${demo.id})`);
+  console.log(`  Démo USER : ${demoUsername} (${demo.id})`);
 
   // Cible du portfolio : demo en e2e, admin en usage normal
   await wipeUserData(admin.id);
   await wipeUserData(demo.id);
   const userId = LIGHT ? demo.id : admin.id;
   console.log(
-    `  Portfolio seedé sur : ${LIGHT ? DEMO_USERNAME : ADMIN_USERNAME}`
+    `  Portfolio seedé sur : ${LIGHT ? demoUsername : adminUsername}`
   );
 
   // ── Platforms ──────────────────────────────────────────────────────────────
@@ -1171,8 +1174,9 @@ async function main() {
   console.log(`  Transactions: ${finalTx}`);
   console.log(`  admin tx    : ${adminTx}`);
   console.log(`  demo tx     : ${demoTx}`);
-  console.log(`Login admin   : ${ADMIN_USERNAME} / ${ADMIN_PASSWORD}`);
-  console.log(`Login démo    : ${DEMO_USERNAME} / ${DEMO_PASSWORD}`);
+  console.log(`  Compte admin : ${adminUsername} (mot de passe = ADMIN_PASSWORD)`);
+  console.log(`  Compte démo  : ${demoUsername} (mot de passe = DEMO_PASSWORD)`);
+  console.log("  → Les mots de passe ne sont jamais affichés (voir .env / docs/secrets.md).");
   console.log("────────────────────────────────────────");
 }
 

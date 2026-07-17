@@ -52,16 +52,89 @@ export function usePlatformsQuery(baseCurrency: string) {
   });
 }
 
-export function useTransactionsQuery() {
+/** Réponse paginée GET /api/transactions */
+export type TransactionsListResponse = {
+  transactions: TxRow[];
+  total: number;
+  totalAll: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  typeCounts?: Partial<Record<string, number>>;
+};
+
+export type TransactionsListParams = {
+  /** Page 1-based (alignée API) */
+  page: number;
+  pageSize: number;
+  typeGroup?: string;
+  accountType?: string;
+  q?: string;
+};
+
+/** Clé RQ pour le journal — invalidation `["transactions"]` couvre list + meta. */
+export function transactionsListQueryKey(params: TransactionsListParams) {
+  return [
+    "transactions",
+    "list",
+    params.page,
+    params.pageSize,
+    params.typeGroup || "all",
+    params.accountType || "",
+    params.q?.trim() || "",
+  ] as const;
+}
+
+function buildTransactionsListUrl(params: TransactionsListParams): string {
+  const sp = new URLSearchParams({
+    page: String(Math.max(1, params.page)),
+    pageSize: String(params.pageSize),
+    typeGroup: params.typeGroup || "all",
+  });
+  if (params.accountType) sp.set("accountType", params.accountType);
+  if (params.q?.trim()) sp.set("q", params.q.trim());
+  return `/api/transactions?${sp.toString()}`;
+}
+
+/**
+ * Journal paginé / filtré — source de vérité unique pour TransactionsTab.
+ */
+export function useTransactionsListQuery(
+  params: TransactionsListParams,
+  opts?: { enabled?: boolean }
+) {
   return useQuery({
-    queryKey: ["transactions"],
+    queryKey: transactionsListQueryKey(params),
     queryFn: () =>
-      fetchJson<{ transactions: TxRow[]; total?: number }>(`/api/transactions`),
+      fetchJson<TransactionsListResponse>(buildTransactionsListUrl(params)),
+    enabled: opts?.enabled !== false,
     staleTime: TX_STALE_MS,
     placeholderData: keepPreviousData,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Méta légère (totalAll) pour maturité dashboard / KPI — 1 ligne API.
+ * Ne charge pas le journal complet.
+ */
+export function useTransactionsMetaQuery(opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["transactions", "meta"] as const,
+    queryFn: () =>
+      fetchJson<TransactionsListResponse>(
+        `/api/transactions?page=1&pageSize=1`
+      ),
+    enabled: opts?.enabled !== false,
+    staleTime: TX_STALE_MS,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
   });
+}
+
+/** @deprecated Préférer useTransactionsListQuery / useTransactionsMetaQuery */
+export function useTransactionsQuery() {
+  return useTransactionsMetaQuery();
 }
 
 export function useAssetDetailQuery(detailAssetId: string | null) {

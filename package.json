@@ -16,6 +16,8 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report",
     "ci:local": "npm run typecheck && npm run test && npm run build",
+    "ready:check": "npm run typecheck && npm run test",
+    "secrets:check": "echo See docs/secrets.md — CI runs gitleaks; ensure .env is not committed",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

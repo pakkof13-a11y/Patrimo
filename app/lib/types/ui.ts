@@ -114,6 +114,20 @@ export type HistoryPoint = {
   cashTotalEur: number;
   totalValueBase: number;
   cashTotalBase: number;
+  /** Positions cotées / non-cash (base) */
+  positionsBase?: number;
+  /** Plus-values réalisées cumulées (base) */
+  realizedPnlBase?: number;
+  /** Variation latente cumulée (base) */
+  unrealizedPnlBase?: number;
+  /** Revenus cash cumulés — div. / coupons / loyers agrégés (base) */
+  cashIncomeBase?: number;
+  /** Split revenus (base) — dérivé du journal */
+  dividendsBase?: number;
+  couponsBase?: number;
+  rentsBase?: number;
+  /** Coût de revient positions (base) */
+  totalCostBase?: number;
   isLive?: boolean;
 };
 

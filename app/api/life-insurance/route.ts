@@ -2,7 +2,17 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
-import { lifeInsuranceSchema, lifeProductSchema } from "@/app/lib/schemas";
+import {
+  lifeInsuranceSchema,
+  lifeInsuranceUpdateSchema,
+  lifeProductSchema,
+  lifeProductUpdateSchema,
+} from "@/app/lib/schemas";
+import {
+  presentFields,
+  requireBodyId,
+  validationErrorResponse,
+} from "@/app/lib/api/validation";
 import { listLifeInsurances } from "@/app/lib/cash/pockets";
 
 export async function GET() {
@@ -21,7 +31,7 @@ export async function POST(req: Request) {
   if (body?.kind === "product") {
     const parsed = lifeProductSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json({ error: "Validation échouée", details: parsed.error.flatten() }, { status: 400 });
+      return validationErrorResponse(parsed.error);
     }
     const parent = await prisma.lifeInsurance.findFirst({
       where: { id: parsed.data.lifeInsuranceId, userId },
@@ -41,7 +51,7 @@ export async function POST(req: Request) {
 
   const parsed = lifeInsuranceSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Validation échouée", details: parsed.error.flatten() }, { status: 400 });
+    return validationErrorResponse(parsed.error);
   }
   const policy = await prisma.lifeInsurance.create({
     data: {
@@ -60,7 +70,7 @@ export async function PUT(req: Request) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 401 });
   const body = await req.json();
-  const id = body?.id as string;
+  const id = requireBodyId(body);
   if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
 
   if (body?.kind === "product") {
@@ -68,26 +78,53 @@ export async function PUT(req: Request) {
       where: { id, lifeInsurance: { userId } },
     });
     if (!product) return NextResponse.json({ error: "Produit introuvable" }, { status: 404 });
+
+    const parsed = lifeProductUpdateSchema.safeParse(body);
+    if (!parsed.success) return validationErrorResponse(parsed.error);
+
+    const f = presentFields(body, parsed.data as Record<string, unknown>) as typeof parsed.data;
     const data: Prisma.LifeInsuranceProductUpdateInput = {};
-    if (body.name !== undefined) data.name = String(body.name);
-    if (body.currentValue !== undefined)
-      data.currentValue = new Prisma.Decimal(String(body.currentValue).replace(",", "."));
-    if (body.notes !== undefined) data.notes = body.notes || null;
-    const updated = await prisma.lifeInsuranceProduct.update({ where: { id }, data });
+    if (f.name !== undefined) data.name = f.name;
+    if (f.currentValue !== undefined)
+      data.currentValue = new Prisma.Decimal(f.currentValue || "0");
+    if (f.currency !== undefined) data.currency = f.currency;
+    if (f.notes !== undefined) data.notes = f.notes || null;
+
+    const write = await prisma.lifeInsuranceProduct.updateMany({
+      where: { id, lifeInsurance: { userId } },
+      data,
+    });
+    if (write.count === 0) {
+      return NextResponse.json({ error: "Produit introuvable" }, { status: 404 });
+    }
+    const updated = await prisma.lifeInsuranceProduct.findFirst({
+      where: { id, lifeInsurance: { userId } },
+    });
     return NextResponse.json({ product: updated });
   }
 
   const existing = await prisma.lifeInsurance.findFirst({ where: { id, userId } });
   if (!existing) return NextResponse.json({ error: "Introuvable" }, { status: 404 });
+
+  const parsed = lifeInsuranceUpdateSchema.safeParse(body);
+  if (!parsed.success) return validationErrorResponse(parsed.error);
+
+  const f = presentFields(body, parsed.data as Record<string, unknown>) as typeof parsed.data;
   const data: Prisma.LifeInsuranceUpdateInput = {};
-  if (body.insurer !== undefined) data.insurer = String(body.insurer);
-  if (body.openDate !== undefined)
-    data.openDate = body.openDate ? new Date(body.openDate) : null;
-  if (body.cashEuro !== undefined)
-    data.cashEuro = new Prisma.Decimal(String(body.cashEuro).replace(",", "."));
-  if (body.currency !== undefined) data.currency = String(body.currency).toUpperCase();
-  if (body.notes !== undefined) data.notes = body.notes || null;
-  const policy = await prisma.lifeInsurance.update({ where: { id }, data });
+  if (f.insurer !== undefined) data.insurer = f.insurer;
+  if (f.openDate !== undefined) data.openDate = f.openDate ? new Date(f.openDate) : null;
+  if (f.cashEuro !== undefined) data.cashEuro = new Prisma.Decimal(f.cashEuro || "0");
+  if (f.currency !== undefined) data.currency = f.currency;
+  if (f.notes !== undefined) data.notes = f.notes || null;
+
+  const write = await prisma.lifeInsurance.updateMany({
+    where: { id, userId },
+    data,
+  });
+  if (write.count === 0) {
+    return NextResponse.json({ error: "Introuvable" }, { status: 404 });
+  }
+  const policy = await prisma.lifeInsurance.findFirst({ where: { id, userId } });
   return NextResponse.json({ policy });
 }
 

@@ -281,7 +281,10 @@ export async function executeOrderTriggers(
         data[f] = null;
       }
       try {
-        await prisma.asset.update({ where: { id: asset.id }, data });
+        await prisma.asset.updateMany({
+          where: { id: asset.id, userId },
+          data,
+        });
       } catch (e) {
         console.error("clear trigger fields", asset.id, e);
         report.error =

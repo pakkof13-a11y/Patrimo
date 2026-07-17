@@ -3,11 +3,21 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { createTransactionSchema } from "@/app/lib/schemas";
 import {
+  requireBodyId,
+  validationErrorResponse,
+} from "@/app/lib/api/validation";
+import {
   createTransaction,
   updateTransaction,
   deleteTransaction,
 } from "@/app/lib/transactions/service";
 import { AccountingError } from "@/app/lib/accounting";
+import {
+  buildTxListWhere,
+  mapTypeCountsToGroups,
+  parseTxListQuery,
+  TX_LIST_SELECT,
+} from "@/app/lib/transactions/list-query";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -64,24 +74,64 @@ function mapTx(t: {
   };
 }
 
-export async function GET() {
+/**
+ * GET /api/transactions
+ * Pagination serveur + filtres (typeGroup, accountType, q).
+ * Voir `app/lib/transactions/list-query.ts` et `docs/api-transactions.md`.
+ */
+export async function GET(req: Request) {
   const userId = await requireUserId();
-  if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (!userId) {
+    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  }
 
-  const [rows, total] = await Promise.all([
+  const url = new URL(req.url);
+  const query = parseTxListQuery(url.searchParams);
+  const where = buildTxListWhere(userId, query);
+  const whereForCounts = buildTxListWhere(userId, query, {
+    omitTypeFilter: true,
+  });
+
+  const skip = (query.page - 1) * query.pageSize;
+
+  const [rows, total, totalAll, grouped] = await Promise.all([
     prisma.transaction.findMany({
-      where: { userId },
-      include: { asset: true, platform: true, toPlatform: true },
+      where,
+      select: TX_LIST_SELECT,
       orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
-      take: 5000,
+      skip,
+      take: query.pageSize,
     }),
+    prisma.transaction.count({ where }),
     prisma.transaction.count({ where: { userId } }),
+    prisma.transaction.groupBy({
+      by: ["type"],
+      where: whereForCounts,
+      _count: { _all: true },
+    }),
   ]);
 
-  const transactions = rows.map(mapTx);
+  const pageCount = Math.max(1, Math.ceil(total / query.pageSize) || 1);
+  // Clamp page if client asked beyond last page
+  const safePage = Math.min(query.page, pageCount);
+
+  const typeCounts = mapTypeCountsToGroups(
+    grouped.map((g) => ({
+      type: g.type,
+      _count: g._count._all,
+    }))
+  );
 
   return NextResponse.json(
-    { transactions, total },
+    {
+      transactions: rows.map(mapTx),
+      total,
+      totalAll,
+      page: safePage,
+      pageSize: query.pageSize,
+      pageCount,
+      typeCounts,
+    },
     {
       headers: {
         "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -92,7 +142,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const userId = await requireUserId();
-  if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (!userId) {
+    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  }
 
   let body: unknown;
   try {
@@ -102,26 +154,26 @@ export async function POST(req: Request) {
   }
 
   const parsed = createTransactionSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Validation échouée", details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
+  if (!parsed.success) return validationErrorResponse(parsed.error);
 
   try {
-    const bodyObj = body as Record<string, unknown>;
+    const bodyObj = (body ?? {}) as Record<string, unknown>;
     const created = await createTransaction({
       ...parsed.data,
       userId,
       autoFundCash:
-        bodyObj.autoFundCash === undefined ? true : Boolean(bodyObj.autoFundCash),
+        bodyObj.autoFundCash === undefined
+          ? true
+          : Boolean(bodyObj.autoFundCash),
       allowNegativeCash: Boolean(bodyObj.allowNegativeCash),
     });
     return NextResponse.json({ transaction: created }, { status: 201 });
   } catch (e) {
     if (e instanceof AccountingError) {
-      return NextResponse.json({ error: e.message, code: e.code }, { status: 400 });
+      return NextResponse.json(
+        { error: e.message, code: e.code },
+        { status: 400 }
+      );
     }
     console.error(e);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
@@ -130,22 +182,19 @@ export async function POST(req: Request) {
 
 export async function PUT(req: Request) {
   const userId = await requireUserId();
-  if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (!userId) {
+    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  }
 
   const body = await req.json();
-  const id = body?.id as string | undefined;
+  const id = requireBodyId(body);
   if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
 
   const parsed = createTransactionSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Validation échouée", details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
+  if (!parsed.success) return validationErrorResponse(parsed.error);
 
   try {
-    const bodyObj = body as Record<string, unknown>;
+    const bodyObj = (body ?? {}) as Record<string, unknown>;
     const updated = await updateTransaction({
       ...parsed.data,
       userId,
@@ -156,7 +205,10 @@ export async function PUT(req: Request) {
     return NextResponse.json({ transaction: updated });
   } catch (e) {
     if (e instanceof AccountingError) {
-      return NextResponse.json({ error: e.message, code: e.code }, { status: 400 });
+      return NextResponse.json(
+        { error: e.message, code: e.code },
+        { status: 400 }
+      );
     }
     console.error(e);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
@@ -165,7 +217,9 @@ export async function PUT(req: Request) {
 
 export async function DELETE(req: Request) {
   const userId = await requireUserId();
-  if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (!userId) {
+    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  }
 
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
@@ -176,7 +230,10 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof AccountingError) {
-      return NextResponse.json({ error: e.message, code: e.code }, { status: 400 });
+      return NextResponse.json(
+        { error: e.message, code: e.code },
+        { status: 400 }
+      );
     }
     console.error(e);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });

@@ -5,6 +5,12 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { LayoutGrid, PieChart as PieIcon } from "lucide-react";
 import { CHART_COLORS } from "@/app/lib/types/ui";
 import { formatCurrency, cn } from "@/app/lib/utils";
+import {
+  EmptyPlaceholder,
+  PanelHeader,
+  SegmentedControl,
+  SegmentedItem,
+} from "@/components/ui/panel";
 
 type Slice = { name: string; value: number };
 
@@ -33,18 +39,9 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function formatChartNumber(n: number): string {
-  return round2(n).toLocaleString("fr-FR", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  });
-}
-
 /**
- * Squarified treemap — same visual family as Coin360 heatmaps:
- * nested rectangles filling a box, area ∝ weight, no external gaps.
- *
- * Based on Bruls, Huizing, van Wijk (Eurographics 2000).
+ * Treemap squarifié (aire ∝ poids) — vue mosaïque de l’allocation.
+ * Algorithme : Bruls, Huizing, van Wijk (Eurographics 2000).
  */
 function squarify(items: Item[]): LaidOutTile[] {
   const total = items.reduce((s, i) => s + i.value, 0);
@@ -179,16 +176,16 @@ function AllocationTiles({
 
   return (
     <div
-      className="relative h-72 w-full overflow-hidden rounded-lg bg-black"
+      className="relative h-44 w-full overflow-hidden rounded-lg bg-black sm:h-48 lg:h-52"
       data-testid="allocation-tiles"
       role="img"
-      aria-label="Tree-map allocation par classe style Coin360"
+      aria-label="Allocation par classe d’actifs"
     >
       {tiles.map((t) => {
         const area = t.w * t.h;
-        // Approximate pixel sizes for readability thresholds (container ~288px tall)
-        const pxH = t.h * 288;
-        const pxW = t.w * 360;
+        // Seuils de lisibilité (hauteur conteneur ~176–208px)
+        const pxH = t.h * 192;
+        const pxW = t.w * 260;
 
         let nameFs = 12;
         let pctFs = 15;
@@ -227,7 +224,6 @@ function AllocationTiles({
               width: `${t.w * 100}%`,
               height: `${t.h * 100}%`,
               backgroundColor: t.color,
-              // Coin360 brick edge — 1px inset, no gap between cells
               boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.4)",
               margin: 0,
               padding: rowMode ? "3px 7px" : "8px 10px",
@@ -290,93 +286,150 @@ function AllocationTiles({
 export function AllocationClassPanel({
   data,
   baseCurrency,
+  compact = false,
 }: {
   data: Slice[];
   baseCurrency: string;
+  /** Densité pour colonne latérale du dashboard */
+  compact?: boolean;
 }) {
   const [mode, setMode] = useState<"pie" | "tiles">("tiles");
 
   return (
-    <div className="card p-4" data-testid="allocation-class-panel">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">Allocation par classe</h3>
-        <div
-          className="inline-flex rounded-lg border border-[var(--border)] p-0.5"
-          role="tablist"
-          aria-label="Mode de visualisation"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "pie"}
-            data-testid="alloc-mode-pie"
-            onClick={() => setMode("pie")}
-            className={cn(
-              "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition",
-              mode === "pie"
-                ? "bg-teal-700 text-white dark:bg-teal-600"
-                : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-            )}
-          >
-            <PieIcon className="h-3.5 w-3.5" />
-            Camembert
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "tiles"}
-            data-testid="alloc-mode-tiles"
-            onClick={() => setMode("tiles")}
-            className={cn(
-              "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition",
-              mode === "tiles"
-                ? "bg-teal-700 text-white dark:bg-teal-600"
-                : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-            )}
-          >
-            <LayoutGrid className="h-3.5 w-3.5" />
-            Tuiles
-          </button>
-        </div>
-      </div>
+    <div
+      className={cn("card p-3.5 sm:p-4", compact && "h-full")}
+      data-testid="allocation-class-panel"
+    >
+      <PanelHeader
+        title="Allocation par classe"
+        subtitle={compact ? "Par type d’actif" : "Répartition par type d’actif"}
+        actions={
+          <SegmentedControl aria-label="Mode de visualisation">
+            <SegmentedItem
+              selected={mode === "pie"}
+              testId="alloc-mode-pie"
+              onClick={() => setMode("pie")}
+            >
+              <PieIcon className="h-3.5 w-3.5" />
+              Camembert
+            </SegmentedItem>
+            <SegmentedItem
+              selected={mode === "tiles"}
+              testId="alloc-mode-tiles"
+              onClick={() => setMode("tiles")}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Mosaïque
+            </SegmentedItem>
+          </SegmentedControl>
+        }
+      />
 
       {data.length === 0 ? (
-        <div className="flex h-72 items-center justify-center text-sm text-slate-500">
-          Aucune allocation à afficher
+        <div className="flex h-44 items-center sm:h-48 lg:h-52">
+          <EmptyPlaceholder
+            compact
+            title="Aucune allocation"
+            description="Les classes d’actifs apparaîtront dès le premier achat."
+          />
         </div>
       ) : mode === "tiles" ? (
         <AllocationTiles data={data} baseCurrency={baseCurrency} />
       ) : (
-        <div className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={data}
-                dataKey="value"
-                nameKey="name"
-                outerRadius={100}
-                animationDuration={0}
-                label={({ name, value }) =>
-                  `${name} ${formatChartNumber(Number(value ?? 0))}`
-                }
-                labelLine
-              >
-                {data.map((slice, i) => (
-                  <Cell
-                    key={`${slice.name}-${i}`}
-                    fill={CHART_COLORS[i % CHART_COLORS.length]}
-                  />
-                ))}
-              </Pie>
-              <Tooltip
-                formatter={(v) =>
-                  formatCurrency(round2(Number(v ?? 0)), baseCurrency)
-                }
-              />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
+        <PieWithLegend
+          data={data}
+          baseCurrency={baseCurrency}
+          compact={compact}
+        />
       )}
+    </div>
+  );
+}
+
+/** Camembert + légende montants & % toujours visibles (hors hover). */
+function PieWithLegend({
+  data,
+  baseCurrency,
+  compact,
+}: {
+  data: Slice[];
+  baseCurrency: string;
+  compact?: boolean;
+}) {
+  const total = data.reduce((s, d) => s + d.value, 0) || 1;
+  const rows = [...data]
+    .filter((d) => d.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .map((d, i) => ({
+      ...d,
+      pct: (d.value / total) * 100,
+      color: CHART_COLORS[i % CHART_COLORS.length]!,
+    }));
+
+  return (
+    <div className="flex min-h-0 flex-col gap-2">
+      <div className={cn("w-full", compact ? "h-36" : "h-40 sm:h-44")}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={rows}
+              dataKey="value"
+              nameKey="name"
+              cx="50%"
+              cy="50%"
+              outerRadius={compact ? 64 : 78}
+              innerRadius={compact ? 28 : 34}
+              animationDuration={0}
+              paddingAngle={1}
+            >
+              {rows.map((slice) => (
+                <Cell key={slice.name} fill={slice.color} />
+              ))}
+            </Pie>
+            <Tooltip
+              formatter={(v, _n, item) => {
+                const pct =
+                  item && typeof item === "object" && "payload" in item
+                    ? Number(
+                        (item as { payload?: { pct?: number } }).payload?.pct ??
+                          0
+                      )
+                    : 0;
+                return [
+                  `${formatCurrency(round2(Number(v ?? 0)), baseCurrency)} · ${pct.toFixed(1)} %`,
+                  "Allocation",
+                ];
+              }}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <ul
+        className="max-h-28 space-y-1 overflow-y-auto pr-0.5"
+        data-testid="allocation-pie-legend"
+      >
+        {rows.map((r) => (
+          <li
+            key={r.name}
+            className="flex items-center gap-2 text-[11px] leading-tight"
+          >
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-sm"
+              style={{ backgroundColor: r.color }}
+              aria-hidden
+            />
+            <span className="min-w-0 flex-1 truncate font-medium text-[var(--foreground)]">
+              {r.name}
+            </span>
+            <span className="shrink-0 tabular-nums text-[var(--muted-foreground)]">
+              {r.pct.toFixed(1)}&nbsp;%
+            </span>
+            <span className="shrink-0 tabular-nums font-medium text-[var(--foreground)]">
+              {formatCurrency(round2(r.value), baseCurrency)}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -14,9 +14,17 @@ export type EmployeeSavingsSource = (typeof EMPLOYEE_SAVINGS_SOURCES)[number];
 export const EMPLOYEE_SAVINGS_UNLOCK_MODES = ["DATE", "RETIREMENT"] as const;
 export type EmployeeSavingsUnlockMode = (typeof EMPLOYEE_SAVINGS_UNLOCK_MODES)[number];
 
+/** Libellés longs (formulaires, légendes) */
 export const PLAN_TYPE_LABELS: Record<EmployeeSavingsPlanType, string> = {
-  PEE: "PEE (Plan d'Épargne Entreprise)",
-  PER: "PER (Plan d'Épargne Retraite)",
+  PEE: "PEE — Plan d'épargne entreprise",
+  PER: "PER — Plan d'épargne retraite",
+  PERCO: "PERCO — Plan d'épargne retraite collectif",
+};
+
+/** Libellés courts (tableau, KPI, chips) */
+export const PLAN_TYPE_SHORT: Record<EmployeeSavingsPlanType, string> = {
+  PEE: "PEE",
+  PER: "PER",
   PERCO: "PERCO",
 };
 
@@ -25,6 +33,11 @@ export const SOURCE_TYPE_LABELS: Record<EmployeeSavingsSource, string> = {
   INTERESTEMENT: "Intéressement",
   PARTICIPATION: "Participation",
   ABONDEMENT: "Abondement employeur",
+};
+
+export const UNLOCK_MODE_LABELS: Record<EmployeeSavingsUnlockMode, string> = {
+  DATE: "Date fixe",
+  RETIREMENT: "Retraite",
 };
 
 export const COMMON_MANAGERS = [

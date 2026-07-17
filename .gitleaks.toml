@@ -1,0 +1,22 @@
+# Config Gitleaks — https://github.com/gitleaks/gitleaks
+# Utilisé en CI (.github/workflows/ci.yml)
+
+title = "Patrimo"
+
+[extend]
+useDefault = true
+
+# Faux positifs acceptables (placeholders, fixtures CI documentées)
+[allowlist]
+description = "Placeholders et fixtures non secrètes"
+paths = [
+  '''\.env\.example$''',
+  '''docs/secrets\.md$''',
+  '''\.gitleaks\.toml$''',
+]
+regexes = [
+  '''ci-only-[a-z0-9-]+''',
+  '''remplacez-par-''',
+  '''votre-cle''',
+  '''pk_votre_cle''',
+]

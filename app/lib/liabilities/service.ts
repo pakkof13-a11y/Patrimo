@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
+import { owned } from "../db/tenant-scope";
 import { d, toFixed } from "../money/decimal";
 import { toEurAmount } from "../market/fx";
 import {
@@ -25,14 +26,16 @@ export type LiabilityEventType =
 
 /**
  * Apply all due monthly debits for one liability (idempotent via lastPaymentAppliedAt).
+ * Requires userId — never loads/writes a liability by bare id alone.
  * Returns updated remaining if any debit ran.
  */
 export async function applyDuePaymentsForLiability(
+  userId: string,
   liabilityId: string,
   now: Date = new Date()
 ) {
-  const liability = await prisma.liability.findUnique({
-    where: { id: liabilityId },
+  const liability = await prisma.liability.findFirst({
+    where: owned(liabilityId, userId),
   });
   if (!liability) return null;
   if (!liability.paymentDay || !liability.monthlyPayment) return liability;
@@ -105,14 +108,17 @@ export async function applyDuePaymentsForLiability(
       endDate = lastApplied || now;
     }
 
-    return tx.liability.update({
-      where: { id: liabilityId },
+    const write = await tx.liability.updateMany({
+      where: owned(liabilityId, userId),
       data: {
         remainingAmount: new Prisma.Decimal(remaining),
         lastPaymentAppliedAt: lastApplied,
         endDate,
       },
     });
+    if (write.count === 0) return null;
+
+    return tx.liability.findFirst({ where: owned(liabilityId, userId) });
   });
 }
 
@@ -123,7 +129,7 @@ export async function applyDuePaymentsForUser(userId: string, now: Date = new Da
     select: { id: true },
   });
   for (const r of rows) {
-    await applyDuePaymentsForLiability(r.id, now);
+    await applyDuePaymentsForLiability(userId, r.id, now);
   }
 }
 
@@ -195,7 +201,7 @@ export async function recordEarlyRepayment(opts: {
   notes?: string;
 }) {
   const liability = await prisma.liability.findFirst({
-    where: { id: opts.liabilityId, userId: opts.userId },
+    where: owned(opts.liabilityId, opts.userId),
   });
   if (!liability) throw new Error("Passif introuvable");
 
@@ -247,13 +253,15 @@ export async function recordEarlyRepayment(opts: {
             : "Remboursement anticipé partiel"),
       },
     });
-    return tx.liability.update({
-      where: { id: liability.id },
+    const write = await tx.liability.updateMany({
+      where: owned(liability.id, opts.userId),
       data: {
         remainingAmount: new Prisma.Decimal(remaining),
         endDate,
       },
     });
+    if (write.count === 0) throw new Error("Passif introuvable");
+    return tx.liability.findFirstOrThrow({ where: owned(liability.id, opts.userId) });
   });
 }
 
@@ -265,7 +273,7 @@ export async function changeMonthlyPayment(opts: {
   notes?: string;
 }) {
   const liability = await prisma.liability.findFirst({
-    where: { id: opts.liabilityId, userId: opts.userId },
+    where: owned(opts.liabilityId, opts.userId),
   });
   if (!liability) throw new Error("Passif introuvable");
 
@@ -300,13 +308,15 @@ export async function changeMonthlyPayment(opts: {
               : ""),
       },
     });
-    return tx.liability.update({
-      where: { id: liability.id },
+    const write = await tx.liability.updateMany({
+      where: owned(liability.id, opts.userId),
       data: {
         monthlyPayment: new Prisma.Decimal(newPayment),
         endDate: projected,
       },
     });
+    if (write.count === 0) throw new Error("Passif introuvable");
+    return tx.liability.findFirstOrThrow({ where: owned(liability.id, opts.userId) });
   });
 }
 
@@ -321,7 +331,7 @@ export async function changeInterestRate(opts: {
   notes?: string;
 }) {
   const liability = await prisma.liability.findFirst({
-    where: { id: opts.liabilityId, userId: opts.userId },
+    where: owned(opts.liabilityId, opts.userId),
   });
   if (!liability) throw new Error("Passif introuvable");
 
@@ -357,12 +367,14 @@ export async function changeInterestRate(opts: {
               : ""),
       },
     });
-    return tx.liability.update({
-      where: { id: liability.id },
+    const write = await tx.liability.updateMany({
+      where: owned(liability.id, opts.userId),
       data: {
         interestRate: new Prisma.Decimal(newRate),
         endDate: projected,
       },
     });
+    if (write.count === 0) throw new Error("Passif introuvable");
+    return tx.liability.findFirstOrThrow({ where: owned(liability.id, opts.userId) });
   });
 }

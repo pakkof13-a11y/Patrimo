@@ -510,6 +510,7 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     cashIncomeEur: toFixed(cashIncome, 8),
     totalReturnEur: toFixed(totalReturn, 8),
     totalMarketValueBase: toBase(marketValue),
+    totalCostBasisBase: toBase(costBasis),
     totalCashBase: toBase(cash),
     totalLiabilitiesBase: toBase(liabilitiesEur),
     netWorthBase: toBase(netWorth),
@@ -585,8 +586,8 @@ export async function recordPortfolioSnapshot(userId: string) {
   });
 
   if (existing) {
-    return prisma.portfolioSnapshot.update({
-      where: { id: existing.id },
+    await prisma.portfolioSnapshot.updateMany({
+      where: { id: existing.id, userId },
       data: {
         totalValueEur: toFixed(totalValueEur, 8),
         totalCostEur: toFixed(totalCostEur, 8),
@@ -597,6 +598,9 @@ export async function recordPortfolioSnapshot(userId: string) {
         assetCount,
         date: new Date(),
       },
+    });
+    return prisma.portfolioSnapshot.findFirstOrThrow({
+      where: { id: existing.id, userId },
     });
   }
 
@@ -622,30 +626,102 @@ export type PortfolioHistoryPoint = {
   cashTotalEur: number;
   totalValueBase: number;
   cashTotalBase: number;
+  positionsBase?: number;
+  realizedPnlBase?: number;
+  unrealizedPnlBase?: number;
+  cashIncomeBase?: number;
+  dividendsBase?: number;
+  couponsBase?: number;
+  rentsBase?: number;
+  totalCostBase?: number;
   isLive?: boolean;
 };
 
-/** Snapshots + optional live point for the evolution chart */
+/**
+ * Cumul des revenus par type (net EUR) jusqu’à chaque date de snapshot.
+ * Source : journal (DIVIDENDE / COUPON / LOYER).
+ */
+function attachIncomeSplit(
+  points: PortfolioHistoryPoint[],
+  incomeRows: Array<{
+    type: string;
+    occurredAt: Date;
+    netCashImpactEur: { toString(): string };
+  }>,
+  toBase: (eur: ReturnType<typeof d>) => number
+): void {
+  if (points.length === 0) return;
+
+  let i = 0;
+  let div = d(0);
+  let coup = d(0);
+  let rent = d(0);
+
+  for (const p of points) {
+    const t = Date.parse(p.date);
+    while (i < incomeRows.length) {
+      const row = incomeRows[i]!;
+      if (row.occurredAt.getTime() > t) break;
+      const net = d(row.netCashImpactEur.toString());
+      if (row.type === "DIVIDENDE") div = div.plus(net);
+      else if (row.type === "COUPON") coup = coup.plus(net);
+      else if (row.type === "LOYER") rent = rent.plus(net);
+      i++;
+    }
+    p.dividendsBase = toBase(div);
+    p.couponsBase = toBase(coup);
+    p.rentsBase = toBase(rent);
+    // Si le snapshot n’a pas de cashIncome, reconstruire le total split
+    if (p.cashIncomeBase == null || p.cashIncomeBase === 0) {
+      const sum = toBase(div.plus(coup).plus(rent));
+      if (sum > 0) p.cashIncomeBase = sum;
+    }
+  }
+}
+
+/** Snapshots + point live pour le module Évolution (historique long). */
 export async function getPortfolioHistory(
   userId: string,
   baseCurrency = "EUR"
 ): Promise<PortfolioHistoryPoint[]> {
-  const [snapshots, rates, live] = await Promise.all([
+  const [snapshots, rates, live, incomeRows] = await Promise.all([
     prisma.portfolioSnapshot.findMany({
       where: { userId },
-      orderBy: { date: "asc" },
-      take: 120,
+      // Prendre les plus récents (sinon take coupe l’historique récent)
+      orderBy: { date: "desc" },
+      take: 2200,
     }),
     getEurRates(),
     getPortfolioBundle(userId, baseCurrency),
+    prisma.transaction.findMany({
+      where: {
+        userId,
+        type: { in: ["DIVIDENDE", "COUPON", "LOYER"] },
+      },
+      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+      select: {
+        type: true,
+        occurredAt: true,
+        netCashImpactEur: true,
+      },
+    }),
   ]);
 
   const toBase = (eur: ReturnType<typeof d>) =>
     Number(convertFromEurSync(eur, baseCurrency, rates));
 
-  const points: PortfolioHistoryPoint[] = snapshots.map((s) => {
+  // Remettre en ordre chronologique croissant pour la courbe
+  const snapshotsAsc = [...snapshots].reverse();
+
+  const points: PortfolioHistoryPoint[] = snapshotsAsc.map((s) => {
     const totalEur = d(s.totalValueEur.toString());
     const cashEur = d(s.cashTotalEur.toString());
+    const realizedEur = d(s.realizedPnlEur.toString());
+    const unrealizedEur = d(s.unrealizedPnlEur.toString());
+    const incomeEur = d(s.cashIncomeEur.toString());
+    const costEur = d(s.totalCostEur.toString());
+    const totalBase = toBase(totalEur);
+    const cashBase = toBase(cashEur);
     return {
       date: s.date.toISOString(),
       label: new Intl.DateTimeFormat("fr-FR", {
@@ -655,25 +731,42 @@ export async function getPortfolioHistory(
       }).format(s.date),
       totalValueEur: totalEur.toNumber(),
       cashTotalEur: cashEur.toNumber(),
-      totalValueBase: toBase(totalEur),
-      cashTotalBase: toBase(cashEur),
+      totalValueBase: totalBase,
+      cashTotalBase: cashBase,
+      positionsBase: totalBase - cashBase,
+      realizedPnlBase: toBase(realizedEur),
+      unrealizedPnlBase: toBase(unrealizedEur),
+      cashIncomeBase: toBase(incomeEur),
+      totalCostBase: toBase(costEur),
     };
   });
 
   // Always append current live valuation so the chart is never empty / stale
   const liveTotal = d(live.summary.portfolioPlusCashEur);
   const liveCash = d(live.summary.totalCashEur);
+  const liveRealized = d(String(live.summary.realizedPnlEur ?? 0));
+  const liveUnrealized = d(String(live.summary.unrealizedPnlEur ?? 0));
+  const liveIncome = d(String(live.summary.cashIncomeEur ?? 0));
+  const liveCost = d(String(live.summary.totalCostBasisEur ?? 0));
   const todayKey = new Date().toISOString().slice(0, 10);
   const last = points[points.length - 1];
   const lastKey = last ? last.date.slice(0, 10) : null;
+
+  const liveTotalBase = toBase(liveTotal);
+  const liveCashBase = toBase(liveCash);
 
   const livePoint: PortfolioHistoryPoint = {
     date: new Date().toISOString(),
     label: "Aujourd'hui",
     totalValueEur: liveTotal.toNumber(),
     cashTotalEur: liveCash.toNumber(),
-    totalValueBase: toBase(liveTotal),
-    cashTotalBase: toBase(liveCash),
+    totalValueBase: liveTotalBase,
+    cashTotalBase: liveCashBase,
+    positionsBase: liveTotalBase - liveCashBase,
+    realizedPnlBase: toBase(liveRealized),
+    unrealizedPnlBase: toBase(liveUnrealized),
+    cashIncomeBase: toBase(liveIncome),
+    totalCostBase: toBase(liveCost),
     isLive: true,
   };
 
@@ -681,8 +774,13 @@ export async function getPortfolioHistory(
     points.push(livePoint);
   } else {
     // Replace today's snapshot with freshest live value
-    points[points.length - 1] = { ...livePoint, label: last.label || "Aujourd'hui" };
+    points[points.length - 1] = {
+      ...livePoint,
+      label: last.label || "Aujourd'hui",
+    };
   }
+
+  attachIncomeSplit(points, incomeRows, toBase);
 
   return points;
 }

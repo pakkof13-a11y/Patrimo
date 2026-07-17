@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { crowdlendingSchema } from "@/app/lib/schemas";
 import {
+  presentFields,
+  requireBodyId,
+  validationErrorResponse,
+} from "@/app/lib/api/validation";
+import {
   createCrowdlending,
   deleteCrowdlending,
   listCrowdlending,
@@ -27,12 +32,7 @@ export async function POST(req: Request) {
   if (!userId) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const parsed = crowdlendingSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Validation échouée", details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
+  if (!parsed.success) return validationErrorResponse(parsed.error);
   try {
     const line = await createCrowdlending(userId, parsed.data);
     return NextResponse.json({ line }, { status: 201 });
@@ -48,17 +48,13 @@ export async function PUT(req: Request) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
-  const id = body?.id as string;
+  const id = requireBodyId(body);
   if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
   const parsed = crowdlendingSchema.partial().safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Validation échouée", details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
+  if (!parsed.success) return validationErrorResponse(parsed.error);
+  const patch = presentFields(body, parsed.data as Record<string, unknown>);
   try {
-    const line = await updateCrowdlending(userId, id, parsed.data);
+    const line = await updateCrowdlending(userId, id, patch);
     return NextResponse.json({ line });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erreur";

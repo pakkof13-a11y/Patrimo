@@ -70,13 +70,20 @@ function canUseStorage(): boolean {
   }
 }
 
+/**
+ * Largeur d’interface : toujours fluide (auto-adaptatif).
+ * Les anciens modes standard/wide/ultra sont migrés silencieusement.
+ * L’UI Préférences n’expose plus ce choix (complexité inutile).
+ */
 export function loadLayoutWidth(): LayoutWidthMode {
   if (!canUseStorage()) return "fluid";
   try {
     const v = localStorage.getItem(LAYOUT_KEY);
-    if (v === "fluid" || v === "standard" || v === "wide" || v === "ultra") return v;
-    // migrate old default
-    if (v === null) return "fluid";
+    if (v && v !== "fluid") {
+      localStorage.setItem(LAYOUT_KEY, "fluid");
+    } else if (v === null) {
+      localStorage.setItem(LAYOUT_KEY, "fluid");
+    }
   } catch {
     /* ignore */
   }
@@ -85,7 +92,8 @@ export function loadLayoutWidth(): LayoutWidthMode {
 
 export function saveLayoutWidth(mode: LayoutWidthMode) {
   try {
-    localStorage.setItem(LAYOUT_KEY, mode);
+    // Force fluid even if called with legacy values
+    localStorage.setItem(LAYOUT_KEY, mode === "fluid" ? "fluid" : "fluid");
   } catch {
     /* ignore */
   }
@@ -169,13 +177,13 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
     id: "allocationPct",
     label: "Allocation portefeuille (%)",
     group: "optional",
-    minWidth: 120,
+    minWidth: 132,
   },
   {
     id: "breakEvenBase",
     label: "Break-even / Seuil de rentabilité",
     group: "optional",
-    minWidth: 120,
+    minWidth: 128,
   },
   { id: "costBasisEur", label: "Capital investi", group: "optional", minWidth: 110 },
   { id: "assetClass", label: "Classe", group: "optional", minWidth: 100 },
@@ -263,26 +271,58 @@ export function resetHoldingsColumns(): {
   };
 }
 
+/**
+ * Sanitize visibility map: drop unknown keys, force mandatory on.
+ * Returns null if structure is unusable (caller may reset storage).
+ */
+export function sanitizeColumnVisibility(
+  raw: unknown,
+  fallback: ColumnVisibilityMap
+): ColumnVisibilityMap | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const merged: ColumnVisibilityMap = { ...fallback };
+  let anyKnown = false;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!(k in fallback)) continue;
+    if (typeof v !== "boolean") continue;
+    merged[k] = v;
+    anyKnown = true;
+  }
+  for (const c of HOLDINGS_COLUMN_META) {
+    if (c.group === "mandatory" || c.locked) merged[c.id] = true;
+  }
+  // Unusable blob (no known keys) → treat as corrupt
+  if (!anyKnown && Object.keys(raw as object).length > 0) return null;
+  return merged;
+}
+
 export function loadColumnVisibility(
   tableKey: string,
   fallback: ColumnVisibilityMap
 ): ColumnVisibilityMap {
   if (!canUseStorage()) return fallback;
   try {
-    const raw = localStorage.getItem(`${COLUMNS_PREFIX}${tableKey}.${COLUMNS_VERSION}`);
+    const raw = localStorage.getItem(
+      `${COLUMNS_PREFIX}${tableKey}.${COLUMNS_VERSION}`
+    );
     const legacy = localStorage.getItem(COLUMNS_PREFIX + tableKey);
     const source = raw || legacy;
     if (!source) return fallback;
-    const parsed = JSON.parse(source) as ColumnVisibilityMap;
-    const merged: ColumnVisibilityMap = { ...fallback };
-    for (const [k, v] of Object.entries(parsed)) {
-      if (k in fallback && typeof v === "boolean") merged[k] = v;
+    const parsed = JSON.parse(source) as unknown;
+    const sanitized = sanitizeColumnVisibility(parsed, fallback);
+    if (!sanitized) {
+      // Corrupt → wipe versioned + legacy keys
+      try {
+        localStorage.removeItem(
+          `${COLUMNS_PREFIX}${tableKey}.${COLUMNS_VERSION}`
+        );
+        localStorage.removeItem(COLUMNS_PREFIX + tableKey);
+      } catch {
+        /* ignore */
+      }
+      return fallback;
     }
-    // Mandatory / locked columns always stay visible
-    for (const c of HOLDINGS_COLUMN_META) {
-      if (c.group === "mandatory" || c.locked) merged[c.id] = true;
-    }
-    return merged;
+    return sanitized;
   } catch {
     return fallback;
   }
@@ -299,21 +339,54 @@ export function saveColumnVisibility(tableKey: string, visibility: ColumnVisibil
   }
 }
 
+/**
+ * Sanitize order: known ids only, no dupes, append missing defaults.
+ * Returns null if input is not a usable array (corrupt).
+ */
+export function sanitizeColumnOrder(
+  raw: unknown,
+  defaults: string[] = defaultColumnOrder()
+): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const known = new Set(defaults);
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const id of raw) {
+    if (typeof id !== "string") continue;
+    if (!known.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    order.push(id);
+  }
+  for (const id of defaults) {
+    if (!seen.has(id)) order.push(id);
+  }
+  // Empty after filter of non-empty input → corrupt
+  if (order.length === 0) return null;
+  return order;
+}
+
 /** Merge saved order with any new columns appended at end */
 export function loadColumnOrder(tableKey: string): string[] {
   const defaults = defaultColumnOrder();
   if (!canUseStorage()) return defaults;
   try {
-    const raw = localStorage.getItem(`${ORDER_PREFIX}${tableKey}.${COLUMNS_VERSION}`);
+    const raw = localStorage.getItem(
+      `${ORDER_PREFIX}${tableKey}.${COLUMNS_VERSION}`
+    );
     if (!raw) return defaults;
-    const parsed = JSON.parse(raw) as string[];
-    if (!Array.isArray(parsed)) return defaults;
-    const known = new Set(defaults);
-    const order = parsed.filter((id) => known.has(id));
-    for (const id of defaults) {
-      if (!order.includes(id)) order.push(id);
+    const parsed = JSON.parse(raw) as unknown;
+    const sanitized = sanitizeColumnOrder(parsed, defaults);
+    if (!sanitized) {
+      try {
+        localStorage.removeItem(
+          `${ORDER_PREFIX}${tableKey}.${COLUMNS_VERSION}`
+        );
+      } catch {
+        /* ignore */
+      }
+      return defaults;
     }
-    return order;
+    return sanitized;
   } catch {
     return defaults;
   }
@@ -471,6 +544,29 @@ export function computeFlexColumnLayout(opts: {
   };
 }
 
+/**
+ * Sanitize locked sizing map. Returns null only if JSON shape is unusable.
+ * Drops unknown ids and non-finite values (partial maps are valid).
+ */
+export function sanitizeLockedSizing(
+  raw: unknown
+): Record<string, number> | null {
+  if (raw == null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) return null;
+  const known = new Set(HOLDINGS_COLUMN_META.map((c) => c.id));
+  const locked: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!known.has(k)) continue;
+    const n = Number(v);
+    if (!Number.isFinite(n)) continue;
+    locked[k] = Math.min(
+      COLUMN_RESIZE_MAX,
+      Math.max(columnMinWidth(k), Math.round(n))
+    );
+  }
+  return locked;
+}
+
 /** Load *locked* column widths only (v5). Empty = full flex auto-fit. */
 export function loadColumnSizing(tableKey: string): Record<string, number> {
   if (!canUseStorage()) return defaultColumnSizing();
@@ -478,24 +574,51 @@ export function loadColumnSizing(tableKey: string): Record<string, number> {
     const raw = localStorage.getItem(
       `${SIZE_PREFIX}${tableKey}.${SIZING_VERSION}`
     );
-    if (!raw) return defaultColumnSizing();
-    const parsed = JSON.parse(raw) as Record<string, number>;
-    if (!parsed || typeof parsed !== "object") return defaultColumnSizing();
-    const known = new Set(HOLDINGS_COLUMN_META.map((c) => c.id));
-    const locked: Record<string, number> = {};
-    for (const [k, v] of Object.entries(parsed)) {
-      if (!known.has(k)) continue;
-      const n = Number(v);
-      if (!Number.isFinite(n)) continue;
-      locked[k] = Math.min(
-        COLUMN_RESIZE_MAX,
-        Math.max(columnMinWidth(k), Math.round(n))
-      );
+    if (!raw) {
+      // Drop obsolete pre-v5 full maps so they never reappear as “locks”
+      try {
+        localStorage.removeItem(
+          `${SIZE_PREFIX}${tableKey}.${COLUMNS_VERSION}`
+        );
+      } catch {
+        /* ignore */
+      }
+      return defaultColumnSizing();
     }
-    return locked;
+    const parsed = JSON.parse(raw) as unknown;
+    const sanitized = sanitizeLockedSizing(parsed);
+    if (sanitized == null) {
+      try {
+        localStorage.removeItem(
+          `${SIZE_PREFIX}${tableKey}.${SIZING_VERSION}`
+        );
+      } catch {
+        /* ignore */
+      }
+      return defaultColumnSizing();
+    }
+    return sanitized;
   } catch {
     return defaultColumnSizing();
   }
+}
+
+/**
+ * One-shot load of all holdings column prefs with migration guards.
+ * Safe defaults if anything is corrupt.
+ */
+export function loadHoldingsColumnPrefs(tableKey = "holdings"): {
+  visibility: ColumnVisibilityMap;
+  order: string[];
+  lockedSizing: Record<string, number>;
+} {
+  const visibility = loadColumnVisibility(
+    tableKey,
+    defaultHoldingsVisibility("fluid")
+  );
+  const order = loadColumnOrder(tableKey);
+  const lockedSizing = loadColumnSizing(tableKey);
+  return { visibility, order, lockedSizing };
 }
 
 /** Persist only locked widths (v5). */

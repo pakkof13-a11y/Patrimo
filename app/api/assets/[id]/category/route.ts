@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { updateAssetCategorySchema } from "@/app/lib/schemas";
+import { validationErrorResponse } from "@/app/lib/api/validation";
 import { assetCategoryLabel } from "@/app/lib/assets/categories";
 
 /**
@@ -23,25 +24,24 @@ async function updateCategory(req: Request, id: string) {
   }
 
   const parsed = updateAssetCategorySchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      {
-        error: "Catégorie invalide",
-        details: parsed.error.flatten(),
-      },
-      { status: 400 }
-    );
-  }
+  if (!parsed.success) return validationErrorResponse(parsed.error);
 
   const asset = await prisma.asset.findFirst({ where: { id, userId } });
   if (!asset) {
     return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });
   }
 
-  const updated = await prisma.asset.update({
-    where: { id },
+  const write = await prisma.asset.updateMany({
+    where: { id, userId },
     data: { category: parsed.data.category },
   });
+  if (write.count === 0) {
+    return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });
+  }
+  const updated = await prisma.asset.findFirst({ where: { id, userId } });
+  if (!updated) {
+    return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });
+  }
 
   return NextResponse.json({
     asset: {

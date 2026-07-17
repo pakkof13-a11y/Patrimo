@@ -29,7 +29,7 @@ import {
   useHoldingsQuery,
   usePlatformsQuery,
   usePortfolioHistoryQuery,
-  useTransactionsQuery,
+  useTransactionsMetaQuery,
 } from "@/app/hooks/use-portfolio-queries";
 import {
   EMPTY_HOLDINGS,
@@ -48,31 +48,88 @@ import {
 } from "@/app/lib/types/nav-groups";
 import {
   ONBOARDING_DISMISS_KEY,
-  ONBOARDING_SESSION_DISMISS_KEY,
   ONBOARDING_SHOW_EVERY_START_KEY,
   loadOnboardingDismissState,
-  saveSessionPref,
   saveUiPref,
 } from "@/app/lib/ui-preferences";
 
+import dynamic from "next/dynamic";
 import { AppHeader } from "@/components/layout/app-header";
 import { Shell } from "@/components/layout/display-provider";
 import { KpiStrip } from "@/components/dashboard/kpi-strip";
 import { DashboardTab } from "@/components/dashboard/dashboard-tab";
 import { HoldingsSection } from "@/components/holdings/holdings-section";
-import { TransactionsTab } from "@/components/transactions/transactions-tab";
-import { PlatformsTab } from "@/components/platforms/platforms-tab";
-import { BanksTab } from "@/components/tabs/banks-tab";
-import { LiabilitiesTab } from "@/components/tabs/liabilities-tab";
-import { EmployeeSavingsTab } from "@/components/tabs/employee-savings-tab";
-import { AlternativesTab } from "@/components/tabs/alternatives-tab";
-import { FiscalYearTab } from "@/components/tabs/fiscal-year-tab";
 import { TransactionModal } from "@/components/modals/transaction-modal";
 import { PlatformModal } from "@/components/modals/platform-modal";
 import { AssetDetailModal } from "@/components/modals/asset-detail-modal";
 import { ImportCsvModal } from "@/components/modals/import-csv-modal";
 import { CommandPalette } from "@/components/layout/command-palette";
-import { DashboardHelp } from "@/components/onboarding/dashboard-help";
+import {
+  dashboardBlocksFor,
+  resolveDashboardMaturity,
+} from "@/app/lib/dashboard/maturity";
+
+/** Placeholder léger pendant le chargement d’un onglet code-splité. */
+function TabChunkFallback() {
+  return (
+    <div
+      className="card h-48 animate-pulse bg-[var(--muted)]/40"
+      aria-busy="true"
+      data-testid="tab-chunk-loading"
+    />
+  );
+}
+
+// Onglets lourds : chunks séparés (dashboard + positions restent eager — chemins chauds).
+const TransactionsTab = dynamic(
+  () =>
+    import("@/components/transactions/transactions-tab").then((m) => ({
+      default: m.TransactionsTab,
+    })),
+  { loading: () => <TabChunkFallback />, ssr: false }
+);
+const PlatformsTab = dynamic(
+  () =>
+    import("@/components/platforms/platforms-tab").then((m) => ({
+      default: m.PlatformsTab,
+    })),
+  { loading: () => <TabChunkFallback />, ssr: false }
+);
+const BanksTab = dynamic(
+  () =>
+    import("@/components/tabs/banks-tab").then((m) => ({
+      default: m.BanksTab,
+    })),
+  { loading: () => <TabChunkFallback />, ssr: false }
+);
+const LiabilitiesTab = dynamic(
+  () =>
+    import("@/components/tabs/liabilities-tab").then((m) => ({
+      default: m.LiabilitiesTab,
+    })),
+  { loading: () => <TabChunkFallback />, ssr: false }
+);
+const EmployeeSavingsTab = dynamic(
+  () =>
+    import("@/components/tabs/employee-savings-tab").then((m) => ({
+      default: m.EmployeeSavingsTab,
+    })),
+  { loading: () => <TabChunkFallback />, ssr: false }
+);
+const AlternativesTab = dynamic(
+  () =>
+    import("@/components/tabs/alternatives-tab").then((m) => ({
+      default: m.AlternativesTab,
+    })),
+  { loading: () => <TabChunkFallback />, ssr: false }
+);
+const FiscalYearTab = dynamic(
+  () =>
+    import("@/components/tabs/fiscal-year-tab").then((m) => ({
+      default: m.FiscalYearTab,
+    })),
+  { loading: () => <TabChunkFallback />, ssr: false }
+);
 
 const emptySubscribe = () => () => undefined;
 
@@ -155,30 +212,24 @@ function PortfolioAppClient({
   const [platformComboLabel, setPlatformComboLabel] = useState("");
   const [txPlatformLabel, setTxPlatformLabel] = useState("");
   const [cmdOpen, setCmdOpen] = useState(false);
-  /**
-   * Aide bienvenue — valeurs SSR-safe (identiques serveur/client).
-   * Lecture localStorage UNIQUEMENT après mount (évite Recoverable Error hydratation).
-   */
-  /** Aide bienvenue (tableau de bord uniquement) — visible par défaut */
-  const [helpVisible, setHelpVisible] = useState(true);
+  /** Préférence onboarding « afficher à chaque démarrage » (hero empty/setup) */
   const [showEveryStart, setShowEveryStart] = useState(true);
-  const [helpPrefsReady, setHelpPrefsReady] = useState(false);
   const baseCurrencyRef = useRef(baseCurrency);
+  /** Auto-refresh cours : positions + dashboard uniquement (pas fiscal / passifs / etc.). */
+  const priceRefreshEnabled =
+    tab === "dashboard" || isPositionsTab(tab) || tab === "transactions";
   const { refreshMutation, lastPriceSync, priceSyncPulse } =
-    usePriceAutoRefresh(baseCurrencyRef);
+    usePriceAutoRefresh(baseCurrencyRef, { enabled: priceRefreshEnabled });
 
   // Ref devise pour le timer prix — pas pendant le render (React 19)
   useEffect(() => {
     baseCurrencyRef.current = baseCurrency;
   }, [baseCurrency]);
 
-  // Prefs aide : après mount (client only)
+  // Prefs onboarding : après mount (client only)
   useEffect(() => {
-    const { dismissed, showEveryStart: every } = loadOnboardingDismissState();
+    const { showEveryStart: every } = loadOnboardingDismissState();
     setShowEveryStart(every);
-    // dismissed permanent (case décochée) → aide masquée ; sinon visible
-    setHelpVisible(!dismissed);
-    setHelpPrefsReady(true);
   }, []);
 
   // Deep-link / e2e : ?import=1 ouvre la modale CSV
@@ -239,7 +290,8 @@ function PortfolioAppClient({
   const historyQ = usePortfolioHistoryQuery(baseCurrency);
   const platformsQ = usePlatformsQuery(baseCurrency);
   const detailQ = useAssetDetailQuery(detailAssetId);
-  const txQ = useTransactionsQuery();
+  /** Compte total léger (maturité dashboard) — pas le journal paginé. */
+  const txMetaQ = useTransactionsMetaQuery();
 
   // ─── Forms ──────────────────────────────────────────────────────────────────
 
@@ -428,35 +480,42 @@ function PortfolioAppClient({
     return allHoldings.filter((h) => (h.accountType || "CTO") === envelopeFilter);
   }, [allHoldings, envelopeFilter]);
 
+  /** Tickers uniques pour le calendrier des résultats (dashboard) */
+  const portfolioTickers = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { ticker: string; name: string }[] = [];
+    for (const h of allHoldings) {
+      const t = (h.ticker ?? "").trim();
+      if (!t) continue;
+      const key = t.toUpperCase().replace(/\..*$/, "");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ticker: t, name: h.name });
+    }
+    return out;
+  }, [allHoldings]);
+
   const platforms = useMemo(
     () => platformsQ.data?.platforms ?? holdingsQ.data?.platforms ?? [],
     [platformsQ.data?.platforms, holdingsQ.data?.platforms]
   );
   const summary = holdingsQ.data?.summary;
-  const txCount = txQ.data?.transactions?.length ?? 0;
+  const txCount =
+    txMetaQ.data?.totalAll ?? txMetaQ.data?.total ?? 0;
 
   const positionsView = isPositionsTab(tab);
   const isDashboard = tab === "dashboard";
 
-  function toggleDashboardHelp() {
-    setHelpVisible((v) => {
-      const next = !v;
-      if (!next) {
-        // Masquer
-        if (showEveryStart) {
-          saveUiPref(ONBOARDING_DISMISS_KEY, false);
-          saveSessionPref(ONBOARDING_SESSION_DISMISS_KEY, false);
-        } else {
-          saveUiPref(ONBOARDING_DISMISS_KEY, true);
-          saveSessionPref(ONBOARDING_SESSION_DISMISS_KEY, false);
-        }
-      } else {
-        saveUiPref(ONBOARDING_DISMISS_KEY, false);
-        saveSessionPref(ONBOARDING_SESSION_DISMISS_KEY, false);
-      }
-      return next;
-    });
-  }
+  /** Maturité du compte → densité du dashboard + KPI strip */
+  const dashboardMaturity = resolveDashboardMaturity({
+    platformCount: platforms.length,
+    transactionCount: txCount,
+    holdingCount: allHoldings.length,
+    historyPointCount: historyQ.data?.history?.length ?? 0,
+  });
+  const dashBlocks = dashboardBlocksFor(dashboardMaturity);
+  /** KPI globaux : toujours hors dashboard ; sur dashboard seulement si mature */
+  const showGlobalKpis = !isDashboard || dashBlocks.showKpiStrip;
 
   const platformSelectOptions = useMemo(
     () =>
@@ -611,32 +670,17 @@ function PortfolioAppClient({
       />
 
       <Shell>
-        {/* Indicateurs : 8 tuiles + toggle au-dessus, sur tous les onglets */}
-        <KpiStrip summary={summary} baseCurrency={baseCurrency} />
-
-        {/* Aide bienvenue : uniquement Tableau de bord */}
-        {isDashboard && helpPrefsReady && (
-          <DashboardHelp
-            visible={helpVisible}
-            onToggle={toggleDashboardHelp}
-            hasPlatforms={platforms.length > 0}
-            hasHoldings={allHoldings.length > 0}
-            hasTransactions={txCount > 0}
-            showEveryStart={showEveryStart}
-            onShowEveryStartChange={(v) => {
-              setShowEveryStart(v);
-              saveUiPref(ONBOARDING_SHOW_EVERY_START_KEY, v);
-              if (v) {
-                saveUiPref(ONBOARDING_DISMISS_KEY, false);
-                setHelpVisible(true);
-              }
-            }}
-            onAddPlatform={() => {
-              setTab("platforms");
-              setShowPlatform(true);
-            }}
-            onImport={() => setShowImport(true)}
-            onAddTransaction={() => openNewTransaction("ACHAT")}
+        {/*
+          KPI strip :
+          - onglets métier : toujours
+          - dashboard empty/setup : masqué (réduit la densité perçue)
+          - dashboard active : cockpit complet
+        */}
+        {showGlobalKpis && (
+          <KpiStrip
+            summary={summary}
+            baseCurrency={baseCurrency}
+            smartFilter={isDashboard && dashBlocks.kpiSmartFilter}
           />
         )}
 
@@ -656,6 +700,8 @@ function PortfolioAppClient({
                 openNewTransaction(type, h)
               }
               onCategoryChange={onCategoryChange}
+              onAddTransaction={() => openNewTransaction("ACHAT")}
+              onImport={() => setShowImport(true)}
             />
           ) : null}
         </div>
@@ -677,14 +723,51 @@ function PortfolioAppClient({
             allocation={holdingsQ.data?.allocation}
             history={historyQ.data?.history ?? []}
             historyLoading={historyQ.isPending && !historyQ.data}
+            maturityInput={{
+              platformCount: platforms.length,
+              transactionCount: txCount,
+              holdingCount: allHoldings.length,
+              historyPointCount: historyQ.data?.history?.length ?? 0,
+            }}
+            portfolioTickers={portfolioTickers}
+            onAddPlatform={() => {
+              setTab("platforms");
+              setShowPlatform(true);
+            }}
+            onImport={() => setShowImport(true)}
+            onAddTransaction={() => openNewTransaction("ACHAT")}
+            onNavigate={(target) => {
+              switch (target) {
+                case "positions":
+                  setTab("holdings");
+                  break;
+                case "transactions":
+                  setTab("transactions");
+                  break;
+                case "platforms":
+                  setTab("platforms");
+                  break;
+                case "import":
+                  setShowImport(true);
+                  break;
+                case "transaction":
+                  openNewTransaction("ACHAT");
+                  break;
+              }
+            }}
+            showEveryStart={showEveryStart}
+            onShowEveryStartChange={(v) => {
+              setShowEveryStart(v);
+              saveUiPref(ONBOARDING_SHOW_EVERY_START_KEY, v);
+              if (v) {
+                saveUiPref(ONBOARDING_DISMISS_KEY, false);
+              }
+            }}
           />
         )}
 
         {tab === "transactions" && (
           <TransactionsTab
-            transactions={txQ.data?.transactions || []}
-            totalFromApi={txQ.data?.total}
-            loading={txQ.isPending && !txQ.data}
             onEdit={openEditTx}
             onDelete={(id) => deleteTx.mutate(id)}
             onImport={() => setShowImport(true)}
@@ -751,6 +834,48 @@ function PortfolioAppClient({
               qc.invalidateQueries({ queryKey: ["asset-detail", detailAssetId] });
             },
           });
+        }}
+        onAddTransaction={(type) => {
+          const h = allHoldings.find((x) => x.assetId === detailAssetId);
+          setDetailAssetId(null);
+          if (h) {
+            openNewTransaction(type || "ACHAT", h);
+            return;
+          }
+          // Fallback si position absente mais détail chargé
+          const d = detailQ.data;
+          if (d?.asset) {
+            const platformId =
+              d.transactions[0]?.platformId || platforms[0]?.id || "";
+            openNewTransaction(type || "ACHAT", {
+              assetId: d.asset.id,
+              name: d.asset.name,
+              ticker: d.asset.ticker,
+              assetClass: d.asset.assetClass,
+              accountType:
+                (d.asset as { accountType?: string }).accountType || "CTO",
+              currency: d.asset.currency,
+              platformId,
+              platformName: d.asset.platformName,
+              platformLogoUrl: d.asset.platformLogoUrl,
+              quantity: d.holding?.quantity || "0",
+              avgCostEur: d.holding?.avgCostEur || "0",
+              costBasisEur: "0",
+              currentPriceEur: d.asset.priceQuote?.priceEur || "0",
+              currentPriceNative: d.asset.priceQuote?.priceNative || "0",
+              marketValueEur: d.holding?.marketValueEur || "0",
+              marketValueBase: d.holding?.marketValueEur || "0",
+              costBasisBase: "0",
+              unrealizedPnlEur: "0",
+              unrealizedPnlBase: "0",
+              unrealizedPnlPct: "0",
+              priceSource: null,
+              priceStatus: null,
+              lastUpdatedAt: null,
+            });
+          } else {
+            openNewTransaction(type || "ACHAT");
+          }
         }}
       />
 

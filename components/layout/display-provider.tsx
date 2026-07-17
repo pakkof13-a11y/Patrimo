@@ -35,27 +35,29 @@ export function DisplayProvider({ children }: { children: React.ReactNode }) {
     setLayoutWidthState(loadLayoutWidth());
   }, []);
 
-  const setLayoutWidth = useCallback((mode: LayoutWidthMode) => {
-    setLayoutWidthState(mode);
-    saveLayoutWidth(mode);
+  const setLayoutWidth = useCallback((_mode: LayoutWidthMode) => {
+    // Layout modes retirés de l’UI — toujours fluide
+    setLayoutWidthState("fluid");
+    saveLayoutWidth("fluid");
   }, []);
 
   const maxWidth = layoutMaxWidth(layoutWidth);
 
   const value = useMemo<DisplayContextValue>(() => {
     const kpiGridClass =
-      "grid w-full min-w-0 gap-3 auto-rows-fr [grid-template-columns:repeat(auto-fit,minmax(min(100%,11.5rem),1fr))]";
+      "grid w-full min-w-0 gap-2.5 auto-rows-fr sm:gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,11.25rem),1fr))]";
     const dashboardGridClass =
       layoutWidth === "ultra" || layoutWidth === "fluid"
-        ? "grid gap-4 lg:grid-cols-2 xl:grid-cols-3"
-        : "grid gap-4 lg:grid-cols-2";
+        ? "grid gap-3 sm:gap-4 lg:grid-cols-2 xl:grid-cols-3"
+        : "grid gap-3 sm:gap-4 lg:grid-cols-2";
 
     return {
       layoutWidth,
       setLayoutWidth,
       maxWidth,
+      /* section-stack : gap design system entre header zones */
       shellClassName:
-        "app-shell min-w-0 max-w-full space-y-4 px-3 py-4 sm:space-y-6 sm:px-5 sm:py-6 lg:px-6",
+        "app-shell section-stack min-w-0 max-w-full px-3 py-4 sm:px-5 sm:py-5 lg:px-6 lg:py-6",
       kpiGridClass,
       dashboardGridClass,
     };
@@ -79,10 +81,10 @@ export function useDisplay() {
       setLayoutWidth: () => undefined,
       maxWidth: "2560px",
       shellClassName:
-        "app-shell min-w-0 max-w-full space-y-4 px-3 py-4 sm:space-y-6 sm:px-5 sm:py-6",
+        "app-shell section-stack min-w-0 max-w-full px-3 py-4 sm:px-5 sm:py-5",
       kpiGridClass:
-        "grid w-full min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,11.5rem),1fr))]",
-      dashboardGridClass: "grid gap-4 lg:grid-cols-2 xl:grid-cols-3",
+        "grid w-full min-w-0 gap-2.5 sm:gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,11.25rem),1fr))]",
+      dashboardGridClass: "grid gap-3 sm:gap-4 lg:grid-cols-2 xl:grid-cols-3",
     };
   }
   return ctx;

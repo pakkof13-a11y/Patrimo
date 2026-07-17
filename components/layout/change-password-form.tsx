@@ -50,14 +50,17 @@ export function ChangePasswordForm() {
   }
 
   return (
-    <div
-      className="mt-4 border-t border-[var(--border)] pt-3"
-      data-testid="change-password-section"
-    >
-      <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-        <KeyRound className="h-3.5 w-3.5" />
-        Changer mon mot de passe
+    <div data-testid="change-password-section">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+        <KeyRound className="h-3.5 w-3.5" aria-hidden />
+        Sécurité
       </div>
+      <p className="text-meta mb-2">
+        Modifiez le mot de passe de ce compte. L&apos;ancien reste requis.
+      </p>
+      <p className="mb-2 text-[11px] font-medium text-[var(--foreground)]">
+        Changer mon mot de passe
+      </p>
       <p className="mb-2 text-[11px] text-zinc-500 dark:text-slate-400">
         Saisissez votre mot de passe actuel, puis le nouveau (min. 6 caractères).
       </p>

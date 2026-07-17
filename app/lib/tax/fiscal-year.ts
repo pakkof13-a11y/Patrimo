@@ -48,9 +48,14 @@ export type FiscalTxLite = {
   fxRateToEur?: string | number | null;
   grossAmountEur?: string | number | null;
   feesEur?: string | number | null;
+  /** native fees (converted with fx when feesEur absent) */
+  fees?: string | number | null;
   netCashImpactEur?: string | number | null;
   withholdingTaxEur?: string | number | null;
   assetId?: string | null;
+  /** Courtiers — le CUMP est par (assetId × platformId), comme le ledger */
+  platformId?: string | null;
+  toPlatformId?: string | null;
   accountType?: string | null;
 };
 
@@ -132,10 +137,13 @@ export function buildFiscalYearReport(
       const unit = n(tx.unitPrice);
       const fx = n(tx.fxRateToEur) || 1;
       const sellPxEur = unit * fx;
+      const fees =
+        n(tx.feesEur) > 0 ? n(tx.feesEur) : n(tx.fees) * fx;
       let realized = 0;
       const cumpFn = opts?.cumpAtSell?.(tx);
       if (cumpFn != null && Number.isFinite(cumpFn) && qty > 0) {
-        realized = qty * (sellPxEur - cumpFn);
+        // Aligné ledger : (qty × px − fees) − qty × CUMP
+        realized = qty * sellPxEur - fees - qty * cumpFn;
       } else {
         // Fallback : pas de coût → 0 (évite faux positif)
         realized = 0;
@@ -188,9 +196,10 @@ export function buildFiscalYearReport(
   return {
     year,
     disclaimer:
-      "Estimations indicatives — ne constituent pas un calcul fiscal opposable. " +
-      "PEA / assurance-vie : régimes spéciaux (exonération sous conditions, rachat…). " +
-      "Consultez un professionnel pour votre déclaration.",
+      "Estimations de suivi patrimonial — non opposables à l’administration fiscale. " +
+      "Le PFU estimé ne concerne que les enveloppes CTO, crypto et CFD (gains positifs). " +
+      "PEA et assurance-vie relèvent de régimes spéciaux non simulés ici. " +
+      "Pour toute déclaration, appuyez-vous sur vos relevés et un professionnel.",
     byEnvelope,
     totals: {
       realizedPnlEur,
@@ -203,53 +212,74 @@ export function buildFiscalYearReport(
 }
 
 /**
- * Replay minimal pour fournir le CUMP à chaque vente (ordre chrono).
+ * Clé de lot fiscal / CUMP — alignée sur le ledger (`assetId::platformId`).
+ * Sans platformId (données historiques incomplètes) → lot par assetId seul.
+ */
+export function fiscalLotKey(
+  assetId: string,
+  platformId?: string | null
+): string {
+  const p = platformId?.trim();
+  return p ? `${assetId}::${p}` : assetId;
+}
+
+/**
+ * Replay CUMP par lot (asset × plateforme), ordre chrono.
+ * Évite d’agréger les coûts multi-courtiers sur un même assetId.
+ * Gère aussi TRANSFERT_TITRE (déplace qty + coût proportionnel, sans P&L).
  */
 export function buildCumpAtSellLookup(
-  transactions: Array<
-    FiscalTxLite & {
-      id?: string;
-      fees?: string | number | null;
-      feesEur?: string | number | null;
-    }
-  >
+  transactions: Array<FiscalTxLite & { id?: string }>
 ): (tx: FiscalTxLite & { id?: string }) => number | null {
-  // Position cost/qty par assetId (agrégé multi-plateforme pour la vue fiscale simple)
   const qty = new Map<string, number>();
   const cost = new Map<string, number>();
 
-  const ordered = [...transactions].sort(
-    (a, b) =>
-      new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime()
-  );
+  const ordered = [...transactions].sort((a, b) => {
+    const da = new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime();
+    if (da !== 0) return da;
+    const ida = (a as { id?: string }).id ?? "";
+    const idb = (b as { id?: string }).id ?? "";
+    return ida.localeCompare(idb);
+  });
 
   const realizedCump = new Map<string, number>();
 
   for (const tx of ordered) {
     const assetId = tx.assetId;
     if (!assetId) continue;
+    const key = fiscalLotKey(assetId, tx.platformId);
     const q = n(tx.quantity);
     const unit = n(tx.unitPrice);
     const fx = n(tx.fxRateToEur) || 1;
-    const fees =
-      n(tx.feesEur) > 0 ? n(tx.feesEur) : n(tx.fees) * fx;
+    const fees = n(tx.feesEur) > 0 ? n(tx.feesEur) : n(tx.fees) * fx;
 
     if (tx.type === "ACHAT" && q > 0) {
       const buyCost = q * unit * fx + fees;
-      qty.set(assetId, (qty.get(assetId) ?? 0) + q);
-      cost.set(assetId, (cost.get(assetId) ?? 0) + buyCost);
+      qty.set(key, (qty.get(key) ?? 0) + q);
+      cost.set(key, (cost.get(key) ?? 0) + buyCost);
     } else if (tx.type === "SPLIT" && q > 0) {
-      const cur = qty.get(assetId) ?? 0;
-      qty.set(assetId, cur * q);
-      // cost unchanged
+      const cur = qty.get(key) ?? 0;
+      qty.set(key, cur * q);
+      // cost total unchanged → unit CUMP drops
+    } else if (tx.type === "TRANSFERT_TITRE" && q > 0 && tx.toPlatformId) {
+      const toKey = fiscalLotKey(assetId, tx.toPlatformId);
+      const q0 = qty.get(key) ?? 0;
+      const c0 = cost.get(key) ?? 0;
+      const cump = q0 > 1e-12 ? c0 / q0 : 0;
+      const moved = Math.min(q, q0);
+      const movedCost = cump * moved;
+      qty.set(key, Math.max(0, q0 - moved));
+      cost.set(key, Math.max(0, c0 - movedCost));
+      qty.set(toKey, (qty.get(toKey) ?? 0) + moved);
+      cost.set(toKey, (cost.get(toKey) ?? 0) + movedCost);
     } else if (tx.type === "VENTE" && q > 0) {
-      const q0 = qty.get(assetId) ?? 0;
-      const c0 = cost.get(assetId) ?? 0;
+      const q0 = qty.get(key) ?? 0;
+      const c0 = cost.get(key) ?? 0;
       const cump = q0 > 1e-12 ? c0 / q0 : 0;
       if (tx.id) realizedCump.set(tx.id, cump);
       const sold = Math.min(q, q0);
-      qty.set(assetId, Math.max(0, q0 - sold));
-      cost.set(assetId, Math.max(0, c0 - cump * sold));
+      qty.set(key, Math.max(0, q0 - sold));
+      cost.set(key, Math.max(0, c0 - cump * sold));
     }
   }
 
@@ -257,7 +287,6 @@ export function buildCumpAtSellLookup(
     if (tx.type !== "VENTE") return null;
     const id = (tx as { id?: string }).id;
     if (id && realizedCump.has(id)) return realizedCump.get(id)!;
-    // fallback recompute not available
     return null;
   };
 }

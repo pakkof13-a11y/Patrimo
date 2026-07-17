@@ -2,66 +2,84 @@
 
 import { cn } from "@/app/lib/utils";
 
-export type TxTypeFilterId = "all" | "buy" | "sell" | "dividend" | "fees";
+/**
+ * Filtres rapides par famille de type (taxonomie métier).
+ * Les ids stables servent aux tests et au state local.
+ */
+export type TxTypeFilterId =
+  | "all"
+  | "buy"
+  | "sell"
+  | "dividend"
+  | "fees"
+  | "cash"
+  | "transfer"
+  | "split";
 
 export const TX_TYPE_FILTERS: Array<{
   id: TxTypeFilterId;
   label: string;
-  /** Transaction.type values matched */
+  /** Transaction.type values matched ; null = tout */
   types: string[] | null;
   emptyHint: string;
-  activeClass: string;
-  idleClass: string;
+  /** Accent discret (selected) — pas une navigation concurrente */
+  accent: string;
 }> = [
   {
     id: "all",
     label: "Tout",
     types: null,
     emptyHint: "Aucune transaction",
-    activeClass:
-      "bg-slate-800 text-white ring-1 ring-slate-600 dark:bg-slate-200 dark:text-slate-900",
-    idleClass:
-      "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700",
+    accent: "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900",
   },
   {
     id: "buy",
     label: "Achats",
     types: ["ACHAT"],
     emptyHint: "Aucun achat enregistré",
-    activeClass:
-      "bg-emerald-600 text-white ring-1 ring-emerald-500/50 dark:bg-emerald-500 dark:text-emerald-950",
-    idleClass:
-      "bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-200 dark:hover:bg-emerald-950",
+    accent: "bg-emerald-700 text-white dark:bg-emerald-500 dark:text-emerald-950",
   },
   {
     id: "sell",
     label: "Ventes",
     types: ["VENTE"],
     emptyHint: "Aucune vente enregistrée",
-    activeClass:
-      "bg-sky-600 text-white ring-1 ring-sky-500/50 dark:bg-sky-500 dark:text-sky-950",
-    idleClass:
-      "bg-sky-50 text-sky-800 hover:bg-sky-100 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-950",
+    accent: "bg-sky-700 text-white dark:bg-sky-400 dark:text-sky-950",
   },
   {
     id: "dividend",
-    label: "Dividendes",
+    label: "Revenus",
     types: ["DIVIDENDE", "COUPON", "LOYER", "INTERET"],
-    emptyHint: "Aucun dividende / revenu enregistré",
-    activeClass:
-      "bg-amber-500 text-amber-950 ring-1 ring-amber-400/60 dark:bg-amber-400 dark:text-amber-950",
-    idleClass:
-      "bg-amber-50 text-amber-900 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950/70",
+    emptyHint: "Aucun revenu (dividende, coupon, loyer, intérêts)",
+    accent: "bg-amber-600 text-white dark:bg-amber-400 dark:text-amber-950",
   },
   {
     id: "fees",
     label: "Frais",
     types: ["FRAIS"],
     emptyHint: "Aucun frais enregistré",
-    activeClass:
-      "bg-rose-600 text-white ring-1 ring-rose-500/50 dark:bg-rose-500 dark:text-rose-950",
-    idleClass:
-      "bg-rose-50 text-rose-800 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/70",
+    accent: "bg-rose-700 text-white dark:bg-rose-500 dark:text-rose-950",
+  },
+  {
+    id: "cash",
+    label: "Cash",
+    types: ["APPORT", "RETRAIT"],
+    emptyHint: "Aucun apport ni retrait",
+    accent: "bg-violet-700 text-white dark:bg-violet-400 dark:text-violet-950",
+  },
+  {
+    id: "transfer",
+    label: "Transferts",
+    types: ["TRANSFERT_CASH", "TRANSFERT_TITRE"],
+    emptyHint: "Aucun transfert enregistré",
+    accent: "bg-indigo-700 text-white dark:bg-indigo-400 dark:text-indigo-950",
+  },
+  {
+    id: "split",
+    label: "Splits",
+    types: ["SPLIT"],
+    emptyHint: "Aucun split enregistré",
+    accent: "bg-teal-700 text-white dark:bg-teal-400 dark:text-teal-950",
   },
 ];
 
@@ -81,25 +99,62 @@ export function txTypeFilterEmptyHint(filterId: TxTypeFilterId): string {
   );
 }
 
+/** Classes de pastille pour le type dans le tableau (dense, scannable). */
+export function txTypeChipClass(txType: string): string {
+  switch (txType) {
+    case "ACHAT":
+      return "bg-emerald-50 text-emerald-800 ring-emerald-200/80 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-800/60";
+    case "VENTE":
+      return "bg-sky-50 text-sky-800 ring-sky-200/80 dark:bg-sky-950/50 dark:text-sky-200 dark:ring-sky-800/60";
+    case "DIVIDENDE":
+    case "COUPON":
+    case "LOYER":
+    case "INTERET":
+      return "bg-amber-50 text-amber-900 ring-amber-200/80 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-800/50";
+    case "FRAIS":
+      return "bg-rose-50 text-rose-800 ring-rose-200/80 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-800/50";
+    case "APPORT":
+    case "RETRAIT":
+      return "bg-violet-50 text-violet-800 ring-violet-200/80 dark:bg-violet-950/40 dark:text-violet-200 dark:ring-violet-800/50";
+    case "TRANSFERT_CASH":
+    case "TRANSFERT_TITRE":
+      return "bg-indigo-50 text-indigo-800 ring-indigo-200/80 dark:bg-indigo-950/40 dark:text-indigo-200 dark:ring-indigo-800/50";
+    case "SPLIT":
+      return "bg-teal-50 text-teal-800 ring-teal-200/80 dark:bg-teal-950/40 dark:text-teal-200 dark:ring-teal-800/50";
+    default:
+      return "bg-slate-100 text-slate-700 ring-slate-200/80 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700";
+  }
+}
+
 export function TxTypeFilters({
   value,
   onChange,
   className,
   counts,
+  /** Compact = pas de libellé « Type » (modales étroites) */
+  compact = false,
 }: {
   value: TxTypeFilterId;
   onChange: (id: TxTypeFilterId) => void;
   className?: string;
-  /** Optional counts per filter id for badges */
   counts?: Partial<Record<TxTypeFilterId, number>>;
+  compact?: boolean;
 }) {
   return (
     <div
-      className={cn("flex flex-wrap items-center gap-1.5", className)}
-      role="tablist"
+      className={cn(
+        "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5",
+        className
+      )}
+      role="group"
       aria-label="Filtrer par type de transaction"
       data-testid="tx-type-filters"
     >
+      {!compact && (
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          Type
+        </span>
+      )}
       {TX_TYPE_FILTERS.map((f) => {
         const active = value === f.id;
         const count = counts?.[f.id];
@@ -107,23 +162,23 @@ export function TxTypeFilters({
           <button
             key={f.id}
             type="button"
-            role="tab"
-            aria-selected={active}
+            aria-pressed={active}
             data-testid={`tx-filter-${f.id}`}
             onClick={() => onChange(f.id)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold transition",
-              active ? f.activeClass : f.idleClass
+              "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition",
+              "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+              active
+                ? f.accent
+                : "bg-transparent text-slate-600 ring-1 ring-inset ring-slate-200/90 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:ring-slate-700 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
             )}
           >
             {f.label}
             {typeof count === "number" && (
               <span
                 className={cn(
-                  "rounded-full px-1.5 py-px text-[10px] font-bold tabular-nums",
-                  active
-                    ? "bg-black/15 dark:bg-white/25"
-                    : "bg-black/5 dark:bg-white/10"
+                  "tabular-nums text-[10px]",
+                  active ? "opacity-80" : "text-slate-400 dark:text-slate-500"
                 )}
               >
                 {count}

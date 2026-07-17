@@ -190,10 +190,10 @@ export function PlatformCombobox({
                   role="option"
                   aria-selected={i === highlight}
                   className={cn(
-                    "cursor-pointer px-3 py-2 text-sm",
+                    "cursor-pointer border-t border-[var(--border)] px-3 py-2.5 text-sm",
                     i === highlight
                       ? "bg-teal-50 text-teal-900 dark:bg-teal-950 dark:text-teal-100"
-                      : "hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                      : "hover:bg-[var(--muted)]"
                   )}
                   onMouseEnter={() => setHighlight(i)}
                   onMouseDown={(e) => {
@@ -201,7 +201,12 @@ export function PlatformCombobox({
                     pick(i);
                   }}
                 >
-                  Utiliser « <span className="font-medium">{item.label}</span> » (personnalisé)
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+                    Créer comme plateforme personnalisée
+                  </div>
+                  <div className="mt-0.5 font-medium">
+                    « {item.label} »
+                  </div>
                 </li>
               );
             }
@@ -215,7 +220,7 @@ export function PlatformCombobox({
                   "flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm",
                   i === highlight
                     ? "bg-teal-50 text-teal-900 dark:bg-teal-950 dark:text-teal-100"
-                    : "hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                    : "hover:bg-[var(--muted)]"
                 )}
                 onMouseEnter={() => setHighlight(i)}
                 onMouseDown={(e) => {
@@ -223,12 +228,22 @@ export function PlatformCombobox({
                   pick(i);
                 }}
               >
-                <PlatformLogo src={o.logoUrl} name={o.label} size={22} />
+                <PlatformLogo src={o.logoUrl} name={o.label} size={24} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{o.label}</div>
-                  {o.subtitle && (
-                    <div className="truncate text-[11px] text-zinc-500">{o.subtitle}</div>
-                  )}
+                  <div className="truncate text-[11px] text-[var(--muted-foreground)]">
+                    {o.subtitle ? (
+                      <>
+                        <span className="font-medium text-teal-800/80 dark:text-teal-200/80">
+                          Preset
+                        </span>
+                        <span className="mx-1 opacity-40">·</span>
+                        {o.subtitle}
+                      </>
+                    ) : (
+                      "Suggestion catalogue"
+                    )}
+                  </div>
                 </div>
               </li>
             );

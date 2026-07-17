@@ -202,13 +202,18 @@ export async function updatePreciousMetal(
     notes: input.notes !== undefined ? input.notes : existing.notes,
   });
 
-  const row = await prisma.preciousMetalPosition.update({ where: { id }, data });
+  const write = await prisma.preciousMetalPosition.updateMany({
+    where: { id, userId },
+    data,
+  });
+  if (write.count === 0) throw new Error("Position introuvable");
+  const row = await prisma.preciousMetalPosition.findFirst({ where: { id, userId } });
+  if (!row) throw new Error("Position introuvable");
   return mapRow(row);
 }
 
 export async function deletePreciousMetal(userId: string, id: string) {
-  const existing = await prisma.preciousMetalPosition.findFirst({ where: { id, userId } });
-  if (!existing) throw new Error("Position introuvable");
-  await prisma.preciousMetalPosition.delete({ where: { id } });
+  const result = await prisma.preciousMetalPosition.deleteMany({ where: { id, userId } });
+  if (result.count === 0) throw new Error("Position introuvable");
   return { ok: true };
 }

@@ -1,14 +1,35 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, Newspaper, CalendarDays } from "lucide-react";
+import {
+  Briefcase,
+  ExternalLink,
+  Landmark,
+  Newspaper,
+} from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
-import type { MacroEvent, MacroImpact, NewsItem } from "@/app/lib/news/service";
+import type {
+  EarningsEvent,
+  MacroEvent,
+  MacroImpact,
+  NewsItem,
+} from "@/app/lib/news/service";
+import { earningsTimingLabel } from "@/app/lib/news/service";
+import {
+  filterEarningsByRelease,
+  filterMacroByRelease,
+  MARKET_RELEASE_FILTERS,
+  type MarketReleaseFilter,
+} from "@/app/lib/news/release-filter";
 import { CountryFlag } from "@/components/ui/country-flag";
 import { cn } from "@/app/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDistanceToNow } from "date-fns";
 import { fr } from "date-fns/locale";
+import type { PortfolioTickerProp } from "@/components/dashboard/market-calendar-panel";
+
+export type { MarketReleaseFilter };
 
 const IMPACT_LABEL: Record<MacroImpact, string> = {
   low: "Faible",
@@ -21,6 +42,8 @@ const IMPACT_CLASS: Record<MacroImpact, string> = {
   medium: "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
   high: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
 };
+
+const INITIAL = 4;
 
 function relativeTime(iso: string): string {
   try {
@@ -42,146 +65,423 @@ function clockTime(iso: string): string {
   }
 }
 
-function NewsSkeleton() {
-  return (
-    <ul className="space-y-3">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <li key={i} className="space-y-1.5">
-          <Skeleton className="h-3.5 w-full" />
-          <Skeleton className="h-3 w-2/3" />
-        </li>
-      ))}
-    </ul>
-  );
-}
+/**
+ * Contexte marché — 3 tuiles analytiques (Actualités · Macro · Résultats).
+ * Même langage carte que Allocation / Plateforme.
+ */
+export function NewsMacroPanel({
+  portfolioTickers = [],
+  compact = false,
+}: {
+  portfolioTickers?: PortfolioTickerProp[];
+  /** Conservé pour API — densifie le contenu des listes */
+  compact?: boolean;
+}) {
+  const newsLimit = compact ? 3 : 4;
+  const listLimit = compact ? 3 : INITIAL;
 
-function MacroSkeleton() {
-  return (
-    <ul className="space-y-2">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <li key={i} className="flex items-center gap-2">
-          <Skeleton className="h-4 w-10" />
-          <Skeleton className="h-4 flex-1" />
-          <Skeleton className="h-5 w-14 rounded-full" />
-        </li>
-      ))}
-    </ul>
-  );
-}
+  const [newsMore, setNewsMore] = useState(false);
+  const [macroMore, setMacroMore] = useState(false);
+  const [earnMore, setEarnMore] = useState(false);
+  const [macroFilter, setMacroFilter] =
+    useState<MarketReleaseFilter>("upcoming");
+  const [earnFilter, setEarnFilter] =
+    useState<MarketReleaseFilter>("upcoming");
 
-export function NewsMacroPanel() {
+  const tickersParam = useMemo(() => {
+    return portfolioTickers
+      .filter((p) => p.ticker?.trim())
+      .slice(0, 24)
+      .map((p) =>
+        p.name?.trim()
+          ? `${p.ticker.trim()}:${p.name.trim()}`
+          : p.ticker.trim()
+      )
+      .join(",");
+  }, [portfolioTickers]);
+
   const newsQ = useQuery({
-    queryKey: ["news"],
-    queryFn: () => fetchJson<{ news: NewsItem[]; source: string }>("/api/news?limit=6"),
+    queryKey: ["news", newsLimit],
+    queryFn: () =>
+      fetchJson<{ news: NewsItem[]; source: string }>(
+        `/api/news?limit=${newsLimit}`
+      ),
     staleTime: 5 * 60_000,
   });
 
   const macroQ = useQuery({
     queryKey: ["macro-calendar"],
     queryFn: () =>
-      fetchJson<{ events: MacroEvent[]; date: string; source: string }>("/api/macro"),
+      fetchJson<{ events: MacroEvent[]; date: string }>("/api/macro"),
     staleTime: 5 * 60_000,
   });
 
+  const earnQ = useQuery({
+    queryKey: ["earnings-calendar", tickersParam],
+    queryFn: () => {
+      const q = new URLSearchParams({ limit: "10" });
+      if (tickersParam) q.set("tickers", tickersParam);
+      return fetchJson<{
+        events: EarningsEvent[];
+        date: string;
+        source?: string;
+      }>(`/api/earnings?${q.toString()}`);
+    },
+    staleTime: 5 * 60_000,
+  });
+
+  const newsAll = newsQ.data?.news ?? [];
+  const macroAll = useMemo(
+    () => filterMacroByRelease(macroQ.data?.events ?? [], macroFilter),
+    [macroQ.data?.events, macroFilter]
+  );
+  const earnAll = useMemo(
+    () => filterEarningsByRelease(earnQ.data?.events ?? [], earnFilter),
+    [earnQ.data?.events, earnFilter]
+  );
+
+  const newsVisible = newsMore ? newsAll : newsAll.slice(0, listLimit);
+  const macroVisible = macroMore ? macroAll : macroAll.slice(0, listLimit);
+  const earnVisible = earnMore ? earnAll : earnAll.slice(0, listLimit);
+
+  return (
+    <section className="space-y-3" data-testid="news-macro-panel">
+      <div className="flex flex-wrap items-end justify-between gap-2 px-0.5">
+        <div>
+          <h2 className="section-heading">Contexte marché</h2>
+          <p className="text-meta">
+            Actualités, calendrier macro et résultats
+          </p>
+        </div>
+      </div>
+
+      <div
+        className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:items-stretch"
+        data-testid="market-context-tiles"
+      >
+        {/* —— Actualités —— */}
+        <article
+          className="card flex min-h-0 min-w-0 flex-col p-3.5 sm:p-4"
+          data-testid="market-tile-news"
+        >
+          <header className="mb-2.5 flex items-start gap-2">
+            <Newspaper
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]"
+              aria-hidden
+            />
+            <div className="min-w-0">
+              <h3 className="text-title">Actualités</h3>
+              <p className="text-meta">Flux économique</p>
+            </div>
+          </header>
+
+          <div className="min-h-[10rem] flex-1">
+            {newsQ.isLoading ? (
+              <ul className="space-y-2.5" aria-busy="true">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <li key={i}>
+                    <Skeleton className="h-3.5 w-full" />
+                    <Skeleton className="mt-1.5 h-3 w-1/2" />
+                  </li>
+                ))}
+              </ul>
+            ) : newsQ.isError ? (
+              <p className="py-8 text-center text-xs text-[var(--muted-foreground)]">
+                Actualités momentanément indisponibles
+              </p>
+            ) : newsAll.length === 0 ? (
+              <p className="py-8 text-center text-xs text-[var(--muted-foreground)]">
+                Aucune actualité pour l&apos;instant
+              </p>
+            ) : (
+              <ul className="divide-y divide-[var(--border)]">
+                {newsVisible.map((n) => (
+                  <li key={n.id} className="list-row-interactive py-1.5 first:pt-0 last:pb-0">
+                    <a
+                      href={n.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group flex items-start gap-1.5 rounded-[var(--radius-sm)] px-0.5 focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                    >
+                      <span className="min-w-0 flex-1 text-xs font-medium leading-snug text-[var(--foreground)] group-hover:text-[var(--primary)]">
+                        {n.title}
+                      </span>
+                      <ExternalLink
+                        className="mt-0.5 h-3 w-3 shrink-0 text-[var(--muted-foreground)] opacity-40 group-hover:opacity-100"
+                        aria-hidden
+                      />
+                    </a>
+                    <p className="text-meta mt-0.5">
+                      {n.source}
+                      <span className="mx-1 opacity-40">·</span>
+                      <time dateTime={n.publishedAt}>
+                        {relativeTime(n.publishedAt)}
+                      </time>
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {newsAll.length > listLimit && (
+            <button
+              type="button"
+              className="mt-2 self-start text-[11px] font-medium text-[var(--primary)] hover:underline"
+              onClick={() => setNewsMore((v) => !v)}
+            >
+              {newsMore ? "Voir moins" : "Voir plus"}
+            </button>
+          )}
+        </article>
+
+        {/* —— Macroéconomie —— */}
+        <article
+          className="card flex min-h-0 min-w-0 flex-col p-3.5 sm:p-4"
+          data-testid="market-cal-macro"
+        >
+          <header className="mb-2 flex items-start gap-2">
+            <Landmark
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]"
+              aria-hidden
+            />
+            <div className="min-w-0 flex-1">
+              <h3 className="text-title">Macroéconomie</h3>
+              <p className="text-meta">Indicateurs clés</p>
+            </div>
+          </header>
+
+          <ReleaseFilterBar
+            value={macroFilter}
+            onChange={(f) => {
+              setMacroFilter(f);
+              setMacroMore(false);
+            }}
+            testId="macro-time-filter"
+          />
+
+          <div className="min-h-[10rem] flex-1">
+            {macroQ.isLoading ? (
+              <ul className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <li key={i} className="flex gap-2">
+                    <Skeleton className="h-4 w-10" />
+                    <Skeleton className="h-4 flex-1" />
+                  </li>
+                ))}
+              </ul>
+            ) : macroQ.isError ? (
+              <p className="py-6 text-center text-xs text-[var(--muted-foreground)]">
+                Calendrier macro indisponible
+              </p>
+            ) : macroAll.length === 0 ? (
+              <p className="py-6 text-center text-xs text-[var(--muted-foreground)]">
+                {macroFilter === "upcoming"
+                  ? "Aucun indicateur à venir"
+                  : "Aucune publication (24 h)"}
+              </p>
+            ) : (
+              <ul className="space-y-1.5">
+                {macroVisible.map((e) => (
+                  <li
+                    key={e.id}
+                    className="flex flex-wrap items-center gap-1.5 rounded-[var(--radius-md)] px-0.5 py-1 text-xs sm:gap-2"
+                  >
+                    <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
+                      {clockTime(e.time)}
+                    </span>
+                    <CountryFlag code={e.countryCode || e.country} showCode />
+                    <span className="min-w-0 flex-1 leading-snug text-[var(--foreground)]">
+                      {e.title}
+                    </span>
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
+                        IMPACT_CLASS[e.impact]
+                      )}
+                    >
+                      {IMPACT_LABEL[e.impact]}
+                    </span>
+                    {(e.actual || e.forecast) && (
+                      <span className="w-full pl-12 text-[10px] text-[var(--muted-foreground)]">
+                        {e.actual
+                          ? `Réel ${e.actual}`
+                          : e.forecast
+                            ? `Cons. ${e.forecast}`
+                            : ""}
+                        {e.actual && e.forecast ? ` · cons. ${e.forecast}` : ""}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {macroAll.length > listLimit && (
+            <button
+              type="button"
+              className="mt-2 self-start text-[11px] font-medium text-[var(--primary)] hover:underline"
+              data-testid="market-cal-macro-more"
+              onClick={() => setMacroMore((v) => !v)}
+            >
+              {macroMore ? "Voir moins" : "Voir plus"}
+            </button>
+          )}
+        </article>
+
+        {/* —— Résultats —— */}
+        <article
+          className="card flex min-h-0 min-w-0 flex-col p-3.5 sm:p-4 sm:col-span-2 lg:col-span-1"
+          data-testid="market-cal-earnings"
+        >
+          <header className="mb-2 flex items-start gap-2">
+            <Briefcase
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]"
+              aria-hidden
+            />
+            <div className="min-w-0 flex-1">
+              <h3 className="text-title">
+                Résultats des entreprises
+              </h3>
+              <p className="text-meta">
+                {portfolioTickers.length > 0
+                  ? "Priorité portefeuille"
+                  : "Publications cotées"}
+              </p>
+            </div>
+          </header>
+
+          <ReleaseFilterBar
+            value={earnFilter}
+            onChange={(f) => {
+              setEarnFilter(f);
+              setEarnMore(false);
+            }}
+            testId="earn-time-filter"
+          />
+
+          <div className="min-h-[10rem] flex-1">
+            {earnQ.isLoading ? (
+              <ul className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <li key={i} className="flex gap-2">
+                    <Skeleton className="h-4 w-10" />
+                    <Skeleton className="h-4 flex-1" />
+                  </li>
+                ))}
+              </ul>
+            ) : earnQ.isError ? (
+              <p className="py-6 text-center text-xs text-[var(--muted-foreground)]">
+                Calendrier des résultats indisponible
+              </p>
+            ) : earnAll.length === 0 ? (
+              <p className="py-6 text-center text-xs text-[var(--muted-foreground)]">
+                {earnFilter === "upcoming"
+                  ? "Aucun résultat à venir"
+                  : "Aucun résultat publié (24 h)"}
+              </p>
+            ) : (
+              <ul className="space-y-1.5">
+                {earnVisible.map((e) => (
+                  <li
+                    key={e.id}
+                    className={cn(
+                      "rounded-[var(--radius-md)] border border-transparent px-1 py-1.5 text-xs",
+                      e.inPortfolio &&
+                        "border-[var(--primary-soft)] bg-[var(--primary-soft)]/40"
+                    )}
+                    data-in-portfolio={e.inPortfolio ? "true" : "false"}
+                  >
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
+                        {clockTime(e.time)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="font-medium text-[var(--foreground)]">
+                          {e.companyName}
+                        </span>
+                        <span className="ml-1.5 font-mono text-[10px] text-[var(--muted-foreground)]">
+                          {e.ticker}
+                        </span>
+                      </span>
+                      {e.inPortfolio && (
+                        <span className="shrink-0 rounded-full bg-[var(--primary)]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--primary)]">
+                          Portefeuille
+                        </span>
+                      )}
+                      <span className="shrink-0 text-[10px] text-[var(--muted-foreground)]">
+                        {earningsTimingLabel(e.timing)}
+                      </span>
+                    </div>
+                    {(e.epsEstimate || e.epsActual) && (
+                      <p className="mt-0.5 pl-12 text-[10px] text-[var(--muted-foreground)]">
+                        {e.epsActual
+                          ? `EPS ${e.epsActual}`
+                          : e.epsEstimate
+                            ? `EPS att. ${e.epsEstimate}`
+                            : ""}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {earnAll.length > listLimit && (
+            <button
+              type="button"
+              className="mt-2 self-start text-[11px] font-medium text-[var(--primary)] hover:underline"
+              data-testid="market-cal-earnings-more"
+              onClick={() => setEarnMore((v) => !v)}
+            >
+              {earnMore ? "Voir moins" : "Voir plus"}
+            </button>
+          )}
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function ReleaseFilterBar({
+  value,
+  onChange,
+  testId,
+}: {
+  value: MarketReleaseFilter;
+  onChange: (v: MarketReleaseFilter) => void;
+  testId: string;
+}) {
   return (
     <div
-      className="grid gap-4 lg:grid-cols-2"
-      data-testid="news-macro-panel"
+      className="mb-2 flex gap-0.5 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/30 p-0.5"
+      role="tablist"
+      aria-label="Statut de publication"
+      data-testid={testId}
     >
-      <section className="card p-4">
-        <div className="mb-3 flex items-center gap-2">
-          <Newspaper className="h-4 w-4 text-teal-700 dark:text-teal-400" />
-          <div>
-            <h3 className="text-sm font-semibold">Actualités éco</h3>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Dernières infos · sources mock (API prête pour un flux réel)
-            </p>
-          </div>
-        </div>
-        {newsQ.isLoading ? (
-          <NewsSkeleton />
-        ) : (
-          <ul className="divide-y divide-[var(--border)]">
-            {(newsQ.data?.news ?? []).map((n) => (
-              <li key={n.id} className="py-2.5 first:pt-0 last:pb-0">
-                <a
-                  href={n.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group block"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-sm font-medium leading-snug text-slate-800 group-hover:text-teal-700 dark:text-slate-100 dark:group-hover:text-teal-300">
-                      {n.title}
-                    </span>
-                    <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400 opacity-0 transition group-hover:opacity-100" />
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span className="font-medium text-slate-600 dark:text-slate-300">
-                      {n.source}
-                    </span>
-                    <span>·</span>
-                    <time dateTime={n.publishedAt}>{relativeTime(n.publishedAt)}</time>
-                  </div>
-                </a>
-              </li>
-            ))}
-            {(newsQ.data?.news?.length ?? 0) === 0 && (
-              <li className="py-6 text-center text-sm text-slate-500">Aucune actualité</li>
+      {MARKET_RELEASE_FILTERS.map((f) => {
+        const selected = value === f.id;
+        return (
+          <button
+            key={f.id}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            data-testid={`${testId}-${f.id}`}
+            onClick={() => onChange(f.id)}
+            className={cn(
+              "flex-1 rounded-[var(--radius-sm)] px-2 py-1 text-[10px] font-semibold transition",
+              selected
+                ? "bg-[var(--card)] text-[var(--foreground)] shadow-[var(--shadow-xs)]"
+                : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
             )}
-          </ul>
-        )}
-      </section>
-
-      <section className="card p-4">
-        <div className="mb-3 flex items-center gap-2">
-          <CalendarDays className="h-4 w-4 text-teal-700 dark:text-teal-400" />
-          <div>
-            <h3 className="text-sm font-semibold">Calendrier macro</h3>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Annonces du jour · impact Faible / Moyen / Fort
-            </p>
-          </div>
-        </div>
-        {macroQ.isLoading ? (
-          <MacroSkeleton />
-        ) : (
-          <ul className="space-y-2">
-            {(macroQ.data?.events ?? []).map((e) => (
-              <li
-                key={e.id}
-                className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--muted)]/30 px-2.5 py-2 text-sm"
-              >
-                <span className="w-12 shrink-0 font-mono text-xs tabular-nums text-slate-600 dark:text-slate-300">
-                  {clockTime(e.time)}
-                </span>
-                <CountryFlag code={e.countryCode || e.country} showCode />
-                <span className="min-w-0 flex-1 text-xs sm:text-sm">{e.title}</span>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                    IMPACT_CLASS[e.impact]
-                  )}
-                >
-                  {IMPACT_LABEL[e.impact]}
-                </span>
-                {(e.forecast || e.previous) && (
-                  <span className="w-full text-[10px] text-slate-500 dark:text-slate-400 sm:w-auto">
-                    {e.forecast ? `Prév. ${e.forecast}` : ""}
-                    {e.forecast && e.previous ? " · " : ""}
-                    {e.previous ? `Préc. ${e.previous}` : ""}
-                  </span>
-                )}
-              </li>
-            ))}
-            {(macroQ.data?.events?.length ?? 0) === 0 && (
-              <li className="py-6 text-center text-sm text-slate-500">
-                Aucune annonce aujourd&apos;hui
-              </li>
-            )}
-          </ul>
-        )}
-      </section>
+          >
+            {f.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

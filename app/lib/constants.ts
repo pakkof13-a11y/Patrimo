@@ -34,14 +34,14 @@ export type AccountType = keyof typeof ACCOUNT_TYPES;
 export const ENVELOPE_CASH_TYPES = ["CTO", "PEA", "AV"] as const;
 
 export const PLATFORM_TYPES = {
-  COURTIER: "Courtier en bourse",
-  ASSURANCE_VIE: "Courtier en assurance vie",
-  EXCHANGE_CRYPTO: "Exchange Crypto",
+  COURTIER: "Courtier titres",
+  ASSURANCE_VIE: "Assurance-vie",
+  EXCHANGE_CRYPTO: "Exchange crypto",
   BANQUE: "Banque",
-  BLOCKCHAIN: "Blockchain / Wallet",
-  PORTEFEUILLE_HARDWARE: "Portefeuille Hardware",
-  NOTAIRE_IMMOBILIER: "Notaire / Immobilier",
-  BROKER_CFD: "Courtier en CFD",
+  BLOCKCHAIN: "Blockchain / wallet",
+  PORTEFEUILLE_HARDWARE: "Portefeuille hardware",
+  NOTAIRE_IMMOBILIER: "Notaire / immobilier",
+  BROKER_CFD: "Courtier CFD",
   AUTRE: "Autre",
 } as const;
 
@@ -145,13 +145,25 @@ export const LIABILITY_LENDER_OPTIONS = [
 
 export const BUSINESS_TIMEZONE = "Europe/Paris";
 
+/**
+ * Identifiants publics par défaut (non secrets) — emails / usernames de bootstrap.
+ * Les mots de passe ne sont JAMAIS ici : voir ADMIN_PASSWORD / DEMO_PASSWORD dans .env
+ * et `app/lib/env/seed-credentials.ts`.
+ */
 export const DEMO_EMAIL = "demo@patrimo.fr";
-export const DEMO_PASSWORD = "demo1234";
 export const DEMO_USERNAME = "demo";
 
-/** SuperUser initial (seed) */
+/** SuperUser initial (seed) — username / email publics uniquement */
 export const ADMIN_USERNAME = "admin";
-export const ADMIN_PASSWORD = "Kzc48++";
 export const ADMIN_EMAIL = "admin@patrimo.local";
 
-export const PRICE_AUTO_REFRESH_MS = 10_000;
+/**
+ * Intervalle auto-refresh des prix (onglet leader, page visible uniquement).
+ * 90 s : bon compromis fraîcheur vs charge providers / multi-onglets.
+ * Voir docs/perf-refresh.md
+ */
+export const PRICE_AUTO_REFRESH_MS = 90_000;
+
+/** Pause de base après échecs consécutifs (backoff exponentiel plafonné). */
+export const PRICE_REFRESH_BACKOFF_BASE_MS = 60_000;
+export const PRICE_REFRESH_BACKOFF_MAX_MS = 10 * 60_000;

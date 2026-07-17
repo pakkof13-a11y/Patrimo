@@ -1,6 +1,7 @@
 import { prisma } from "../prisma";
 import { createTransaction } from "../transactions/service";
 import { resolveAssetLogo } from "../assets/logos";
+import { assetReuseByTickerWhere } from "../assets/reuse";
 import type { ImportDraftRow } from "./map-rows";
 import type { TxType } from "../accounting/types";
 import { AccountingError } from "../accounting";
@@ -26,23 +27,23 @@ async function resolveOrCreateAsset(
   const ticker = row.ticker;
   const name = row.name || ticker || "Actif importé";
 
+  const assetClass = row.assetClass || "ACTIONS";
+  const priceProvider =
+    assetClass === "CRYPTO" ? "COINGECKO" : assetClass === "ACTIONS" ? "YAHOO" : "MANUAL";
+  const accountType =
+    assetClass === "CRYPTO"
+      ? "CRYPTO"
+      : assetClass === "IMMOBILIER"
+        ? "IMMOBILIER"
+        : "CTO";
+
   if (ticker) {
+    // Same ticker + envelope only — never mutate home platformId.
     const byTicker = await prisma.asset.findFirst({
-      where: {
-        userId,
-        ticker: { equals: ticker, mode: "insensitive" },
-      },
+      where: assetReuseByTickerWhere(userId, ticker, accountType),
       orderBy: { createdAt: "asc" },
     });
-    if (byTicker) {
-      if (byTicker.platformId !== platformId) {
-        await prisma.asset.update({
-          where: { id: byTicker.id },
-          data: { platformId },
-        });
-      }
-      return byTicker.id;
-    }
+    if (byTicker) return byTicker.id;
   }
 
   const byName = await prisma.asset.findFirst({
@@ -53,16 +54,6 @@ async function resolveOrCreateAsset(
     },
   });
   if (byName) return byName.id;
-
-  const assetClass = row.assetClass || "ACTIONS";
-  const priceProvider =
-    assetClass === "CRYPTO" ? "COINGECKO" : assetClass === "ACTIONS" ? "YAHOO" : "MANUAL";
-  const accountType =
-    assetClass === "CRYPTO"
-      ? "CRYPTO"
-      : assetClass === "IMMOBILIER"
-        ? "IMMOBILIER"
-        : "CTO";
 
   const logoUrl = resolveAssetLogo({
     ticker,

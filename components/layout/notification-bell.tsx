@@ -123,8 +123,10 @@ export function NotificationBell() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] text-slate-700 transition hover:bg-[var(--muted)] dark:text-slate-200",
-          open && "ring-2 ring-teal-500/40"
+          "relative inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition",
+          "hover:bg-[var(--muted)] hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-50",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40",
+          open && "bg-[var(--muted)] text-teal-800 dark:text-teal-200"
         )}
         aria-label={
           unreadCount > 0
@@ -134,7 +136,7 @@ export function NotificationBell() {
         aria-expanded={open}
         data-testid="notification-bell-btn"
       >
-        <Bell className="h-4 w-4" />
+        <Bell className="h-3.5 w-3.5" />
         {unreadCount > 0 && (
           <span className="absolute right-1 top-1 flex h-2.5 w-2.5">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />

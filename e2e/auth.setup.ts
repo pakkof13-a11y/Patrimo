@@ -11,11 +11,16 @@ const authFile = path.join(__dirname, ".auth", "user.json");
  */
 setup("authenticate as demo user", async ({ page }) => {
   fs.mkdirSync(path.dirname(authFile), { recursive: true });
-  await loginRequest(
-    page.request,
-    process.env.E2E_USER || "demo",
-    process.env.E2E_PASS || "demo1234"
-  );
+  const user =
+    process.env.E2E_USER?.trim() || process.env.DEMO_USERNAME?.trim() || "demo";
+  const pass =
+    process.env.E2E_PASS?.trim() || process.env.DEMO_PASSWORD?.trim();
+  if (!pass) {
+    throw new Error(
+      "[e2e] E2E_PASS (ou DEMO_PASSWORD) manquant. Voir .env.example."
+    );
+  }
+  await loginRequest(page.request, user, pass);
   await page.goto("/positions", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("holdings-table")).toBeVisible({
     timeout: 45_000,

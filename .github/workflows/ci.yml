@@ -11,18 +11,39 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Fixtures CI uniquement — jamais de secrets de production (voir docs/secrets.md)
 env:
   DATABASE_URL: postgresql://patrimo:patrimo@localhost:5432/patrimo?schema=public
-  AUTH_SECRET: ci-test-secret-not-for-production-0123456789abcdef
+  AUTH_SECRET: ci-only-auth-secret-not-for-production-0123456789abcdef
   AUTH_URL: http://127.0.0.1:3000
   NEXTAUTH_URL: http://127.0.0.1:3000
+  ADMIN_PASSWORD: ci-only-admin-password
+  DEMO_PASSWORD: ci-only-demo-password
+  E2E_USER: demo
+  E2E_PASS: ci-only-demo-password
   ALLOW_DEMO_FALLBACK: "true"
   CI: "true"
 
 jobs:
+  secrets:
+    name: Secret scan (Gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   quality:
     name: Typecheck · Unit · Build
     runs-on: ubuntu-latest
+    needs: secrets
     timeout-minutes: 20
 
     services:

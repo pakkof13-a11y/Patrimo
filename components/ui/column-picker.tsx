@@ -91,13 +91,13 @@ export function ColumnPicker({
       const el = buttonRef.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
-      const menuWidth = 300;
+      const menuWidth = 320;
       const gap = 8;
       const pad = 12;
       const spaceBelow = window.innerHeight - r.bottom - pad;
       const spaceAbove = r.top - pad;
       const preferBelow = spaceBelow >= 220 || spaceBelow >= spaceAbove;
-      const maxHeight = Math.min(480, Math.max(220, preferBelow ? spaceBelow : spaceAbove));
+      const maxHeight = Math.min(520, Math.max(240, preferBelow ? spaceBelow : spaceAbove));
       let left = r.right - menuWidth;
       left = Math.max(pad, Math.min(left, window.innerWidth - menuWidth - pad));
       setCoords({
@@ -148,7 +148,7 @@ export function ColumnPicker({
       <li
         key={c.id}
         className={cn(
-          "rounded-lg transition-colors",
+          "rounded-md transition-colors",
           dragOverId === c.id && "bg-teal-500/10 ring-1 ring-teal-500/40"
         )}
         onDragOver={(e) => {
@@ -167,9 +167,9 @@ export function ColumnPicker({
       >
         <div
           className={cn(
-            "flex items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-sm",
+            "flex items-start gap-1.5 rounded-md px-1.5 py-1.5 text-sm",
             mandatory
-              ? "opacity-50 cursor-not-allowed"
+              ? "bg-[var(--muted)]/40 opacity-80"
               : "hover:bg-[var(--muted)]"
           )}
         >
@@ -181,7 +181,7 @@ export function ColumnPicker({
               aria-label={`Déplacer ${c.label}`}
               title="Glisser pour réordonner"
               className={cn(
-                "cursor-grab touch-none rounded p-0.5 text-zinc-400 active:cursor-grabbing",
+                "mt-0.5 cursor-grab touch-none rounded p-0.5 text-zinc-400 active:cursor-grabbing",
                 !mandatory && "hover:text-zinc-600 dark:hover:text-zinc-200"
               )}
               data-testid={`column-drag-${c.id}`}
@@ -201,13 +201,14 @@ export function ColumnPicker({
           )}
           <label
             className={cn(
-              "flex min-w-0 flex-1 items-center gap-2",
+              "flex min-w-0 flex-1 items-start gap-2",
               mandatory ? "cursor-not-allowed" : "cursor-pointer"
             )}
+            title={c.label}
           >
             <input
               type="checkbox"
-              className="accent-teal-700 disabled:cursor-not-allowed"
+              className="mt-0.5 shrink-0 accent-teal-700 disabled:cursor-not-allowed"
               checked={checked}
               disabled={mandatory}
               readOnly={mandatory}
@@ -217,10 +218,12 @@ export function ColumnPicker({
                 onChange(c.id, e.target.checked);
               }}
             />
-            <span className="leading-snug">{c.label}</span>
+            <span className="min-w-0 flex-1 break-words leading-snug text-[13px]">
+              {c.label}
+            </span>
             {mandatory && (
-              <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-zinc-400">
-                verrouillé
+              <span className="mt-0.5 shrink-0 rounded bg-zinc-200/80 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">
+                Fixe
               </span>
             )}
           </label>
@@ -248,27 +251,29 @@ export function ColumnPicker({
           flexDirection: "column",
         }}
       >
-        <div className="mb-1 shrink-0 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Colonnes
+        <div className="mb-0.5 shrink-0 text-xs font-semibold tracking-tight text-[var(--foreground)]">
+          Colonnes du tableau
         </div>
-        <p className="mb-2 shrink-0 text-[11px] leading-snug text-zinc-400">
-          Les obligatoires restent affichées · cochez les optionnelles · glissez pour
-          l’ordre
+        <p className="mb-2.5 shrink-0 text-[11px] leading-snug text-[var(--muted-foreground)]">
+          Obligatoires toujours visibles · optionnelles au choix · glisser pour
+          l&apos;ordre
         </p>
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-0.5">
           <section data-testid="column-picker-mandatory">
-            <h3 className="mb-1.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-              <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+            <h3 className="sticky top-0 z-10 mb-1.5 bg-[var(--card)] py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
               Obligatoires
-              <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+              <span className="ml-1.5 tabular-nums font-normal opacity-70">
+                ({mandatoryCols.length})
+              </span>
             </h3>
             <ul className="space-y-0.5">{mandatoryCols.map(renderRow)}</ul>
           </section>
           <section data-testid="column-picker-optional">
-            <h3 className="mb-1.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-              <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+            <h3 className="sticky top-0 z-10 mb-1.5 bg-[var(--card)] py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
               Optionnelles
-              <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+              <span className="ml-1.5 tabular-nums font-normal opacity-70">
+                ({optionalCols.length})
+              </span>
             </h3>
             <ul className="space-y-0.5">{optionalCols.map(renderRow)}</ul>
           </section>
@@ -276,7 +281,7 @@ export function ColumnPicker({
         {onReset && (
           <button
             type="button"
-            className="mt-2 shrink-0 w-full text-left text-xs text-teal-700 underline dark:text-teal-300"
+            className="mt-2.5 shrink-0 w-full rounded-md border border-[var(--border)] px-2 py-1.5 text-left text-xs font-medium text-teal-800 hover:bg-[var(--muted)] dark:text-teal-200"
             onClick={onReset}
             data-testid="column-picker-reset"
           >

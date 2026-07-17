@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireUserId } from "@/app/lib/auth-helpers";
 
 const TEMPLATE = `date;type;ticker;name;quantity;unit_price;fees;currency;cash_amount;notes;asset_class
 15/03/2023;ACHAT;MC.PA;LVMH;8;612.5;12.5;EUR;;Achat initial;ACTIONS
@@ -10,12 +11,19 @@ const TEMPLATE = `date;type;ticker;name;quantity;unit_price;fees;currency;cash_a
 10/05/2024;APPORT;;;;;;EUR;5000;Apport compte;CASH
 `;
 
+/** Modèle CSV import transactions — session requise (defense-in-depth). */
 export async function GET() {
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  }
+
   return new NextResponse(TEMPLATE, {
     status: 200,
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": 'attachment; filename="patrimo-import-modele.csv"',
+      "Cache-Control": "private, no-store",
     },
   });
 }

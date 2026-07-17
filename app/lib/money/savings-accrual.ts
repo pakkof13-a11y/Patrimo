@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
+import { owned } from "../db/tenant-scope";
 import {
   creditDueInterest,
   type PayoutFrequency,
@@ -19,12 +20,16 @@ function asFrequency(v: string | null | undefined): PayoutFrequency {
 
 /**
  * Credit all due interest periods onto the livret balance (idempotent).
+ * Requires userId so a bare savingsId can never mutate another tenant's account.
  */
 export async function applyDueInterestForSavings(
+  userId: string,
   savingsId: string,
   now: Date = new Date()
 ) {
-  const row = await prisma.savingsAccount.findUnique({ where: { id: savingsId } });
+  const row = await prisma.savingsAccount.findFirst({
+    where: owned(savingsId, userId),
+  });
   if (!row) return null;
 
   const rateType = asRateType(row.rateType);
@@ -51,14 +56,20 @@ export async function applyDueInterestForSavings(
     return { account: row, periodsCredited: 0, totalInterest: "0" };
   }
 
-  const updated = await prisma.savingsAccount.update({
-    where: { id: savingsId },
+  const write = await prisma.savingsAccount.updateMany({
+    where: owned(savingsId, userId),
     data: {
       balance: new Prisma.Decimal(result.balance),
       lastPayoutAt: result.lastPayoutAt,
       lastAccruedAt: result.lastPayoutAt || row.lastAccruedAt,
     },
   });
+  if (write.count === 0) return null;
+
+  const updated = await prisma.savingsAccount.findFirst({
+    where: owned(savingsId, userId),
+  });
+  if (!updated) return null;
 
   return {
     account: updated,
@@ -73,7 +84,7 @@ export async function applyDueInterestForUser(userId: string, now: Date = new Da
   let periods = 0;
   let totalInterest = 0;
   for (const r of rows) {
-    const res = await applyDueInterestForSavings(r.id, now);
+    const res = await applyDueInterestForSavings(userId, r.id, now);
     if (res) {
       periods += res.periodsCredited;
       totalInterest += Number(res.totalInterest || 0);

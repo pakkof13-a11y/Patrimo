@@ -6,6 +6,8 @@ import {
   recordPortfolioSnapshot,
 } from "@/app/lib/portfolio/service";
 import { prisma } from "@/app/lib/prisma";
+import { portfolioBaseCurrencySchema } from "@/app/lib/schemas";
+import { validationErrorResponse } from "@/app/lib/api/validation";
 
 export async function GET(req: Request) {
   try {
@@ -52,8 +54,17 @@ export async function PATCH(req: Request) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 401 });
 
-  const body = await req.json();
-  const baseCurrency = String(body?.baseCurrency || "EUR").toUpperCase();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "JSON invalide" }, { status: 400 });
+  }
+
+  const parsed = portfolioBaseCurrencySchema.safeParse(body ?? {});
+  if (!parsed.success) return validationErrorResponse(parsed.error);
+
+  const baseCurrency = parsed.data.baseCurrency;
   await prisma.user.update({
     where: { id: userId },
     data: { baseCurrency },

@@ -11,14 +11,29 @@ export function parseFrenchMoney(text: string): number {
   return Number(match[0].replace(/\s/g, "").replace(",", "."));
 }
 
-const E2E_USER = process.env.E2E_USER || "demo";
-const E2E_PASS = process.env.E2E_PASS || "demo1234";
+/**
+ * Credentials E2E — jamais de mot de passe en dur.
+ * E2E_PASS ou DEMO_PASSWORD requis (voir .env.example).
+ */
+export function e2eUsername(): string {
+  return process.env.E2E_USER?.trim() || process.env.DEMO_USERNAME?.trim() || "demo";
+}
+
+export function e2ePassword(): string {
+  const pass = process.env.E2E_PASS?.trim() || process.env.DEMO_PASSWORD?.trim();
+  if (!pass) {
+    throw new Error(
+      "[e2e] E2E_PASS (ou DEMO_PASSWORD) manquant. Définissez-le dans .env (voir .env.example)."
+    );
+  }
+  return pass;
+}
 
 /** Connexion UI (credentials NextAuth). */
 export async function loginAs(
   page: Page,
-  username = E2E_USER,
-  password = E2E_PASS
+  username = e2eUsername(),
+  password = e2ePassword()
 ) {
   await page.goto("/login", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("login-form")).toBeVisible({ timeout: 20_000 });
@@ -54,8 +69,8 @@ export async function loginRequest(
       headers: () => Record<string, string>;
     }>;
   },
-  username = E2E_USER,
-  password = E2E_PASS
+  username = e2eUsername(),
+  password = e2ePassword()
 ) {
   const csrfRes = await request.get("/api/auth/csrf");
   const csrfBody = (await csrfRes.json()) as { csrfToken?: string };

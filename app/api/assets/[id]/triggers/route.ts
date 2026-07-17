@@ -2,22 +2,10 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
+import { updateAssetTriggersSchema } from "@/app/lib/schemas";
+import { presentFields, validationErrorResponse } from "@/app/lib/api/validation";
 
 const FIELDS = ["stopLoss", "tp1", "tp2", "tp3", "tp4"] as const;
-
-function parseLevel(raw: unknown): Prisma.Decimal | null | undefined {
-  // undefined = leave unchanged; null = clear; number/string = set
-  if (raw === undefined) return undefined;
-  if (raw === null || raw === "") return null;
-  const s = String(raw).trim().replace(",", ".");
-  if (s === "" || s === "-" || s.toLowerCase() === "null") return null;
-  const n = Number(s);
-  if (!Number.isFinite(n) || n < 0) {
-    throw new Error("Niveau invalide (nombre ≥ 0 attendu)");
-  }
-  if (n === 0) return null;
-  return new Prisma.Decimal(s);
-}
 
 /**
  * PATCH exit levels (Stop Loss / TP1–4) for an asset.
@@ -38,33 +26,37 @@ export async function PATCH(
     return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });
   }
 
-  let body: Record<string, unknown>;
+  let body: unknown;
   try {
-    body = (await req.json()) as Record<string, unknown>;
+    body = await req.json();
   } catch {
     return NextResponse.json({ error: "JSON invalide" }, { status: 400 });
   }
 
+  const parsed = updateAssetTriggersSchema.safeParse(body);
+  if (!parsed.success) return validationErrorResponse(parsed.error);
+
+  const f = presentFields(body, parsed.data as Record<string, unknown>) as typeof parsed.data;
   const data: Prisma.AssetUpdateInput = {};
-  try {
-    for (const f of FIELDS) {
-      if (!(f in body)) continue;
-      const v = parseLevel(body[f]);
-      if (v === undefined) continue;
-      data[f] = v;
-    }
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Niveau invalide" },
-      { status: 400 }
-    );
+
+  for (const field of FIELDS) {
+    if (f[field] === undefined) continue;
+    const v = f[field];
+    data[field] = v == null ? null : new Prisma.Decimal(v);
   }
 
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: "Aucun champ à mettre à jour" }, { status: 400 });
   }
 
-  const updated = await prisma.asset.update({ where: { id }, data });
+  const write = await prisma.asset.updateMany({ where: { id, userId }, data });
+  if (write.count === 0) {
+    return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });
+  }
+  const updated = await prisma.asset.findFirst({ where: { id, userId } });
+  if (!updated) {
+    return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });
+  }
   return NextResponse.json({
     asset: {
       id: updated.id,

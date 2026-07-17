@@ -242,32 +242,13 @@ function validateLedger(
 }
 
 /**
- * Ensure the asset's home platform matches the transaction platform
- * so holdings resolve consistently (qty is tracked per asset×platform).
+ * Asset.platformId is home/display only. Positions live on (assetId × platformId)
+ * via the ledger — never rewrite home platform when trading elsewhere.
  */
-async function alignAssetPlatform(input: CreateTxInput) {
-  if (!input.assetId) return;
-  const asset = await prisma.asset.findFirst({
-    where: { id: input.assetId, userId: input.userId },
-  });
-  if (!asset) return;
-  // Keep asset.platformId as "primary" display platform; position still uses tx.platformId.
-  // If they differ on ACHAT, move asset metadata to the trading platform for consistency.
-  if (
-    (input.type === "ACHAT" || input.type === "VENTE") &&
-    asset.platformId !== input.platformId
-  ) {
-    await prisma.asset.update({
-      where: { id: asset.id },
-      data: { platformId: input.platformId },
-    });
-  }
-}
 
 export async function createTransaction(raw: CreateTxInput) {
   const input = await resolveFx(raw);
   await validateOwnership(input);
-  await alignAssetPlatform(input);
 
   const occurredAt = new Date(input.occurredAt);
   if (Number.isNaN(occurredAt.getTime())) {
@@ -334,7 +315,6 @@ export async function createTransaction(raw: CreateTxInput) {
 export async function updateTransaction(raw: UpdateTxInput) {
   const input = await resolveFx(raw);
   await validateOwnership(input);
-  await alignAssetPlatform(input);
 
   const current = await prisma.transaction.findFirst({
     where: { id: raw.id, userId: input.userId },
@@ -362,13 +342,21 @@ export async function updateTransaction(raw: UpdateTxInput) {
     amounts.grossAmountEur.minus(amounts.feesEur).minus(amounts.netCashImpactEur).toString()
   );
 
-  const updated = await prisma.transaction.update({
-    where: { id: raw.id },
+  const write = await prisma.transaction.updateMany({
+    where: { id: raw.id, userId: input.userId },
     data: buildPrismaData(input, occurredAt, amounts, {
       rate: whtRate,
       eur: Math.max(0, whtEur),
     }),
   });
+  if (write.count === 0) {
+    throw new AccountingError("TX_NOT_FOUND", "Transaction introuvable");
+  }
+
+  const updated = await prisma.transaction.findFirst({
+    where: { id: raw.id, userId: input.userId },
+  });
+  if (!updated) throw new AccountingError("TX_NOT_FOUND", "Transaction introuvable");
 
   const { invalidateLedgerCache } = await import("../portfolio/ledger-cache");
   invalidateLedgerCache(input.userId);
@@ -393,7 +381,10 @@ export async function deleteTransaction(userId: string, id: string) {
     validateLedger(existing, undefined, id, true);
   }
 
-  await prisma.transaction.delete({ where: { id } });
+  const del = await prisma.transaction.deleteMany({ where: { id, userId } });
+  if (del.count === 0) {
+    throw new AccountingError("TX_NOT_FOUND", "Transaction introuvable");
+  }
 
   const { invalidateLedgerCache } = await import("../portfolio/ledger-cache");
   invalidateLedgerCache(userId);

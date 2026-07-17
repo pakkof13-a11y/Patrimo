@@ -163,6 +163,58 @@ export function getEconomicNews(limit = 8): NewsItem[] {
   }));
 }
 
+/**
+ * Actualités liées à un ticker (mock contextuel).
+ * Remplacer par un fournisseur (Finnhub, Polygon, etc.) en production.
+ */
+export function getAssetRelatedNews(
+  ticker: string | null | undefined,
+  limit = 6
+): NewsItem[] {
+  const t = (ticker || "").trim().toUpperCase().replace(/\..*$/, "");
+  if (!t || t.length < 1) return [];
+
+  const templates: Omit<NewsItem, "id" | "publishedAt">[] = [
+    {
+      title: `${t} : les investisseurs scrutent les prochaines publications`,
+      source: "Reuters",
+      url: "https://www.reuters.com/",
+    },
+    {
+      title: `Analyse : momentum et valorisation de ${t} sous surveillance`,
+      source: "Bloomberg",
+      url: "https://www.bloomberg.com/",
+    },
+    {
+      title: `${t} — flux institutionnels et consensus analystes`,
+      source: "Financial Times",
+      url: "https://www.ft.com/",
+    },
+    {
+      title: `Marché : ${t} évolue dans un contexte sectoriel contrasté`,
+      source: "Les Echos",
+      url: "https://www.lesechos.fr/",
+    },
+    {
+      title: `${t} : points clés pour le suivi de position`,
+      source: "Boursorama",
+      url: "https://www.boursorama.com/",
+    },
+    {
+      title: `Veille : actualité et catalyseurs autour de ${t}`,
+      source: "Zonebourse",
+      url: "https://www.zonebourse.com/",
+    },
+  ];
+
+  const offsets = [1, 3, 7, 14, 26, 40];
+  return templates.slice(0, Math.min(limit, templates.length)).map((n, i) => ({
+    id: `asset-news-${t}-${i + 1}`,
+    ...n,
+    publishedAt: hoursAgo(offsets[i] ?? (i + 1) * 2),
+  }));
+}
+
 export function getMacroCalendarToday(): MacroEvent[] {
   const now = new Date();
   const y = now.getFullYear();
@@ -171,6 +223,16 @@ export function getMacroCalendarToday(): MacroEvent[] {
 
   return MACRO_POOL.map((e, i) => {
     const t = new Date(y, m, d, e.hour, e.minute, 0, 0);
+    // Si l’heure de publication est dépassée et qu’un consensus existe,
+    // simuler un « réel » pour la bascule À venir → Publiées.
+    let actual = e.actual ?? null;
+    if (
+      actual == null &&
+      e.forecast != null &&
+      t.getTime() < now.getTime() - 5 * 60 * 1000
+    ) {
+      actual = e.forecast;
+    }
     return {
       id: `macro-${i + 1}`,
       time: t.toISOString(),
@@ -178,9 +240,150 @@ export function getMacroCalendarToday(): MacroEvent[] {
       countryCode: e.countryCode,
       title: e.title,
       impact: e.impact,
-      actual: e.actual ?? null,
+      actual,
       forecast: e.forecast ?? null,
       previous: e.previous ?? null,
     };
   });
+}
+
+/** Vrai si le chiffre macro est effectivement disponible (pas seulement l’heure). */
+export function isMacroEventPublished(e: MacroEvent, now = new Date()): boolean {
+  if (e.actual != null && String(e.actual).trim() !== "") return true;
+  // Événements sans chiffre (discours) : publiés 15 min après l’heure prévue
+  if (
+    (e.forecast == null || String(e.forecast).trim() === "") &&
+    (e.previous == null || String(e.previous).trim() === "")
+  ) {
+    const t = Date.parse(e.time);
+    return Number.isFinite(t) && t <= now.getTime() - 15 * 60 * 1000;
+  }
+  return false;
+}
+
+/** Timing de publication des résultats (convention marché US/EU). */
+export type EarningsTiming = "bmo" | "amc" | "during";
+
+export type EarningsEvent = {
+  id: string;
+  time: string;
+  companyName: string;
+  ticker: string;
+  timing: EarningsTiming;
+  /** EPS consensus (string affichable) */
+  epsEstimate: string | null;
+  /** EPS publié si dispo */
+  epsActual: string | null;
+  /** Présent dans le portefeuille de l’utilisateur */
+  inPortfolio: boolean;
+};
+
+/** Vrai si l’EPS / résultat est réellement publié. */
+export function isEarningsEventPublished(e: EarningsEvent): boolean {
+  return e.epsActual != null && String(e.epsActual).trim() !== "";
+}
+
+export type PortfolioTickerRef = {
+  ticker: string;
+  name: string;
+};
+
+const EARNINGS_TIMING_LABEL: Record<EarningsTiming, string> = {
+  bmo: "Avant ouverture",
+  amc: "Après clôture",
+  during: "Séance",
+};
+
+export function earningsTimingLabel(t: EarningsTiming): string {
+  return EARNINGS_TIMING_LABEL[t];
+}
+
+/**
+ * Calendrier résultats (mock) — priorise les tickers du portefeuille.
+ * Utilisé en dernier recours si Yahoo / Finnhub indisponibles.
+ * Préférer `resolveEarningsCalendar` (earnings-live) côté API.
+ */
+export function getEarningsCalendarMock(opts: {
+  portfolio?: PortfolioTickerRef[];
+  watchlist?: PortfolioTickerRef[];
+  limit?: number;
+}): EarningsEvent[] {
+  const limit = Math.min(20, Math.max(1, opts.limit ?? 8));
+  const portfolio = (opts.portfolio ?? [])
+    .map((p) => ({
+      ticker: (p.ticker || "").trim().toUpperCase(),
+      name: p.name?.trim() || p.ticker || "—",
+    }))
+    .filter((p) => p.ticker.length > 0);
+
+  const watch = (opts.watchlist ?? [])
+    .map((p) => ({
+      ticker: (p.ticker || "").trim().toUpperCase(),
+      name: p.name?.trim() || p.ticker || "—",
+    }))
+    .filter((p) => p.ticker.length > 0);
+
+  const portfolioSet = new Set(
+    portfolio.flatMap((p) => [
+      p.ticker,
+      p.ticker.replace(/\..*$/, ""),
+    ])
+  );
+  const seen = new Set<string>();
+  const ordered: PortfolioTickerRef[] = [];
+
+  for (const p of portfolio) {
+    if (seen.has(p.ticker)) continue;
+    seen.add(p.ticker);
+    ordered.push(p);
+  }
+  for (const p of watch) {
+    if (seen.has(p.ticker)) continue;
+    seen.add(p.ticker);
+    ordered.push(p);
+  }
+
+  // Fallback illustratif si portefeuille vide (ne marque pas inPortfolio)
+  if (ordered.length === 0) {
+    ordered.push(
+      { ticker: "ASML.AS", name: "ASML Holding" },
+      { ticker: "MC.PA", name: "LVMH" },
+      { ticker: "AAPL", name: "Apple" }
+    );
+  }
+
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const d = now.getDate();
+  const timings: EarningsTiming[] = ["bmo", "amc", "during", "amc", "bmo"];
+  const hours = [7, 17, 12, 18, 8, 16, 7, 17];
+
+  return ordered.slice(0, limit).map((p, i) => {
+    const timing = timings[i % timings.length]!;
+    const hour = hours[i % hours.length]!;
+    const t = new Date(y, m, d, hour, i % 2 === 0 ? 0 : 30, 0, 0);
+    const est = (1.2 + (i % 5) * 0.35).toFixed(2).replace(".", ",");
+    const hasActual = i % 3 === 0;
+    const base = p.ticker.replace(/\..*$/, "");
+    return {
+      id: `earn-${p.ticker}-${i}`,
+      time: t.toISOString(),
+      companyName: p.name,
+      ticker: p.ticker,
+      timing,
+      epsEstimate: est,
+      epsActual: hasActual
+        ? (1.15 + (i % 5) * 0.4).toFixed(2).replace(".", ",")
+        : null,
+      inPortfolio: portfolioSet.has(p.ticker) || portfolioSet.has(base),
+    };
+  });
+}
+
+/** @deprecated Utiliser getEarningsCalendarMock ou resolveEarningsCalendar */
+export function getEarningsCalendar(
+  opts: Parameters<typeof getEarningsCalendarMock>[0]
+): EarningsEvent[] {
+  return getEarningsCalendarMock(opts);
 }

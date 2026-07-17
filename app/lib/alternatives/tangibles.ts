@@ -143,13 +143,18 @@ export async function updateTangible(
       input.hasCertificate !== undefined ? input.hasCertificate : existing.hasCertificate,
     notes: input.notes !== undefined ? input.notes : existing.notes,
   });
-  const row = await prisma.tangibleAsset.update({ where: { id }, data });
+  const write = await prisma.tangibleAsset.updateMany({
+    where: { id, userId },
+    data,
+  });
+  if (write.count === 0) throw new Error("Actif introuvable");
+  const row = await prisma.tangibleAsset.findFirst({ where: { id, userId } });
+  if (!row) throw new Error("Actif introuvable");
   return mapRow(row);
 }
 
 export async function deleteTangible(userId: string, id: string) {
-  const existing = await prisma.tangibleAsset.findFirst({ where: { id, userId } });
-  if (!existing) throw new Error("Actif introuvable");
-  await prisma.tangibleAsset.delete({ where: { id } });
+  const result = await prisma.tangibleAsset.deleteMany({ where: { id, userId } });
+  if (result.count === 0) throw new Error("Actif introuvable");
   return { ok: true };
 }

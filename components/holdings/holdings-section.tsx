@@ -25,16 +25,26 @@ import {
   type ColumnOrderState,
   type ColumnSizingState,
 } from "@tanstack/react-table";
-import { ChevronLeft, ChevronRight, GripVertical, MoreHorizontal } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
 import { PlatformLogo } from "@/components/ui/platform-logo";
-import { ColumnPicker } from "@/components/ui/column-picker";
 import { EnvelopeCashPanel } from "@/components/tabs/envelope-cash-panel";
 import { LifeInsuranceTab } from "@/components/tabs/life-insurance-tab";
-import { HoldingRecentTxs } from "@/components/holdings/holding-recent-txs";
 import { PositionCategoryGroupHeader } from "@/components/holdings/position-category-group-header";
 import { EditAssetCategoryModal } from "@/components/holdings/edit-asset-category-modal";
+import {
+  HoldingsToolbar,
+  type HoldingsPageSize,
+} from "@/components/holdings/holdings-toolbar";
+import { HoldingsEmptyState } from "@/components/holdings/holdings-empty-state";
+import {
+  formatRelativeUpdate,
+  HOLDINGS_EXPAND_COL_PX,
+  renderHoldingRow,
+  TriggerLevelInput,
+  type TriggerField,
+} from "@/components/holdings/holding-table-row";
 import { PageJump } from "@/components/ui/page-jump";
 import {
   ACCOUNT_TYPES,
@@ -49,8 +59,6 @@ import {
   getChangeColor,
   cn,
 } from "@/app/lib/utils";
-import { formatDistanceToNow } from "date-fns";
-import { fr } from "date-fns/locale";
 import { type Holding, type MainTab } from "@/app/lib/types/ui";
 import {
   HOLDINGS_GROUP_BY_KEY,
@@ -63,14 +71,11 @@ import {
 } from "@/app/lib/ui-preferences";
 import {
   groupPositionsByAssetCategory,
-  parseAssetCategory,
   parseHoldingsGroupBy,
   type HoldingsGroupBy,
 } from "@/app/lib/assets/categories";
 
-const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
-type PageSizeOption = (typeof PAGE_SIZE_OPTIONS)[number];
-const DEFAULT_PAGE_SIZE: PageSizeOption = 20;
+const DEFAULT_PAGE_SIZE: HoldingsPageSize = 20;
 import {
   COLUMN_RESIZE_MAX,
   COLUMN_RESIZE_MIN,
@@ -92,82 +97,16 @@ import {
   saveColumnVisibility,
 } from "@/app/lib/display-preferences";
 import { useDisplay } from "@/components/layout/display-provider";
-import { TableFilters, matchesSearchQuery } from "@/components/ui/table-filters";
+import { matchesSearchQuery } from "@/components/ui/table-filters";
 import { useDebouncedValue } from "@/app/hooks/use-debounced-value";
+import {
+  formatPageLabel,
+  formatRangeLabel,
+  shouldShowPaginationNav,
+} from "@/app/lib/ui/pagination";
 
 const TABLE_KEY = "holdings";
-/** Fixed first column for expand/collapse (must be added to table total width). */
-const EXPAND_COL_PX = 44;
-/** Fixed trailing actions column (⋯ menu). */
-const ACTIONS_COL_PX = 44;
-
-/** Label + control : stack mobile, ligne compacte dès sm */
-const CTRL_LABEL =
-  "flex w-full min-w-0 flex-col gap-1 text-xs text-slate-600 dark:text-slate-300 sm:w-auto sm:flex-row sm:items-center sm:gap-2 sm:whitespace-nowrap";
-const CTRL_SELECT =
-  "input !w-full min-w-0 max-w-full !py-1.5 text-sm sm:!w-auto";
-
-function formatRelativeUpdate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  try {
-    const d0 = new Date(iso);
-    if (Number.isNaN(d0.getTime())) return "—";
-    return formatDistanceToNow(d0, { addSuffix: true, locale: fr });
-  } catch {
-    return "—";
-  }
-}
-
-type TriggerField = "stopLoss" | "tp1" | "tp2" | "tp3" | "tp4";
-
-function TriggerLevelInput({
-  assetId,
-  field,
-  value,
-  onCommit,
-}: {
-  assetId: string;
-  field: TriggerField;
-  value: string | null | undefined;
-  onCommit: (assetId: string, field: TriggerField, value: string | null) => void;
-}) {
-  const [draft, setDraft] = useState(value ?? "");
-  useEffect(() => {
-    setDraft(value ?? "");
-  }, [value, assetId, field]);
-
-  return (
-    <input
-      type="text"
-      inputMode="decimal"
-      className="input !w-full min-w-[4.5rem] !px-1.5 !py-1 text-right text-xs tabular-nums"
-      placeholder="—"
-      value={draft}
-      title="Seuil en devise native · vide = désactivé · exécution auto au refresh des prix"
-      onClick={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => e.stopPropagation()}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => {
-        const next = draft.trim().replace(",", ".");
-        const prev = (value ?? "").trim();
-        if (next === prev) return;
-        if (next === "" || next === "—") {
-          onCommit(assetId, field, null);
-          return;
-        }
-        const n = Number(next);
-        if (!Number.isFinite(n) || n < 0) {
-          setDraft(value ?? "");
-          return;
-        }
-        onCommit(assetId, field, next);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-      }}
-    />
-  );
-}
+const EXPAND_COL_PX = HOLDINGS_EXPAND_COL_PX;
 
 export function HoldingsSection({
   tab,
@@ -181,6 +120,8 @@ export function HoldingsSection({
   onEnvelopeChange,
   onOpenTransactionForAsset,
   onCategoryChange,
+  onAddTransaction,
+  onImport,
 }: {
   tab: MainTab;
   holdings: Holding[];
@@ -196,6 +137,9 @@ export function HoldingsSection({
   onRowDoubleClick: (assetId: string) => void;
   /** Select enveloppe → parent met à jour l'URL */
   onEnvelopeChange?: (accountType: AccountType | null) => void;
+  /** CTA empty state */
+  onAddTransaction?: () => void;
+  onImport?: () => void;
   /** Menu contextuel ligne : type tx + holding */
   onOpenTransactionForAsset?: (
     type: string,
@@ -896,9 +840,17 @@ export function HoldingsSection({
     ? `Positions — ${ACCOUNT_TYPES[envelopeFilter]}`
     : "Positions (toutes les enveloppes)";
 
-  /** +1 expand · +1 actions (menu ⋯) */
-  const visibleLeafIds = table.getVisibleLeafColumns().map((c) => c.id);
-  const visibleColCount = visibleLeafIds.length + 2;
+  /** Clé stable des colonnes visibles (identité stable entre renders). */
+  const visibleLeafKey = table
+    .getVisibleLeafColumns()
+    .map((c) => c.id)
+    .join("|");
+  /** +1 expand (plus de colonne ⋯ — actions dans l’historique) */
+  const visibleLeafIds = useMemo(
+    () => (visibleLeafKey ? visibleLeafKey.split("|") : []),
+    [visibleLeafKey]
+  );
+  const visibleColCount = visibleLeafIds.length + 1;
   const isResizingColumn = table.getState().columnSizingInfo.isResizingColumn;
 
   useEffect(() => {
@@ -921,7 +873,7 @@ export function HoldingsSection({
 
     const { sizes, tableWidth } = computeFlexColumnLayout({
       containerWidth,
-      expandPx: EXPAND_COL_PX + ACTIONS_COL_PX,
+      expandPx: EXPAND_COL_PX,
       columnIds: visibleLeafIds,
       locked: lockedSizing,
       minWidthOf: columnMinWidth,
@@ -945,8 +897,8 @@ export function HoldingsSection({
     containerWidth,
     lockedSizing,
     isResizingColumn,
-    // string key avoids identity thrash on the id array
-    visibleLeafIds.join("|"),
+    visibleLeafIds,
+    visibleLeafKey,
   ]);
 
   function applyColumnDrop(targetId: string) {
@@ -971,263 +923,91 @@ export function HoldingsSection({
           </div>
         </>
       )}
-      <div className="card min-w-0 overflow-hidden">
-        {/* En-tête Positions : titre + barre de contrôles fluide (wrap, pas de débordement) */}
-        <div className="flex min-w-0 flex-col gap-3 border-b border-[var(--border)] px-3 py-3 sm:px-4">
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold leading-snug break-words">
-              {positionsTitle}
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {envelopeFilter
-                ? `Filtre Type de compte = ${ACCOUNT_TYPES[envelopeFilter]} · ${holdings.length} ligne(s)`
-                : "CUMP · type de compte · logos · prix auto 10s"}
-            </p>
-          </div>
-
-          {/*
-            Toolbar structurée (groupes logiques) :
-            - Mobile  : colonne verticale (flex-col)
-            - md      : grille 2 cols (A | B, C pleine largeur aligné droite)
-            - lg+     : une ligne (A · B · C) justify-between
-          */}
-          <div
-            className={cn(
-              "min-w-0 w-full gap-3",
-              "flex flex-col",
-              "md:grid md:grid-cols-2 md:items-start md:gap-4",
-              "lg:flex lg:flex-row lg:items-center lg:justify-between lg:gap-4"
-            )}
-            data-testid="holdings-toolbar"
-          >
-            {/* Groupe A — Paramètres de table */}
-            <div
-              className={cn(
-                "flex min-w-0 w-full flex-col gap-2",
-                "sm:flex-row sm:flex-wrap sm:items-center sm:gap-3",
-                "md:col-start-1 md:row-start-1",
-                "lg:w-auto lg:min-w-0 lg:flex-1 lg:basis-0"
-              )}
-              data-testid="holdings-toolbar-group-a"
-            >
-              <label className={CTRL_LABEL}>
-                <span className="shrink-0 font-medium">Positions par page</span>
-                <select
-                  className={cn(CTRL_SELECT, "font-semibold tabular-nums sm:!min-w-[4.25rem]")}
-                  value={pagination.pageSize}
-                  onChange={(e) => {
-                    const next = Number(e.target.value) as PageSizeOption;
-                    setPagination({
-                      pageIndex: 0,
-                      pageSize: next,
-                    });
-                  }}
-                  data-testid="holdings-page-size"
-                  aria-label="Nombre de lignes par page"
-                >
-                  {PAGE_SIZE_OPTIONS.map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {onEnvelopeChange && (
-                <label className={CTRL_LABEL}>
-                  <span className="shrink-0 font-medium">Enveloppe :</span>
-                  <select
-                    className={cn(CTRL_SELECT, "sm:min-w-[10rem]")}
-                    value={envelopeFilter ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      onEnvelopeChange(v ? (v as AccountType) : null);
-                    }}
-                    data-testid="envelope-select"
-                    aria-label="Filtrer par enveloppe"
-                  >
-                    <option value="">Toutes les enveloppes</option>
-                    {(Object.keys(ACCOUNT_TYPES) as AccountType[]).map((k) => (
-                      <option key={k} value={k}>
-                        {ACCOUNT_TYPES[k]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <label className={CTRL_LABEL}>
-                <span className="shrink-0 font-medium">Regrouper par :</span>
-                <select
-                  className={cn(CTRL_SELECT, "sm:min-w-[11rem]")}
-                  value={groupBy}
-                  onChange={(e) =>
-                    setGroupBy(parseHoldingsGroupBy(e.target.value))
-                  }
-                  data-testid="holdings-group-by"
-                  aria-label="Regrouper les positions"
-                >
-                  <option value="none">Aucun</option>
-                  <option value="assetCategory">
-                    Sous-catégorie d&apos;actif
-                  </option>
-                </select>
-              </label>
-              {groupMode && categoryGroups.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="text-[11px]"
-                    onClick={expandAllGroups}
-                    data-testid="holdings-expand-all-groups"
-                  >
-                    Tout déplier
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="text-[11px]"
-                    onClick={() =>
-                      collapseAllGroups(categoryGroups.map((g) => g.category))
-                    }
-                    data-testid="holdings-collapse-all-groups"
-                  >
-                    Tout replier
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            {/* Groupe B — Vue, comptes, recherche */}
-            <div
-              className={cn(
-                "flex min-w-0 w-full flex-col gap-2",
-                "sm:flex-row sm:flex-wrap sm:items-center sm:gap-3",
-                "md:col-start-2 md:row-start-1",
-                "lg:w-auto lg:min-w-0 lg:flex-1 lg:basis-0 lg:justify-center"
-              )}
-              data-testid="holdings-toolbar-group-b"
-            >
-              <label className={CTRL_LABEL}>
-                <span className="shrink-0 font-medium">Vue</span>
-                <select
-                  className={cn(CTRL_SELECT, "sm:min-w-[8rem]")}
-                  defaultValue=""
-                  aria-label="Vues enregistrées"
-                  data-testid="holdings-saved-views"
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    e.target.value = "";
-                    if (id === "__save__") {
-                      const name = window.prompt("Nom de la vue :");
-                      if (!name?.trim()) return;
-                      const view: SavedHoldingsView = {
-                        id: `v-${Date.now()}`,
-                        name: name.trim(),
-                        envelope: envelopeFilter || "",
-                        accountType: accountFilter || "",
-                        search: searchInput,
-                        visibility: columnVisibility as Record<string, boolean>,
-                        pageSize: pagination.pageSize,
-                        createdAt: new Date().toISOString(),
-                      };
-                      const next = [...savedViews, view];
-                      setSavedViews(next);
-                      saveSavedViews(next);
-                      return;
-                    }
-                    const view = savedViews.find((v) => v.id === id);
-                    if (!view) return;
-                    setSearchInput(view.search);
-                    setAccountFilter(view.accountType);
-                    if (view.pageSize) {
-                      setPagination((prev) => ({
-                        ...prev,
-                        pageIndex: 0,
-                        pageSize: view.pageSize!,
-                      }));
-                    }
-                    if (view.visibility) {
-                      setColumnVisibility(view.visibility as VisibilityState);
-                    }
-                    if (onEnvelopeChange) {
-                      onEnvelopeChange(
-                        view.envelope ? (view.envelope as AccountType) : null
-                      );
-                    }
-                  }}
-                >
-                  <option value="">Vues…</option>
-                  <option value="__save__">+ Enregistrer la vue actuelle</option>
-                  {savedViews.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <TableFilters
-                className="min-w-0 w-full sm:w-auto sm:flex-1"
-                search={searchInput}
-                onSearchChange={setSearchInput}
-                accountType={accountFilter}
-                onAccountTypeChange={setAccountFilter}
-                showAccountFilter={!envelopeFilter}
-                placeholder="Nom, ticker, ISIN…"
-              />
-            </div>
-
-            {/* Groupe C — Actions (Colonnes) */}
-            <div
-              className={cn(
-                "flex w-full shrink-0 items-center",
-                "md:col-span-2 md:row-start-2 md:justify-end",
-                "lg:col-auto lg:w-auto lg:justify-end lg:self-center"
-              )}
-              data-testid="holdings-toolbar-group-c"
-            >
-              <ColumnPicker
-                columns={HOLDINGS_COLUMN_META.map((c) => ({
-                  id: c.id,
-                  label: c.label,
-                  locked: c.group === "mandatory" || Boolean(c.locked),
-                  group: c.group,
-                }))}
-                visibility={columnVisibility as Record<string, boolean>}
-                order={columnOrder}
-                onChange={(id, visible) => {
-                  const meta = HOLDINGS_COLUMN_META.find((c) => c.id === id);
-                  // Mandatory columns cannot be unchecked
-                  if (meta?.group === "mandatory" || meta?.locked) {
-                    setColumnVisibility((prev) => ({ ...prev, [id]: true }));
-                    return;
-                  }
-                  setColumnVisibility((prev) => ({ ...prev, [id]: visible }));
-                }}
-                onOrderChange={(next) => setColumnOrder(next)}
-                onReset={() => {
-                  const reset = resetHoldingsColumns();
-                  setColumnVisibility(reset.visibility);
-                  setColumnOrder(reset.order);
-                  setLockedSizing(reset.sizing);
-                  setColumnSizing({});
-                }}
-              />
-            </div>
-          </div>
-        </div>
-        <div className="border-b border-[var(--border)] px-4 py-2 text-[11px] text-slate-500 dark:text-slate-400">
-          Flèche = dernières transactions · double-clic ligne = détail · poignée ⋮⋮ =
-          déplacer · bord droit = redimensionner (double-clic = autosize) ·{" "}
-          {Math.max(visibleColCount - 1, 0)} colonne(s)
-          {filteredHoldings.length > 0 && (
-            <span className="ml-1 tabular-nums">
-              · {filteredHoldings.length} ligne
-              {filteredHoldings.length !== 1 ? "s" : ""}
-            </span>
-          )}
-        </div>
+      <div className="card-flat min-w-0 overflow-hidden">
+        <HoldingsToolbar
+          title={positionsTitle}
+          subtitle={
+            envelopeFilter
+              ? `${ACCOUNT_TYPES[envelopeFilter]} · positions dérivées du journal`
+              : "Positions calculées depuis le journal · CUMP multi-compte"
+          }
+          sourceCount={holdings.length}
+          filteredCount={filteredHoldings.length}
+          loading={loading}
+          envelopeFilter={envelopeFilter}
+          onEnvelopeChange={onEnvelopeChange}
+          groupBy={groupBy}
+          onGroupByChange={setGroupBy}
+          groupMode={groupMode}
+          categoryGroupCount={categoryGroups.length}
+          onExpandAllGroups={expandAllGroups}
+          onCollapseAllGroups={() =>
+            collapseAllGroups(categoryGroups.map((g) => g.category))
+          }
+          search={searchInput}
+          onSearchChange={setSearchInput}
+          accountFilter={accountFilter}
+          onAccountFilterChange={setAccountFilter}
+          pageSize={pagination.pageSize}
+          onPageSizeChange={(n) =>
+            setPagination({ pageIndex: 0, pageSize: n })
+          }
+          savedViews={savedViews}
+          onSaveView={(name) => {
+            const view: SavedHoldingsView = {
+              id: `v-${Date.now()}`,
+              name,
+              envelope: envelopeFilter || "",
+              accountType: accountFilter || "",
+              search: searchInput,
+              visibility: columnVisibility as Record<string, boolean>,
+              pageSize: pagination.pageSize,
+              createdAt: new Date().toISOString(),
+            };
+            const next = [...savedViews, view];
+            setSavedViews(next);
+            saveSavedViews(next);
+          }}
+          onApplyView={(view) => {
+            setSearchInput(view.search);
+            setAccountFilter(view.accountType);
+            if (view.pageSize) {
+              setPagination((prev) => ({
+                ...prev,
+                pageIndex: 0,
+                pageSize: view.pageSize!,
+              }));
+            }
+            if (view.visibility) {
+              setColumnVisibility(view.visibility as VisibilityState);
+            }
+            if (onEnvelopeChange) {
+              onEnvelopeChange(
+                view.envelope ? (view.envelope as AccountType) : null
+              );
+            }
+          }}
+          columns={{
+            visibility: columnVisibility as Record<string, boolean>,
+            order: columnOrder,
+            onVisibilityChange: (id, visible) => {
+              const meta = HOLDINGS_COLUMN_META.find((c) => c.id === id);
+              if (meta?.group === "mandatory" || meta?.locked) {
+                setColumnVisibility((prev) => ({ ...prev, [id]: true }));
+                return;
+              }
+              setColumnVisibility((prev) => ({ ...prev, [id]: visible }));
+            },
+            onOrderChange: (next) => setColumnOrder(next),
+            onReset: () => {
+              const reset = resetHoldingsColumns();
+              setColumnVisibility(reset.visibility);
+              setColumnOrder(reset.order);
+              setLockedSizing(reset.sizing);
+              setColumnSizing({});
+            },
+          }}
+        />
         <div
           ref={scrollWrapRef}
           className="table-container-responsive table-fluid-wrap holdings-table-scroll"
@@ -1264,6 +1044,9 @@ export function HoldingsSection({
                     const floor = columnMinWidth(colId);
                     const isResizing = h.column.getIsResizing();
                     const isLocked = lockedSizing[colId] != null;
+                    const fullLabel =
+                      HOLDINGS_COLUMN_META.find((c) => c.id === colId)?.label ??
+                      String(h.column.columnDef.header ?? colId);
                     return (
                       <th
                         key={h.id}
@@ -1278,7 +1061,7 @@ export function HoldingsSection({
                           width: size,
                           minWidth: floor,
                         }}
-                        title="Clic = trier · ⋮⋮ = déplacer · bord droit = largeur (dbl-clic = auto)"
+                        title={`${fullLabel}\nClic = trier · ⋮⋮ = déplacer · bord = largeur`}
                         onDragOver={(e) => {
                           e.preventDefault();
                           e.dataTransfer.dropEffect = "move";
@@ -1325,7 +1108,11 @@ export function HoldingsSection({
                           >
                             <GripVertical className="h-3 w-3" aria-hidden />
                           </span>
-                          <span className="truncate" data-column-label>
+                          <span
+                            className="min-w-0 truncate"
+                            data-column-label
+                            title={fullLabel}
+                          >
                             {flexRender(h.column.columnDef.header, h.getContext())}
                             {{ asc: " ↑", desc: " ↓" }[h.column.getIsSorted() as string] ??
                               null}
@@ -1380,15 +1167,6 @@ export function HoldingsSection({
                       </th>
                     );
                   })}
-                  <th
-                    className="px-1 py-3"
-                    style={{
-                      width: ACTIONS_COL_PX,
-                      minWidth: ACTIONS_COL_PX,
-                      maxWidth: ACTIONS_COL_PX,
-                    }}
-                    aria-label="Actions"
-                  />
                 </tr>
               ))}
             </thead>
@@ -1408,24 +1186,36 @@ export function HoldingsSection({
                   <td
                     colSpan={Math.max(visibleColCount, 1)}
                     className="px-4 py-10 text-center"
-                    data-testid="holdings-empty"
                   >
-                    <div className="mx-auto max-w-md space-y-1.5">
-                      <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                        {envelopeFilter
-                          ? `Aucune position en ${ACCOUNT_TYPES[envelopeFilter]}`
-                          : debouncedSearch
-                            ? "Aucun résultat pour cette recherche"
-                            : "Aucune position cotée"}
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        {envelopeFilter
-                          ? "Changez d’enveloppe ou enregistrez un achat sur ce type de compte."
-                          : debouncedSearch
-                            ? "Modifiez les filtres ou effacez la recherche."
-                            : "Ajoutez une transaction d’achat, ou importez un CSV courtier."}
-                      </p>
-                    </div>
+                    <HoldingsEmptyState
+                      kind={
+                        holdings.length === 0 && !debouncedSearch && !accountFilter
+                          ? envelopeFilter
+                            ? "envelope"
+                            : "source"
+                          : debouncedSearch || accountFilter
+                            ? "filter"
+                            : envelopeFilter
+                              ? "envelope"
+                              : "source"
+                      }
+                      envelopeLabel={
+                        envelopeFilter
+                          ? ACCOUNT_TYPES[envelopeFilter]
+                          : undefined
+                      }
+                      searchQuery={debouncedSearch.trim() || undefined}
+                      onClearSearch={
+                        debouncedSearch
+                          ? () => {
+                              setSearchInput("");
+                              setAccountFilter("");
+                            }
+                          : undefined
+                      }
+                      onAddTransaction={onAddTransaction}
+                      onImport={onImport}
+                    />
                   </td>
                 </tr>
               )}
@@ -1479,6 +1269,8 @@ export function HoldingsSection({
         </div>
         {(() => {
           const total = filteredHoldings.length;
+          const showNav = shouldShowPaginationNav(total);
+
           if (groupMode) {
             return (
               <div
@@ -1487,51 +1279,54 @@ export function HoldingsSection({
               >
                 <span className="tabular-nums" data-testid="holdings-group-summary">
                   {total === 0
-                    ? "Aucune ligne"
-                    : `${total} position${total !== 1 ? "s" : ""} · ${categoryGroups.length} groupe${categoryGroups.length !== 1 ? "s" : ""} (pagination désactivée en mode regroupement)`}
+                    ? "Aucune position à afficher"
+                    : `${total} position${total !== 1 ? "s" : ""} · ${categoryGroups.length} groupe${categoryGroups.length !== 1 ? "s" : ""}`}
+                </span>
+                <span className="text-[11px] text-[var(--muted-foreground)]">
+                  Toutes les lignes · pagination inactive
                 </span>
               </div>
             );
           }
+
+          // Empty / loading: human footer, no « Page 0 / 0 », no duplicate page-size
+          if (!showNav) {
+            return (
+              <div
+                className="border-t border-[var(--border)] px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400"
+                data-testid="holdings-pagination"
+                data-empty="true"
+              >
+                <span className="tabular-nums" data-testid="holdings-page-label">
+                  {loading
+                    ? "Chargement…"
+                    : holdings.length === 0
+                      ? "Aucune position"
+                      : "Aucun résultat pour les filtres actifs"}
+                </span>
+              </div>
+            );
+          }
+
           const pageCount = Math.max(1, table.getPageCount() || 1);
           const pageIndex = table.getState().pagination.pageIndex;
           const pageSize = table.getState().pagination.pageSize;
-          const from = total === 0 ? 0 : pageIndex * pageSize + 1;
-          const to = Math.min(total, (pageIndex + 1) * pageSize);
           return (
             <div
               className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400"
               data-testid="holdings-pagination"
+              data-empty="false"
             >
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="inline-flex items-center gap-1.5">
-                  <span className="font-medium text-slate-600 dark:text-slate-300">
-                    Positions par page
-                  </span>
-                  <select
-                    className="input !w-auto !min-w-[4.25rem] !py-1 text-sm font-semibold tabular-nums"
-                    value={pageSize}
-                    onChange={(e) => {
-                      const next = Number(e.target.value) as PageSizeOption;
-                      setPagination({ pageIndex: 0, pageSize: next });
-                    }}
-                    data-testid="holdings-page-size-footer"
-                    aria-label="Nombre de lignes par page"
-                  >
-                    {PAGE_SIZE_OPTIONS.map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <span className="tabular-nums">
-                  {total === 0 ? "Aucune ligne" : `${from}–${to} sur ${total}`}
-                </span>
-              </div>
+              {/* Page size : uniquement dans la toolbar (pas de doublon footer) */}
+              <span className="tabular-nums">
+                {formatRangeLabel(pageIndex, pageSize, total)}
+              </span>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="tabular-nums font-medium" data-testid="holdings-page-label">
-                  Page {total === 0 ? 0 : pageIndex + 1} / {total === 0 ? 0 : pageCount}
+                <span
+                  className="tabular-nums font-medium"
+                  data-testid="holdings-page-label"
+                >
+                  {formatPageLabel(pageIndex, pageCount, total)}
                 </span>
                 <PageJump
                   pageIndex={pageIndex}
@@ -1588,217 +1383,5 @@ export function HoldingsSection({
         />
       )}
     </section>
-  );
-}
-
-function renderHoldingRow(
-  row: Row<Holding>,
-  opts: {
-    expandedIds: Set<string>;
-    toggleExpanded: (id: string) => void;
-    visibleColCount: number;
-    onRowDoubleClick: (id: string) => void;
-    onOpenTransactionForAsset?: (type: string, holding: Holding) => void;
-    onEditCategory: (holding: Holding) => void;
-  }
-) {
-  const assetId = row.original.assetId;
-  const expanded = opts.expandedIds.has(assetId);
-  return (
-    <Fragment key={row.id}>
-      <tr
-        className="holdings-row border-t border-[var(--border)]"
-        title="Double-clic pour le détail · flèche pour les transactions"
-        onDoubleClick={() => opts.onRowDoubleClick(assetId)}
-        data-expanded={expanded ? "true" : "false"}
-        data-category={parseAssetCategory(row.original.category)}
-      >
-        <td
-          className="holdings-expand-col px-0 py-2 align-middle text-center"
-          style={{
-            width: EXPAND_COL_PX,
-            minWidth: EXPAND_COL_PX,
-            maxWidth: EXPAND_COL_PX,
-          }}
-        >
-          <button
-            type="button"
-            className={cn(
-              "inline-flex h-4 w-4 items-center justify-center rounded border border-slate-200 bg-white p-0 text-slate-700 shadow-sm transition hover:border-teal-600 hover:bg-teal-50 hover:text-teal-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-teal-400 dark:hover:bg-slate-700 dark:hover:text-teal-300",
-              expanded &&
-                "border-teal-600 bg-teal-50 text-teal-800 dark:border-teal-400 dark:bg-teal-950/50 dark:text-teal-300"
-            )}
-            aria-expanded={expanded}
-            aria-label={
-              expanded
-                ? "Masquer les transactions"
-                : "Afficher les dernières transactions"
-            }
-            data-testid={`holding-expand-${assetId}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              opts.toggleExpanded(assetId);
-            }}
-            onDoubleClick={(e) => e.stopPropagation()}
-          >
-            <ChevronRight
-              className={cn(
-                "h-[10px] w-[10px] shrink-0 transition-transform duration-150",
-                expanded && "rotate-90"
-              )}
-              strokeWidth={2.5}
-              aria-hidden
-            />
-          </button>
-        </td>
-        {row.getVisibleCells().map((cell) => {
-          const size = cell.column.getSize();
-          const floor = columnMinWidth(cell.column.id);
-          return (
-            <td
-              key={cell.id}
-              data-column-id={cell.column.id}
-              className="col-cell-sized px-3 py-3 align-top sm:px-4"
-              style={{
-                width: size,
-                minWidth: floor,
-              }}
-            >
-              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-            </td>
-          );
-        })}
-        <td
-          className="px-1 py-2 align-middle"
-          style={{
-            width: ACTIONS_COL_PX,
-            minWidth: ACTIONS_COL_PX,
-            maxWidth: ACTIONS_COL_PX,
-          }}
-        >
-          <HoldingRowActions
-            holding={row.original}
-            onAction={
-              opts.onOpenTransactionForAsset
-                ? (type) => opts.onOpenTransactionForAsset!(type, row.original)
-                : undefined
-            }
-            onDetail={() => opts.onRowDoubleClick(assetId)}
-            onEditCategory={() => opts.onEditCategory(row.original)}
-          />
-        </td>
-      </tr>
-      {expanded && (
-        <tr
-          className="border-t border-[var(--border)] bg-slate-50/70 dark:bg-slate-900/50"
-          data-testid={`holding-expand-panel-${assetId}`}
-        >
-          <td colSpan={opts.visibleColCount} className="px-3 py-2 sm:px-4">
-            <div className="ml-2 border-l-2 border-teal-600/40 pl-3 dark:border-teal-500/40">
-              <HoldingRecentTxs assetId={assetId} enabled={expanded} />
-            </div>
-          </td>
-        </tr>
-      )}
-    </Fragment>
-  );
-}
-
-function HoldingRowActions({
-  holding,
-  onAction,
-  onDetail,
-  onEditCategory,
-}: {
-  holding: Holding;
-  onAction?: (type: string) => void;
-  onDetail: () => void;
-  onEditCategory?: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] text-slate-500 hover:bg-[var(--muted)]"
-        aria-label={`Actions pour ${holding.name}`}
-        aria-expanded={open}
-        data-testid={`holding-actions-${holding.assetId}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        onDoubleClick={(e) => e.stopPropagation()}
-      >
-        <MoreHorizontal className="h-4 w-4" />
-      </button>
-      {open && (
-        <div
-          className="absolute right-0 z-40 mt-1 min-w-[12rem] rounded-lg border border-[var(--border)] bg-[var(--card)] py-1 text-sm shadow-xl"
-          role="menu"
-        >
-          {onAction &&
-            (
-              [
-                ["ACHAT", "Acheter"],
-                ["VENTE", "Vendre"],
-                ["DIVIDENDE", "Enregistrer un dividende"],
-                ["FRAIS", "Ajouter des frais"],
-              ] as const
-            ).map(([type, label]) => (
-              <button
-                key={type}
-                type="button"
-                role="menuitem"
-                className="block w-full px-3 py-1.5 text-left hover:bg-[var(--muted)]"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOpen(false);
-                  onAction(type);
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          {onEditCategory && (
-            <button
-              type="button"
-              role="menuitem"
-              className="block w-full border-t border-[var(--border)] px-3 py-1.5 text-left hover:bg-[var(--muted)]"
-              data-testid={`holding-edit-category-${holding.assetId}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onEditCategory();
-              }}
-            >
-              Modifier la catégorie
-            </button>
-          )}
-          <button
-            type="button"
-            role="menuitem"
-            className="block w-full border-t border-[var(--border)] px-3 py-1.5 text-left hover:bg-[var(--muted)]"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              onDetail();
-            }}
-          >
-            Voir le détail / transactions
-          </button>
-        </div>
-      )}
-    </div>
   );
 }

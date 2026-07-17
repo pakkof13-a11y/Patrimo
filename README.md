@@ -15,6 +15,15 @@ Application locale de suivi d’investissements (actions, crypto, immobilier, ca
 - Decimal.js pour tous les montants et quantités
 - Vitest (unitaires) + Playwright (E2E critique)
 
+## Readiness (env de test)
+
+Voir **[docs/readiness.md](docs/readiness.md)** pour la checklist déploiement test,
+les garde-fous secrets et la décision **déployable / non déployable**.
+
+```powershell
+npm run ready:check   # typecheck + unitaires
+```
+
 ## Prérequis Windows (PowerShell)
 
 - Node.js 20+ (`node -v`, `npm -v`)
@@ -87,16 +96,16 @@ Optionnel — injecter les blockchains en base (sinon elles ne sont que des pres
 npm run db:seed-blockchains
 ```
 
-Compte démo :
+Comptes bootstrap (seed) :
 
-- Email : `demo@patrimo.fr`
-- Mot de passe : `demo1234`
+- Définis via **`.env`** : `ADMIN_PASSWORD`, `DEMO_PASSWORD` (obligatoires pour le seed).
+- Identifiants publics par défaut : `demo` / `demo@patrimo.fr`, `admin` / `admin@patrimo.local`.
+- Voir **`.env.example`** et **`docs/secrets.md`** (aucun mot de passe dans le dépôt).
 
-### Auth locale (important)
+### Auth locale
 
-Mode **single-user** : `requireUserId()` résout le compte démo / premier utilisateur.
-**Pas de session multi-utilisateur** tant que NextAuth n’est pas rebranché.
-Ne pas exposer l’app sur Internet sans authentification réelle.
+NextAuth (Credentials) multi-utilisateur avec isolation `userId`.
+Configurer `AUTH_SECRET` avant de démarrer. Ne jamais committer `.env`.
 
 ### Client Prisma (erreur `findMany` / 500 holdings)
 

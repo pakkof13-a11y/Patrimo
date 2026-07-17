@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
-import { liabilitySchema } from "@/app/lib/schemas";
+import { liabilitySchema, liabilityUpdateSchema } from "@/app/lib/schemas";
+import {
+  presentFields,
+  requireBodyId,
+  validationErrorResponse,
+} from "@/app/lib/api/validation";
 import {
   changeInterestRate,
   changeMonthlyPayment,
@@ -82,10 +87,7 @@ export async function POST(req: Request) {
 
   const parsed = liabilitySchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Validation échouée", details: parsed.error.flatten() },
-      { status: 400 }
-    );
+    return validationErrorResponse(parsed.error);
   }
 
   const paymentDay =
@@ -122,36 +124,43 @@ export async function PUT(req: Request) {
   if (!userId) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 401 });
 
   const body = await req.json();
-  const id = body?.id as string | undefined;
+  const id = requireBodyId(body);
   if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
 
   const existing = await prisma.liability.findFirst({ where: { id, userId } });
   if (!existing) return NextResponse.json({ error: "Introuvable" }, { status: 404 });
 
-  const data: Prisma.LiabilityUpdateInput = {};
-  if (body.name !== undefined) data.name = String(body.name);
-  if (body.initialAmount !== undefined)
-    data.initialAmount = new Prisma.Decimal(String(body.initialAmount).replace(",", "."));
-  if (body.remainingAmount !== undefined)
-    data.remainingAmount = new Prisma.Decimal(String(body.remainingAmount).replace(",", "."));
-  if (body.currency !== undefined) data.currency = String(body.currency).toUpperCase();
-  if (body.interestRate !== undefined && body.interestRate !== "")
-    data.interestRate = new Prisma.Decimal(String(body.interestRate).replace(",", "."));
-  if (body.interestRate === "" || body.interestRate === null) data.interestRate = null;
-  if (body.monthlyPayment !== undefined && body.monthlyPayment !== "")
-    data.monthlyPayment = new Prisma.Decimal(String(body.monthlyPayment).replace(",", "."));
-  if (body.monthlyPayment === "" || body.monthlyPayment === null) data.monthlyPayment = null;
-  if (body.bankName !== undefined) data.bankName = body.bankName || null;
-  if (body.notes !== undefined) data.notes = body.notes || null;
-  if (body.startDate !== undefined)
-    data.startDate = body.startDate ? new Date(body.startDate) : null;
-  if (body.endDate !== undefined) data.endDate = body.endDate ? new Date(body.endDate) : null;
-  if (body.paymentDay !== undefined && body.paymentDay !== "" && body.paymentDay != null) {
-    data.paymentDay = Math.max(1, Math.min(31, Math.floor(Number(body.paymentDay))));
-  }
-  if (body.paymentDay === "" || body.paymentDay === null) data.paymentDay = null;
+  const parsed = liabilityUpdateSchema.safeParse(body);
+  if (!parsed.success) return validationErrorResponse(parsed.error);
 
-  const liability = await prisma.liability.update({ where: { id }, data });
+  const f = presentFields(body, parsed.data as Record<string, unknown>) as typeof parsed.data;
+  const data: Prisma.LiabilityUpdateInput = {};
+
+  if (f.name !== undefined) data.name = f.name;
+  if (f.initialAmount !== undefined)
+    data.initialAmount = new Prisma.Decimal(f.initialAmount || "0");
+  if (f.remainingAmount !== undefined)
+    data.remainingAmount = new Prisma.Decimal(f.remainingAmount || "0");
+  if (f.currency !== undefined) data.currency = f.currency;
+  if (f.interestRate !== undefined)
+    data.interestRate = f.interestRate != null ? new Prisma.Decimal(f.interestRate) : null;
+  if (f.monthlyPayment !== undefined)
+    data.monthlyPayment =
+      f.monthlyPayment != null ? new Prisma.Decimal(f.monthlyPayment) : null;
+  if (f.bankName !== undefined) data.bankName = f.bankName || null;
+  if (f.notes !== undefined) data.notes = f.notes || null;
+  if (f.startDate !== undefined) data.startDate = f.startDate ? new Date(f.startDate) : null;
+  if (f.endDate !== undefined) data.endDate = f.endDate ? new Date(f.endDate) : null;
+  if (f.paymentDay !== undefined) data.paymentDay = f.paymentDay;
+
+  const write = await prisma.liability.updateMany({
+    where: { id, userId },
+    data,
+  });
+  if (write.count === 0) {
+    return NextResponse.json({ error: "Introuvable" }, { status: 404 });
+  }
+  const liability = await prisma.liability.findFirst({ where: { id, userId } });
   return NextResponse.json({ liability });
 }
 
@@ -163,9 +172,9 @@ export async function DELETE(req: Request) {
   const id = searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
 
-  const existing = await prisma.liability.findFirst({ where: { id, userId } });
-  if (!existing) return NextResponse.json({ error: "Introuvable" }, { status: 404 });
-
-  await prisma.liability.delete({ where: { id } });
+  const del = await prisma.liability.deleteMany({ where: { id, userId } });
+  if (del.count === 0) {
+    return NextResponse.json({ error: "Introuvable" }, { status: 404 });
+  }
   return NextResponse.json({ ok: true });
 }

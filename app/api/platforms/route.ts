@@ -3,6 +3,11 @@ import { Prisma } from "@prisma/client";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { platformSchema } from "@/app/lib/schemas";
+import {
+  presentFields,
+  requireBodyId,
+  validationErrorResponse,
+} from "@/app/lib/api/validation";
 import { getPlatformCashBalances } from "@/app/lib/portfolio/service";
 import { findPreset, PLATFORM_PRESETS } from "@/app/lib/platforms/presets";
 
@@ -27,12 +32,7 @@ export async function POST(req: Request) {
   }
 
   const parsed = platformSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Validation échouée", details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
+  if (!parsed.success) return validationErrorResponse(parsed.error);
 
   const name = parsed.data.name.trim();
 
@@ -88,33 +88,34 @@ export async function PUT(req: Request) {
   if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const body = await req.json();
-  const id = body?.id as string | undefined;
+  const id = requireBodyId(body);
   if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
 
   const existing = await prisma.platform.findFirst({ where: { id, userId } });
   if (!existing) return NextResponse.json({ error: "Introuvable" }, { status: 404 });
 
   const parsed = platformSchema.partial().safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Validation échouée", details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
+  if (!parsed.success) return validationErrorResponse(parsed.error);
+
+  const f = presentFields(body, parsed.data as Record<string, unknown>) as typeof parsed.data;
+  const data: Prisma.PlatformUpdateInput = {};
+  if (f.name !== undefined) data.name = f.name.trim();
+  if (f.type !== undefined) data.type = f.type;
+  if (f.subtype !== undefined) data.subtype = f.subtype;
+  if (f.logoKey !== undefined) data.logoKey = f.logoKey;
+  if (f.logoUrl !== undefined) data.logoUrl = f.logoUrl || null;
+  if (f.walletAddress !== undefined) data.walletAddress = f.walletAddress;
+  if (f.notes !== undefined) data.notes = f.notes;
 
   try {
-    const platform = await prisma.platform.update({
-      where: { id },
-      data: {
-        name: parsed.data.name,
-        type: parsed.data.type,
-        subtype: parsed.data.subtype,
-        logoKey: parsed.data.logoKey,
-        logoUrl: parsed.data.logoUrl || null,
-        walletAddress: parsed.data.walletAddress,
-        notes: parsed.data.notes,
-      },
+    const write = await prisma.platform.updateMany({
+      where: { id, userId },
+      data,
     });
+    if (write.count === 0) {
+      return NextResponse.json({ error: "Introuvable" }, { status: 404 });
+    }
+    const platform = await prisma.platform.findFirst({ where: { id, userId } });
     return NextResponse.json({ platform });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
@@ -158,7 +159,7 @@ export async function DELETE(req: Request) {
   }
 
   try {
-    await prisma.platform.delete({ where: { id } });
+    await prisma.platform.deleteMany({ where: { id, userId } });
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error("[platforms DELETE]", e);

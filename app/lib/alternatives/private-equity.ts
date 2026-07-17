@@ -150,13 +150,18 @@ export async function updatePrivateEquity(
     currency: input.currency ?? existing.currency,
     notes: input.notes !== undefined ? input.notes : existing.notes,
   });
-  const row = await prisma.privateEquityPosition.update({ where: { id }, data });
+  const write = await prisma.privateEquityPosition.updateMany({
+    where: { id, userId },
+    data,
+  });
+  if (write.count === 0) throw new Error("Position introuvable");
+  const row = await prisma.privateEquityPosition.findFirst({ where: { id, userId } });
+  if (!row) throw new Error("Position introuvable");
   return mapRow(row);
 }
 
 export async function deletePrivateEquity(userId: string, id: string) {
-  const existing = await prisma.privateEquityPosition.findFirst({ where: { id, userId } });
-  if (!existing) throw new Error("Position introuvable");
-  await prisma.privateEquityPosition.delete({ where: { id } });
+  const result = await prisma.privateEquityPosition.deleteMany({ where: { id, userId } });
+  if (result.count === 0) throw new Error("Position introuvable");
   return { ok: true };
 }

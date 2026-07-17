@@ -5,6 +5,7 @@ import { prisma } from "@/app/lib/prisma";
 import { addAssetSchema } from "@/app/lib/schemas";
 import { toEurAmount } from "@/app/lib/market/fx";
 import { resolveAssetLogo } from "@/app/lib/assets/logos";
+import { assetReuseByTickerWhere } from "@/app/lib/assets/reuse";
 
 export async function GET() {
   const userId = await requireUserId();
@@ -36,25 +37,16 @@ export async function POST(req: Request) {
   });
   if (!platform) return NextResponse.json({ error: "Plateforme introuvable" }, { status: 404 });
 
-  // Reuse existing asset by ticker (any platform) so extra buys update the SAME position
+  // Reuse by ticker + tax envelope. Positions stay per (assetId, platformId) on txs —
+  // never overwrite Asset.platformId (home display) when trading on another broker.
   if (parsed.data.ticker) {
+    const accountType = parsed.data.accountType || "CTO";
     const existingByTicker = await prisma.asset.findFirst({
-      where: {
-        userId,
-        ticker: { equals: parsed.data.ticker, mode: "insensitive" },
-      },
+      where: assetReuseByTickerWhere(userId, parsed.data.ticker, accountType),
       orderBy: { createdAt: "asc" },
     });
     if (existingByTicker) {
-      // Keep trading on the selected platform for this session's metadata
-      if (existingByTicker.platformId !== parsed.data.platformId) {
-        await prisma.asset.update({
-          where: { id: existingByTicker.id },
-          data: { platformId: parsed.data.platformId },
-        });
-      }
-      const refreshed = await prisma.asset.findUnique({ where: { id: existingByTicker.id } });
-      return NextResponse.json({ asset: refreshed ?? existingByTicker, existing: true });
+      return NextResponse.json({ asset: existingByTicker, existing: true });
     }
   }
 

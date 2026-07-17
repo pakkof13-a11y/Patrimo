@@ -176,6 +176,9 @@ export function AssetPriceChart({
     [transactions]
   );
 
+  /** Onglet Performance : nécessite au moins un achat dans le journal */
+  const canShowPerf = Boolean(firstBuyAt) && transactions.length > 0;
+
   const perfPeriodEnabled = useMemo(() => {
     const map = {} as Record<PriceHistoryRange, boolean>;
     for (const p of PERF_PERIODS) {
@@ -183,6 +186,13 @@ export function AssetPriceChart({
     }
     return map;
   }, [firstBuyAt]);
+
+  // Revenir au cours si Performance n'est plus pertinente
+  useEffect(() => {
+    if (!canShowPerf && mainTab === "perf") {
+      setMainTab("price");
+    }
+  }, [canShowPerf, mainTab]);
 
   // Si la période sélectionnée devient invalide (nouvel actif / historique court) → 7J
   useEffect(() => {
@@ -440,46 +450,52 @@ export function AssetPriceChart({
 
   return (
     <div
-      className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] p-2.5 transition-opacity duration-200"
+      className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 transition-opacity duration-200"
       data-testid="asset-price-chart"
       data-main-tab={mainTab}
     >
-      {/* Ligne 1 : onglets (gauche) + style (droite) */}
-      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+      {/* Ligne 1 : mode (gauche) + style (droite) — hiérarchie claire */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div
-          className="inline-flex rounded-lg border border-[var(--border)] bg-slate-50 p-0.5 dark:bg-slate-900/60"
+          className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--muted)]/40 p-0.5"
           role="tablist"
           aria-label="Vue du graphique"
         >
-          {MAIN_TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={mainTab === t.id}
-              data-testid={`chart-main-tab-${t.id}`}
-              onClick={() => setMainTab(t.id)}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-[11px] font-semibold transition",
-                mainTab === t.id
-                  ? "bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-slate-50"
-                  : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
+          {MAIN_TABS.filter((t) => t.id === "price" || canShowPerf).map(
+            (t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={mainTab === t.id}
+                data-testid={`chart-main-tab-${t.id}`}
+                onClick={() => setMainTab(t.id)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-[11px] font-semibold transition",
+                  mainTab === t.id
+                    ? "bg-[var(--card)] text-[var(--foreground)] shadow-[var(--shadow-xs)]"
+                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                )}
+              >
+                {t.label}
+              </button>
+            )
+          )}
         </div>
+        {!canShowPerf && (
+          <p className="text-meta w-full basis-full sm:ml-auto sm:w-auto sm:basis-auto">
+            Performance après le premier achat
+          </p>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Delta cours uniquement en vue Cours (KPIs perf déjà sous les onglets) */}
           {isPrice && delta && (
             <span
               className={cn(
                 "text-[10px] font-medium tabular-nums",
                 delta.up
                   ? "text-sky-600 dark:text-sky-400"
-                  : "text-slate-500 dark:text-slate-400"
+                  : "text-[var(--muted-foreground)]"
               )}
             >
               {delta.up ? "+" : ""}
@@ -489,7 +505,7 @@ export function AssetPriceChart({
           )}
           {isPrice && (
             <div
-              className="inline-flex rounded-lg border border-[var(--border)] bg-slate-50 p-0.5 dark:bg-slate-900/60"
+              className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--muted)]/40 p-0.5"
               role="tablist"
               aria-label="Style de graphique"
             >
@@ -505,7 +521,7 @@ export function AssetPriceChart({
                     "rounded-md px-2 py-1 text-[10px] font-medium transition",
                     style === s.id
                       ? "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900"
-                      : "text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100"
+                      : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                   )}
                 >
                   {s.label}
@@ -516,7 +532,7 @@ export function AssetPriceChart({
           {isPerf && (
             <>
               <div
-                className="inline-flex rounded-lg border border-[var(--border)] bg-slate-50 p-0.5 dark:bg-slate-900/60"
+                className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--muted)]/40 p-0.5"
                 role="tablist"
                 aria-label="Métrique de performance"
               >

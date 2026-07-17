@@ -408,3 +408,188 @@ export const changePasswordSchema = z
   });
 
 export type ChangePasswordForm = z.infer<typeof changePasswordSchema>;
+
+// ─── Partial update schemas (no .default() — avoids silent overwrites) ───────
+
+/** Decimal that may be cleared on update (null / "" → null). */
+const clearableDecimal = z
+  .union([z.string(), z.number(), z.null(), z.literal("")])
+  .transform((v) => {
+    if (v === null || v === "") return null;
+    return String(v).trim().replace(",", ".");
+  })
+  .refine((v) => v === null || !Number.isNaN(Number(v)), "Nombre invalide");
+
+const currencyCode = z
+  .string()
+  .min(3, "Devise invalide")
+  .max(3, "Devise invalide")
+  .transform((v) => v.trim().toUpperCase());
+
+const optionalDateString = z
+  .union([z.string(), z.null(), z.literal("")])
+  .transform((v) => (v === null || v === "" ? null : String(v)));
+
+const optionalClearableInt = (min: number, max: number) =>
+  z
+    .union([z.string(), z.number(), z.null(), z.literal("")])
+    .transform((v) => {
+      if (v === null || v === "") return null;
+      const n = Math.floor(Number(v));
+      if (!Number.isFinite(n)) return null;
+      return Math.max(min, Math.min(max, n));
+    });
+
+/** PUT /api/liabilities — partial, clearable money/dates. */
+export const liabilityUpdateSchema = z.object({
+  name: z.string().min(2, "Nom requis").optional(),
+  initialAmount: decimalString.optional(),
+  remainingAmount: decimalString.optional(),
+  currency: currencyCode.optional(),
+  interestRate: clearableDecimal.optional(),
+  monthlyPayment: clearableDecimal.optional(),
+  startDate: optionalDateString.optional(),
+  endDate: optionalDateString.optional(),
+  paymentDay: optionalClearableInt(1, 31).optional(),
+  bankName: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+});
+
+export type LiabilityUpdateForm = z.infer<typeof liabilityUpdateSchema>;
+
+/** PUT /api/banks */
+export const bankAccountUpdateSchema = z.object({
+  bankName: z.string().min(1, "Banque requise").optional(),
+  balance: decimalString.optional(),
+  currency: currencyCode.optional(),
+  notes: z.string().optional().nullable(),
+});
+
+export type BankAccountUpdateForm = z.infer<typeof bankAccountUpdateSchema>;
+
+/** PUT /api/savings */
+export const savingsAccountUpdateSchema = z.object({
+  name: z.string().min(1, "Nom du livret requis").optional(),
+  balance: decimalString.optional(),
+  apyPercent: decimalString.optional(),
+  rateType: z.enum(["APR", "APY"]).optional(),
+  payoutFrequency: z.enum(["DAILY", "WEEKLY", "MONTHLY", "YEARLY"]).optional(),
+  payoutDayOfWeek: optionalClearableInt(1, 7).optional(),
+  payoutDayOfMonth: optionalClearableInt(1, 31).optional(),
+  payoutMonth: optionalClearableInt(1, 12).optional(),
+  currency: currencyCode.optional(),
+  notes: z.string().optional().nullable(),
+});
+
+export type SavingsAccountUpdateForm = z.infer<typeof savingsAccountUpdateSchema>;
+
+/** PUT /api/life-insurance (contrat) */
+export const lifeInsuranceUpdateSchema = z.object({
+  insurer: z.string().min(1, "Assureur requis").optional(),
+  openDate: optionalDateString.optional(),
+  cashEuro: decimalString.optional(),
+  currency: currencyCode.optional(),
+  notes: z.string().optional().nullable(),
+});
+
+export type LifeInsuranceUpdateForm = z.infer<typeof lifeInsuranceUpdateSchema>;
+
+/** PUT /api/life-insurance kind=product */
+export const lifeProductUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  currentValue: decimalString.optional(),
+  currency: currencyCode.optional(),
+  notes: z.string().optional().nullable(),
+});
+
+export type LifeProductUpdateForm = z.infer<typeof lifeProductUpdateSchema>;
+
+/** PUT /api/envelopes */
+export const envelopeCashUpdateSchema = z.object({
+  envelope: z.enum(["CTO", "PEA", "AV"]),
+  balance: decimalString.optional(),
+  currency: currencyCode.optional(),
+});
+
+export type EnvelopeCashUpdateForm = z.infer<typeof envelopeCashUpdateSchema>;
+
+/** PATCH /api/portfolio — devise de reporting */
+export const portfolioBaseCurrencySchema = z.object({
+  baseCurrency: currencyCode.default("EUR"),
+});
+
+export type PortfolioBaseCurrencyForm = z.infer<typeof portfolioBaseCurrencySchema>;
+
+/** PATCH /api/assets/:id — metadata */
+export const updateAssetMetadataSchema = z.object({
+  ticker: z
+    .union([z.string(), z.null(), z.literal("")])
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      if (v === null || v === "") return null;
+      const t = String(v).trim().toUpperCase();
+      return t.length ? t : null;
+    })
+    .refine((v) => v === undefined || v === null || v.length <= 32, "Ticker trop long"),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Nom requis")
+    .optional(),
+  countryCode: z
+    .union([z.string(), z.null(), z.literal("")])
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      if (v === null || v === "") return null;
+      const c = String(v).trim().toUpperCase().slice(0, 2);
+      return c || null;
+    }),
+  withholdingTaxRate: z
+    .union([z.string(), z.number(), z.null(), z.literal("")])
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      if (v === null || v === "") return null;
+      let r = Number(String(v).replace(",", "."));
+      if (!Number.isFinite(r)) return Number.NaN;
+      if (r > 1 && r <= 100) r = r / 100;
+      return Math.min(1, Math.max(0, r));
+    })
+    .refine((v) => v === undefined || v === null || Number.isFinite(v), "Taux WHT invalide"),
+});
+
+export type UpdateAssetMetadataForm = z.infer<typeof updateAssetMetadataSchema>;
+
+/** Optional price level: undefined = omit, null/""/0 = clear, number = set. */
+const triggerLevel = z
+  .union([z.string(), z.number(), z.null(), z.literal("")])
+  .transform((v) => {
+    if (v === null || v === "") return null;
+    const s = String(v).trim().replace(",", ".");
+    if (s === "" || s === "-" || s.toLowerCase() === "null") return null;
+    const n = Number(s);
+    if (!Number.isFinite(n) || n < 0) return Number.NaN;
+    if (n === 0) return null;
+    return s;
+  })
+  .refine((v) => v === null || !Number.isNaN(Number(v)), "Niveau invalide (nombre ≥ 0 attendu)");
+
+/** PATCH /api/assets/:id/triggers */
+export const updateAssetTriggersSchema = z.object({
+  stopLoss: triggerLevel.optional(),
+  tp1: triggerLevel.optional(),
+  tp2: triggerLevel.optional(),
+  tp3: triggerLevel.optional(),
+  tp4: triggerLevel.optional(),
+});
+
+export type UpdateAssetTriggersForm = z.infer<typeof updateAssetTriggersSchema>;
+
+/** PATCH|PUT /api/assets/:id/account-type */
+export const updateAccountTypeSchema = z.object({
+  accountType: z.enum(accountTypes),
+});
+
+export type UpdateAccountTypeForm = z.infer<typeof updateAccountTypeSchema>;

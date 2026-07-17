@@ -59,7 +59,16 @@ export default function LoginPage() {
         callbackUrl,
       });
       if (!res || res.error) {
-        setError("Identifiant ou mot de passe incorrect.");
+        // Messages génériques — pas de distinction « user existe / mauvais mdp ».
+        // rate_limited : cooldown sans confirmer l’existence du compte.
+        const code = (res as { code?: string } | undefined)?.code;
+        if (code === "rate_limited") {
+          setError(
+            "Trop de tentatives. Réessayez dans quelques instants."
+          );
+        } else {
+          setError("Identifiant ou mot de passe incorrect.");
+        }
         setPending(false);
         return;
       }

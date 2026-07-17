@@ -79,27 +79,27 @@ export function EditAssetCategoryModal({
   if (!open) return null;
 
   return (
-    <Modal onClose={onClose} title="Modifier la catégorie">
+    <Modal onClose={onClose} title="Catégorie de l’actif">
       <div className="space-y-4" data-testid="edit-category-modal">
-        <div>
-          <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/25 px-3 py-2.5">
+          <p className="text-sm font-semibold text-[var(--foreground)]">
             {assetName}
             {ticker ? (
-              <span className="ml-1.5 font-mono text-xs text-slate-500">
+              <span className="ml-1.5 font-mono text-xs font-normal text-[var(--muted-foreground)]">
                 {ticker}
               </span>
             ) : null}
           </p>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Classification visuelle uniquement — sans impact sur quantités, CUMP
-            ou P&amp;L.
+          <p className="text-meta mt-1">
+            Classification d&apos;affichage uniquement — sans effet sur quantités,
+            CUMP ou P&amp;L.
           </p>
         </div>
 
-        <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+        <label className="block text-xs font-medium text-[var(--muted-foreground)]">
           Sous-catégorie
           <select
-            className="input mt-1 w-full"
+            className="input mt-1.5 w-full"
             value={value}
             onChange={(e) => setValue(parseAssetCategory(e.target.value))}
             data-testid="edit-category-select"
@@ -133,7 +133,7 @@ export function EditAssetCategoryModal({
           </p>
         )}
 
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-3">
           <Button
             type="button"
             variant="outline"

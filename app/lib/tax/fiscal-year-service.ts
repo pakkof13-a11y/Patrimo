@@ -34,6 +34,8 @@ export async function getFiscalYearReport(
     netCashImpactEur: r.netCashImpactEur.toString(),
     withholdingTaxEur: r.withholdingTaxEur?.toString() ?? null,
     assetId: r.assetId,
+    platformId: r.platformId,
+    toPlatformId: r.toPlatformId,
     accountType: r.asset?.accountType ?? "CTO",
   }));
 

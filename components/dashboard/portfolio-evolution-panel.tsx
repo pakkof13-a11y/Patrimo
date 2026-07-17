@@ -1,0 +1,533 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, SlidersHorizontal } from "lucide-react";
+import { formatCurrency, cn } from "@/app/lib/utils";
+import type { HistoryPoint } from "@/app/lib/types/ui";
+import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  buildEvolutionSeries,
+  evolutionDeltaSummary,
+  evolutionIntervalHint,
+  evolutionIntervalLabel,
+  isEvolutionRangeEnabled,
+  withBenchmarkSeries,
+  benchmarkLabel,
+  type EvolutionChartStyle,
+  type EvolutionMetric,
+  type EvolutionRange,
+  type EvolutionViewMode,
+} from "@/app/lib/portfolio/evolution-aggregate";
+import {
+  DEFAULT_EVOLUTION_PREFS,
+  loadEvolutionPrefs,
+  saveEvolutionPrefs,
+  type EvolutionBenchmark,
+  type EvolutionBenchmarkChoice,
+  type EvolutionPrefsV4,
+} from "@/app/lib/portfolio/evolution-prefs";
+import { loadDefaultBenchmark } from "@/app/lib/portfolio/benchmark-prefs";
+import {
+  DecomposedCumulAreas,
+  DecomposedCumulColumns,
+  DecomposedPeriodChart,
+  GlobalColumnsChart,
+  GlobalLineChart,
+  PeriodColumnsChart,
+  PeriodLineChart,
+} from "@/components/dashboard/portfolio-evolution-charts";
+
+const RANGES: { id: EvolutionRange; label: string }[] = [
+  { id: "7d", label: "7J" },
+  { id: "1m", label: "1M" },
+  { id: "3m", label: "3M" },
+  { id: "6m", label: "6M" },
+  { id: "ytd", label: "YTD" },
+  { id: "1y", label: "1A" },
+  { id: "5y", label: "5A" },
+  { id: "all", label: "Tout" },
+];
+
+const METRICS: { id: EvolutionMetric; label: string; title: string }[] = [
+  {
+    id: "cumul",
+    label: "Cumulée",
+    title: "Niveau de patrimoine Ã  chaque période",
+  },
+  {
+    id: "period",
+    label: "Périodique",
+    title: "Variation entre deux périodes",
+  },
+];
+
+const STYLES: { id: EvolutionChartStyle; label: string }[] = [
+  { id: "line", label: "Courbe" },
+  { id: "columns", label: "Colonnes" },
+];
+
+const VIEWS: { id: EvolutionViewMode; label: string; title: string }[] = [
+  { id: "global", label: "Globale", title: "Patrimoine total uniquement" },
+  {
+    id: "decomposed",
+    label: "Décomposée",
+    title: "Positions, cash, revenus (div. / coupons / loyers), P&L",
+  },
+];
+
+const BENCHMARK_CHOICES: {
+  id: EvolutionBenchmarkChoice;
+  label: string;
+  title: string;
+}[] = [
+  {
+    id: "default",
+    label: "Défaut",
+    title: "Benchmark défini dans Préférences",
+  },
+  { id: "none", label: "Aucun", title: "Pas de comparaison" },
+  { id: "cash", label: "Cash", title: "Capital constant (alternative cash)" },
+  {
+    id: "inflation",
+    label: "Inflation",
+    title: "Référence indicative ~2 % / an",
+  },
+  {
+    id: "index",
+    label: "Indice",
+    title: "Proxy actions ~7 % / an (indicatif)",
+  },
+];
+
+function Segmented<T extends string>({
+  items,
+  value,
+  onChange,
+  ariaLabel,
+  testIdPrefix,
+  size = "md",
+  muted = false,
+}: {
+  items: { id: T; label: string; title?: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  ariaLabel: string;
+  testIdPrefix?: string;
+  size?: "md" | "sm";
+  /** Contrôles secondaires : moins saillants */
+  muted?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "inline-flex max-w-full flex-wrap rounded-[var(--radius-md)] border p-0.5",
+        muted
+          ? "border-[var(--border)]/70 bg-transparent"
+          : "border-[var(--border)] bg-[var(--muted)]/45"
+      )}
+      role="tablist"
+      aria-label={ariaLabel}
+    >
+      {items.map((item) => {
+        const selected = value === item.id;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            title={item.title}
+            aria-selected={selected}
+            data-testid={
+              testIdPrefix ? `${testIdPrefix}-${item.id}` : undefined
+            }
+            onClick={() => onChange(item.id)}
+            className={cn(
+              "rounded-[var(--radius-sm)] font-medium transition",
+              "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+              size === "sm"
+                ? "px-1.5 py-0.5 text-[10px]"
+                : "px-2.5 py-1 text-[11px]",
+              selected &&
+                !muted &&
+                "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]",
+              selected &&
+                muted &&
+                "bg-[var(--muted)] font-semibold text-[var(--foreground)]",
+              !selected &&
+                "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+            )}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Module Évolution du portefeuille — V3
+ * Hiérarchie : période → lecture/style → options avancées (vue / Vs)
+ * Prefs persistées (localStorage versionné).
+ * Conçu pour s'insérer dans une colonne de grille (pas de bandeau full-width).
+ */
+export function PortfolioEvolutionPanel({
+  history,
+  baseCurrency,
+  loading,
+  className,
+}: {
+  history: HistoryPoint[];
+  baseCurrency: string;
+  loading?: boolean;
+  className?: string;
+}) {
+  const [prefs, setPrefs] = useState<EvolutionPrefsV4>(DEFAULT_EVOLUTION_PREFS);
+  const [userDefaultBm, setUserDefaultBm] = useState<EvolutionBenchmark>("none");
+  const [hydrated, setHydrated] = useState(false);
+  const styleTouched = useRef(false);
+
+  useEffect(() => {
+    setPrefs(loadEvolutionPrefs());
+    setUserDefaultBm(loadDefaultBenchmark());
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    saveEvolutionPrefs(prefs);
+  }, [prefs, hydrated]);
+
+  // Recharger le défaut si l'utilisateur change les Préférences (autre onglet / focus)
+  useEffect(() => {
+    function onFocus() {
+      setUserDefaultBm(loadDefaultBenchmark());
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  const { range, metric, style, view, benchmark, advancedOpen } = prefs;
+
+  /** Benchmark effectif (héritage préférences ou override dashboard) */
+  const activeBenchmark: EvolutionBenchmark =
+    benchmark === "default" ? userDefaultBm : benchmark;
+
+  const update = (patch: Partial<EvolutionPrefsV4>) => {
+    setPrefs((p) => ({ ...p, ...patch, v: 4 }));
+  };
+
+  const setMetric = (m: EvolutionMetric) => {
+    // Soft default style only if user n'a pas forcé le style
+    if (!styleTouched.current) {
+      update({ metric: m, style: m === "period" ? "columns" : "line" });
+    } else {
+      update({ metric: m });
+    }
+  };
+
+  const setStyle = (s: EvolutionChartStyle) => {
+    styleTouched.current = true;
+    update({ style: s });
+  };
+
+  const firstDate = history[0]?.date ?? null;
+
+  const rangeEnabled = useMemo(() => {
+    const map = {} as Record<EvolutionRange, boolean>;
+    for (const r of RANGES) {
+      map[r.id] = isEvolutionRangeEnabled(r.id, firstDate);
+    }
+    return map;
+  }, [firstDate]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (!rangeEnabled[range]) {
+      setPrefs((p) =>
+        p.range === "7d" ? p : { ...p, range: "7d", v: 4 as const }
+      );
+    }
+  }, [range, rangeEnabled, hydrated]);
+
+  const { points: rawPoints, interval } = useMemo(
+    () => buildEvolutionSeries(history, range, metric),
+    [history, range, metric]
+  );
+
+  const points = useMemo(
+    () =>
+      view === "global" && activeBenchmark !== "none"
+        ? withBenchmarkSeries(rawPoints, activeBenchmark)
+        : withBenchmarkSeries(rawPoints, "none"),
+    [rawPoints, view, activeBenchmark]
+  );
+
+  const summary = useMemo(() => evolutionDeltaSummary(points), [points]);
+
+  const empty = !loading && history.length === 0;
+  const noPoints = !loading && !empty && points.length === 0;
+
+  const showBenchmark =
+    view === "global" && activeBenchmark !== "none";
+
+  return (
+    <div
+      className={cn(
+        "card flex h-full min-h-0 min-w-0 flex-col overflow-hidden p-3.5 sm:p-4",
+        className
+      )}
+      data-testid="portfolio-evolution-panel"
+    >
+      <PanelHeader
+        title="Évolution du portefeuille"
+        subtitle={
+          <>
+            Positions et liquidités
+            <span className="mx-1 opacity-40">·</span>
+            {evolutionIntervalLabel(interval)}
+            <span className="sr-only">
+              {" "}
+              ({evolutionIntervalHint(interval)})
+            </span>
+            {baseCurrency !== "EUR" ? (
+              <>
+                <span className="mx-1 opacity-40">·</span>
+                {baseCurrency}
+              </>
+            ) : null}
+          </>
+        }
+        actions={
+          summary && points.length > 0 ? (
+            <div
+              className={cn(
+                "shrink-0 text-right text-xs font-semibold tabular-nums",
+                summary.delta >= 0
+                  ? "text-[var(--success)]"
+                  : "text-[var(--danger)]"
+              )}
+              data-testid="evolution-delta"
+              title="Variation de la valeur totale sur la période affichée"
+            >
+              {summary.delta >= 0 ? "+" : ""}
+              {formatCurrency(summary.delta, baseCurrency)}
+              <span className="ml-1 font-medium opacity-90">
+                ({summary.delta >= 0 ? "+" : ""}
+                {summary.pct.toFixed(1)}&nbsp;%)
+              </span>
+            </div>
+          ) : null
+        }
+      />
+
+      {/* Primaire : période + cumul/périodique · Avancé repliable */}
+      <div className="mb-2.5 space-y-2" data-testid="evolution-controls">
+        <div
+          className="flex min-w-0 flex-wrap items-center gap-0.5 sm:gap-1"
+          role="tablist"
+          aria-label="Période"
+        >
+          {RANGES.map((r) => {
+            const enabled = rangeEnabled[r.id] !== false;
+            const selected = range === r.id;
+            return (
+              <button
+                key={r.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-disabled={!enabled}
+                disabled={!enabled}
+                title={
+                  enabled
+                    ? undefined
+                    : "Historique trop court pour cette période"
+                }
+                data-testid={`evolution-range-${r.id}`}
+                onClick={() => enabled && update({ range: r.id })}
+                className={cn(
+                  "rounded-[var(--radius-sm)] px-2 py-1 text-[11px] font-medium transition",
+                  "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+                  !enabled &&
+                    "cursor-not-allowed bg-[var(--muted)]/40 text-[var(--muted-foreground)] opacity-40",
+                  enabled &&
+                    selected &&
+                    "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]",
+                  enabled &&
+                    !selected &&
+                    "bg-[var(--muted)]/70 text-[var(--foreground)] hover:bg-[var(--muted)]"
+                )}
+              >
+                {r.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          <Segmented
+            items={METRICS}
+            value={metric}
+            onChange={setMetric}
+            ariaLabel="Mode de lecture"
+            testIdPrefix="evolution-metric"
+          />
+          <button
+            type="button"
+            className={cn(
+              "ml-auto inline-flex items-center gap-1 rounded-[var(--radius-md)] border border-[var(--border)] px-2 py-1 text-[11px] font-medium transition",
+              "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+              advancedOpen
+                ? "border-[var(--primary)]/30 bg-[var(--primary-soft)] text-[var(--foreground)]"
+                : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+            )}
+            aria-expanded={advancedOpen}
+            data-testid="evolution-advanced-toggle"
+            onClick={() => update({ advancedOpen: !advancedOpen })}
+          >
+            <SlidersHorizontal className="h-3 w-3" aria-hidden />
+            Affichage
+            <ChevronDown
+              className={cn(
+                "h-3 w-3 transition-transform",
+                advancedOpen && "rotate-180"
+              )}
+              aria-hidden
+            />
+          </button>
+        </div>
+
+        {advancedOpen && (
+          <div
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/15 px-2.5 py-2"
+            data-testid="evolution-advanced"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                Style
+              </span>
+              <Segmented
+                items={STYLES}
+                value={style}
+                onChange={setStyle}
+                ariaLabel="Style de graphique"
+                testIdPrefix="evolution-style"
+                size="sm"
+                muted
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                Vue
+              </span>
+              <Segmented
+                items={VIEWS}
+                value={view}
+                onChange={(v) => update({ view: v })}
+                ariaLabel="Mode de vue"
+                testIdPrefix="evolution-view"
+                size="sm"
+                muted
+              />
+            </div>
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                Vs
+              </span>
+              <Segmented
+                items={BENCHMARK_CHOICES}
+                value={benchmark}
+                onChange={(b) => update({ benchmark: b })}
+                ariaLabel="Comparaison"
+                testIdPrefix="evolution-benchmark"
+                size="sm"
+                muted
+              />
+            </div>
+            {view === "decomposed" && activeBenchmark !== "none" && (
+              <p className="text-meta w-full basis-full">
+                Comparaison disponible en vue globale
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* —— Graphique (flex pour s'aligner sur la colonne droite) —— */}
+      <div
+        className="relative min-h-[12.5rem] w-full flex-1 sm:min-h-[13.5rem]"
+        data-testid="evolution-chart"
+      >
+        <div className="absolute inset-0">
+        {loading ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-4">
+            <Skeleton className="h-32 w-full max-w-md rounded-[var(--radius-lg)]" />
+            <p className="text-meta">Chargement de l&apos;historique…</p>
+          </div>
+        ) : empty ? (
+          <EmptyPlaceholder
+            compact
+            title="Historique encore vide"
+            description="Actualisez les cours pour enregistrer un premier point de courbe."
+          />
+        ) : noPoints ? (
+          <EmptyPlaceholder
+            compact
+            title="Période trop courte"
+            description="Choisissez une plage plus large ou attendez davantage d'historique."
+          />
+        ) : view === "decomposed" && metric === "cumul" ? (
+          style === "columns" ? (
+            <DecomposedCumulColumns data={points} baseCurrency={baseCurrency} />
+          ) : (
+            <DecomposedCumulAreas data={points} baseCurrency={baseCurrency} />
+          )
+        ) : view === "decomposed" && metric === "period" ? (
+          <DecomposedPeriodChart
+            data={points}
+            baseCurrency={baseCurrency}
+            style={style}
+          />
+        ) : metric === "period" ? (
+          style === "line" ? (
+            <PeriodLineChart
+              data={points}
+              baseCurrency={baseCurrency}
+              showBenchmark={showBenchmark}
+              benchmarkName={benchmarkLabel(activeBenchmark)}
+            />
+          ) : (
+            <PeriodColumnsChart data={points} baseCurrency={baseCurrency} />
+          )
+        ) : style === "columns" ? (
+          <GlobalColumnsChart data={points} baseCurrency={baseCurrency} />
+        ) : (
+          <GlobalLineChart
+            data={points}
+            baseCurrency={baseCurrency}
+            showBenchmark={showBenchmark}
+            benchmarkName={benchmarkLabel(activeBenchmark)}
+          />
+        )}
+        </div>
+      </div>
+
+      {view === "decomposed" && !empty && points.length > 0 && (
+        <p className="text-meta mt-2 shrink-0">
+          Revenus du journal · dividendes, coupons, loyers
+        </p>
+      )}
+      {showBenchmark && (
+        <p className="text-meta mt-1.5 shrink-0">
+          Vs {benchmarkLabel(activeBenchmark)}
+          {activeBenchmark === "inflation" || activeBenchmark === "index"
+            ? " · référence indicative"
+            : ""}
+          {benchmark === "default" ? " · défaut préférences" : ""}
+        </p>
+      )}
+    </div>
+  );
+}

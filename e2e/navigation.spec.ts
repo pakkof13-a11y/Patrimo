@@ -16,9 +16,10 @@ test.describe("Navigation & shell", () => {
 
     await clickNav(page, "Tableau de bord");
     await expect(page).toHaveURL(/\/dashboard/);
-    await expect(page.getByText("Évolution de la valeur du portefeuille")).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(
+      page.getByTestId("portfolio-evolution-panel")
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Évolution du portefeuille")).toBeVisible();
     await expect(page.getByText("Allocation par classe")).toBeVisible();
 
     await clickNav(page, "Transactions");
@@ -48,6 +49,11 @@ test.describe("Navigation & shell", () => {
     await clickNav(page, "Positions");
     await expect(page).toHaveURL(/\/positions/);
     await expect(page.getByTestId("holdings-table")).toBeVisible();
+    // Pagination never shows the broken empty label « Page 0 / 0 »
+    const pageLabel = page.getByTestId("holdings-page-label");
+    if (await pageLabel.count()) {
+      await expect(pageLabel.first()).not.toHaveText(/Page\s*0\s*\/\s*0/i);
+    }
   });
 
   test("filtre PEA / CTO via sélecteur Enveloppe", async ({ page }) => {

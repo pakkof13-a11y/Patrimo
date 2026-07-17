@@ -242,17 +242,19 @@ export async function updateEmployeeSavingsLine(
   };
 
   const data = normalizeCreate(merged);
-  const row = await prisma.employeeSavingsLine.update({
-    where: { id },
+  const write = await prisma.employeeSavingsLine.updateMany({
+    where: { id, userId },
     data,
   });
+  if (write.count === 0) throw new Error("Ligne introuvable");
+  const row = await prisma.employeeSavingsLine.findFirst({ where: { id, userId } });
+  if (!row) throw new Error("Ligne introuvable");
   return mapLine(row);
 }
 
 export async function deleteEmployeeSavingsLine(userId: string, id: string) {
-  const existing = await prisma.employeeSavingsLine.findFirst({ where: { id, userId } });
-  if (!existing) throw new Error("Ligne introuvable");
-  await prisma.employeeSavingsLine.delete({ where: { id } });
+  const result = await prisma.employeeSavingsLine.deleteMany({ where: { id, userId } });
+  if (result.count === 0) throw new Error("Ligne introuvable");
   return { ok: true };
 }
 

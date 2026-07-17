@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/app/lib/prisma";
-import { requireAdmin } from "@/app/lib/auth-helpers";
 import {
-  createUserSchema,
-  resetPasswordSchema,
-} from "@/app/lib/schemas";
+  adminGateJson,
+  gateAdmin,
+  invalidateUserAccessCache,
+} from "@/app/lib/auth-helpers";
+import { createUserSchema, resetPasswordSchema } from "@/app/lib/schemas";
 
 /** Liste des utilisateurs — ADMIN only */
 export async function GET() {
-  const admin = await requireAdmin();
-  if (!admin) {
-    return NextResponse.json({ error: "Accès réservé à l'administrateur" }, { status: 403 });
-  }
+  const gate = await gateAdmin();
+  if (!gate.ok) return adminGateJson(gate);
 
   const users = await prisma.user.findMany({
     orderBy: { createdAt: "asc" },
@@ -37,10 +36,8 @@ export async function GET() {
 
 /** Création d'utilisateur — ADMIN only */
 export async function POST(req: Request) {
-  const admin = await requireAdmin();
-  if (!admin) {
-    return NextResponse.json({ error: "Accès réservé à l'administrateur" }, { status: 403 });
-  }
+  const gate = await gateAdmin();
+  if (!gate.ok) return adminGateJson(gate);
 
   const body = await req.json().catch(() => ({}));
   const parsed = createUserSchema.safeParse(body);
@@ -94,10 +91,8 @@ export async function POST(req: Request) {
 
 /** Réinitialisation mot de passe — ADMIN only */
 export async function PATCH(req: Request) {
-  const admin = await requireAdmin();
-  if (!admin) {
-    return NextResponse.json({ error: "Accès réservé à l'administrateur" }, { status: 403 });
-  }
+  const gate = await gateAdmin();
+  if (!gate.ok) return adminGateJson(gate);
 
   const body = await req.json().catch(() => ({}));
   const parsed = resetPasswordSchema.safeParse(body);
@@ -112,7 +107,10 @@ export async function PATCH(req: Request) {
     where: { id: parsed.data.userId },
   });
   if (!target) {
-    return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Utilisateur introuvable" },
+      { status: 404 }
+    );
   }
 
   const passwordHash = await bcrypt.hash(parsed.data.password, 12);
@@ -121,15 +119,17 @@ export async function PATCH(req: Request) {
     data: { passwordHash },
   });
 
+  // Force re-check accès (mot de passe changé — cache accès inchangé mais propre)
+  invalidateUserAccessCache(target.id);
+
   return NextResponse.json({ ok: true, userId: target.id });
 }
 
 /** Suppression d'un utilisateur (et cascade données) — ADMIN only, pas soi-même */
 export async function DELETE(req: Request) {
-  const admin = await requireAdmin();
-  if (!admin) {
-    return NextResponse.json({ error: "Accès réservé à l'administrateur" }, { status: 403 });
-  }
+  const gate = await gateAdmin();
+  if (!gate.ok) return adminGateJson(gate);
+  const admin = gate.user;
 
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get("id");
@@ -144,5 +144,7 @@ export async function DELETE(req: Request) {
   }
 
   await prisma.user.delete({ where: { id: userId } });
+  invalidateUserAccessCache(userId);
+
   return NextResponse.json({ ok: true });
 }

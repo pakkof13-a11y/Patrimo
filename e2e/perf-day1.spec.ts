@@ -98,14 +98,19 @@ test.describe("Performance cumulée jour 1", () => {
       { timeout: 30_000 }
     );
 
-    // Ouvrir la fiche actif (double-clic ou clic ligne)
+    // Ouvrir la fiche actif : expand → « Fiche complète » (plus fiable que dblclick e2e)
     const row = page
       .getByTestId("holdings-table")
       .locator("tr", { hasText: /E2PERF|E2E Perf Day1/i })
       .first();
-    await row.dblclick();
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await row.locator("button[aria-expanded]").first().click();
+    await page.getByTestId(`holding-open-detail-${assetId}`).click();
 
     // Modal détail + chart
+    await expect(page.getByTestId("asset-detail-header")).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(page.getByTestId("asset-price-chart")).toBeVisible({
       timeout: 30_000,
     });

@@ -3,58 +3,104 @@
 /* Class-based dark mode for next-themes */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/**
+ * Patrimo design tokens — finance premium
+ * Palette sobre : papier chaud / navy profond, accent teal institutionnel.
+ * Spacing 4px-based ; densité confortable sans aérer comme un SaaS marketing.
+ */
 :root {
-  /* Soft off-white / warm cream — easy on the eyes */
-  --background: #f7f6f3;
+  /* Surfaces */
+  --background: #f4f3ef;
   --background-gradient: linear-gradient(
-    165deg,
-    #ffffff 0%,
-    #f8f7f4 45%,
-    #f3f1ec 100%
+    180deg,
+    #faf9f6 0%,
+    #f4f3ef 48%,
+    #efeee9 100%
   );
-  --foreground: #0a0a0a;
+  --foreground: #12141a;
   --card: #ffffff;
-  --card-foreground: #0a0a0a;
-  --primary: #0f766e;
-  --primary-foreground: #ffffff;
-  --muted: #f0efeb;
-  --muted-foreground: #3f3f46;
-  --border: #e4e2dc;
-  --success: #15803d;
-  --danger: #b91c1c;
-  --accent: #0ea5e9;
+  --card-foreground: #12141a;
+  --elevated: #ffffff;
+  --muted: #ebeae4;
+  --muted-foreground: #5c6370;
+  --border: #dddcd5;
+  --border-strong: #c9c8c0;
   --input-bg: #ffffff;
-  --table-head: #faf9f7;
-  --ring: rgb(13 148 136 / 0.25);
-  --header-bg: rgba(255, 255, 255, 0.92);
+  --table-head: #f7f6f2;
+  --header-bg: rgba(255, 255, 255, 0.86);
+
+  /* Brand & status */
+  --primary: #0d6b63;
+  --primary-foreground: #ffffff;
+  --primary-soft: rgba(13, 107, 99, 0.08);
+  --success: #147a3f;
+  --danger: #b42318;
+  --accent: #1d6fbf;
+  --ring: rgb(13 107 99 / 0.28);
+  --focus-ring: 0 0 0 2px var(--card), 0 0 0 4px var(--ring);
+
+  /* Elevation */
+  --shadow-xs: 0 1px 0 rgb(18 20 26 / 0.04);
+  --shadow-sm: 0 1px 2px rgb(18 20 26 / 0.05), 0 1px 1px rgb(18 20 26 / 0.03);
+  --shadow-md: 0 4px 16px rgb(18 20 26 / 0.06), 0 1px 3px rgb(18 20 26 / 0.04);
+
+  /* Radius — angular enough for finance, not toy-like */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 0.875rem;
+
+  /* Spacing scale (4px) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --section-gap: 1.25rem;
+  --section-gap-lg: 1.75rem;
+
   --app-max-width: 2560px;
+  --shell-pad-x: 0.875rem;
+  --shell-pad-y: 1rem;
+  color-scheme: light;
 }
 
 .dark {
-  /* Soft navy → deep slate blue — less tiring than pure black */
-  --background: #0c1526;
+  --background: #0a101c;
   --background-gradient: linear-gradient(
-    165deg,
-    #0a1628 0%,
-    #0f1f38 40%,
-    #132038 70%,
-    #0e1a2e 100%
+    180deg,
+    #0d1524 0%,
+    #0a101c 55%,
+    #080e18 100%
   );
-  --foreground: #e8eef7;
-  --card: rgba(18, 30, 52, 0.92);
-  --card-foreground: #e8eef7;
+  --foreground: #e6ebf4;
+  --card: rgba(14, 22, 38, 0.94);
+  --card-foreground: #e6ebf4;
+  --elevated: #121c30;
+  --muted: #152033;
+  --muted-foreground: #8b97ab;
+  --border: rgba(148, 163, 184, 0.12);
+  --border-strong: rgba(148, 163, 184, 0.22);
+  --input-bg: #0c1424;
+  --table-head: rgba(10, 18, 32, 0.95);
+  --header-bg: rgba(10, 16, 28, 0.9);
+
   --primary: #2dd4bf;
   --primary-foreground: #042f2e;
-  --muted: #1a2740;
-  --muted-foreground: #94a3b8;
-  --border: rgba(148, 163, 184, 0.15);
+  --primary-soft: rgba(45, 212, 191, 0.1);
   --success: #34d399;
   --danger: #f87171;
-  --accent: #38bdf8;
-  --input-bg: #0c1830;
-  --table-head: rgba(12, 24, 48, 0.9);
-  --ring: rgb(45 212 191 / 0.35);
-  --header-bg: rgba(12, 22, 40, 0.88);
+  --accent: #5ba3e8;
+  --ring: rgb(45 212 191 / 0.32);
+  --focus-ring: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+
+  --shadow-xs: 0 1px 0 rgb(0 0 0 / 0.25);
+  --shadow-sm: 0 2px 8px rgb(0 0 0 / 0.28);
+  --shadow-md: 0 8px 28px rgb(0 0 0 / 0.35);
+
+  color-scheme: dark;
 }
 
 body {
@@ -66,32 +112,195 @@ body {
   min-height: 100vh;
   max-width: 100%;
   overflow-x: hidden;
+  font-feature-settings: "ss01" on, "cv11" on;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Fluid shell: 95% of viewport, capped by --app-max-width (default 2560px) */
+/* Fluid shell: ~94% viewport, cap --app-max-width */
 .app-shell {
-  width: min(95%, var(--app-max-width, 2560px));
+  width: min(94%, var(--app-max-width, 2560px));
   max-width: var(--app-max-width, 2560px);
   margin-left: auto;
   margin-right: auto;
-  /* Prevent flex grandchildren from forcing page-wide overflow */
   min-width: 0;
   box-sizing: border-box;
 }
 
-/* Prefer no horizontal page scroll; tables scroll internally only when needed */
 html {
   overflow-x: hidden;
   max-width: 100%;
 }
 
-/* Sticky header — never wider than viewport */
+/* Sticky chrome — séparé du contenu par bordure fine + blur */
 .app-header {
   width: 100%;
   max-width: 100%;
   min-width: 0;
   border-bottom: 1px solid var(--border);
   background: var(--header-bg);
+  box-shadow: var(--shadow-xs);
+}
+
+/* Stack vertical de zones (KPI → toolbar → table) */
+.section-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-gap);
+  min-width: 0;
+}
+
+@media (min-width: 640px) {
+  .section-stack {
+    gap: var(--section-gap-lg);
+  }
+}
+
+/* Typographie utilitaire */
+.text-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  line-height: 1.3;
+}
+
+.text-meta {
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+
+.text-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--foreground);
+  line-height: 1.35;
+}
+
+/* Section page (hors carte) — « Votre patrimoine », « Contexte marché » */
+.section-heading {
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--foreground);
+  line-height: 1.35;
+}
+
+/* Contrôle segmenté (mode Global / Camembert…) */
+.segmented {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--muted);
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  padding: 0.125rem;
+  gap: 0.125rem;
+}
+
+.segmented-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.625rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--muted-foreground);
+  transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease,
+    opacity 0.12s ease;
+  white-space: nowrap;
+}
+
+.segmented-item:hover:not(:disabled):not([data-selected="true"]) {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+}
+
+.segmented-item[data-selected="true"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: var(--shadow-xs);
+}
+
+.segmented-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.segmented-item:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* Empty states centrés (cartes / tables) */
+.empty-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.5rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  max-width: 28rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.empty-placeholder-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--foreground);
+  line-height: 1.35;
+}
+
+.empty-placeholder-desc {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  max-width: 24rem;
+}
+
+.empty-placeholder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding-top: 0.35rem;
+}
+
+/* Lignes cliquables listes marché / news */
+.list-row-interactive {
+  transition: background-color 0.12s ease;
+  border-radius: var(--radius-sm);
+}
+
+.list-row-interactive:hover {
+  background: var(--primary-soft);
+}
+
+.list-row-interactive:focus-within {
+  background: var(--primary-soft);
+}
+
+/* Focus visible global (composants non-Tailwind) */
+:focus-visible {
+  outline: none;
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  box-shadow: var(--focus-ring);
 }
 
 /**
@@ -119,6 +328,69 @@ html {
   overscroll-behavior-x: contain;
   /* Always reserve room for the scrollbar track when needed (avoids layout jump) */
   scrollbar-gutter: stable;
+  /* Fade hint on small screens: scroll is intentional */
+  background:
+    linear-gradient(90deg, var(--card) 30%, transparent) left center / 1.25rem 100% no-repeat,
+    linear-gradient(270deg, var(--card) 30%, transparent) right center / 1.25rem 100% no-repeat,
+    var(--card);
+  background-attachment: local, local, scroll;
+}
+
+/**
+ * Priorité colonnes responsive (opt-in) :
+ *   .col-hide-sm  → masquée &lt; 640px
+ *   .col-hide-md  → masquée &lt; 768px
+ *   .col-sticky-first → 1re colonne collante en scroll horizontal
+ */
+@media (max-width: 639.98px) {
+  .table-fluid th.col-hide-sm,
+  .table-fluid td.col-hide-sm {
+    display: none;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .table-fluid th.col-hide-md,
+  .table-fluid td.col-hide-md {
+    display: none;
+  }
+}
+
+.table-fluid th.col-sticky-first,
+.table-fluid td.col-sticky-first {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--card);
+  box-shadow: 4px 0 8px -4px rgb(18 20 26 / 0.12);
+}
+
+.table-fluid thead th.col-sticky-first {
+  z-index: 3;
+  background: var(--table-head);
+}
+
+.dark .table-fluid th.col-sticky-first,
+.dark .table-fluid td.col-sticky-first {
+  box-shadow: 4px 0 10px -4px rgb(0 0 0 / 0.45);
+}
+
+/* Actions column: compact, always visible */
+.table-fluid th.col-actions,
+.table-fluid td.col-actions {
+  min-width: 4.5rem;
+  width: 4.5rem;
+  text-align: right;
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: var(--card);
+  box-shadow: -4px 0 8px -4px rgb(18 20 26 / 0.1);
+}
+
+.table-fluid thead th.col-actions {
+  z-index: 3;
+  background: var(--table-head);
 }
 
 .table-fluid {
@@ -269,36 +541,82 @@ body.col-resizing {
   background: var(--card);
   color: var(--card-foreground);
   border: 1px solid var(--border);
-  border-radius: 1rem;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
-  /* Contain wide tables: card stays viewport-width, scroll lives in .table-*-wrap */
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
   max-width: 100%;
   min-width: 0;
 }
 
 .dark .card {
-  box-shadow: 0 4px 24px rgb(0 0 0 / 0.25);
-  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
+}
+
+/* Carte plate (toolbar / table chrome) — moins de « boîte dans boîte » */
+.card-flat {
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: none;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.surface-inset {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.kpi-tile {
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  max-width: 100%;
+  min-width: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.kpi-tile:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kpi-tile {
+    transition: none;
+  }
 }
 
 .kpi-value {
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
+  font-weight: 600;
 }
 
 .input {
   width: 100%;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
   outline: none;
   background: var(--input-bg);
   color: var(--foreground);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.input:hover:not(:disabled):not(:focus) {
+  border-color: var(--border-strong);
 }
 
 .input:focus {
-  box-shadow: 0 0 0 2px var(--ring);
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring);
 }
 
 .input:disabled {
@@ -311,13 +629,23 @@ body.col-resizing {
   background: var(--table-head);
 }
 
+/* Séparateur de zones dans une card (toolbar / table / footer) */
+.card-divider {
+  border-color: var(--border);
+}
+
 .holdings-row {
   cursor: pointer;
   transition: background 0.12s ease;
 }
 
 .holdings-row:hover {
-  background: rgba(20, 184, 166, 0.06);
+  background: var(--primary-soft);
+}
+
+.holdings-row:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
 }
 
 /* Expand / collapse control column — always visible under table-layout:fixed */
@@ -347,7 +675,7 @@ body.col-resizing {
 }
 
 .dark .holdings-row:hover {
-  background: rgba(45, 212, 191, 0.08);
+  background: var(--primary-soft);
 }
 
 /* Recharts tooltip readable in dark */

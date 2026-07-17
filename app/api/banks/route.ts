@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
-import { bankAccountSchema } from "@/app/lib/schemas";
+import { bankAccountSchema, bankAccountUpdateSchema } from "@/app/lib/schemas";
+import {
+  presentFields,
+  requireBodyId,
+  validationErrorResponse,
+} from "@/app/lib/api/validation";
 import { listBankAccounts } from "@/app/lib/cash/pockets";
 
 export async function GET() {
@@ -18,7 +23,7 @@ export async function POST(req: Request) {
   const body = await req.json();
   const parsed = bankAccountSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Validation échouée", details: parsed.error.flatten() }, { status: 400 });
+    return validationErrorResponse(parsed.error);
   }
   const account = await prisma.bankAccount.create({
     data: {
@@ -36,19 +41,29 @@ export async function PUT(req: Request) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 401 });
   const body = await req.json();
-  const id = body?.id as string;
+  const id = requireBodyId(body);
   if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
   const existing = await prisma.bankAccount.findFirst({ where: { id, userId } });
   if (!existing) return NextResponse.json({ error: "Introuvable" }, { status: 404 });
 
-  const data: Prisma.BankAccountUpdateInput = {};
-  if (body.bankName !== undefined) data.bankName = String(body.bankName);
-  if (body.balance !== undefined)
-    data.balance = new Prisma.Decimal(String(body.balance).replace(",", "."));
-  if (body.currency !== undefined) data.currency = String(body.currency).toUpperCase();
-  if (body.notes !== undefined) data.notes = body.notes || null;
+  const parsed = bankAccountUpdateSchema.safeParse(body);
+  if (!parsed.success) return validationErrorResponse(parsed.error);
 
-  const account = await prisma.bankAccount.update({ where: { id }, data });
+  const f = presentFields(body, parsed.data as Record<string, unknown>) as typeof parsed.data;
+  const data: Prisma.BankAccountUpdateInput = {};
+  if (f.bankName !== undefined) data.bankName = f.bankName;
+  if (f.balance !== undefined) data.balance = new Prisma.Decimal(f.balance || "0");
+  if (f.currency !== undefined) data.currency = f.currency;
+  if (f.notes !== undefined) data.notes = f.notes || null;
+
+  const write = await prisma.bankAccount.updateMany({
+    where: { id, userId },
+    data,
+  });
+  if (write.count === 0) {
+    return NextResponse.json({ error: "Introuvable" }, { status: 404 });
+  }
+  const account = await prisma.bankAccount.findFirst({ where: { id, userId } });
   return NextResponse.json({ account });
 }
 
