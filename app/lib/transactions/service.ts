@@ -267,6 +267,27 @@ export async function createTransaction(raw: CreateTxInput) {
       throw new AccountingError("INVALID_PRICE", "Prix unitaire requis");
     }
   }
+  if (input.type === "REWARD") {
+    if (!input.assetId) {
+      throw new AccountingError("ASSET_REQUIRED", "Sélectionnez un actif");
+    }
+    if (!input.quantity || d(input.quantity).lte(0)) {
+      throw new AccountingError(
+        "INVALID_QTY",
+        "Quantité de récompense strictement positive requise"
+      );
+    }
+    if (
+      input.unitPrice != null &&
+      input.unitPrice !== "" &&
+      d(input.unitPrice).lt(0)
+    ) {
+      throw new AccountingError(
+        "INVALID_PRICE",
+        "Valeur de marché indicative ne peut pas être négative"
+      );
+    }
+  }
   if (input.type === "SPLIT") {
     if (!input.assetId) {
       throw new AccountingError("ASSET_REQUIRED", "Sélectionnez un actif");

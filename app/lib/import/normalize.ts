@@ -1,11 +1,61 @@
 /** French-friendly number & date parsing for CSV imports — robuste multi-locale */
 
 const CURRENCY_CHARS = /[€$£¥%₿\s\u00a0\u202f\u2007\u2009']/g;
+/** Codes monétaires collés (export Revolut crypto FR) */
+const CURRENCY_CODE_SUFFIX = /\s*(EUR|USD|GBP|CHF|JPY|CAD|AUD)\s*$/i;
+
+/**
+ * Mois FR (export Revolut / apps FR) — abréviations avec ou sans point.
+ * Clé = forme normalisée (sans accent, minuscule, sans point final).
+ */
+const FR_MONTHS: Record<string, number> = {
+  janv: 1,
+  jan: 1,
+  janvier: 1,
+  fevr: 2,
+  fev: 2,
+  fevrier: 2,
+  feb: 2,
+  mars: 3,
+  mar: 3,
+  avr: 4,
+  avril: 4,
+  apr: 4,
+  mai: 5,
+  may: 5,
+  juin: 6,
+  jun: 6,
+  juil: 7,
+  juillet: 7,
+  jul: 7,
+  aout: 8,
+  aou: 8,
+  aug: 8,
+  sept: 9,
+  sep: 9,
+  septembre: 9,
+  oct: 10,
+  octobre: 10,
+  nov: 11,
+  novembre: 11,
+  dec: 12,
+  decembre: 12,
+  decembr: 12,
+};
+
+function normalizeMonthToken(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\./g, "");
+}
 
 /**
  * Nettoie et parse un nombre :
- * - symboles monétaires (€, $, …), espaces insécables
- * - décimales FR (1.234,56) / EN (1,234.56)
+ * - symboles monétaires (€, $, EUR…), espaces insécables
+ * - décimales FR (1.234,56) / EN (1,234.56) / crypto FR (0,00000502)
  * - parenthèses négatives
  */
 export function parseNumber(raw: string | undefined | null): number | null {
@@ -13,13 +63,22 @@ export function parseNumber(raw: string | undefined | null): number | null {
   let s = String(raw).trim();
   if (!s) return null;
 
+  s = s.replace(CURRENCY_CODE_SUFFIX, "");
   s = s.replace(CURRENCY_CHARS, "").replace(/'/g, "");
+  // Caractères corrompus d’encodage (euro / espaces → ?)
+  s = s.replace(/\?/g, "");
   // Unicode minus / en-dash
   s = s.replace(/[−–—]/g, "-");
 
+  // Parenthèses négatives comptables avant nettoyage agressif
   if (/^\(.*\)$/.test(s)) {
     s = "-" + s.slice(1, -1);
   }
+
+  // Tout caractère non numérique restant (sauf . , -)
+  s = s.replace(/[^\d.,\-]/g, "");
+
+  if (!s || s === "-" || s === "." || s === ",") return null;
 
   // both separators present
   if (/,/.test(s) && /\./.test(s)) {
@@ -31,16 +90,20 @@ export function parseNumber(raw: string | undefined | null): number | null {
       s = s.replace(/,/g, "");
     }
   } else if (/,/.test(s) && !/\./.test(s)) {
-    // only comma → decimal if 1-2 digits after, else thousands
-    const m = s.match(/,(\d+)$/);
-    if (m && m[1]!.length <= 2) {
-      s = s.replace(",", ".");
-    } else {
+    // Uniquement virgules :
+    // - 1,234,567 → milliers EN (plusieurs virgules)
+    // - 1,23 ou 0,00000502 ou 2,53384547 → décimal FR (une virgule)
+    // - 1,234 → ambigu : si exactement 3 chiffres après et partie entière ≥ 4? On privilégie
+    //   décimal FR pour 1 seule virgule (crypto / cours FR) sauf motif milliers répété.
+    const commas = (s.match(/,/g) || []).length;
+    if (commas > 1) {
       s = s.replace(/,/g, "");
+    } else {
+      // Une seule virgule → toujours décimal FR (quantités crypto multi-décimales)
+      s = s.replace(",", ".");
     }
   }
 
-  // trailing percent already stripped
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
@@ -48,7 +111,7 @@ export function parseNumber(raw: string | undefined | null): number | null {
 /**
  * Parse de dates multi-formats :
  * ISO, DD/MM/YYYY, MM/DD/YYYY (si ambigu privilégie FR),
- * "15 Mar 2024", Unix epoch, Excel serial (approx).
+ * "15 Mar 2024", "9 mai 2026, 20:02:43" (FR Revolut), Unix, Excel serial.
  */
 export function parseDate(raw: string | undefined | null): Date | null {
   if (raw == null) return null;
@@ -74,12 +137,10 @@ export function parseDate(raw: string | undefined | null): Date | null {
     if (day > 12 && month <= 12) {
       // day/month OK as FR
     } else if (month > 12 && day <= 12) {
-      // month/day swapped (US written as m/d but we parsed d/m)
       const t = day;
       day = month;
       month = t;
     }
-    // else prefer FR (day, month)
     const hour = Number(m[4] ?? 12);
     const min = Number(m[5] ?? 0);
     const sec = Number(m[6] ?? 0);
@@ -87,10 +148,43 @@ export function parseDate(raw: string | undefined | null): Date | null {
     return Number.isNaN(d.getTime()) ? null : d;
   }
 
-  // "15 Mar 2024" / "Mar 15, 2024"
+  // "9 mai 2026, 20:02:43" / "7 févr. 2023, 21:58:19" / "15 Mar 2024"
+  const frNamed = s.match(
+    /^(\d{1,2})\s+([A-Za-zÀ-ÿ.]+)\s+(\d{4})(?:\s*,?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?/i
+  );
+  if (frNamed) {
+    const day = Number(frNamed[1]);
+    const mon = FR_MONTHS[normalizeMonthToken(frNamed[2]!)];
+    const year = Number(frNamed[3]);
+    if (mon && day >= 1 && day <= 31) {
+      const hour = Number(frNamed[4] ?? 12);
+      const min = Number(frNamed[5] ?? 0);
+      const sec = Number(frNamed[6] ?? 0);
+      const d = new Date(year, mon - 1, day, hour, min, sec);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+  }
+
+  // "Mar 15, 2024" / "Mar 15 2024"
+  const enNamed = s.match(
+    /^([A-Za-z.]+)\s+(\d{1,2}),?\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/
+  );
+  if (enNamed) {
+    const mon = FR_MONTHS[normalizeMonthToken(enNamed[1]!)];
+    const day = Number(enNamed[2]);
+    const year = Number(enNamed[3]);
+    if (mon && day >= 1 && day <= 31) {
+      const hour = Number(enNamed[4] ?? 12);
+      const min = Number(enNamed[5] ?? 0);
+      const sec = Number(enNamed[6] ?? 0);
+      const d = new Date(year, mon - 1, day, hour, min, sec);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+  }
+
+  // "15 Mar 2024" / "Mar 15, 2024" via engine (EN only)
   const named = Date.parse(s);
   if (!Number.isNaN(named)) {
-    // Reject pure numbers already handled
     if (!/^\d+$/.test(s)) {
       return new Date(named);
     }
@@ -116,6 +210,22 @@ export function parseDate(raw: string | undefined | null): Date | null {
 
   const fallback = new Date(s);
   return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
+/** Extrait un code devise depuis un champ Prix/Value Revolut ("1,00 CHF", "0,35€"). */
+export function extractCurrencyHint(
+  ...fields: Array<string | undefined | null>
+): string | null {
+  for (const f of fields) {
+    if (!f) continue;
+    const s = String(f);
+    const code = s.match(/\b(EUR|USD|GBP|CHF|JPY|CAD|AUD)\b/i);
+    if (code) return code[1]!.toUpperCase();
+    if (/€/.test(s)) return "EUR";
+    if (/\$/.test(s)) return "USD";
+    if (/£/.test(s)) return "GBP";
+  }
+  return null;
 }
 
 export function toIsoLocal(d: Date): string {

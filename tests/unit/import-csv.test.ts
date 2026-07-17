@@ -32,12 +32,36 @@ describe("normalize numbers and dates", () => {
     expect(parseNumber("(100)")).toBe(-100);
   });
 
+  it("parses crypto FR quantities and Revolut price fields", () => {
+    // Une seule virgule → décimal (pas milliers) même > 2 décimales
+    expect(parseNumber("2,53384547")).toBeCloseTo(2.53384547, 6);
+    expect(parseNumber("0,00000502")).toBeCloseTo(0.00000502, 10);
+    expect(parseNumber("69\u202f635,02€")).toBeCloseTo(69635.02, 2);
+    expect(parseNumber("1,00 CHF")).toBeCloseTo(1, 2);
+    expect(parseNumber("62\u202f956,71 CHF")).toBeCloseTo(62956.71, 2);
+  });
+
   it("parses FR dates", () => {
     const d = parseDate("15/03/2023");
     expect(d).not.toBeNull();
     expect(d!.getFullYear()).toBe(2023);
     expect(d!.getMonth()).toBe(2);
     expect(d!.getDate()).toBe(15);
+  });
+
+  it("parses Revolut FR crypto dates", () => {
+    const d1 = parseDate("9 mai 2026, 20:02:43");
+    expect(d1).not.toBeNull();
+    expect(d1!.getFullYear()).toBe(2026);
+    expect(d1!.getMonth()).toBe(4);
+    expect(d1!.getDate()).toBe(9);
+    expect(d1!.getHours()).toBe(20);
+
+    const d2 = parseDate("7 févr. 2023, 21:58:19");
+    expect(d2).not.toBeNull();
+    expect(d2!.getFullYear()).toBe(2023);
+    expect(d2!.getMonth()).toBe(1);
+    expect(d2!.getDate()).toBe(7);
   });
 });
 
@@ -46,6 +70,9 @@ describe("presets", () => {
     expect(mapTxType("buy")).toBe("ACHAT");
     expect(mapTxType(null, "SELL")).toBe("VENTE");
     expect(mapTxType("Dividende")).toBe("DIVIDENDE");
+    expect(mapTxType("Récompense de staking")).toBe("REWARD");
+    expect(mapTxType("STAKING")).toBe("REWARD");
+    expect(mapTxType("Learning reward")).toBe("REWARD");
   });
 
   it("normalizes tickers and asset classes", () => {
@@ -69,6 +96,20 @@ describe("mapCsvToDrafts", () => {
     expect(rows[0].quantity).toBe("8");
     expect(rows[1].type).toBe("APPORT");
     expect(rows[1].cashAmount).toBe("5000");
+  });
+
+  it("maps REWARD staking without treating as purchase", () => {
+    const text = `date;type;ticker;name;quantity;unit_price;fees;currency;cash_amount;notes;asset_class
+07/02/2023;REWARD;DOT;DOT;2.5;6.38;0;EUR;;Staking reward;CRYPTO
+`;
+    const csv = parseCsv(text);
+    const { rows } = mapCsvToDrafts(csv, "patrimo");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].type).toBe("REWARD");
+    expect(rows[0].status).not.toBe("error");
+    expect(rows[0].quantity).toBe("2.5");
+    // FMV optional, not a cash buy
+    expect(rows[0].cashAmount).toBeNull();
   });
 
   it("maps binance-like buy row", () => {

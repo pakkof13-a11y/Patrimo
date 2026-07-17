@@ -56,6 +56,31 @@ export function createAliasAdapter(preset: AliasPreset): PlatformCsvAdapter {
       for (const hint of hints) {
         if (keys.some((k) => k === hint || k.includes(hint))) hits++;
       }
+      // Bonus fort : export crypto Revolut (Symbol + Value + Type + Date)
+      if (preset.id === "revolut") {
+        const hasSymbol = keys.includes("symbol");
+        const hasValue = keys.includes("value");
+        const hasType = keys.includes("type");
+        const hasDate = keys.includes("date");
+        const hasQty = keys.includes("quantity");
+        if (hasSymbol && hasType && hasDate && hasQty && hasValue) {
+          return 92;
+        }
+        if (hasSymbol && hasType && hasDate && hasQty) {
+          return 78;
+        }
+      }
+      // Modèle Patrimo exporté (date;type;ticker;unit_price;…)
+      if (preset.id === "patrimo") {
+        if (
+          keys.includes("date") &&
+          keys.includes("type") &&
+          keys.includes("ticker") &&
+          (keys.includes("unit_price") || keys.includes("quantity"))
+        ) {
+          return 88;
+        }
+      }
       if (hits === 0) return 0;
       // Score proportionnel
       return Math.min(100, Math.round((hits / Math.max(hints.length, 1)) * 100));

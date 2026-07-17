@@ -139,7 +139,8 @@ export function ImportCsvModal({
         }),
       });
 
-      // Si pas de map manuelle, tenter le store local
+      // Mapping mémorisé : ne l’appliquer que s’il n’empire pas le score
+      // (évite un ancien mapping partiel qui force des centaines d’erreurs).
       if (!columnMap && data.headers?.length) {
         const saved = loadSavedColumnMap(data.headers);
         if (saved && Object.keys(saved).length > 0) {
@@ -152,14 +153,21 @@ export function ImportCsvModal({
               columnMap: saved,
             }),
           });
-          setPreview(retry);
-          setRows(retry.rows);
-          setManualMap(saved as Record<string, ColumnRole>);
-          setShowMapper(Boolean(retry.needsManualMapping));
-          toast.success(
-            `Mapping mémorisé réutilisé · ${retry.stats.ok} OK · ${retry.stats.error} erreur(s)`
-          );
-          return;
+          const baseScore = data.stats.ok * 2 + data.stats.warning - data.stats.error * 3;
+          const savedScore =
+            retry.stats.ok * 2 + retry.stats.warning - retry.stats.error * 3;
+          if (savedScore >= baseScore && retry.stats.error <= data.stats.error) {
+            setPreview(retry);
+            setRows(retry.rows);
+            setManualMap(saved as Record<string, ColumnRole>);
+            setShowMapper(Boolean(retry.needsManualMapping));
+            toast.success(
+              `Analyse (mapping mémorisé) : ${retry.stats.ok} OK · ${retry.stats.warning} avert. · ${retry.stats.error} erreur(s)` +
+                (retry.confidence ? ` · confiance ${retry.confidence}` : "")
+            );
+            return;
+          }
+          // Mapping mémorisé plus mauvais → ignorer (ne pas polluer l’UI)
         }
       }
 

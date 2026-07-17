@@ -44,10 +44,25 @@ function visibilityForType(txType: string): FieldVisibility {
   const t = String(txType || "");
   const isIncome = ["DIVIDENDE", "COUPON", "LOYER", "INTERET"].includes(t);
   const isTrade = t === "ACHAT" || t === "VENTE";
+  const isReward = t === "REWARD";
   const isCashMove = t === "APPORT" || t === "RETRAIT";
   const isFees = t === "FRAIS";
   const isSplit = t === "SPLIT";
 
+  if (isReward) {
+    return {
+      asset: true,
+      ticker: true,
+      quantity: true,
+      unitPrice: true,
+      cashAmount: false,
+      fees: false,
+      incomeFiscal: false,
+      quantityLabel: "Quantité reçue",
+      typeHint:
+        "Staking / reward / airdrop : tokens reçus sans dépense. Quantité en portefeuille, coût d’acquisition 0 (pas un achat). Prix unitaire optionnel = valeur marché à la réception (info).",
+    };
+  }
   if (isSplit) {
     return {
       asset: true,

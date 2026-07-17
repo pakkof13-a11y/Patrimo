@@ -20,7 +20,9 @@ async function resolveOrCreateAsset(
 ): Promise<string | null> {
   const needsAsset =
     row.type &&
-    ["ACHAT", "VENTE", "DIVIDENDE", "COUPON", "LOYER"].includes(row.type);
+    ["ACHAT", "VENTE", "REWARD", "DIVIDENDE", "COUPON", "LOYER"].includes(
+      row.type
+    );
 
   if (!needsAsset) return null;
 

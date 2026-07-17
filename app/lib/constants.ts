@@ -54,6 +54,8 @@ export const TRANSACTION_TYPES = {
   COUPON: "Coupon",
   LOYER: "Loyer perçu",
   INTERET: "Intérêts",
+  /** Réception gratuite (staking, airdrop…) — +qty, coût 0, pas un achat. */
+  REWARD: "Staking / reward",
   FRAIS: "Frais / Commission",
   APPORT: "Apport cash banque",
   RETRAIT: "Retrait cash banque",

@@ -115,6 +115,7 @@ export const createTransactionSchema = z
     const needsAsset = [
       "ACHAT",
       "VENTE",
+      "REWARD",
       "TRANSFERT_TITRE",
       "DIVIDENDE",
       "COUPON",
@@ -124,7 +125,7 @@ export const createTransactionSchema = z
     if (needsAsset && !data.assetId) {
       ctx.addIssue({ code: "custom", message: "Actif requis", path: ["assetId"] });
     }
-    if (["ACHAT", "VENTE", "TRANSFERT_TITRE", "SPLIT"].includes(data.type)) {
+    if (["ACHAT", "VENTE", "REWARD", "TRANSFERT_TITRE", "SPLIT"].includes(data.type)) {
       if (!data.quantity || Number(data.quantity) <= 0) {
         ctx.addIssue({
           code: "custom",
@@ -139,6 +140,16 @@ export const createTransactionSchema = z
     if (["ACHAT", "VENTE"].includes(data.type)) {
       if (!data.unitPrice || Number(data.unitPrice) < 0) {
         ctx.addIssue({ code: "custom", message: "Prix unitaire requis", path: ["unitPrice"] });
+      }
+    }
+    // REWARD : prix unitaire optionnel (FMV d’affichage) — si fourni, ≥ 0
+    if (data.type === "REWARD" && data.unitPrice != null && data.unitPrice !== "") {
+      if (Number(data.unitPrice) < 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Prix unitaire (valeur marché) ne peut pas être négatif",
+          path: ["unitPrice"],
+        });
       }
     }
     if (["TRANSFERT_CASH", "TRANSFERT_TITRE"].includes(data.type) && !data.toPlatformId) {

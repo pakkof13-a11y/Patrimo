@@ -8,6 +8,12 @@ export const TX_TYPES = [
   "COUPON",
   "LOYER",
   "INTERET",
+  /**
+   * Réception gratuite d’actifs (staking, airdrop, learning reward…) :
+   * +quantité, coût d’acquisition 0 (rien dépensé) — distinct d’un ACHAT.
+   * unitPrice optionnel = valeur de marché à la réception (affichage / notes), pas de CUMP.
+   */
+  "REWARD",
   "FRAIS",
   "APPORT",
   "RETRAIT",

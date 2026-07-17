@@ -257,6 +257,9 @@ export function buildCumpAtSellLookup(
       const buyCost = q * unit * fx + fees;
       qty.set(key, (qty.get(key) ?? 0) + q);
       cost.set(key, (cost.get(key) ?? 0) + buyCost);
+    } else if (tx.type === "REWARD" && q > 0) {
+      // Réception gratuite : +qty, coût d'acquisition inchangé (0 pour ce lot)
+      qty.set(key, (qty.get(key) ?? 0) + q);
     } else if (tx.type === "SPLIT" && q > 0) {
       const cur = qty.get(key) ?? 0;
       qty.set(key, cur * q);

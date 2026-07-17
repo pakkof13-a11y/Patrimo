@@ -113,6 +113,25 @@ export function applyTransaction(
       state.totalFeesPaidEur = state.totalFeesPaidEur.plus(feesEur);
       break;
     }
+    case "REWARD": {
+      // Staking / airdrop / learning reward : +qty, coût d’acquisition 0 (rien dépensé).
+      // unitPrice éventuel = FMV à la réception (audit) — n’entre pas dans le CUMP.
+      // Frais éventuels restent comptés en fees globaux, pas en PRU (récompense gratuite).
+      const assetId = requireAsset(tx);
+      const qty = d(tx.quantity ?? 0);
+      if (qty.lte(0)) {
+        throw new AccountingError(
+          "INVALID_QTY",
+          "Quantité de récompense strictement positive requise"
+        );
+      }
+      const next = applyBuy(getPos(state, assetId, tx.platformId), qty, 0, 0);
+      setPos(state, assetId, tx.platformId, next);
+      if (feesEur.gt(0)) {
+        state.totalFeesPaidEur = state.totalFeesPaidEur.plus(feesEur);
+      }
+      break;
+    }
     case "VENTE": {
       // Positions + realized P&L only — sale proceeds do NOT increase bank cash
       const assetId = requireAsset(tx);
@@ -302,6 +321,14 @@ export function computeNetCashImpactEur(tx: LedgerTx): {
       const unitEur = toEur(tx.unitPrice ?? 0, tx.fxRateToEur);
       const gross = qty.times(unitEur);
       // No cash impact — still store gross for audit
+      return { grossAmountEur: gross, feesEur, netCashImpactEur: zero() };
+    }
+    case "REWARD": {
+      // Quantité reçue gratuitement — pas d’impact cash ni de coût.
+      // gross = FMV indicative (qty × unitPrice) si prix fourni, sinon 0.
+      const qty = d(tx.quantity ?? 0);
+      const unitEur = toEur(tx.unitPrice ?? 0, tx.fxRateToEur);
+      const gross = qty.times(unitEur);
       return { grossAmountEur: gross, feesEur, netCashImpactEur: zero() };
     }
     case "VENTE": {

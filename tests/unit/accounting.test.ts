@@ -58,6 +58,49 @@ describe("CUMP", () => {
   });
 });
 
+describe("Ledger — REWARD (staking / free receipt)", () => {
+  it("augmente la quantité sans coût d’acquisition ni cash", () => {
+    const state = replayTransactions([
+      tx({
+        id: "buy",
+        type: "ACHAT",
+        platformId: "p",
+        assetId: "dot",
+        quantity: d(10),
+        unitPrice: d(5),
+      }),
+      tx({
+        id: "reward",
+        type: "REWARD",
+        platformId: "p",
+        assetId: "dot",
+        quantity: d(2),
+        unitPrice: d(6), // FMV indicative — ne doit PAS entrer dans le CUMP
+        occurredAt: new Date("2024-06-01T00:00:00Z"),
+      }),
+    ]);
+    const pos = state.positions.get("dot::p");
+    expect(pos).toBeDefined();
+    expect(pos!.quantity.toFixed(0)).toBe("12");
+    // Coût total reste 10×5 = 50 (reward à coût 0)
+    expect(pos!.costBasisEur.toFixed(0)).toBe("50");
+    expect(avgCost(pos!).toFixed(4)).toBe("4.1667");
+    expect(totalCash(state).toFixed(0)).toBe("0");
+    const impact = computeNetCashImpactEur(
+      tx({
+        id: "r",
+        type: "REWARD",
+        platformId: "p",
+        assetId: "dot",
+        quantity: d(2),
+        unitPrice: d(6),
+      })
+    );
+    expect(impact.netCashImpactEur.toFixed(0)).toBe("0");
+    expect(impact.grossAmountEur.toFixed(0)).toBe("12"); // FMV audit
+  });
+});
+
 describe("Ledger — clampOversell (replay historique)", () => {
   it("borne une vente trop large au stock disponible", () => {
     const state = replayTransactions(

@@ -19,6 +19,7 @@ export function txTypeToCanonical(t: TxType | null): CanonicalTxKind {
   if (t === "VENTE") return "SELL";
   if (t === "DIVIDENDE" || t === "COUPON" || t === "LOYER" || t === "INTERET")
     return "DIVIDEND";
+  // REWARD reste OTHER au niveau canonique (le commit UI utilise les drafts mapCsvToDrafts)
   return "OTHER";
 }
 

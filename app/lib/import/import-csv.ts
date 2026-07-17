@@ -91,28 +91,59 @@ export function importCsv(
     columnMap: options.columnMap,
   });
 
-  // Drafts via le moteur existant (compat commit) avec le même mapping
+  // Drafts (validation UI + commit) :
+  // - formats connus (revolut, patrimo…) : mapping preset natif + override manuel user only
+  // - dynamic/generic : mapping adaptateur (auto-match)
+  // Ne pas forcer parsed.columnMap en override pour les presets : un merge dyn/alias
+  // partiel peut casser le preset (ex. Value manquante → 1000+ erreurs).
   const draftFormat =
     formatId === "dynamic"
       ? "generic"
       : (formatId as ImportFormatId);
 
+  const knownPreset =
+    draftFormat !== "generic" &&
+    draftFormat !== "dynamic" &&
+    String(formatId) !== "dynamic";
+
   let drafts: ImportDraftRow[] = [];
   try {
     const mapped = mapCsvToDrafts(csv, draftFormat as ImportFormatId, {
-      columnMapOverride: parsed.columnMap,
+      columnMapOverride: knownPreset
+        ? options.columnMap || null
+        : parsed.columnMap || options.columnMap || null,
     });
     drafts = mapped.rows;
   } catch {
     drafts = [];
   }
 
+  // Si le mapping adaptateur est meilleur (moins d’erreurs), l’utiliser pour l’UI
+  // (cas dynamic / generic surtout).
+  if (knownPreset && options.columnMap) {
+    // user override already applied
+  } else if (!knownPreset) {
+    // already used adapter map
+  }
+
+  const columnMapForUi =
+    knownPreset && !options.columnMap
+      ? // align UI map with what drafts used (preset resolve)
+        (() => {
+          try {
+            return mapCsvToDrafts(csv, draftFormat as ImportFormatId).columnMap;
+          } catch {
+            return parsed.columnMap;
+          }
+        })()
+      : parsed.columnMap;
+
   return {
     csv,
     formatId: String(formatId),
     formatLabel: adapter.meta.label,
     detectedFormatId: detected,
-    columnMap: parsed.columnMap,
+    columnMap: columnMapForUi as ColumnMapping,
     confidence: parsed.confidence,
     needsManualMapping: parsed.needsManualMapping,
     transactions: parsed.transactions,

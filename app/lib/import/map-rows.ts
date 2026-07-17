@@ -1,5 +1,10 @@
 import type { ParsedCsv } from "./csv-parse";
-import { parseDate, parseNumber, toIsoLocal } from "./normalize";
+import {
+  extractCurrencyHint,
+  parseDate,
+  parseNumber,
+  toIsoLocal,
+} from "./normalize";
 import {
   getFormat,
   guessAssetClass,
@@ -139,6 +144,17 @@ export function mapCsvToDrafts(
         // Personal expense — skip as non-portfolio unless user wants cash out
         typeRaw = "withdraw";
       }
+      // Export crypto FR : devise souvent dans Price/Value (« 1,00 CHF », « 0,35€ »)
+      if (!currencyRaw) {
+        const hint = extractCurrencyHint(
+          priceRaw,
+          cashRaw,
+          feesRaw,
+          notesRaw,
+          descriptionRaw
+        );
+        if (hint) currencyRaw = hint;
+      }
     }
 
     if (formatId === "coinbase") {
@@ -239,24 +255,54 @@ export function mapCsvToDrafts(
       warnings.push("Prix unitaire déduit du montant total");
     }
 
-    // Coinbase Receive: quantity of crypto, no unit price required for APPORT-like
-    // We map receive → APPORT but APPORT needs cashAmount. Better map receive of crypto as ACHAT with price 0? 
-    // Or keep APPORT with cashAmount = 0 invalid.
-    // For crypto receive/rewards: treat as ACHAT with unitPrice 0 and qty, fees 0 — accounting may reject unitPrice 0.
-    // createTransaction requires unitPrice >= 0 for ACHAT — 0 is allowed (lt 0 fails).
+    // Staking / rewards en tokens → type REWARD (+qty, coût 0, pas un achat).
+    // Prix marché optionnel (affichage FMV) ; INTERET avec qty crypto bascule aussi en REWARD.
     if (
-      type &&
-      ["APPORT", "INTERET"].includes(type) &&
+      type === "INTERET" &&
       ticker &&
       qty != null &&
       qty > 0 &&
+      !FIAT.has(ticker)
+    ) {
+      type = "REWARD";
+      if (unitPrice == null && cashAmount != null && qty !== 0) {
+        unitPrice = Math.abs(cashAmount / qty);
+        warnings.push(
+          "Valeur marché indicative déduite du montant (staking / reward)"
+        );
+      }
+      unitPrice = unitPrice ?? 0;
+      warnings.push(
+        "Récompense crypto → Staking / reward (quantité gratuite, hors achat)"
+      );
+    }
+
+    // REWARD : normaliser qty / FMV optionnelle
+    if (type === "REWARD") {
+      if (unitPrice == null && cashAmount != null && qty != null && qty !== 0) {
+        unitPrice = Math.abs(cashAmount / qty);
+        warnings.push("Valeur marché indicative déduite du montant");
+      }
+      unitPrice = unitPrice ?? 0;
+      // Pas de cash dépensé
+      cashAmount = null;
+    }
+
+    // Coinbase Receive (dépôt externe de tokens) : sans prix → REWARD gratuit
+    if (
+      type === "APPORT" &&
+      ticker &&
+      qty != null &&
+      qty > 0 &&
+      !FIAT.has(ticker) &&
       (cashAmount == null || cashAmount === 0)
     ) {
-      // Crypto deposit / reward → free ACHAT so quantity enters the ledger
-      type = "ACHAT";
+      type = "REWARD";
       unitPrice = unitPrice ?? 0;
-      cashAmount = 0;
-      warnings.push("Dépôt / reward crypto importé comme achat à coût 0");
+      cashAmount = null;
+      warnings.push(
+        "Réception crypto sans coût → Staking / reward (entrée de quantité gratuite)"
+      );
     }
 
     // Coinbase Send of crypto → VENTE at 0 or RETRAIT
@@ -279,6 +325,14 @@ export function mapCsvToDrafts(
       if (!ticker && !name) errors.push("Ticker ou nom d'actif requis");
       if (qty == null || qty <= 0) errors.push("Quantité positive requise");
       if (unitPrice == null || unitPrice < 0) errors.push("Prix unitaire requis");
+    }
+
+    if (type === "REWARD") {
+      if (!ticker && !name) errors.push("Ticker ou nom d'actif requis");
+      if (qty == null || qty <= 0) errors.push("Quantité positive requise");
+      if (unitPrice != null && unitPrice < 0) {
+        errors.push("Valeur marché indicative invalide");
+      }
     }
 
     if (

@@ -190,9 +190,9 @@ export const IMPORT_FORMATS: FormatPreset[] = [
   },
   {
     id: "revolut",
-    label: "Revolut (compte / trading)",
+    label: "Revolut (compte / trading / crypto)",
     description:
-      "Statement compte (Type, Product, Started/Completed Date, Description, Amount, Fee, Currency) ou export Invest (Ticker, Quantity, Price per share)",
+      "Statement compte (Type, Product, Amount…) ; export crypto FR (Symbol, Type, Quantity, Price, Value, Fees, Date) ; export Invest (Ticker, Price per share)",
     aliases: {
       // Dates
       date: "date",
@@ -215,10 +215,11 @@ export const IMPORT_FORMATS: FormatPreset[] = [
       qty: "quantity",
       price_per_share: "unitPrice",
       price: "unitPrice",
-      // Money
+      // Money — Value = notional crypto statement FR
       amount: "cashAmount",
       total_amount: "cashAmount",
       total: "cashAmount",
+      value: "cashAmount",
       fee: "fees",
       fees: "fees",
       currency: "currency",
@@ -410,11 +411,18 @@ const TYPE_ALIASES: Record<string, TxType> = {
   interet: "INTERET",
   interest: "INTERET",
   interests: "INTERET",
-  rewards: "INTERET",
-  reward: "INTERET",
-  staking: "INTERET",
-  "learning reward": "INTERET",
-  "rewards income": "INTERET",
+  rewards: "REWARD",
+  reward: "REWARD",
+  staking: "REWARD",
+  "mise en staking": "REWARD",
+  "recompense de staking": "REWARD",
+  "recompense apprendre": "REWARD",
+  apprendre: "REWARD",
+  "learning reward": "REWARD",
+  "rewards income": "REWARD",
+  airdrop: "REWARD",
+  reception: "APPORT",
+  recompense: "REWARD",
   frais: "FRAIS",
   fee: "FRAIS",
   fees: "FRAIS",
@@ -470,6 +478,7 @@ export function mapTxType(raw: string | undefined | null, side?: string | null):
       "COUPON",
       "LOYER",
       "INTERET",
+      "REWARD",
       "FRAIS",
       "APPORT",
       "RETRAIT",
@@ -484,8 +493,10 @@ export function mapTxType(raw: string | undefined | null, side?: string | null):
   if (/vente|cession|sold|sell /i.test(key)) return "VENTE";
   if (/dividende|dividend/i.test(key)) return "DIVIDENDE";
   if (/coupon/i.test(key)) return "COUPON";
-  if (/reward|staking|interest|interet/i.test(key)) return "INTERET";
-  if (/top.?up|deposit|received?|funding/i.test(key)) return "APPORT";
+  // Staking / airdrop / learning reward → REWARD (pas INTERET cash, pas ACHAT)
+  if (/reward|staking|recompense|apprendre|airdrop/i.test(key)) return "REWARD";
+  if (/interest|interet/i.test(key)) return "INTERET";
+  if (/top.?up|deposit|receiv|reception|funding/i.test(key)) return "APPORT";
   if (/withdraw|sent?|card.?payment/i.test(key)) return "RETRAIT";
   if (/exchange|convert/i.test(key)) return "ACHAT"; // refined by description in map-rows
   return null;
@@ -517,6 +528,17 @@ export function detectFormatFromHeaders(headers: string[]): ImportFormatId {
     return "revolut";
   }
   if (has("price_per_share") && has("ticker")) return "revolut";
+  // Export crypto Revolut FR : Symbol, Type, Quantity, Price, Value, Fees, Date
+  if (
+    has("symbol") &&
+    has("type") &&
+    has("quantity") &&
+    has("price") &&
+    hasAny("value", "fees") &&
+    has("date")
+  ) {
+    return "revolut";
+  }
   if (hasAny("ib_commission", "t_price", "buy_sell") && hasAny("symbol", "tradedate", "trade_date")) {
     return "interactive_brokers";
   }
@@ -528,6 +550,15 @@ export function detectFormatFromHeaders(headers: string[]): ImportFormatId {
   }
   if (has("libelle") || has("isin") || has("date_valeur")) return "boursorama";
   if (has("unit_price") && has("asset_class")) return "patrimo";
+  if (
+    has("date") &&
+    has("type") &&
+    has("ticker") &&
+    hasAny("unit_price", "quantity") &&
+    hasAny("cash_amount", "fees", "asset_class", "currency")
+  ) {
+    return "patrimo";
+  }
   return "generic";
 }
 
