@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, LogOut } from "lucide-react";
+import { ChevronDown, ImagePlus, LogOut } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/app/lib/utils";
 import { fetchJson } from "@/app/lib/api-client";
@@ -15,6 +16,8 @@ import { formatDateTimeParis } from "@/app/lib/money/format";
 import { PreferencesPanel } from "@/components/layout/preferences-panel";
 import {
   loadUserAvatarDataUrl,
+  readImageFileAsDataUrl,
+  saveUserAvatarDataUrl,
   userInitials,
 } from "@/app/lib/ui/user-avatar-prefs";
 
@@ -36,6 +39,7 @@ export function HeaderAccountMenu({
   const [open, setOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const meQ = useQuery({
     queryKey: ["auth-me"],
@@ -76,6 +80,24 @@ export function HeaderAccountMenu({
     meQ.data?.user?.email ||
     `${(username || "user").toLowerCase().replace(/[^a-z0-9._-]/g, "")}@patrimo.local`;
   const initials = userInitials(username);
+
+  async function onAvatarFile(file: File | null) {
+    if (!file) return;
+    try {
+      const dataUrl = await readImageFileAsDataUrl(file);
+      saveUserAvatarDataUrl(dataUrl);
+      setAvatarUrl(dataUrl);
+      toast.success("Avatar mis à jour");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Avatar invalide");
+    }
+  }
+
+  function clearAvatar() {
+    saveUserAvatarDataUrl(null);
+    setAvatarUrl(null);
+    toast.success("Avatar retiré");
+  }
 
   return (
     <div ref={rootRef} className="relative" data-testid="header-account-menu">
@@ -127,22 +149,25 @@ export function HeaderAccountMenu({
           aria-label="Compte et préférences"
           data-testid="header-account-dropdown"
         >
-          {/* Identité */}
-          <div className="mb-2 rounded-lg bg-[var(--muted)]/50 px-3 py-2.5">
+          {/* Identité + avatar (sélection à droite du bandeau) */}
+          <div
+            className="mb-2 rounded-lg bg-[var(--muted)]/50 px-3 py-2.5"
+            data-testid="header-account-identity"
+          >
             <div className="flex items-center gap-2.5">
               {avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={avatarUrl}
                   alt=""
-                  className="h-10 w-10 rounded-full object-cover"
+                  className="h-10 w-10 shrink-0 rounded-full object-cover"
                 />
               ) : (
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--primary)] text-sm font-bold text-white">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-sm font-bold text-white">
                   {initials}
                 </span>
               )}
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-[var(--foreground)]">
                   {username}
                   {isAdmin && (
@@ -155,6 +180,46 @@ export function HeaderAccountMenu({
                   {email}
                 </p>
                 <p className="text-[10px] text-slate-400">Europe/Paris</p>
+              </div>
+              {/* Bouton avatar à droite du bandeau user (sélection JPG/PNG) */}
+              <div
+                className="flex shrink-0 flex-col items-end gap-1"
+                data-testid="avatar-settings"
+              >
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png"
+                  className="hidden"
+                  data-testid="avatar-file-input"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    e.target.value = "";
+                    void onAvatarFile(f);
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="!h-7 !px-2 !text-[11px]"
+                  onClick={() => avatarInputRef.current?.click()}
+                  data-testid="avatar-upload"
+                  title="Changer l’avatar"
+                >
+                  <ImagePlus className="mr-1 h-3 w-3" />
+                  JPG / PNG
+                </Button>
+                {avatarUrl && (
+                  <button
+                    type="button"
+                    className="text-[10px] text-[var(--muted-foreground)] underline-offset-2 hover:underline"
+                    onClick={clearAvatar}
+                    data-testid="avatar-clear"
+                  >
+                    Retirer
+                  </button>
+                )}
               </div>
             </div>
           </div>

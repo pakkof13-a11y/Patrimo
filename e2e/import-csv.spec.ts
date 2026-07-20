@@ -55,11 +55,23 @@ test.describe("Import CSV", () => {
       page.getByRole("heading", { name: /Importer des transactions \(CSV\)/i })
     ).toBeVisible();
 
+    // Sélecteur de mode (CSV / wallet)
+    await expect(page.getByTestId("import-mode-select")).toBeVisible();
+    await expect(page.getByTestId("import-mode-select")).toHaveValue("csv");
+
+    // Modèle téléchargeable uniquement pour le format Patrimo
+    await page.getByTestId("import-format-select").selectOption("patrimo");
     await expect(
       page.getByRole("button", { name: /Télécharger le modèle/i })
     ).toBeVisible();
+    await page.getByTestId("import-format-select").selectOption("auto");
+    await expect(
+      page.getByRole("button", { name: /Télécharger le modèle/i })
+    ).toHaveCount(0);
 
-    const fileInput = page.locator('input[type="file"]');
+    const fileInput = page.locator(
+      '[data-testid="import-csv-dropzone"] input[type="file"]'
+    );
     await fileInput.setInputFiles({
       name: "e2e-import.csv",
       mimeType: "text/csv",

@@ -241,7 +241,7 @@ export function PreferencesPanel({
   function clearAvatar() {
     saveUserAvatarDataUrl(null);
     setAvatarUrl(null);
-    toast.success("Avatar retiré — initiales affichées");
+    toast.success("Avatar retiré");
   }
 
   const prefsBody = (
@@ -292,26 +292,13 @@ export function PreferencesPanel({
               votre écran (mode fluide). Aucun réglage manuel requis.
             </p>
 
-            <p className="mb-1.5 text-[11px] font-medium text-[var(--foreground)]">
-              Avatar (bas à gauche)
-            </p>
-            <div
-              className="mb-3 flex items-center gap-3"
-              data-testid="avatar-settings"
-            >
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--primary)] text-sm font-bold text-white shadow">
-                {avatarUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={avatarUrl}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <span>{initials}</span>
-                )}
-              </div>
-              <div className="min-w-0 flex-1 space-y-1.5">
+            {/* Avatar : sélection dans le bandeau identité du menu compte (à droite).
+                En mode non-embedded (FAB legacy), conserver un sélecteur compact. */}
+            {!embedded && (
+              <div
+                className="mb-3 flex items-center justify-end gap-2"
+                data-testid="avatar-settings"
+              >
                 <input
                   ref={avatarInputRef}
                   type="file"
@@ -324,38 +311,31 @@ export function PreferencesPanel({
                     void onAvatarFile(f);
                   }}
                 />
-                <div className="flex flex-wrap gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="!h-7 !text-[11px]"
+                  onClick={() => avatarInputRef.current?.click()}
+                  data-testid="avatar-upload"
+                >
+                  <ImagePlus className="mr-1 h-3 w-3" />
+                  JPG / PNG
+                </Button>
+                {avatarUrl && (
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
+                    variant="ghost"
                     className="!h-7 !text-[11px]"
-                    onClick={() => avatarInputRef.current?.click()}
-                    data-testid="avatar-upload"
+                    onClick={clearAvatar}
+                    data-testid="avatar-clear"
                   >
-                    <ImagePlus className="mr-1 h-3 w-3" />
-                    JPG / PNG
+                    Retirer
                   </Button>
-                  {avatarUrl && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="!h-7 !text-[11px]"
-                      onClick={clearAvatar}
-                      data-testid="avatar-clear"
-                    >
-                      Retirer
-                    </Button>
-                  )}
-                </div>
-                <p className="text-[10px] text-[var(--muted-foreground)]">
-                  {avatarUrl
-                    ? "Avatar actif — initiales masquées sur le bouton"
-                    : `Initiales « ${initials} » (2 premières lettres du compte)`}
-                </p>
+                )}
               </div>
-            </div>
+            )}
 
             <p className="mb-1.5 text-[11px] font-medium text-[var(--foreground)]">
               Thème
