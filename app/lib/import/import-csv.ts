@@ -18,7 +18,11 @@ import type {
   MappingConfidence,
 } from "./types";
 import type { ImportFormatId } from "./presets";
-import { detectFormatFromHeaders } from "./presets";
+import { detectFormatFromHeaders, getFormat } from "./presets";
+import {
+  expandIbkrActivityStatement,
+  isIbkrActivityStatement,
+} from "./ibkr-activity";
 
 export type ImportCsvOptions = {
   /** Forcer un adaptateur / format */
@@ -56,6 +60,59 @@ export function importCsv(
   csvText: string,
   options: ImportCsvOptions = {}
 ): ImportCsvResult {
+  // ── IBKR Activity Statement (multi-sections) ─────────────────────────────
+  // Doit être traité avant parseCsv classique (headers ≠ 1ère ligne).
+  const forceIbkr =
+    options.formatId === "interactive_brokers" ||
+    options.formatId === "auto" ||
+    !options.formatId;
+  if (forceIbkr && isIbkrActivityStatement(csvText)) {
+    const expanded = expandIbkrActivityStatement(csvText);
+    if (expanded.matched && expanded.csv.rows.length > 0) {
+      const draftResult = mapCsvToDrafts(expanded.csv, "interactive_brokers");
+      const okCount = draftResult.rows.filter((r) => r.status === "ok").length;
+      return {
+        csv: expanded.csv,
+        formatId: "interactive_brokers",
+        formatLabel: getFormat("interactive_brokers").label,
+        detectedFormatId: "interactive_brokers",
+        columnMap: draftResult.columnMap as ColumnMapping,
+        confidence:
+          okCount > 0 ? (okCount >= draftResult.rows.length * 0.7 ? "high" : "medium") : "low",
+        needsManualMapping: false,
+        needsFormatConfirm: false,
+        transactions: [],
+        drafts: draftResult.rows,
+        warnings: expanded.warnings,
+        adapterRanking: [
+          {
+            id: "interactive_brokers",
+            score: 99,
+            label: getFormat("interactive_brokers").label,
+          },
+        ],
+      };
+    }
+    if (expanded.matched && expanded.csv.rows.length === 0) {
+      // Statement détecté mais vide → message clair
+      return {
+        csv: expanded.csv,
+        formatId: "interactive_brokers",
+        formatLabel: getFormat("interactive_brokers").label,
+        detectedFormatId: "interactive_brokers",
+        columnMap: {},
+        confidence: "none",
+        needsManualMapping: true,
+        transactions: [],
+        drafts: [],
+        warnings: expanded.warnings.length
+          ? expanded.warnings
+          : ["Activity Statement IBKR sans lignes de transactions"],
+        adapterRanking: [],
+      };
+    }
+  }
+
   const csv = parseCsv(csvText, options.delimiter);
   if (csv.headers.length === 0) {
     return {

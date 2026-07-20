@@ -121,6 +121,26 @@ export function mapCsvToDrafts(
     const productRaw = getByRole(raw, columnMap, "product");
     const platformRaw = getByRole(raw, columnMap, "platform");
 
+    // ── Interactive Brokers (trades plats ou Activity Statement aplati) ───
+    if (formatId === "interactive_brokers") {
+      // side déjà BUY/SELL/DIVIDEND/DEPOSIT/WITHDRAWAL depuis ibkr-activity
+      if (!typeRaw && sideRaw) {
+        typeRaw = sideRaw;
+      }
+      // Asset class Stocks/Actions → ACTIONS (classRaw lu plus bas via forcedClass)
+      if (!classRaw) {
+        const ac = String(
+          (raw as Record<string, string>).AssetClass ||
+            (raw as Record<string, string>).assetclass ||
+            ""
+        );
+        if (/stock|action|equity|share/i.test(ac)) {
+          (raw as Record<string, string>).__ibkr_class = "ACTIONS";
+        }
+      }
+      if (!currencyRaw) currencyRaw = "EUR";
+    }
+
     // ── Format-specific enrichment ──────────────────────────────────────────
     if (formatId === "revolut") {
       // Product column can be "Current", "BTC", "Savings", etc.
@@ -339,11 +359,29 @@ export function mapCsvToDrafts(
       (descriptionRaw ? descriptionRaw.slice(0, 80) : null);
 
     // Crypto formats default to CRYPTO class — pas les exports Invest (Price per share)
-    let forcedClass: string | null = classRaw || null;
+    let forcedClass: string | null =
+      classRaw ||
+      (raw as Record<string, string>).__ibkr_class ||
+      null;
     const rawKeys = Object.keys(raw);
     const isRevolutEquityExport = rawKeys.some((k) =>
       /price\s*per\s*share|total\s*amount/i.test(k)
     );
+    if (
+      formatId === "interactive_brokers" &&
+      !forcedClass &&
+      /stock|action|equity|share/i.test(classRaw || "")
+    ) {
+      forcedClass = "ACTIONS";
+    }
+    if (
+      formatId === "interactive_brokers" &&
+      !forcedClass &&
+      type &&
+      ["ACHAT", "VENTE", "DIVIDENDE"].includes(type)
+    ) {
+      forcedClass = "ACTIONS";
+    }
     if (
       (formatId === "coinbase" ||
         formatId === "binance" ||

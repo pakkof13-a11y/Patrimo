@@ -368,7 +368,8 @@ export const IMPORT_FORMATS: FormatPreset[] = [
   {
     id: "interactive_brokers",
     label: "Interactive Brokers",
-    description: "Activity / Trades CSV IBKR",
+    description:
+      "Activity Statement IBKR (Trades/Transactions multi-sections FR/EN) ou CSV trades plat",
     aliases: {
       tradedate: "date",
       trade_date: "date",
@@ -376,16 +377,22 @@ export const IMPORT_FORMATS: FormatPreset[] = [
       date: "date",
       symbol: "ticker",
       buy_sell: "side",
+      side: "side",
       quantity: "quantity",
       t_price: "unitPrice",
+      t_price_: "unitPrice",
       price: "unitPrice",
       proceeds: "cashAmount",
       comm_fee: "fees",
+      ibcommission: "fees",
       ib_commission: "fees",
       commission: "fees",
       currency: "currency",
       currencyprimary: "currency",
       description: "name",
+      notes: "notes",
+      assetclass: "assetClass",
+      asset_class: "assetClass",
     },
   },
   {
@@ -636,6 +643,11 @@ export function mapTxType(raw: string | undefined | null, side?: string | null):
     const s = side.trim().toLowerCase();
     if (["buy", "achat", "b"].includes(s)) return "ACHAT";
     if (["sell", "vente", "s"].includes(s)) return "VENTE";
+    if (["dividend", "dividende", "div"].includes(s)) return "DIVIDENDE";
+    if (["deposit", "depot", "apport", "topup", "top_up"].includes(s))
+      return "APPORT";
+    if (["withdrawal", "retrait", "withdraw"].includes(s)) return "RETRAIT";
+    if (["sell", "vente", "s"].includes(s)) return "VENTE";
   }
   if (!raw) return null;
   const key = raw
@@ -791,7 +803,18 @@ export function detectFormatFromHeaders(headers: string[]): ImportFormatId {
   ) {
     return "revolut";
   }
-  if (hasAny("ib_commission", "t_price", "buy_sell") && hasAny("symbol", "tradedate", "trade_date")) {
+  if (
+    hasAny("ib_commission", "ibcommission", "t_price") &&
+    hasAny("symbol", "tradedate", "trade_date", "buy_sell")
+  ) {
+    return "interactive_brokers";
+  }
+  // Activity Statement aplati (headers synthétiques)
+  if (
+    has("tradedate") &&
+    has("symbol") &&
+    hasAny("buy_sell", "t_price", "ibcommission")
+  ) {
     return "interactive_brokers";
   }
   if (hasAny("shares") && hasAny("isin") && hasAny("taxes", "commission")) {

@@ -125,7 +125,13 @@ export function parseDate(raw: string | undefined | null): Date | null {
   s = s.replace(/\s+(UTC|GMT)\s*$/i, "Z");
 
   // ISO-like YYYY-MM-DD[THH:mm:ss][Z]
+  // IBKR Activity Statement : "2025-10-21, 03:17:30" (virgule après la date)
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const ibkr = s.replace(
+      /^(\d{4}-\d{2}-\d{2}),\s*(\d{1,2}:\d{2}(?::\d{2})?)/,
+      "$1 $2"
+    );
+    if (ibkr !== s) s = ibkr;
     // Essai direct (gère bien "YYYY-MM-DD HH:mm:ssZ" et variantes Node)
     let d = new Date(s);
     if (!Number.isNaN(d.getTime())) return d;

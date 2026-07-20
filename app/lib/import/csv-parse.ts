@@ -33,7 +33,8 @@ function detectDelimiter(sample: string): string {
   return ",";
 }
 
-function parseLine(line: string, delimiter: string): string[] {
+/** Parse une ligne CSV (quotes, délimiteur). Exporté pour les parsers multi-sections (IBKR…). */
+export function parseLine(line: string, delimiter: string): string[] {
   const out: string[] = [];
   let cur = "";
   let inQuotes = false;
