@@ -19,14 +19,12 @@ import {
  * - historique txs incrémental (getSignaturesForAddress + getParsedTransaction)
  * - écriture ledger positions si platformId + writeLedger
  *
- * Body: {
- *   platformId?: string
- *   address?: string
- *   writeLedger?: boolean  // défaut true si platformId
- *   syncTransactions?: boolean // défaut true (historique on-chain)
- *   fullResync?: boolean // force historique initial (ignore curseur)
- * }
+ * Env cloud : SOLANA_RPC_URL (RPC dédié recommandé). Sans clé, le RPC public
+ * mainnet-beta rate-limite fortement les IPs Vercel → timeouts / 502.
  */
+
+/** Vercel — sync RPC peut dépasser 10 s sans RPC dédié */
+export const maxDuration = 60;
 
 const bodySchema = z
   .object({
@@ -142,6 +140,15 @@ export async function POST(req: Request) {
     );
   }
 
+  const hasCustomRpc = Boolean((process.env.SOLANA_RPC_URL || "").trim());
+  const onVercel = process.env.VERCEL === "1";
+  // Sur Vercel sans RPC dédié : historique on-chain optionnel (timeouts / 429 publics)
+  // L’appelant peut forcer syncTransactions: true
+  const wantTxSync =
+    syncTxOpt === true ||
+    fullResync === true ||
+    (syncTxOpt !== false && !(onVercel && !hasCustomRpc));
+
   try {
     // Sans plateforme : snapshot seul (pas de curseur / ledger)
     if (!platform?.id) {
@@ -156,15 +163,22 @@ export async function POST(req: Request) {
         platformId: null,
         platformName: null,
         snapshot,
+        notice: hasCustomRpc
+          ? null
+          : "RPC public Solana — pour le cloud, définissez SOLANA_RPC_URL (Helius/QuickNode).",
       });
     }
 
     const result = await syncSolanaWalletFull(userId, platform.id, address, {
       writeLedger: writeLedgerOpt !== false,
-      // Historique on-chain : ON par défaut (false = soldes seuls)
-      syncTransactions: syncTxOpt !== false || fullResync === true,
+      syncTransactions: wantTxSync,
       txOpts: { fullResync: Boolean(fullResync) },
     });
+
+    const cloudNotice =
+      onVercel && !hasCustomRpc
+        ? "Cloud : soldes via RPC public. Historique on-chain limité — configurez SOLANA_RPC_URL pour une synchro complète."
+        : null;
 
     return NextResponse.json({
       ok: true,
@@ -177,6 +191,8 @@ export async function POST(req: Request) {
       platformId: platform.id,
       platformName: platform.name,
       snapshot: result.snapshot,
+      notice: cloudNotice,
+      rpcConfigured: hasCustomRpc,
     });
   } catch (e) {
     if (e instanceof SolanaRpcError) {
@@ -187,16 +203,31 @@ export async function POST(req: Request) {
             ? 429
             : 502;
       return NextResponse.json(
-        { error: e.message, code: e.code, source: "solana-rpc" },
+        {
+          error: e.message,
+          code: e.code,
+          source: "solana-rpc",
+          hint:
+            e.code === "RATE_LIMITED" || !hasCustomRpc
+              ? "Définissez SOLANA_RPC_URL (RPC dédié) sur Vercel pour éviter les 429 du RPC public."
+              : undefined,
+        },
         { status }
       );
     }
-    console.error("[solana-sync]", e instanceof Error ? e.message : e);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[solana-sync]", msg);
+    const isTimeout = /timeout|TIMEOUT|aborted| supprimé| supprim/i.test(msg);
     return NextResponse.json(
       {
-        error: "Échec de la synchronisation Solana (RPC)",
-        code: "RPC_UNAVAILABLE",
+        error: isTimeout
+          ? "Synchronisation Solana interrompue (timeout serveur). Réessayez ou configurez SOLANA_RPC_URL."
+          : "Échec de la synchronisation Solana (RPC)",
+        code: isTimeout ? "TIMEOUT" : "RPC_UNAVAILABLE",
         source: "solana-rpc",
+        hint: !hasCustomRpc
+          ? "Sur Vercel, le RPC public mainnet-beta est souvent bloqué/rate-limité. Ajoutez SOLANA_RPC_URL."
+          : undefined,
       },
       { status: 502 }
     );

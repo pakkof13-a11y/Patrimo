@@ -45,7 +45,7 @@ import { fetchJson } from "@/app/lib/api-client";
 import {
   availableApiStatusMessage,
   blockchainCatalogPresets,
-  DEFAULT_ZERION_API_KEY,
+
   describeChainSyncFeatures,
   getChainSyncCapability,
   missingApiStatusMessage,
@@ -370,7 +370,8 @@ export function ImportCsvModal({
   const [importMode, setImportMode] = useState<"csv" | "wallet">("csv");
   const [walletPresetKey, setWalletPresetKey] = useState("SOLANA");
   const [walletAddress, setWalletAddress] = useState("");
-  const [walletApiKey, setWalletApiKey] = useState(DEFAULT_ZERION_API_KEY);
+  /** Vide = le serveur utilise ZERION_API_KEY (jamais de secret en bundle client) */
+  const [walletApiKey, setWalletApiKey] = useState("");
   const [walletMoneroAmount, setWalletMoneroAmount] = useState("");
   const [walletPending, setWalletPending] = useState(false);
   const [walletResult, setWalletResult] = useState<{
@@ -957,7 +958,8 @@ export function ImportCsvModal({
     const cap = getChainSyncCapability(preset.key);
     const addr = walletAddress.trim();
     // Clé préremplie : l’utilisateur n’a PAS besoin de la saisir pour que ça marche
-    const apiKey = walletApiKey.trim() || DEFAULT_ZERION_API_KEY;
+    // Vide → le backend résout ZERION_API_KEY (env serveur)
+    const apiKey = walletApiKey.trim();
 
     // ── Monero ────────────────────────────────────────────────────────────
     if (cap?.provider === "monero-manual") {
@@ -1300,7 +1302,7 @@ export function ImportCsvModal({
                     const cap = getChainSyncCapability(key);
                     if (cap?.provider === "zerion") {
                       setWalletApiKey(
-                        cap.defaultApiKey || DEFAULT_ZERION_API_KEY
+                        cap.defaultApiKey || ""
                       );
                     }
                   }}

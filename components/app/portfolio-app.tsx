@@ -539,7 +539,7 @@ function PortfolioAppClient({
       const address = (body.walletAddress || "").trim();
       if (!address || body.type !== "BLOCKCHAIN") return;
 
-      const { resolveChainSyncForPlatform, DEFAULT_ZERION_API_KEY } =
+      const { resolveChainSyncForPlatform } =
         await import("@/app/lib/market/chain-wallet-sync");
       const cap = resolveChainSyncForPlatform({
         logoKey: body.logoKey || res.platform.logoKey,
@@ -564,7 +564,8 @@ function PortfolioAppClient({
             body: JSON.stringify({
               platformId: res.platform.id,
               address,
-              apiKey: body.walletApiKey || DEFAULT_ZERION_API_KEY,
+              // Vide → ZERION_API_KEY serveur (jamais de clé hardcodée côté client)
+              apiKey: body.walletApiKey || undefined,
               chainPreset: body.logoKey || cap.presetKey,
               allChains: false,
               writeLedger: true,

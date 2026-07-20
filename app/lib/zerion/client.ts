@@ -31,10 +31,27 @@ async function throttle(): Promise<void> {
   await run;
 }
 
+/**
+ * Résout la clé Zerion (server-side uniquement en pratique).
+ * Priorité : override form/body → env ZERION_API_KEY → vide (erreur CONFIG).
+ * Ne jamais embarquer de clé hardcodée dans le client.
+ */
 export function resolveZerionApiKey(override?: string | null): string {
-  const fromEnv = (process.env.ZERION_API_KEY || "").trim();
   const fromOverride = (override || "").trim();
-  return fromOverride || fromEnv || DEFAULT_ZERION_API_KEY;
+  // Ignore placeholders UI
+  if (
+    fromOverride &&
+    !fromOverride.includes("…") &&
+    !/^zk_?$/i.test(fromOverride) &&
+    fromOverride.length >= 8
+  ) {
+    return fromOverride;
+  }
+  const fromEnv = (process.env.ZERION_API_KEY || "").trim();
+  if (fromEnv) return fromEnv;
+  // DEFAULT_ZERION_API_KEY est volontairement vide (pas de secret en bundle)
+  const fallback = (DEFAULT_ZERION_API_KEY || "").trim();
+  return fallback;
 }
 
 function basicAuthHeader(apiKey: string): string {
@@ -258,6 +275,12 @@ export async function fetchZerionPositions(
   opts?: { chainId?: string | null; currency?: string }
 ): Promise<ZerionBalanceItem[]> {
   const key = resolveZerionApiKey(apiKey);
+  if (!key) {
+    throw new ZerionError(
+      "Clé API Zerion manquante — configurez ZERION_API_KEY sur le serveur (Vercel)",
+      "CONFIG"
+    );
+  }
   const query: Record<string, string> = {
     currency: opts?.currency || "usd",
     "filter[positions]": "only_simple",
@@ -441,6 +464,12 @@ export async function fetchZerionTransactions(
   }
 ): Promise<ZerionTxFetchResult> {
   const key = resolveZerionApiKey(apiKey);
+  if (!key) {
+    throw new ZerionError(
+      "Clé API Zerion manquante — configurez ZERION_API_KEY sur le serveur (Vercel)",
+      "CONFIG"
+    );
+  }
   const pageSize = Math.min(100, Math.max(10, opts?.pageSize ?? 100));
   const maxPages = Math.min(20, Math.max(1, opts?.maxPages ?? 8));
   const all: ZerionTxItem[] = [];

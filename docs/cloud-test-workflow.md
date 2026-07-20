@@ -140,6 +140,10 @@ export STAGING_DATABASE_URL="postgresql://…staging-pooler…/neondb?sslmode=re
 | `AUTH_URL` / `NEXTAUTH_URL` | `https://patrimo-psi.vercel.app` | **omit** (trustHost) | localhost |
 | `ALLOW_DEMO_FALLBACK` | `false` | `false` | selon besoin |
 | Clés API (Finnhub, Zerion…) | prod keys si besoin | **clés démo / limitées** | local |
+| `ZERION_API_KEY` | **requis** pour Base/EVM | **requis** (Preview) | optionnel si clé saisie UI |
+| `SOLANA_RPC_URL` | **recommandé** (RPC dédié) | **recommandé** | optionnel (public rate-limité) |
+| `SOLSCAN_API_KEY` | optionnel (dates txs) | optionnel | optionnel |
+| `COINGECKO_API_KEY` | Monero méta | Monero méta | optionnel |
 
 Ne jamais copier les secrets prod dans le dépôt.  
 Ne pas committer `.env`, `.env.production.local`, `.env.neon`.

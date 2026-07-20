@@ -12,7 +12,10 @@ import {
 /**
  * POST /api/wallets/monero/sync
  * Monero : solde local + méta CoinGecko (pas Zerion).
+ * Env optionnelle : COINGECKO_API_KEY
  */
+
+export const maxDuration = 30;
 
 const bodySchema = z.object({
   platformId: z.string().min(1),

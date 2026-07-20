@@ -22,7 +22,7 @@ import {
 import type { PlatformForm } from "@/app/lib/schemas";
 import { cn } from "@/app/lib/utils";
 import {
-  DEFAULT_ZERION_API_KEY,
+
   ZERION_HELP_MESSAGE,
   getChainSyncCapability,
 } from "@/app/lib/market/chain-wallet-sync";
@@ -65,7 +65,7 @@ export function PlatformModal({
       logoKey: "",
       logoUrl: "",
       walletAddress: "",
-      walletApiKey: DEFAULT_ZERION_API_KEY,
+      walletApiKey: "",
     });
     onComboLabelChange("");
     setLogoManualOpen(false);
@@ -140,7 +140,7 @@ export function PlatformModal({
     form.setValue("logoKey", "");
     form.setValue("logoUrl", "");
     form.setValue("walletAddress", "");
-    form.setValue("walletApiKey", DEFAULT_ZERION_API_KEY);
+    form.setValue("walletApiKey", "");
     form.setValue("subtype", null);
     onComboLabelChange("");
     setSelectionKind("none");
@@ -187,7 +187,7 @@ export function PlatformModal({
         if (cap?.provider === "zerion") {
           form.setValue(
             "walletApiKey",
-            cap.defaultApiKey || DEFAULT_ZERION_API_KEY
+            cap.defaultApiKey || ""
           );
         } else {
           form.setValue("walletApiKey", null);

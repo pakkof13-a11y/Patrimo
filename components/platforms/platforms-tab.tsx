@@ -26,7 +26,7 @@ import type { PlatformRow } from "@/app/lib/types/ui";
 import type { SolanaPortfolioSnapshot } from "@/app/lib/solana";
 import {
   availableApiStatusMessage,
-  DEFAULT_ZERION_API_KEY,
+
   describeChainSyncFeatures,
   ZERION_HELP_MESSAGE,
   missingApiStatusMessage,
@@ -127,7 +127,8 @@ export function PlatformsTab({
   const [editLogo, setEditLogo] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [editWallet, setEditWallet] = useState("");
-  const [editApiKey, setEditApiKey] = useState(DEFAULT_ZERION_API_KEY);
+  /** Vide = serveur utilise ZERION_API_KEY */
+  const [editApiKey, setEditApiKey] = useState("");
   const [editMoneroAmount, setEditMoneroAmount] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const [editSyncing, setEditSyncing] = useState(false);
@@ -269,7 +270,7 @@ export function PlatformsTab({
     setEditApiKey(
       (p as { walletApiKey?: string | null }).walletApiKey ||
         cap?.defaultApiKey ||
-        DEFAULT_ZERION_API_KEY
+        ""
     );
     setEditMoneroAmount("");
   }
@@ -397,7 +398,7 @@ export function PlatformsTab({
           walletAddress: wallet,
           walletApiKey:
             cap.provider === "zerion"
-              ? apiKey || DEFAULT_ZERION_API_KEY
+              ? apiKey || null
               : undefined,
           type: editType === "BLOCKCHAIN" ? editType : "BLOCKCHAIN",
         }),
@@ -432,7 +433,8 @@ export function PlatformsTab({
           body: JSON.stringify({
             platformId: editTarget.id,
             address: wallet,
-            apiKey: apiKey || DEFAULT_ZERION_API_KEY,
+            // Vide → backend ZERION_API_KEY
+            apiKey: apiKey || undefined,
             chainPreset: editTarget.logoKey || cap.presetKey,
             // Filtre par chaîne de la plateforme (évite de fusionner toutes les EVM)
             allChains: false,

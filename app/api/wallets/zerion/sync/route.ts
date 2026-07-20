@@ -22,7 +22,12 @@ import {
  *
  * Par défaut : filtre par chaîne de la plateforme (BASE → base uniquement).
  * allChains=true = fusion multi-L2 (optionnel).
+ *
+ * maxDuration : historique Zerion + throttle 1 req/s dépasse souvent 10 s.
  */
+
+/** Vercel serverless — jusqu’à 60 s (Hobby Fluid / Pro) */
+export const maxDuration = 60;
 
 const bodySchema = z.object({
   platformId: z.string().min(1),
@@ -85,6 +90,7 @@ export async function POST(req: Request) {
       name: true,
       logoKey: true,
       walletAddress: true,
+      walletApiKey: true,
     },
   });
   if (!platform) {
@@ -94,9 +100,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const platformApiKey = (
-    platform as { walletApiKey?: string | null }
-  ).walletApiKey;
+  const platformApiKey = platform.walletApiKey;
 
   const presetKey = (
     chainPresetIn ||
@@ -125,6 +129,16 @@ export async function POST(req: Request) {
   }
 
   const apiKey = resolveZerionApiKey(apiKeyIn ?? platformApiKey);
+  if (!apiKey) {
+    return NextResponse.json(
+      {
+        error:
+          "Clé API Zerion manquante — configurez ZERION_API_KEY sur Vercel (Production/Preview) ou saisissez une clé dans la plateforme",
+        code: "NO_API_KEY",
+      },
+      { status: 400 }
+    );
+  }
   const patch: Record<string, string | null> = {};
   if (address !== (platform.walletAddress || "").trim()) {
     patch.walletAddress = address;
@@ -240,17 +254,31 @@ export async function POST(req: Request) {
           ? 401
           : e.code === "RATE_LIMIT"
             ? 429
-            : 502;
+            : e.code === "CONFIG"
+              ? 400
+              : 502;
       return NextResponse.json(
-        { error: e.message, code: e.code, source: "zerion" },
+        {
+          error: e.message,
+          code: e.code,
+          source: "zerion",
+          hint:
+            e.code === "CONFIG" || e.code === "AUTH"
+              ? "Vérifiez ZERION_API_KEY dans Vercel (Production + Preview)."
+              : undefined,
+        },
         { status }
       );
     }
-    console.error("[zerion-sync]", e instanceof Error ? e.message : e);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[zerion-sync]", msg);
+    const isTimeout = /timeout|TIMEOUT|aborted/i.test(msg);
     return NextResponse.json(
       {
-        error: "Échec synchronisation Zerion",
-        code: "ZERION_UNAVAILABLE",
+        error: isTimeout
+          ? "Synchronisation Zerion interrompue (timeout). Réessayez — l’historique multi-pages est long sur le plan free."
+          : "Échec synchronisation Zerion",
+        code: isTimeout ? "TIMEOUT" : "ZERION_UNAVAILABLE",
         source: "zerion",
       },
       { status: 502 }

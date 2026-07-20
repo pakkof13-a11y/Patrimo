@@ -99,7 +99,8 @@ function zerionCap(
     validateAddress,
     syncPath: "/api/wallets/zerion/sync",
     showApiKeyField: true,
-    defaultApiKey: DEFAULT_ZERION_API_KEY,
+    // Vide côté UI — le serveur utilise ZERION_API_KEY (env)
+    defaultApiKey: "",
     helpMessage: ZERION_HELP_MESSAGE,
   };
 }

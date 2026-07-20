@@ -143,8 +143,11 @@ export function isZerionPreset(presetKey: string | null | undefined): boolean {
   return getZerionChain(presetKey) != null;
 }
 
-export const DEFAULT_ZERION_API_KEY =
-  "zk_64ac4bfaf37e4075bc7709e0ce2357d2";
+/**
+ * Placeholder UI uniquement — **jamais** de clé réelle dans le bundle client.
+ * La clé effective est résolue server-side via `ZERION_API_KEY` (env Vercel/local).
+ */
+export const DEFAULT_ZERION_API_KEY = "";
 
 export const ZERION_HELP_MESSAGE =
-  "Pour récupérer les soldes et l’historique des wallets multi-chaînes (EVM : Ethereum, Polygon, Arbitrum, Base, BSC…), nous utilisons l’API Zerion. Une clé API par défaut est pré-renseignée ; vous pouvez utiliser la vôtre depuis https://dashboard.zerion.io/ (plan gratuit : 1 req/s, 300 req/jour). Solana reste sur Helius. Monero = saisie locale + CoinGecko.";
+  "Pour récupérer les soldes et l’historique des wallets multi-chaînes (EVM : Ethereum, Polygon, Arbitrum, Base, BSC…), nous utilisons l’API Zerion. La clé serveur (ZERION_API_KEY) est utilisée par défaut ; vous pouvez en fournir une depuis https://dashboard.zerion.io/ (plan gratuit : 1 req/s, 300 req/jour). Solana → RPC (SOLANA_RPC_URL recommandé). Monero = saisie locale + CoinGecko.";

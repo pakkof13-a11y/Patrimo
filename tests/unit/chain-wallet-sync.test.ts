@@ -67,7 +67,8 @@ describe("chain-wallet-sync", () => {
     expect(d).toMatch(/Zerion/i);
     expect(d).toMatch(/tokens/i);
     expect(cap.showApiKeyField).toBe(true);
-    expect(cap.defaultApiKey?.startsWith("zk_")).toBe(true);
+    // Clé réelle uniquement via env serveur — jamais pré-remplie dans le client
+    expect(cap.defaultApiKey || "").toBe("");
   });
 
   it("résout Solana / Ethereum depuis nom / logoKey", () => {

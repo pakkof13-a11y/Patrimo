@@ -24,9 +24,16 @@ const COMMITMENT: Commitment = "confirmed";
  * Public mainnet-beta : ~1–2 req/s max en pratique → 600–800 ms safe.
  * Override : SOLANA_RPC_MIN_INTERVAL_MS
  */
+function isPublicMainnetRpc(): boolean {
+  const u = (process.env.SOLANA_RPC_URL || "").trim();
+  return !u || /mainnet-beta\.solana\.com/i.test(u);
+}
+
 function minIntervalMs(): number {
   const raw = Number(process.env.SOLANA_RPC_MIN_INTERVAL_MS);
   if (Number.isFinite(raw) && raw >= 0) return raw;
+  // Sur Vercel + RPC public : IPs partagées → 429 très fréquents
+  if (process.env.VERCEL === "1" && isPublicMainnetRpc()) return 1200;
   // RPC custom souvent plus permissif
   const url = getSolanaRpcUrl();
   if (!/mainnet-beta\.solana\.com/i.test(url)) return 150;
@@ -46,6 +53,8 @@ export const SOLANA_INITIAL_SIG_LIMIT = (() => {
   if (Number.isFinite(raw) && raw > 0) return Math.min(200, Math.floor(raw));
   const url = (process.env.SOLANA_RPC_URL || "").trim();
   if (url && !/mainnet-beta\.solana\.com/i.test(url)) return 80;
+  // Vercel + RPC public : rester très court (sinon timeout fonction)
+  if (process.env.VERCEL === "1") return 12;
   return 40;
 })();
 
@@ -55,6 +64,7 @@ export const SOLANA_INCREMENTAL_SIG_LIMIT = (() => {
   if (Number.isFinite(raw) && raw > 0) return Math.min(100, Math.floor(raw));
   const url = (process.env.SOLANA_RPC_URL || "").trim();
   if (url && !/mainnet-beta\.solana\.com/i.test(url)) return 40;
+  if (process.env.VERCEL === "1") return 8;
   return 25;
 })();
 
