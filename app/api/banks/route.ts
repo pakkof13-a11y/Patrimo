@@ -9,6 +9,25 @@ import {
   validationErrorResponse,
 } from "@/app/lib/api/validation";
 import { listBankAccounts } from "@/app/lib/cash/pockets";
+import { findOrCreatePlatform } from "@/app/lib/platforms/upsert";
+import { findPreset, primaryType } from "@/app/lib/platforms/presets";
+
+/** Assure une plateforme homonyme pour afficher le cash en Sources → Plateformes. */
+async function ensureBankPlatform(userId: string, bankName: string) {
+  const name = bankName.trim();
+  if (name.length < 2) return;
+  const preset = findPreset(name);
+  try {
+    await findOrCreatePlatform(userId, {
+      name: preset?.name || name,
+      type: preset ? primaryType(preset) : "BANQUE",
+      logoKey: preset?.key || null,
+      logoUrl: preset?.logoUrl || null,
+    });
+  } catch {
+    // Ne bloque pas la création du compte si la plateforme échoue
+  }
+}
 
 export async function GET() {
   const userId = await requireUserId();
@@ -34,6 +53,7 @@ export async function POST(req: Request) {
       notes: parsed.data.notes || null,
     },
   });
+  await ensureBankPlatform(userId, parsed.data.bankName);
   return NextResponse.json({ account }, { status: 201 });
 }
 
@@ -62,6 +82,9 @@ export async function PUT(req: Request) {
   });
   if (write.count === 0) {
     return NextResponse.json({ error: "Introuvable" }, { status: 404 });
+  }
+  if (f.bankName) {
+    await ensureBankPlatform(userId, f.bankName);
   }
   const account = await prisma.bankAccount.findFirst({ where: { id, userId } });
   return NextResponse.json({ account });

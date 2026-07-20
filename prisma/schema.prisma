@@ -368,6 +368,8 @@ model SavingsAccount {
   id            String   @id @default(cuid())
   userId        String
   name          String
+  /// Banque de détention (aligné comptes courants / plateformes)
+  bankName      String?
   /// Principal / last booked balance (crédité aux dates de versement)
   balance       Decimal  @default(0) @db.Decimal(28, 12)
   /// Taux annuel saisi en % (ex. 3.0 = 3%) — interprété selon rateType

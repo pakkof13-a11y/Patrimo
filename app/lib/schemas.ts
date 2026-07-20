@@ -276,6 +276,8 @@ export type BankAccountForm = z.infer<typeof bankAccountSchema>;
 
 export const savingsAccountSchema = z.object({
   name: z.string().min(1, "Nom du livret requis"),
+  /** Banque de détention (optionnel mais recommandé) */
+  bankName: z.string().min(1).optional().nullable(),
   balance: decimalString.default("0"),
   /** Taux annuel en % (APR ou APY selon rateType) */
   apyPercent: decimalString.default("0"),
@@ -522,6 +524,7 @@ export type BankAccountUpdateForm = z.infer<typeof bankAccountUpdateSchema>;
 /** PUT /api/savings */
 export const savingsAccountUpdateSchema = z.object({
   name: z.string().min(1, "Nom du livret requis").optional(),
+  bankName: z.string().min(1).optional().nullable(),
   balance: decimalString.optional(),
   apyPercent: decimalString.optional(),
   rateType: z.enum(["APR", "APY"]).optional(),

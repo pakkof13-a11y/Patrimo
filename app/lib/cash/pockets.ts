@@ -1,11 +1,12 @@
 import { prisma } from "../prisma";
-import { d, toFixed, zero } from "../money/decimal";
+import { d, toFixed, zero, type Decimal } from "../money/decimal";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
 import { positiveCashOnly, savingsDisplayBalance, type RateType, type PayoutFrequency } from "../money/savings";
 import {
   applyDueInterestForUser,
   mapSavingsRowForApi,
 } from "../money/savings-accrual";
+import { normalizePlatformSearch } from "../platforms/presets";
 
 /**
  * Sum all explicit cash pockets that have balance > 0 only.
@@ -66,6 +67,61 @@ export async function getExplicitCashTotalEur(userId: string) {
   }
 
   return { totalEur: total, rates };
+}
+
+/**
+ * Cash explicite (comptes + livrets) agrégé par nom de banque normalisé → EUR.
+ * Utilisé pour rattacher le solde banque à une plateforme du même nom (ex. Revolut).
+ */
+export async function getBankPocketCashByNameEur(
+  userId: string,
+  rates?: Record<string, number>
+): Promise<Map<string, Decimal>> {
+  const fx = rates ?? (await getEurRates());
+  const byName = new Map<string, Decimal>();
+
+  const add = (bankName: string | null | undefined, amountEur: Decimal) => {
+    if (!bankName?.trim() || amountEur.lte(0)) return;
+    const key = normalizePlatformSearch(bankName);
+    if (!key) return;
+    byName.set(key, (byName.get(key) || zero()).plus(amountEur));
+  };
+
+  const [banks, savings] = await Promise.all([
+    prisma.bankAccount.findMany({ where: { userId } }),
+    prisma.savingsAccount.findMany({ where: { userId } }),
+  ]);
+
+  for (const b of banks) {
+    if (!positiveCashOnly(b.balance.toString())) continue;
+    const eur = d(convertToEurSync(b.balance.toString(), b.currency, fx));
+    add(b.bankName, eur);
+  }
+
+  for (const s of savings) {
+    const rateType = (s.rateType === "APR" ? "APR" : "APY") as RateType;
+    const freq = (
+      ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"].includes(s.payoutFrequency || "")
+        ? s.payoutFrequency
+        : "DAILY"
+    ) as PayoutFrequency;
+    const clock = s.lastPayoutAt || s.lastAccruedAt;
+    const { displayBalance } = savingsDisplayBalance(
+      s.balance.toString(),
+      s.apyPercent.toString(),
+      clock,
+      new Date(),
+      rateType,
+      freq
+    );
+    if (!positiveCashOnly(displayBalance)) continue;
+    // Livret sans banque de détention : compte dans le cash global, pas sur une plateforme
+    if (!s.bankName?.trim()) continue;
+    const eur = d(convertToEurSync(displayBalance, s.currency, fx));
+    add(s.bankName, eur);
+  }
+
+  return byName;
 }
 
 export async function listBankAccounts(userId: string, base = "EUR") {

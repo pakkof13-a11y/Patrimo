@@ -97,6 +97,7 @@ export function mapSavingsRowForApi(
   s: {
     id: string;
     name: string;
+    bankName?: string | null;
     balance: { toString(): string };
     apyPercent: { toString(): string };
     rateType?: string | null;
@@ -136,6 +137,7 @@ export function mapSavingsRowForApi(
   return {
     id: s.id,
     name: s.name,
+    bankName: s.bankName ?? null,
     balance: s.balance.toString(),
     displayBalance: display.displayBalance,
     apyPercent: s.apyPercent.toString(),

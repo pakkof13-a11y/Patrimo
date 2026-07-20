@@ -10,6 +10,24 @@ import {
 } from "@/app/lib/api/validation";
 import { listSavingsAccounts } from "@/app/lib/cash/pockets";
 import { applyDueInterestForUser } from "@/app/lib/money/savings-accrual";
+import { findOrCreatePlatform } from "@/app/lib/platforms/upsert";
+import { findPreset, primaryType } from "@/app/lib/platforms/presets";
+
+async function ensureBankPlatform(userId: string, bankName: string | null | undefined) {
+  const name = (bankName || "").trim();
+  if (name.length < 2) return;
+  const preset = findPreset(name);
+  try {
+    await findOrCreatePlatform(userId, {
+      name: preset?.name || name,
+      type: preset ? primaryType(preset) : "BANQUE",
+      logoKey: preset?.key || null,
+      logoUrl: preset?.logoUrl || null,
+    });
+  } catch {
+    /* non bloquant */
+  }
+}
 
 export async function GET() {
   const userId = await requireUserId();
@@ -28,10 +46,12 @@ export async function POST(req: Request) {
   }
   const d = parsed.data;
   const now = new Date();
+  const bankName = d.bankName?.trim() || null;
   const account = await prisma.savingsAccount.create({
     data: {
       userId,
       name: d.name,
+      bankName,
       balance: new Prisma.Decimal(d.balance || "0"),
       apyPercent: new Prisma.Decimal(d.apyPercent || "0"),
       rateType: d.rateType || "APY",
@@ -45,6 +65,7 @@ export async function POST(req: Request) {
       notes: d.notes || null,
     },
   });
+  await ensureBankPlatform(userId, bankName);
   return NextResponse.json({ account }, { status: 201 });
 }
 
@@ -66,6 +87,15 @@ export async function PUT(req: Request) {
   const f = presentFields(body, parsed.data as Record<string, unknown>) as typeof parsed.data;
   const data: Prisma.SavingsAccountUpdateInput = {};
   if (f.name !== undefined) data.name = f.name;
+  if (f.bankName !== undefined) {
+    data.bankName =
+      f.bankName == null || String(f.bankName).trim() === ""
+        ? null
+        : String(f.bankName).trim();
+    if (data.bankName) {
+      await ensureBankPlatform(userId, String(data.bankName));
+    }
+  }
   if (f.balance !== undefined) {
     data.balance = new Prisma.Decimal(f.balance || "0");
     data.lastAccruedAt = new Date();

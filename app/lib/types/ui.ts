@@ -88,6 +88,9 @@ export type PlatformRow = {
   subtype?: string | null;
   cashEur: string;
   cashBase: string;
+  /** Cash Banques/Livrets rattaché par nom (hors ledger APPORT) */
+  bankPocketCashEur?: string;
+  bankPocketCashBase?: string;
   logoUrl: string | null;
   logoKey?: string | null;
   walletAddress?: string | null;

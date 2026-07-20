@@ -1,7 +1,8 @@
 "use client";
 
 import { fetchJson } from "@/app/lib/api-client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -51,30 +52,69 @@ function CurrencySelect({
   );
 }
 
-/** Combobox banque avec recherche (liste longue). */
+/** Combobox banque — liste en portal (fixed) pour passer au-dessus des cartes sœurs. */
 function BankNameCombobox({
   value,
   onChange,
   className,
   testId,
+  placeholder = "Rechercher une banque…",
 }: {
   value: string;
   onChange: (name: string) => void;
   className?: string;
   testId?: string;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
+  const [menuBox, setMenuBox] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     setQuery(value);
   }, [value]);
 
+  const updateMenuPosition = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setMenuBox({
+      top: r.bottom + 4,
+      left: r.left,
+      width: Math.max(r.width, 220),
+    });
+  };
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuBox(null);
+      return;
+    }
+    updateMenuPosition();
+    const onScrollOrResize = () => updateMenuPosition();
+    window.addEventListener("resize", onScrollOrResize);
+    // capture scroll on any ancestor
+    window.addEventListener("scroll", onScrollOrResize, true);
+    return () => {
+      window.removeEventListener("resize", onScrollOrResize);
+      window.removeEventListener("scroll", onScrollOrResize, true);
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     function onDoc(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (rootRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -89,19 +129,72 @@ function BankNameCombobox({
 
   const listboxId = `${testId || "bank-combobox"}-listbox`;
 
+  const menu =
+    open &&
+    menuBox &&
+    typeof document !== "undefined" &&
+    createPortal(
+      <ul
+        ref={menuRef}
+        id={listboxId}
+        role="listbox"
+        data-testid={testId ? `${testId}-listbox` : "bank-combobox-listbox"}
+        className="fixed z-[200] max-h-56 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--card)] py-1 shadow-xl"
+        style={{
+          top: menuBox.top,
+          left: menuBox.left,
+          width: menuBox.width,
+        }}
+      >
+        {filtered.length === 0 ? (
+          <li className="px-3 py-2 text-xs text-[var(--muted-foreground)]">
+            Aucune banque — validez pour garder « {query.trim()} »
+          </li>
+        ) : (
+          filtered.map((b) => (
+            <li key={b}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={b === value}
+                className={cn(
+                  "block w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--muted)]",
+                  b === value &&
+                    "bg-teal-700/10 font-medium text-teal-900 dark:text-teal-100"
+                )}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onChange(b);
+                  setQuery(b);
+                  setOpen(false);
+                }}
+              >
+                {b}
+              </button>
+            </li>
+          ))
+        )}
+      </ul>,
+      document.body
+    );
+
   return (
-    <div ref={rootRef} className={cn("relative min-w-0", className)}>
+    <div
+      ref={rootRef}
+      className={cn("relative min-w-0", open && "z-[60]", className)}
+    >
       <div className="relative">
         <Search
           className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--muted-foreground)]"
           aria-hidden
         />
         <input
+          ref={inputRef}
           role="combobox"
           className="input w-full !py-1.5 !pl-8 !pr-8 text-sm"
           value={query}
           data-testid={testId}
-          placeholder="Rechercher une banque…"
+          placeholder={placeholder}
           aria-label="Banque"
           aria-expanded={open}
           aria-controls={listboxId}
@@ -113,7 +206,6 @@ function BankNameCombobox({
             setOpen(true);
           }}
           onBlur={() => {
-            // Commit free text if valid / custom
             if (query.trim() && query.trim() !== value) {
               onChange(query.trim());
             }
@@ -124,41 +216,7 @@ function BankNameCombobox({
           aria-hidden
         />
       </div>
-      {open && (
-        <ul
-          id={listboxId}
-          className="absolute z-40 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--card)] py-1 shadow-lg"
-          role="listbox"
-        >
-          {filtered.length === 0 ? (
-            <li className="px-3 py-2 text-xs text-[var(--muted-foreground)]">
-              Aucune banque — appuyez hors liste pour garder « {query.trim()} »
-            </li>
-          ) : (
-            filtered.map((b) => (
-              <li key={b}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={b === value}
-                  className={cn(
-                    "block w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--muted)]",
-                    b === value && "bg-teal-700/10 font-medium text-teal-900 dark:text-teal-100"
-                  )}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    onChange(b);
-                    setQuery(b);
-                    setOpen(false);
-                  }}
-                >
-                  {b}
-                </button>
-              </li>
-            ))
-          )}
-        </ul>
-      )}
+      {menu}
     </div>
   );
 }
@@ -261,6 +319,7 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
         accounts: Array<{
           id: string;
           name: string;
+          bankName: string | null;
           balance: string;
           displayBalance: string;
           apyPercent: string;
@@ -286,6 +345,7 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
   const [bankCurrency, setBankCurrency] = useState("EUR");
 
   const [livretName, setLivretName] = useState("Livret A");
+  const [livretBankName, setLivretBankName] = useState("Revolut");
   const [livretBalance, setLivretBalance] = useState("0");
   const [livretApy, setLivretApy] = useState("3");
   const [livretRateType, setLivretRateType] = useState<"APR" | "APY">("APY");
@@ -301,10 +361,15 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
     {}
   );
 
+  /** Invalide banques + KPI cash + plateformes (cash rattaché par nom). */
   const refresh = async () => {
-    await qc.invalidateQueries({ queryKey: ["banks"] });
-    await qc.invalidateQueries({ queryKey: ["savings"] });
-    await qc.invalidateQueries({ queryKey: ["holdings"] });
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ["banks"] }),
+      qc.invalidateQueries({ queryKey: ["savings"] }),
+      qc.invalidateQueries({ queryKey: ["holdings"] }),
+      qc.invalidateQueries({ queryKey: ["platforms"] }),
+      qc.invalidateQueries({ queryKey: ["portfolio-history"] }),
+    ]);
   };
 
   const addBank = useMutation({
@@ -331,6 +396,7 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
         method: "POST",
         body: JSON.stringify({
           name: livretName,
+          bankName: livretBankName.trim() || null,
           balance: livretBalance || "0",
           apyPercent: livretApy || "0",
           rateType: livretRateType,
@@ -608,6 +674,16 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
                 onChange={(e) => setLivretName(e.target.value)}
               />
             </label>
+            <label className="min-w-0 flex-1 sm:min-w-[12rem] sm:max-w-xs">
+              <FieldLabel hint="Banque de détention — rattache le solde à la plateforme du même nom">
+                Banque
+              </FieldLabel>
+              <BankNameCombobox
+                value={livretBankName}
+                onChange={setLivretBankName}
+                testId="banks-savings-add-bank"
+              />
+            </label>
             <label className="w-full sm:w-28">
               <FieldLabel>Solde</FieldLabel>
               <input
@@ -801,6 +877,18 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
                           <NetWorthBadge
                             included={a.countsInNetWorth}
                             compact
+                          />
+                        </div>
+                        <div className="mt-1.5 max-w-xs">
+                          <FieldLabel hint="Banque de détention">
+                            Banque
+                          </FieldLabel>
+                          <BankNameCombobox
+                            value={a.bankName || ""}
+                            onChange={(bankName) =>
+                              patchSavings.mutate({ id: a.id, bankName })
+                            }
+                            placeholder="Banque de détention…"
                           />
                         </div>
                         <p className="text-meta mt-1">

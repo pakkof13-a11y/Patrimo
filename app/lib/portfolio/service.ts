@@ -482,24 +482,28 @@ export async function getPlatformCashBalances(
   ledger?: Awaited<ReturnType<typeof loadLedgerForUser>>
 ) {
   const fx = rates ?? (await getEurRates());
-  const [led, platforms, lastTxRows, assetQuotes] = await Promise.all([
-    ledger ? Promise.resolve(ledger) : loadLedgerForUser(userId),
-    prisma.platform.findMany({ where: { userId }, orderBy: { name: "asc" } }),
-    prisma.transaction.findMany({
-      where: { userId },
-      select: { platformId: true, occurredAt: true },
-      orderBy: { occurredAt: "desc" },
-    }),
-    prisma.asset.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        currency: true,
-        manualPrice: true,
-        priceQuote: { select: { priceEur: true } },
-      },
-    }),
-  ]);
+  const { getBankPocketCashByNameEur } = await import("../cash/pockets");
+  const { normalizePlatformSearch } = await import("../platforms/presets");
+  const [led, platforms, lastTxRows, assetQuotes, bankCashByName] =
+    await Promise.all([
+      ledger ? Promise.resolve(ledger) : loadLedgerForUser(userId),
+      prisma.platform.findMany({ where: { userId }, orderBy: { name: "asc" } }),
+      prisma.transaction.findMany({
+        where: { userId },
+        select: { platformId: true, occurredAt: true },
+        orderBy: { occurredAt: "desc" },
+      }),
+      prisma.asset.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          currency: true,
+          manualPrice: true,
+          priceQuote: { select: { priceEur: true } },
+        },
+      }),
+      getBankPocketCashByNameEur(userId, fx),
+    ]);
 
   const lastTxByPlatform = new Map<string, Date>();
   for (const row of lastTxRows) {
@@ -541,7 +545,12 @@ export async function getPlatformCashBalances(
   }
 
   return platforms.map((p) => {
-    const cashEur = led.cashByPlatform.get(p.id) ?? zero();
+    // Ledger cash (APPORT/RETRAIT/revenus) + soldes saisis Banques/Livrets
+    // rattachés par nom de banque (ex. « Revolut » compte + plateforme Revolut).
+    const ledgerCash = led.cashByPlatform.get(p.id) ?? zero();
+    const pocketCash =
+      bankCashByName.get(normalizePlatformSearch(p.name)) || zero();
+    const cashEur = ledgerCash.plus(pocketCash);
     const positionsValueEur = positionsValueByPlatform.get(p.id) || zero();
     const totalValueEur = cashEur.plus(positionsValueEur);
     const lastAt = lastTxByPlatform.get(p.id);
@@ -562,6 +571,9 @@ export async function getPlatformCashBalances(
         (p as { walletApiKey?: string | null }).walletApiKey ?? null,
       cashEur: toFixed(cashEur, 8),
       cashBase: convertFromEurSync(cashEur, baseCurrency, fx),
+      /** Cash issu des poches Banques/Livrets uniquement (hors ledger) */
+      bankPocketCashEur: toFixed(pocketCash, 8),
+      bankPocketCashBase: convertFromEurSync(pocketCash, baseCurrency, fx),
       positionCount: openPositionCountByPlatform.get(p.id) || 0,
       positionsValueEur: toFixed(positionsValueEur, 8),
       positionsValueBase: convertFromEurSync(positionsValueEur, baseCurrency, fx),
@@ -703,6 +715,19 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     byPlatform[h.platformName] = (byPlatform[h.platformName] ?? 0) + v;
     const at = (h as HoldingRow & { accountType?: string }).accountType || "CTO";
     byAccountType[at] = (byAccountType[at] ?? 0) + v;
+  }
+  // Cash (poches banques + ledger) rattaché aux plateformes pour le camembert « par plateforme »
+  for (const p of platforms) {
+    const cash = Number(p.cashBase || p.cashEur || 0);
+    if (cash > 0) {
+      byPlatform[p.name] = (byPlatform[p.name] ?? 0) + cash;
+    }
+  }
+  // Classe CASH = total cash patrimoine (poches Banques/Livrets/enveloppes/AV > 0)
+  const cashClassBase = Number(summary.totalCashBase || summary.totalCashEur || 0);
+  if (cashClassBase > 0) {
+    byClass["CASH"] = (byClass["CASH"] ?? 0) + cashClassBase;
+    byAccountType["CASH"] = (byAccountType["CASH"] ?? 0) + cashClassBase;
   }
 
   return {
