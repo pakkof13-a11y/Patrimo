@@ -79,9 +79,29 @@ describe("platform presets uniqueness", () => {
   });
 
   it("COURTIER en bourse and ASSURANCE_VIE and CFD are distinct keys", () => {
-    const byType = (t: string) => PLATFORM_PRESETS.filter((p) => p.type === t);
+    const byType = (t: string) =>
+      PLATFORM_PRESETS.filter((p) => p.types.includes(t as never));
     expect(byType("COURTIER").length).toBeGreaterThan(5);
     expect(byType("ASSURANCE_VIE").length).toBeGreaterThan(10);
     expect(byType("BROKER_CFD").length).toBeGreaterThan(5);
+  });
+
+  it("multi-types catalogue (Revolut, eToro) + absences (N26)", () => {
+    const revolut = PLATFORM_PRESETS.find((p) => p.key === "REVOLUT");
+    expect(revolut?.types).toEqual(
+      expect.arrayContaining([
+        "COURTIER",
+        "EXCHANGE_CRYPTO",
+        "BANQUE",
+        "BROKER_CFD",
+      ])
+    );
+    const etoro = PLATFORM_PRESETS.find((p) => p.key === "ETORO");
+    expect(etoro?.types).toEqual(
+      expect.arrayContaining(["COURTIER", "BROKER_CFD", "EXCHANGE_CRYPTO"])
+    );
+    expect(PLATFORM_PRESETS.some((p) => p.key === "N26")).toBe(false);
+    expect(PLATFORM_PRESETS.some((p) => p.key === "BYBIT")).toBe(true);
+    expect(PLATFORM_PRESETS.some((p) => p.key === "LEDGER")).toBe(true);
   });
 });

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { importCsv } from "@/app/lib/import/import-csv";
+import {
+  IMPORT_MAX_CSV_CHARS,
+  IMPORT_PREVIEW_MAX_ROWS,
+} from "@/app/lib/import/limits";
 import { IMPORT_FORMATS } from "@/app/lib/import/presets";
 import type { ColumnMapping } from "@/app/lib/import/types";
 import { listAdapters } from "@/app/lib/import/adapters/registry";
@@ -19,8 +23,13 @@ export async function POST(req: Request) {
     if (!csvText.trim()) {
       return NextResponse.json({ error: "Fichier CSV vide" }, { status: 400 });
     }
-    if (csvText.length > 2_000_000) {
-      return NextResponse.json({ error: "Fichier trop volumineux (max ~2 Mo)" }, { status: 400 });
+    if (csvText.length > IMPORT_MAX_CSV_CHARS) {
+      return NextResponse.json(
+        {
+          error: `Fichier trop volumineux (max ~${Math.round(IMPORT_MAX_CSV_CHARS / 1_000_000)} Mo)`,
+        },
+        { status: 400 }
+      );
     }
 
     const knownIds = new Set([
@@ -52,6 +61,8 @@ export async function POST(req: Request) {
       columnMap: result.columnMap,
       confidence: result.confidence,
       needsManualMapping: result.needsManualMapping,
+      needsFormatConfirm: result.needsFormatConfirm || false,
+      ambiguousFormats: result.ambiguousFormats || [],
       transactions: result.transactions.slice(0, 100).map((t) => ({
         date: t.date.toISOString(),
         type: t.type,
@@ -62,8 +73,9 @@ export async function POST(req: Request) {
       })),
       adapterRanking: result.adapterRanking.slice(0, 8),
       warnings: result.warnings.slice(0, 50),
-      rows: rows.slice(0, 500),
-      truncated: rows.length > 500,
+      rows: rows.slice(0, IMPORT_PREVIEW_MAX_ROWS),
+      truncated: rows.length > IMPORT_PREVIEW_MAX_ROWS,
+      previewLimit: IMPORT_PREVIEW_MAX_ROWS,
       totalRows: rows.length,
       stats: { ok: okCount, warning: warnCount, error: errCount },
     });

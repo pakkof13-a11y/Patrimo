@@ -20,7 +20,7 @@ export function Field({
   children: React.ReactNode;
   /** Aide contextuelle sous le champ */
   hint?: React.ReactNode;
-  /** Message d’erreur (role=alert) */
+  /** Message d’erreur (role=alert + aria-live) */
   error?: React.ReactNode;
   /** Affiche « optionnel » à côté du label */
   optional?: boolean;
@@ -28,6 +28,9 @@ export function Field({
   htmlFor?: string;
   className?: string;
 }) {
+  const errorId = htmlFor ? `${htmlFor}-error` : undefined;
+  const hintId = htmlFor ? `${htmlFor}-hint` : undefined;
+
   return (
     <div className={cn("block min-w-0 text-xs", className)}>
       <label
@@ -43,18 +46,25 @@ export function Field({
       </label>
       {children}
       {hint && !error ? (
-        <p className="mt-1 text-[10px] font-normal leading-snug text-[var(--muted-foreground)]">
+        <p
+          id={hintId}
+          className="mt-1 text-[10px] font-normal leading-snug text-[var(--muted-foreground)]"
+        >
           {hint}
         </p>
       ) : null}
-      {error ? (
-        <p
-          role="alert"
-          className="mt-1 text-[11px] font-medium leading-snug text-[var(--danger)]"
-        >
-          {error}
-        </p>
-      ) : null}
+      {/* aria-live : annonce les erreurs aux lecteurs d’écran sans voler le focus */}
+      <div aria-live="polite" aria-atomic="true">
+        {error ? (
+          <p
+            id={errorId}
+            role="alert"
+            className="mt-1 text-[11px] font-medium leading-snug text-[var(--danger)]"
+          >
+            {error}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }

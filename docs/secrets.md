@@ -22,7 +22,8 @@
 | `DEMO_USERNAME` / `DEMO_EMAIL` | Identité demo seed | Non (défauts publics) |
 | `E2E_USER` / `E2E_PASS` | Playwright | `E2E_PASS` ou `DEMO_PASSWORD` |
 | `FINNHUB_API_KEY` | Cours / earnings | Non |
-| `COINGECKO_API_KEY` | Crypto | Non |
+| `COINGECKO_API_KEY` | Crypto (CoinGecko **Demo**, clé `CG-…`) | Non |
+| `SOLANA_RPC_URL` | RPC Solana natif (défaut mainnet-beta public) | Non |
 | `CRON_SECRET` | Accrual multi-user | Non |
 | `NEXT_PUBLIC_LOGO_DEV_PUBLISHABLE_KEY` | Logos (publishable) | Non |
 
@@ -45,6 +46,7 @@ Si `ADMIN_PASSWORD` ou `DEMO_PASSWORD` manque, le seed **échoue explicitement**
 | Départ collaborateur | Rotation `ADMIN_PASSWORD`, `AUTH_SECRET`, clés API. |
 | Périodique (prod) | Rotation `AUTH_SECRET` et mots de passe admin au moins tous les 90 jours. |
 | Après seed en prod de test | Utiliser des mots de passe **distincts** du local ; ne pas réutiliser des fixtures CI. |
+| Playwright / e2e | Seed e2e = **wipe compte `demo` uniquement** (admin préservé). Pour isoler totalement : `DATABASE_URL_E2E` dans `.env.e2e` (voir `.env.e2e.example`). Ne stockez pas votre patrimoine perso sur le compte `demo`. |
 
 ### Rotation `AUTH_SECRET`
 
@@ -72,7 +74,7 @@ Voir aussi **[docs/readiness.md](readiness.md)** (décision déployable + health
 - [ ] `AUTH_SECRET` unique et fort.
 - [ ] `AUTH_URL` / `NEXTAUTH_URL` = URL publique de l’env test.
 - [ ] Mots de passe admin/demo **différents** du CI et du local.
-- [ ] Clés Finnhub / CoinGecko en variables serveur uniquement (pas `NEXT_PUBLIC_`).
+- [ ] Clés Finnhub / CoinGecko en variables serveur uniquement (pas `NEXT_PUBLIC_`). `SOLANA_RPC_URL` = URL RPC (pas de secret Solscan).
 - [ ] Scan Gitleaks vert sur la branche.
 - [ ] `GET /api/health` → `ok: true`, `env.authSecretConfigured: true`.
 - [ ] Seed **one-shot** après migrate (pas `db push --accept-data-loss`).

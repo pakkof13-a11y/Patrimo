@@ -94,7 +94,13 @@ model Platform {
   logoKey       String?
   logoUrl       String?
   walletAddress String?
+  /// Clé API GoldRush (Covalent) optionnelle par plateforme — défaut serveur sinon
+  walletApiKey  String?
   notes         String?
+  /// Curseur sync Solana RPC : dernière signature connue (plus récente)
+  lastKnownSignature String?
+  /// Dernière synchro on-chain réussie (soldes et/ou txs)
+  lastSyncedAt       DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -102,10 +108,38 @@ model Platform {
   assets           Asset[]
   transactionsFrom Transaction[] @relation("TxPlatform")
   transactionsTo   Transaction[] @relation("TxToPlatform")
+  onchainTxs       BlockchainOnchainTx[]
 
   @@index([userId])
   @@index([userId, type])
   @@unique([userId, name])
+}
+
+/// Transactions on-chain Solana (RPC natif) — distinctes du journal ledger Patrimo.
+model BlockchainOnchainTx {
+  id               String    @id @default(cuid())
+  userId           String
+  platformId       String
+  signature        String
+  slot             BigInt?
+  blockTime        DateTime?
+  status           String    @default("unknown")
+  /// TRANSFER | SWAP_LIKE | STAKE_LIKE | FAILED | UNKNOWN
+  type             String?
+  feeLamports      BigInt?
+  primaryProgramId String?
+  programIds       Json?
+  transfers        Json?
+  rawParsed        Json?
+  err              String?
+  createdAt        DateTime  @default(now())
+
+  platform Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
+
+  @@unique([platformId, signature])
+  @@index([userId, platformId])
+  @@index([platformId, blockTime])
+  @@index([signature])
 }
 
 /// Sous-catégorie d’affichage (UI) — indépendante des calculs ledger / assetClass.

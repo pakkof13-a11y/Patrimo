@@ -25,7 +25,7 @@ export function ModulePageHeader({
   return (
     <header
       className={cn(
-        "flex flex-wrap items-start justify-between gap-3",
+        "module-page-header flex flex-wrap items-start justify-between gap-3",
         className
       )}
       data-testid={testId}
@@ -35,7 +35,7 @@ export function ModulePageHeader({
           {title}
         </h2>
         {subtitle != null && subtitle !== "" ? (
-          <div className="text-meta mt-0.5 leading-relaxed">{subtitle}</div>
+          <div className="module-intro text-meta">{subtitle}</div>
         ) : null}
       </div>
       {actions ? (

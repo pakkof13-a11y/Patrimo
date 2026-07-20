@@ -12,10 +12,11 @@ function getApiKey(): string | null {
 export const finnhubProvider: MarketDataProvider = {
   id: "finnhub",
   supports(asset) {
+    // CRYPTO : CoinGecko exclusif — jamais Finnhub
+    if (asset.assetClass === "CRYPTO") return false;
     return (
       asset.priceProvider === "FINNHUB" ||
-      asset.assetClass === "ACTIONS" ||
-      (asset.assetClass === "CRYPTO" && asset.priceProvider !== "COINGECKO")
+      asset.assetClass === "ACTIONS"
     );
   },
   async fetchPrice(asset: AssetMeta): Promise<PriceQuoteResult> {

@@ -11,6 +11,11 @@ export type ImportFormatId =
   | "fortuneo"
   | "trade_republic"
   | "interactive_brokers"
+  | "cryptocom"
+  | "cryptocom_transfer"
+  | "nexo"
+  | "ascendex"
+  | "ledger_live"
   | "dynamic";
 
 export type ColumnRole =
@@ -28,6 +33,7 @@ export type ColumnRole =
   | "side" // buy/sell for binance-like
   | "description" // free-text for Revolut / Coinbase inference
   | "product" // Revolut product column
+  | "platform" // courtier / plateforme
   | "ignore";
 
 export type FormatPreset = {
@@ -78,6 +84,12 @@ export const IMPORT_FORMATS: FormatPreset[] = [
       commentaire: "notes",
       libelle: "notes",
       asset_class: "assetClass",
+      platform: "platform",
+      plateforme: "platform",
+      broker: "platform",
+      courtier: "platform",
+      account: "platform",
+      compte: "platform",
       classe: "assetClass",
     },
   },
@@ -232,10 +244,38 @@ export const IMPORT_FORMATS: FormatPreset[] = [
     },
   },
   {
+    id: "ledger_live",
+    label: "Ledger Live (operations export)",
+    description:
+      "Export Ledger Live « operations » (Operation Date, Status, Currency Ticker, Operation Type IN/OUT/FEES/REWARD, Operation Amount/Fees, Account Name, Countervalue…)",
+    aliases: {
+      operation_date: "date",
+      date: "date",
+      status: "ignore", // filtré dans map-rows (Failed)
+      currency_ticker: "ticker",
+      operation_type: "type",
+      type: "type",
+      operation_amount: "quantity",
+      amount: "quantity",
+      operation_fees: "fees",
+      fees: "fees",
+      operation_hash: "notes",
+      hash: "notes",
+      account_name: "platform",
+      account: "platform",
+      account_xpub: "ignore",
+      xpub: "ignore",
+      countervalue_ticker: "currency",
+      countervalue_at_operation_date: "cashAmount",
+      countervalue_at_csv_export: "ignore",
+      countervalue: "cashAmount",
+    },
+  },
+  {
     id: "coinbase",
     label: "Coinbase (Transaction history)",
     description:
-      "Export Transaction history (Timestamp, Transaction Type, Asset, Quantity, Spot Price, Fees) ou Advanced Trade",
+      "Export Transaction history Coinbase (Timestamp, Transaction Type, Asset, Quantity, Price/Spot Price, Fees) — y compris format 2024–2026 avec ID et Price at Transaction",
     aliases: {
       timestamp: "date",
       date_time: "date",
@@ -252,10 +292,15 @@ export const IMPORT_FORMATS: FormatPreset[] = [
       size_unit: "ignore",
       quantity_transacted: "quantity",
       quantity: "quantity",
+      // Ancien export
       spot_price_at_transaction: "unitPrice",
-      price: "unitPrice",
       spot_price_currency: "currency",
+      // Nouveau export 2024–2026 (Price at Transaction, Price Currency)
+      price_at_transaction: "unitPrice",
+      price_currency: "currency",
+      price: "unitPrice",
       subtotal: "cashAmount",
+      // Préférer Subtotal pour FMV ; Total reste disponible si Subtotal absent
       total_inclusive_of_fees_and_or_spread: "cashAmount",
       total: "cashAmount",
       fees_and_or_spread: "fees",
@@ -267,6 +312,8 @@ export const IMPORT_FORMATS: FormatPreset[] = [
       trade_id: "ignore",
       transaction_id: "ignore",
       id: "ignore",
+      sender_address: "ignore",
+      recipient_address: "ignore",
     },
   },
   {
@@ -339,6 +386,87 @@ export const IMPORT_FORMATS: FormatPreset[] = [
       currency: "currency",
       currencyprimary: "currency",
       description: "name",
+    },
+  },
+  {
+    id: "cryptocom",
+    label: "Crypto.com (App — crypto / carte / fiat)",
+    description:
+      "Export app : Timestamp (UTC), Transaction Description, Currency, Amount, To Currency, To Amount, Native Amount, Transaction Kind",
+    aliases: {
+      timestamp_utc: "date",
+      timestamp: "date",
+      time_utc: "date",
+      transaction_description: "description",
+      description: "description",
+      currency: "ticker",
+      amount: "quantity",
+      to_currency: "name", // buy side of conversion
+      to_amount: "cashAmount", // temporarily; map-rows specializes
+      native_currency: "currency",
+      native_amount: "notes", // numeric in notes path — specialized in map-rows
+      native_amount_in_usd: "ignore",
+      transaction_kind: "type",
+      transaction_hash: "ignore",
+    },
+  },
+  {
+    id: "cryptocom_transfer",
+    label: "Crypto.com (Deposit / Withdrawal / Supercharger)",
+    description:
+      "Exports wallet : Time (UTC), Coin, Deposit/Withdrawal Amount, Fee, Status",
+    aliases: {
+      time_utc: "date",
+      time: "date",
+      coin: "ticker",
+      deposit_amount: "quantity",
+      withdrawal_amount: "quantity",
+      amount: "quantity",
+      fee: "fees",
+      deposit_address: "ignore",
+      withdrawal_address: "ignore",
+      status: "notes",
+      txid: "ignore",
+      tx_id: "ignore",
+    },
+  },
+  {
+    id: "nexo",
+    label: "Nexo",
+    description:
+      "Nexo Transactions CSV (Transaction, Type, Input/Output Currency & Amount, Date / Time)",
+    aliases: {
+      transaction: "ignore",
+      type: "type",
+      currency: "ticker",
+      amount: "quantity",
+      input_currency: "ticker",
+      input_amount: "quantity",
+      output_currency: "name",
+      output_amount: "cashAmount",
+      usd_equivalent: "ignore",
+      details: "description",
+      outstanding_loan: "ignore",
+      date_time: "date",
+      date_time_utc: "date",
+      date: "date",
+    },
+  },
+  {
+    id: "ascendex",
+    label: "AscendEX (staking / DeFi rewards)",
+    description:
+      "Exports staking/DeFi : Time, Type, Projects, Token, Size / Reward, Status",
+    aliases: {
+      time: "date",
+      type: "type",
+      projects: "description",
+      token: "ticker",
+      size: "quantity",
+      farming_balance: "ignore",
+      income_type: "notes",
+      reward: "quantity",
+      status: "notes",
     },
   },
   {
@@ -420,7 +548,12 @@ const TYPE_ALIASES: Record<string, TxType> = {
   apprendre: "REWARD",
   "learning reward": "REWARD",
   "rewards income": "REWARD",
-  airdrop: "REWARD",
+  "staking income": "REWARD",
+  "staking reward": "REWARD",
+  "inflation reward": "REWARD",
+  airdrop: "AIRDROP",
+  "air drop": "AIRDROP",
+  "claim airdrop": "AIRDROP",
   reception: "APPORT",
   recompense: "REWARD",
   frais: "FRAIS",
@@ -443,12 +576,59 @@ const TYPE_ALIASES: Record<string, TxType> = {
   send: "RETRAIT",
   sent: "RETRAIT",
   card_payment: "RETRAIT",
+  // Ledger Live Operation Type (fees déjà mappé → FRAIS plus haut)
+  in: "APPORT", // réception crypto → REWARD dans map-rows
+  out: "RETRAIT", // envoi crypto → VENTE dans map-rows
+  delegate: "TRANSFERT_TITRE",
+  undelegate: "TRANSFERT_TITRE",
+  redelegate: "TRANSFERT_TITRE",
+  unbond: "TRANSFERT_TITRE",
+  bond: "TRANSFERT_TITRE",
+  withdraw_unbonded: "APPORT",
+  opt_in: "TRANSFERT_TITRE",
+  opt_out: "TRANSFERT_TITRE",
+  lock: "TRANSFERT_TITRE",
+  chill: "TRANSFERT_TITRE",
+  nominate: "TRANSFERT_TITRE",
   transfert: "TRANSFERT_CASH",
   transfer: "TRANSFERT_CASH",
   // Revolut / Coinbase specials handled in map-rows when possible
   exchange: "ACHAT",
   convert: "ACHAT",
   conversion: "ACHAT",
+  // Crypto.com Transaction Kind
+  crypto_purchase: "ACHAT",
+  crypto_viban_exchange: "ACHAT",
+  crypto_exchange: "ACHAT",
+  crypto_withdrawal: "RETRAIT",
+  crypto_deposit: "APPORT",
+  crypto_earn_program_created: "TRANSFERT_TITRE",
+  crypto_earn_program_withdrawn: "TRANSFERT_TITRE",
+  crypto_earn_interest_paid: "INTERET",
+  referral_card_cashback: "REWARD",
+  referral_gift: "REWARD",
+  referral_bonus: "REWARD",
+  mco_stake_reward: "REWARD",
+  admin_wallet_credited: "APPORT",
+  admin_wallet_deducted: "RETRAIT",
+  finance_deposit: "APPORT",
+  finance_withdraw: "RETRAIT",
+  viban_purchase: "ACHAT",
+  viban_deposit: "APPORT",
+  dust_conversion_debited: "VENTE",
+  dust_conversion_credited: "ACHAT",
+  // Nexo
+  lockingtermdeposit: "TRANSFERT_CASH",
+  exchangedepositedon: "ACHAT",
+  deposittoexchange: "APPORT",
+  transferin: "APPORT",
+  transferout: "RETRAIT",
+  interestadditional: "INTERET",
+  fixedterminterest: "INTERET",
+  // AscendEX
+  compound: "REWARD",
+  regular_redemption: "RETRAIT",
+  regularredemption: "RETRAIT",
 };
 
 export function mapTxType(raw: string | undefined | null, side?: string | null): TxType | null {
@@ -463,10 +643,20 @@ export function mapTxType(raw: string | undefined | null, side?: string | null):
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+  // Cas composés Revolut Invest — avant le match « includes » des alias courts
+  // (sinon "reward" capture "STOCKS PROMOTION REWARD", "buy" capture "BUY - MARKET" OK)
+  if (/clawback/i.test(key)) return "RETRAIT";
+  if (/stocks?\s*promotion|promotion\s*reward/i.test(key)) return "APPORT";
+  if (/cash\s*top.?up|^top.?up$/i.test(key)) return "APPORT";
+  if (/cash\s*withdraw/i.test(key)) return "RETRAIT";
+  if (/^buy(\s|$|-)/i.test(key)) return "ACHAT";
+  if (/^sell(\s|$|-)/i.test(key)) return "VENTE";
+
   if (TYPE_ALIASES[key]) return TYPE_ALIASES[key];
-  // Contains
-  for (const [k, v] of Object.entries(TYPE_ALIASES)) {
-    if (key.includes(k)) return v;
+  // Contains — trier par longueur décroissante pour éviter "fee" avant "fees" etc.
+  const aliasKeys = Object.keys(TYPE_ALIASES).sort((a, b) => b.length - a.length);
+  for (const k of aliasKeys) {
+    if (key.includes(k)) return TYPE_ALIASES[k]!;
   }
   // Exact enum
   const upper = raw.trim().toUpperCase();
@@ -489,12 +679,13 @@ export function mapTxType(raw: string | undefined | null, side?: string | null):
     return upper as TxType;
   }
   // Boursorama / Revolut / Coinbase free-text labels
-  if (/achat|souscription|execution d.achat|bought|buy /i.test(key)) return "ACHAT";
-  if (/vente|cession|sold|sell /i.test(key)) return "VENTE";
+  if (/achat|souscription|execution d.achat|bought/i.test(key)) return "ACHAT";
+  if (/vente|cession|sold/i.test(key)) return "VENTE";
   if (/dividende|dividend/i.test(key)) return "DIVIDENDE";
   if (/coupon/i.test(key)) return "COUPON";
   // Staking / airdrop / learning reward → REWARD (pas INTERET cash, pas ACHAT)
-  if (/reward|staking|recompense|apprendre|airdrop/i.test(key)) return "REWARD";
+  if (/air\s*drop|airdrop/i.test(key)) return "AIRDROP";
+  if (/reward|staking|recompense|apprendre/i.test(key)) return "REWARD";
   if (/interest|interet/i.test(key)) return "INTERET";
   if (/top.?up|deposit|receiv|reception|funding/i.test(key)) return "APPORT";
   if (/withdraw|sent?|card.?payment/i.test(key)) return "RETRAIT";
@@ -513,6 +704,58 @@ export function detectFormatFromHeaders(headers: string[]): ImportFormatId {
     needles.some((n) => keys.some((k) => k.includes(n) || k === n));
 
   if (has("pair") && (has("side") || has("executed"))) return "binance";
+  // Ledger Live operations export
+  if (
+    hasAny("operation_date", "operation_type", "currency_ticker") &&
+    hasAny("operation_amount", "operation_fees") &&
+    (hasAny("account_name", "account_xpub") || hasAny("countervalue_at_operation_date"))
+  ) {
+    return "ledger_live";
+  }
+  if (
+    has("operation_type") &&
+    has("currency_ticker") &&
+    hasAny("operation_date", "operation_hash")
+  ) {
+    return "ledger_live";
+  }
+  // Crypto.com App (transaction_kind signature)
+  if (
+    hasAny("transaction_kind") ||
+    (hasAny("timestamp_utc", "timestamp") &&
+      hasAny("native_amount") &&
+      hasAny("transaction_description", "description") &&
+      hasAny("currency") &&
+      hasAny("amount"))
+  ) {
+    // Ne pas confondre avec Coinbase (quantity_transacted / spot_price)
+    if (
+      !hasAny("quantity_transacted", "spot_price_at_transaction", "transaction_type")
+    ) {
+      return "cryptocom";
+    }
+  }
+  // Crypto.com Deposit / Withdrawal
+  if (
+    hasAny("time_utc", "time") &&
+    has("coin") &&
+    hasAny("deposit_amount", "withdrawal_amount")
+  ) {
+    return "cryptocom_transfer";
+  }
+  // Nexo
+  if (
+    has("type") &&
+    hasAny("date_time", "date_time_utc") &&
+    (hasAny("input_currency", "input_amount") ||
+      (has("currency") && has("amount") && hasAny("transaction")))
+  ) {
+    return "nexo";
+  }
+  // AscendEX staking
+  if (has("token") && has("time") && hasAny("projects", "farming_balance", "reward")) {
+    return "ascendex";
+  }
   if (
     has("timestamp") ||
     has("transaction_type") ||
@@ -524,6 +767,15 @@ export function detectFormatFromHeaders(headers: string[]): ImportFormatId {
   if (
     (has("started_date") || has("completed_date") || has("product")) &&
     (has("description") || has("type"))
+  ) {
+    return "revolut";
+  }
+  // Export Invest Revolut : Date, Ticker, Type, Quantity, Price per share, Total Amount
+  if (
+    has("price_per_share") &&
+    has("ticker") &&
+    has("date") &&
+    hasAny("type", "total_amount")
   ) {
     return "revolut";
   }

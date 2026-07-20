@@ -53,7 +53,7 @@ const METRICS: { id: EvolutionMetric; label: string; title: string }[] = [
   {
     id: "cumul",
     label: "Cumulée",
-    title: "Niveau de patrimoine Ã  chaque période",
+    title: "Niveau de patrimoine à chaque période",
   },
   {
     id: "period",
@@ -462,9 +462,21 @@ export function PortfolioEvolutionPanel({
       >
         <div className="absolute inset-0">
         {loading ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-4">
-            <Skeleton className="h-32 w-full max-w-md rounded-[var(--radius-lg)]" />
-            <p className="text-meta">Chargement de l&apos;historique…</p>
+          <div
+            className="flex h-full flex-col gap-3 px-2 py-2"
+            data-testid="evolution-loading-skeleton"
+            aria-busy="true"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <Skeleton className="h-3 w-28" />
+              <Skeleton className="h-6 w-20 rounded-full" />
+            </div>
+            <Skeleton className="min-h-[10rem] w-full flex-1 rounded-[var(--radius-lg)]" />
+            <div className="flex gap-2">
+              <Skeleton className="h-2 w-14" />
+              <Skeleton className="h-2 w-16" />
+              <Skeleton className="h-2 w-12" />
+            </div>
           </div>
         ) : empty ? (
           <EmptyPlaceholder

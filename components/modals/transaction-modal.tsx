@@ -26,6 +26,9 @@ type PlatformOption = {
   label: string;
   subtitle?: string;
   logoUrl?: string | null;
+  isNew?: boolean;
+  isCatalog?: boolean;
+  preset?: import("@/app/lib/platforms/presets").PlatformPreset;
 };
 
 type FieldVisibility = {
@@ -44,7 +47,7 @@ function visibilityForType(txType: string): FieldVisibility {
   const t = String(txType || "");
   const isIncome = ["DIVIDENDE", "COUPON", "LOYER", "INTERET"].includes(t);
   const isTrade = t === "ACHAT" || t === "VENTE";
-  const isReward = t === "REWARD";
+  const isReward = t === "REWARD" || t === "AIRDROP";
   const isCashMove = t === "APPORT" || t === "RETRAIT";
   const isFees = t === "FRAIS";
   const isSplit = t === "SPLIT";
@@ -60,7 +63,9 @@ function visibilityForType(txType: string): FieldVisibility {
       incomeFiscal: false,
       quantityLabel: "Quantité reçue",
       typeHint:
-        "Staking / reward / airdrop : tokens reçus sans dépense. Quantité en portefeuille, coût d’acquisition 0 (pas un achat). Prix unitaire optionnel = valeur marché à la réception (info).",
+        t === "AIRDROP"
+          ? "Airdrop : tokens reçus gratuitement. Quantité en portefeuille, coût d’acquisition 0. Prix unitaire optionnel = valeur marché à la réception (info)."
+          : "Staking / reward : tokens reçus sans dépense. Quantité en portefeuille, coût d’acquisition 0 (pas un achat). Prix unitaire optionnel = valeur marché à la réception (info).",
     };
   }
   if (isSplit) {
@@ -225,6 +230,8 @@ export function TransactionModal({
   onSubmit,
   onPlatformLabelChange,
   onAssetLabelChange,
+  onRequestCreatePlatform,
+  onSelectCatalogPlatform,
 }: {
   open: boolean;
   editing: boolean;
@@ -238,6 +245,10 @@ export function TransactionModal({
   onSubmit: (values: CreateTransactionForm) => void;
   onPlatformLabelChange: (label: string) => void;
   onAssetLabelChange: (label: string) => void;
+  /** Ouvre la création contextuelle (＋ Autre) */
+  onRequestCreatePlatform?: (prefill?: string) => void;
+  /** Sélection d’un courtier du catalogue → upsert + sélection */
+  onSelectCatalogPlatform?: (opt: PlatformOption) => void | Promise<void>;
 }) {
   const currency = form.watch("currency") || "EUR";
   const fxRateToEur = form.watch("fxRateToEur") || "1";
@@ -456,23 +467,39 @@ export function TransactionModal({
                 value={platformLabel}
                 testId="tx-platform"
                 allowCustom={false}
-                placeholder="Rechercher une plateforme…"
+                showCreateOption
+                placeholder="Boursorama, Binance, Trade Republic…"
                 options={platformOptions}
                 onValueChange={onPlatformLabelChange}
                 onSelect={(sel) => {
+                  if ("create" in sel && sel.create) {
+                    onRequestCreatePlatform?.(sel.prefill);
+                    return;
+                  }
                   if ("custom" in sel && sel.custom) return;
                   if ("value" in sel) {
-                    form.setValue("platformId", sel.value);
+                    // Catalogue courtier → création auto avec logo
+                    if (
+                      sel.isCatalog ||
+                      String(sel.value).startsWith("catalog:")
+                    ) {
+                      void onSelectCatalogPlatform?.(sel);
+                      onPlatformLabelChange(sel.label);
+                      return;
+                    }
+                    form.setValue("platformId", sel.value, {
+                      shouldValidate: true,
+                    });
                     onPlatformLabelChange(sel.label);
                   }
                 }}
               />
-              {platformsEmpty && (
-                <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                  Aucune plateforme — créez-en une dans l&apos;onglet
-                  Plateformes.
-                </p>
-              )}
+              <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+                Suggestions avec logos (Boursorama, Binance, IBKR…).{" "}
+                {platformsEmpty
+                  ? "Ou ＋ Autre pour une plateforme libre."
+                  : "＋ Autre en bas de liste si besoin."}
+              </p>
             </Field>
           </div>
           <p

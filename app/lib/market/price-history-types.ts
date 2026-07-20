@@ -32,7 +32,7 @@ export type PriceHistoryResult = {
   /** Resolution of each bar (15m, 1h, 4h, 1d, 1wk) */
   barInterval: PriceBarInterval;
   currency: string;
-  source: "db" | "yahoo" | "mock";
+  source: "db" | "yahoo" | "coingecko" | "mock";
   points: PriceHistoryPoint[];
   /**
    * Bornes de fetch réelles (ISO).
@@ -55,28 +55,22 @@ export function parseHistoryRange(raw: string | null): PriceHistoryRange {
 }
 
 /**
- * Bar interval rules:
- * - 7d  → 15m
- * - 1m  → 1h
- * - 3m  → 4h
- * - YTD → adapts like the fixed ranges based on days elapsed this year
- * - 1y  → 1d
- * - 5y  → 1wk
- * - all → 1wk
+ * Bar interval rules (spec produit) :
+ * - 7d  → 4h
+ * - 1m, 3m, ytd, 1y → 1d (quotidien)
+ * - 5y, all → 1wk (agrégé ; « mensuel » via 1wk dense + label)
  */
 export function barIntervalForRange(range: PriceHistoryRange, now = new Date()): PriceBarInterval {
-  if (range === "7d") return "15m";
-  if (range === "1m") return "1h";
-  if (range === "3m") return "4h";
-  if (range === "1y") return "1d";
-  if (range === "5y") return "1wk";
-  if (range === "all") return "1wk";
-  // YTD: same steps as the other ranges
+  if (range === "7d") return "4h";
+  if (range === "1m" || range === "3m" || range === "1y") return "1d";
+  if (range === "5y" || range === "all") return "1wk";
+  // YTD : quotidien dès que > 7j
   const start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-  const days = Math.max(1, (now.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
-  if (days <= 7) return "15m";
-  if (days <= 31) return "1h";
-  if (days <= 93) return "4h";
+  const days = Math.max(
+    1,
+    (now.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)
+  );
+  if (days <= 7) return "4h";
   return "1d";
 }
 

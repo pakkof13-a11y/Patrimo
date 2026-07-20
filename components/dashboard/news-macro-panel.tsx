@@ -15,7 +15,11 @@ import type {
   MacroImpact,
   NewsItem,
 } from "@/app/lib/news/service";
-import { earningsTimingLabel } from "@/app/lib/news/service";
+import {
+  compareActualToConsensus,
+  earningsTimingLabel,
+  newsSourceLogoUrl,
+} from "@/app/lib/news/service";
 import {
   filterEarningsByRelease,
   filterMacroByRelease,
@@ -77,7 +81,8 @@ export function NewsMacroPanel({
   /** Conservé pour API — densifie le contenu des listes */
   compact?: boolean;
 }) {
-  const newsLimit = compact ? 3 : 4;
+  // Min. 5 actualités (demande produit) ; compact garde 5 aussi pour densité
+  const newsLimit = 5;
   const listLimit = compact ? 3 : INITIAL;
 
   const [newsMore, setNewsMore] = useState(false);
@@ -104,16 +109,21 @@ export function NewsMacroPanel({
     queryKey: ["news", newsLimit],
     queryFn: () =>
       fetchJson<{ news: NewsItem[]; source: string }>(
-        `/api/news?limit=${newsLimit}`
+        `/api/news?limit=${Math.max(newsLimit, 8)}`
       ),
-    staleTime: 5 * 60_000,
+    // Actualités : rafraîchir souvent (Finnhub change)
+    staleTime: 2 * 60_000,
+    refetchInterval: 5 * 60_000,
   });
 
   const macroQ = useQuery({
     queryKey: ["macro-calendar"],
     queryFn: () =>
-      fetchJson<{ events: MacroEvent[]; date: string }>("/api/macro"),
+      fetchJson<{ events: MacroEvent[]; date: string; source?: string }>(
+        "/api/macro"
+      ),
     staleTime: 5 * 60_000,
+    refetchInterval: 10 * 60_000,
   });
 
   const earnQ = useQuery({
@@ -140,7 +150,9 @@ export function NewsMacroPanel({
     [earnQ.data?.events, earnFilter]
   );
 
-  const newsVisible = newsMore ? newsAll : newsAll.slice(0, listLimit);
+  // Toujours afficher au moins 5 actus si disponibles
+  const newsCap = Math.max(5, listLimit);
+  const newsVisible = newsMore ? newsAll : newsAll.slice(0, newsCap);
   const macroVisible = macroMore ? macroAll : macroAll.slice(0, listLimit);
   const earnVisible = earnMore ? earnAll : earnAll.slice(0, listLimit);
 
@@ -171,7 +183,15 @@ export function NewsMacroPanel({
             />
             <div className="min-w-0">
               <h3 className="text-title">Actualités</h3>
-              <p className="text-meta">Flux économique</p>
+              <p className="text-meta">
+                {newsQ.data?.source === "google-fr"
+                  ? "Sources FR prioritaires"
+                  : newsQ.data?.source === "mixed"
+                    ? "Sources FR + marché"
+                    : newsQ.data?.source === "finnhub"
+                      ? "Flux marché (live)"
+                      : "Flux économique"}
+              </p>
             </div>
           </header>
 
@@ -196,13 +216,21 @@ export function NewsMacroPanel({
             ) : (
               <ul className="divide-y divide-[var(--border)]">
                 {newsVisible.map((n) => (
-                  <li key={n.id} className="list-row-interactive py-1.5 first:pt-0 last:pb-0">
+                  <li
+                    key={n.id}
+                    className="list-row-interactive py-1.5 first:pt-0 last:pb-0"
+                  >
                     <a
                       href={n.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="group flex items-start gap-1.5 rounded-[var(--radius-sm)] px-0.5 focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                      className="group flex items-start gap-2 rounded-[var(--radius-sm)] px-0.5 focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
                     >
+                      <NewsSourceLogo
+                        source={n.source}
+                        logoUrl={n.sourceLogoUrl}
+                        articleUrl={n.url}
+                      />
                       <span className="min-w-0 flex-1 text-xs font-medium leading-snug text-[var(--foreground)] group-hover:text-[var(--primary)]">
                         {n.title}
                       </span>
@@ -211,7 +239,7 @@ export function NewsMacroPanel({
                         aria-hidden
                       />
                     </a>
-                    <p className="text-meta mt-0.5">
+                    <p className="text-meta mt-0.5 pl-8">
                       {n.source}
                       <span className="mx-1 opacity-40">·</span>
                       <time dateTime={n.publishedAt}>
@@ -224,7 +252,7 @@ export function NewsMacroPanel({
             )}
           </div>
 
-          {newsAll.length > listLimit && (
+          {newsAll.length > newsCap && (
             <button
               type="button"
               className="mt-2 self-start text-[11px] font-medium text-[var(--primary)] hover:underline"
@@ -247,7 +275,13 @@ export function NewsMacroPanel({
             />
             <div className="min-w-0 flex-1">
               <h3 className="text-title">Macroéconomie</h3>
-              <p className="text-meta">Indicateurs clés</p>
+              <p className="text-meta">
+                {macroQ.data &&
+                "source" in (macroQ.data as { source?: string }) &&
+                (macroQ.data as { source?: string }).source === "forexfactory"
+                  ? "Calendrier du jour (live)"
+                  : "Indicateurs du jour"}
+              </p>
             </div>
           </header>
 
@@ -302,16 +336,12 @@ export function NewsMacroPanel({
                     >
                       {IMPACT_LABEL[e.impact]}
                     </span>
-                    {(e.actual || e.forecast) && (
-                      <span className="w-full pl-12 text-[10px] text-[var(--muted-foreground)]">
-                        {e.actual
-                          ? `Réel ${e.actual}`
-                          : e.forecast
-                            ? `Cons. ${e.forecast}`
-                            : ""}
-                        {e.actual && e.forecast ? ` · cons. ${e.forecast}` : ""}
-                      </span>
-                    )}
+                    <MacroFigures
+                      previous={e.previous}
+                      forecast={e.forecast}
+                      actual={e.actual}
+                      mode={macroFilter}
+                    />
                   </li>
                 ))}
               </ul>
@@ -393,15 +423,24 @@ export function NewsMacroPanel({
                     )}
                     data-in-portfolio={e.inPortfolio ? "true" : "false"}
                   >
-                    <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
                         {clockTime(e.time)}
                       </span>
+                      <CountryFlag
+                        code={e.countryCode || "us"}
+                        showCode
+                      />
+                      <CompanyLogo
+                        src={e.logoUrl}
+                        name={e.companyName}
+                        ticker={e.ticker}
+                      />
                       <span className="min-w-0 flex-1">
-                        <span className="font-medium text-[var(--foreground)]">
+                        <span className="block truncate font-medium leading-tight text-[var(--foreground)]">
                           {e.companyName}
                         </span>
-                        <span className="ml-1.5 font-mono text-[10px] text-[var(--muted-foreground)]">
+                        <span className="font-mono text-[10px] leading-tight text-[var(--muted-foreground)]">
                           {e.ticker}
                         </span>
                       </span>
@@ -414,15 +453,11 @@ export function NewsMacroPanel({
                         {earningsTimingLabel(e.timing)}
                       </span>
                     </div>
-                    {(e.epsEstimate || e.epsActual) && (
-                      <p className="mt-0.5 pl-12 text-[10px] text-[var(--muted-foreground)]">
-                        {e.epsActual
-                          ? `EPS ${e.epsActual}`
-                          : e.epsEstimate
-                            ? `EPS att. ${e.epsEstimate}`
-                            : ""}
-                      </p>
-                    )}
+                    <EarningsFigures
+                      estimate={e.epsEstimate}
+                      actual={e.epsActual}
+                      mode={earnFilter}
+                    />
                   </li>
                 ))}
               </ul>
@@ -442,6 +477,166 @@ export function NewsMacroPanel({
         </article>
       </div>
     </section>
+  );
+}
+
+const RESULT_COLOR = {
+  above: "text-emerald-700 dark:text-emerald-300 font-semibold",
+  below: "text-red-700 dark:text-red-300 font-semibold",
+  equal: "text-sky-700 dark:text-sky-300 font-semibold",
+  na: "text-[var(--muted-foreground)]",
+} as const;
+
+/** Ligne Préc. / Cons. / Rés. pour macro (publiées = 3 champs + couleur sur Rés.) */
+function MacroFigures({
+  previous,
+  forecast,
+  actual,
+  mode,
+}: {
+  previous?: string | null;
+  forecast?: string | null;
+  actual?: string | null;
+  mode: MarketReleaseFilter;
+}) {
+  const hasAny = previous || forecast || actual;
+  if (!hasAny) return null;
+
+  if (mode === "upcoming") {
+    // À venir : consensus + précédent si dispo (pas de résultat)
+    if (!forecast && !previous) return null;
+    return (
+      <span className="w-full pl-12 text-[10px] text-[var(--muted-foreground)]">
+        {previous ? (
+          <>
+            <span className="font-medium">Préc.</span> {previous}
+          </>
+        ) : null}
+        {previous && forecast ? " · " : null}
+        {forecast ? (
+          <>
+            <span className="font-medium">Cons.</span> {forecast}
+          </>
+        ) : null}
+      </span>
+    );
+  }
+
+  // Publiées : toujours Préc. · Cons. · Rés. (— si manquant)
+  const cmp = compareActualToConsensus(actual, forecast);
+  return (
+    <span className="w-full pl-12 text-[10px] tabular-nums text-[var(--muted-foreground)]">
+      <span className="font-medium">Préc.</span> {previous?.trim() || "—"}
+      {" · "}
+      <span className="font-medium">Cons.</span> {forecast?.trim() || "—"}
+      {" · "}
+      <span className="font-medium">Rés.</span>{" "}
+      <span className={RESULT_COLOR[cmp]}>{actual?.trim() || "—"}</span>
+    </span>
+  );
+}
+
+function NewsSourceLogo({
+  source,
+  logoUrl,
+  articleUrl,
+}: {
+  source: string;
+  logoUrl?: string | null;
+  articleUrl?: string | null;
+}) {
+  const [failed, setFailed] = useState(false);
+  const src = logoUrl || newsSourceLogoUrl(source, articleUrl);
+  if (failed) {
+    return (
+      <span
+        className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--muted)] text-[8px] font-bold uppercase text-[var(--muted-foreground)]"
+        aria-hidden
+        title={source}
+      >
+        {(source || "?").slice(0, 1)}
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      width={20}
+      height={20}
+      loading="lazy"
+      decoding="async"
+      title={source}
+      className="mt-0.5 h-5 w-5 shrink-0 rounded-md bg-white object-contain p-0.5 ring-1 ring-black/10 dark:bg-slate-900 dark:ring-white/15"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function CompanyLogo({
+  src,
+  name,
+  ticker,
+}: {
+  src?: string | null;
+  name: string;
+  ticker: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return (
+      <span
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--muted)] text-[9px] font-bold text-[var(--muted-foreground)]"
+        aria-hidden
+        title={name || ticker}
+      >
+        {(ticker || name || "?").slice(0, 2).toUpperCase()}
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      width={24}
+      height={24}
+      loading="lazy"
+      decoding="async"
+      title={name || ticker}
+      className="h-6 w-6 shrink-0 rounded-md bg-white object-contain p-0.5 ring-1 ring-black/10 dark:bg-slate-900 dark:ring-white/15"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function EarningsFigures({
+  estimate,
+  actual,
+  mode,
+}: {
+  estimate?: string | null;
+  actual?: string | null;
+  mode: MarketReleaseFilter;
+}) {
+  if (mode === "upcoming") {
+    if (!estimate) return null;
+    return (
+      <p className="mt-0.5 pl-12 text-[10px] text-[var(--muted-foreground)]">
+        <span className="font-medium">Cons.</span> EPS {estimate}
+      </p>
+    );
+  }
+  if (!actual && !estimate) return null;
+  const cmp = compareActualToConsensus(actual, estimate);
+  return (
+    <p className="mt-0.5 pl-12 text-[10px] tabular-nums text-[var(--muted-foreground)]">
+      <span className="font-medium">Cons.</span> {estimate?.trim() || "—"}
+      {" · "}
+      <span className="font-medium">Rés.</span>{" "}
+      <span className={RESULT_COLOR[cmp]}>{actual?.trim() || "—"}</span>
+    </p>
   );
 }
 

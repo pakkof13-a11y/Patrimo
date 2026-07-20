@@ -54,6 +54,19 @@ export const tooltipStyle = {
   fontSize: 12,
 };
 
+/** Domaine Y symétrique autour de 0 (variations +/− lisibles). */
+export function symmetricZeroDomain(
+  values: number[],
+  padRatio = 0.12
+): [number, number] {
+  let maxAbs = 0;
+  for (const v of values) {
+    if (Number.isFinite(v)) maxAbs = Math.max(maxAbs, Math.abs(v));
+  }
+  const pad = Math.max(maxAbs * (1 + padRatio), 1);
+  return [-pad, pad];
+}
+
 export function GlobalLineChart({
   data,
   baseCurrency,
@@ -65,6 +78,7 @@ export function GlobalLineChart({
   showBenchmark?: boolean;
   benchmarkName?: string;
 }) {
+  // Courbe stock : points colorés gain (hausse vs précédent) / perte
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
@@ -101,14 +115,41 @@ export function GlobalLineChart({
           name="Patrimoine"
           stroke={EVOLUTION_CHART_COLORS.total}
           strokeWidth={2.5}
-          dot={data.length <= 20 ? { r: 2.5, fill: EVOLUTION_CHART_COLORS.total } : false}
+          dot={(props: {
+            cx?: number;
+            cy?: number;
+            index?: number;
+            payload?: EvolutionSeriesPoint;
+          }) => {
+            const { cx, cy, index, payload } = props;
+            if (cx == null || cy == null || !payload || index == null) {
+              return <g />;
+            }
+            const prev = index > 0 ? data[index - 1] : null;
+            const up =
+              prev == null
+                ? true
+                : (payload.total ?? 0) >= (prev.total ?? 0);
+            const fill = up
+              ? EVOLUTION_CHART_COLORS.pos
+              : EVOLUTION_CHART_COLORS.neg;
+            return (
+              <circle
+                cx={cx}
+                cy={cy}
+                r={data.length <= 24 ? 3 : 2}
+                fill={fill}
+                stroke={fill}
+              />
+            );
+          }}
           activeDot={{ r: 5 }}
         />
         {showBenchmark && (
           <Line
             type="monotone"
             dataKey="benchmark"
-            name={benchmarkName || "RÃ©fÃ©rence"}
+            name={benchmarkName || "Référence"}
             stroke={EVOLUTION_CHART_COLORS.benchmark}
             strokeWidth={1.5}
             strokeDasharray="5 4"
@@ -120,7 +161,7 @@ export function GlobalLineChart({
   );
 }
 
-/** Colonnes cumulÃ©es (niveaux absolus) */
+/** Colonnes cumulées (niveaux absolus) — couleur gain/perte vs période précédente */
 export function GlobalColumnsChart({
   data,
   baseCurrency,
@@ -157,16 +198,29 @@ export function GlobalColumnsChart({
         <Bar
           dataKey="total"
           name="Patrimoine"
-          fill={EVOLUTION_CHART_COLORS.total}
           radius={[3, 3, 0, 0]}
           maxBarSize={32}
-        />
+        >
+          {data.map((entry, i) => {
+            const prev = i > 0 ? data[i - 1] : null;
+            const up =
+              prev == null ? true : (entry.total ?? 0) >= (prev.total ?? 0);
+            return (
+              <Cell
+                key={i}
+                fill={
+                  up ? EVOLUTION_CHART_COLORS.pos : EVOLUTION_CHART_COLORS.neg
+                }
+              />
+            );
+          })}
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
-/** PÃ©riodique colonnes : zÃ©ro central, vert + / rouge âˆ’ */
+/** Périodique colonnes : zéro central, vert + / rouge − */
 export function PeriodColumnsChart({
   data,
   baseCurrency,
@@ -174,6 +228,7 @@ export function PeriodColumnsChart({
   data: EvolutionSeriesPoint[];
   baseCurrency: string;
 }) {
+  const yDomain = symmetricZeroDomain(data.map((d) => d.chartValue ?? 0));
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
@@ -188,8 +243,15 @@ export function PeriodColumnsChart({
           tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
           tickFormatter={yTick}
           width={52}
+          domain={yDomain}
+          allowDataOverflow
         />
-        <ReferenceLine y={0} stroke="var(--foreground)" strokeOpacity={0.35} strokeWidth={1.5} />
+        <ReferenceLine
+          y={0}
+          stroke="var(--foreground)"
+          strokeOpacity={0.45}
+          strokeWidth={1.75}
+        />
         <Tooltip
           formatter={(v) => [
             formatCurrency(Number(v ?? 0), baseCurrency),
@@ -205,7 +267,11 @@ export function PeriodColumnsChart({
           {data.map((entry, i) => (
             <Cell
               key={i}
-              fill={entry.chartValue >= 0 ? EVOLUTION_CHART_COLORS.pos : EVOLUTION_CHART_COLORS.neg}
+              fill={
+                entry.chartValue >= 0
+                  ? EVOLUTION_CHART_COLORS.pos
+                  : EVOLUTION_CHART_COLORS.neg
+              }
             />
           ))}
         </Bar>
@@ -214,7 +280,7 @@ export function PeriodColumnsChart({
   );
 }
 
-/** PÃ©riodique courbe : segments verts/rouges via pos/neg + ligne zÃ©ro */
+/** Périodique courbe : 0 au milieu, points verts/rouges gain/perte */
 export function PeriodLineChart({
   data,
   baseCurrency,
@@ -226,8 +292,10 @@ export function PeriodLineChart({
   showBenchmark?: boolean;
   benchmarkName?: string;
 }) {
-  // pos/neg dÃ©jÃ  sur chartValue ; pour une courbe continue colorÃ©e on utilise chartValue unique
-  // + dots colorÃ©s, et zone de rÃ©fÃ©rence 0
+  const yDomain = symmetricZeroDomain([
+    ...data.map((d) => d.chartValue ?? 0),
+    ...data.map((d) => d.benchmarkDelta ?? 0),
+  ]);
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
@@ -242,12 +310,14 @@ export function PeriodLineChart({
           tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
           tickFormatter={yTick}
           width={52}
+          domain={yDomain}
+          allowDataOverflow
         />
         <ReferenceLine
           y={0}
           stroke="var(--foreground)"
-          strokeOpacity={0.4}
-          strokeWidth={1.5}
+          strokeOpacity={0.5}
+          strokeWidth={1.75}
         />
         <Tooltip
           formatter={(v, name) => [
@@ -263,27 +333,6 @@ export function PeriodLineChart({
         {showBenchmark && (
           <Legend wrapperStyle={{ fontSize: 11 }} iconSize={8} />
         )}
-        {/* Aires pos/neg pour lire immÃ©diatement le signe autour de zÃ©ro */}
-        <Area
-          type="monotone"
-          dataKey="pos"
-          name="+ "
-          stroke="none"
-          fill={EVOLUTION_CHART_COLORS.pos}
-          fillOpacity={0.12}
-          legendType="none"
-          isAnimationActive={false}
-        />
-        <Area
-          type="monotone"
-          dataKey="neg"
-          name="âˆ’ "
-          stroke="none"
-          fill={EVOLUTION_CHART_COLORS.neg}
-          fillOpacity={0.12}
-          legendType="none"
-          isAnimationActive={false}
-        />
         <Line
           type="monotone"
           dataKey="chartValue"
@@ -303,8 +352,12 @@ export function PeriodLineChart({
                 cx={cx}
                 cy={cy}
                 r={3.5}
-                fill={up ? EVOLUTION_CHART_COLORS.pos : EVOLUTION_CHART_COLORS.neg}
-                stroke={up ? EVOLUTION_CHART_COLORS.pos : EVOLUTION_CHART_COLORS.neg}
+                fill={
+                  up ? EVOLUTION_CHART_COLORS.pos : EVOLUTION_CHART_COLORS.neg
+                }
+                stroke={
+                  up ? EVOLUTION_CHART_COLORS.pos : EVOLUTION_CHART_COLORS.neg
+                }
               />
             );
           }}
@@ -314,7 +367,7 @@ export function PeriodLineChart({
           <Line
             type="monotone"
             dataKey="benchmarkDelta"
-            name={benchmarkName ? `Î” ${benchmarkName}` : "Î” RÃ©f."}
+            name={benchmarkName ? `Δ ${benchmarkName}` : "Δ Réf."}
             stroke={EVOLUTION_CHART_COLORS.benchmark}
             strokeWidth={1.5}
             strokeDasharray="5 4"
@@ -326,7 +379,7 @@ export function PeriodLineChart({
   );
 }
 
-/** CumulÃ© dÃ©composÃ© : positions + cash + split revenus (aires). */
+/** Cumulé décomposé : positions + cash + split revenus (aires). */
 export function DecomposedCumulAreas({
   data,
   baseCurrency,
@@ -485,19 +538,26 @@ export function DecomposedPeriodChart({
       Math.abs(p.dRents) > 0.01
   );
 
+  // Latente en premier (centrée sur le repère jour), puis les autres critères
   const series = [
-    { key: "dPositions", name: "Î” Positions", color: EVOLUTION_CHART_COLORS.positions },
-    { key: "dCash", name: "Î” Cash", color: EVOLUTION_CHART_COLORS.cash },
+    { key: "dUnrealized", name: "Δ Latente", color: EVOLUTION_CHART_COLORS.unrealized },
+    { key: "dPositions", name: "Δ Positions", color: EVOLUTION_CHART_COLORS.positions },
+    { key: "dCash", name: "Δ Cash", color: EVOLUTION_CHART_COLORS.cash },
     ...(hasSplit
       ? [
-          { key: "dDividends", name: "Î” Dividendes", color: EVOLUTION_CHART_COLORS.dividends },
-          { key: "dCoupons", name: "Î” Coupons", color: EVOLUTION_CHART_COLORS.coupons },
-          { key: "dRents", name: "Î” Loyers", color: EVOLUTION_CHART_COLORS.rents },
+          { key: "dDividends", name: "Δ Dividendes", color: EVOLUTION_CHART_COLORS.dividends },
+          { key: "dCoupons", name: "Δ Coupons", color: EVOLUTION_CHART_COLORS.coupons },
+          { key: "dRents", name: "Δ Loyers", color: EVOLUTION_CHART_COLORS.rents },
         ]
-      : [{ key: "dIncome", name: "Î” Revenus", color: EVOLUTION_CHART_COLORS.dividends }]),
-    { key: "dRealized", name: "Î” RÃ©alisÃ©", color: EVOLUTION_CHART_COLORS.realized },
-    { key: "dUnrealized", name: "Î” Latente", color: EVOLUTION_CHART_COLORS.unrealized },
+      : [{ key: "dIncome", name: "Δ Revenus", color: EVOLUTION_CHART_COLORS.dividends }]),
+    { key: "dRealized", name: "Δ Réalisé", color: EVOLUTION_CHART_COLORS.realized },
   ] as const;
+
+  const yDomain = symmetricZeroDomain(
+    data.flatMap((p) =>
+      series.map((s) => Number((p as Record<string, unknown>)[s.key] ?? 0))
+    )
+  );
 
   if (style === "line") {
     return (
@@ -514,6 +574,14 @@ export function DecomposedPeriodChart({
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
             tickFormatter={yTick}
             width={52}
+            domain={yDomain}
+            allowDataOverflow
+          />
+          <ReferenceLine
+            y={0}
+            stroke="var(--foreground)"
+            strokeOpacity={0.5}
+            strokeWidth={1.75}
           />
           <Tooltip
             formatter={(v, name) => [
@@ -539,6 +607,7 @@ export function DecomposedPeriodChart({
     );
   }
 
+  // Colonnes côte à côte (pas stack) — 0 au milieu, signe via teinte
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
@@ -553,6 +622,14 @@ export function DecomposedPeriodChart({
           tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
           tickFormatter={yTick}
           width={52}
+          domain={yDomain}
+          allowDataOverflow
+        />
+        <ReferenceLine
+          y={0}
+          stroke="var(--foreground)"
+          strokeOpacity={0.5}
+          strokeWidth={1.75}
         />
         <Tooltip
           formatter={(v, name) => [
@@ -568,9 +645,27 @@ export function DecomposedPeriodChart({
             dataKey={s.key}
             name={s.name}
             fill={s.color}
-            maxBarSize={24}
-            stackId="delta"
-          />
+            maxBarSize={18}
+            radius={[2, 2, 0, 0]}
+          >
+            {data.map((entry, i) => {
+              const raw = Number(
+                (entry as Record<string, unknown>)[s.key] ?? 0
+              );
+              const up = raw >= 0;
+              return (
+                <Cell
+                  key={i}
+                  fill={
+                    up
+                      ? s.color
+                      : EVOLUTION_CHART_COLORS.neg
+                  }
+                  fillOpacity={up ? 0.9 : 0.85}
+                />
+              );
+            })}
+          </Bar>
         ))}
       </BarChart>
     </ResponsiveContainer>

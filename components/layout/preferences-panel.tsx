@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Database,
+  ImagePlus,
   Monitor,
   Moon,
   Settings,
@@ -24,6 +25,19 @@ import {
   saveDefaultBenchmark,
   type DefaultBenchmark,
 } from "@/app/lib/portfolio/benchmark-prefs";
+import {
+  LATENT_PNL_RANGE_LABELS,
+  LATENT_PNL_RANGES,
+  loadLatentPnlRange,
+  saveLatentPnlRange,
+  type LatentPnlRange,
+} from "@/app/lib/portfolio/latent-pnl-prefs";
+import {
+  loadUserAvatarDataUrl,
+  readImageFileAsDataUrl,
+  saveUserAvatarDataUrl,
+  userInitials,
+} from "@/app/lib/ui/user-avatar-prefs";
 
 const CLEAR_CONFIRM_WORD = "SUPPRIMER";
 
@@ -81,12 +95,23 @@ function SectionTitle({
 
 /**
  * Panneau Préférences — architecture en 3 zones :
- * 1. Affichage (thème) — largeur toujours fluide, hors UI
+ * 1. Affichage (thème, avatar, P&L latent, benchmark)
  * 2. Sécurité (mot de passe) + admin
- * 3. Données / zone de danger (effacer le patrimoine)
+ * 3. Données / zone de danger
+ *
+ * - `embedded` : contenu seul (menu profil haut-droit)
+ * - `header` : bouton icône + popover
+ * - `bottom-left` : FAB (legacy, désactivé côté app)
  */
-export function PreferencesPanel() {
-  const [open, setOpen] = useState(false);
+export function PreferencesPanel({
+  placement = "header",
+  embedded = false,
+}: {
+  placement?: "bottom-left" | "header";
+  /** Contenu inline sans bouton trigger (menu compte) */
+  embedded?: boolean;
+} = {}) {
+  const [open, setOpen] = useState(embedded);
   const [dangerOpen, setDangerOpen] = useState(false);
   const [confirmChecked, setConfirmChecked] = useState(false);
   const [confirmText, setConfirmText] = useState("");
@@ -96,10 +121,15 @@ export function PreferencesPanel() {
   const [themeMounted, setThemeMounted] = useState(false);
   const [defaultBenchmark, setDefaultBenchmark] =
     useState<DefaultBenchmark>("none");
+  const [latentRange, setLatentRange] = useState<LatentPnlRange>("all");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setThemeMounted(true);
     setDefaultBenchmark(loadDefaultBenchmark());
+    setLatentRange(loadLatentPnlRange());
+    setAvatarUrl(loadUserAvatarDataUrl());
   }, []);
 
   const meQ = useQuery({
@@ -114,6 +144,7 @@ export function PreferencesPanel() {
   const isAdmin = meQ.data?.user?.role === "ADMIN";
 
   useEffect(() => {
+    if (embedded) return;
     if (!open) {
       setDangerOpen(false);
       setConfirmChecked(false);
@@ -130,7 +161,7 @@ export function PreferencesPanel() {
       window.clearTimeout(id);
       document.removeEventListener("mousedown", onDoc);
     };
-  }, [open]);
+  }, [open, embedded]);
 
   const clearMut = useMutation({
     mutationFn: () =>
@@ -190,42 +221,32 @@ export function PreferencesPanel() {
         ? theme
         : "system";
 
-  return (
-    <div ref={rootRef} className="relative">
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        onPointerDown={(e) => e.stopPropagation()}
-        title="Préférences"
-        data-testid="preferences-panel"
-        aria-expanded={open}
-        aria-label="Préférences"
-        className={cn(
-          "h-8 w-8 shrink-0 p-0 text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]",
-          "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-          open && "bg-[var(--muted)] text-[var(--primary)]"
-        )}
-      >
-        <Settings className="h-3.5 w-3.5" />
-      </Button>
+  const isFab = placement === "bottom-left" && !embedded;
+  const username =
+    meQ.data?.user?.username || meQ.data?.user?.id?.slice(0, 8) || "";
+  const initials = userInitials(username);
 
-      {open && (
-        <div
-          className={cn(
-            "absolute right-0 z-50 mt-2 w-[min(22rem,calc(100vw-1.25rem))]",
-            "max-h-[min(85vh,36rem)] overflow-y-auto overscroll-contain",
-            "rounded-[var(--radius-xl)] border border-[var(--border)] bg-[var(--card)] p-3.5 shadow-[var(--shadow-md)]"
-          )}
-          role="dialog"
-          aria-label="Préférences"
-          data-testid="preferences-dialog"
-        >
+  async function onAvatarFile(file: File | null) {
+    if (!file) return;
+    try {
+      const dataUrl = await readImageFileAsDataUrl(file);
+      saveUserAvatarDataUrl(dataUrl);
+      setAvatarUrl(dataUrl);
+      toast.success("Avatar mis à jour");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Avatar invalide");
+    }
+  }
+
+  function clearAvatar() {
+    saveUserAvatarDataUrl(null);
+    setAvatarUrl(null);
+    toast.success("Avatar retiré — initiales affichées");
+  }
+
+  const prefsBody = (
+        <>
+          {!embedded && (
           <div className="mb-3 flex items-start justify-between gap-2">
             <div>
               <h2 className="text-title flex items-center gap-2">
@@ -250,6 +271,12 @@ export function PreferencesPanel() {
               )}
             </div>
           </div>
+          )}
+          {embedded && (
+            <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+              Préférences
+            </p>
+          )}
 
           {/* ── 1. Affichage ──────────────────────────────────────────── */}
           <section
@@ -264,6 +291,71 @@ export function PreferencesPanel() {
               La largeur de l&apos;interface s&apos;adapte automatiquement à
               votre écran (mode fluide). Aucun réglage manuel requis.
             </p>
+
+            <p className="mb-1.5 text-[11px] font-medium text-[var(--foreground)]">
+              Avatar (bas à gauche)
+            </p>
+            <div
+              className="mb-3 flex items-center gap-3"
+              data-testid="avatar-settings"
+            >
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--primary)] text-sm font-bold text-white shadow">
+                {avatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={avatarUrl}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span>{initials}</span>
+                )}
+              </div>
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png"
+                  className="hidden"
+                  data-testid="avatar-file-input"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    e.target.value = "";
+                    void onAvatarFile(f);
+                  }}
+                />
+                <div className="flex flex-wrap gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="!h-7 !text-[11px]"
+                    onClick={() => avatarInputRef.current?.click()}
+                    data-testid="avatar-upload"
+                  >
+                    <ImagePlus className="mr-1 h-3 w-3" />
+                    JPG / PNG
+                  </Button>
+                  {avatarUrl && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="!h-7 !text-[11px]"
+                      onClick={clearAvatar}
+                      data-testid="avatar-clear"
+                    >
+                      Retirer
+                    </Button>
+                  )}
+                </div>
+                <p className="text-[10px] text-[var(--muted-foreground)]">
+                  {avatarUrl
+                    ? "Avatar actif — initiales masquées sur le bouton"
+                    : `Initiales « ${initials} » (2 premières lettres du compte)`}
+                </p>
+              </div>
+            </div>
 
             <p className="mb-1.5 text-[11px] font-medium text-[var(--foreground)]">
               Thème
@@ -321,6 +413,52 @@ export function PreferencesPanel() {
                 {activeTheme === "system" ? " (via le système)" : ""}
               </p>
             )}
+
+            <p className="mb-1.5 mt-4 text-[11px] font-medium text-[var(--foreground)]">
+              P&amp;L latent — période
+            </p>
+            <p className="text-meta mb-2">
+              Période affichée sur l&apos;indicateur P&amp;L latent (bandeau KPI).
+              « Tout » = latent total actuel.
+            </p>
+            <div
+              className="flex flex-nowrap gap-0.5 overflow-x-auto pb-0.5"
+              role="radiogroup"
+              aria-label="Période P&L latent"
+              data-testid="latent-pnl-range-settings"
+            >
+              {LATENT_PNL_RANGES.map((id) => {
+                const selected = latentRange === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    data-testid={`latent-pnl-range-${id}`}
+                    onClick={() => {
+                      setLatentRange(id);
+                      saveLatentPnlRange(id);
+                      try {
+                        window.dispatchEvent(
+                          new CustomEvent("patrimo:latent-pnl-range")
+                        );
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    className={cn(
+                      "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold transition",
+                      selected
+                        ? "border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)]"
+                        : "border-[var(--border)] text-[var(--muted-foreground)] hover:bg-[var(--muted)]/50"
+                    )}
+                  >
+                    {LATENT_PNL_RANGE_LABELS[id]}
+                  </button>
+                );
+              })}
+            </div>
 
             <p className="mb-1.5 mt-4 text-[11px] font-medium text-[var(--foreground)]">
               Benchmark par défaut (dashboard)
@@ -506,6 +644,89 @@ export function PreferencesPanel() {
               </div>
             )}
           </section>
+        </>
+  );
+
+  if (embedded) {
+    return (
+      <div
+        ref={rootRef}
+        className="px-0.5"
+        data-placement="embedded"
+        data-testid="preferences-panel"
+      >
+        <div data-testid="preferences-dialog">{prefsBody}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={rootRef}
+      className={cn(
+        isFab
+          ? "fixed bottom-4 left-4 z-[70] sm:bottom-5 sm:left-5"
+          : "relative"
+      )}
+      data-placement={placement}
+    >
+      <Button
+        type="button"
+        variant={isFab ? "default" : "ghost"}
+        size="sm"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        title="Préférences"
+        data-testid="preferences-panel"
+        aria-expanded={open}
+        aria-label="Préférences"
+        className={cn(
+          isFab
+            ? cn(
+                "relative h-11 w-11 overflow-hidden rounded-full p-0 shadow-lg",
+                "bg-[var(--primary)] text-white hover:opacity-95",
+                open && "ring-2 ring-teal-500/40 ring-offset-2"
+              )
+            : cn(
+                "h-8 w-8 shrink-0 p-0 text-[var(--muted-foreground)] hover:bg-[var(--muted)]",
+                open && "bg-[var(--muted)] text-[var(--primary)]"
+              )
+        )}
+      >
+        {isFab ? (
+          avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={avatarUrl}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span className="text-sm font-bold">{initials}</span>
+          )
+        ) : (
+          <Settings className="h-3.5 w-3.5" aria-hidden />
+        )}
+      </Button>
+      {open && (
+        <div
+          className={cn(
+            "z-50 w-[min(22rem,calc(100vw-1.25rem))] p-3.5",
+            "max-h-[min(85vh,36rem)] overflow-y-auto overscroll-contain",
+            "rounded-[var(--radius-xl)] border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-md)]",
+            isFab
+              ? "absolute bottom-full left-0 mb-2"
+              : "absolute right-0 mt-2"
+          )}
+          role="dialog"
+          aria-label="Préférences"
+          data-testid="preferences-dialog"
+        >
+          {prefsBody}
         </div>
       )}
     </div>

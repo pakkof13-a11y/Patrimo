@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Wallet,
   TrendingUp,
@@ -20,6 +20,13 @@ import {
   loadUiPref,
   saveUiPref,
 } from "@/app/lib/ui-preferences";
+import {
+  computePeriodLatentFromHistory,
+  LATENT_PNL_RANGE_LABELS,
+  loadLatentPnlRange,
+  type LatentPnlRange,
+} from "@/app/lib/portfolio/latent-pnl-prefs";
+import type { HistoryPoint } from "@/app/lib/types/ui";
 
 /**
  * Grille fluide des 8 KPI (CSS Grid auto-fit) :
@@ -43,19 +50,47 @@ function num(v: unknown): number {
 export function KpiStrip({
   summary,
   baseCurrency,
+  history,
   /** Masque alternatifs / épargne / passifs à zéro pour alléger le bandeau */
   smartFilter = false,
 }: {
   summary?: Record<string, string | number | unknown>;
   baseCurrency: string;
+  /** Points d’évolution pour P&L latent de période */
+  history?: HistoryPoint[];
   smartFilter?: boolean;
 }) {
   /** true = afficher les KPI (défaut) */
   const [visible, setVisible] = useState(true);
+  const [latentRange, setLatentRange] = useState<LatentPnlRange>("all");
 
   useEffect(() => {
     setVisible(loadUiPref(KPI_VISIBLE_KEY, true));
+    setLatentRange(loadLatentPnlRange());
+    function onPref() {
+      setLatentRange(loadLatentPnlRange());
+    }
+    window.addEventListener("patrimo:latent-pnl-range", onPref);
+    window.addEventListener("storage", onPref);
+    return () => {
+      window.removeEventListener("patrimo:latent-pnl-range", onPref);
+      window.removeEventListener("storage", onPref);
+    };
   }, []);
+
+  const totalLatent = num(
+    summary?.unrealizedPnlBase ?? summary?.unrealizedPnlEur
+  );
+  const periodLatent = useMemo(() => {
+    if (!history?.length) return null;
+    return computePeriodLatentFromHistory(history, latentRange);
+  }, [history, latentRange]);
+  const latentValue =
+    latentRange === "all" || periodLatent == null ? totalLatent : periodLatent;
+  const latentLabel =
+    latentRange === "all"
+      ? "P&L latent"
+      : `P&L latent (${LATENT_PNL_RANGE_LABELS[latentRange]})`;
 
   function toggleVisible() {
     setVisible((v) => {
@@ -79,7 +114,10 @@ export function KpiStrip({
   const showLiab = !smartFilter || Math.abs(liab) > 1e-6;
 
   return (
-    <div className="w-full min-w-0 space-y-2" data-testid="kpi-strip">
+    <div
+      className="w-full min-w-0 space-y-2.5 pb-0.5"
+      data-testid="kpi-strip"
+    >
       <div className="flex items-center justify-between gap-2">
         <p className="text-label hidden sm:block">Indicateurs patrimoniaux</p>
         <button
@@ -126,21 +164,13 @@ export function KpiStrip({
             icon={<TrendingUp className="h-4 w-4" />}
             label={
               <span className="inline-flex items-center gap-1">
-                P&amp;L latent
+                {latentLabel}
                 <FinanceTip term="P&L latent" />
               </span>
             }
-            value={formatCurrency(
-              String(
-                summary?.unrealizedPnlBase ?? summary?.unrealizedPnlEur ?? 0
-              ),
-              baseCurrency
-            )}
-            tone={
-              num(summary?.unrealizedPnlBase ?? summary?.unrealizedPnlEur) >= 0
-                ? "up"
-                : "down"
-            }
+            value={formatCurrency(String(latentValue), baseCurrency)}
+            tone={latentValue >= 0 ? "up" : "down"}
+            testId="kpi-latent"
           />
           <Kpi
             icon={<TrendingUp className="h-4 w-4" />}

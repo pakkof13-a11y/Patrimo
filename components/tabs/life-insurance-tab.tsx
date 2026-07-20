@@ -22,7 +22,7 @@ const AV_SUBTYPE_RANK = new Map(
 
 /** Presets « Courtier en assurance vie » triés par sous-catégorie puis A–Z */
 function assuranceVieComboboxOptions(): PlatformComboboxOption[] {
-  return PLATFORM_PRESETS.filter((p) => p.type === "ASSURANCE_VIE")
+  return PLATFORM_PRESETS.filter((p) => p.types.includes("ASSURANCE_VIE"))
     .slice()
     .sort((a, b) => {
       const ra =

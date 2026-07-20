@@ -54,11 +54,13 @@ export const TRANSACTION_TYPES = {
   COUPON: "Coupon",
   LOYER: "Loyer perçu",
   INTERET: "Intérêts",
-  /** Réception gratuite (staking, airdrop…) — +qty, coût 0, pas un achat. */
+  /** Réception gratuite (staking…) — +qty, coût 0, pas un achat. */
   REWARD: "Staking / reward",
+  /** Airdrop token — +qty, coût 0 (même ledger que REWARD). */
+  AIRDROP: "Airdrop",
   FRAIS: "Frais / Commission",
-  APPORT: "Apport cash banque",
-  RETRAIT: "Retrait cash banque",
+  APPORT: "Dépôt",
+  RETRAIT: "Retrait",
   TRANSFERT_CASH: "Transfert cash",
   TRANSFERT_TITRE: "Transfert titres",
   /** Ratio dans quantité (2 = doublement de titres, CUMP / 2). */
@@ -74,35 +76,46 @@ export const PRICE_PROVIDERS = {
   MANUAL: "Valorisation manuelle",
 } as const;
 
-/** Banks offered in comptes courants dropdown */
+/**
+ * Banques / fintechs — onglet comptes courants.
+ * N26 uniquement ici (pas de PEA/CTO → hors PLATFORM_PRESETS).
+ * Banques PEA/CTO restent listées pour les liquidités (doublon intentionnel
+ * avec le catalogue plateformes, usages distincts).
+ * Tri alphabétique + « Autre » en fin.
+ */
 export const BANK_OPTIONS = [
-  "Revolut",
-  "Hello Bank",
-  "N26",
-  "BoursoBank",
-  "La Banque Postale",
-  "CIC",
-  "Nickel",
-  "Monabanq",
-  "Sumeria",
-  "BNP Paribas",
-  "Société Générale",
-  "Crédit Agricole",
-  "Caisse d'Épargne",
   "Banque Populaire",
-  "LCL",
+  "BforBank",
+  "BNP Paribas",
+  "BoursoBank",
+  "Caisse d'Épargne",
+  "CIC",
+  "Crédit Agricole",
   "Crédit Mutuel",
   "Fortuneo",
-  "BforBank",
+  "Hello Bank",
+  "La Banque Postale",
+  "LCL",
+  "Monabanq",
+  "N26",
+  "Nickel",
+  "Revolut",
+  "Société Générale",
+  "Sumeria",
   "Autre",
 ] as const;
 
-/** Prêteurs / banques pour l'onglet Passifs (crédits) — uniques par key, tri A–Z sur name */
+/**
+ * Prêteurs / banques pour l'onglet Passifs (crédits uniquement).
+ * Ne remonte PAS dans PLATFORM_PRESETS.
+ * Uniques par key, tri A–Z sur name.
+ */
 const LIABILITY_LENDER_SEED: { key: string; name: string }[] = [
   { key: "BANQUE_POPULAIRE", name: "Banque Populaire" },
   { key: "BFORBANK", name: "BforBank" },
   { key: "BNP_PARIBAS", name: "BNP Paribas" },
   { key: "BOURSOBANK", name: "BoursoBank" },
+  { key: "BPIFRANCE", name: "Bpifrance" },
   { key: "CAISSE_EPARGNE", name: "Caisse d'Épargne" },
   { key: "CARREFOUR_BANQUE", name: "Carrefour Banque" },
   { key: "CCF", name: "CCF" },
@@ -112,10 +125,14 @@ const LIABILITY_LENDER_SEED: { key: string; name: string }[] = [
   { key: "CREDIT_AGRICOLE", name: "Crédit Agricole" },
   { key: "CREDIT_FONCIER", name: "Crédit Foncier" },
   { key: "CREDIT_MUTUEL", name: "Crédit Mutuel" },
+  { key: "DOMOFINANCE", name: "Domofinance" },
   { key: "FLOA_BANK", name: "FLOA Bank" },
   { key: "FORTUNEO", name: "Fortuneo" },
   { key: "FRANFINANCE", name: "Franfinance" },
+  { key: "GE_MONEY_BANK", name: "GE Money Bank" },
   { key: "HELLO_BANK", name: "Hello Bank!" },
+  { key: "HSBC_FRANCE", name: "HSBC France" },
+  { key: "ING", name: "ING" },
   { key: "LA_BANQUE_POSTALE", name: "La Banque Postale" },
   { key: "LCL", name: "LCL" },
   { key: "MONABANQ", name: "Monabanq" },
@@ -161,10 +178,10 @@ export const ADMIN_EMAIL = "admin@patrimo.local";
 
 /**
  * Intervalle auto-refresh des prix (onglet leader, page visible uniquement).
- * 90 s : bon compromis fraîcheur vs charge providers / multi-onglets.
+ * 60 s : fraîcheur correcte vs charge providers / multi-onglets.
  * Voir docs/perf-refresh.md
  */
-export const PRICE_AUTO_REFRESH_MS = 90_000;
+export const PRICE_AUTO_REFRESH_MS = 60_000;
 
 /** Pause de base après échecs consécutifs (backoff exponentiel plafonné). */
 export const PRICE_REFRESH_BACKOFF_BASE_MS = 60_000;

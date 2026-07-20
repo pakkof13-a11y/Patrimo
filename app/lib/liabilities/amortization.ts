@@ -221,3 +221,194 @@ export function projectEndDate(
   if (months == null) return null;
   return addMonthsClamped(from, months);
 }
+
+/** Progression de remboursement : 0–100 (% du capital initial déjà remboursé). */
+export function repaymentProgressPct(
+  initial: DecimalInput,
+  remaining: DecimalInput
+): number {
+  const i = d(initial);
+  if (i.lte(0)) return 0;
+  const rem = d(remaining);
+  if (rem.lte(0)) return 100;
+  if (rem.gte(i)) return 0;
+  const paid = i.minus(rem);
+  return Math.min(100, Math.max(0, paid.div(i).times(100).toNumber()));
+}
+
+/**
+ * Prochaine date d’échéance (jour de prélèvement) strictement après lastApplied
+ * (ou ≥ start / aujourd’hui).
+ */
+export function nextPaymentDueDate(opts: {
+  paymentDay: number | null | undefined;
+  startDate: Date | null;
+  endDate: Date | null;
+  lastPaymentAppliedAt: Date | null;
+  now?: Date;
+}): Date | null {
+  if (opts.paymentDay == null || opts.paymentDay < 1) return null;
+  const paymentDay = Math.max(1, Math.min(31, Math.floor(opts.paymentDay)));
+  const now = startOfUtcDay(opts.now ?? new Date());
+  const start = opts.startDate ? startOfUtcDay(opts.startDate) : null;
+  const end = opts.endDate ? startOfUtcDay(opts.endDate) : null;
+  const lastApplied = opts.lastPaymentAppliedAt
+    ? startOfUtcDay(opts.lastPaymentAppliedAt)
+    : null;
+
+  let y = now.getUTCFullYear();
+  let m = now.getUTCMonth();
+  if (lastApplied) {
+    // mois suivant le dernier prélèvement
+    y = lastApplied.getUTCFullYear();
+    m = lastApplied.getUTCMonth() + 1;
+    if (m > 11) {
+      m = 0;
+      y += 1;
+    }
+  } else if (start && start.getTime() > now.getTime()) {
+    y = start.getUTCFullYear();
+    m = start.getUTCMonth();
+  }
+
+  for (let i = 0; i < 600; i++) {
+    const pd = paymentDateForMonth(y, m, paymentDay);
+    const afterStart = !start || pd.getTime() >= start.getTime();
+    const afterLast = !lastApplied || pd.getTime() > lastApplied.getTime();
+    const notPast = pd.getTime() >= now.getTime() || (!lastApplied && afterStart);
+    // prochaine = première date ≥ now (ou > lastApplied) dans le futur / aujourd’hui
+    if (afterStart && afterLast && pd.getTime() >= now.getTime()) {
+      if (end && pd.getTime() > end.getTime()) return null;
+      return pd;
+    }
+    // si on scanne encore le passé sans lastApplied, avancer
+    if (!notPast || !afterLast) {
+      m += 1;
+      if (m > 11) {
+        m = 0;
+        y += 1;
+      }
+      continue;
+    }
+    m += 1;
+    if (m > 11) {
+      m = 0;
+      y += 1;
+    }
+  }
+  return null;
+}
+
+export type AmortizationRow = {
+  /** 1-based installment index */
+  index: number;
+  dueDate: string | null;
+  principalPaid: string;
+  interest: string;
+  insurance: string;
+  payment: string;
+  remainingAfter: string;
+};
+
+/**
+ * Tableau d’amortissement prévisionnel (échéances mensuelles à taux fixe).
+ * Assurance mensuelle optionnelle (sinon 0 — pas de champ Prisma dédié).
+ */
+export function buildAmortizationSchedule(opts: {
+  principal: DecimalInput;
+  annualPercent: DecimalInput;
+  monthlyPayment: DecimalInput;
+  startDate?: Date | null;
+  paymentDay?: number | null;
+  /** plafonne le tableau (défaut 480 = 40 ans) */
+  maxMonths?: number;
+  insuranceMonthly?: DecimalInput;
+}): AmortizationRow[] {
+  let bal = d(opts.principal);
+  const M = d(opts.monthlyPayment);
+  const r = monthlyRateFromAnnual(opts.annualPercent);
+  const ins = d(opts.insuranceMonthly ?? 0);
+  if (bal.lte(0) || M.lte(0)) return [];
+
+  const max = opts.maxMonths ?? 480;
+  const day =
+    opts.paymentDay != null && opts.paymentDay >= 1
+      ? Math.min(31, Math.floor(opts.paymentDay))
+      : 1;
+  const start = opts.startDate
+    ? startOfUtcDay(opts.startDate)
+    : startOfUtcDay(new Date());
+
+  let y = start.getUTCFullYear();
+  let m = start.getUTCMonth();
+  const rows: AmortizationRow[] = [];
+
+  for (let i = 0; i < max && bal.gt(0.00000001); i++) {
+    const due = paymentDateForMonth(y, m, day);
+    const interest = r > 0 ? bal.times(r) : d(0);
+    // Mensualité hors assurance ; capital = M - intérêts (plafonné)
+    let principalPart = M.minus(interest);
+    if (principalPart.lt(0)) {
+      // Mensualité ne couvre pas les intérêts — on arrête (scénario pathologique)
+      rows.push({
+        index: i + 1,
+        dueDate: due.toISOString(),
+        principalPaid: "0",
+        interest: toFixed(interest, 8),
+        insurance: toFixed(ins, 8),
+        payment: toFixed(M.plus(ins), 8),
+        remainingAfter: toFixed(bal, 8),
+      });
+      break;
+    }
+    if (principalPart.gt(bal)) principalPart = bal;
+    const payCore = principalPart.plus(interest);
+    bal = bal.minus(principalPart);
+    if (bal.lt(0)) bal = d(0);
+
+    rows.push({
+      index: i + 1,
+      dueDate: due.toISOString(),
+      principalPaid: toFixed(principalPart, 8),
+      interest: toFixed(interest, 8),
+      insurance: toFixed(ins, 8),
+      payment: toFixed(payCore.plus(ins), 8),
+      remainingAfter: toFixed(bal, 8),
+    });
+
+    m += 1;
+    if (m > 11) {
+      m = 0;
+      y += 1;
+    }
+  }
+  return rows;
+}
+
+/** Index (0-based) de l’échéance courante / prochaine dans le tableau. */
+export function currentScheduleIndex(
+  schedule: AmortizationRow[],
+  remainingCapital: DecimalInput,
+  now: Date = new Date()
+): number {
+  if (schedule.length === 0) return -1;
+  const nowT = startOfUtcDay(now).getTime();
+  // 1) première échéance dont la date ≥ aujourd’hui
+  for (let i = 0; i < schedule.length; i++) {
+    const iso = schedule[i]!.dueDate;
+    if (!iso) continue;
+    if (startOfUtcDay(new Date(iso)).getTime() >= nowT) return i;
+  }
+  // 2) sinon la plus proche du capital restant actuel
+  const rem = d(remainingCapital);
+  let best = schedule.length - 1;
+  let bestDelta = Infinity;
+  for (let i = 0; i < schedule.length; i++) {
+    const delta = d(schedule[i]!.remainingAfter).minus(rem).abs().toNumber();
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = i;
+    }
+  }
+  return best;
+}

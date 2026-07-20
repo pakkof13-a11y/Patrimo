@@ -26,7 +26,10 @@ import {
 import { TRANSACTION_TYPES } from "@/app/lib/constants";
 import {
   formatCurrency,
+  formatCurrencyPrecise,
   formatDate,
+  formatQuantity,
+  formatUnitPrice,
   getAssetClassLabel,
   getChangeColor,
   cn,
@@ -37,6 +40,19 @@ import {
   type BuyLotLite,
 } from "@/app/lib/portfolio/fx-pnl";
 import type { TxRow } from "@/app/lib/types/ui";
+
+type CustodySlice = {
+  platformId: string;
+  platformName: string;
+  platformLogoUrl: string | null;
+  blockchainKey: string;
+  blockchainLabel: string;
+  assetId: string;
+  quantity: number;
+  marketValueEur: number;
+  quantityPct: number;
+  valuePct: number;
+};
 
 type AssetDetail = {
   asset: {
@@ -52,6 +68,10 @@ type AssetDetail = {
     isin?: string | null;
     platformName: string;
     platformLogoUrl: string | null;
+    blockchainKey?: string | null;
+    blockchainLabel?: string | null;
+    platformCount?: number;
+    siblingAssetIds?: string[];
     assetLogoUrl: string | null;
     priceQuote: {
       priceNative: string;
@@ -67,6 +87,13 @@ type AssetDetail = {
     avgCostEur: string;
     marketValueEur: string;
   } | null;
+  custodyDistribution?: CustodySlice[];
+  platforms?: Array<{
+    id: string;
+    name: string;
+    logoUrl: string | null;
+    assetId: string;
+  }>;
   transactions: Array<{
     id: string;
     type: string;
@@ -85,6 +112,8 @@ type AssetDetail = {
     paymentDate?: string | null;
     notes: string | null;
     platformId: string;
+    platformName?: string | null;
+    platformLogoUrl?: string | null;
     toPlatformId?: string | null;
     assetId?: string | null;
   }>;
@@ -118,6 +147,8 @@ export function AssetDetailModal({
   onEditCategory?: () => void;
 }) {
   const [typeFilter, setTypeFilter] = useState<TxTypeFilterId>("all");
+  /** Filtre historique par plateforme ("" = toutes) */
+  const [platformFilter, setPlatformFilter] = useState("");
   const [txMenuOpen, setTxMenuOpen] = useState(false);
   const [whtOpen, setWhtOpen] = useState(false);
   const txMenuRef = useRef<HTMLDivElement>(null);
@@ -126,6 +157,7 @@ export function AssetDetailModal({
   useEffect(() => {
     if (open) {
       setTypeFilter("all");
+      setPlatformFilter("");
       setTxMenuOpen(false);
       setWhtOpen(false);
     }
@@ -157,12 +189,75 @@ export function AssetDetailModal({
   const filteredTxs = useMemo(() => {
     return txs
       .filter((t) => matchesTxTypeFilter(t.type, typeFilter))
+      .filter((t) => !platformFilter || t.platformId === platformFilter)
       .slice()
       .sort(
         (a, b) =>
           new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
       );
-  }, [txs, typeFilter]);
+  }, [txs, typeFilter, platformFilter]);
+
+  const platformOptions = useMemo(() => {
+    if (data?.platforms && data.platforms.length > 0) return data.platforms;
+    const byId = new Map<string, { id: string; name: string }>();
+    for (const t of txs) {
+      if (t.platformId && !byId.has(t.platformId)) {
+        byId.set(t.platformId, {
+          id: t.platformId,
+          name: t.platformName || t.platformId,
+        });
+      }
+    }
+    return [...byId.values()];
+  }, [data?.platforms, txs]);
+
+  const multiPlatform = (data?.asset.platformCount ?? platformOptions.length) > 1;
+
+  /** Valeur marché + repli si quote absente (qty × cours ou coût). */
+  const positionValue = useMemo(() => {
+    if (!data?.holding) return null;
+    const qty = Number(data.holding.quantity);
+    let mv = Number(data.holding.marketValueEur);
+    if (!Number.isFinite(mv) || Math.abs(mv) < 1e-12) {
+      const px = data.asset.priceQuote
+        ? Number(data.asset.priceQuote.priceEur)
+        : Number(data.holding.avgCostEur);
+      if (Number.isFinite(qty) && Number.isFinite(px)) mv = qty * px;
+    }
+    return {
+      qty,
+      marketValueEur: Number.isFinite(mv) ? mv : 0,
+      avgCostEur: Number(data.holding.avgCostEur) || 0,
+    };
+  }, [data]);
+
+  /** Décomposition coût d’acquisition (achats du journal). */
+  const acquisitionBreakdown = useMemo(() => {
+    const buys = txs.filter((t) => t.type === "ACHAT");
+    if (buys.length === 0) return null;
+    let gross = 0;
+    let fees = 0;
+    for (const t of buys) {
+      const q = Number(t.quantity || 0);
+      const p = Number(t.unitPrice || 0);
+      const fx = Number(t.fxRateToEur || 1) || 1;
+      if (Number.isFinite(q) && Number.isFinite(p)) gross += q * p * fx;
+      const fe = Number(t.feesEur ?? t.fees ?? 0);
+      if (Number.isFinite(fe)) {
+        // feesEur déjà en EUR ; sinon fees natifs × fx
+        fees += t.feesEur != null ? fe : fe * fx;
+      }
+    }
+    return {
+      gross,
+      fees,
+      // « Moins les frais » → montant net acquis (valeur économique hors frais)
+      net: gross - fees,
+      buyCount: buys.length,
+    };
+  }, [txs]);
+
+  const isCrypto = data?.asset.assetClass === "CRYPTO";
 
   if (!open) return null;
 
@@ -173,7 +268,40 @@ export function AssetDetailModal({
       wide
       panelClassName="w-[min(72vw,calc(100vw-2rem))] max-w-[900px]"
     >
-      {loading && <p className="text-sm text-slate-400">Chargement du détail…</p>}
+      {loading && (
+        <div className="flex flex-col gap-3" data-testid="asset-detail-loading">
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--muted)]/25 px-2.5 py-2">
+            <div className="flex items-center gap-2.5">
+              <div className="h-9 w-9 animate-pulse rounded-full bg-[var(--muted)]" />
+              <div className="space-y-1.5">
+                <div className="h-3.5 w-32 animate-pulse rounded bg-[var(--muted)]" />
+                <div className="h-2.5 w-48 animate-pulse rounded bg-[var(--muted)]" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <div className="ml-auto h-2.5 w-16 animate-pulse rounded bg-[var(--muted)]" />
+              <div className="ml-auto h-5 w-24 animate-pulse rounded bg-[var(--muted)]" />
+            </div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-16 animate-pulse rounded-lg bg-[var(--muted)]"
+              />
+            ))}
+          </div>
+          <div className="h-40 animate-pulse rounded-lg bg-[var(--muted)]" />
+          <div className="space-y-2 rounded-lg border border-[var(--border)] p-2">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex justify-between gap-3">
+                <div className="h-3 w-40 animate-pulse rounded bg-[var(--muted)]" />
+                <div className="h-3 w-28 animate-pulse rounded bg-[var(--muted)]" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {data && (
         <div className="flex flex-col gap-3">
           {/* Header compact (~70–80px) */}
@@ -210,28 +338,60 @@ export function AssetDetailModal({
                     />
                     {data.asset.platformName}
                   </span>
+                  {isCrypto && data.asset.blockchainLabel && (
+                    <>
+                      <span>·</span>
+                      <span
+                        className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-900 dark:text-amber-100"
+                        data-testid="asset-detail-blockchain"
+                      >
+                        {data.asset.blockchainLabel}
+                      </span>
+                    </>
+                  )}
+                  {multiPlatform && (
+                    <>
+                      <span>·</span>
+                      <span
+                        className="rounded-full border border-teal-600/25 bg-teal-600/10 px-1.5 py-0.5 text-[10px] font-semibold text-teal-900 dark:text-teal-100"
+                        data-testid="asset-detail-platform-count"
+                        title={platformOptions.map((p) => p.name).join(" · ")}
+                      >
+                        {data.asset.platformCount ?? platformOptions.length}{" "}
+                        plateformes
+                      </span>
+                    </>
+                  )}
                   <CurrencyBadge code={data.asset.currency} className="!py-0 !text-[10px]" />
                 </div>
               </div>
             </div>
-            {data.holding && (
-              <div className="shrink-0 text-right leading-tight">
-                <div className="text-base font-semibold tabular-nums sm:text-lg">
-                  {formatCurrency(data.holding.marketValueEur, "EUR")}
+            {positionValue && (
+              <div
+                className="shrink-0 text-right leading-tight"
+                data-testid="asset-detail-position-value"
+              >
+                <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                  Valeur totale
                 </div>
-                <div className="mt-0.5 max-w-[22rem] text-[10px] tabular-nums text-slate-500 dark:text-slate-400">
+                <div className="text-base font-semibold tabular-nums sm:text-lg">
+                  {formatCurrency(positionValue.marketValueEur, "EUR")}
+                </div>
+                <div className="mt-0.5 max-w-[22rem] text-[10px] tabular-nums text-[var(--muted-foreground)]">
                   Qté{" "}
-                  {Number(data.holding.quantity).toLocaleString("fr-FR", {
-                    maximumFractionDigits: 6,
-                  })}{" "}
-                  · CUMP {formatCurrency(data.holding.avgCostEur, "EUR")}
+                  <span className="font-medium text-[var(--foreground)]">
+                    {formatQuantity(positionValue.qty)}
+                  </span>
+                  {" · "}
+                  CUMP {formatCurrency(positionValue.avgCostEur, "EUR")}
                   {data.asset.priceQuote && (
                     <>
-                      {" "}
-                      · Cours{" "}
-                      {formatCurrency(
+                      {" · "}
+                      Cours{" "}
+                      {formatUnitPrice(
                         data.asset.priceQuote.priceNative,
-                        data.asset.priceQuote.nativeCurrency
+                        data.asset.priceQuote.nativeCurrency,
+                        { crypto: isCrypto }
                       )}
                     </>
                   )}
@@ -240,24 +400,133 @@ export function AssetDetailModal({
             )}
           </div>
 
-          {data.holding && (
+          {isCrypto &&
+            (data.custodyDistribution?.length ?? 0) > 0 && (
+              <div
+                className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 px-3 py-2.5"
+                data-testid="asset-detail-custody"
+              >
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+                      Répartition plateformes / blockchains
+                    </h3>
+                    <p className="text-[10px] text-[var(--muted-foreground)]">
+                      Même ticker sur l&apos;enveloppe crypto — quantités et poids
+                    </p>
+                  </div>
+                </div>
+                <ul className="space-y-1.5">
+                  {(data.custodyDistribution || []).map((slice) => (
+                    <li
+                      key={`${slice.assetId}-${slice.platformId}`}
+                      className="flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-transparent px-1 py-1 hover:border-[var(--border)] hover:bg-[var(--card)]"
+                      data-testid="custody-slice"
+                    >
+                      <PlatformLogo
+                        src={slice.platformLogoUrl}
+                        name={slice.platformName}
+                        size={20}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium">
+                          {slice.platformName}
+                        </div>
+                        <div className="text-[10px] text-[var(--muted-foreground)]">
+                          {slice.blockchainLabel}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right text-[11px] tabular-nums">
+                        <div className="font-medium">
+                          {formatQuantity(slice.quantity)}
+                          <span className="ml-1 text-[10px] font-normal text-[var(--muted-foreground)]">
+                            ({slice.quantityPct.toFixed(1)} %)
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-[var(--muted-foreground)]">
+                          {formatCurrency(slice.marketValueEur, "EUR")}
+                          <span className="ml-1">
+                            · {slice.valuePct.toFixed(1)} %
+                          </span>
+                        </div>
+                      </div>
+                      <div
+                        className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-[var(--muted)]"
+                        title={`${slice.valuePct} % de la valeur`}
+                      >
+                        <div
+                          className="h-full rounded-full bg-teal-600/80"
+                          style={{
+                            width: `${Math.min(100, Math.max(2, slice.valuePct))}%`,
+                          }}
+                        />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+          {acquisitionBreakdown && (
+            <div
+              className="grid gap-2 rounded-lg border border-[var(--border)] bg-[var(--muted)]/20 px-3 py-2.5 sm:grid-cols-3"
+              data-testid="asset-detail-cost-breakdown"
+            >
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                  Valeur dépensée brute
+                </div>
+                <div className="mt-0.5 text-sm font-semibold tabular-nums text-sky-700 dark:text-sky-300">
+                  {formatCurrency(acquisitionBreakdown.gross, "EUR")}
+                </div>
+                <p className="text-[10px] text-[var(--muted-foreground)]">
+                  Σ qty × prix ({acquisitionBreakdown.buyCount} achat
+                  {acquisitionBreakdown.buyCount > 1 ? "s" : ""})
+                </p>
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">
+                  Moins les frais
+                </div>
+                <div className="mt-0.5 text-sm font-semibold tabular-nums text-red-600 dark:text-red-400">
+                  −{formatCurrency(acquisitionBreakdown.fees, "EUR")}
+                </div>
+                <p className="text-[10px] text-[var(--muted-foreground)]">
+                  Frais d’exécution cumulés
+                </p>
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+                  Montant net acquis
+                </div>
+                <div className="mt-0.5 text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
+                  {formatCurrency(acquisitionBreakdown.net, "EUR")}
+                </div>
+                <p className="text-[10px] text-[var(--muted-foreground)]">
+                  Brut − frais (net acquis)
+                </p>
+              </div>
+            </div>
+          )}
+
+          {data.holding && positionValue && (
             <FxPnlPanel
               currency={
                 data.asset.priceQuote?.nativeCurrency || data.asset.currency
               }
-              qty={Number(data.holding.quantity)}
-              avgCostEur={Number(data.holding.avgCostEur)}
-              marketValueEur={Number(data.holding.marketValueEur)}
+              qty={positionValue.qty}
+              avgCostEur={positionValue.avgCostEur}
+              marketValueEur={positionValue.marketValueEur}
               priceNative={
                 data.asset.priceQuote
                   ? Number(data.asset.priceQuote.priceNative)
-                  : Number(data.holding.avgCostEur)
+                  : positionValue.avgCostEur
               }
               priceEur={
                 data.asset.priceQuote
                   ? Number(data.asset.priceQuote.priceEur)
-                  : Number(data.holding.marketValueEur) /
-                    Math.max(Number(data.holding.quantity), 1e-12)
+                  : positionValue.marketValueEur /
+                    Math.max(positionValue.qty, 1e-12)
               }
               transactions={data.transactions}
             />
@@ -334,12 +603,39 @@ export function AssetDetailModal({
                 "sm:flex-row sm:items-center sm:justify-between sm:gap-3"
               )}
             >
-              <TxTypeFilters
-                value={typeFilter}
-                onChange={setTypeFilter}
-                counts={typeCounts}
-                className="min-w-0 flex-1"
-              />
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <TxTypeFilters
+                  value={typeFilter}
+                  onChange={setTypeFilter}
+                  counts={typeCounts}
+                  className="min-w-0 flex-1"
+                />
+                {multiPlatform && (
+                  <label className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
+                    <span className="shrink-0 font-medium">Plateforme</span>
+                    <select
+                      className="input !w-auto min-w-[8rem] !py-1 text-[11px]"
+                      value={platformFilter}
+                      onChange={(e) => setPlatformFilter(e.target.value)}
+                      data-testid="asset-detail-platform-filter"
+                      aria-label="Filtrer l'historique par plateforme"
+                    >
+                      <option value="">Toutes ({txs.length})</option>
+                      {platformOptions.map((p) => {
+                        const n = txs.filter(
+                          (t) => t.platformId === p.id
+                        ).length;
+                        return (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                            {n > 0 ? ` (${n})` : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                )}
+              </div>
               {onAddTransaction && (
                 <div
                   ref={txMenuRef}
@@ -393,117 +689,153 @@ export function AssetDetailModal({
               )}
             </div>
 
-            <div className="max-h-80 overflow-auto rounded-lg border border-[var(--border)]">
-              <table className="w-full text-left text-xs sm:text-sm">
-                <thead className="table-head sticky top-0 text-[10px] font-medium tracking-wide text-[var(--muted-foreground)]">
-                  <tr>
-                    <th className="px-3 py-2">Date</th>
-                    <th className="px-3 py-2">Type</th>
-                    <th className="px-3 py-2 text-right">Qté</th>
-                    <th className="px-3 py-2 text-right">Prix unit.</th>
-                    <th className="px-3 py-2 text-right">Frais</th>
-                    <th className="px-3 py-2 text-right">Impact cash €</th>
-                    <th className="w-16 px-2 py-2 text-right">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTxs.map((t) => (
-                    <tr
-                      key={t.id}
-                      className="group/row border-t border-[var(--border)] hover:bg-[var(--muted)]/30"
-                    >
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {formatDate(t.occurredAt)}
-                      </td>
-                      <td className="px-3 py-2">
-                        {TRANSACTION_TYPES[t.type as keyof typeof TRANSACTION_TYPES] ||
-                          t.type}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        {t.quantity != null && t.quantity !== ""
-                          ? Number(t.quantity).toLocaleString("fr-FR", {
-                              maximumFractionDigits: 6,
-                            })
-                          : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        {t.unitPrice != null
-                          ? formatCurrency(t.unitPrice, t.currency)
-                          : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        {formatCurrency(t.fees, t.currency)}
-                      </td>
-                      <td
-                        className={cn(
-                          "px-3 py-2 text-right tabular-nums",
-                          getChangeColor(t.netCashImpactEur)
-                        )}
-                      >
-                        {formatCurrency(t.netCashImpactEur, "EUR")}
-                      </td>
-                      <td className="px-1 py-1.5 text-right">
+            <div
+              className="max-h-80 space-y-0 overflow-auto rounded-lg border border-[var(--border)]"
+              data-testid="asset-detail-tx-list"
+            >
+              {filteredTxs.map((t) => {
+                const typeLabel =
+                  TRANSACTION_TYPES[
+                    t.type as keyof typeof TRANSACTION_TYPES
+                  ] || t.type;
+                const qtyStr =
+                  t.quantity != null && t.quantity !== ""
+                    ? formatQuantity(t.quantity)
+                    : "—";
+                const qtyN = Number(t.quantity);
+                const pxN = Number(t.unitPrice);
+                const feesN = Number(t.fees) || 0;
+                const fx = Number(t.fxRateToEur) || 1;
+                const hasTradeMath =
+                  Number.isFinite(qtyN) &&
+                  Number.isFinite(pxN) &&
+                  Math.abs(qtyN) > 0 &&
+                  ["ACHAT", "VENTE", "REWARD"].includes(t.type);
+                const gross = hasTradeMath
+                  ? Math.abs(qtyN * pxN) * fx
+                  : null;
+                const feesEur = hasTradeMath ? Math.abs(feesN) * fx : null;
+                // UX consigne : brut (bleu) − frais (rouge) = net (vert)
+                const net =
+                  gross != null && feesEur != null
+                    ? Math.max(0, gross - feesEur)
+                    : null;
+
+                return (
+                  <div
+                    key={t.id}
+                    className="group/row flex items-center justify-between gap-3 border-t border-[var(--border)] px-3 py-2.5 first:border-t-0 hover:bg-[var(--muted)]/30"
+                  >
+                    <div className="min-w-0 flex-1 text-xs sm:text-sm">
+                      <span className="font-medium text-[var(--foreground)]">
+                        {typeLabel}
+                      </span>
+                      <span className="text-[var(--muted-foreground)]">
+                        {" "}
+                        - {formatDate(t.occurredAt)}
+                      </span>
+                      {multiPlatform && t.platformName && (
+                        <span className="text-[var(--muted-foreground)]">
+                          {" "}
+                          · {t.platformName}
+                        </span>
+                      )}
+                      <span className="text-[var(--muted-foreground)]">
+                        {" "}
+                        |{" "}
+                      </span>
+                      <span className="font-mono tabular-nums text-[var(--foreground)]">
+                        {qtyStr}
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {hasTradeMath && net != null ? (
                         <div
+                          className="flex flex-wrap items-center justify-end gap-x-1 text-right text-[11px] tabular-nums sm:text-xs"
+                          data-testid="asset-detail-tx-price-math"
+                        >
+                          <span className="font-medium text-sky-700 dark:text-sky-300">
+                            {formatCurrencyPrecise(gross!, "EUR")}
+                          </span>
+                          <span className="text-[var(--muted-foreground)]">
+                            −
+                          </span>
+                          <span className="font-medium text-red-600 dark:text-red-400">
+                            {formatCurrencyPrecise(feesEur!, "EUR")}
+                          </span>
+                          <span className="text-[var(--muted-foreground)]">
+                            =
+                          </span>
+                          <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                            {formatCurrencyPrecise(net, "EUR")}
+                          </span>
+                        </div>
+                      ) : (
+                        <span
                           className={cn(
-                            "inline-flex items-center justify-end gap-0.5",
-                            "opacity-40 transition group-hover/row:opacity-100",
-                            "focus-within:opacity-100"
+                            "text-xs font-medium tabular-nums",
+                            getChangeColor(t.netCashImpactEur)
                           )}
                         >
-                          <button
-                            type="button"
-                            className={cn(
-                              "rounded p-1.5 text-[var(--muted-foreground)] transition",
-                              "hover:bg-[var(--muted)] hover:text-[var(--foreground)]",
-                              "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-                            )}
-                            aria-label="Modifier la transaction"
-                            title="Modifier"
-                            onClick={() => {
-                              onEditTx({
-                                ...t,
-                                asset: { name: data.asset.name },
-                                platform: { name: data.asset.platformName },
-                              });
-                            }}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            className={cn(
-                              "rounded p-1.5 text-[var(--muted-foreground)] transition",
-                              "hover:bg-red-50 hover:text-red-600/90",
-                              "dark:hover:bg-red-950/40 dark:hover:text-red-400",
-                              "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-                            )}
-                            aria-label="Supprimer la transaction"
-                            title="Supprimer"
-                            onClick={() => {
-                              if (confirm("Supprimer cette transaction ?")) {
-                                onDeleteTx(t.id);
-                              }
-                            }}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredTxs.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="px-3 py-6 text-center text-[var(--muted-foreground)]">
-                        {txs.length === 0
-                          ? "Aucune transaction pour cet actif"
-                          : `${txTypeFilterEmptyHint(typeFilter)} pour cette position`}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                          {formatCurrencyPrecise(t.netCashImpactEur, "EUR")}
+                        </span>
+                      )}
+                      <div
+                        className={cn(
+                          "inline-flex items-center gap-0.5",
+                          "opacity-40 transition group-hover/row:opacity-100",
+                          "focus-within:opacity-100"
+                        )}
+                      >
+                        <button
+                          type="button"
+                          className={cn(
+                            "rounded p-1.5 text-[var(--muted-foreground)] transition",
+                            "hover:bg-[var(--muted)] hover:text-[var(--foreground)]",
+                            "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                          )}
+                          aria-label="Modifier la transaction"
+                          title="Modifier"
+                          onClick={() => {
+                            onEditTx({
+                              ...t,
+                              asset: { name: data.asset.name },
+                              platform: { name: data.asset.platformName },
+                            });
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          className={cn(
+                            "rounded p-1.5 text-[var(--muted-foreground)] transition",
+                            "hover:bg-red-50 hover:text-red-600/90",
+                            "dark:hover:bg-red-950/40 dark:hover:text-red-400",
+                            "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                          )}
+                          aria-label="Supprimer la transaction"
+                          title="Supprimer"
+                          onClick={() => {
+                            if (confirm("Supprimer cette transaction ?")) {
+                              onDeleteTx(t.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {filteredTxs.length === 0 && (
+                <div className="px-3 py-6 text-center text-sm text-[var(--muted-foreground)]">
+                  {txs.length === 0
+                    ? "Aucune transaction pour cet actif"
+                    : `${txTypeFilterEmptyHint(typeFilter)} pour cette position`}
+                </div>
+              )}
             </div>
           </div>
 

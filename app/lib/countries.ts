@@ -26,6 +26,9 @@ const ISO_MAP: Record<string, string> = {
   cn: "cn",
   ca: "ca",
   au: "au",
+  nz: "nz",
+  nl: "nl",
+  hk: "hk",
   /** Eurozone / Euro area → EU flag */
   ez: "eu",
   eu: "eu",

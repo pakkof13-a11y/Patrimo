@@ -2,7 +2,7 @@
 
 import { cn } from "@/app/lib/utils";
 
-export type HistorySource = "yahoo" | "db" | "mock";
+export type HistorySource = "yahoo" | "db" | "coingecko" | "mock";
 
 const SOURCE_META: Record<
   HistorySource,
@@ -13,6 +13,12 @@ const SOURCE_META: Record<
     title: "Cours de marché (Yahoo Finance), convertis en EUR",
     className:
       "bg-sky-50 text-sky-800 ring-sky-200 dark:bg-sky-950/50 dark:text-sky-200 dark:ring-sky-800",
+  },
+  coingecko: {
+    label: "CoinGecko",
+    title: "Historique crypto (CoinGecko), en EUR — aligné sur le pricing live",
+    className:
+      "bg-emerald-50 text-emerald-800 ring-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-800",
   },
   db: {
     label: "Base locale",

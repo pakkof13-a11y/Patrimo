@@ -1,4 +1,5 @@
 import type { ParsedCsv } from "./csv-parse";
+import { normalizeHeader } from "./csv-parse";
 import {
   extractCurrencyHint,
   parseDate,
@@ -32,6 +33,8 @@ export type ImportDraftRow = {
   currency: string;
   cashAmount: string | null;
   notes: string | null;
+  /** Nom plateforme détecté dans le CSV (sinon destination import). */
+  platformName: string | null;
   assetClass: "ACTIONS" | "CRYPTO" | "IMMOBILIER" | "OBLIGATIONS" | "CASH" | "AUTRE";
   raw: Record<string, string>;
 };
@@ -112,10 +115,11 @@ export function mapCsvToDrafts(
     const feesRaw = getByRole(raw, columnMap, "fees");
     let currencyRaw = getByRole(raw, columnMap, "currency");
     const cashRaw = getByRole(raw, columnMap, "cashAmount");
-    const notesRaw = getByRole(raw, columnMap, "notes");
+    let notesRaw = getByRole(raw, columnMap, "notes");
     const classRaw = getByRole(raw, columnMap, "assetClass");
     const descriptionRaw = getByRole(raw, columnMap, "description");
     const productRaw = getByRole(raw, columnMap, "product");
+    const platformRaw = getByRole(raw, columnMap, "platform");
 
     // ── Format-specific enrichment ──────────────────────────────────────────
     if (formatId === "revolut") {
@@ -157,8 +161,35 @@ export function mapCsvToDrafts(
       }
     }
 
+    // ── Ledger Live (hardware wallet export) ────────────────────────────────
+    if (formatId === "ledger_live") {
+      const statusRaw = (() => {
+        for (const [k, v] of Object.entries(raw)) {
+          if (normalizeHeader(k) === "status") return v;
+        }
+        return "";
+      })();
+      if (/^failed$/i.test(statusRaw.trim())) {
+        // Avertissement (pas error) : ligne désélectionnée, ne bloque pas l’import
+        warnings.push("Opération Failed (Ledger) — ignorée");
+      }
+      const tOp = typeRaw.trim();
+      if (/^fees$/i.test(tOp)) typeRaw = "fees";
+      else if (/^in$/i.test(tOp)) typeRaw = "in";
+      else if (/^out$/i.test(tOp)) typeRaw = "out";
+      else if (/^reward$/i.test(tOp)) typeRaw = "reward";
+      // Staking / bonding → TRANSFERT_TITRE (désélection auto, hors positions libres)
+      else if (
+        /^(delegate|undelegate|redelegate|bond|unbond|opt_in|opt_out|lock|chill|nominate|withdraw_unbonded)$/i.test(
+          tOp
+        )
+      ) {
+        typeRaw = "delegate";
+      }
+    }
+
     if (formatId === "coinbase") {
-      // Asset column is crypto ticker; Spot Price Currency is fiat
+      // Asset column is crypto ticker; Spot/Price Currency is fiat
       if (tickerRaw && FIAT.has(tickerRaw.toUpperCase()) && !currencyRaw) {
         currencyRaw = tickerRaw;
         tickerRaw = "";
@@ -177,8 +208,112 @@ export function mapCsvToDrafts(
       // Receive/Send without qty in some exports
       if (/^receive$/i.test(typeRaw)) typeRaw = "receive";
       if (/^send$/i.test(typeRaw)) typeRaw = "send";
-      if (/reward|learning/i.test(typeRaw)) typeRaw = "rewards";
+      if (/reward|learning|staking\s*income|inflation/i.test(typeRaw)) {
+        typeRaw = "rewards";
+      }
+      // Prix avec préfixe $ déjà géré par parseNumber ; s’assurer que
+      // Price Currency (USD) n’écrase pas un ticker crypto
+      if (currencyRaw && !FIAT.has(currencyRaw.toUpperCase()) && tickerRaw) {
+        // garder currency fiat si dispo dans raw
+        for (const [k, v] of Object.entries(raw)) {
+          if (/price\s*currency|spot\s*price\s*currency/i.test(k) && v) {
+            currencyRaw = v.replace(/[^A-Za-z]/g, "").slice(0, 3);
+            break;
+          }
+        }
+      }
     }
+
+    // Crypto.com App (wallet / carte / fiat)
+    if (formatId === "cryptocom") {
+      // Conversions : Currency (sold) + To Currency (bought) → enregistrer l’achat
+      if (
+        /crypto_exchange|viban_purchase|crypto_viban/i.test(typeRaw) &&
+        nameRaw
+      ) {
+        tickerRaw = nameRaw; // To Currency
+        // To Amount was mapped to cashAmount role — use as quantity
+        if (cashRaw && (!qtyRaw || Number(String(qtyRaw).replace(",", ".")) < 0)) {
+          // quantity stays from Amount (sold, often negative) — use abs To Amount if present
+        }
+        sideRaw = "buy";
+      }
+      // Quantity signed : abs pour ACHAT/VENTE
+      // native_amount was mapped poorly to notes — recover from raw keys
+      if (!currencyRaw) {
+        for (const [k, v] of Object.entries(raw)) {
+          if (/native.?currency/i.test(k) && v) {
+            currencyRaw = v;
+            break;
+          }
+        }
+      }
+      // Prefer Transaction Kind already in typeRaw
+      if (!typeRaw && descriptionRaw) {
+        typeRaw = descriptionRaw;
+      }
+      // Card cashbacks / rewards
+      if (/cashback|referral|supercharger|mco_stake/i.test(typeRaw + descriptionRaw)) {
+        typeRaw = "reward";
+      }
+    }
+
+    // Crypto.com Deposit / Withdrawal exports
+    if (formatId === "cryptocom_transfer") {
+      const rawKeys = Object.keys(raw).join(" ");
+      if (/deposit/i.test(rawKeys) && !/withdrawal/i.test(rawKeys)) {
+        typeRaw = "deposit";
+      } else if (/withdrawal/i.test(rawKeys)) {
+        typeRaw = "withdraw";
+      } else if (/supercharger|reward/i.test(rawKeys + typeRaw)) {
+        typeRaw = "reward";
+      }
+      // Supercharger rewards: Time, Coin, Amount only
+      if (!typeRaw) typeRaw = "reward";
+    }
+
+    // Nexo
+    if (formatId === "nexo") {
+      // Interest / rewards stay on Input Currency
+      if (/interest|dividend|bonus|cashback/i.test(typeRaw)) {
+        // keep ticker from input currency
+      }
+      if (/withdrawal/i.test(typeRaw)) typeRaw = "withdraw";
+      if (/deposit/i.test(typeRaw)) typeRaw = "deposit";
+      // Exchange / convert → buy of output
+      if (/exchange/i.test(typeRaw) && nameRaw) {
+        tickerRaw = nameRaw;
+        // output amount in cashAmount role
+        sideRaw = "buy";
+        typeRaw = "buy";
+      }
+      if (/locking|transfer from savings/i.test(typeRaw + descriptionRaw)) {
+        typeRaw = "transfer";
+      }
+    }
+
+    // AscendEX staking / DeFi
+    if (formatId === "ascendex") {
+      if (/reward|compound|interest|award/i.test(typeRaw + notesRaw + descriptionRaw)) {
+        typeRaw = "reward";
+      }
+      if (/deposit/i.test(typeRaw + notesRaw)) typeRaw = "deposit";
+      if (/redemption|withdraw/i.test(typeRaw + notesRaw)) typeRaw = "withdraw";
+      // Reward cell "0.84 CAPS-S"
+      if (qtyRaw && /[A-Za-z]/.test(qtyRaw)) {
+        const m = qtyRaw.replace(/\s/g, "").match(/^([\d.,]+)/);
+        if (m) {
+          // quantity cleaned below via parseQtyField
+          (raw as Record<string, string>).__ascendex_qty = m[1]!;
+        }
+      }
+    }
+
+    // Override qty from AscendEX reward parse
+    const qtyField =
+      formatId === "ascendex" && (raw as Record<string, string>).__ascendex_qty
+        ? (raw as Record<string, string>).__ascendex_qty
+        : qtyRaw;
 
     const date = parseDate(dateRaw);
     if (!date) errors.push("Date invalide ou manquante");
@@ -203,17 +338,33 @@ export function mapCsvToDrafts(
       ticker ||
       (descriptionRaw ? descriptionRaw.slice(0, 80) : null);
 
-    // Crypto formats default to CRYPTO class
+    // Crypto formats default to CRYPTO class — pas les exports Invest (Price per share)
     let forcedClass: string | null = classRaw || null;
+    const rawKeys = Object.keys(raw);
+    const isRevolutEquityExport = rawKeys.some((k) =>
+      /price\s*per\s*share|total\s*amount/i.test(k)
+    );
     if (
-      (formatId === "coinbase" || formatId === "binance" || formatId === "revolut") &&
+      (formatId === "coinbase" ||
+        formatId === "binance" ||
+        formatId === "cryptocom" ||
+        formatId === "cryptocom_transfer" ||
+        formatId === "nexo" ||
+        formatId === "ascendex" ||
+        formatId === "ledger_live" ||
+        (formatId === "revolut" && !isRevolutEquityExport)) &&
       ticker &&
       !forcedClass
     ) {
       forcedClass = "CRYPTO";
     }
+    if (formatId === "revolut" && isRevolutEquityExport && ticker && !forcedClass) {
+      forcedClass = "ACTIONS";
+    }
 
-    const qty = parseQtyField(qtyRaw);
+    let qty = parseQtyField(qtyField || qtyRaw);
+    // Crypto.com / Nexo : quantités signées
+    if (qty != null && qty < 0) qty = Math.abs(qty);
     let unitPrice = parseNumber(priceRaw);
     let fees = parseNumber(feesRaw) ?? 0;
     if (feesRaw && fees === 0) {
@@ -229,6 +380,39 @@ export function mapCsvToDrafts(
       } else if (type === "ACHAT" || type === "APPORT") {
         cashAmount = Math.abs(cashAmount);
       }
+    }
+
+    // Ledger Live : frais réseau en crypto (qty = fees) → VENTE de qty
+    if (
+      formatId === "ledger_live" &&
+      type === "FRAIS" &&
+      ticker &&
+      qty != null &&
+      qty > 0 &&
+      !FIAT.has(ticker)
+    ) {
+      type = "VENTE";
+      if (unitPrice == null && cashAmount != null && qty !== 0) {
+        unitPrice = Math.abs(cashAmount / qty);
+      }
+      unitPrice = unitPrice ?? 0;
+      fees = 0;
+      cashAmount = null;
+      // pas de warning bulk (sinon 800+ lignes « avertissement » en UI)
+    }
+
+    // Ledger Live : opérations contractuelles à qty 0 (approve, claim vide…)
+    // → désélection + warning (pas error, pour ne pas afficher « 194 erreurs »)
+    let ledgerSkipNoQty = false;
+    if (
+      formatId === "ledger_live" &&
+      (qty == null || qty === 0) &&
+      type &&
+      ["APPORT", "RETRAIT", "FRAIS", "REWARD", "ACHAT", "VENTE"].includes(type)
+    ) {
+      warnings.push("Sans mouvement de quantité — ignorée");
+      ledgerSkipNoQty = true;
+      type = null; // évite les validations cash/qty en aval
     }
 
     // Trades without explicit cash
@@ -252,7 +436,9 @@ export function mapCsvToDrafts(
       cashAmount != null
     ) {
       unitPrice = Math.abs(cashAmount / qty);
-      warnings.push("Prix unitaire déduit du montant total");
+      if (formatId !== "ledger_live") {
+        warnings.push("Prix unitaire déduit du montant total");
+      }
     }
 
     // Staking / rewards en tokens → type REWARD (+qty, coût 0, pas un achat).
@@ -281,35 +467,75 @@ export function mapCsvToDrafts(
     if (type === "REWARD") {
       if (unitPrice == null && cashAmount != null && qty != null && qty !== 0) {
         unitPrice = Math.abs(cashAmount / qty);
-        warnings.push("Valeur marché indicative déduite du montant");
+        if (formatId !== "ledger_live") {
+          warnings.push("Valeur marché indicative déduite du montant");
+        }
       }
       unitPrice = unitPrice ?? 0;
       // Pas de cash dépensé
       cashAmount = null;
     }
 
-    // Coinbase Receive (dépôt externe de tokens) : sans prix → REWARD gratuit
+    // Réception crypto (Revolut « Réception », Ledger « IN », Receive…) :
+    // ce n'est PAS un apport cash — entrée de quantité en REWARD (coût 0).
+    // FMV (Price/Value) = info d’affichage uniquement, pas un ACHAT.
+    // ACHAT uniquement si le type source est clairement un achat/purchase.
     if (
       type === "APPORT" &&
       ticker &&
       qty != null &&
       qty > 0 &&
-      !FIAT.has(ticker) &&
-      (cashAmount == null || cashAmount === 0)
+      !FIAT.has(ticker)
     ) {
-      type = "REWARD";
-      unitPrice = unitPrice ?? 0;
-      cashAmount = null;
-      warnings.push(
-        "Réception crypto sans coût → Staking / reward (entrée de quantité gratuite)"
-      );
+      const hay = `${typeRaw} ${notesRaw} ${descriptionRaw} ${nameRaw}`;
+      const buyHint =
+        /^(buy|achat|purchase)$/i.test((typeRaw || "").trim()) ||
+        /crypto_purchase|viban_purchase|bought|acquisition/i.test(hay);
+      if (buyHint) {
+        type = "ACHAT";
+        if (unitPrice == null && cashAmount != null && qty !== 0) {
+          unitPrice = Math.abs(cashAmount / qty);
+        }
+        unitPrice = unitPrice ?? 0;
+        cashAmount = null;
+        warnings.push("Dépôt crypto type achat → Achat (entrée de position)");
+      } else {
+        type = "REWARD";
+        if (unitPrice == null && cashAmount != null && qty !== 0) {
+          unitPrice = Math.abs(cashAmount / qty);
+          if (formatId !== "ledger_live") {
+            warnings.push(
+              "Valeur marché indicative déduite du montant (réception)"
+            );
+          }
+        }
+        unitPrice = unitPrice ?? 0;
+        cashAmount = null;
+        if (formatId !== "ledger_live") {
+          warnings.push(
+            "Réception crypto → Staking / reward (entrée de quantité, hors apport cash)"
+          );
+        }
+      }
     }
 
-    // Coinbase Send of crypto → VENTE at 0 or RETRAIT
-    if (type === "RETRAIT" && ticker && qty != null && qty > 0 && !FIAT.has(ticker)) {
+    // Retrait crypto (envoi) → VENTE ledger (baisse stock) ; note retrait-crypto (UX).
+    if (
+      type === "RETRAIT" &&
+      ticker &&
+      qty != null &&
+      qty > 0 &&
+      !FIAT.has(ticker)
+    ) {
       type = "VENTE";
+      if (unitPrice == null && cashAmount != null && qty !== 0) {
+        unitPrice = Math.abs(cashAmount / qty);
+      }
       unitPrice = unitPrice ?? 0;
-      warnings.push("Envoi crypto importé comme vente à prix 0 (sortie de portefeuille)");
+      cashAmount = null;
+      notesRaw = notesRaw
+        ? `${notesRaw} | retrait-crypto`
+        : "retrait-crypto (sortie de portefeuille)";
     }
 
     let currency = (currencyRaw || "EUR").trim().toUpperCase() || "EUR";
@@ -355,13 +581,33 @@ export function mapCsvToDrafts(
     }
 
     if (type === "TRANSFERT_CASH" || type === "TRANSFERT_TITRE") {
-      warnings.push("Transferts non importés automatiquement (ignorés au commit)");
+      // Ledger staking ops : un seul message court, pas de flood
+      if (formatId === "ledger_live") {
+        warnings.push("Staking / bonding — non importé (hors positions libres)");
+      } else {
+        warnings.push(
+          "Transferts non importés automatiquement (ignorés au commit)"
+        );
+      }
     }
 
     // Skip failed / pending Revolut states
     if (/^reverted$|^failed$|^pending$/i.test(notesRaw) || /^reverted$|^failed$/i.test(typeRaw)) {
       errors.push("Opération non finalisée (pending/failed) — ignorée");
     }
+
+    // Ne pas marquer Failed générique si déjà géré Ledger
+    if (
+      formatId === "ledger_live" &&
+      warnings.some((w) => /Failed \(Ledger\)/i.test(w))
+    ) {
+      const idx = errors.findIndex((e) =>
+        /non finalisée \(pending\/failed\)/i.test(e)
+      );
+      if (idx >= 0) errors.splice(idx, 1);
+    }
+
+    const ledgerFailed = warnings.some((w) => /Failed \(Ledger\)/i.test(w));
 
     const status: ImportDraftRow["status"] =
       errors.length > 0 ? "error" : warnings.length > 0 ? "warning" : "ok";
@@ -370,10 +616,27 @@ export function mapCsvToDrafts(
       errors.length > 0 ||
       type === "TRANSFERT_CASH" ||
       type === "TRANSFERT_TITRE" ||
+      type == null ||
+      ledgerSkipNoQty ||
+      ledgerFailed ||
       (formatId === "revolut" &&
         type === "RETRAIT" &&
         !ticker &&
         /card|atm/i.test(typeRaw + descriptionRaw));
+
+    const platformName = platformRaw?.trim() ? platformRaw.trim() : null;
+
+    // Ledger : nom d’actif = ticker ; plateforme = Account Name (Solana, Arbitrum…)
+    // Notes = hash + account pour dédup / audit
+    const notesParts =
+      formatId === "ledger_live"
+        ? [
+            notesRaw,
+            platformName ? `account:${platformName}` : "",
+            descriptionRaw,
+            productRaw,
+          ]
+        : [notesRaw, descriptionRaw, productRaw];
 
     rows.push({
       line,
@@ -384,13 +647,22 @@ export function mapCsvToDrafts(
       type,
       occurredAt: date ? toIsoLocal(date) : null,
       ticker,
-      name,
+      name: name || ticker,
       quantity: qty != null ? String(qty) : null,
       unitPrice: unitPrice != null ? String(unitPrice) : null,
       fees: String(fees),
       currency,
       cashAmount: cashAmount != null ? String(Math.abs(cashAmount)) : null,
-      notes: [notesRaw, descriptionRaw, productRaw].filter(Boolean).join(" · ") || null,
+      notes: notesParts.filter(Boolean).join(" · ") || null,
+      // Une seule plateforme d’import « Ledger Live » recommandée ;
+      // Account Name reste en notes. Si l’utilisateur veut scinder par chaîne,
+      // le champ platform du CSV peut être mappé manuellement.
+      platformName:
+        formatId === "ledger_live"
+          ? platformName
+            ? `Ledger · ${platformName}`
+            : "Ledger Live"
+          : platformName,
       assetClass,
       raw,
     });

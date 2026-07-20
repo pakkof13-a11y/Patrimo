@@ -10,7 +10,6 @@ import {
   Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { PreferencesPanel } from "@/components/layout/preferences-panel";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { HeaderAccountMenu } from "@/components/layout/header-account-menu";
 import { formatDateTimeParis } from "@/app/lib/money/format";
@@ -322,9 +321,9 @@ export function AppHeader({
               variant="ghost"
               size="sm"
               onClick={onOpenCommandPalette}
-              title="Recherche et commandes (Ctrl+K)"
+              title="Recherche (/) · palette (Ctrl+K)"
               data-testid="open-command-palette"
-              aria-label="Palette de commandes"
+              aria-label="Recherche et palette de commandes (raccourci barre oblique ou Ctrl+K)"
               className={cn(iconBtnClass, "hidden sm:inline-flex")}
             >
               <Search className="h-3.5 w-3.5" />
@@ -393,7 +392,8 @@ export function AppHeader({
                 "rounded-r-none pr-2.5",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:ring-offset-1"
               )}
-              title="Nouvelle transaction — source de vérité du portefeuille"
+              title="Nouvelle transaction (n) — source de vérité du portefeuille"
+              aria-keyshortcuts="n"
             >
               <Plus className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Transaction</span>
@@ -417,7 +417,7 @@ export function AppHeader({
           </div>
         </div>
 
-        {/* D — Compte & préférences */}
+        {/* D — Compte (Préférences = FAB bas-gauche, roue crantée) */}
         <div
           className={cn(
             "flex shrink-0 items-center gap-1 border-l border-[var(--border)] pl-2 sm:pl-2.5"
@@ -426,7 +426,6 @@ export function AppHeader({
           role="group"
           aria-label="Compte"
         >
-          <PreferencesPanel />
           <HeaderAccountMenu
             baseCurrency={baseCurrency}
             onBaseCurrencyChange={onBaseCurrencyChange}

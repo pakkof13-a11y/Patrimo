@@ -189,10 +189,13 @@ export function SessionLineChart({
   points,
   barInterval,
   markers = [],
+  scale = "linear",
 }: {
   points: PriceHistoryPoint[];
   barInterval?: PriceBarInterval;
   markers?: ChartTxMarker[];
+  /** Échelle Y linéaire ou logarithmique */
+  scale?: "linear" | "log";
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 224 });
@@ -233,13 +236,26 @@ export function SessionLineChart({
       hi = Math.max(hi, m.lineAnchorPrice, m.barHigh);
     }
     if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { minP: 0, maxP: 1 };
+    if (scale === "log") {
+      lo = Math.max(lo, 1e-12);
+      hi = Math.max(hi, lo * 1.01);
+      return { minP: lo, maxP: hi };
+    }
     const span = hi - lo || Math.abs(hi) * 0.02 || 1;
     return { minP: lo - span * 0.04, maxP: hi + span * 0.04 };
-  }, [data, markers]);
+  }, [data, markers, scale]);
 
   const yScale = useCallback(
-    (price: number) => pad.t + ((maxP - price) / (maxP - minP || 1)) * plotH,
-    [maxP, minP, pad.t, plotH]
+    (price: number) => {
+      if (scale === "log") {
+        const lo = Math.log(Math.max(minP, 1e-12));
+        const hi = Math.log(Math.max(maxP, minP * 1.01));
+        const p = Math.log(Math.max(price, 1e-12));
+        return pad.t + ((hi - p) / (hi - lo || 1)) * plotH;
+      }
+      return pad.t + ((maxP - price) / (maxP - minP || 1)) * plotH;
+    },
+    [maxP, minP, pad.t, plotH, scale]
   );
 
   const n = data.length;
@@ -445,10 +461,12 @@ export function SessionCandleChart({
   points,
   barInterval,
   markers = [],
+  scale = "linear",
 }: {
   points: PriceHistoryPoint[];
   barInterval?: PriceBarInterval;
   markers?: ChartTxMarker[];
+  scale?: "linear" | "log";
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 224 });
@@ -487,14 +505,27 @@ export function SessionCandleChart({
       hi = Math.max(hi, m.candleAnchorPrice, m.barHigh);
     }
     if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { minP: 0, maxP: 1 };
+    if (scale === "log") {
+      lo = Math.max(lo, 1e-12);
+      hi = Math.max(hi, lo * 1.01);
+      return { minP: lo, maxP: hi };
+    }
     const span = hi - lo || Math.abs(hi) * 0.02 || 1;
     // Marge pour icônes sous Low / au-dessus High
     return { minP: lo - span * 0.08, maxP: hi + span * 0.08 };
-  }, [data, markers]);
+  }, [data, markers, scale]);
 
   const yScale = useCallback(
-    (price: number) => pad.t + ((maxP - price) / (maxP - minP || 1)) * plotH,
-    [maxP, minP, pad.t, plotH]
+    (price: number) => {
+      if (scale === "log") {
+        const lo = Math.log(Math.max(minP, 1e-12));
+        const hi = Math.log(Math.max(maxP, minP * 1.01));
+        const p = Math.log(Math.max(price, 1e-12));
+        return pad.t + ((hi - p) / (hi - lo || 1)) * plotH;
+      }
+      return pad.t + ((maxP - price) / (maxP - minP || 1)) * plotH;
+    },
+    [maxP, minP, pad.t, plotH, scale]
   );
 
   const n = data.length;

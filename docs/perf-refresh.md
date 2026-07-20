@@ -4,7 +4,7 @@
 
 | Paramètre | Valeur | Raison |
 |-----------|--------|--------|
-| Intervalle | **90 s** (`PRICE_AUTO_REFRESH_MS`) | Évite le spam providers (était 10 s) |
+| Intervalle | **60 s** (`PRICE_AUTO_REFRESH_MS`) | Compromis fraîcheur / charge providers (était 10 s, puis 90 s) |
 | Onglets | Leader only (`localStorage` lock ~25 s) | Multi-onglets = 1 POST `/api/prices/refresh` |
 | Visibility | Pause si `document.hidden` | Pas de charge en arrière-plan |
 | Vues | Dashboard, Positions, Transactions | Fiscal / passifs / AV : pas d’auto-tick |

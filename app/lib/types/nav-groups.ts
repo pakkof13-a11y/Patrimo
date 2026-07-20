@@ -32,10 +32,10 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     id: "sources",
-    label: "Comptes et sources",
+    label: "Sources",
     items: [
       { id: "banques", label: "Banques", testId: "banques" },
-      { id: "platforms", label: "Plateformes", testId: "platforms" },
+      { id: "platforms", label: "Mes plateformes", testId: "platforms" },
     ],
   },
   {

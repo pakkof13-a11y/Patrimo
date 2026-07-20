@@ -71,6 +71,11 @@ export function CommandPalette({
         e.preventDefault();
         onOpenChange(!open);
       }
+      // Échap ferme la palette (en plus du trap interne éventuel)
+      if (open && e.key === "Escape") {
+        e.preventDefault();
+        onOpenChange(false);
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -156,7 +161,7 @@ export function CommandPalette({
       },
       {
         id: "nav-plat",
-        label: "Aller aux Plateformes",
+        label: "Aller à Mes plateformes",
         section: "Navigation",
         icon: <Building2 className="h-3.5 w-3.5" />,
         run: () => onNavigate("platforms"),

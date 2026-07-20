@@ -14,6 +14,7 @@
  */
 
 import type { Prisma } from "@prisma/client";
+import { nftExcludePrismaClause } from "./nft-filter";
 
 export const TX_LIST_DEFAULT_PAGE_SIZE = 50;
 export const TX_LIST_MAX_PAGE_SIZE = 100;
@@ -23,12 +24,24 @@ export const TX_TYPE_GROUPS: Record<string, string[] | null> = {
   all: null,
   buy: ["ACHAT"],
   sell: ["VENTE"],
+  reward: ["REWARD", "AIRDROP"],
+  airdrop: ["AIRDROP"],
   dividend: ["DIVIDENDE", "COUPON", "LOYER", "INTERET"],
   fees: ["FRAIS"],
   cash: ["APPORT", "RETRAIT"],
   transfer: ["TRANSFERT_CASH", "TRANSFERT_TITRE"],
   split: ["SPLIT"],
 };
+
+export type TxListSortBy =
+  | "date"
+  | "type"
+  | "asset"
+  | "envelope"
+  | "platform"
+  | "quantity"
+  | "currency"
+  | "netPrice";
 
 export type TxListQuery = {
   page: number;
@@ -37,7 +50,20 @@ export type TxListQuery = {
   typeExact: string | null;
   accountType: string | null;
   q: string | null;
+  sortBy: TxListSortBy;
+  sortDir: "asc" | "desc";
 };
+
+const SORT_BY_SET = new Set<TxListSortBy>([
+  "date",
+  "type",
+  "asset",
+  "envelope",
+  "platform",
+  "quantity",
+  "currency",
+  "netPrice",
+]);
 
 export function parseTxListQuery(
   searchParams: URLSearchParams
@@ -72,6 +98,13 @@ export function parseTxListQuery(
   const qRaw = searchParams.get("q")?.trim() || "";
   const q = qRaw.length > 0 ? qRaw.slice(0, 120) : null;
 
+  const sortRaw = (searchParams.get("sortBy") || "date").trim();
+  const sortBy = SORT_BY_SET.has(sortRaw as TxListSortBy)
+    ? (sortRaw as TxListSortBy)
+    : "date";
+  const dirRaw = (searchParams.get("sortDir") || "desc").trim().toLowerCase();
+  const sortDir: "asc" | "desc" = dirRaw === "asc" ? "asc" : "desc";
+
   return {
     page,
     pageSize,
@@ -79,7 +112,51 @@ export function parseTxListQuery(
     typeExact: typeExact && typeExact.length > 0 ? typeExact : null,
     accountType: accountType && accountType.length > 0 ? accountType : null,
     q,
+    sortBy,
+    sortDir,
   };
+}
+
+/** OrderBy Prisma pour la liste transactions. */
+export function buildTxListOrderBy(
+  query: TxListQuery
+): Prisma.TransactionOrderByWithRelationInput[] {
+  const dir = query.sortDir;
+  switch (query.sortBy) {
+    case "type":
+      return [{ type: dir }, { occurredAt: "desc" }, { id: "asc" }];
+    case "asset":
+      return [
+        { asset: { name: dir } },
+        { occurredAt: "desc" },
+        { id: "asc" },
+      ];
+    case "envelope":
+      return [
+        { asset: { accountType: dir } },
+        { occurredAt: "desc" },
+        { id: "asc" },
+      ];
+    case "platform":
+      return [
+        { platform: { name: dir } },
+        { occurredAt: "desc" },
+        { id: "asc" },
+      ];
+    case "currency":
+      return [{ currency: dir }, { occurredAt: "desc" }, { id: "asc" }];
+    case "quantity":
+      return [{ quantity: dir }, { occurredAt: "desc" }, { id: "asc" }];
+    case "netPrice":
+      return [
+        { netCashImpactEur: dir },
+        { occurredAt: "desc" },
+        { id: "asc" },
+      ];
+    case "date":
+    default:
+      return [{ occurredAt: dir }, { id: "asc" }];
+  }
 }
 
 export function resolveTypeFilter(
@@ -100,8 +177,11 @@ export function buildTxListWhere(
 ): Prisma.TransactionWhereInput {
   const types = opts?.omitTypeFilter ? null : resolveTypeFilter(query);
 
+  const nftNot = nftExcludePrismaClause();
   const where: Prisma.TransactionWhereInput = {
     userId,
+    // Vue principale : pas de NFT (toutes blockchains)
+    AND: [{ NOT: nftNot.NOT as Prisma.TransactionWhereInput[] }],
   };
 
   if (types && types.length > 0) {
@@ -170,12 +250,19 @@ export const TX_LIST_SELECT = {
       ticker: true,
       isin: true,
       accountType: true,
+      assetClass: true,
+      logoUrl: true,
+      notes: true,
+      providerSymbol: true,
     },
   },
   platform: {
     select: {
       name: true,
       logoUrl: true,
+      logoKey: true,
+      type: true,
+      subtype: true,
     },
   },
   toPlatform: {

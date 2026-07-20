@@ -160,6 +160,8 @@ export function AssetPriceChart({
   const [mainTab, setMainTab] = useState<MainTab>("price");
   const [range, setRange] = useState<PriceHistoryRange>("1m");
   const [style, setStyle] = useState<ChartStyle>("line");
+  /** Échelle Y : linéaire (défaut) ou logarithmique */
+  const [yScale, setYScale] = useState<"linear" | "log">("linear");
   /** Perf : période par défaut 7J, style Courbe, métrique Σ cumulée */
   const [perfRange, setPerfRange] = useState<PriceHistoryRange>("7d");
   const [perfStyle, setPerfStyle] = useState<PerfChartStyle>("line");
@@ -529,6 +531,37 @@ export function AssetPriceChart({
               ))}
             </div>
           )}
+          {isPrice && (
+            <div
+              className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--muted)]/40 p-0.5"
+              role="tablist"
+              aria-label="Échelle de l'axe Y"
+            >
+              {(
+                [
+                  { id: "linear" as const, label: "Linéaire" },
+                  { id: "log" as const, label: "Log" },
+                ] as const
+              ).map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={yScale === s.id}
+                  data-testid={`chart-yscale-${s.id}`}
+                  onClick={() => setYScale(s.id)}
+                  className={cn(
+                    "rounded-md px-2 py-1 text-[10px] font-medium transition",
+                    yScale === s.id
+                      ? "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900"
+                      : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                  )}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
           {isPerf && (
             <>
               <div
@@ -708,7 +741,7 @@ export function AssetPriceChart({
                 pnlKpis.latentPnlEur < 0 && "text-rose-600 dark:text-rose-400",
                 pnlKpis.latentPnlEur === 0 && "text-slate-500 dark:text-slate-400"
               )}
-              data-testid="kpi-latent"
+              data-testid="kpi-latent-chart"
             >
               {pnlKpis.latentPnlEur >= 0 ? "+" : ""}
               {formatCurrency(pnlKpis.latentPnlEur, "EUR")}
@@ -832,12 +865,14 @@ export function AssetPriceChart({
               points={points}
               barInterval={barInterval}
               markers={allMarkers}
+              scale={yScale}
             />
           ) : (
             <SessionLineChart
               points={points}
               barInterval={barInterval}
               markers={allMarkers}
+              scale={yScale}
             />
           ))}
 

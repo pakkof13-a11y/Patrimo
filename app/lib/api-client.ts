@@ -87,10 +87,25 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
   }
 
   if (!res.ok) {
-    const fromBody =
+    let fromBody =
       toErrorMessage(data?.error, "") ||
       toErrorMessage(data?.message, "") ||
       "";
+    // Enrichit « Validation échouée » avec details.fieldErrors si présents
+    if (
+      (!fromBody || fromBody === "Validation échouée") &&
+      data?.details &&
+      typeof data.details === "object"
+    ) {
+      const fe = (data.details as { fieldErrors?: Record<string, string[]> })
+        .fieldErrors;
+      if (fe && typeof fe === "object") {
+        const parts = Object.entries(fe)
+          .filter(([, v]) => Array.isArray(v) && v.length > 0)
+          .map(([k, v]) => `${k}: ${(v as string[]).join(", ")}`);
+        if (parts.length) fromBody = parts.join(" · ");
+      }
+    }
     if (res.status === 409) {
       throw new Error(
         fromBody || "Cette plateforme existe déjà dans votre liste"

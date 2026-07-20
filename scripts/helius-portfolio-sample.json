@@ -1,0 +1,1727 @@
+{
+  "wallet": "5QQuBjEBuHCAKUcE2c9DbVr3r2w3pnJg93eqVjf4tKnf",
+  "source": "helius",
+  "fetchedAt": "20-07-2026 15:27:48",
+  "balances": [
+    {
+      "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "ticker": "USDC",
+      "name": "USD Coin",
+      "amount": 461.102391,
+      "decimals": 6,
+      "logo": "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png",
+      "usdValue": 461.01628411605674
+    },
+    {
+      "mint": "jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v",
+      "ticker": "JupSOL",
+      "name": "Jupiter Staked SOL",
+      "amount": 1.737593599,
+      "decimals": 9,
+      "logo": "https://static.jup.ag/jupSOL/icon.png",
+      "usdValue": 159.62374061091836
+    },
+    {
+      "mint": "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+      "ticker": "SKR",
+      "name": "Seeker",
+      "amount": 2500,
+      "decimals": 6,
+      "logo": "https://gateway.irys.xyz/uP1dFvCofZQT26m3SKOCttXrir3ORBR1B8wPhP6tv7M?ext=png",
+      "usdValue": 20.016871858388186
+    },
+    {
+      "mint": "DvjbEsdca43oQcw2h3HW1CT7N3x5vRcr3QrvTUHnXvgV",
+      "ticker": "DOOD",
+      "name": "Doodles",
+      "amount": 1368,
+      "decimals": 9,
+      "logo": "https://arweave.net/OqHnpGf36DiprL5YIC4xJHG8zRsWFV2FsZcNTfVgAPg",
+      "usdValue": 2.0628208369016647
+    },
+    {
+      "mint": "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj",
+      "ticker": "stSOL",
+      "name": "Lido Staked SOL",
+      "amount": 0.021960785,
+      "decimals": 9,
+      "logo": "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj/logo.png",
+      "usdValue": 2.0528347761608887
+    },
+    {
+      "mint": "So11111111111111111111111111111111111111111",
+      "ticker": "SOL",
+      "name": "Solana",
+      "amount": 0.008798712,
+      "decimals": 9,
+      "logo": null,
+      "usdValue": 0.6752938289558716
+    },
+    {
+      "mint": "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
+      "ticker": "JTO",
+      "name": "JITO",
+      "amount": 0.214742578,
+      "decimals": 9,
+      "logo": "https://metadata.jito.network/token/jto/image",
+      "usdValue": 0.12929558779246927
+    },
+    {
+      "mint": "SW1TCHLmRGTfW5xZknqQdpdarB8PD95sJYWpNp9TbFx",
+      "ticker": "SWTCH",
+      "name": "Switchboard",
+      "amount": 80,
+      "decimals": 9,
+      "logo": "https://arweave.net/6vzi0XguvyKL5bqvQCUgatwaVfaXMGweGlk9QlqS8Sc",
+      "usdValue": 0.06064219865947962
+    },
+    {
+      "mint": "MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey",
+      "ticker": "MNDE",
+      "name": "Marinade",
+      "amount": 0.599774155,
+      "decimals": 9,
+      "logo": "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey/logo.png",
+      "usdValue": 0.011364461433789571
+    },
+    {
+      "mint": "7i5KKsX2weiTkry7jA4ZwSuXGhs5eJBEjY8vVxR4pfRx",
+      "ticker": "GMT",
+      "name": "GMT",
+      "amount": 0.868478823,
+      "decimals": 9,
+      "logo": "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/7i5KKsX2weiTkry7jA4ZwSuXGhs5eJBEjY8vVxR4pfRx/logo.png",
+      "usdValue": 0.006306244830405865
+    },
+    {
+      "mint": "HAPPYwgFcjEJDzRtfWE6tiHE9zGdzpNky2FvjPHsvvGZ",
+      "ticker": "HAPPY",
+      "name": "Happy Cat",
+      "amount": 2123.67,
+      "decimals": 9,
+      "logo": "https://ipfs.io/ipfs/QmePUch18pVBHf4z2LM7D6RC3wnaFB3Tff3iXVE6nKLsws",
+      "usdValue": null
+    },
+    {
+      "mint": "GRUmPYbiTpq9ZPy5LAqBMMze7kErf5dEX2i9qYfwoSmR",
+      "ticker": "GRUMPY",
+      "name": "Grumpy Cat",
+      "amount": 5989.65,
+      "decimals": 9,
+      "logo": "https://ipfs.io/ipfs/QmezkzHwWJGTR8hsaFj9rRVfNPUzKCJmWfhhWgP591x2xr",
+      "usdValue": null
+    },
+    {
+      "mint": "Em9zr2tgSmGgRbz3kxyQeRXjRi9oc13wMu6cKam4zWFW",
+      "ticker": "NAMI",
+      "name": "Thief Cat",
+      "amount": 74.5,
+      "decimals": 6,
+      "logo": null,
+      "usdValue": null
+    },
+    {
+      "mint": "5j2shkkzascw33QpW6RRqfRkacLkn7QwwV1e7jX36nyn",
+      "ticker": "FECES",
+      "name": "FECES",
+      "amount": 1000,
+      "decimals": 9,
+      "logo": "https://ipfs.io/ipfs/QmQNcRByqUZ5pAJCa364J6W6YgTiFRAEPm2bX8a8SBhx3z",
+      "usdValue": null
+    },
+    {
+      "mint": "3DH8WZ6C2HdDR4J9ekYnTfai8Tx8mxn92mW8zcYmP4px",
+      "ticker": "HM",
+      "name": "Holdium",
+      "amount": 354,
+      "decimals": 9,
+      "logo": "https://arweave.net/S7UYKRUpMyemVFVcquML0uBsH8hQ1euT9RgLvBJ8y4Y",
+      "usdValue": null
+    },
+    {
+      "mint": "2DMMamkkxQ6zDMBtkFp8KH7FoWzBMBA1CGTYwom4QH6Z",
+      "ticker": "CHAPTER2",
+      "name": "Chapter 2 Preorder Token",
+      "amount": 1,
+      "decimals": 0,
+      "logo": "https://arweave.net/pvqmEfFQ0PvWM3fYzJ-jKe2uEGdFXYrSo_jXWOaureg?ext=jpeg",
+      "usdValue": null
+    },
+    {
+      "mint": "21rweMLGYeMNonHW7H3xa5py17X6ZFRcHirCp9inRBQA",
+      "ticker": "IQ50",
+      "name": "IQ50",
+      "amount": 800000,
+      "decimals": 6,
+      "logo": "https://arweave.net/6KljMJ7KsWcEhyVXXP7R17_B4nrViaj5o1l9vPMlKbA",
+      "usdValue": null
+    }
+  ],
+  "transactions": [
+    {
+      "signature": "28krDhwopwoqLihyXcBxAiLCx7oB3oaovqZEoiw5Q2veDLLu2auaZqRgKsyFzkKChuWfVX4knxY7Zht2mdcxJ2yw",
+      "date": "14-07-2026 15:51:18",
+      "timestampUnix": 1784037078,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": []
+    },
+    {
+      "signature": "4mJWn13x12AvY9oEegGp38eLFKwUNX7MwqrzoDNpSB4FJ4zX7XPHZxUDTtbQEfGpE6ExF9v1YUARGQbRibnTjmek",
+      "date": "14-07-2026 15:51:12",
+      "timestampUnix": 1784037072,
+      "type": "SWAP",
+      "status": "success",
+      "fee": 5381,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111112",
+          "amount": -2.08,
+          "decimals": 0
+        },
+        {
+          "mint": "jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v",
+          "amount": 1.737593599,
+          "decimals": 0
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -2.08,
+          "decimals": 9
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00203928,
+          "decimals": 9
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00203928,
+          "decimals": 9
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 0.00203928,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "3j16KFnDnvexzA9e3PpiBpAK8K66fjSNkcp1A7aQXAcWcMa3dw4VpGXJ9VDsj5gdbcMTiPCHguNXd4GkL2qazpHJ",
+      "date": "14-07-2026 15:36:44",
+      "timestampUnix": 1784036204,
+      "type": "SWAP",
+      "status": "success",
+      "fee": 17996,
+      "balanceChanges": [
+        {
+          "mint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+          "amount": 10.412764,
+          "decimals": 0
+        },
+        {
+          "mint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+          "amount": -10.412764,
+          "decimals": 0
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00203928,
+          "decimals": 9
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00195576,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "5TaqspX7P5BipVi8Dz5p3xKaRx7jj8TXqmDtM2VgRG7k2MaQam1UuRmv6T3MpWs5TuoSRKCGzFCqWRnsVZ8MGqUy",
+      "date": "11-07-2026 21:17:49",
+      "timestampUnix": 1783797469,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 11360,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 0.092454222,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "364RiUBBR16793UCHav64E3U7d8KpuFc7UhtWeMHGBKSBeMQJmF5whvd2yY5ncgpe8sRS2QDdiCBscSbTP5WfrBT",
+      "date": "11-07-2026 21:17:26",
+      "timestampUnix": 1783797446,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 22558,
+      "balanceChanges": [
+        {
+          "mint": "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+          "amount": 2500,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "263jaVdqZLEZ2h8yWEpRe246VzRXuJqLEtBTTif8U64L13UyJmb75FmG3x9ytBdP7KBECxaEhkW9V3FnT7R3e13r",
+      "date": "11-07-2026 21:16:34",
+      "timestampUnix": 1783797394,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5333,
+      "balanceChanges": [
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": 136.310421,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "4tJqMMsGTDZ8W4wfzA1GeLLvGHkPo2Tt3zNFoaZ5EZtYgZ7WL6GDWG1CrixhquTmLHHbBfScxJjYeMh78oMaNBpf",
+      "date": "07-07-2026 17:28:06",
+      "timestampUnix": 1783438086,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 21000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1.707,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "3RbAPJBFJhqHb5jVpfsGGJ4J6jMhmmMnNzvTdTEjE1SWtwKXtC3WyC8r8yqJNE8h9AsHaSNEc1nnN6KKGuW85ieq",
+      "date": "29-11-2025 18:06:31",
+      "timestampUnix": 1764435991,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 14900,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 0.186782012,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4vWV4ZYGUQCRTy92jdbTr9NrADm4ireUSibxQag6xpufMLv8J4EoR3G9XrmLx8ETHsCknVB8PJW7LobKTmvNKwYq",
+      "date": "29-11-2025 18:06:12",
+      "timestampUnix": 1764435972,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 40455,
+      "balanceChanges": [
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": 5.982775,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "5q5wJxGrde6zM5rfevWuu3LDBqgPp5BzJd6ZmBDFz3EHrof5opzuVL4PhzmVaLDeKQE6vpMJsamv8quP7684nR93",
+      "date": "29-11-2025 18:05:40",
+      "timestampUnix": 1764435940,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 153280,
+      "balanceChanges": [
+        {
+          "mint": "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj",
+          "amount": 0.021960785,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "3isYqdVEbf6zeaixzVR5tkcmFvPmne4XbEEzQXVyEChTvJfgnw5o7gxHRegC5voBKt8sSZp4yFrFtBtXutLeLpei",
+      "date": "28-09-2025 08:46:26",
+      "timestampUnix": 1759041986,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4D6i75knQ9dsNC27bLz4BojfR62v9paGi958PkDhua4iJYkq2kot1NP92PSy8HgMZ29baBZZsHtCvq5QijgC5jGA",
+      "date": "28-09-2025 08:43:29",
+      "timestampUnix": 1759041809,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "KRmKsE83DWnQw81xmaSDQEeSV1Ju7KXJzDVMRWYWnHtx1Cvr1gbkCKoPLVDnPDE7pgQBrtJiUQBuiEmyhGckfGA",
+      "date": "25-09-2025 13:26:38",
+      "timestampUnix": 1758799598,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "61NwjYtFnpTQmRC6mnmaYMLmUiqyAngJ6saqQYNxyuKNGLrbMLTFegDhV8838XSidMpqVwFtd2a2zDwMkQ4DdRd6",
+      "date": "25-09-2025 13:26:27",
+      "timestampUnix": 1758799587,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "2HEcfg1XcBzXK2BonDWXMteo8g2DX96rzpYVn5xq2CPJETptgTLkZHhoMRr4Q1RSL1EDnPB5H1rv7MzBQYCphWac",
+      "date": "25-09-2025 13:26:16",
+      "timestampUnix": 1758799576,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4vY6GaEiAb9bhXej4nmTmKz9EVevVGcjQfprgYu7Za5RtKQC3zEJEQN8kuJ5c2zgrbXFURY93mTM4kKrMbugwjB1",
+      "date": "25-09-2025 13:26:05",
+      "timestampUnix": 1758799565,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4ueAfKw9ijJ2MnhqQWtqY7Hyj3DsvEb2oC5ae3H8wuqxuzuH4s9qAWN3Ku5VmsHKdoxMCeA2uYzKRHzW7H4kfyov",
+      "date": "25-09-2025 13:25:41",
+      "timestampUnix": 1758799541,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4ZwyYoz5CtwNd3bG7i5jbXk3PgES21XVoqAgk2B7ij3rijcZCcPEEo19pCxrzpPnYdhiCWGyQMWXHM6NRwqCJD7Y",
+      "date": "25-09-2025 13:25:41",
+      "timestampUnix": 1758799541,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "2WaGvFPyM6t3iQBKjKomhYn5GT9zyiiGpETejxUfHynWWugwTi4KiGT6FpQReVtNL1m8UPpm6jVtMsJzRPu7S6EK",
+      "date": "25-09-2025 13:25:38",
+      "timestampUnix": 1758799538,
+      "type": "SEND",
+      "status": "success",
+      "fee": 80000,
+      "balanceChanges": [
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": -3000,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "2Kx8uyN7FgimzmvoU9J7FgVmd2zqUWDzusp1mhQ5WgEivvgCNT4frqQXamuXhu828i3FB7cr1SfqgEXQ31BSbQH8",
+      "date": "24-09-2025 15:26:12",
+      "timestampUnix": 1758720372,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4nS51JuaiYKpzrCdfBPL7WR1PF5WZog4JxrHWoqEvSLEHvajvxLAXo8jYP5Y1NqNhV6QPKMrrhtWo83mUonhxgBJ",
+      "date": "24-09-2025 15:25:57",
+      "timestampUnix": 1758720357,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "37MsxonXarRFrZLjcLY8E5FWGVLaJ3PD9vAjGiwniLw9N8LBHws4b7oYp8RnH6RkFnJfd3RGWVs2tJG9Mf8wrnX5",
+      "date": "24-09-2025 15:25:48",
+      "timestampUnix": 1758720348,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "5St9vHuvQVGM1RPwn7rPiXkThBnfBKbKjqiXJgWuEmkyHynY2YtT5php2WnVJvxwMgUZFvyXKRWgcRNzaMPeCWp2",
+      "date": "24-09-2025 15:25:39",
+      "timestampUnix": 1758720339,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "Cn8vKm4SKW8FkvcBzqXyhMq5eDDVyz1sPNVUnKW6hLgbiQo3n77erRZdiMwRyt6iqudEnUsn1xBKmdZYTcdxoNF",
+      "date": "24-09-2025 15:25:27",
+      "timestampUnix": 1758720327,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "287ErrFSVsE3Hgx46jwLnj2fedbhZwMpeQBqhkfD3kp76qfLQDMp51cXSpEKcwikbxtLBPqwbQsaLQqXBxkaVx1u",
+      "date": "24-09-2025 15:25:27",
+      "timestampUnix": 1758720327,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "3sGncdCqbtWxxNnV6DxfQERDLTmYK2P9bVZvFuyW9mtVbPBpbkDKM9i3Q7k4RpFoY1qmpPvfKbnSZV526fqYBvqw",
+      "date": "24-09-2025 15:25:27",
+      "timestampUnix": 1758720327,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "5ZcVboxwaFowEaULeFK9nLNP1j8PQAyjr8yi6t1KHFTYub22XNpv24q2r1UjdNmqdiJHJpsu8GVE6fmyTAM33U1L",
+      "date": "24-09-2025 15:25:27",
+      "timestampUnix": 1758720327,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "3dHxhNJozaBPFjr2XUjuWoF4JeY6LSFcCFF4wcCgpwj8WTeaEyGP6dgNyHPCRW7WiqXuUmhqq4jE4DH8fjxAqWA1",
+      "date": "24-09-2025 15:25:15",
+      "timestampUnix": 1758720315,
+      "type": "SEND",
+      "status": "success",
+      "fee": 80000,
+      "balanceChanges": [
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": -3000,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "42HmYbXZ5aLF5vo1oZzm9RQm6GhUwXTojLFRCvXUituYaTZKWN6Q4PUttjbjWwYx2KDrivHSNhgBYthdHxEf387Y",
+      "date": "23-09-2025 09:48:34",
+      "timestampUnix": 1758613714,
+      "type": "SEND",
+      "status": "success",
+      "fee": 80000,
+      "balanceChanges": [
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": -3850,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "4PRK28MgEbXGq5vR1uaj6Ea8JJhacpdWog5PU9jbiNhEa7zY3FhbxN5mK9V5wLoiSRZnF1M3ad9C2CXrJQ6aFGnQ",
+      "date": "23-09-2025 09:45:43",
+      "timestampUnix": 1758613543,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4R92ZMVXN68RuoAZnjcHyacYG4zkgGXNYii3UVdi49WKHjn9EguZeqNtfCMGqdBVMZkHnhPUdDJBJwfMEohbriVV",
+      "date": "23-09-2025 09:45:31",
+      "timestampUnix": 1758613531,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "5HXjB9Pw3dSsriVtCMu6u5rUR4Yu3z2RS7dau6qxv5ij6YTunHVTZZBx91FT7JX3ZrN6JAMmRWi9nnbZhBxetVc4",
+      "date": "23-09-2025 09:45:30",
+      "timestampUnix": 1758613530,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "2LLQ3ZRVntjFVBFUXZx1QyGGbbwXryhDQSoVDEnUBU5SoRiQddqP2v1WEqGHqX2Mbk8b1AHDoeiifgjPptHstaqh",
+      "date": "23-09-2025 09:45:11",
+      "timestampUnix": 1758613511,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "5DPphWNBKjJk1AJnnxZi9kNKzumAe4myckMBKhfBMtPCKufjkiNjip4GDczqxBGbSafyN2qNNAih3ZedEC2cbbyr",
+      "date": "23-09-2025 09:45:04",
+      "timestampUnix": 1758613504,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "5d3x6KXhwHaNsG44rMEaKYA47v6KcNgiporDh4Wqqu1H77WA6GimRFL669DuwEyKDJtXVntyQ4qEo4hBsseAjwtY",
+      "date": "23-09-2025 09:44:53",
+      "timestampUnix": 1758613493,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4xSyKZJXWvyUvYPawvNTLBqHQ3oURhFyjcjCPTrq4HXj4huG2XhNoey5uF4UHM8g1pt5mpjMMW8LwDHidNkUiU5N",
+      "date": "23-09-2025 09:44:53",
+      "timestampUnix": 1758613493,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "jDAW1mrMMuvERAYjsTf7vzbm5kuJ3LHn6yGtF1uCWrdiiVJR3ShAoGcAegU2cEMnZcmrbzcFzHbYxvqAjspY5ij",
+      "date": "23-09-2025 09:44:39",
+      "timestampUnix": 1758613479,
+      "type": "SEND",
+      "status": "success",
+      "fee": 80000,
+      "balanceChanges": [
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": -100,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "49TZJK3t5Xc6PaqL7innNv1NPqU1326Cjt11avtCNcBM3BXsbEWgmCUjQjn7YKqjkVRrgEj4BmZoRKUJAQzT6aYF",
+      "date": "20-09-2025 08:41:17",
+      "timestampUnix": 1758350477,
+      "type": "SEND",
+      "status": "success",
+      "fee": 14224,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00155904,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "5AHbuxSC1faRJJLuai43Yr94tTrhcRU8YDUAkAAMWfGrtntcpWd9vm663Wz4GDsEV7BUYs1jUgemPXKujMHUrTze",
+      "date": "20-09-2025 08:31:30",
+      "timestampUnix": 1758349890,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "47X8z942ATTVTzAPVvPWoBdvproCynEU2n5BCcBZkRvajXFL1mnXGAetpwS9z5zU57oy6BpGBddSVWrFfco2v7ng",
+      "date": "20-09-2025 08:31:24",
+      "timestampUnix": 1758349884,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "32pdVTjUYtbwVYvXKoQKBPFS6VhFrUgENfmtK5cfGcHF7yeYbWMqWjEQRJkHqTvUYKcrPn2ifL2oJKSY7yocZpsk",
+      "date": "20-09-2025 08:31:04",
+      "timestampUnix": 1758349864,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "2ZkmQrYzHqYcniE7mgccAMA9Dn4ynb3Gfv8FYZm5VFV8KpH72n6BS7AsNs5qCSArfLNyMxaXpTGKtPgRUZgZTaBo",
+      "date": "20-09-2025 08:30:48",
+      "timestampUnix": 1758349848,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "3BJhaQmALyN9BXvceUvEdZNzNofiT1Muuj5tRUk9MPoFDKoVSyCiG2cEFjijGATCYPnR8iqRtJHUkhuw6PUED9Qa",
+      "date": "20-09-2025 08:30:48",
+      "timestampUnix": 1758349848,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "3Rv1V3AyZ2RRwcdwWHJRHXAqTUVx76gMr5AQkmCRDaaRHMn643dUXUiH3PFaPDV6hSSjmwct9aeGJWrjBYBdvXwL",
+      "date": "20-09-2025 08:30:47",
+      "timestampUnix": 1758349847,
+      "type": "SWAP",
+      "status": "success",
+      "fee": 47000,
+      "balanceChanges": [
+        {
+          "mint": "SW1TCHLmRGTfW5xZknqQdpdarB8PD95sJYWpNp9TbFx",
+          "amount": 80,
+          "decimals": 0
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00203928,
+          "decimals": 9
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.0017748,
+          "decimals": 9
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.0145,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "bMGcfS2DPFPykcFHYySgsf1UyGhrT29xf9B8N3i9ufj7uvGKsLAkNSQapPDveaWpsA12j251KjsAYqTaL9dcKsz",
+      "date": "03-09-2025 22:29:21",
+      "timestampUnix": 1756931361,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": []
+    },
+    {
+      "signature": "7QfWP7zQEbXX9ddp2bNWaAgULM7XaprbNCxtefzYCmgpwzdGhS7NCDLH13BGpV2hmHetsKtByexEy5ABEMc6oHz",
+      "date": "02-09-2025 23:51:40",
+      "timestampUnix": 1756849900,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": []
+    },
+    {
+      "signature": "2KFNVSjvcRZN7TDmjQjehdWoq4pYyaSFHy1kcDtpR21ZmuhUJNjzTc9UWDhvngxwyzRAcuSovLLs1A48YaoR379M",
+      "date": "01-09-2025 18:39:21",
+      "timestampUnix": 1756744761,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": []
+    },
+    {
+      "signature": "2NxaJwtgvAF8b5F5M5FKnAn7tN294LrCGbBZm1WE6LDRuDiJwqu1ThVhFTG1tbRgZGkW7zGQDybb4AKcRLTDzxH9",
+      "date": "31-08-2025 17:44:50",
+      "timestampUnix": 1756655090,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": []
+    },
+    {
+      "signature": "2291LqCc8KZR9H9ZpwNU1fzY1rRA3K3qff9oa6c1adesnWQVhiZqdf82o36RxQgkv8Las3vU11xeUKhWs3FHVSuS",
+      "date": "30-08-2025 01:05:59",
+      "timestampUnix": 1756508759,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": []
+    },
+    {
+      "signature": "QmDpjiELobP7vSjX6otx2Jdsmm9351kbn9PY6nbCWXbbTQ98bowMvGdzRyFZtjBZHMhaMAzaGdnEib8x97YckFa",
+      "date": "09-08-2025 16:11:13",
+      "timestampUnix": 1754748673,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "2HgzLkenStZCN7GG64q3HmBBqomyXWvW2au5u217bF6Uvs6kCyQ198SPpmXxSP8ci6F2Sd3tdmv463RXm7Ytkwjh",
+      "date": "03-08-2025 17:13:57",
+      "timestampUnix": 1754234037,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "5PqNKWEsWiL9ouv4asKJVf3qYM1FHwa5J17J56yDLJdtkUHDzwHLwvU9gFVQz1EeZZDTBvVqLgkU9XFZVFBQZZnd",
+      "date": "02-08-2025 19:48:35",
+      "timestampUnix": 1754156915,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4AL1C6nscw13WGrcrPM4nvntv9JCjPPuutfTmT35FM1QMVsCU8RCb1VohGCxK3wczBgPuxGTfHbNNvYNKsxEexuF",
+      "date": "02-08-2025 17:36:19",
+      "timestampUnix": 1754148979,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4M44zPYqpiq3NA4TEi9fGsnL5t9QDRrrZSRSrXiweFodSdNhsCwQsEMEzRkY23uqDRFnuMTieNbcgP6CPpwWADja",
+      "date": "02-08-2025 16:56:49",
+      "timestampUnix": 1754146609,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "5vXJYHsiHqX3o9cNVWgvhbAgb2sizuDWdVFawTmrNiP7ugBXyYaDWd211SnJPJHNPZwsbbSwvUSmktwLTDGUEZ7J",
+      "date": "02-08-2025 14:21:22",
+      "timestampUnix": 1754137282,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4f53BuWUAD53fK4ZqVG4V8fiP41VYaDK2GvjWuYo6BJcFHdXLdt187d8mhHjXnYk9ncDUGEtVR5hj83VnAwbkMyu",
+      "date": "31-07-2025 17:12:07",
+      "timestampUnix": 1753974727,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4dqwBVg5huJSHGfZJFSMFoDNe4W7uw1NuBKDyF8dxoWA95Bpi8cM56NZyq5NWZNxGfAhcWmayZXqJYeeo1pgF9uW",
+      "date": "29-07-2025 19:35:26",
+      "timestampUnix": 1753810526,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5210,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4b2F5jKWajThuPsqQWmWvpE1a5SDTXHJsNw5UKMEt9pBfmEBktEooFvNcZLJDG6H1svrnp2S53LYPcfJNyJXnhLS",
+      "date": "22-07-2025 17:06:43",
+      "timestampUnix": 1753196803,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 10597,
+      "balanceChanges": [
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": 2304.871271,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "27PqinUxM2E2r1fVUmuccnd7vs95ZZsoCC95fPr5pKNo2CtqthYdCy3vF1pTQDBYs5L6JRFULFvvSEoqJneUN3kn",
+      "date": "03-07-2025 13:21:30",
+      "timestampUnix": 1751541690,
+      "type": "SWAP",
+      "status": "success",
+      "fee": 80000,
+      "balanceChanges": [
+        {
+          "mint": "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS",
+          "amount": 62.637597,
+          "decimals": 0
+        },
+        {
+          "mint": "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS",
+          "amount": -62.637597,
+          "decimals": 0
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00203928,
+          "decimals": 9
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00161472,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4XyfU7qqRb3XgMwiMHsg1yGCRuKRewDB715vdsvC3M9yM3b4YfKhZy2b4JyV1rgwhxjMNc9GH2z2aYJw7vufwp4v",
+      "date": "19-05-2025 13:47:15",
+      "timestampUnix": 1747655235,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "2ksLdyEBDKR78sz8XqbrKTW3Lksqv86WXusp5w5Q6nyo3ditMynhAD7MsgtVWvEESgEkLH4WuAbYQkA1QtTiEp6y",
+      "date": "19-05-2025 13:47:15",
+      "timestampUnix": 1747655235,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "3uVMJ7useVbcxY8Ew7EtxeNzdJVYEu76UcucJdozjEKtQHW61s2hZMWLjVsePA9LW775dgXxJxS5CKoBD9TBjRhb",
+      "date": "19-05-2025 13:47:06",
+      "timestampUnix": 1747655226,
+      "type": "SEND",
+      "status": "success",
+      "fee": 80000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -1,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4pi8Ci9F9AjLN8iwivb6zmPZjvEy8ZCTVnB18Ms9PMadjP8o7YLb7z7qmJe2yEGmFgHxP4eFLiaNht9tfQLcipKT",
+      "date": "09-05-2025 17:38:56",
+      "timestampUnix": 1746805136,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 285000,
+      "balanceChanges": [
+        {
+          "mint": "DvjbEsdca43oQcw2h3HW1CT7N3x5vRcr3QrvTUHnXvgV",
+          "amount": 1368,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "46ibQZYG2scjb3VJk5yzG6E6wGrXqQkVQfrycJcCMziR7tBEwDMpq626yWxpASSvzopivauok9kNyF1crJcJVjvM",
+      "date": "09-05-2025 13:26:07",
+      "timestampUnix": 1746789967,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 285000,
+      "balanceChanges": []
+    },
+    {
+      "signature": "2pETFgsTQuGKe3bkWJKMNxkaoJDiRjBbTXqWzi6sPrEHW7ZsEYBk9rCgweoiqmvpeKMMisch6xBbgmHecySi3gC9",
+      "date": "08-04-2025 02:18:22",
+      "timestampUnix": 1744071502,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5825,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4VBHk3PYR2ihGcXTA2c2DcvfhRsad2HGY8M3ERB8yQuextFzLjk5whHYbJzdszpBQ3eRgiuXmHxig2gN7rMz6oR4",
+      "date": "07-04-2025 14:07:35",
+      "timestampUnix": 1744027655,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5825,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "TGwLQ6dBepHZoinUMRaydXYQ439ymCdRZhJZh3L6KwghQLCNofw2GzrErTbEFGoau5mkFacEaxFC739Vi7K5VZT",
+      "date": "07-04-2025 10:24:55",
+      "timestampUnix": 1744014295,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "593s7epBnP1kiUQ1cKwYztk5VX6RUBvQRyX82ZoEE6A9RyhFu9G5woTMy9EJ7MkwkLdPCeiBmswu7GYfxQQYFXzc",
+      "date": "07-04-2025 10:24:51",
+      "timestampUnix": 1744014291,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "ho2igyNjpad3cxPL6MgbAWi8wTTrtkSVugPbaD8hCr3fSV9ZQGo5N3W5UyV6P8k6TtEmfZyR5rjrna3n1TSzXez",
+      "date": "07-04-2025 10:24:51",
+      "timestampUnix": 1744014291,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "2BciTtPkfd78wkoq2d15Rx96s7fP1nPV7MPnMmqv79VMHSuzHtHt8cbdie8BudnRJPkTLTjcZjdbQFHuiafFkvxB",
+      "date": "07-04-2025 10:24:49",
+      "timestampUnix": 1744014289,
+      "type": "SWAP",
+      "status": "success",
+      "fee": 64325,
+      "balanceChanges": [
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": -3500.358763,
+          "decimals": 0
+        },
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": 3848.067999,
+          "decimals": 0
+        },
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": -3643.230551,
+          "decimals": 0
+        },
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": 4005.414076,
+          "decimals": 0
+        },
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": -7.853482,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "Y6gsKZpjgCeZcffSYkxd3p54CVJb3U1dwCHPvpv5k1BcPe5cMNXyMSTgbm334dDTbf1f9DYME74ou86HHQdrC6P",
+      "date": "29-01-2025 13:19:16",
+      "timestampUnix": 1738153156,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5825,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "3J6CCyrRefHkieZSZUC4n7ov6N1i7AhBgfDg1Txievf2qi1SupPjzSf8vwDknz8FcDi2KhP6kc9fe9NSbrJXT6xF",
+      "date": "29-01-2025 01:17:10",
+      "timestampUnix": 1738109830,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5825,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "26CpxQfqdXDTMbCRD9R9RjWZgYSDae561r9dbubKGH9od8K2v526H54RC9MY6UmgiAGysb2dP8WnTX6Wzstfgsau",
+      "date": "28-01-2025 21:38:23",
+      "timestampUnix": 1738096703,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 5000,
+      "balanceChanges": []
+    },
+    {
+      "signature": "5bKGfivoQGH1XeABdTyFizsorz59CrMbamWG9CnnGDLdkPS6CdLpCeBXUdbR4FBU3gY5rDCUCM4b1DrvZnxDMcos",
+      "date": "28-01-2025 21:28:30",
+      "timestampUnix": 1738096110,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5300,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-7,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4Y437LY9sjQGw1K6qSB5EURAKGzP2RCEgWtq2sKDJNzxJd8Sr5cr6Gmea5ohK5Q9BwmvUdj6dtXE8QMauyGxLhMW",
+      "date": "28-01-2025 21:28:30",
+      "timestampUnix": 1738096110,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5300,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-7,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "25VbgNFxbR3sCAU7BcinfVWnqiPwXxoUQDzwGw49A5Z79GaqtdAfARJ1F6xwxRjVSxmXSLQYUGwDmuGoTcqEeWou",
+      "date": "28-01-2025 21:28:22",
+      "timestampUnix": 1738096102,
+      "type": "SWAP",
+      "status": "success",
+      "fee": 1187154,
+      "balanceChanges": [
+        {
+          "mint": "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",
+          "amount": -6980,
+          "decimals": 0
+        },
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": 118.309331,
+          "decimals": 0
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00203928,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "3DAkmutXgjx2SReGksBeLLwYKBno4ZbddQpmfsH5MbvJtt5tT1u44RrpXjWeegrktLqXSJXvUJ6LpqhJci6WgZWj",
+      "date": "22-01-2025 21:00:29",
+      "timestampUnix": 1737576029,
+      "type": "SWAP",
+      "status": "success",
+      "fee": 25873,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.000163142,
+          "decimals": 9
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00065257,
+          "decimals": 9
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 0.00203928,
+          "decimals": 9
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 0.00203928,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "22NhvbH617buCNCkxhSGGE4npWC42APMTsvjojQv8xoVMdmRuiv2Nv3KQPHxHCCFBJ6MmH42ubcuPL5wb4G6FJ5W",
+      "date": "22-01-2025 20:59:05",
+      "timestampUnix": 1737575945,
+      "type": "SWAP",
+      "status": "success",
+      "fee": 116772,
+      "balanceChanges": [
+        {
+          "mint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+          "amount": 71,
+          "decimals": 0
+        },
+        {
+          "mint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+          "amount": -71,
+          "decimals": 0
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00203928,
+          "decimals": 9
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00200448,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "27jomEJMsCjjdNf2X1o3pPY1WdrRi3VaHDnRmxA3tLZEsSQzwx5ztcUALceAnXKZHnYFbG7hwjoVhzLy9nH8b2Ds",
+      "date": "21-01-2025 18:17:33",
+      "timestampUnix": 1737479853,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 88208,
+      "balanceChanges": [
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": 2.800592,
+          "decimals": 0
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 0.00203928,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "R8neaKBJfJUx8GTm7TZhWSPN6AHeVm63YxbvSFFgivEGhyeb6Kue6p5i9CS62PoJCP1Skwz3Uskeqq8vhxfMghU",
+      "date": "21-01-2025 18:14:25",
+      "timestampUnix": 1737479665,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 21095,
+      "balanceChanges": [
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": 17.835334,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "48vnRsSuk3N1e4Z69TNGnfWsPDE8niputxkKaZbKWLYUSQNQnqTzJpQrLmi5p2fBsw52Q458bq1GQyzQ2zwkCFYe",
+      "date": "21-01-2025 18:14:20",
+      "timestampUnix": 1737479660,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 17216,
+      "balanceChanges": [
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": 15.476942,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "3bHRiWCbMB7xeUgXMH5z8iKHxUCxGoysu1wqn6tJEh1MWwpfL2jpFiR6wozDptg7b2CjzXGSvX3RfGCRwtNyzhK5",
+      "date": "21-01-2025 18:14:20",
+      "timestampUnix": 1737479660,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 17228,
+      "balanceChanges": [
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": 18.424932,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "5rrf37KxGXB5vXCSGC2jSzFtpobgtxwwuZ9arsy7mV5afXwAWq2C2Ko4F71yA7HJ86a4cTbagQKr1fevmF8djbxT",
+      "date": "21-01-2025 18:14:06",
+      "timestampUnix": 1737479646,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 26745,
+      "balanceChanges": [
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": 369.235637,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "2VQTTseXgv7mfoJJR52P79rag4Hunu7Yd5KaWRzqnUMQdf4Sab9r4PpLWYMNn7gi7WSZ39tnSFqgykCHDHYU6uyw",
+      "date": "21-01-2025 18:14:00",
+      "timestampUnix": 1737479640,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 25948,
+      "balanceChanges": [
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": 1842.493198,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "23BZYqeaEnWzXbHL4z8PL5LVynUEVeEy7pMuz3ur8MeTSgJc2m32B3LA1GJrXhZRxu4fj1KSoxA9ff5QMZNarTGa",
+      "date": "21-01-2025 18:13:52",
+      "timestampUnix": 1737479632,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 23178,
+      "balanceChanges": [
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": 18.424932,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "F6N2VirPAxFFNBifhtuHoqpYt3Tf8UCrwqvmHUdjjAzvH9WUCwpKsLTSSYTF2nucy4XLEucPC8Y8fC6qTBW8Z9F",
+      "date": "21-01-2025 18:13:47",
+      "timestampUnix": 1737479627,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 23609,
+      "balanceChanges": [
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": 18.424932,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "2yHdt4gZf19APuxhCs5D5VFSk1XLWTvHWHF6f32z4hcAbC5nBr319fpEhzKMLKMYZetXU4pmscxuDVcX8h68os8o",
+      "date": "21-01-2025 13:24:32",
+      "timestampUnix": 1737462272,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 51573,
+      "balanceChanges": [
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": 18.57352,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "2QanPPM4tuhHNdFsCDPaBprBu2qh6GLcXU89maFQ3S39tTgm4A3TKuHcHtdwGW3X7WrXHBB7dBohz35ZhJHzrvh6",
+      "date": "21-01-2025 13:04:25",
+      "timestampUnix": 1737461065,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5825,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "5K4DtjKyutbhrKfcX2nykVTLPkpHjSRn6rXr4ZQXqBKDP4Er6YRzLtXjwUyUAzjnBA8xpGntk2a2NbJbGNYgMmKT",
+      "date": "21-01-2025 01:26:42",
+      "timestampUnix": 1737419202,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5825,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "4KBXqhAt6H4eeH4HY7YdacrzPGXL6PDqyYjQk7dpXYujPDNqTVK8MbmML4ZQ9RBzWjSYZWmXAoYKrsv2XE1FAm6p",
+      "date": "21-01-2025 01:26:11",
+      "timestampUnix": 1737419171,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 180383,
+      "balanceChanges": [
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": 18.572323,
+          "decimals": 0
+        }
+      ]
+    },
+    {
+      "signature": "5RNjaiTBC3saDx5QAjWvPyLzuAnaopkL4jC5E53DbYHVkXUuQHcrh1rPu41JN3UEsVC4aLysXRnaCdkb9F8jbHc9",
+      "date": "20-01-2025 22:44:09",
+      "timestampUnix": 1737409449,
+      "type": "SEND",
+      "status": "success",
+      "fee": 1481021,
+      "balanceChanges": [
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": -2431.623931,
+          "decimals": 0
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00348,
+          "decimals": 9
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00203928,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "53X16oUspgkhwR2sYhp2Dg5iyp9pABjnYjL5jK7344SVnZRnkxgA362GhFsxL8hWjd49hj1PXN52biAUYiDMxnMJ",
+      "date": "20-01-2025 22:43:00",
+      "timestampUnix": 1737409380,
+      "type": "SWAP",
+      "status": "success",
+      "fee": 470081,
+      "balanceChanges": [
+        {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": -5000,
+          "decimals": 0
+        },
+        {
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "amount": 4803.326972,
+          "decimals": 0
+        },
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": -0.00203928,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "45NLc9e24Znxmn8uDitf4JQGBWBwVdVyeTF1dzgfspjpoGGQUx85Y5veHY614CQAqhtJa7aVivU1hDTy35ynp4o2",
+      "date": "30-12-2024 07:24:57",
+      "timestampUnix": 1735539897,
+      "type": "RECEIVE",
+      "status": "success",
+      "fee": 5140,
+      "balanceChanges": [
+        {
+          "mint": "So11111111111111111111111111111111111111111",
+          "amount": 1e-9,
+          "decimals": 9
+        }
+      ]
+    },
+    {
+      "signature": "3Nkm7LbNf61payg24yHNkBnQPqvAkAjVDAzoPKDBV79G45jmEQfKQAc8syYXoxJFttQkmR24SBFi7wVh3KM4RCt2",
+      "date": "23-12-2024 19:22:47",
+      "timestampUnix": 1734978167,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 9600,
+      "balanceChanges": []
+    },
+    {
+      "signature": "hqiCvdxbSY99Ss7Am5EkqLa5RBSMKUXxjGjsRnCCivCVUQeumy4Q4YPX1BDsLdYTXdyXJSnm4Cv8mcccbCF6ogj",
+      "date": "23-12-2024 18:04:39",
+      "timestampUnix": 1734973479,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 9600,
+      "balanceChanges": []
+    },
+    {
+      "signature": "5gsrcjreUvLZMSbRG2FxHY1w6fHdsLQMxCXAwnmBD1K5iGTnSgEdvCY1NWcnrfBEKDzyoWQhSHn5n1sPX7F7Hi1i",
+      "date": "23-12-2024 14:50:12",
+      "timestampUnix": 1734961812,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 9600,
+      "balanceChanges": []
+    },
+    {
+      "signature": "4pV2R9NTGC9RSn7FZA16DBdu9nDF1BPP3wDh6uE3V4xpJBrdXHNz7KYjS8XHxYR38Cgph3txLNvB1tDr5Pdm9r65",
+      "date": "23-12-2024 13:48:16",
+      "timestampUnix": 1734958096,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 9600,
+      "balanceChanges": []
+    },
+    {
+      "signature": "5r3P2AtVqqPMwLharPCAnycHmjNzxqVMnUHyTUVXrZ2esn7Sa4pwgNTBCMVB7Wdx7UoArMGyF9U7kkqGmrGMhG4a",
+      "date": "23-12-2024 12:41:32",
+      "timestampUnix": 1734954092,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 9600,
+      "balanceChanges": []
+    },
+    {
+      "signature": "4imRWR6atMYUA61QAGKnC32My6he9AtLTJFHemn6ZZhKqkr96RnD1SQnwMLVPNwEE2FpF4WKTCbyribanCNSHqN",
+      "date": "23-12-2024 11:36:30",
+      "timestampUnix": 1734950190,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 9600,
+      "balanceChanges": []
+    },
+    {
+      "signature": "5mc7M5s29EQUa8C2APs1fcCaD7irJ8v3Yv5ExKMCzffbmS8PrrQYnUgcoMQ77wTzjMhi3J6b7MSs22t7dXfnTN57",
+      "date": "23-12-2024 10:30:27",
+      "timestampUnix": 1734946227,
+      "type": "INTERACTION",
+      "status": "success",
+      "fee": 9600,
+      "balanceChanges": []
+    }
+  ]
+}

@@ -36,6 +36,12 @@ export type ImportCsvResult = {
   columnMap: ColumnMapping;
   confidence: MappingConfidence;
   needsManualMapping: boolean;
+  /**
+   * Auto-détection ambiguë : plusieurs formats score proche.
+   * L’UI doit demander à l’utilisateur de choisir le template.
+   */
+  needsFormatConfirm?: boolean;
+  ambiguousFormats?: Array<{ id: string; score: number; label: string }>;
   transactions: TransactionImport[];
   /** Drafts pour le pipeline de commit existant */
   drafts: ImportDraftRow[];
@@ -71,11 +77,21 @@ export function importCsv(
   let detected: string | null = null;
   let ranking: Array<{ id: string; score: number; label: string }> = [];
 
+  let needsFormatConfirm = false;
+  let ambiguousFormats:
+    | Array<{ id: string; score: number; label: string }>
+    | undefined;
+
   if (formatId === "auto" || formatId === "generic" || formatId === "dynamic") {
     const best = detectBestAdapter(csv.headers);
     ranking = best.ranking;
     detected = best.adapter.meta.id;
+    if (best.ambiguous && best.ambiguous.length > 1) {
+      needsFormatConfirm = true;
+      ambiguousFormats = best.ambiguous;
+    }
     if (formatId === "auto") {
+      // En cas d’ambiguïté, on garde le meilleur score mais l’UI doit confirmer
       formatId = best.adapter.meta.id as typeof formatId;
     } else if (formatId === "generic") {
       detected = detectFormatFromHeaders(csv.headers);
@@ -145,7 +161,9 @@ export function importCsv(
     detectedFormatId: detected,
     columnMap: columnMapForUi as ColumnMapping,
     confidence: parsed.confidence,
-    needsManualMapping: parsed.needsManualMapping,
+    needsManualMapping: parsed.needsManualMapping || needsFormatConfirm,
+    needsFormatConfirm,
+    ambiguousFormats,
     transactions: parsed.transactions,
     drafts,
     warnings: parsed.warnings,

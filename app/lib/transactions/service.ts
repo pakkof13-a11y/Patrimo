@@ -238,7 +238,25 @@ function validateLedger(
 ) {
   const base = existing.filter((t) => t.id !== excludeId);
   const extra = pending ? (Array.isArray(pending) ? pending : [pending]) : [];
-  replayTransactions([...base, ...extra], { allowNegativeCash });
+  const all = [...base, ...extra];
+  const soft = Boolean(allowNegativeCash);
+
+  // Aligné sur loadLedgerForUser : un journal seed/import peut contenir
+  // des VENTE > stock. Sans clamp, TOUTE nouvelle écriture (REWARD wallet,
+  // ACHAT Zerion…) échoue alors que le dashboard lit le ledger en mode soft.
+  try {
+    replayTransactions(all, { allowNegativeCash: soft });
+  } catch (strictErr) {
+    try {
+      replayTransactions(all, {
+        allowNegativeCash: true,
+        clampOversell: true,
+      });
+    } catch {
+      // Re-lancer l’erreur stricte d’origine (plus informative)
+      throw strictErr;
+    }
+  }
 }
 
 /**
@@ -267,14 +285,16 @@ export async function createTransaction(raw: CreateTxInput) {
       throw new AccountingError("INVALID_PRICE", "Prix unitaire requis");
     }
   }
-  if (input.type === "REWARD") {
+  if (input.type === "REWARD" || input.type === "AIRDROP") {
     if (!input.assetId) {
       throw new AccountingError("ASSET_REQUIRED", "Sélectionnez un actif");
     }
     if (!input.quantity || d(input.quantity).lte(0)) {
       throw new AccountingError(
         "INVALID_QTY",
-        "Quantité de récompense strictement positive requise"
+        input.type === "AIRDROP"
+          ? "Quantité d'airdrop strictement positive requise"
+          : "Quantité de récompense strictement positive requise"
       );
     }
     if (
@@ -309,8 +329,23 @@ export async function createTransaction(raw: CreateTxInput) {
   const whtRate = await resolveIncomeWhtRate(input);
   const newTx = toLedgerTx(`pending-${Date.now()}`, input, occurredAt, whtRate);
 
-  // ACHAT/VENTE no longer need cash; only bank ops may fail cash checks
-  validateLedger(existing, newTx, undefined, Boolean(input.allowNegativeCash));
+  // ACHAT / VENTE / REWARD / SPLIT / TRANSFERT_TITRE n’impactent pas le cash bancaire.
+  // Si le journal historique a déjà des RETRAIT sans APPORT, le replay échouerait
+  // sans allowNegativeCash — et bloquerait à tort l’écriture de positions (ex. sync wallet).
+  const positionOnly = [
+    "ACHAT",
+    "VENTE",
+    "REWARD",
+    "AIRDROP",
+    "SPLIT",
+    "TRANSFERT_TITRE",
+  ].includes(input.type);
+  validateLedger(
+    existing,
+    newTx,
+    undefined,
+    Boolean(input.allowNegativeCash) || positionOnly
+  );
 
   const amounts = computeNetCashImpactEur(newTx);
   const whtEur = Number(

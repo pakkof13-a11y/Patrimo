@@ -167,13 +167,56 @@ const ENVELOPE_URL: Record<string, string> = {
   "": "/positions",
 };
 
+/**
+ * Sélecteur Enveloppe = <button> + listbox multi-cases (plus de <select>).
+ * `code` = CTO | PEA | … ou "" pour tout sélectionner.
+ */
+export async function selectEnvelopeFilter(
+  page: Page,
+  code: string
+): Promise<void> {
+  const trigger = page.getByTestId("envelope-select");
+  await expect(trigger).toBeVisible({ timeout: 15_000 });
+  // Ouvrir le menu si fermé
+  const listbox = page.getByTestId("envelope-multiselect");
+  if (!(await listbox.isVisible().catch(() => false))) {
+    await trigger.click();
+  }
+  await expect(listbox).toBeVisible({ timeout: 5_000 });
+
+  if (!code) {
+    await page.getByTestId("envelope-select-all").click();
+  } else {
+    // Une seule enveloppe : tout décocher puis cocher la cible
+    await page.getByTestId("envelope-select-none").click();
+    const check = page.getByTestId(`envelope-check-${code}`);
+    await expect(check).toBeVisible();
+    // Après « tout désélectionner », la case est décochée → cocher
+    if (!(await check.isChecked().catch(() => false))) {
+      await check.check();
+    }
+  }
+
+  // Fermer le popover (évite de masquer d’autres contrôles)
+  const close = page.getByTestId("envelope-close");
+  if (await close.isVisible().catch(() => false)) {
+    await close.click();
+  } else {
+    await page.keyboard.press("Escape").catch(() => undefined);
+  }
+}
+
 /** Chemins URL pour les onglets (secours si le clic nav ne navigue pas). */
 const NAV_PATH: Record<string, string> = {
   "Tableau de bord": "/dashboard",
   Positions: "/positions",
   Transactions: "/transactions",
   Fiscalité: "/fiscalite",
-  Plateformes: "/plateformes",
+  /** Libellé produit actuel */
+  "Mes plateformes": "/comptes",
+  /** Alias historiques — même destination */
+  "Mes comptes": "/comptes",
+  Plateformes: "/comptes",
   Passifs: "/passifs",
   Banques: "/banques",
   "Épargne Salariale": "/epargne-salariale",
@@ -192,6 +235,8 @@ export async function clickNav(page: Page, label: string) {
     Positions: "nav-holdings",
     Transactions: "nav-transactions",
     Fiscalité: "nav-fiscal",
+    "Mes plateformes": "nav-platforms",
+    "Mes comptes": "nav-platforms",
     Plateformes: "nav-platforms",
     Passifs: "nav-liabilities",
     Banques: "nav-banques",
@@ -216,7 +261,8 @@ export async function clickNav(page: Page, label: string) {
 
     const sel = page.getByTestId("envelope-select");
     if (await sel.isVisible().catch(() => false)) {
-      await sel.selectOption(val);
+      // Multi-select (button + listbox), pas de <select>
+      await selectEnvelopeFilter(page, val);
       try {
         if (val) {
           await expect(page).toHaveURL(new RegExp(`envelope=${val}`, "i"), {
@@ -317,6 +363,74 @@ export async function waitForHoldingsReady(page: Page) {
 }
 
 /**
+ * Après création API d’une position : navigue vers /positions, attend le fetch
+ * holdings + fin du skeleton, filtre optionnel, puis poll jusqu’à voir le libellé.
+ * (Le skeleton ne contient plus « Chargement » — les asserts basés sur ce texte
+ * passaient trop tôt.)
+ */
+export async function waitForHoldingInTable(
+  page: Page,
+  match: RegExp,
+  opts?: { search?: string; timeout?: number }
+) {
+  const timeout = opts?.timeout ?? 45_000;
+
+  const waitHoldingsOk = () =>
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/holdings") &&
+        r.request().method() === "GET" &&
+        r.ok(),
+      { timeout }
+    );
+
+  const firstHoldings = waitHoldingsOk();
+  await page.goto("/positions", { waitUntil: "domcontentloaded" });
+  if (page.url().includes("/login")) {
+    await loginAs(page);
+    const again = waitHoldingsOk();
+    await page.goto("/positions", { waitUntil: "domcontentloaded" });
+    await again.catch(() => null);
+  } else {
+    await firstHoldings.catch(() => null);
+  }
+
+  await expect(page.getByTestId("holdings-table")).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByTestId("holdings-loading-skeleton")).toHaveCount(0, {
+    timeout,
+  });
+
+  if (opts?.search) {
+    const search = page.getByPlaceholder(/Nom, ticker, ISIN/i).first();
+    if (await search.isVisible().catch(() => false)) {
+      await search.fill(opts.search);
+      // debounce useDebouncedValue holdings ≈ 300 ms
+      await page.waitForTimeout(500);
+    }
+  }
+
+  await expect
+    .poll(
+      async () => {
+        const text =
+          (await page
+            .getByTestId("holdings-table")
+            .innerText()
+            .catch(() => "")) || "";
+        return match.test(text) ? "ok" : "pending";
+      },
+      { timeout, intervals: [400, 800, 1500, 2500] }
+    )
+    .toBe("ok");
+
+  await expect(page.getByTestId("holdings-table")).toContainText(match, {
+    timeout: 15_000,
+  });
+}
+
+/**
  * Ouvre la modale Import CSV.
  * Deep-link `?import=1` = chemin fiable e2e (évite hit-test header sous charge).
  */
@@ -351,25 +465,16 @@ export async function openImportCsvModal(page: Page) {
  * Retry avec second clic après court délai si le 1er est perdu.
  */
 export async function openPreferences(page: Page) {
+  // Préférences intégrées au menu profil (haut-droit)
   const dialog = page.getByTestId("preferences-dialog");
-  const btn = page.getByTestId("preferences-panel");
-  await expect(btn).toBeVisible({ timeout: 15_000 });
-  await btn.scrollIntoViewIfNeeded();
+  if (await dialog.isVisible().catch(() => false)) return;
 
-  for (let i = 0; i < 3; i++) {
-    // Lire l’état via aria-expanded
-    const expanded = await btn.getAttribute("aria-expanded");
-    if (expanded === "true" && (await dialog.isVisible().catch(() => false))) {
-      return;
-    }
-    await btn.click({ force: true });
-    try {
-      await expect(dialog).toBeVisible({ timeout: 2_000 });
-      return;
-    } catch {
-      /* retry */
-    }
-  }
+  const account = page.getByTestId("header-account-trigger");
+  await expect(account).toBeVisible({ timeout: 15_000 });
+  await account.click({ force: true });
+  await expect(page.getByTestId("header-account-dropdown")).toBeVisible({
+    timeout: 5_000,
+  });
   await expect(dialog).toBeVisible({ timeout: 5_000 });
 }
 

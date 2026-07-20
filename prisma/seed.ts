@@ -37,6 +37,10 @@ async function wipeUserData(userId: string) {
   await prisma.tangibleAsset
     .deleteMany({ where: { userId } })
     .catch(() => undefined);
+  // On-chain txs liées aux plateformes de l’utilisateur
+  await prisma.blockchainOnchainTx
+    .deleteMany({ where: { userId } })
+    .catch(() => undefined);
   await prisma.asset.deleteMany({ where: { userId } });
   await prisma.platform.deleteMany({ where: { userId } });
   await prisma.portfolioSnapshot.deleteMany({ where: { userId } });
@@ -45,10 +49,12 @@ async function wipeUserData(userId: string) {
 /**
  * Seed Patrimo — ~30 positions + ~100–120 transactions sur ~3 ans + tous onglets.
  *
- * - Défaut : portfolio sur **admin** et **demo**.
- * - `SEED_DEMO_ONLY=1` : uniquement demo (admin wipe sans données).
- * - `SEED_ADMIN_ONLY=1` : uniquement admin.
- * - E2E (`SEED_LIGHT=1` / `E2E=1`) : portfolio sur **demo** uniquement.
+ * - Défaut : portfolio sur **admin** et **demo** (wipe des deux cibles seedées).
+ * - `SEED_DEMO_ONLY=1` : wipe + seed **demo uniquement** (admin non touché).
+ * - `SEED_ADMIN_ONLY=1` : wipe + seed **admin uniquement**.
+ * - E2E (`SEED_LIGHT=1` / `E2E=1` / `PLAYWRIGHT=1`) : **demo uniquement**,
+ *   **n’efface jamais admin** (évite de vider le patrimoine perso si connecté en admin).
+ * - `SEED_SKIP_WIPE=1` : ne wipe personne (upsert users seulement — rare).
  */
 async function main() {
   const creds = loadSeedCredentials();
@@ -65,14 +71,16 @@ async function main() {
     process.env.SEED_LIGHT === "1" ||
     process.env.E2E === "1" ||
     process.env.PLAYWRIGHT === "1";
-  const DEMO_ONLY = process.env.SEED_DEMO_ONLY === "1";
-  const ADMIN_ONLY = process.env.SEED_ADMIN_ONLY === "1";
+  const DEMO_ONLY = process.env.SEED_DEMO_ONLY === "1" || LIGHT;
+  const ADMIN_ONLY =
+    process.env.SEED_ADMIN_ONLY === "1" && !LIGHT && !DEMO_ONLY;
+  const SKIP_WIPE = process.env.SEED_SKIP_WIPE === "1";
 
   console.log(
     LIGHT
-      ? "Seeding Patrimo — SEED_LIGHT / e2e → portfolio sur compte demo…"
+      ? "Seeding Patrimo — E2E/LIGHT → wipe+seed **demo uniquement** (admin préservé)…"
       : DEMO_ONLY
-        ? "Seeding Patrimo — portfolio DEMO uniquement…"
+        ? "Seeding Patrimo — portfolio DEMO uniquement (admin non wipe)…"
         : ADMIN_ONLY
           ? "Seeding Patrimo — portfolio ADMIN uniquement…"
           : "Seeding Patrimo — portfolios ADMIN + DEMO (3 ans, multi-onglets)…"
@@ -120,17 +128,25 @@ async function main() {
   });
   console.log(`  Démo USER : ${demoUsername} (${demo.id})`);
 
-  await wipeUserData(admin.id);
-  await wipeUserData(demo.id);
-
+  // Ne wipe QUE les comptes qui vont être reseedés.
+  // E2E / LIGHT : jamais admin → le patrimoine perso (souvent sur admin) reste intact.
   const targets: Array<{ id: string; tag: string; label: string }> = [];
-  if (LIGHT || DEMO_ONLY) {
-    targets.push({ id: demo.id, tag: "Demo", label: demoUsername });
-  } else if (ADMIN_ONLY) {
+  if (ADMIN_ONLY) {
     targets.push({ id: admin.id, tag: "Admin", label: adminUsername });
+  } else if (DEMO_ONLY || LIGHT) {
+    targets.push({ id: demo.id, tag: "Demo", label: demoUsername });
   } else {
     targets.push({ id: admin.id, tag: "Admin", label: adminUsername });
     targets.push({ id: demo.id, tag: "Demo", label: demoUsername });
+  }
+
+  if (SKIP_WIPE) {
+    console.log("  SEED_SKIP_WIPE=1 → aucun wipe (données existantes conservées)");
+  } else {
+    for (const t of targets) {
+      console.log(`  wipe → ${t.label}`);
+      await wipeUserData(t.id);
+    }
   }
 
   for (const t of targets) {

@@ -9,11 +9,16 @@ export const TX_TYPES = [
   "LOYER",
   "INTERET",
   /**
-   * Réception gratuite d’actifs (staking, airdrop, learning reward…) :
+   * Réception gratuite d’actifs (staking, learning reward…) :
    * +quantité, coût d’acquisition 0 (rien dépensé) — distinct d’un ACHAT.
    * unitPrice optionnel = valeur de marché à la réception (affichage / notes), pas de CUMP.
    */
   "REWARD",
+  /**
+   * Airdrop token (réception gratuite hors staking) — même ledger que REWARD
+   * (+qty, coût 0). Séparé pour filtre / reporting.
+   */
+  "AIRDROP",
   "FRAIS",
   "APPORT",
   "RETRAIT",

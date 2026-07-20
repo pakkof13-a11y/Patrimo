@@ -5,7 +5,12 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Plus, Tags } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import { TRANSACTION_TYPES } from "@/app/lib/constants";
-import { formatCurrency, formatDate, getChangeColor, cn } from "@/app/lib/utils";
+import {
+  formatCurrencyPrecise,
+  formatDate,
+  formatQuantity,
+  cn,
+} from "@/app/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 
@@ -17,6 +22,7 @@ type RecentTx = {
   unitPrice: string | null;
   fees: string;
   currency: string;
+  fxRateToEur?: string;
   netCashImpactEur: string;
   notes: string | null;
 };
@@ -30,9 +36,32 @@ const TX_QUICK: { type: string; label: string }[] = [
   { type: "FRAIS", label: "Frais" },
 ];
 
+function tradePriceMath(tx: RecentTx): {
+  gross: number;
+  fees: number;
+  net: number;
+} | null {
+  const qty = Number(tx.quantity);
+  const px = Number(tx.unitPrice);
+  const feesN = Number(tx.fees) || 0;
+  const fx = Number(tx.fxRateToEur) || 1;
+  if (
+    !Number.isFinite(qty) ||
+    !Number.isFinite(px) ||
+    Math.abs(qty) <= 0 ||
+    !["ACHAT", "VENTE", "REWARD"].includes(tx.type)
+  ) {
+    return null;
+  }
+  const gross = Math.abs(qty * px) * fx;
+  const fees = Math.abs(feesN) * fx;
+  const net = Math.max(0, gross - fees);
+  return { gross, fees, net };
+}
+
 /**
  * Aperçu rapide de l’historique d’une position (expansion ligne).
- * Hiérarchie actions : Transaction · Fiche complète · Catégorie (secondaire).
+ * Layout : « Achat - Date | Qté »  ·  « brut − frais = net » (bleu/rouge/vert).
  */
 export function HoldingRecentTxs({
   assetId,
@@ -112,7 +141,6 @@ export function HoldingRecentTxs({
           className="flex flex-wrap items-center gap-1.5"
           data-testid={`holding-inline-actions-${assetId}`}
         >
-          {/* Primaire : Transaction */}
           {onOpenTransaction && (
             <div
               ref={menuRef}
@@ -173,7 +201,6 @@ export function HoldingRecentTxs({
             </div>
           )}
 
-          {/* Secondaire : fiche */}
           {onOpenDetail && (
             <Button
               type="button"
@@ -190,7 +217,6 @@ export function HoldingRecentTxs({
             </Button>
           )}
 
-          {/* Tertiaire : catégorie */}
           {onEditCategory && (
             <Button
               type="button"
@@ -216,40 +242,66 @@ export function HoldingRecentTxs({
           Enregistrez un achat pour démarrer l&apos;historique.
         </p>
       ) : (
-        <ul className="divide-y divide-[var(--border)]">
+        <ul className="divide-y divide-[var(--border)]" data-testid="holding-tx-list">
           {txs.map((tx) => {
-            const impact = Number(tx.netCashImpactEur);
+            const typeLabel =
+              TRANSACTION_TYPES[tx.type as keyof typeof TRANSACTION_TYPES] ??
+              tx.type;
+            const qtyStr =
+              tx.quantity != null && tx.quantity !== ""
+                ? formatQuantity(tx.quantity)
+                : null;
+            const math = tradePriceMath(tx);
+
             return (
               <li
                 key={tx.id}
-                className="flex flex-wrap items-center justify-between gap-2 px-1 py-1.5 text-xs"
+                className="flex items-center justify-between gap-3 px-1 py-2 text-xs"
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <span className="font-medium text-[var(--foreground)]">
-                    {TRANSACTION_TYPES[tx.type as keyof typeof TRANSACTION_TYPES] ??
-                      tx.type}
+                    {typeLabel}
                   </span>
-                  <span className="mx-1.5 text-[var(--muted-foreground)]">·</span>
-                  <time
-                    className="text-[var(--muted-foreground)]"
-                    dateTime={tx.occurredAt}
-                  >
-                    {formatDate(tx.occurredAt)}
-                  </time>
-                  {tx.quantity != null && (
-                    <span className="ml-1.5 tabular-nums text-[var(--muted-foreground)]">
-                      × {Number(tx.quantity).toLocaleString("fr-FR")}
+                  <span className="text-[var(--muted-foreground)]">
+                    {" "}
+                    - {formatDate(tx.occurredAt)}
+                  </span>
+                  {qtyStr != null && (
+                    <>
+                      <span className="text-[var(--muted-foreground)]">
+                        {" "}
+                        |{" "}
+                      </span>
+                      <span className="font-mono tabular-nums text-[var(--foreground)]">
+                        {qtyStr}
+                      </span>
+                    </>
+                  )}
+                </div>
+                <div
+                  className="shrink-0 text-right tabular-nums"
+                  data-testid="holding-tx-price-math"
+                >
+                  {math ? (
+                    <span className="inline-flex flex-wrap items-center justify-end gap-x-1">
+                      <span className="font-medium text-sky-700 dark:text-sky-300">
+                        {formatCurrencyPrecise(math.gross, "EUR")}
+                      </span>
+                      <span className="text-[var(--muted-foreground)]">−</span>
+                      <span className="font-medium text-red-600 dark:text-red-400">
+                        {formatCurrencyPrecise(math.fees, "EUR")}
+                      </span>
+                      <span className="text-[var(--muted-foreground)]">=</span>
+                      <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                        {formatCurrencyPrecise(math.net, "EUR")}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="font-medium text-[var(--foreground)]">
+                      {formatCurrencyPrecise(tx.netCashImpactEur, "EUR")}
                     </span>
                   )}
                 </div>
-                <span
-                  className={cn(
-                    "shrink-0 tabular-nums font-medium",
-                    getChangeColor(impact)
-                  )}
-                >
-                  {formatCurrency(tx.netCashImpactEur, "EUR")}
-                </span>
               </li>
             );
           })}

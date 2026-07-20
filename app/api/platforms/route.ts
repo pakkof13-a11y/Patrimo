@@ -9,7 +9,8 @@ import {
   validationErrorResponse,
 } from "@/app/lib/api/validation";
 import { getPlatformCashBalances } from "@/app/lib/portfolio/service";
-import { findPreset, PLATFORM_PRESETS } from "@/app/lib/platforms/presets";
+import { PLATFORM_PRESETS } from "@/app/lib/platforms/presets";
+import { findOrCreatePlatform } from "@/app/lib/platforms/upsert";
 
 export async function GET() {
   const userId = await requireUserId();
@@ -20,6 +21,13 @@ export async function GET() {
   return NextResponse.json({ platforms, presets: PLATFORM_PRESETS });
 }
 
+/**
+ * POST /api/platforms
+ * Body: platformSchema (+ optionnel `upsert: true` pour find-or-create race-safe).
+ * Mode upsert (défaut pour création contextuelle) : ne renvoie jamais 409,
+ * retourne `{ platform, created }`.
+ * Mode strict (`upsert: false`) : 409 si le nom existe déjà.
+ */
 export async function POST(req: Request) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
@@ -31,45 +39,64 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Corps de requête invalide" }, { status: 400 });
   }
 
+  const raw = body as Record<string, unknown>;
+  /** Défaut true : création contextuelle (transaction / import). */
+  const upsert =
+    raw.upsert === false || raw.upsert === "false" ? false : true;
+
   const parsed = platformSchema.safeParse(body);
   if (!parsed.success) return validationErrorResponse(parsed.error);
 
   const name = parsed.data.name.trim();
 
-  // Pre-check unique (userId, name)
-  const existing = await prisma.platform.findFirst({
-    where: { userId, name: { equals: name, mode: "insensitive" } },
-  });
-  if (existing) {
-    return NextResponse.json(
-      { error: "Cette plateforme existe déjà dans votre liste" },
-      { status: 409 }
-    );
+  if (!upsert) {
+    const existing = await prisma.platform.findFirst({
+      where: { userId, name: { equals: name, mode: "insensitive" } },
+    });
+    if (existing) {
+      return NextResponse.json(
+        { error: "Cette plateforme existe déjà dans votre liste" },
+        { status: 409 }
+      );
+    }
   }
 
-  const preset = parsed.data.logoKey
-    ? findPreset(parsed.data.logoKey)
-    : findPreset(parsed.data.name);
-
   try {
-    const platform = await prisma.platform.create({
-      data: {
-        userId,
-        name,
-        type: parsed.data.type || preset?.type || "AUTRE",
-        subtype:
-          parsed.data.subtype ||
-          preset?.subtype ||
-          null,
-        logoKey: parsed.data.logoKey || preset?.key || null,
-        logoUrl: parsed.data.logoUrl || preset?.logoUrl || null,
-        walletAddress: parsed.data.walletAddress || null,
-        notes: parsed.data.notes,
-      },
+    const { platform, created } = await findOrCreatePlatform(userId, {
+      name,
+      type: parsed.data.type,
+      subtype: parsed.data.subtype,
+      logoKey: parsed.data.logoKey,
+      logoUrl: parsed.data.logoUrl,
+      walletAddress: parsed.data.walletAddress,
+      walletApiKey: parsed.data.walletApiKey,
+      notes: parsed.data.notes,
     });
-    return NextResponse.json({ platform }, { status: 201 });
+    return NextResponse.json(
+      { platform, created },
+      { status: created ? 201 : 200 }
+    );
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      // Dernière ligne de défense race — re-upsert
+      try {
+        const again = await findOrCreatePlatform(userId, {
+          name,
+          type: parsed.data.type,
+          subtype: parsed.data.subtype,
+          logoKey: parsed.data.logoKey,
+          logoUrl: parsed.data.logoUrl,
+          walletAddress: parsed.data.walletAddress,
+          walletApiKey: parsed.data.walletApiKey,
+          notes: parsed.data.notes,
+        });
+        return NextResponse.json(
+          { platform: again.platform, created: again.created },
+          { status: again.created ? 201 : 200 }
+        );
+      } catch {
+        /* fallthrough */
+      }
       return NextResponse.json(
         { error: "Cette plateforme existe déjà dans votre liste" },
         { status: 409 }
@@ -105,6 +132,10 @@ export async function PUT(req: Request) {
   if (f.logoKey !== undefined) data.logoKey = f.logoKey;
   if (f.logoUrl !== undefined) data.logoUrl = f.logoUrl || null;
   if (f.walletAddress !== undefined) data.walletAddress = f.walletAddress;
+  // walletApiKey ajouté au schéma — cast tant que le client Prisma n’est pas regénéré
+  if (f.walletApiKey !== undefined) {
+    (data as Record<string, unknown>).walletApiKey = f.walletApiKey;
+  }
   if (f.notes !== undefined) data.notes = f.notes;
 
   try {
@@ -131,40 +162,134 @@ export async function PUT(req: Request) {
   }
 }
 
+/**
+ * DELETE /api/platforms?id=…
+ * - Sans force : refuse si actifs/txs liés (409 + counts)
+ * - force=1 : cascade (txs, assets, quotes, on-chain…) puis plateforme
+ */
 export async function DELETE(req: Request) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
+  const force =
+    url.searchParams.get("force") === "1" ||
+    url.searchParams.get("force") === "true";
   if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
 
   const existing = await prisma.platform.findFirst({ where: { id, userId } });
   if (!existing) return NextResponse.json({ error: "Introuvable" }, { status: 404 });
 
   const [assetCount, txCount] = await Promise.all([
-    prisma.asset.count({ where: { platformId: id } }),
+    prisma.asset.count({ where: { platformId: id, userId } }),
     prisma.transaction.count({
-      where: { OR: [{ platformId: id }, { toPlatformId: id }] },
+      where: {
+        userId,
+        OR: [{ platformId: id }, { toPlatformId: id }],
+      },
     }),
   ]);
 
-  if (assetCount > 0 || txCount > 0) {
+  if (!force && (assetCount > 0 || txCount > 0)) {
     return NextResponse.json(
       {
-        error: `Impossible de supprimer « ${existing.name} » : ${assetCount} actif(s) et ${txCount} transaction(s) y sont encore liés. Supprimez-les d'abord.`,
+        error: `La plateforme « ${existing.name} » a ${assetCount} actif(s) et ${txCount} transaction(s) liés.`,
+        code: "HAS_DEPENDENCIES",
+        assetCount,
+        txCount,
+        name: existing.name,
       },
       { status: 409 }
     );
   }
 
   try {
+    if (force) {
+      // Asset.platform onDelete:Restrict + Transaction.assetId Restrict :
+      // il faut supprimer TOUTES les txs qui pointent vers les actifs de la
+      // plateforme (même si tx.platformId est ailleurs), puis les actifs.
+      const assetIds = (
+        await prisma.asset.findMany({
+          where: { platformId: id, userId },
+          select: { id: true },
+        })
+      ).map((a) => a.id);
+
+      let deletedTxs = 0;
+      await prisma.$transaction(
+        async (tx) => {
+          if (assetIds.length > 0) {
+            await tx.priceHistory.deleteMany({
+              where: { assetId: { in: assetIds } },
+            });
+            await tx.priceQuote.deleteMany({
+              where: { assetId: { in: assetIds } },
+            });
+          }
+
+          // Txs liées à la plateforme OU aux actifs « home » de la plateforme
+          const delTx = await tx.transaction.deleteMany({
+            where: {
+              userId,
+              OR: [
+                { platformId: id },
+                { toPlatformId: id },
+                ...(assetIds.length > 0
+                  ? [{ assetId: { in: assetIds } }]
+                  : []),
+              ],
+            },
+          });
+          deletedTxs = delTx.count;
+
+          // On-chain Solana (Cascade côté schema, mais on nettoie explicitement)
+          await tx.blockchainOnchainTx.deleteMany({
+            where: { platformId: id, userId },
+          });
+
+          await tx.asset.deleteMany({ where: { platformId: id, userId } });
+          await tx.platform.deleteMany({ where: { id, userId } });
+        },
+        { timeout: 60_000 }
+      );
+
+      try {
+        const { invalidateLedgerCache } = await import(
+          "@/app/lib/portfolio/ledger-cache"
+        );
+        invalidateLedgerCache(userId);
+      } catch {
+        /* ignore */
+      }
+      return NextResponse.json({
+        ok: true,
+        force: true,
+        deleted: {
+          assets: assetCount,
+          transactions: deletedTxs || txCount,
+          name: existing.name,
+        },
+      });
+    }
+
     await prisma.platform.deleteMany({ where: { id, userId } });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, force: false });
   } catch (e) {
     console.error("[platforms DELETE]", e);
+    const msg = e instanceof Error ? e.message : "Erreur serveur";
+    // Prisma FK / timeout : message utile côté UI
+    const friendly =
+      /Foreign key|Restrict|P2003/i.test(msg)
+        ? `Impossible de supprimer « ${existing.name} » : des données liées restent bloquantes. Réessayez avec force, ou contactez le support.`
+        : /timeout|Timed out/i.test(msg)
+          ? "Suppression trop longue — réessayez (beaucoup de transactions)."
+          : "Erreur serveur lors de la suppression, veuillez réessayer";
     return NextResponse.json(
-      { error: "Erreur serveur, veuillez réessayer" },
+      {
+        error: friendly,
+        detail: process.env.NODE_ENV === "development" ? msg : undefined,
+      },
       { status: 500 }
     );
   }

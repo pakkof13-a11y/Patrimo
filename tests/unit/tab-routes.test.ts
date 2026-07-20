@@ -12,13 +12,13 @@ describe("tab-routes", () => {
     expect(tabToPath("pea")).toBe("/positions/pea");
     expect(tabToPath("transactions")).toBe("/transactions");
     expect(tabToPath("fiscal")).toBe("/fiscalite");
-    expect(tabToPath("platforms")).toBe("/plateformes");
+    expect(tabToPath("platforms")).toBe("/comptes");
     expect(tabToPath("liabilities")).toBe("/passifs");
   });
 
   it("pathToTab parses catch-all slugs", () => {
-    expect(pathToTab(undefined)).toBe("holdings");
-    expect(pathToTab([])).toBe("holdings");
+    expect(pathToTab(undefined)).toBe("dashboard");
+    expect(pathToTab([])).toBe("dashboard");
     expect(pathToTab(["dashboard"])).toBe("dashboard");
     expect(pathToTab(["positions"])).toBe("holdings");
     expect(pathToTab(["positions", "pea"])).toBe("pea");
@@ -26,6 +26,8 @@ describe("tab-routes", () => {
     expect(pathToTab(["transactions"])).toBe("transactions");
     expect(pathToTab(["fiscalite"])).toBe("fiscal");
     expect(pathToTab(["plateformes"])).toBe("platforms");
+    expect(pathToTab(["comptes"])).toBe("platforms");
+    expect(pathToTab(["mes-comptes"])).toBe("platforms");
     expect(pathToTab(["passifs"])).toBe("liabilities");
   });
 

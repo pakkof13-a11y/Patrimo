@@ -15,8 +15,24 @@ export type Holding = {
   accountType: string;
   currency: string;
   platformId: string;
+  /** Plateformes de l’agrégat (crypto multi-custody) — filtre Positions */
+  platformIds?: string[];
+  /**
+   * Jambes multi-custody (qty / coût / MV par plateforme).
+   * Reslice d’affichage si ?platformId= actif.
+   */
+  platformSlices?: import("@/app/lib/portfolio/holdings-platform-slice").HoldingPlatformSlice[];
   platformName: string;
   platformLogoUrl: string | null;
+  /** Type plateforme (BLOCKCHAIN, EXCHANGE_CRYPTO, …) */
+  platformType?: string | null;
+  platformLogoKey?: string | null;
+  /**
+   * Blockchain / lieu de détention UI (ethereum, solana, exchange…).
+   * Affichage & regroupement — hors calculs ledger.
+   */
+  blockchainKey?: string | null;
+  blockchainLabel?: string | null;
   assetLogoUrl?: string | null;
   logoUrl?: string | null;
   quantity: string;
@@ -73,7 +89,18 @@ export type PlatformRow = {
   cashEur: string;
   cashBase: string;
   logoUrl: string | null;
+  logoKey?: string | null;
   walletAddress?: string | null;
+  walletApiKey?: string | null;
+  notes?: string | null;
+  /** Positions titres ouvertes (qty > 0) */
+  positionCount?: number;
+  positionsValueEur?: string;
+  positionsValueBase?: string;
+  /** Cash + titres */
+  totalValueEur?: string;
+  totalValueBase?: string;
+  lastTransactionAt?: string | null;
 };
 
 export type TxRow = {
@@ -97,9 +124,22 @@ export type TxRow = {
     ticker?: string | null;
     isin?: string | null;
     accountType?: string | null;
+    assetClass?: string | null;
+    logoUrl?: string | null;
+    notes?: string | null;
+    providerSymbol?: string | null;
   } | null;
-  platform: { name: string; logoUrl?: string | null };
+  platform: {
+    name: string;
+    logoUrl?: string | null;
+    logoKey?: string | null;
+    type?: string | null;
+    subtype?: string | null;
+  };
   toPlatform?: { name: string } | null;
+  /** Blockchain dérivée (crypto) */
+  blockchainKey?: string | null;
+  blockchainLabel?: string | null;
 };
 
 export type PortfolioAllocation = {
@@ -177,7 +217,7 @@ export const PRIMARY_NAV: { id: MainTab; label: string }[] = [
   { id: "transactions", label: "Transactions" },
   { id: "fiscal", label: "Fiscalité" },
   { id: "liabilities", label: "Passifs" },
-  { id: "platforms", label: "Plateformes" },
+  { id: "platforms", label: "Mes plateformes" },
 ];
 
 /**

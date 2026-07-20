@@ -36,7 +36,25 @@ export function Providers({ children }: { children: React.ReactNode }) {
           <NotificationsProvider>
             <QueryClientProvider client={client}>
               <ErrorBoundary label="app">{children}</ErrorBoundary>
-              <Toaster richColors position="top-right" closeButton theme="system" />
+              <Toaster
+                position="top-right"
+                closeButton
+                theme="system"
+                visibleToasts={5}
+                gap={10}
+                offset={16}
+                duration={4000}
+                toastOptions={{
+                  duration: 4000,
+                  closeButton: true,
+                  classNames: {
+                    toast: "patrimo-toast",
+                    title: "text-[0.8125rem] font-medium",
+                    description: "text-[0.75rem] opacity-80",
+                    closeButton: "patrimo-toast-close",
+                  },
+                }}
+              />
             </QueryClientProvider>
           </NotificationsProvider>
         </DisplayProvider>

@@ -2,6 +2,7 @@ import { prisma } from "../prisma";
 import { d, toFixed, zero } from "../money/decimal";
 import {
   replayTransactions,
+  totalCash,
   totalCostBasis,
   totalRealizedPnl,
   type LedgerTx,
@@ -10,6 +11,16 @@ import {
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
 import { resolvePlatformLogo } from "../platforms/presets";
 import { resolveAssetLogo } from "../assets/logos";
+import {
+  blockchainLabel,
+  buildCustodyDistribution,
+  resolveBlockchainKey,
+} from "../assets/blockchain";
+import {
+  mergePlatformSlices,
+  sliceFromHoldingLeg,
+  type HoldingPlatformSlice,
+} from "./holdings-platform-slice";
 
 function mapDbTx(row: {
   id: string;
@@ -115,8 +126,22 @@ export type HoldingRow = {
   accountType: string;
   currency: string;
   platformId: string;
+  /**
+   * Toutes les plateformes contribuant à la ligne (crypto multi-custody).
+   * Le filtre Positions `?platformId=` matche ce tableau, pas seulement platformId.
+   */
+  platformIds?: string[];
+  /**
+   * Jambes par plateforme (qty / coût / MV) — reslice UI si filtre plateforme.
+   * Absent ou length=1 → mono-custody.
+   */
+  platformSlices?: HoldingPlatformSlice[];
   platformName: string;
   platformLogoUrl: string | null;
+  platformType?: string | null;
+  platformLogoKey?: string | null;
+  blockchainKey?: string | null;
+  blockchainLabel?: string | null;
   assetLogoUrl: string | null;
   quantity: string;
   /** PRU / CUMP (EUR) — break-even unitaire frais inclus */
@@ -254,7 +279,18 @@ export async function getHoldings(
       assetClass: asset.assetClass,
     });
 
-    rows.push({
+    const chainKey = resolveBlockchainKey({
+      platformType: platform?.type,
+      platformLogoKey: platform?.logoKey,
+      platformName: platform?.name,
+      platformSubtype: platform?.subtype,
+      assetNotes: asset.notes,
+      providerSymbol: asset.providerSymbol,
+      accountType: asset.accountType,
+      assetClass: asset.assetClass,
+    });
+
+    const leg: HoldingRow = {
       assetId: pos.assetId,
       name: asset.name,
       ticker: asset.ticker,
@@ -265,12 +301,17 @@ export async function getHoldings(
       accountType: asset.accountType || "CTO",
       currency: asset.currency || asset.priceQuote?.nativeCurrency || "EUR",
       platformId: pos.platformId,
+      platformIds: [pos.platformId],
       platformName: platform?.name || "—",
       platformLogoUrl: resolvePlatformLogo({
         logoKey: platform?.logoKey,
         logoUrl: platform?.logoUrl,
         name: platform?.name,
       }),
+      platformType: platform?.type ?? null,
+      platformLogoKey: platform?.logoKey ?? null,
+      blockchainKey: chainKey,
+      blockchainLabel: blockchainLabel(chainKey),
       assetLogoUrl: assetLogo,
       quantity: toFixed(pos.quantity, 8),
       avgCostEur: toFixed(avg, 8),
@@ -301,15 +342,29 @@ export async function getHoldings(
       tp2: asset.tp2?.toString() ?? null,
       tp3: asset.tp3?.toString() ?? null,
       tp4: asset.tp4?.toString() ?? null,
-    });
+    };
+    leg.platformSlices = [sliceFromHoldingLeg(leg)];
+    rows.push(leg);
   }
 
-  // Merge same assetId (multi-platform) into one line so qty always accumulates visibly
+  // Merge :
+  // 1) même assetId multi-plateforme
+  // 2) crypto même ticker + enveloppe → une ligne (ETH Base + ETH Revolut)
+  function mergeKey(row: HoldingRow): string {
+    const tick = (row.ticker || "").trim().toUpperCase();
+    const env = (row.accountType || "CTO").toUpperCase();
+    const isCrypto =
+      row.assetClass === "CRYPTO" || env === "CRYPTO";
+    if (isCrypto && tick) return `crypto:${env}:${tick}`;
+    return `id:${row.assetId}`;
+  }
+
   const merged = new Map<string, HoldingRow>();
   for (const row of rows) {
-    const prev = merged.get(row.assetId);
+    const key = mergeKey(row);
+    const prev = merged.get(key);
     if (!prev) {
-      merged.set(row.assetId, row);
+      merged.set(key, row);
       continue;
     }
     const qty = d(prev.quantity).plus(d(row.quantity));
@@ -326,13 +381,57 @@ export async function getHoldings(
         : `${prev.platformName}, ${row.platformName}`;
     const fees = d(prev.acquisitionFeesEur).plus(d(row.acquisitionFeesEur));
     const income = d(prev.passiveIncomeEur).plus(d(row.passiveIncomeEur));
-    merged.set(row.assetId, {
+    // Prix unitaire : moyenne pondérée par qty (ou cours live le plus frais)
+    const px =
+      qty.gt(0) && mv.gt(0)
+        ? mv.div(qty)
+        : d(prev.currentPriceEur).gt(0)
+          ? d(prev.currentPriceEur)
+          : d(row.currentPriceEur);
+    const preferLive =
+      (prev.priceSource || "").toLowerCase().includes("coingecko") ||
+      (prev.priceSource || "").toLowerCase().includes("zerion")
+        ? prev
+        : (row.priceSource || "").toLowerCase().includes("coingecko") ||
+            (row.priceSource || "").toLowerCase().includes("zerion")
+          ? row
+          : prev;
+    // Principal = plus grosse jambe (détail, logo, filtre par défaut)
+    const takeRow = d(row.quantity).gt(d(prev.quantity));
+    const prevIds = prev.platformIds?.length
+      ? prev.platformIds
+      : [prev.platformId];
+    const rowIds = row.platformIds?.length
+      ? row.platformIds
+      : [row.platformId];
+    const platformIds = [...new Set([...prevIds, ...rowIds])];
+    const prevSlices =
+      prev.platformSlices?.length
+        ? prev.platformSlices
+        : [sliceFromHoldingLeg(prev)];
+    const rowSlices =
+      row.platformSlices?.length
+        ? row.platformSlices
+        : [sliceFromHoldingLeg(row)];
+    const platformSlices = mergePlatformSlices(prevSlices, rowSlices);
+    merged.set(key, {
       ...prev,
+      // assetId principal = plus grosse position (détail + actions)
+      assetId: takeRow ? row.assetId : prev.assetId,
       accountType: prev.accountType || row.accountType || "CTO",
+      // Aligner platformId sur la jambe principale (sinon filtre Positions incohérent)
+      platformId: takeRow ? row.platformId : prev.platformId,
+      platformIds,
+      platformSlices,
       platformName: platforms,
+      platformLogoUrl: preferLive.platformLogoUrl || prev.platformLogoUrl,
+      blockchainKey: prev.blockchainKey || row.blockchainKey,
+      blockchainLabel: prev.blockchainLabel || row.blockchainLabel,
       quantity: toFixed(qty, 8),
       costBasisEur: toFixed(cost, 8),
       avgCostEur: toFixed(avg, 8),
+      currentPriceEur: toFixed(px, 8),
+      currentPriceNative: preferLive.currentPriceNative || prev.currentPriceNative,
       marketValueEur: toFixed(mv, 8),
       marketValueBase: toFixed(mvBase, 8),
       costBasisBase: toFixed(costBase, 8),
@@ -342,6 +441,10 @@ export async function getHoldings(
         8
       ),
       unrealizedPnlPct: toFixed(pct, 4),
+      priceSource: preferLive.priceSource || prev.priceSource,
+      priceProvider: preferLive.priceProvider || prev.priceProvider,
+      priceStatus: preferLive.priceStatus || prev.priceStatus,
+      lastUpdatedAt: preferLive.lastUpdatedAt || prev.lastUpdatedAt,
       acquisitionFeesEur: toFixed(fees, 8),
       acquisitionFeesBase: toBase(fees),
       passiveIncomeEur: toFixed(income, 8),
@@ -379,13 +482,69 @@ export async function getPlatformCashBalances(
   ledger?: Awaited<ReturnType<typeof loadLedgerForUser>>
 ) {
   const fx = rates ?? (await getEurRates());
-  const [led, platforms] = await Promise.all([
+  const [led, platforms, lastTxRows, assetQuotes] = await Promise.all([
     ledger ? Promise.resolve(ledger) : loadLedgerForUser(userId),
     prisma.platform.findMany({ where: { userId }, orderBy: { name: "asc" } }),
+    prisma.transaction.findMany({
+      where: { userId },
+      select: { platformId: true, occurredAt: true },
+      orderBy: { occurredAt: "desc" },
+    }),
+    prisma.asset.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        currency: true,
+        manualPrice: true,
+        priceQuote: { select: { priceEur: true } },
+      },
+    }),
   ]);
+
+  const lastTxByPlatform = new Map<string, Date>();
+  for (const row of lastTxRows) {
+    if (!lastTxByPlatform.has(row.platformId)) {
+      lastTxByPlatform.set(row.platformId, row.occurredAt);
+    }
+  }
+
+  const priceEurByAsset = new Map<string, ReturnType<typeof d>>();
+  for (const a of assetQuotes) {
+    if (a.priceQuote) {
+      priceEurByAsset.set(a.id, d(a.priceQuote.priceEur.toString()));
+    } else if (a.manualPrice) {
+      priceEurByAsset.set(
+        a.id,
+        d(convertToEurSync(a.manualPrice.toString(), a.currency || "EUR", fx))
+      );
+    }
+  }
+
+  const positionsValueByPlatform = new Map<string, ReturnType<typeof zero>>();
+  const openPositionCountByPlatform = new Map<string, number>();
+  for (const pos of led.positions.values()) {
+    if (pos.quantity.lte(0)) continue;
+    const platformId = pos.platformId;
+    openPositionCountByPlatform.set(
+      platformId,
+      (openPositionCountByPlatform.get(platformId) || 0) + 1
+    );
+    let price = priceEurByAsset.get(pos.assetId) || zero();
+    if (price.isZero() && pos.costBasisEur.gt(0) && pos.quantity.gt(0)) {
+      price = pos.costBasisEur.div(pos.quantity);
+    }
+    const mv = pos.quantity.times(price);
+    positionsValueByPlatform.set(
+      platformId,
+      (positionsValueByPlatform.get(platformId) || zero()).plus(mv)
+    );
+  }
 
   return platforms.map((p) => {
     const cashEur = led.cashByPlatform.get(p.id) ?? zero();
+    const positionsValueEur = positionsValueByPlatform.get(p.id) || zero();
+    const totalValueEur = cashEur.plus(positionsValueEur);
+    const lastAt = lastTxByPlatform.get(p.id);
     return {
       id: p.id,
       name: p.name,
@@ -393,10 +552,22 @@ export async function getPlatformCashBalances(
       subtype: p.subtype ?? null,
       notes: p.notes,
       logoKey: p.logoKey,
-      logoUrl: resolvePlatformLogo({ logoKey: p.logoKey, logoUrl: p.logoUrl, name: p.name }),
+      logoUrl: resolvePlatformLogo({
+        logoKey: p.logoKey,
+        logoUrl: p.logoUrl,
+        name: p.name,
+      }),
       walletAddress: p.walletAddress,
+      walletApiKey:
+        (p as { walletApiKey?: string | null }).walletApiKey ?? null,
       cashEur: toFixed(cashEur, 8),
       cashBase: convertFromEurSync(cashEur, baseCurrency, fx),
+      positionCount: openPositionCountByPlatform.get(p.id) || 0,
+      positionsValueEur: toFixed(positionsValueEur, 8),
+      positionsValueBase: convertFromEurSync(positionsValueEur, baseCurrency, fx),
+      totalValueEur: toFixed(totalValueEur, 8),
+      totalValueBase: convertFromEurSync(totalValueEur, baseCurrency, fx),
+      lastTransactionAt: lastAt ? lastAt.toISOString() : null,
     };
   });
 }
@@ -679,15 +850,168 @@ function attachIncomeSplit(
   }
 }
 
-/** Snapshots + point live pour le module Évolution (historique long). */
+/** Jour civil Europe/Paris → clé YYYY-MM-DD */
+function parisDayKey(isoOrDate: string | Date): string {
+  const iso =
+    typeof isoOrDate === "string" ? isoOrDate : isoOrDate.toISOString();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(iso));
+  const y = parts.find((p) => p.type === "year")?.value ?? "1970";
+  const m = parts.find((p) => p.type === "month")?.value ?? "01";
+  const d = parts.find((p) => p.type === "day")?.value ?? "01";
+  return `${y}-${m}-${d}`;
+}
+
+/** Liste inclusive des jours civils YYYY-MM-DD (UTC noon step). */
+function enumerateDayKeysInclusive(first: string, last: string): string[] {
+  if (first > last) return [first];
+  const out: string[] = [];
+  const [y0, m0, d0] = first.split("-").map(Number);
+  const [y1, m1, d1] = last.split("-").map(Number);
+  let t = Date.UTC(y0!, m0! - 1, d0!, 12, 0, 0);
+  const end = Date.UTC(y1!, m1! - 1, d1!, 12, 0, 0);
+  const dayMs = 24 * 60 * 60 * 1000;
+  // Garde-fou : max ~15 ans
+  const hardCap = 5500;
+  while (t <= end && out.length < hardCap) {
+    const dt = new Date(t);
+    const y = dt.getUTCFullYear();
+    const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(dt.getUTCDate()).padStart(2, "0");
+    out.push(`${y}-${m}-${d}`);
+    t += dayMs;
+  }
+  return out;
+}
+
+/**
+ * Reconstruit des points d’évolution à partir des dates d’opération (`occurredAt`),
+ * pas de `createdAt` ni des seuls snapshots post-import.
+ *
+ * Valorisation historique = coût d’acquisition (CUMP) + cash ledger
+ * (sans séries de cours journalières). Le point live du jour utilise le marché.
+ *
+ * Entre deux jours de transaction, la valeur (au coût) est reportée chaque jour
+ * civil pour que les plages 7J / 1M / … reflètent la vraie profondeur temporelle.
+ */
+export function buildHistoryFromOccurredAt(
+  txs: LedgerTx[],
+  toBase: (eur: ReturnType<typeof d>) => number,
+  opts?: { maxPoints?: number; untilDayKey?: string }
+): PortfolioHistoryPoint[] {
+  if (txs.length === 0) return [];
+
+  const sorted = [...txs].sort((a, b) => {
+    const t = a.occurredAt.getTime() - b.occurredAt.getTime();
+    if (t !== 0) return t;
+    return a.id.localeCompare(b.id);
+  });
+
+  const firstDay = parisDayKey(sorted[0]!.occurredAt);
+  const lastTxDay = parisDayKey(sorted[sorted.length - 1]!.occurredAt);
+  const lastDay =
+    opts?.untilDayKey && opts.untilDayKey > lastTxDay
+      ? opts.untilDayKey
+      : lastTxDay;
+
+  // Tous les jours civils du 1er occurredAt → fin (report de valorisation)
+  let keys = enumerateDayKeysInclusive(firstDay, lastDay);
+
+  // Échantillonner si trop dense : toujours conserver 1er, dernier, et jours de tx
+  const maxPoints = opts?.maxPoints ?? 800;
+  if (keys.length > maxPoints) {
+    const mustKeep = new Set<string>([firstDay, lastDay]);
+    for (const tx of sorted) {
+      mustKeep.add(parisDayKey(tx.occurredAt));
+    }
+    const step = Math.ceil(keys.length / maxPoints);
+    keys = keys.filter(
+      (k, i) => mustKeep.has(k) || i % step === 0 || i === keys.length - 1
+    );
+    // Déduplique en gardant l’ordre
+    const seenK = new Set<string>();
+    keys = keys.filter((k) => {
+      if (seenK.has(k)) return false;
+      seenK.add(k);
+      return true;
+    });
+  }
+
+  const points: PortfolioHistoryPoint[] = [];
+  let cursor = 0;
+  const applied: LedgerTx[] = [];
+
+  for (const day of keys) {
+    // Inclure toutes les tx du jour (et antérieures non encore appliquées)
+    // — tri strict par occurredAt, jamais createdAt
+    while (cursor < sorted.length) {
+      const tx = sorted[cursor]!;
+      const tk = parisDayKey(tx.occurredAt);
+      if (tk > day) break;
+      applied.push(tx);
+      cursor += 1;
+    }
+
+    if (applied.length === 0) continue;
+
+    let state;
+    try {
+      state = replayTransactions(applied);
+    } catch {
+      state = replayTransactions(applied, {
+        allowNegativeCash: true,
+        clampOversell: true,
+      });
+    }
+
+    const costEur = totalCostBasis(state);
+    const cashEur = totalCash(state);
+    const realizedEur = totalRealizedPnl(state);
+    const incomeEur = state.cashIncomeEur;
+    // Historique : positions au coût (pas de mark-to-market rétroactif)
+    const totalEur = costEur.plus(cashEur);
+    const totalBase = toBase(totalEur);
+    const cashBase = toBase(cashEur);
+    // Date à 12:00 UTC du jour civil pour un ancrage stable
+    const [yy, mm, dd] = day.split("-").map(Number);
+    const date = new Date(Date.UTC(yy!, mm! - 1, dd!, 12, 0, 0));
+
+    points.push({
+      date: date.toISOString(),
+      label: new Intl.DateTimeFormat("fr-FR", {
+        timeZone: "Europe/Paris",
+        day: "2-digit",
+        month: "short",
+        year: "2-digit",
+      }).format(date),
+      totalValueEur: totalEur.toNumber(),
+      cashTotalEur: cashEur.toNumber(),
+      totalValueBase: totalBase,
+      cashTotalBase: cashBase,
+      positionsBase: totalBase - cashBase,
+      realizedPnlBase: toBase(realizedEur),
+      // Latent historique non connu sans prix → 0
+      unrealizedPnlBase: 0,
+      cashIncomeBase: toBase(incomeEur),
+      totalCostBase: toBase(costEur),
+    });
+  }
+
+  return points;
+}
+
+/** Snapshots + reconstruction `occurredAt` + point live pour l’Évolution. */
 export async function getPortfolioHistory(
   userId: string,
   baseCurrency = "EUR"
 ): Promise<PortfolioHistoryPoint[]> {
-  const [snapshots, rates, live, incomeRows] = await Promise.all([
+  const [snapshots, rates, live, incomeRows, allTxRows] = await Promise.all([
     prisma.portfolioSnapshot.findMany({
       where: { userId },
-      // Prendre les plus récents (sinon take coupe l’historique récent)
       orderBy: { date: "desc" },
       take: 2200,
     }),
@@ -705,15 +1029,27 @@ export async function getPortfolioHistory(
         netCashImpactEur: true,
       },
     }),
+    // Toutes les tx pour reconstruire l’historique sur occurredAt (pas createdAt)
+    prisma.transaction.findMany({
+      where: { userId },
+      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+    }),
   ]);
 
   const toBase = (eur: ReturnType<typeof d>) =>
     Number(convertFromEurSync(eur, baseCurrency, rates));
 
-  // Remettre en ordre chronologique croissant pour la courbe
-  const snapshotsAsc = [...snapshots].reverse();
+  const ledgerTxs = allTxRows.map(mapDbTx);
+  // Jusqu’à aujourd’hui (Paris) : l’historique suit les occurredAt même si
+  // l’import a été fait le même jour (createdAt / snapshot bootstrap).
+  const todayParis = parisDayKey(new Date());
+  const fromTx = buildHistoryFromOccurredAt(ledgerTxs, toBase, {
+    untilDayKey: todayParis,
+  });
 
-  const points: PortfolioHistoryPoint[] = snapshotsAsc.map((s) => {
+  // Snapshots marché (mark-to-market) — utile pour les jours récents post-import
+  const snapshotsAsc = [...snapshots].reverse();
+  const fromSnaps: PortfolioHistoryPoint[] = snapshotsAsc.map((s) => {
     const totalEur = d(s.totalValueEur.toString());
     const cashEur = d(s.cashTotalEur.toString());
     const realizedEur = d(s.realizedPnlEur.toString());
@@ -741,6 +1077,34 @@ export async function getPortfolioHistory(
     };
   });
 
+  // Fusion : points ledger (occurredAt) + snapshots (jour civil).
+  // Source de vérité temporelle = occurredAt des transactions (jamais createdAt).
+  // Snapshots mark-to-market : utiles en fin de courbe, mais ne doivent pas
+  // « collapser » l’historique sur la date d’import seule.
+  const byDay = new Map<string, PortfolioHistoryPoint>();
+  for (const p of fromTx) {
+    byDay.set(parisDayKey(p.date), p);
+  }
+  const firstTxDay = fromTx.length > 0 ? parisDayKey(fromTx[0]!.date) : null;
+  for (const p of fromSnaps) {
+    const day = parisDayKey(p.date);
+    // Ne pas injecter de snapshot antérieur au 1er occurredAt (artefacts)
+    if (firstTxDay && day < firstTxDay) continue;
+    const existing = byDay.get(day);
+    // Sur un jour déjà reconstruit au coût : n’écraser que si le snapshot
+    // apporte un mark-to-market (latent ≠ 0) ou cash différent — sinon garder
+    // la reconstruction occurredAt (évite courbe plate « jour d’import »).
+    if (existing && Math.abs(p.unrealizedPnlBase ?? 0) < 1e-9) {
+      // Snapshot purement au coût / bootstrap : conserver fromTx
+      continue;
+    }
+    byDay.set(day, p);
+  }
+
+  const points = [...byDay.values()].sort(
+    (a, b) => Date.parse(a.date) - Date.parse(b.date)
+  );
+
   // Always append current live valuation so the chart is never empty / stale
   const liveTotal = d(live.summary.portfolioPlusCashEur);
   const liveCash = d(live.summary.totalCashEur);
@@ -748,9 +1112,9 @@ export async function getPortfolioHistory(
   const liveUnrealized = d(String(live.summary.unrealizedPnlEur ?? 0));
   const liveIncome = d(String(live.summary.cashIncomeEur ?? 0));
   const liveCost = d(String(live.summary.totalCostBasisEur ?? 0));
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = parisDayKey(new Date());
   const last = points[points.length - 1];
-  const lastKey = last ? last.date.slice(0, 10) : null;
+  const lastKey = last ? parisDayKey(last.date) : null;
 
   const liveTotalBase = toBase(liveTotal);
   const liveCashBase = toBase(liveCash);
@@ -773,7 +1137,7 @@ export async function getPortfolioHistory(
   if (!last || lastKey !== todayKey) {
     points.push(livePoint);
   } else {
-    // Replace today's snapshot with freshest live value
+    // Replace today's point with freshest live market value
     points[points.length - 1] = {
       ...livePoint,
       label: last.label || "Aujourd'hui",
@@ -791,15 +1155,147 @@ export async function getAssetDetail(userId: string, assetId: string) {
     include: {
       platform: true,
       priceQuote: true,
-      transactions: {
-        orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
-      },
     },
   });
   if (!asset) return null;
 
+  const isCrypto =
+    asset.assetClass === "CRYPTO" || asset.accountType === "CRYPTO";
+  const tickerNorm = (asset.ticker || "").trim().toUpperCase();
+
+  // Agrégat multi-plateformes : tous les assetIds même ticker + enveloppe (crypto)
+  // (getHoldings merge en 1 ligne — on re-query la base pour les siblings)
+  let siblingAssets: Array<{
+    id: string;
+    platformId: string;
+    platform: {
+      id: string;
+      name: string;
+      type: string;
+      logoKey: string | null;
+      logoUrl: string | null;
+      subtype: string | null;
+    };
+  }> = [
+    {
+      id: asset.id,
+      platformId: asset.platformId,
+      platform: asset.platform,
+    },
+  ];
+
+  if (isCrypto && tickerNorm) {
+    const rows = await prisma.asset.findMany({
+      where: {
+        userId,
+        accountType: asset.accountType || "CRYPTO",
+        assetClass: "CRYPTO",
+        ticker: { equals: asset.ticker!, mode: "insensitive" },
+      },
+      select: {
+        id: true,
+        platformId: true,
+        platform: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            logoKey: true,
+            logoUrl: true,
+            subtype: true,
+          },
+        },
+      },
+    });
+    if (rows.length > 0) siblingAssets = rows;
+  }
+
+  const siblingIds = siblingAssets.map((s) => s.id);
   const holdings = await getHoldings(userId, "EUR");
-  const holding = holdings.find((h) => h.assetId === assetId) ?? null;
+  // Ligne agrégée (après merge) ou fallback assetId
+  const holding =
+    holdings.find((h) => siblingIds.includes(h.assetId)) ??
+    holdings.find((h) => h.assetId === assetId) ??
+    null;
+
+  // Qtés par assetId via ledger (avant merge UI)
+  const ledger = await loadLedgerForUser(userId);
+  const priceEur = asset.priceQuote
+    ? d(asset.priceQuote.priceEur.toString())
+    : asset.manualPrice
+      ? d(asset.manualPrice.toString())
+      : zero();
+
+  const custodySlices = siblingAssets.map((s) => {
+    let qty = zero();
+    let cost = zero();
+    for (const pos of ledger.positions.values()) {
+      if (pos.assetId === s.id && pos.quantity.gt(0)) {
+        qty = qty.plus(pos.quantity);
+        cost = cost.plus(pos.costBasisEur);
+      }
+    }
+    const mv = qty.times(priceEur.gt(0) ? priceEur : zero());
+    const chainKey = resolveBlockchainKey({
+      platformType: s.platform.type,
+      platformLogoKey: s.platform.logoKey,
+      platformName: s.platform.name,
+      platformSubtype: s.platform.subtype,
+      accountType: asset.accountType,
+      assetClass: asset.assetClass,
+    });
+    return {
+      assetId: s.id,
+      platformId: s.platformId,
+      platformName: s.platform.name,
+      platformLogoUrl: resolvePlatformLogo({
+        logoKey: s.platform.logoKey,
+        logoUrl: s.platform.logoUrl,
+        name: s.platform.name,
+      }),
+      blockchainKey: chainKey,
+      quantity: toFixed(qty, 12),
+      marketValueEur: toFixed(mv.gt(0) ? mv : cost, 8),
+    };
+  }).filter((s) => Number(s.quantity) > 0 || siblingAssets.length === 1);
+
+  const custodyDistribution = buildCustodyDistribution(custodySlices);
+
+  const platforms = siblingAssets.map((s) => ({
+    id: s.platformId,
+    name: s.platform.name,
+    logoUrl: resolvePlatformLogo({
+      logoKey: s.platform.logoKey,
+      logoUrl: s.platform.logoUrl,
+      name: s.platform.name,
+    }),
+    assetId: s.id,
+  }));
+  // Dédup plateformes (même platformId rare)
+  const platformsUnique = [
+    ...new Map(platforms.map((p) => [p.id, p])).values(),
+  ];
+
+  const allTxs = await prisma.transaction.findMany({
+    where: { userId, assetId: { in: siblingIds } },
+    include: {
+      platform: {
+        select: { id: true, name: true, logoKey: true, logoUrl: true },
+      },
+    },
+    orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+  });
+
+  const chainKey = resolveBlockchainKey({
+    platformType: asset.platform.type,
+    platformLogoKey: asset.platform.logoKey,
+    platformName: asset.platform.name,
+    platformSubtype: asset.platform.subtype,
+    assetNotes: asset.notes,
+    providerSymbol: asset.providerSymbol,
+    accountType: asset.accountType,
+    assetClass: asset.assetClass,
+  });
 
   return {
     asset: {
@@ -823,6 +1319,13 @@ export async function getAssetDetail(userId: string, assetId: string) {
         logoUrl: asset.platform.logoUrl,
         name: asset.platform.name,
       }),
+      platformType: asset.platform.type,
+      platformLogoKey: asset.platform.logoKey,
+      blockchainKey: chainKey,
+      blockchainLabel: blockchainLabel(chainKey),
+      /** Nb de plateformes distinctes de l’agrégat */
+      platformCount: platformsUnique.length,
+      siblingAssetIds: siblingIds,
       assetLogoUrl: resolveAssetLogo({
         logoUrl: asset.logoUrl,
         ticker: asset.ticker,
@@ -841,7 +1344,9 @@ export async function getAssetDetail(userId: string, assetId: string) {
         : null,
     },
     holding,
-    transactions: asset.transactions.map((t) => ({
+    custodyDistribution,
+    platforms: platformsUnique,
+    transactions: allTxs.map((t) => ({
       id: t.id,
       type: t.type,
       occurredAt: t.occurredAt.toISOString(),
@@ -867,6 +1372,14 @@ export async function getAssetDetail(userId: string, assetId: string) {
         (t as { paymentDate?: Date | null }).paymentDate?.toISOString() ?? null,
       notes: t.notes,
       platformId: t.platformId,
+      platformName: t.platform?.name ?? null,
+      platformLogoUrl: t.platform
+        ? resolvePlatformLogo({
+            logoKey: t.platform.logoKey,
+            logoUrl: t.platform.logoUrl,
+            name: t.platform.name,
+          })
+        : null,
       toPlatformId: t.toPlatformId,
       assetId: t.assetId,
     })),

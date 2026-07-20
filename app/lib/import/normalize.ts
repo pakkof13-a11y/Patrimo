@@ -64,6 +64,8 @@ export function parseNumber(raw: string | undefined | null): number | null {
   if (!s) return null;
 
   s = s.replace(CURRENCY_CODE_SUFFIX, "");
+  // Préfixe monétaire export Revolut Invest : "USD 51.99", "EUR -360"
+  s = s.replace(/^(EUR|USD|GBP|CHF|JPY|CAD|AUD)\s+/i, "");
   s = s.replace(CURRENCY_CHARS, "").replace(/'/g, "");
   // Caractères corrompus d’encodage (euro / espaces → ?)
   s = s.replace(/\?/g, "");
@@ -115,13 +117,28 @@ export function parseNumber(raw: string | undefined | null): number | null {
  */
 export function parseDate(raw: string | undefined | null): Date | null {
   if (raw == null) return null;
-  const s = String(raw).trim();
+  let s = String(raw).trim();
   if (!s) return null;
 
-  // ISO-like YYYY-MM-DD[THH:mm:ss]
+  // Coinbase 2024–2026 : "2026-07-17 21:38:42 UTC" (le mot UTC contient "T"
+  // → ne pas confondre avec un ISO "T" séparateur)
+  s = s.replace(/\s+(UTC|GMT)\s*$/i, "Z");
+
+  // ISO-like YYYY-MM-DD[THH:mm:ss][Z]
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    const d = new Date(s.includes("T") ? s : s.replace(" ", "T"));
-    return Number.isNaN(d.getTime()) ? null : d;
+    // Essai direct (gère bien "YYYY-MM-DD HH:mm:ssZ" et variantes Node)
+    let d = new Date(s);
+    if (!Number.isNaN(d.getTime())) return d;
+    // Normalise espace → T pour les parsers stricts
+    const iso = s.includes("T") ? s : s.replace(" ", "T");
+    d = new Date(iso);
+    if (!Number.isNaN(d.getTime())) return d;
+    // Sans fuseau : tenter Z
+    if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)) {
+      d = new Date(iso + "Z");
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+    return null;
   }
 
   // DD/MM/YYYY[ HH:mm[:ss]] or DD-MM-YYYY or DD.MM.YYYY

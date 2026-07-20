@@ -19,34 +19,20 @@ export type AssetSearchHit = {
 
 async function searchCoinGecko(query: string, limit = 12): Promise<AssetSearchHit[]> {
   if (!query || query.length < 2) return [];
-  try {
-    const apiKey = process.env.COINGECKO_API_KEY;
-    const headers: Record<string, string> = { Accept: "application/json" };
-    if (apiKey) headers["x-cg-demo-api-key"] = apiKey;
-
-    const url = `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      headers,
-      cache: "no-store",
-      signal: AbortSignal.timeout(6_000),
-    });
-    if (!res.ok) return [];
-    const data = (await res.json()) as {
-      coins?: Array<{ id: string; name: string; symbol: string; large?: string; thumb?: string }>;
-    };
-    return (data.coins || []).slice(0, limit).map((c) => ({
-      name: c.name,
-      ticker: (c.symbol || "").toUpperCase(),
-      assetClass: "CRYPTO",
-      currency: "EUR",
-      priceProvider: "COINGECKO",
-      providerSymbol: c.id,
-      logoUrl: c.large || c.thumb || null,
-      source: "coingecko" as const,
-    }));
-  } catch {
-    return [];
-  }
+  const { searchCoingeckoCoins } = await import(
+    "@/app/lib/market/providers/coingecko"
+  );
+  const coins = await searchCoingeckoCoins(query, limit);
+  return coins.map((c) => ({
+    name: c.name,
+    ticker: (c.symbol || "").toUpperCase(),
+    assetClass: "CRYPTO",
+    currency: "EUR",
+    priceProvider: "COINGECKO",
+    providerSymbol: c.id,
+    logoUrl: c.large || c.thumb || null,
+    source: "coingecko" as const,
+  }));
 }
 
 export async function searchAssets(userId: string, query: string): Promise<AssetSearchHit[]> {

@@ -15,6 +15,7 @@ import type {
 } from "@/app/lib/news/service";
 import { getEarningsCalendarMock } from "@/app/lib/news/service";
 import { toYahooSymbol, toFinnhubSymbol } from "@/app/lib/market/symbol";
+import { logoByName, logoByTicker } from "@/app/lib/logos/logodev";
 
 const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey"],
@@ -77,12 +78,116 @@ function normalizeKey(ticker: string): string {
   return ticker.trim().toUpperCase().replace(/\..*$/, "");
 }
 
+/** Suffixe bourse → pays siège / cotation (drapeau UI). */
+export function countryCodeFromTicker(ticker: string): string {
+  const t = ticker.trim().toUpperCase();
+  const m = t.match(/\.([A-Z]{1,2})$/);
+  if (m) {
+    const s = m[1]!;
+    if (s === "PA") return "fr"; // Euronext Paris
+    if (s === "AS") return "nl"; // Amsterdam
+    if (s === "DE" || s === "F") return "de";
+    if (s === "L") return "gb";
+    if (s === "MI") return "it";
+    if (s === "MC") return "es";
+    if (s === "SW" || s === "S") return "ch";
+    if (s === "TO" || s === "V") return "ca";
+    if (s === "AX") return "au";
+    if (s === "T" || s === "TY") return "jp";
+    if (s === "HK") return "hk";
+  }
+  // défaut US pour tickers purs (AAPL, MSFT…)
+  return "us";
+}
+
+export function logoUrlForEarnings(
+  ticker: string,
+  companyName: string
+): string {
+  const t = ticker.trim();
+  if (t) return logoByTicker(t, { size: 64, format: "png", retina: true });
+  return logoByName(companyName || t, {
+    size: 64,
+    format: "png",
+    retina: true,
+  });
+}
+
+function enrichEarningsVisuals(e: EarningsEvent): EarningsEvent {
+  return {
+    ...e,
+    countryCode: e.countryCode || countryCodeFromTicker(e.ticker),
+    logoUrl: e.logoUrl || logoUrlForEarnings(e.ticker, e.companyName),
+  };
+}
+
+/** Tickers crypto / stables fréquents — pas de « résultats d’entreprises ». */
+const CRYPTO_BASE = new Set([
+  "BTC",
+  "ETH",
+  "SOL",
+  "BNB",
+  "XRP",
+  "ADA",
+  "DOGE",
+  "AVAX",
+  "DOT",
+  "LINK",
+  "MATIC",
+  "POL",
+  "ATOM",
+  "NEAR",
+  "APT",
+  "ARB",
+  "OP",
+  "SUI",
+  "TON",
+  "TRX",
+  "LTC",
+  "BCH",
+  "XLM",
+  "UNI",
+  "AAVE",
+  "SHIB",
+  "PEPE",
+  "USDT",
+  "USDC",
+  "DAI",
+  "BUSD",
+  "STSOL",
+  "WETH",
+  "WMATIC",
+  "WBTC",
+]);
+
+/**
+ * Exclut les cryptos du calendrier earnings (Yahoo renvoie parfois des dates absurdes).
+ */
+export function isCryptoEarningsTicker(ticker: string): boolean {
+  const t = ticker.trim().toUpperCase();
+  if (!t) return true;
+  if (t.includes("BINANCE:") || t.includes("COINBASE:")) return true;
+  // Paires type BTC-USD / ETHUSDT
+  if (/[-/](USD|USDT|EUR|BTC|ETH)$/i.test(t)) return true;
+  if (/^(BTC|ETH|SOL|BNB|XRP)/.test(t) && !/\.(PA|AS|DE|L|MI|MC)$/i.test(t)) {
+    const base = normalizeKey(t);
+    if (CRYPTO_BASE.has(base)) return true;
+  }
+  const base = normalizeKey(t);
+  if (CRYPTO_BASE.has(base)) return true;
+  // Tokens style USDC.E, jEUR, 4EURF (Ledger / DeFi)
+  if (/^U?S[DT]C(\.|$)/i.test(base)) return true;
+  if (/^(WETH|WBTC|STSOL|JUP|MNDE)/i.test(base)) return true;
+  return false;
+}
+
 function dedupeRefs(list: PortfolioTickerRef[]): PortfolioTickerRef[] {
   const seen = new Set<string>();
   const out: PortfolioTickerRef[] = [];
   for (const p of list) {
     const t = (p.ticker || "").trim();
     if (!t) continue;
+    if (isCryptoEarningsTicker(t)) continue;
     const key = t.toUpperCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -149,16 +254,19 @@ async function fetchYahooOne(
 
     const eps = earn?.earningsAverage ?? null;
 
-    return {
+    const ticker = ref.ticker.toUpperCase();
+    return enrichEarningsVisuals({
       id: `yahoo-${symbol}-${time.slice(0, 10)}`,
       time,
       companyName: ref.name,
-      ticker: ref.ticker.toUpperCase(),
+      ticker,
       timing: timingFromIso(time),
       epsEstimate: formatEps(eps),
       epsActual: null,
       inPortfolio,
-    };
+      countryCode: countryCodeFromTicker(ticker),
+      logoUrl: logoUrlForEarnings(ticker, ref.name),
+    });
   } catch {
     return null;
   }
@@ -209,6 +317,7 @@ function finnhubRowToEvent(
 ): EarningsEvent | null {
   const symbol = (row.symbol || "").trim().toUpperCase();
   if (!symbol || !row.date) return null;
+  if (isCryptoEarningsTicker(symbol)) return null;
 
   const hour = (row.hour || "dmh").toLowerCase();
   // Heures indicatives Europe/Paris-friendly pour l’affichage
@@ -235,7 +344,7 @@ function finnhubRowToEvent(
     nameByTicker.get(base) ||
     symbol;
 
-  return {
+  return enrichEarningsVisuals({
     id: `fh-${symbol}-${row.date}-${hour}`,
     time,
     companyName: name,
@@ -244,7 +353,9 @@ function finnhubRowToEvent(
     epsEstimate: formatEps(row.epsEstimate ?? null),
     epsActual: formatEps(row.epsActual ?? null),
     inPortfolio: portfolioSet.has(symbol) || portfolioSet.has(base),
-  };
+    countryCode: countryCodeFromTicker(symbol),
+    logoUrl: logoUrlForEarnings(symbol, name),
+  });
 }
 
 /**
@@ -379,7 +490,7 @@ export async function resolveEarningsCalendar(opts: {
             : "finnhub";
 
     return {
-      events: events.slice(0, limit),
+      events: events.slice(0, limit).map(enrichEarningsVisuals),
       source,
     };
   }
@@ -390,7 +501,7 @@ export async function resolveEarningsCalendar(opts: {
       portfolio,
       watchlist: watch,
       limit,
-    }),
+    }).map(enrichEarningsVisuals),
     source: "mock",
   };
 }

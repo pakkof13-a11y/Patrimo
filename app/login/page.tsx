@@ -11,7 +11,7 @@ import {
 } from "@/app/lib/ui-preferences";
 
 /** Chemin relatif uniquement — évite localhost vs 127.0.0.1 (cookies session). */
-function toAppPath(url: string | null | undefined, fallback = "/positions"): string {
+function toAppPath(url: string | null | undefined, fallback = "/dashboard"): string {
   const raw = (url || fallback).trim() || fallback;
   if (raw.startsWith("/")) return raw;
   try {
@@ -36,7 +36,7 @@ function useIsClient() {
 export default function LoginPage() {
   const router = useRouter();
   const search = useSearchParams();
-  const callbackUrl = toAppPath(search.get("callbackUrl"), "/positions");
+  const callbackUrl = toAppPath(search.get("callbackUrl"), "/dashboard");
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -76,7 +76,7 @@ export default function LoginPage() {
       // (dismiss permanent en localStorage n'est pas touché).
       clearSessionPref(ONBOARDING_SESSION_DISMISS_KEY);
       // Ne pas utiliser res.url absolu (AUTH_URL=localhost alors que e2e = 127.0.0.1)
-      router.replace(toAppPath(callbackUrl, "/positions"));
+      router.replace(toAppPath(callbackUrl, "/dashboard"));
       router.refresh();
     } catch {
       setError("Connexion impossible. Réessayez.");

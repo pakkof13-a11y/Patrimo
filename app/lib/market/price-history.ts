@@ -3,6 +3,10 @@ import { prisma } from "../prisma";
 import { d, toFixed } from "../money/decimal";
 import { toYahooSymbol } from "./symbol";
 import { getEurRates, convertToEurSync } from "./fx";
+import {
+  coingeckoGet,
+  resolveCoingeckoId,
+} from "./providers/coingecko";
 import type {
   PriceBarInterval,
   PriceHistoryPoint,
@@ -279,6 +283,253 @@ function buildMockSeries(
   return points;
 }
 
+/**
+ * Yahoo crypto : ETHEREUM / bitcoin (ids CG) sont invalides.
+ * Préférer ETH-USD, BTC-EUR, etc.
+ */
+export function toYahooCryptoSymbol(
+  ticker: string,
+  providerSymbol?: string | null,
+  quoteCurrency = "USD"
+): string | null {
+  const t = (ticker || "").trim().toUpperCase().replace(/[-_/]/g, "");
+  if (!t) return null;
+  // Déjà un symbole Yahoo crypto (ETH-USD, BTC-EUR)
+  const p = (providerSymbol || "").trim().toUpperCase();
+  if (/^[A-Z0-9]{2,12}-[A-Z]{3}$/.test(p)) return p;
+  // Strip suffixes
+  const base = t
+    .replace(/USDT$/, "")
+    .replace(/USD$/, "")
+    .replace(/EUR$/, "")
+    .replace(/^X/, ""); // XBT-style rare
+  if (!base || base.length > 12) return null;
+  // Rejeter les ids CoinGecko (ethereum, binancecoin…)
+  if (base.length > 6 && !/^[A-Z0-9]+$/.test(base)) return null;
+  if (["ETHEREUM", "BITCOIN", "SOLANA", "RIPPLE"].includes(base)) {
+    const map: Record<string, string> = {
+      ETHEREUM: "ETH",
+      BITCOIN: "BTC",
+      SOLANA: "SOL",
+      RIPPLE: "XRP",
+    };
+    return `${map[base]}-${quoteCurrency.toUpperCase()}`;
+  }
+  // Ids CG type avalanche-2
+  if (p.includes("-") && !/^[A-Z0-9]+-[A-Z]{3}$/.test(p)) {
+    // ignore provider id
+  }
+  const q = quoteCurrency.toUpperCase() === "EUR" ? "EUR" : "USD";
+  return `${base}-${q}`;
+}
+
+/** Mappe une fenêtre en param `days` CoinGecko (market_chart / ohlc). */
+function coingeckoDaysParam(from: Date, to: Date): string | number {
+  const days = Math.min(
+    3650,
+    Math.ceil(Math.max(1, to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000)) +
+      1
+  );
+  if (days <= 1) return 1;
+  if (days <= 7) return 7;
+  if (days <= 14) return 14;
+  if (days <= 30) return 30;
+  if (days <= 90) return 90;
+  if (days <= 180) return 180;
+  if (days <= 365) return 365;
+  return "max";
+}
+
+/**
+ * OHLC réel CoinGecko — chandeliers corrects (pas de mèches synthétiques).
+ * GET /coins/{id}/ohlc — [ts, open, high, low, close]
+ */
+async function fetchCoingeckoOhlcBars(
+  coinId: string,
+  from: Date,
+  to: Date,
+  bar: PriceBarInterval,
+  endPrice?: number
+): Promise<PriceHistoryPoint[] | null> {
+  try {
+    const daysParam = coingeckoDaysParam(from, to);
+    const data = await coingeckoGet<
+      Array<[number, number, number, number, number]>
+    >({
+      path: `/coins/${encodeURIComponent(coinId)}/ohlc`,
+      query: {
+        vs_currency: "eur",
+        days: daysParam,
+      },
+      timeoutMs: 12_000,
+    });
+    if (!Array.isArray(data) || data.length < 2) return null;
+
+    const fromMs = from.getTime();
+    const toMs = to.getTime();
+    const outBar: PriceBarInterval =
+      bar === "15m" || bar === "1h" || bar === "4h" ? "1h" : bar;
+
+    const points: PriceHistoryPoint[] = [];
+    for (const row of data) {
+      if (!Array.isArray(row) || row.length < 5) continue;
+      const [ts, open, high, low, close] = row;
+      if (
+        !Number.isFinite(ts) ||
+        !Number.isFinite(open) ||
+        !Number.isFinite(high) ||
+        !Number.isFinite(low) ||
+        !Number.isFinite(close)
+      ) {
+        continue;
+      }
+      if (open <= 0 || high <= 0 || low <= 0 || close <= 0) continue;
+      if (ts < fromMs - 36 * 60 * 60 * 1000 || ts > toMs + 36 * 60 * 60 * 1000) {
+        continue;
+      }
+      const ohlc = normalizeSessionOhlc({ open, high, low, close });
+      points.push(barPoint(new Date(ts), ohlc, outBar));
+    }
+    points.sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    if (endPrice != null && endPrice > 0 && points.length > 0) {
+      const last = points[points.length - 1]!;
+      points[points.length - 1] = barPoint(
+        new Date(last.date),
+        normalizeSessionOhlc({
+          open: last.open,
+          high: Math.max(last.high, endPrice, last.open),
+          low: Math.min(last.low, endPrice, last.open),
+          close: endPrice,
+        }),
+        outBar
+      );
+    }
+    return points.length >= 2 ? points : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Historique CoinGecko (EUR) — source privilégiée pour CRYPTO.
+ * 1) OHLC réel (chandeliers) 2) market_chart (fallback courbe).
+ */
+async function fetchCoingeckoBars(
+  coinId: string,
+  from: Date,
+  to: Date,
+  bar: PriceBarInterval,
+  endPrice?: number
+): Promise<PriceHistoryPoint[] | null> {
+  // Priorité OHLC marché (évite mèches artificielles sessionFromCloses)
+  const ohlc = await fetchCoingeckoOhlcBars(coinId, from, to, bar, endPrice);
+  if (ohlc && ohlc.length >= 2) return ohlc;
+
+  try {
+    const daysParam = coingeckoDaysParam(from, to);
+
+    const data = await coingeckoGet<{
+      prices?: Array<[number, number]>;
+    }>({
+      path: `/coins/${encodeURIComponent(coinId)}/market_chart`,
+      query: {
+        vs_currency: "eur",
+        days: daysParam,
+      },
+      timeoutMs: 12_000,
+    });
+
+    const prices = data.prices ?? [];
+    if (prices.length < 2) return null;
+
+    // Filtrer fenêtre [from, to]
+    const fromMs = from.getTime();
+    const toMs = to.getTime();
+    const filtered = prices.filter(
+      ([ts, p]) =>
+        Number.isFinite(ts) &&
+        Number.isFinite(p) &&
+        p > 0 &&
+        ts >= fromMs - 12 * 60 * 60 * 1000 &&
+        ts <= toMs + 12 * 60 * 60 * 1000
+    );
+    if (filtered.length < 2) return null;
+
+    // Barres depuis closes successifs (pas de mèches aléatoires)
+    const step = barStepMs(
+      bar === "15m" || bar === "1h" || bar === "4h" ? "1h" : bar
+    );
+    const buckets = new Map<number, number[]>();
+    for (const [ts, price] of filtered) {
+      const key = Math.floor(ts / step) * step;
+      const arr = buckets.get(key) ?? [];
+      arr.push(price);
+      buckets.set(key, arr);
+    }
+
+    const keys = [...buckets.keys()].sort((a, b) => a - b);
+    const points: PriceHistoryPoint[] = [];
+    let prevClose: number | undefined;
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i]!;
+      const arr = buckets.get(key)!;
+      const open = prevClose != null ? prevClose : arr[0]!;
+      const close = arr[arr.length - 1]!;
+      const high = Math.max(open, close, ...arr);
+      const low = Math.min(open, close, ...arr);
+      const ohlcBar = normalizeSessionOhlc({ open, high, low, close });
+      const outBar: PriceBarInterval =
+        bar === "15m" || bar === "1h" || bar === "4h" ? "1h" : bar;
+      const p = barPoint(new Date(key), ohlcBar, outBar);
+      points.push(p);
+      prevClose = p.close;
+    }
+
+    if (endPrice != null && endPrice > 0 && points.length > 0) {
+      const last = points[points.length - 1]!;
+      points[points.length - 1] = barPoint(
+        new Date(last.date),
+        normalizeSessionOhlc({
+          open: last.open,
+          high: Math.max(last.high, endPrice, last.open),
+          low: Math.min(last.low, endPrice, last.open),
+          close: endPrice,
+        }),
+        bar === "15m" || bar === "1h" || bar === "4h" ? "1h" : bar
+      );
+    }
+
+    return points.length >= 2 ? points : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Rejette une série Yahoo incohérente vs le cours live
+ * (ex. plat ~0 puis spike sur le last patch).
+ */
+function isPlausiblePriceSeries(
+  points: PriceHistoryPoint[],
+  endPrice: number
+): boolean {
+  if (points.length < 2) return false;
+  if (!(endPrice > 0)) return true;
+  const closes = points.map((p) => p.close).filter((c) => c > 0);
+  if (closes.length < 2) return false;
+  const median = [...closes].sort((a, b) => a - b)[
+    Math.floor(closes.length / 2)
+  ]!;
+  // Médiane < 2 % du live → quasi-sûrement mauvais symbole / devise
+  if (median < endPrice * 0.02) return false;
+  // Médiane > 50× le live → aussi suspect
+  if (median > endPrice * 50) return false;
+  return true;
+}
+
 async function fetchYahooBars(
   symbol: string,
   from: Date,
@@ -454,17 +705,95 @@ export async function getAssetPriceHistory(
       : 0;
 
   const native = asset.priceQuote?.nativeCurrency || asset.currency || "EUR";
-  const symbol = toYahooSymbol(asset.ticker || "", asset.providerSymbol);
+  const isCrypto =
+    asset.assetClass === "CRYPTO" || asset.priceProvider === "COINGECKO";
 
-  // 1) Yahoo bars at the right resolution
+  // 1a) CRYPTO : CoinGecko market_chart (EUR) — aligné sur le pricing live
+  if (isCrypto) {
+    const coinId = resolveCoingeckoId(asset.ticker, asset.providerSymbol);
+    if (coinId) {
+      const cg = await fetchCoingeckoBars(
+        coinId,
+        from,
+        to,
+        bar,
+        endPrice > 0 ? endPrice : undefined
+      );
+      if (cg && cg.length >= 2) {
+        return {
+          assetId,
+          range,
+          barInterval:
+            bar === "15m" || bar === "1h" || bar === "4h" ? "1h" : bar,
+          currency: "EUR",
+          source: "coingecko",
+          points: cg,
+          ...meta,
+        };
+      }
+    }
+    // Fallback Yahoo crypto avec symbole correct (ETH-USD, pas ethereum)
+    const yCrypto = toYahooCryptoSymbol(
+      asset.ticker || "",
+      asset.providerSymbol,
+      native === "EUR" ? "EUR" : "USD"
+    );
+    if (yCrypto) {
+      // Cours Yahoo crypto souvent en USD même pour *-EUR selon ticker
+      const quoteCur = yCrypto.endsWith("-EUR") ? "EUR" : "USD";
+      const yahoo = await fetchYahooBars(yCrypto, from, to, bar, quoteCur);
+      if (
+        yahoo &&
+        yahoo.length >= 2 &&
+        isPlausiblePriceSeries(yahoo, endPrice > 0 ? endPrice : yahoo[yahoo.length - 1]!.close)
+      ) {
+        if (endPrice > 0) {
+          const last = yahoo[yahoo.length - 1]!;
+          yahoo[yahoo.length - 1] = barPoint(
+            new Date(last.date),
+            normalizeSessionOhlc({
+              open: last.open,
+              high: Math.max(last.high, endPrice, last.open),
+              low: Math.min(last.low, endPrice, last.open),
+              close: endPrice,
+            }),
+            bar
+          );
+        }
+        return {
+          assetId,
+          range,
+          barInterval: bar,
+          currency: "EUR",
+          source: "yahoo",
+          points: yahoo,
+          ...meta,
+        };
+      }
+    }
+  }
+
+  // 1b) Actions / autres : Yahoo bars
+  const symbol = isCrypto
+    ? null
+    : toYahooSymbol(asset.ticker || "", asset.providerSymbol);
+
   if (symbol) {
     const yahoo = await fetchYahooBars(symbol, from, to, bar, native);
-    if (yahoo && yahoo.length >= 2) {
+    if (
+      yahoo &&
+      yahoo.length >= 2 &&
+      isPlausiblePriceSeries(
+        yahoo,
+        endPrice > 0 ? endPrice : yahoo[yahoo.length - 1]!.close
+      )
+    ) {
       if (endPrice > 0) {
         const last = yahoo[yahoo.length - 1]!;
         const lastT = new Date(last.date).getTime();
         const sameBucket =
-          Math.floor(lastT / barStepMs(bar)) === Math.floor(to.getTime() / barStepMs(bar));
+          Math.floor(lastT / barStepMs(bar)) ===
+          Math.floor(to.getTime() / barStepMs(bar));
         if (sameBucket) {
           yahoo[yahoo.length - 1] = barPoint(
             new Date(last.date),

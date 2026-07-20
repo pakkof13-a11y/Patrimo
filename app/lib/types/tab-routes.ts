@@ -37,18 +37,18 @@ export function tabToPath(tab: MainTab): string {
     case "liabilities":
       return "/passifs";
     case "platforms":
-      return "/plateformes";
+      return "/comptes";
     default:
-      return "/positions";
+      return "/dashboard";
   }
 }
 
 /**
  * Parse un slug catch-all Next.js → MainTab.
- * ex. undefined → holdings, ["positions","pea"] → pea, ["dashboard"] → dashboard
+ * ex. undefined → dashboard, ["positions","pea"] → pea, ["dashboard"] → dashboard
  */
 export function pathToTab(slug?: string[] | null): MainTab {
-  if (!slug || slug.length === 0) return "holdings";
+  if (!slug || slug.length === 0) return "dashboard";
 
   const [a, b] = slug;
   const head = (a ?? "").toLowerCase();
@@ -58,7 +58,14 @@ export function pathToTab(slug?: string[] | null): MainTab {
   if (head === "transactions") return "transactions";
   if (head === "fiscalite" || head === "fiscal" || head === "tax") return "fiscal";
   if (head === "passifs" || head === "liabilities") return "liabilities";
-  if (head === "plateformes" || head === "platforms") return "platforms";
+  if (
+    head === "plateformes" ||
+    head === "platforms" ||
+    head === "comptes" ||
+    head === "mes-comptes"
+  ) {
+    return "platforms";
+  }
   if (head === "banques" || head === "banks") return "banques";
   if (head === "epargne-salariale" || head === "epargne") {
     return "epargne-salariale";
@@ -80,7 +87,7 @@ export function pathToTab(slug?: string[] | null): MainTab {
   // Anciens / liens directs type /pea
   if (isMainTab(head)) return head;
 
-  return "holdings";
+  return "dashboard";
 }
 
 /** Segment pathname sans query/hash. */

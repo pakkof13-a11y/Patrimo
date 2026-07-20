@@ -39,6 +39,11 @@ import {
 } from "@/components/holdings/holdings-toolbar";
 import { HoldingsEmptyState } from "@/components/holdings/holdings-empty-state";
 import {
+  applyPlatformFilterToHolding,
+  holdingMatchesPlatform,
+  recomputeAllocationsForFiltered,
+} from "@/app/lib/portfolio/holdings-platform-slice";
+import {
   formatRelativeUpdate,
   HOLDINGS_EXPAND_COL_PX,
   renderHoldingRow,
@@ -55,6 +60,7 @@ import {
 import {
   formatCurrency,
   formatPercent,
+  formatUnitPrice,
   getAssetClassLabel,
   getChangeColor,
   cn,
@@ -74,6 +80,7 @@ import {
   parseHoldingsGroupBy,
   type HoldingsGroupBy,
 } from "@/app/lib/assets/categories";
+import { groupPositionsByBlockchain } from "@/app/lib/assets/blockchain";
 
 const DEFAULT_PAGE_SIZE: HoldingsPageSize = 20;
 import {
@@ -113,11 +120,11 @@ export function HoldingsSection({
   holdings,
   loading,
   baseCurrency,
-  envelopeFilter,
+  envelopeFilters,
+  onEnvelopeFiltersChange,
   onAccountTypeChange,
   onTriggerLevelChange,
   onRowDoubleClick,
-  onEnvelopeChange,
   onOpenTransactionForAsset,
   onCategoryChange,
   onAddTransaction,
@@ -127,7 +134,9 @@ export function HoldingsSection({
   holdings: Holding[];
   loading: boolean;
   baseCurrency: string;
-  envelopeFilter: AccountType | null;
+  /** Multi-sélection d’enveloppes (filtrage déjà appliqué côté parent ou ici) */
+  envelopeFilters: AccountType[];
+  onEnvelopeFiltersChange?: (types: AccountType[]) => void;
   onAccountTypeChange: (assetId: string, accountType: string) => void;
   onTriggerLevelChange?: (
     assetId: string,
@@ -135,8 +144,6 @@ export function HoldingsSection({
     value: string | null
   ) => void;
   onRowDoubleClick: (assetId: string) => void;
-  /** Select enveloppe → parent met à jour l'URL */
-  onEnvelopeChange?: (accountType: AccountType | null) => void;
   /** CTA empty state */
   onAddTransaction?: () => void;
   onImport?: () => void;
@@ -162,6 +169,10 @@ export function HoldingsSection({
   const [searchInput, setSearchInput] = useState("");
   const debouncedSearch = useDebouncedValue(searchInput, 300);
   const [accountFilter, setAccountFilter] = useState("");
+  /** Filtre plateforme (deep-link depuis Mes plateformes : ?platformId=) */
+  const platformIdFromUrl = searchParams.get("platformId") || "";
+  const platformFilterId = platformIdFromUrl.trim();
+  const platformNameFromUrl = (searchParams.get("platformName") || "").trim();
   /** Asset ids with expanded recent-transactions panel */
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [pagination, setPagination] = useState<PaginationState>({
@@ -182,7 +193,12 @@ export function HoldingsSection({
   const [editCategoryHolding, setEditCategoryHolding] =
     useState<Holding | null>(null);
 
-  const envelopeKey = envelopeFilter || "ALL";
+  const envelopeKey =
+    envelopeFilters.length === 0
+      ? "NONE"
+      : envelopeFilters.length === 1
+        ? envelopeFilters[0]!
+        : [...envelopeFilters].sort().join("+");
 
   useEffect(() => {
     const fromUrl = searchParams.get("groupBy");
@@ -209,7 +225,7 @@ export function HoldingsSection({
       saveUiPref(HOLDINGS_GROUP_BY_KEY, next);
       const params = new URLSearchParams(searchParams.toString());
       if (next === "none") params.delete("groupBy");
-      else params.set("groupBy", "assetCategory");
+      else params.set("groupBy", next);
       const q = params.toString();
       const target = q ? `${pathname}?${q}` : pathname;
       router.replace(target, { scroll: false });
@@ -335,12 +351,21 @@ export function HoldingsSection({
     setPagination((prev) => ({ ...prev, pageIndex: 0 }));
   }, [
     tab,
-    envelopeFilter,
+    envelopeKey,
     holdings.length,
     debouncedSearch,
     accountFilter,
+    platformFilterId,
     groupBy,
   ]);
+
+  function clearPlatformFilter() {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("platformId");
+    params.delete("platformName");
+    const q = params.toString();
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  }
 
   const holdingsWithCategory = useMemo(() => {
     return holdings.map((h) => ({
@@ -353,7 +378,13 @@ export function HoldingsSection({
   }, [holdings, categoryOverrides]);
 
   const filteredHoldings = useMemo(() => {
-    return holdingsWithCategory.filter((h) => {
+    const visible = holdingsWithCategory.filter((h) => {
+      if (
+        platformFilterId &&
+        !holdingMatchesPlatform(h, platformFilterId)
+      ) {
+        return false;
+      }
       if (accountFilter && (h.accountType || "CTO") !== accountFilter) return false;
       return matchesSearchQuery(debouncedSearch, [
         h.name,
@@ -364,9 +395,49 @@ export function HoldingsSection({
         h.category,
       ]);
     });
-  }, [holdingsWithCategory, debouncedSearch, accountFilter]);
 
-  const groupMode = groupBy === "assetCategory";
+    // Sans filtre plateforme → vue agrégée inchangée
+    if (!platformFilterId) return visible;
+
+    // Reslice métriques (qty / MV / P&L) sur la jambe filtrée uniquement
+    const sliced = visible.map((h) =>
+      applyPlatformFilterToHolding(h, platformFilterId)
+    );
+    return recomputeAllocationsForFiltered(sliced);
+  }, [
+    holdingsWithCategory,
+    debouncedSearch,
+    accountFilter,
+    platformFilterId,
+  ]);
+
+  const platformFilterLabel = useMemo(() => {
+    if (!platformFilterId) return null;
+    const hit = holdings.find((h) => {
+      const ids =
+        h.platformIds && h.platformIds.length > 0
+          ? h.platformIds
+          : [h.platformId];
+      return ids.includes(platformFilterId);
+    });
+    if (hit) {
+      // Si multi-custody, préférer le libellé URL (plateforme cliquée)
+      if (
+        hit.platformIds &&
+        hit.platformIds.length > 1 &&
+        platformNameFromUrl
+      ) {
+        return platformNameFromUrl;
+      }
+      // platformName peut être "A, B" — extraire le segment si possible
+      if (hit.platformId === platformFilterId) return hit.platformName.split(",")[0]!.trim();
+      return platformNameFromUrl || hit.platformName;
+    }
+    return platformNameFromUrl || "Plateforme sélectionnée";
+  }, [platformFilterId, platformNameFromUrl, holdings]);
+
+  const groupMode =
+    groupBy === "assetCategory" || groupBy === "blockchain";
 
   const columns = useMemo<ColumnDef<Holding>[]>(
     () => [
@@ -432,15 +503,43 @@ export function HoldingsSection({
         id: "platformName",
         header: "Plateforme",
         cell: ({ row }) => (
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <PlatformLogo
               src={row.original.platformLogoUrl}
               name={row.original.platformName}
               size={22}
             />
-            <span className="text-sm">{row.original.platformName}</span>
+            <span className="truncate text-sm">{row.original.platformName}</span>
           </div>
         ),
+      },
+      {
+        accessorKey: "blockchainLabel",
+        id: "blockchain",
+        header: "Blockchain",
+        cell: ({ row }) => {
+          const isCrypto =
+            row.original.assetClass === "CRYPTO" ||
+            row.original.accountType === "CRYPTO";
+          if (!isCrypto) {
+            return (
+              <span className="text-xs text-[var(--muted-foreground)]">—</span>
+            );
+          }
+          const label =
+            row.original.blockchainLabel ||
+            row.original.blockchainKey ||
+            "—";
+          return (
+            <span
+              className="inline-flex max-w-[9rem] truncate rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-950 dark:text-amber-100"
+              title={label}
+              data-testid="holding-blockchain-badge"
+            >
+              {label}
+            </span>
+          );
+        },
       },
       {
         accessorKey: "currency",
@@ -496,7 +595,11 @@ export function HoldingsSection({
         cell: ({ row }) => (
           <div>
             <div className="tabular-nums">
-              {formatCurrency(row.original.currentPriceNative, row.original.currency)}
+              {formatUnitPrice(
+                row.original.currentPriceNative,
+                row.original.currency,
+                { crypto: row.original.assetClass === "CRYPTO" }
+              )}
             </div>
             <div className="text-[10px] uppercase tracking-wide text-slate-400">
               {row.original.priceSource || "n/a"}
@@ -826,9 +929,16 @@ export function HoldingsSection({
 
   /** Lignes triées (pré-pagination) pour regroupement — order = tri tableau */
   const sortedAllRows = table.getPrePaginationRowModel().rows;
-  const categoryGroups = groupMode
-    ? groupPositionsByAssetCategory(sortedAllRows.map((r) => r.original))
-    : [];
+  const categoryGroups =
+    groupBy === "assetCategory"
+      ? groupPositionsByAssetCategory(sortedAllRows.map((r) => r.original))
+      : [];
+  const blockchainGroups =
+    groupBy === "blockchain"
+      ? groupPositionsByBlockchain(sortedAllRows.map((r) => r.original))
+      : [];
+  const activeGroups =
+    groupBy === "blockchain" ? blockchainGroups : categoryGroups;
   const rowByAssetId = useMemo(() => {
     const m = new Map<string, Row<Holding>>();
     for (const r of sortedAllRows) m.set(r.original.assetId, r);
@@ -836,9 +946,15 @@ export function HoldingsSection({
      
   }, [sortedAllRows]);
 
-  const positionsTitle = envelopeFilter
-    ? `Positions — ${ACCOUNT_TYPES[envelopeFilter]}`
-    : "Positions (toutes les enveloppes)";
+  const allEnvelopesCount = Object.keys(ACCOUNT_TYPES).length;
+  const positionsTitle =
+    envelopeFilters.length === 0
+      ? "Positions — aucune enveloppe"
+      : envelopeFilters.length === allEnvelopesCount
+        ? "Positions (toutes les enveloppes)"
+        : envelopeFilters.length === 1
+          ? `Positions — ${ACCOUNT_TYPES[envelopeFilters[0]!]}`
+          : `Positions — ${envelopeFilters.length} enveloppes`;
 
   /** Clé stable des colonnes visibles (identité stable entre renders). */
   const visibleLeafKey = table
@@ -912,13 +1028,13 @@ export function HoldingsSection({
   }
 
   return (
-    <section className="space-y-0">
+    <section className="space-y-3 sm:space-y-4" data-testid="holdings-section">
       {tab === "cto" && <EnvelopeCashPanel envelope="CTO" />}
       {tab === "pea" && <EnvelopeCashPanel envelope="PEA" lockCurrencyToEur />}
       {tab === "av" && (
         <>
           <EnvelopeCashPanel envelope="AV" />
-          <div className="mb-4">
+          <div className="mb-1 sm:mb-2">
             <LifeInsuranceTab />
           </div>
         </>
@@ -927,27 +1043,37 @@ export function HoldingsSection({
         <HoldingsToolbar
           title={positionsTitle}
           subtitle={
-            envelopeFilter
-              ? `${ACCOUNT_TYPES[envelopeFilter]} · positions dérivées du journal`
-              : "Positions calculées depuis le journal · CUMP multi-compte"
+            envelopeFilters.length === allEnvelopesCount
+              ? "Positions calculées depuis le journal · CUMP multi-compte"
+              : envelopeFilters.length === 0
+                ? "Sélectionnez au moins une enveloppe pour afficher les positions"
+                : `${envelopeFilters.map((e) => ACCOUNT_TYPES[e]).join(" · ")} · journal`
           }
           sourceCount={holdings.length}
           filteredCount={filteredHoldings.length}
           loading={loading}
-          envelopeFilter={envelopeFilter}
-          onEnvelopeChange={onEnvelopeChange}
+          envelopeFilters={envelopeFilters}
+          onEnvelopeFiltersChange={onEnvelopeFiltersChange}
           groupBy={groupBy}
           onGroupByChange={setGroupBy}
           groupMode={groupMode}
-          categoryGroupCount={categoryGroups.length}
+          categoryGroupCount={activeGroups.length}
           onExpandAllGroups={expandAllGroups}
           onCollapseAllGroups={() =>
-            collapseAllGroups(categoryGroups.map((g) => g.category))
+            collapseAllGroups(
+              groupBy === "blockchain"
+                ? blockchainGroups.map((g) => g.blockchainKey)
+                : categoryGroups.map((g) => g.category)
+            )
           }
           search={searchInput}
           onSearchChange={setSearchInput}
           accountFilter={accountFilter}
           onAccountFilterChange={setAccountFilter}
+          platformFilterLabel={platformFilterLabel}
+          onClearPlatformFilter={
+            platformFilterId ? clearPlatformFilter : undefined
+          }
           pageSize={pagination.pageSize}
           onPageSizeChange={(n) =>
             setPagination({ pageIndex: 0, pageSize: n })
@@ -957,7 +1083,7 @@ export function HoldingsSection({
             const view: SavedHoldingsView = {
               id: `v-${Date.now()}`,
               name,
-              envelope: envelopeFilter || "",
+              envelope: envelopeFilters.join(",") || "",
               accountType: accountFilter || "",
               search: searchInput,
               visibility: columnVisibility as Record<string, boolean>,
@@ -981,10 +1107,12 @@ export function HoldingsSection({
             if (view.visibility) {
               setColumnVisibility(view.visibility as VisibilityState);
             }
-            if (onEnvelopeChange) {
-              onEnvelopeChange(
-                view.envelope ? (view.envelope as AccountType) : null
-              );
+            if (onEnvelopeFiltersChange && view.envelope) {
+              const parts = view.envelope
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean) as AccountType[];
+              if (parts.length > 0) onEnvelopeFiltersChange(parts);
             }
           }}
           columns={{
@@ -1175,9 +1303,23 @@ export function HoldingsSection({
                 <tr>
                   <td
                     colSpan={Math.max(visibleColCount, 1)}
-                    className="px-4 py-8 text-center text-slate-400"
+                    className="p-0"
                   >
-                    Chargement…
+                    <div className="px-2 py-2" data-testid="holdings-loading-skeleton">
+                      {Array.from({ length: 8 }).map((_, r) => (
+                        <div
+                          key={r}
+                          className="flex items-center gap-3 border-t border-[var(--border)] px-2 py-2.5 first:border-t-0"
+                        >
+                          <div className="h-7 w-7 shrink-0 animate-pulse rounded-full bg-[var(--muted)]" />
+                          <div className="h-3 w-28 animate-pulse rounded bg-[var(--muted)]" />
+                          <div className="h-3 w-16 animate-pulse rounded bg-[var(--muted)]" />
+                          <div className="ml-auto h-3 w-20 animate-pulse rounded bg-[var(--muted)]" />
+                          <div className="h-3 w-16 animate-pulse rounded bg-[var(--muted)]" />
+                          <div className="h-3 w-14 animate-pulse rounded bg-[var(--muted)]" />
+                        </div>
+                      ))}
+                    </div>
                   </td>
                 </tr>
               )}
@@ -1190,19 +1332,22 @@ export function HoldingsSection({
                     <HoldingsEmptyState
                       kind={
                         holdings.length === 0 && !debouncedSearch && !accountFilter
-                          ? envelopeFilter
+                          ? envelopeFilters.length === 0 ||
+                            envelopeFilters.length < allEnvelopesCount
                             ? "envelope"
                             : "source"
                           : debouncedSearch || accountFilter
                             ? "filter"
-                            : envelopeFilter
+                            : envelopeFilters.length < allEnvelopesCount
                               ? "envelope"
                               : "source"
                       }
                       envelopeLabel={
-                        envelopeFilter
-                          ? ACCOUNT_TYPES[envelopeFilter]
-                          : undefined
+                        envelopeFilters.length === 1
+                          ? ACCOUNT_TYPES[envelopeFilters[0]!]
+                          : envelopeFilters.length === 0
+                            ? "aucune"
+                            : undefined
                       }
                       searchQuery={debouncedSearch.trim() || undefined}
                       onClearSearch={
@@ -1233,10 +1378,14 @@ export function HoldingsSection({
                 )}
               {!loading &&
                 groupMode &&
-                categoryGroups.map((group) => {
-                  const expanded = !isGroupCollapsed(group.category);
+                activeGroups.map((group) => {
+                  const groupKey =
+                    "blockchainKey" in group
+                      ? group.blockchainKey
+                      : group.category;
+                  const expanded = !isGroupCollapsed(groupKey);
                   return (
-                    <Fragment key={group.category}>
+                    <Fragment key={groupKey}>
                       <PositionCategoryGroupHeader
                         label={group.label}
                         count={group.count}
@@ -1245,7 +1394,7 @@ export function HoldingsSection({
                         weightPct={group.weightPct}
                         baseCurrency={baseCurrency}
                         expanded={expanded}
-                        onToggle={() => toggleGroupCollapsed(group.category)}
+                        onToggle={() => toggleGroupCollapsed(groupKey)}
                         colSpan={Math.max(visibleColCount, 1)}
                       />
                       {expanded &&
@@ -1280,7 +1429,7 @@ export function HoldingsSection({
                 <span className="tabular-nums" data-testid="holdings-group-summary">
                   {total === 0
                     ? "Aucune position à afficher"
-                    : `${total} position${total !== 1 ? "s" : ""} · ${categoryGroups.length} groupe${categoryGroups.length !== 1 ? "s" : ""}`}
+                    : `${total} position${total !== 1 ? "s" : ""} · ${activeGroups.length} groupe${activeGroups.length !== 1 ? "s" : ""}`}
                 </span>
                 <span className="text-[11px] text-[var(--muted-foreground)]">
                   Toutes les lignes · pagination inactive

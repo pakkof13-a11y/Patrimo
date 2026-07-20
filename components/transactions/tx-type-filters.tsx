@@ -11,6 +11,7 @@ export type TxTypeFilterId =
   | "buy"
   | "sell"
   | "reward"
+  | "airdrop"
   | "dividend"
   | "fees"
   | "cash"
@@ -50,9 +51,17 @@ export const TX_TYPE_FILTERS: Array<{
   {
     id: "reward",
     label: "Rewards",
-    types: ["REWARD"],
-    emptyHint: "Aucun staking / reward enregistré",
+    types: ["REWARD", "AIRDROP"],
+    emptyHint: "Aucun staking / reward / airdrop enregistré",
     accent: "bg-fuchsia-700 text-white dark:bg-fuchsia-400 dark:text-fuchsia-950",
+  },
+  {
+    id: "airdrop",
+    label: "Airdrops",
+    types: ["AIRDROP"],
+    emptyHint: "Aucun airdrop enregistré",
+    accent:
+      "bg-purple-700 text-white dark:bg-purple-400 dark:text-purple-950",
   },
   {
     id: "dividend",
@@ -116,6 +125,8 @@ export function txTypeChipClass(txType: string): string {
       return "bg-sky-50 text-sky-800 ring-sky-200/80 dark:bg-sky-950/50 dark:text-sky-200 dark:ring-sky-800/60";
     case "REWARD":
       return "bg-fuchsia-50 text-fuchsia-900 ring-fuchsia-200/80 dark:bg-fuchsia-950/40 dark:text-fuchsia-200 dark:ring-fuchsia-800/50";
+    case "AIRDROP":
+      return "bg-purple-50 text-purple-900 ring-purple-200/80 dark:bg-purple-950/40 dark:text-purple-200 dark:ring-purple-800/50";
     case "DIVIDENDE":
     case "COUPON":
     case "LOYER":

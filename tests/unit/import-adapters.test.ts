@@ -76,6 +76,82 @@ describe("adapter registry", () => {
     expect(score).toBeGreaterThan(0);
     expect(["binance", "generic", "dynamic"]).toContain(adapter.meta.id);
   });
+
+  it("detects Revolut Invest stocks over Patrimo", () => {
+    const { adapter, score } = detectBestAdapter([
+      "Date",
+      "Ticker",
+      "Type",
+      "Quantity",
+      "Price per share",
+      "Total Amount",
+      "Currency",
+      "FX Rate",
+    ]);
+    expect(adapter.meta.id).toBe("revolut");
+    expect(score).toBeGreaterThanOrEqual(90);
+  });
+});
+
+describe("Revolut real-world exports", () => {
+  it("recovers Excel whole-line-quoted crypto rows", () => {
+    // Lignes encapsulées comme après édition Excel (double quotes)
+    const text = [
+      "Symbol,Type,Quantity,Price,Value,Fees,Date",
+      '"BTC,Achat,""0,00000502"",""69 635,02€"",""0,35€"",""0,00€"",""9 mai 2026, 20:02:43"""',
+      '"DOT,Mise en staking,""2,53384547"",""6,38€"",""16,17€"",""0,00€"",""7 févr. 2023, 21:58:19"""',
+    ].join("\n");
+    const r = importCsv(text, { formatId: "auto" });
+    expect(r.formatId).toBe("revolut");
+    expect(r.drafts).toHaveLength(2);
+    expect(r.drafts.every((d) => d.status === "ok" || d.status === "warning")).toBe(
+      true
+    );
+    expect(r.drafts[0].type).toBe("ACHAT");
+    expect(r.drafts[0].ticker).toBe("BTC");
+    expect(Number(r.drafts[0].quantity)).toBeCloseTo(0.00000502, 10);
+    expect(r.drafts[1].type).toBe("REWARD");
+    expect(r.drafts[1].ticker).toBe("DOT");
+  });
+
+  it("imports Revolut stocks BUY - MARKET and cash movements", () => {
+    const text = `Date,Ticker,Type,Quantity,Price per share,Total Amount,Currency,FX Rate
+2021-06-14T09:00:19.573615Z,,CASH TOP-UP,,,USD 100,USD,1.2113
+2021-06-14T13:32:37.807154Z,AMC,BUY - MARKET,1.92344681,USD 51.99,USD 100,USD,1.2129
+2021-06-14T13:40:30.920289Z,AMC,SELL - MARKET,1.92344681,USD 52.74,USD 100.22,USD,1.2129
+2026-04-27T17:21:08.163605Z,,STOCKS PROMOTION REWARD,,,USD 3,USD,1.1747
+2026-05-29T13:37:32.218251Z,,STOCKS PROMOTION CLAWBACK,,,USD -0.94,USD,1.1677
+`;
+    const r = importCsv(text, { formatId: "auto" });
+    expect(r.formatId).toBe("revolut");
+    expect(r.drafts.every((d) => d.status !== "error")).toBe(true);
+    expect(r.drafts[0].type).toBe("APPORT");
+    expect(r.drafts[0].cashAmount).toBe("100");
+    expect(r.drafts[1].type).toBe("ACHAT");
+    expect(r.drafts[1].ticker).toBe("AMC");
+    expect(Number(r.drafts[1].unitPrice)).toBeCloseTo(51.99);
+    expect(r.drafts[1].assetClass).toBe("ACTIONS");
+    expect(r.drafts[2].type).toBe("VENTE");
+    expect(r.drafts[3].type).toBe("APPORT");
+    expect(r.drafts[4].type).toBe("RETRAIT");
+  });
+
+  it("parses USD-prefixed amounts", () => {
+    expect(parseNumber("USD 51.99")).toBeCloseTo(51.99);
+    expect(parseNumber("EUR -360")).toBeCloseTo(-360);
+  });
+
+  it("maps Revolut Réception crypto to REWARD (not cash APPORT)", () => {
+    const text = `Symbol,Type,Quantity,Price,Value,Fees,Date
+ALGO,Réception,"1,989245","0,08€","0,15€","0,00€","22 juin 2026, 12:51:01"
+`;
+    const r = importCsv(text, { formatId: "auto" });
+    expect(r.drafts).toHaveLength(1);
+    expect(r.drafts[0].type).toBe("REWARD");
+    expect(r.drafts[0].ticker).toBe("ALGO");
+    expect(Number(r.drafts[0].quantity)).toBeCloseTo(1.989245, 6);
+    expect(r.drafts[0].status).not.toBe("error");
+  });
 });
 
 describe("importCsv end-to-end", () => {

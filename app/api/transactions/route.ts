@@ -13,11 +13,16 @@ import {
 } from "@/app/lib/transactions/service";
 import { AccountingError } from "@/app/lib/accounting";
 import {
+  buildTxListOrderBy,
   buildTxListWhere,
   mapTypeCountsToGroups,
   parseTxListQuery,
   TX_LIST_SELECT,
 } from "@/app/lib/transactions/list-query";
+import {
+  blockchainLabel,
+  resolveBlockchainKey,
+} from "@/app/lib/assets/blockchain";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -42,10 +47,30 @@ function mapTx(t: {
     ticker: string | null;
     isin: string | null;
     accountType: string;
+    assetClass?: string | null;
+    logoUrl: string | null;
+    notes?: string | null;
+    providerSymbol?: string | null;
   } | null;
-  platform: { name: string; logoUrl: string | null };
+  platform: {
+    name: string;
+    logoUrl: string | null;
+    logoKey?: string | null;
+    type?: string | null;
+    subtype?: string | null;
+  };
   toPlatform: { name: string } | null;
 }) {
+  const chainKey = resolveBlockchainKey({
+    platformType: t.platform.type,
+    platformLogoKey: t.platform.logoKey,
+    platformName: t.platform.name,
+    platformSubtype: t.platform.subtype,
+    assetNotes: t.asset?.notes,
+    providerSymbol: t.asset?.providerSymbol,
+    accountType: t.asset?.accountType,
+    assetClass: t.asset?.assetClass,
+  });
   return {
     id: t.id,
     type: t.type,
@@ -67,10 +92,22 @@ function mapTx(t: {
           ticker: t.asset.ticker,
           isin: t.asset.isin,
           accountType: t.asset.accountType,
+          assetClass: t.asset.assetClass ?? null,
+          logoUrl: t.asset.logoUrl,
+          notes: t.asset.notes ?? null,
+          providerSymbol: t.asset.providerSymbol ?? null,
         }
       : null,
-    platform: { name: t.platform.name, logoUrl: t.platform.logoUrl },
+    platform: {
+      name: t.platform.name,
+      logoUrl: t.platform.logoUrl,
+      logoKey: t.platform.logoKey ?? null,
+      type: t.platform.type ?? null,
+      subtype: t.platform.subtype ?? null,
+    },
     toPlatform: t.toPlatform ? { name: t.toPlatform.name } : null,
+    blockchainKey: chainKey,
+    blockchainLabel: blockchainLabel(chainKey),
   };
 }
 
@@ -98,7 +135,7 @@ export async function GET(req: Request) {
     prisma.transaction.findMany({
       where,
       select: TX_LIST_SELECT,
-      orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+      orderBy: buildTxListOrderBy(query),
       skip,
       take: query.pageSize,
     }),

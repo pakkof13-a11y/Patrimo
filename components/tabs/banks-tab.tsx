@@ -387,9 +387,9 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
 
   return (
     <div className="section-stack space-y-6" data-testid="banks-tab">
-      <header className="px-0.5">
+      <header className="module-page-header px-0.5">
         <h1 className="text-title">Banques</h1>
-        <p className="text-meta mt-0.5">
+        <p className="module-intro text-meta">
           Comptes courants et livrets · conversion en {baseCurrency} pour le
           patrimoine agrégé uniquement
         </p>

@@ -20,10 +20,11 @@ import {
   type CreateTransactionForm,
   type PlatformForm,
 } from "@/app/lib/schemas";
-import { PLATFORM_TYPES, type AccountType } from "@/app/lib/constants";
+import { ACCOUNT_TYPES, type AccountType } from "@/app/lib/constants";
 import { formatCurrency } from "@/app/lib/utils";
 import { fetchJson, reloadHoldings } from "@/app/lib/api-client";
 import { usePriceAutoRefresh } from "@/app/hooks/use-price-auto-refresh";
+import { useGlobalShortcuts } from "@/app/hooks/use-global-shortcuts";
 import {
   useAssetDetailQuery,
   useHoldingsQuery,
@@ -31,6 +32,8 @@ import {
   usePortfolioHistoryQuery,
   useTransactionsMetaQuery,
 } from "@/app/hooks/use-portfolio-queries";
+import { ShortcutsHelpPanel } from "@/components/layout/shortcuts-help-panel";
+
 import {
   EMPTY_HOLDINGS,
   TAB_STORAGE_KEY,
@@ -63,7 +66,15 @@ import { TransactionModal } from "@/components/modals/transaction-modal";
 import { PlatformModal } from "@/components/modals/platform-modal";
 import { AssetDetailModal } from "@/components/modals/asset-detail-modal";
 import { ImportCsvModal } from "@/components/modals/import-csv-modal";
+import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
 import { CommandPalette } from "@/components/layout/command-palette";
+import {
+  sortPlatformsByRecentUsage,
+  touchRecentPlatformId,
+} from "@/app/lib/platforms/recent";
+import { buildPlatformPickOptions } from "@/app/lib/platforms/catalog-options";
+import { ensurePlatformFromPreset } from "@/app/lib/platforms/ensure-from-catalog";
+import type { PlatformPreset } from "@/app/lib/platforms/presets";
 import {
   dashboardBlocksFor,
   resolveDashboardMaturity,
@@ -160,21 +171,22 @@ function PortfolioAppSkeleton() {
       className="min-h-screen text-[var(--foreground)]"
       suppressHydrationWarning
       data-testid="portfolio-skeleton"
+      aria-busy="true"
     >
       <div className="border-b border-[var(--border)] bg-[var(--header-bg)] px-3 py-4 sm:px-5">
-        <div className="app-shell h-10 animate-pulse rounded-lg bg-slate-200/60 dark:bg-slate-800/60" />
+        <div className="app-shell h-10 skeleton-block rounded-lg" />
       </div>
       <div className="app-shell space-y-6 px-3 py-6 sm:px-5 lg:px-6">
         <div className="grid w-full min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,11.5rem),1fr))]">
           {Array.from({ length: 8 }).map((_, i) => (
             <div
               key={i}
-              className="h-20 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800/50"
+              className="h-20 skeleton-block rounded-xl border border-[var(--border)]"
             />
           ))}
         </div>
-        <div className="card h-48 animate-pulse bg-slate-50 dark:bg-slate-900/40" />
-        <div className="card h-72 animate-pulse bg-slate-50 dark:bg-slate-900/40" />
+        <div className="card h-48 skeleton-block" />
+        <div className="card h-72 skeleton-block" />
       </div>
     </div>
   );
@@ -185,7 +197,7 @@ function PortfolioAppSkeleton() {
  * Rendu uniquement côté client (après mount).
  */
 function PortfolioAppClient({
-  initialTab = "holdings",
+  initialTab = "dashboard",
 }: {
   initialTab?: MainTab;
 }) {
@@ -206,12 +218,28 @@ function PortfolioAppClient({
   const [showTx, setShowTx] = useState(false);
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
   const [showPlatform, setShowPlatform] = useState(false);
+  const [showQuickPlatform, setShowQuickPlatform] = useState(false);
+  const [quickPlatformPrefill, setQuickPlatformPrefill] = useState("");
+  /** Cible de la création contextuelle. */
+  const [quickPlatformTarget, setQuickPlatformTarget] = useState<
+    "tx" | "import" | "standalone"
+  >("tx");
+  /** Plateforme par défaut pour l’import (après création à la volée). */
+  const [importDefaultPlatform, setImportDefaultPlatform] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  /** IDs créés dans la session (badge « Nouvelle » dans le combobox). */
+  const [newPlatformIds, setNewPlatformIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [showImport, setShowImport] = useState(false);
   const [detailAssetId, setDetailAssetId] = useState<string | null>(null);
   const [assetLabel, setAssetLabel] = useState("");
   const [platformComboLabel, setPlatformComboLabel] = useState("");
   const [txPlatformLabel, setTxPlatformLabel] = useState("");
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
   /** Préférence onboarding « afficher à chaque démarrage » (hero empty/setup) */
   const [showEveryStart, setShowEveryStart] = useState(true);
   const baseCurrencyRef = useRef(baseCurrency);
@@ -272,14 +300,54 @@ function PortfolioAppClient({
     [router, pathname]
   );
 
-  const onEnvelopeChange = useCallback(
-    (accountType: AccountType | null) => {
-      if (!accountType) {
-        setTab("holdings");
-        return;
+  /** Multi-enveloppes : null = dériver de l’URL (tab) ; sinon sélection manuelle */
+  const ALL_ENVELOPE_TYPES = useMemo(
+    () => Object.keys(ACCOUNT_TYPES) as AccountType[],
+    []
+  );
+  const [manualEnvelopeFilters, setManualEnvelopeFilters] = useState<
+    AccountType[] | null
+  >(null);
+  /**
+   * Quand le multi-select enveloppe pousse l’URL vers /positions (holdings),
+   * le changement de `tab` ne doit PAS réinitialiser la sélection manuelle
+   * (sinon cocher une 2ᵉ case → reset → toutes les cases cochées).
+   */
+  const skipEnvelopeResetRef = useRef(false);
+
+  // Reset sélection manuelle quand l’URL / tab positions change (nav latérale)
+  useEffect(() => {
+    if (skipEnvelopeResetRef.current) {
+      skipEnvelopeResetRef.current = false;
+      return;
+    }
+    setManualEnvelopeFilters(null);
+  }, [tab]);
+
+  const envelopeFilters: AccountType[] = useMemo(() => {
+    if (manualEnvelopeFilters != null) return manualEnvelopeFilters;
+    const fromTab = TAB_TO_ACCOUNT_TYPE[tab];
+    if (fromTab) return [fromTab];
+    return [...ALL_ENVELOPE_TYPES];
+  }, [manualEnvelopeFilters, tab, ALL_ENVELOPE_TYPES]);
+
+  const onEnvelopeFiltersChange = useCallback(
+    (next: AccountType[]) => {
+      setManualEnvelopeFilters(next);
+      // URL : 0 → holdings ; 1 → tab dédié ; multi → holdings (filtre local)
+      if (next.length === 1) {
+        const opt = ENVELOPE_SELECT_OPTIONS.find((o) => o.value === next[0]);
+        if (opt) {
+          // Laisser l’URL (tab) redevenir source de vérité pour 1 enveloppe
+          skipEnvelopeResetRef.current = false;
+          setTab(opt.tab);
+          return;
+        }
       }
-      const opt = ENVELOPE_SELECT_OPTIONS.find((o) => o.value === accountType);
-      setTab(opt?.tab ?? "holdings");
+      if (next.length === 0 || next.length > 1) {
+        skipEnvelopeResetRef.current = true;
+        setTab("holdings");
+      }
     },
     [setTab]
   );
@@ -326,6 +394,7 @@ function PortfolioAppClient({
       logoKey: "",
       logoUrl: "",
       walletAddress: "",
+      walletApiKey: "",
     },
   });
 
@@ -399,6 +468,8 @@ function PortfolioAppClient({
     },
     onSuccess: async (res) => {
       const wasEdit = Boolean(editingTxId);
+      const pid = txForm.getValues("platformId");
+      if (pid) touchRecentPlatformId(pid);
       setShowTx(false);
       setEditingTxId(null);
       setAssetLabel("");
@@ -440,32 +511,149 @@ function PortfolioAppClient({
   });
 
   const savePlatform = useMutation({
-    mutationFn: (body: PlatformForm) =>
-      fetchJson("/api/platforms", {
+    mutationFn: async (body: PlatformForm) => {
+      const res = await fetchJson<{
+        platform: {
+          id: string;
+          name: string;
+          logoKey?: string | null;
+          walletAddress?: string | null;
+        };
+        created?: boolean;
+      }>("/api/platforms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      }),
-    onSuccess: () => {
+      });
+      return { body, res };
+    },
+    onSuccess: async ({ body, res }) => {
       toast.success("Plateforme créée");
       setShowPlatform(false);
       setPlatformComboLabel("");
       platformForm.reset();
       void qc.invalidateQueries({ queryKey: ["platforms"] });
       void qc.invalidateQueries({ queryKey: ["holdings"] });
+
+      // Auto-sync Zerion / Solana si adresse wallet fournie
+      const address = (body.walletAddress || "").trim();
+      if (!address || body.type !== "BLOCKCHAIN") return;
+
+      const { resolveChainSyncForPlatform, DEFAULT_ZERION_API_KEY } =
+        await import("@/app/lib/market/chain-wallet-sync");
+      const cap = resolveChainSyncForPlatform({
+        logoKey: body.logoKey || res.platform.logoKey,
+        name: body.name || res.platform.name,
+        type: "BLOCKCHAIN",
+      });
+      if (!cap?.syncPath) return;
+
+      try {
+        if (cap.provider === "zerion") {
+          const sync = await fetchJson<{
+            summary?: {
+              balances?: number;
+              transactions?: number;
+              assetsTouched?: number;
+              historyTxs?: number;
+            };
+            ledgerError?: string | null;
+          }>(cap.syncPath, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              platformId: res.platform.id,
+              address,
+              apiKey: body.walletApiKey || DEFAULT_ZERION_API_KEY,
+              chainPreset: body.logoKey || cap.presetKey,
+              allChains: false,
+              writeLedger: true,
+            }),
+          });
+          const s = sync.summary;
+          if (sync.ledgerError) {
+            toast.message(`Zerion : ${sync.ledgerError}`);
+          } else if (
+            (s?.assetsTouched ?? 0) === 0 &&
+            (s?.balances ?? 0) === 0 &&
+            (s?.historyTxs ?? 0) === 0
+          ) {
+            toast.message(
+              "Zerion · aucun solde / tx pour cette adresse (vérifiez l’adresse ou la clé API)"
+            );
+          } else {
+            toast.success(
+              `Zerion · ${s?.assetsTouched ?? 0} pos. · ${s?.balances ?? 0} soldes · ${s?.historyTxs ?? 0} tx`
+            );
+          }
+          await qc.invalidateQueries({ queryKey: ["platforms"] });
+          await qc.invalidateQueries({ queryKey: ["holdings"] });
+          await qc.invalidateQueries({ queryKey: ["transactions"] });
+        } else if (cap.provider === "helius-solana") {
+          const sync = await fetchJson<{
+            ledger?: { assetsTouched?: number; txsCreated?: number } | null;
+            ledgerError?: string | null;
+            txSync?: { newTransactions?: number } | null;
+          }>(cap.syncPath, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              platformId: res.platform.id,
+              address,
+              writeLedger: true,
+              syncTransactions: true,
+            }),
+          });
+          if (sync.ledgerError) {
+            toast.message(`Solana · snapshot OK — ${sync.ledgerError}`);
+          } else {
+            toast.success(
+              `Solana · ${sync.ledger?.assetsTouched ?? 0} pos. · ${sync.txSync?.newTransactions ?? 0} tx`
+            );
+          }
+          await qc.invalidateQueries({ queryKey: ["platforms"] });
+          await qc.invalidateQueries({ queryKey: ["holdings"] });
+          await qc.invalidateQueries({ queryKey: ["transactions"] });
+        }
+      } catch (e) {
+        toast.message(
+          e instanceof Error
+            ? `Plateforme créée — sync : ${e.message}`
+            : "Plateforme créée — sync wallet échouée"
+        );
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const deletePlatform = useMutation({
-    mutationFn: (id: string) =>
-      fetchJson<{ ok: boolean }>(`/api/platforms?id=${encodeURIComponent(id)}`, {
+    mutationFn: ({
+      id,
+      force,
+    }: {
+      id: string;
+      force?: boolean;
+    }) => {
+      const q = new URLSearchParams({ id });
+      if (force) q.set("force", "1");
+      return fetchJson<{
+        ok: boolean;
+        deleted?: { assets?: number; transactions?: number; name?: string };
+      }>(`/api/platforms?${q.toString()}`, {
         method: "DELETE",
-      }),
-    onSuccess: () => {
-      toast.success("Plateforme supprimée");
+      });
+    },
+    onSuccess: (res) => {
+      const d = res.deleted;
+      toast.success(
+        d
+          ? `Plateforme supprimée · ${d.transactions ?? 0} tx · ${d.assets ?? 0} actif(s)`
+          : "Plateforme supprimée"
+      );
       void qc.invalidateQueries({ queryKey: ["platforms"] });
       void qc.invalidateQueries({ queryKey: ["holdings"] });
+      void qc.invalidateQueries({ queryKey: ["transactions"] });
+      void qc.invalidateQueries({ queryKey: ["portfolio-history"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -473,18 +661,22 @@ function PortfolioAppClient({
   // ─── Derived ────────────────────────────────────────────────────────────────
 
   const allHoldings = holdingsQ.data?.holdings ?? EMPTY_HOLDINGS;
-  const envelopeFilter: AccountType | null = TAB_TO_ACCOUNT_TYPE[tab] ?? null;
 
   const holdings = useMemo(() => {
-    if (!envelopeFilter) return allHoldings;
-    return allHoldings.filter((h) => (h.accountType || "CTO") === envelopeFilter);
-  }, [allHoldings, envelopeFilter]);
+    if (envelopeFilters.length === 0) return [];
+    if (envelopeFilters.length === ALL_ENVELOPE_TYPES.length) return allHoldings;
+    const set = new Set(envelopeFilters);
+    return allHoldings.filter((h) =>
+      set.has((h.accountType || "CTO") as AccountType)
+    );
+  }, [allHoldings, envelopeFilters, ALL_ENVELOPE_TYPES.length]);
 
-  /** Tickers uniques pour le calendrier des résultats (dashboard) */
+  /** Tickers actions/ETF pour le calendrier résultats (exclut CRYPTO) */
   const portfolioTickers = useMemo(() => {
     const seen = new Set<string>();
     const out: { ticker: string; name: string }[] = [];
     for (const h of allHoldings) {
+      if ((h.assetClass || "").toUpperCase() === "CRYPTO") continue;
       const t = (h.ticker ?? "").trim();
       if (!t) continue;
       const key = t.toUpperCase().replace(/\..*$/, "");
@@ -517,20 +709,68 @@ function PortfolioAppClient({
   /** KPI globaux : toujours hors dashboard ; sur dashboard seulement si mature */
   const showGlobalKpis = !isDashboard || dashBlocks.showKpiStrip;
 
-  const platformSelectOptions = useMemo(
-    () =>
+  const platformSelectOptions = useMemo(() => {
+    // Comptes user (usage récent) + catalogue courtiers avec logos
+    const ownedSorted = sortPlatformsByRecentUsage(
       platforms.map((p) => ({
         value: p.id,
         label: p.name,
-        subtitle: [
-          PLATFORM_TYPES[p.type as keyof typeof PLATFORM_TYPES] || p.type,
-          p.subtype,
-        ]
-          .filter(Boolean)
-          .join(" · "),
+        subtitle: "",
         logoUrl: p.logoUrl,
-      })),
-    [platforms]
+      }))
+    );
+    const order = new Map(ownedSorted.map((o, i) => [o.value, i]));
+    const platformsOrdered = [...platforms].sort((a, b) => {
+      const ra = order.has(a.id) ? order.get(a.id)! : 9999;
+      const rb = order.has(b.id) ? order.get(b.id)! : 9999;
+      if (ra !== rb) return ra - rb;
+      return a.name.localeCompare(b.name, "fr", { sensitivity: "base" });
+    });
+    return buildPlatformPickOptions({
+      platforms: platformsOrdered,
+      newPlatformIds,
+      includeCatalog: true,
+    });
+  }, [platforms, newPlatformIds]);
+
+  const handleCatalogPlatformPick = useCallback(
+    async (
+      target: "tx" | "import",
+      opt: { label: string; preset?: PlatformPreset; value: string }
+    ) => {
+      try {
+        const key =
+          opt.preset?.key ||
+          (opt.value.startsWith("catalog:")
+            ? opt.value.slice("catalog:".length)
+            : "");
+        const ensured = await ensurePlatformFromPreset(
+          opt.preset || key || opt.label
+        );
+        if (ensured.created) {
+          setNewPlatformIds((prev) => new Set(prev).add(ensured.id));
+        }
+        touchRecentPlatformId(ensured.id);
+        void qc.invalidateQueries({ queryKey: ["platforms"] });
+        void qc.invalidateQueries({ queryKey: ["holdings"] });
+        if (target === "tx") {
+          txForm.setValue("platformId", ensured.id, { shouldValidate: true });
+          setTxPlatformLabel(ensured.name);
+        } else {
+          setImportDefaultPlatform({ id: ensured.id, name: ensured.name });
+        }
+        toast.success(
+          ensured.created
+            ? `Plateforme « ${ensured.name} » ajoutée avec logo`
+            : `Plateforme « ${ensured.name} » sélectionnée`
+        );
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : "Impossible d’ajouter ce courtier"
+        );
+      }
+    },
+    [qc, txForm]
   );
 
   const onTriggerLevelChange = useCallback(
@@ -615,13 +855,20 @@ function PortfolioAppClient({
     }).catch(() => undefined);
   }
 
-  function openNewTransaction(type?: string, prefill?: Holding) {
+  function openNewTransaction(
+    type?: string,
+    prefill?: Holding,
+    /** Pré-sélection plateforme (ex. menu Mes plateformes) — prioritaire sur prefill holding. */
+    platformOverride?: { id: string; name: string }
+  ) {
     setEditingTxId(null);
     void qc.invalidateQueries({ queryKey: ["platforms"] });
     void qc.invalidateQueries({ queryKey: ["assets"] });
     const txType = (type || "ACHAT") as CreateTransactionForm["type"];
-    const platformId = prefill?.platformId || platforms[0]?.id || "";
+    const platformId =
+      platformOverride?.id || prefill?.platformId || platforms[0]?.id || "";
     const platformName =
+      platformOverride?.name ||
       platforms.find((p) => p.id === platformId)?.name ||
       prefill?.platformName ||
       "";
@@ -651,10 +898,48 @@ function PortfolioAppClient({
     setShowTx(true);
   }
 
+  function openAddPlatform() {
+    setShowPlatform(true);
+  }
+
+  function viewPositionsForPlatform(platform: { id: string; name: string }) {
+    const qs = new URLSearchParams({
+      platformId: platform.id,
+      platformName: platform.name,
+    });
+    router.push(`/positions?${qs.toString()}`, { scroll: false });
+    try {
+      localStorage.setItem(TAB_STORAGE_KEY, "holdings");
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // ─── Raccourcis clavier globaux (/, n, ?, Échap, Ctrl+K) ───────────────────
+  useGlobalShortcuts({
+    onSearch: () => setCmdOpen(true),
+    onNewTransaction: () => openNewTransaction("ACHAT"),
+    onHelp: () => setShortcutsHelpOpen(true),
+    onEscape: () => {
+      if (shortcutsHelpOpen) {
+        setShortcutsHelpOpen(false);
+        return;
+      }
+      if (cmdOpen) setCmdOpen(false);
+    },
+  });
+
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen min-w-0 max-w-[100vw] overflow-x-clip text-[var(--foreground)]">
+      {/* Skip link a11y — premier Tab */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-teal-600 focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-lg"
+      >
+        Aller au contenu principal
+      </a>
       <AppHeader
         tab={tab}
         onTabChange={setTab}
@@ -671,124 +956,168 @@ function PortfolioAppClient({
 
       <Shell>
         {/*
-          KPI strip :
-          - onglets métier : toujours
-          - dashboard empty/setup : masqué (réduit la densité perçue)
-          - dashboard active : cockpit complet
+          module-flow : rythme vertical KPI → corps du module (tous onglets).
+          Avant : main-content plat → Positions/Transactions collés aux indicateurs.
         */}
-        {showGlobalKpis && (
-          <KpiStrip
-            summary={summary}
-            baseCurrency={baseCurrency}
-            smartFilter={isDashboard && dashBlocks.kpiSmartFilter}
-          />
-        )}
+        <div
+          id="main-content"
+          tabIndex={-1}
+          className="module-flow outline-none"
+        >
+          {/*
+            KPI strip :
+            - onglets métier : toujours
+            - dashboard empty/setup : masqué (réduit la densité perçue)
+            - dashboard active : cockpit complet
+          */}
+          {showGlobalKpis && (
+            <div className="module-kpi-band min-w-0" data-slot="kpi-band">
+              <KpiStrip
+                summary={summary}
+                baseCurrency={baseCurrency}
+                history={historyQ.data?.history}
+                smartFilter={isDashboard && dashBlocks.kpiSmartFilter}
+              />
+            </div>
+          )}
 
-        <div data-slot="positions">
-          {positionsView ? (
-            <HoldingsSection
-              tab={tab}
-              holdings={holdings}
-              loading={holdingsQ.isPending && !holdingsQ.data}
-              baseCurrency={baseCurrency}
-              envelopeFilter={envelopeFilter}
-              onAccountTypeChange={onAccountTypeChange}
-              onTriggerLevelChange={onTriggerLevelChange}
-              onRowDoubleClick={setDetailAssetId}
-              onEnvelopeChange={onEnvelopeChange}
-              onOpenTransactionForAsset={(type, h) =>
-                openNewTransaction(type, h)
-              }
-              onCategoryChange={onCategoryChange}
-              onAddTransaction={() => openNewTransaction("ACHAT")}
-              onImport={() => setShowImport(true)}
-            />
-          ) : null}
+          <div className="module-main" data-slot="module-main">
+            <div data-slot="positions">
+              {positionsView ? (
+                <HoldingsSection
+                  tab={tab}
+                  holdings={holdings}
+                  loading={holdingsQ.isPending && !holdingsQ.data}
+                  baseCurrency={baseCurrency}
+                  envelopeFilters={envelopeFilters}
+                  onEnvelopeFiltersChange={onEnvelopeFiltersChange}
+                  onAccountTypeChange={onAccountTypeChange}
+                  onTriggerLevelChange={onTriggerLevelChange}
+                  onRowDoubleClick={setDetailAssetId}
+                  onOpenTransactionForAsset={(type, h) =>
+                    openNewTransaction(type, h)
+                  }
+                  onCategoryChange={onCategoryChange}
+                  onAddTransaction={() => openNewTransaction("ACHAT")}
+                  onImport={() => setShowImport(true)}
+                />
+              ) : null}
+            </div>
+
+            {tab === "banques" && <BanksTab baseCurrency={baseCurrency} />}
+
+            {tab === "epargne-salariale" && (
+              <EmployeeSavingsTab baseCurrency={baseCurrency} />
+            )}
+
+            {tab === "alternatifs" && (
+              <AlternativesTab baseCurrency={baseCurrency} />
+            )}
+
+            {tab === "dashboard" && (
+              <DashboardTab
+                baseCurrency={baseCurrency}
+                summary={summary}
+                allocation={holdingsQ.data?.allocation}
+                history={historyQ.data?.history ?? []}
+                historyLoading={historyQ.isPending && !historyQ.data}
+                maturityInput={{
+                  platformCount: platforms.length,
+                  transactionCount: txCount,
+                  holdingCount: allHoldings.length,
+                  historyPointCount: historyQ.data?.history?.length ?? 0,
+                }}
+                portfolioTickers={portfolioTickers}
+                onAddPlatform={() => {
+                  setQuickPlatformTarget("standalone");
+                  setQuickPlatformPrefill("");
+                  setShowQuickPlatform(true);
+                }}
+                onImport={() => setShowImport(true)}
+                onAddTransaction={() => openNewTransaction("ACHAT")}
+                onNavigate={(target) => {
+                  switch (target) {
+                    case "positions":
+                      setTab("holdings");
+                      break;
+                    case "transactions":
+                      setTab("transactions");
+                      break;
+                    case "platforms":
+                      setTab("platforms");
+                      break;
+                    case "import":
+                      setShowImport(true);
+                      break;
+                    case "transaction":
+                      openNewTransaction("ACHAT");
+                      break;
+                  }
+                }}
+                showEveryStart={showEveryStart}
+                onShowEveryStartChange={(v) => {
+                  setShowEveryStart(v);
+                  saveUiPref(ONBOARDING_SHOW_EVERY_START_KEY, v);
+                  if (v) {
+                    saveUiPref(ONBOARDING_DISMISS_KEY, false);
+                  }
+                }}
+              />
+            )}
+
+            {tab === "transactions" && (
+              <TransactionsTab
+                onEdit={openEditTx}
+                onDelete={(id) => deleteTx.mutate(id)}
+                onImport={() => setShowImport(true)}
+              />
+            )}
+
+            {tab === "platforms" && (
+              <PlatformsTab
+                platforms={platforms}
+                baseCurrency={baseCurrency}
+                onDelete={(p, opts) =>
+                  deletePlatform.mutate({
+                    id: p.id,
+                    force: opts?.force,
+                  })
+                }
+                deletePendingId={
+                  deletePlatform.isPending
+                    ? deletePlatform.variables?.id ?? null
+                    : null
+                }
+                onMerged={async () => {
+                  void qc.invalidateQueries({ queryKey: ["platforms"] });
+                  void qc.invalidateQueries({ queryKey: ["holdings"] });
+                  void qc.invalidateQueries({ queryKey: ["transactions"] });
+                  await reloadHoldings(qc, baseCurrency);
+                }}
+                onUpdated={() => {
+                  void qc.invalidateQueries({ queryKey: ["platforms"] });
+                  void qc.invalidateQueries({ queryKey: ["holdings"] });
+                }}
+                onAddPlatform={openAddPlatform}
+                onNewTransaction={(p) =>
+                  openNewTransaction("ACHAT", undefined, {
+                    id: p.id,
+                    name: p.name,
+                  })
+                }
+                onViewPositions={(p) =>
+                  viewPositionsForPlatform({ id: p.id, name: p.name })
+                }
+              />
+            )}
+
+            {tab === "liabilities" && (
+              <LiabilitiesTab baseCurrency={baseCurrency} />
+            )}
+
+            {tab === "fiscal" && <FiscalYearTab baseCurrency={baseCurrency} />}
+          </div>
         </div>
-
-        {tab === "banques" && <BanksTab baseCurrency={baseCurrency} />}
-
-        {tab === "epargne-salariale" && (
-          <EmployeeSavingsTab baseCurrency={baseCurrency} />
-        )}
-
-        {tab === "alternatifs" && (
-          <AlternativesTab baseCurrency={baseCurrency} />
-        )}
-
-        {tab === "dashboard" && (
-          <DashboardTab
-            baseCurrency={baseCurrency}
-            summary={summary}
-            allocation={holdingsQ.data?.allocation}
-            history={historyQ.data?.history ?? []}
-            historyLoading={historyQ.isPending && !historyQ.data}
-            maturityInput={{
-              platformCount: platforms.length,
-              transactionCount: txCount,
-              holdingCount: allHoldings.length,
-              historyPointCount: historyQ.data?.history?.length ?? 0,
-            }}
-            portfolioTickers={portfolioTickers}
-            onAddPlatform={() => {
-              setTab("platforms");
-              setShowPlatform(true);
-            }}
-            onImport={() => setShowImport(true)}
-            onAddTransaction={() => openNewTransaction("ACHAT")}
-            onNavigate={(target) => {
-              switch (target) {
-                case "positions":
-                  setTab("holdings");
-                  break;
-                case "transactions":
-                  setTab("transactions");
-                  break;
-                case "platforms":
-                  setTab("platforms");
-                  break;
-                case "import":
-                  setShowImport(true);
-                  break;
-                case "transaction":
-                  openNewTransaction("ACHAT");
-                  break;
-              }
-            }}
-            showEveryStart={showEveryStart}
-            onShowEveryStartChange={(v) => {
-              setShowEveryStart(v);
-              saveUiPref(ONBOARDING_SHOW_EVERY_START_KEY, v);
-              if (v) {
-                saveUiPref(ONBOARDING_DISMISS_KEY, false);
-              }
-            }}
-          />
-        )}
-
-        {tab === "transactions" && (
-          <TransactionsTab
-            onEdit={openEditTx}
-            onDelete={(id) => deleteTx.mutate(id)}
-            onImport={() => setShowImport(true)}
-          />
-        )}
-
-        {tab === "platforms" && (
-          <PlatformsTab
-            platforms={platforms}
-            baseCurrency={baseCurrency}
-            onAdd={() => setShowPlatform(true)}
-            onDelete={(p) => deletePlatform.mutate(p.id)}
-            deletePendingId={
-              deletePlatform.isPending ? deletePlatform.variables ?? null : null
-            }
-          />
-        )}
-
-        {tab === "liabilities" && <LiabilitiesTab baseCurrency={baseCurrency} />}
-
-        {tab === "fiscal" && <FiscalYearTab baseCurrency={baseCurrency} />}
       </Shell>
 
       <TransactionModal
@@ -802,14 +1131,24 @@ function PortfolioAppClient({
         pending={saveTx.isPending}
         onClose={() => setShowTx(false)}
         onSubmit={(values) => {
+          if (values.platformId) touchRecentPlatformId(values.platformId);
           saveTx.mutate(
             editingTxId ? { ...values, id: editingTxId } : values
           );
         }}
         onPlatformLabelChange={setTxPlatformLabel}
         onAssetLabelChange={setAssetLabel}
+        onRequestCreatePlatform={(prefill) => {
+          setQuickPlatformTarget("tx");
+          setQuickPlatformPrefill(prefill || "");
+          setShowQuickPlatform(true);
+        }}
+        onSelectCatalogPlatform={(opt) =>
+          handleCatalogPlatformPick("tx", opt)
+        }
       />
 
+      {/* Création / ajout plateforme (Mes plateformes → Ajouter une plateforme). */}
       <PlatformModal
         open={showPlatform}
         form={platformForm}
@@ -879,19 +1218,70 @@ function PortfolioAppClient({
         }}
       />
 
+      {/*
+        Import d’abord (layer 0), puis QuickPlatform au-dessus (layer 1).
+        Quand création depuis import : import.suspended = true.
+      */}
       <ImportCsvModal
         open={showImport}
-        onClose={() => setShowImport(false)}
+        onClose={() => {
+          // Ne pas fermer l’import si création plateforme en cours
+          if (showQuickPlatform && quickPlatformTarget === "import") return;
+          setShowImport(false);
+        }}
         platformOptions={platformSelectOptions}
         platformsEmpty={platforms.length === 0}
-        defaultPlatformId={platforms[0]?.id}
-        defaultPlatformLabel={platforms[0]?.name}
+        defaultPlatformId={
+          importDefaultPlatform?.id || platforms[0]?.id
+        }
+        defaultPlatformLabel={
+          importDefaultPlatform?.name || platforms[0]?.name
+        }
+        suspended={
+          showQuickPlatform && quickPlatformTarget === "import"
+        }
+        onRequestCreatePlatform={(prefill) => {
+          setQuickPlatformTarget("import");
+          setQuickPlatformPrefill(prefill || "");
+          setShowQuickPlatform(true);
+        }}
+        onSelectCatalogPlatform={(opt) =>
+          handleCatalogPlatformPick("import", opt)
+        }
         onImported={async () => {
           await qc.invalidateQueries({ queryKey: ["transactions"] });
           await qc.invalidateQueries({ queryKey: ["assets"] });
+          await qc.invalidateQueries({ queryKey: ["platforms"] });
           void qc.invalidateQueries({ queryKey: ["portfolio-history"] });
           await reloadHoldings(qc, baseCurrency);
-          setTab("transactions");
+        }}
+        onViewJournal={() => setTab("holdings")}
+      />
+
+      <QuickPlatformModal
+        open={showQuickPlatform}
+        prefillName={quickPlatformPrefill}
+        context={quickPlatformTarget}
+        onClose={() => setShowQuickPlatform(false)}
+        onCreated={(p) => {
+          if (p.created) {
+            setNewPlatformIds((prev) => new Set(prev).add(p.id));
+          }
+          touchRecentPlatformId(p.id);
+          void qc.invalidateQueries({ queryKey: ["platforms"] });
+          void qc.invalidateQueries({ queryKey: ["holdings"] });
+          if (quickPlatformTarget === "tx") {
+            txForm.setValue("platformId", p.id, { shouldValidate: true });
+            setTxPlatformLabel(p.name);
+          } else if (quickPlatformTarget === "import") {
+            // Réinjecte dans le champ plateforme de l’import (toujours ouvert)
+            setImportDefaultPlatform({ id: p.id, name: p.name });
+          }
+          toast.success(
+            p.created
+              ? `Plateforme « ${p.name} » créée et sélectionnée`
+              : `Plateforme « ${p.name} » sélectionnée`
+          );
         }}
       />
 
@@ -903,10 +1293,16 @@ function PortfolioAppClient({
         onOpenTransaction={(type) => openNewTransaction(type)}
         onOpenImport={() => setShowImport(true)}
         onOpenPlatform={() => {
-          setTab("platforms");
-          setShowPlatform(true);
+          setQuickPlatformTarget("standalone");
+          setQuickPlatformPrefill("");
+          setShowQuickPlatform(true);
         }}
         onOpenAsset={(id) => setDetailAssetId(id)}
+      />
+
+      <ShortcutsHelpPanel
+        open={shortcutsHelpOpen}
+        onClose={() => setShortcutsHelpOpen(false)}
       />
     </div>
   );

@@ -26,10 +26,15 @@ test.describe("Navigation & shell", () => {
     await expect(page).toHaveURL(/\/transactions/);
     await expect(page.getByText("Journal des transactions")).toBeVisible();
 
-    await clickNav(page, "Plateformes");
-    await expect(page).toHaveURL(/\/plateformes/);
-    // Empty by default — only manual platforms; UI still shows the section + add button
-    await expect(page.getByRole("button", { name: /Plateforme/i }).first()).toBeVisible({
+    // Produit : « Mes plateformes » (groupe Sources) → /comptes
+    await clickNav(page, "Mes plateformes");
+    await expect(page).toHaveURL(/\/comptes/);
+    await expect(page.getByTestId("platforms-tab")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByText("Mes plateformes")).toBeVisible();
+    // CTA stable : création contextuelle via transaction
+    await expect(page.getByTestId("platforms-add-platform")).toBeVisible({
       timeout: 10_000,
     });
 
@@ -60,21 +65,28 @@ test.describe("Navigation & shell", () => {
     await gotoDashboard(page);
 
     await expect(page.getByTestId("primary-nav")).toBeVisible();
+    // Sélecteur visible sur Positions (pas forcément dès le dashboard)
+    await clickNav(page, "Positions");
     await expect(page.getByTestId("envelope-select")).toBeVisible();
 
     await clickNav(page, "Compte-Titres");
     await expect(page.getByTestId("holdings-table")).toBeVisible();
-    await expect(page.getByTestId("envelope-select")).toHaveValue("CTO");
+    // Button multi-select : pas de .value — libellé + URL
+    await expect(page.getByTestId("envelope-select")).toContainText(
+      /Compte-Titres|CTO/i
+    );
     await expect(page).toHaveURL(/envelope=cto/i);
 
     await clickNav(page, "PEA");
     await expect(page.getByTestId("holdings-table")).toBeVisible();
-    await expect(page.getByTestId("envelope-select")).toHaveValue("PEA");
+    await expect(page.getByTestId("envelope-select")).toContainText(/PEA/i);
     await expect(page).toHaveURL(/envelope=pea/i);
 
     await clickNav(page, "Cryptomonnaies");
     await expect(page.getByTestId("holdings-table")).toBeVisible();
-    await expect(page.getByTestId("envelope-select")).toHaveValue("CRYPTO");
+    await expect(page.getByTestId("envelope-select")).toContainText(
+      /Crypto|CRYPTO/i
+    );
 
     // Dashboard : plus de sélecteur enveloppe
     await clickNav(page, "Tableau de bord");

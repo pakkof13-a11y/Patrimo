@@ -154,6 +154,12 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
     locked: true,
     minWidth: 120,
   },
+  {
+    id: "blockchain",
+    label: "Blockchain",
+    group: "optional",
+    minWidth: 110,
+  },
   { id: "avgCostEur", label: "PRU", group: "mandatory", locked: true, minWidth: 100 },
   { id: "quantity", label: "Quantité", group: "mandatory", locked: true, minWidth: 96 },
   { id: "ticker", label: "Ticker", group: "mandatory", locked: true, minWidth: 88 },
@@ -366,8 +372,12 @@ export function sanitizeColumnOrder(
 }
 
 /** Merge saved order with any new columns appended at end */
-export function loadColumnOrder(tableKey: string): string[] {
-  const defaults = defaultColumnOrder();
+export function loadColumnOrder(
+  tableKey: string,
+  /** Defaults pour tables hors holdings (ex. transactions) */
+  defaultOrder?: string[]
+): string[] {
+  const defaults = defaultOrder ?? defaultColumnOrder();
   if (!canUseStorage()) return defaults;
   try {
     const raw = localStorage.getItem(

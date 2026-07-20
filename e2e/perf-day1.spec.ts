@@ -3,6 +3,7 @@ import {
   ensurePlatform,
   gotoDashboard,
   clickNav,
+  waitForHoldingInTable,
 } from "./helpers";
 
 /**
@@ -75,28 +76,10 @@ test.describe("Performance cumulée jour 1", () => {
       )
       .toBe("ok");
 
-    await gotoDashboard(page);
-
-    // Attendre fin du chargement table
-    await expect(page.getByTestId("holdings-table")).toBeVisible({
-      timeout: 30_000,
+    // Navigation UI après commit API (helper partagé — skeleton + fetch + poll)
+    await waitForHoldingInTable(page, /E2E Perf Day1|E2PERF/i, {
+      search: "E2PERF",
     });
-    await expect(page.getByTestId("holdings-table")).not.toContainText(
-      "Chargement",
-      { timeout: 45_000 }
-    );
-
-    // Filtrer pour trouver l'actif (table paginée / beaucoup de lignes)
-    const search = page.getByPlaceholder(/Nom, ticker, ISIN/i).first();
-    if (await search.isVisible().catch(() => false)) {
-      await search.fill("E2PERF");
-      await page.waitForTimeout(400);
-    }
-
-    await expect(page.getByTestId("holdings-table")).toContainText(
-      /E2E Perf Day1|E2PERF/i,
-      { timeout: 30_000 }
-    );
 
     // Ouvrir la fiche actif : expand → « Fiche complète » (plus fiable que dblclick e2e)
     const row = page
@@ -125,14 +108,16 @@ test.describe("Performance cumulée jour 1", () => {
     // Accepte 0,00 € / +0,00 € / −0,00 €
     expect(text).toMatch(/0[,.]00/);
 
-    // Latente aussi ~0
-    const latent = page.getByTestId("kpi-latent");
+    // Latente chart (testid dédié — distinct du KPI strip global kpi-latent)
+    const latent = page
+      .getByTestId("perf-kpis")
+      .getByTestId("kpi-latent-chart");
     await expect(latent).toBeVisible();
     expect((await latent.innerText()).replace(/\s/g, " ")).toMatch(/0[,.]00/);
 
-    // Fermer la modal (Escape n'est pas branché — bouton ✕ aria-label)
-    await page.getByRole("button", { name: "Fermer" }).click();
-    await expect(page.getByRole("button", { name: "Fermer" })).toHaveCount(0, {
+    // Fermer la modal (bouton ✕ — aria-label mis à jour a11y)
+    await page.getByTestId("modal-close").click();
+    await expect(page.getByTestId("modal-panel")).toHaveCount(0, {
       timeout: 10_000,
     });
 

@@ -6,11 +6,20 @@ import {
   openPreferences,
 } from "./helpers";
 
-test.describe("Plateformes & préférences", () => {
-  test("liste plateformes vide puis création visible", async ({ page, request }) => {
+test.describe("Mes plateformes & préférences", () => {
+  test("liste plateformes + création API visible après reload", async ({
+    page,
+    request,
+  }) => {
     await gotoDashboard(page);
-    await clickNav(page, "Plateformes");
-    await expect(page.getByRole("button", { name: /Plateforme/i }).first()).toBeVisible();
+    await clickNav(page, "Mes plateformes");
+    await expect(page).toHaveURL(/\/comptes/);
+    await expect(page.getByTestId("platforms-tab")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByText("Mes plateformes")).toBeVisible();
+    // CTA produit : ajout direct de plateforme
+    await expect(page.getByTestId("platforms-add-platform")).toBeVisible();
 
     const id = await ensurePlatform(request, {
       name: "E2E Platform Smoke",
@@ -20,8 +29,15 @@ test.describe("Plateformes & préférences", () => {
     expect(id).toBeTruthy();
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await clickNav(page, "Plateformes");
-    await expect(page.getByText("E2E Platform Smoke")).toBeVisible({ timeout: 15_000 });
+    await clickNav(page, "Mes plateformes");
+    await expect(page.getByTestId("platforms-tab")).toBeVisible({
+      timeout: 15_000,
+    });
+    // data-testid dérivé du nom (stable) — évite les regex de wording fragiles
+    await expect(
+      page.getByTestId("platform-E2E Platform Smoke")
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("E2E Platform Smoke")).toBeVisible();
   });
 
   test("préférences : affichage (thème), sécurité, données", async ({

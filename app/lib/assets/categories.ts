@@ -243,9 +243,10 @@ export function groupPositionsByAssetCategory<T extends GroupableHolding>(
   return groups;
 }
 
-export type HoldingsGroupBy = "none" | "assetCategory";
+export type HoldingsGroupBy = "none" | "assetCategory" | "blockchain";
 
 export function parseHoldingsGroupBy(v: string | null | undefined): HoldingsGroupBy {
   if (v === "assetCategory" || v === "category") return "assetCategory";
+  if (v === "blockchain" || v === "chain") return "blockchain";
   return "none";
 }

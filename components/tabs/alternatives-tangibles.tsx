@@ -16,11 +16,25 @@ import {
 import {
   AltEmptyState,
   AltField,
-  AltFormPanel,
-  AltFormSection,
   AltMiniKpi,
   AltModuleShell,
 } from "@/components/tabs/alternatives-shell";
+import {
+  FormWizard,
+  clearWizardDraft,
+  loadWizardDraft,
+  saveWizardDraft,
+  type WizardStep,
+} from "@/components/ui/form-wizard";
+
+const TANGIBLE_DRAFT_KEY = "patrimo.draft.tangible.v1";
+
+const TANGIBLE_STEPS: WizardStep[] = [
+  { id: "id", label: "Identification", description: "Catégorie et objet" },
+  { id: "acq", label: "Acquisition", description: "Prix d’achat et devise" },
+  { id: "val", label: "Valorisation", description: "Estimation actuelle" },
+  { id: "notes", label: "Notes & récap", description: "Contrôle final" },
+];
 
 type FormState = {
   category: string;
@@ -77,6 +91,7 @@ export function AlternativesTangibles({
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(empty());
+  const [wizStep, setWizStep] = useState(0);
 
   const lines = q.data?.lines ?? [];
   const summary = q.data?.summary;
@@ -94,6 +109,21 @@ export function AlternativesTangibles({
       qc.invalidateQueries({ queryKey: ["holdings"] }),
       qc.invalidateQueries({ queryKey: ["alternatives-summary"] }),
     ]);
+  }
+
+  function validateTangibleStep(index: number): boolean {
+    if (index === 0) {
+      if (!form.brandOrArtist.trim() || !form.modelName.trim()) {
+        toast.error("Marque / artiste et modèle requis");
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function saveTangibleDraft() {
+    saveWizardDraft(TANGIBLE_DRAFT_KEY, { form, step: wizStep, editingId });
+    toast.success("Brouillon tangible enregistré");
   }
 
   const saveMut = useMutation({
@@ -122,9 +152,11 @@ export function AlternativesTangibles({
     },
     onSuccess: async () => {
       toast.success(editingId ? "Actif mis à jour" : "Actif ajouté");
+      clearWizardDraft(TANGIBLE_DRAFT_KEY);
       setEditingId(null);
       setForm(empty());
       setShowForm(false);
+      setWizStep(0);
       await invalidate();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -144,7 +176,16 @@ export function AlternativesTangibles({
 
   function startCreate() {
     setEditingId(null);
-    setForm(empty());
+    const draft = loadWizardDraft<{ form?: FormState; step?: number }>(
+      TANGIBLE_DRAFT_KEY
+    );
+    if (draft?.form && !editingId) {
+      setForm({ ...empty(), ...draft.form });
+      setWizStep(draft.step ?? 0);
+    } else {
+      setForm(empty());
+      setWizStep(0);
+    }
     setShowForm(true);
   }
 
@@ -152,6 +193,7 @@ export function AlternativesTangibles({
     setShowForm(false);
     setEditingId(null);
     setForm(empty());
+    setWizStep(0);
   }
 
   return (
@@ -197,155 +239,219 @@ export function AlternativesTangibles({
       }
       formOpen={showForm}
       form={
-        <AltFormPanel
-          title={editingId ? "Modifier l’actif" : "Nouvel actif tangible"}
-          hint="« Nouvel actif » ouvre ce panneau. La plus-value est calculée (valeur estimée − prix d’achat)."
-          testId="tangible-form"
-          actions={
-            <>
-              <Button
-                type="button"
-                size="sm"
-                disabled={
-                  saveMut.isPending ||
-                  !form.brandOrArtist.trim() ||
-                  !form.modelName.trim()
-                }
-                onClick={() => saveMut.mutate()}
-              >
-                {saveMut.isPending
-                  ? "…"
-                  : editingId
-                    ? "Enregistrer"
-                    : "Créer l’actif"}
-              </Button>
-              <Button type="button" size="sm" variant="outline" onClick={cancelForm}>
-                Annuler
-              </Button>
-            </>
-          }
+        <div
+          className="border-b border-[var(--primary)]/20 bg-[var(--primary-soft)] px-4 py-4 sm:px-5"
+          data-testid="tangible-form"
         >
-          <AltFormSection title="Identité" hint="Catégorie et description de l’objet.">
-            <AltField label="Catégorie">
-              <select
-                className="input"
-                value={form.category}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, category: e.target.value }))
-                }
-              >
-                {TANGIBLE_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {TANGIBLE_CATEGORY_LABELS[c]}
-                  </option>
-                ))}
-              </select>
-            </AltField>
-            <AltField label="Marque / Artiste">
-              <input
-                className="input"
-                value={form.brandOrArtist}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, brandOrArtist: e.target.value }))
-                }
-                data-testid="tangible-brand"
-              />
-            </AltField>
-            <AltField label="Modèle / Nom">
-              <input
-                className="input"
-                value={form.modelName}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, modelName: e.target.value }))
-                }
-              />
-            </AltField>
-            <AltField label="Année / Millésime">
-              <input
-                className="input"
-                value={form.yearOrVintage}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, yearOrVintage: e.target.value }))
-                }
-              />
-            </AltField>
-          </AltFormSection>
-
-          <AltFormSection
-            title="Valorisation"
-            hint="Achat saisi · estimation manuelle · plus-value calculée."
+          <header className="mb-3 space-y-0.5">
+            <h3 className="text-title text-sm">
+              {editingId ? "Modifier l’actif" : "Nouvel actif tangible"}
+            </h3>
+            <p className="text-meta">
+              Assistant en 4 étapes — plus-value = estimation − prix d’achat.
+            </p>
+          </header>
+          <FormWizard
+            steps={TANGIBLE_STEPS}
+            current={wizStep}
+            onStepChange={setWizStep}
+            onValidateStep={validateTangibleStep}
+            onSaveDraft={saveTangibleDraft}
+            onCancel={cancelForm}
+            onSubmit={() => saveMut.mutate()}
+            submitLabel={editingId ? "Enregistrer" : "Créer l’actif"}
+            submitDisabled={
+              !form.brandOrArtist.trim() || !form.modelName.trim()
+            }
+            submitPending={saveMut.isPending}
+            testId="tangible-wizard"
           >
-            <AltField label="Prix d’achat">
-              <input
-                className="input"
-                inputMode="decimal"
-                value={form.purchasePrice}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, purchasePrice: e.target.value }))
-                }
-              />
-            </AltField>
-            <AltField
-              label="Valeur estimée actuelle"
-              hint={
-                form.purchasePrice || form.estimatedValue ? (
-                  <>
-                    Plus-value estimée :{" "}
-                    <strong>
-                      {formatCurrency(String(pnlPreview), form.currency)}
-                    </strong>
-                  </>
-                ) : undefined
-              }
-            >
-              <input
-                className="input"
-                inputMode="decimal"
-                value={form.estimatedValue}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, estimatedValue: e.target.value }))
-                }
-              />
-            </AltField>
-            <AltField label="Devise">
-              <input
-                className="input uppercase"
-                maxLength={3}
-                value={form.currency}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    currency: e.target.value.toUpperCase(),
-                  }))
-                }
-              />
-            </AltField>
-            <label className="flex items-center gap-2 pt-5 text-xs font-medium text-slate-600 dark:text-slate-300">
-              <input
-                type="checkbox"
-                className="accent-teal-700"
-                checked={form.hasCertificate}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    hasCertificate: e.target.checked,
-                  }))
-                }
-              />
-              Certificat d’authenticité
-            </label>
-            <AltField label="Notes" className="sm:col-span-2 lg:col-span-3">
-              <input
-                className="input"
-                value={form.notes}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, notes: e.target.value }))
-                }
-                placeholder="Provenance, état, assurance…"
-              />
-            </AltField>
-          </AltFormSection>
-        </AltFormPanel>
+            {wizStep === 0 && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <AltField label="Catégorie">
+                  <select
+                    className="input"
+                    value={form.category}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, category: e.target.value }))
+                    }
+                  >
+                    {TANGIBLE_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {TANGIBLE_CATEGORY_LABELS[c]}
+                      </option>
+                    ))}
+                  </select>
+                </AltField>
+                <AltField label="Année / Millésime">
+                  <input
+                    className="input"
+                    value={form.yearOrVintage}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        yearOrVintage: e.target.value,
+                      }))
+                    }
+                  />
+                </AltField>
+                <AltField label="Marque / Artiste">
+                  <input
+                    className="input"
+                    value={form.brandOrArtist}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        brandOrArtist: e.target.value,
+                      }))
+                    }
+                    data-testid="tangible-brand"
+                  />
+                </AltField>
+                <AltField label="Modèle / Nom">
+                  <input
+                    className="input"
+                    value={form.modelName}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, modelName: e.target.value }))
+                    }
+                  />
+                </AltField>
+              </div>
+            )}
+            {wizStep === 1 && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <AltField label="Prix d’achat">
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    value={form.purchasePrice}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        purchasePrice: e.target.value,
+                      }))
+                    }
+                  />
+                </AltField>
+                <AltField label="Devise">
+                  <input
+                    className="input uppercase"
+                    maxLength={3}
+                    value={form.currency}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        currency: e.target.value.toUpperCase(),
+                      }))
+                    }
+                  />
+                </AltField>
+                <label className="flex items-center gap-2 text-xs font-medium sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    className="accent-teal-700"
+                    checked={form.hasCertificate}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        hasCertificate: e.target.checked,
+                      }))
+                    }
+                  />
+                  Certificat d’authenticité
+                </label>
+              </div>
+            )}
+            {wizStep === 2 && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <AltField
+                  label="Valeur estimée actuelle"
+                  hint={
+                    form.purchasePrice || form.estimatedValue ? (
+                      <>
+                        Plus-value estimée :{" "}
+                        <strong
+                          className={cn(
+                            getChangeColor(String(pnlPreview))
+                          )}
+                        >
+                          {formatCurrency(String(pnlPreview), form.currency)}
+                        </strong>
+                      </>
+                    ) : undefined
+                  }
+                >
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    value={form.estimatedValue}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        estimatedValue: e.target.value,
+                      }))
+                    }
+                  />
+                </AltField>
+              </div>
+            )}
+            {wizStep === 3 && (
+              <div className="space-y-3">
+                <AltField label="Notes">
+                  <input
+                    className="input"
+                    value={form.notes}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, notes: e.target.value }))
+                    }
+                    placeholder="Provenance, état, assurance…"
+                  />
+                </AltField>
+                <dl className="grid gap-2 text-[12px] sm:grid-cols-2">
+                  {(
+                    [
+                      [
+                        "Catégorie",
+                        TANGIBLE_CATEGORY_LABELS[
+                          form.category as keyof typeof TANGIBLE_CATEGORY_LABELS
+                        ] || form.category,
+                      ],
+                      ["Marque", form.brandOrArtist || "—"],
+                      ["Modèle", form.modelName || "—"],
+                      [
+                        "Achat",
+                        form.purchasePrice
+                          ? formatCurrency(form.purchasePrice, form.currency)
+                          : "—",
+                      ],
+                      [
+                        "Estimation",
+                        form.estimatedValue
+                          ? formatCurrency(form.estimatedValue, form.currency)
+                          : "—",
+                      ],
+                      [
+                        "Plus-value",
+                        formatCurrency(String(pnlPreview), form.currency),
+                      ],
+                    ] as const
+                  ).map(([k, v]) => (
+                    <div
+                      key={k}
+                      className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/25 px-2.5 py-2"
+                    >
+                      <dt className="text-[10px] uppercase text-[var(--muted-foreground)]">
+                        {k}
+                      </dt>
+                      <dd className="font-medium tabular-nums">{v}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            )}
+          </FormWizard>
+        </div>
       }
     >
       {!q.isLoading && !hasLines && !showForm ? (
@@ -443,6 +549,7 @@ export function AlternativesTangibles({
                         onClick={() => {
                           setEditingId(l.id);
                           setForm(toForm(l));
+                          setWizStep(0);
                           setShowForm(true);
                         }}
                         aria-label="Modifier"

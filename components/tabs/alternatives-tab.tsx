@@ -329,7 +329,7 @@ export function AlternativesTab({
           <h1 className="text-lg font-semibold leading-snug">
             Actifs alternatifs
           </h1>
-          <p className="mt-0.5 max-w-xl text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+          <p className="module-intro max-w-xl text-xs leading-relaxed text-slate-500 dark:text-slate-400">
             Poche hors marchés cotés — métaux, private equity, crowdlending et
             tangibles. La vue d’ensemble synthétise ; chaque sous-module gère
             sa saisie experte.

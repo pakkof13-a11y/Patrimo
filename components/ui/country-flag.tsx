@@ -32,7 +32,8 @@ export function CountryFlag({
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase dark:bg-slate-700",
+        "inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--card)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--foreground)] shadow-sm",
+        "dark:bg-[var(--muted)]/60",
         className
       )}
       title={`${label} (${iso.toUpperCase()})`}
@@ -42,12 +43,12 @@ export function CountryFlag({
         <img
           src={src}
           alt=""
-          width={16}
-          height={12}
+          width={18}
+          height={14}
           loading="lazy"
           decoding="async"
           className={cn(
-            "h-3 w-4 shrink-0 rounded-[1px] object-cover shadow-sm ring-1 ring-black/10 dark:ring-white/15",
+            "h-3.5 w-[18px] shrink-0 rounded-[2px] object-cover shadow-sm ring-1 ring-black/12 dark:ring-white/20",
             imgClassName
           )}
           onError={() => setFailed(true)}
@@ -55,11 +56,15 @@ export function CountryFlag({
         />
       ) : (
         <span
-          className="inline-block h-3 w-4 shrink-0 rounded-[1px] bg-slate-400/50 dark:bg-slate-500/50"
+          className="inline-block h-3.5 w-[18px] shrink-0 rounded-[2px] bg-slate-400/50 dark:bg-slate-500/50"
           aria-hidden
         />
       )}
-      {showCode && <span>{label}</span>}
+      {showCode && (
+        <span className="leading-none text-[var(--muted-foreground)]">
+          {label}
+        </span>
+      )}
     </span>
   );
 }

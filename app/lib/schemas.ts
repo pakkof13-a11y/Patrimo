@@ -116,6 +116,7 @@ export const createTransactionSchema = z
       "ACHAT",
       "VENTE",
       "REWARD",
+      "AIRDROP",
       "TRANSFERT_TITRE",
       "DIVIDENDE",
       "COUPON",
@@ -125,7 +126,11 @@ export const createTransactionSchema = z
     if (needsAsset && !data.assetId) {
       ctx.addIssue({ code: "custom", message: "Actif requis", path: ["assetId"] });
     }
-    if (["ACHAT", "VENTE", "REWARD", "TRANSFERT_TITRE", "SPLIT"].includes(data.type)) {
+    if (
+      ["ACHAT", "VENTE", "REWARD", "AIRDROP", "TRANSFERT_TITRE", "SPLIT"].includes(
+        data.type
+      )
+    ) {
       if (!data.quantity || Number(data.quantity) <= 0) {
         ctx.addIssue({
           code: "custom",
@@ -142,8 +147,12 @@ export const createTransactionSchema = z
         ctx.addIssue({ code: "custom", message: "Prix unitaire requis", path: ["unitPrice"] });
       }
     }
-    // REWARD : prix unitaire optionnel (FMV d’affichage) — si fourni, ≥ 0
-    if (data.type === "REWARD" && data.unitPrice != null && data.unitPrice !== "") {
+    // REWARD / AIRDROP : prix unitaire optionnel (FMV d’affichage) — si fourni, ≥ 0
+    if (
+      (data.type === "REWARD" || data.type === "AIRDROP") &&
+      data.unitPrice != null &&
+      data.unitPrice !== ""
+    ) {
       if (Number(data.unitPrice) < 0) {
         ctx.addIssue({
           code: "custom",
@@ -182,18 +191,50 @@ export type CreateTransactionForm = z.infer<typeof createTransactionSchema>;
 
 export const platformSchema = z.object({
   name: z.string().min(2, "Nom trop court"),
-  type: z.enum(platformTypes),
+  type: z.enum(platformTypes, {
+    error: "Type de plateforme invalide",
+  }),
   /** e.g. "Layer 1" | "Layer 2 / EVM" for blockchains */
   subtype: z.string().optional().nullable(),
   logoKey: z.string().optional().nullable(),
   logoUrl: z
-    .string()
+    .union([z.string(), z.null(), z.undefined()])
     .optional()
-    .nullable()
-    .transform((v) => (v && v.length > 0 ? v : null))
+    .transform((v) => {
+      if (v == null) return null;
+      const t = String(v).trim();
+      return t.length > 0 ? t : null;
+    })
     .refine((v) => v == null || /^https?:\/\//i.test(v), "URL logo invalide"),
-  walletAddress: z.string().optional().nullable(),
-  notes: z.string().optional(),
+  walletAddress: z
+    .union([z.string(), z.null(), z.undefined()])
+    .optional()
+    .transform((v) => {
+      if (v == null) return null;
+      const t = String(v).trim();
+      return t.length > 0 ? t : null;
+    }),
+  /** Clé API Zerion optionnelle — défaut serveur si vide */
+  walletApiKey: z
+    .union([z.string(), z.null(), z.undefined()])
+    .optional()
+    .transform((v) => {
+      if (v == null) return null;
+      const t = String(v).trim();
+      return t.length > 0 ? t : null;
+    }),
+  /**
+   * Notes : accepte string | null | "" (édition UI envoie souvent null si vide).
+   * Sans .nullable(), un PUT avec notes:null → « Validation échouée ».
+   */
+  notes: z
+    .union([z.string(), z.null(), z.undefined()])
+    .optional()
+    .transform((v) => {
+      if (v == null) return null;
+      const t = String(v).trim();
+      return t.length > 0 ? t : null;
+    }),
 });
 
 export type PlatformForm = z.infer<typeof platformSchema>;

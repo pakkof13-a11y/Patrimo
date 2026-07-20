@@ -11,26 +11,29 @@ function hasFinnhubKey(): boolean {
 
 /**
  * Stocks: Finnhub (if key) then Yahoo — or Yahoo first when no key.
- * Crypto: CoinGecko then Finnhub.
+ * Crypto: **CoinGecko only** (jamais Yahoo / Finnhub).
  */
-export async function fetchPriceWithFallback(asset: AssetMeta): Promise<PriceQuoteResult> {
+export async function fetchPriceWithFallback(
+  asset: AssetMeta
+): Promise<PriceQuoteResult> {
+  // CRYPTO classé : ne jamais rester bloqué en MANUAL (spec : auto CoinGecko)
   if (
-    asset.priceProvider === "MANUAL" ||
-    ["IMMOBILIER", "OBLIGATIONS", "CASH", "AUTRE"].includes(asset.assetClass)
+    asset.priceProvider === "MANUAL" &&
+    asset.assetClass !== "CRYPTO"
   ) {
     return manualProvider.fetchPrice(asset);
   }
+  if (["IMMOBILIER", "OBLIGATIONS", "CASH", "AUTRE"].includes(asset.assetClass)) {
+    return manualProvider.fetchPrice(asset);
+  }
 
+  // CRYPTO : toujours CoinGecko (y compris ex-MANUAL / staked) — plus de sticky MANUAL
   if (asset.assetClass === "CRYPTO" || asset.priceProvider === "COINGECKO") {
-    const cg = await coingeckoProvider.fetchPrice(asset);
-    if (cg.status === "OK") return cg;
-    const y = await yahooProvider.fetchPrice({
+    return coingeckoProvider.fetchPrice({
       ...asset,
-      // try crypto tickers as-is on yahoo sometimes fails; still attempt
-      ticker: asset.ticker,
+      priceProvider: "COINGECKO",
+      assetClass: "CRYPTO",
     });
-    if (y.status === "OK") return y;
-    return { ...cg, error: [cg.error, y.error].filter(Boolean).join(" | ") };
   }
 
   // Stocks / ETFs
@@ -43,7 +46,6 @@ export async function fetchPriceWithFallback(asset: AssetMeta): Promise<PriceQuo
     chain.push(() => finnhubProvider.fetchPrice(asset));
     chain.push(() => yahooProvider.fetchPrice(asset));
   } else {
-    // No Finnhub key → Yahoo is primary (reliable for .PA etc.)
     chain.push(() => yahooProvider.fetchPrice(asset));
   }
 

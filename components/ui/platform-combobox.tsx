@@ -7,29 +7,52 @@ import { cn } from "@/app/lib/utils";
 import {
   PLATFORM_PRESETS,
   filterPresets,
+  primaryType,
   type PlatformPreset,
 } from "@/app/lib/platforms/presets";
 import { PLATFORM_TYPES } from "@/app/lib/constants";
+import { filterPlatformPickOptions } from "@/app/lib/platforms/catalog-options";
 
 export type PlatformComboboxOption = {
   value: string;
+  /** Ligne 1 */
   label: string;
+  /** Ligne 2 — catégorie principale */
+  categoryLabel?: string;
+  /** Ligne 3 — sous-titre descriptif optionnel */
+  description?: string;
+  /** @deprecated = categoryLabel */
   subtitle?: string;
   logoUrl?: string | null;
+  /** Badge « Nouvelle » après création contextuelle */
+  isNew?: boolean;
+  /** Suggestion catalogue (pas de badge visible « Catalogue ») */
+  isCatalog?: boolean;
   /** Extra payload (preset or platform id meta) */
   preset?: PlatformPreset;
 };
+
+export type PlatformComboboxSelect =
+  | PlatformComboboxOption
+  | { custom: true; label: string }
+  | { create: true; prefill?: string };
 
 type Props = {
   /** Controlled text / selected label shown in the input */
   value: string;
   onValueChange: (text: string) => void;
-  /** When user picks a suggestion (or confirms custom) */
-  onSelect: (option: PlatformComboboxOption | { custom: true; label: string }) => void;
+  /** When user picks a suggestion (or confirms custom / create) */
+  onSelect: (option: PlatformComboboxSelect) => void;
   /** Predefined options (user platforms or presets). Defaults to PLATFORM_PRESETS. */
   options?: PlatformComboboxOption[];
-  /** Allow free-text value not in the list */
+  /** Allow free-text value not in the list (legacy) */
   allowCustom?: boolean;
+  /**
+   * Affiche une option fixe « ＋ Autre / Nouvelle plateforme » en bas.
+   * Prioritaire sur allowCustom pour le flux transaction.
+   */
+  showCreateOption?: boolean;
+  createOptionLabel?: string;
   placeholder?: string;
   className?: string;
   /** data-testid for e2e */
@@ -37,14 +60,24 @@ type Props = {
   disabled?: boolean;
 };
 
+const CREATE_VALUE = "__create_new_platform__";
+
 function presetsAsOptions(): PlatformComboboxOption[] {
-  return PLATFORM_PRESETS.map((p) => ({
-    value: p.key,
-    label: p.name,
-    subtitle: `${PLATFORM_TYPES[p.type] || p.type}${p.category ? ` · ${p.category}` : ""}`,
-    logoUrl: p.logoUrl,
-    preset: p,
-  }));
+  return PLATFORM_PRESETS.map((p) => {
+    const cat =
+      PLATFORM_TYPES[primaryType(p) as keyof typeof PLATFORM_TYPES] ||
+      primaryType(p);
+    return {
+      value: p.key,
+      label: p.name,
+      categoryLabel: cat,
+      description: p.subtype || undefined,
+      subtitle: cat,
+      logoUrl: p.logoUrl,
+      isCatalog: true,
+      preset: p,
+    };
+  });
 }
 
 export function PlatformCombobox({
@@ -53,6 +86,8 @@ export function PlatformCombobox({
   onSelect,
   options,
   allowCustom = true,
+  showCreateOption = false,
+  createOptionLabel = "＋ Autre / Nouvelle plateforme",
   placeholder = "Rechercher ou saisir…",
   className,
   testId,
@@ -73,26 +108,17 @@ export function PlatformCombobox({
   const source = options ?? presetsAsOptions();
 
   const filtered = useMemo(() => {
-    const q = value.trim().toLowerCase();
-    // Preserve caller order when `options` is provided (e.g. AV subtypes).
-    // Default presets: A–Z by label.
+    // Prefix strict sur le libellé affiché uniquement (pas category / key / alias).
     const ordered = options
       ? [...source]
       : [...source].sort((a, b) =>
           a.label.localeCompare(b.label, "fr", { sensitivity: "base" })
         );
-    if (!q) return ordered.slice(0, 80);
-    return ordered
-      .filter(
-        (o) =>
-          o.label.toLowerCase().includes(q) ||
-          o.value.toLowerCase().includes(q) ||
-          (o.subtitle || "").toLowerCase().includes(q)
-      )
-      .slice(0, 80);
+    return filterPlatformPickOptions(ordered, value);
   }, [source, value, options]);
 
   const showCustom =
+    !showCreateOption &&
     allowCustom &&
     value.trim().length > 0 &&
     !filtered.some((o) => o.label.toLowerCase() === value.trim().toLowerCase());
@@ -100,9 +126,13 @@ export function PlatformCombobox({
   const items: Array<
     | { kind: "option"; option: PlatformComboboxOption }
     | { kind: "custom"; label: string }
+    | { kind: "create"; label: string }
   > = [
     ...filtered.map((option) => ({ kind: "option" as const, option })),
     ...(showCustom ? [{ kind: "custom" as const, label: value.trim() }] : []),
+    ...(showCreateOption
+      ? [{ kind: "create" as const, label: createOptionLabel }]
+      : []),
   ];
 
   useEffect(() => {
@@ -120,7 +150,6 @@ export function PlatformCombobox({
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  // Fixed positioning so the list scrolls independently of any modal overflow
   useLayoutEffect(() => {
     if (!open || !inputRef.current) {
       setCoords(null);
@@ -133,7 +162,10 @@ export function PlatformCombobox({
       const spaceBelow = window.innerHeight - r.bottom - 12;
       const spaceAbove = r.top - 12;
       const preferBelow = spaceBelow >= 160 || spaceBelow >= spaceAbove;
-      const maxHeight = Math.min(320, Math.max(120, preferBelow ? spaceBelow : spaceAbove));
+      const maxHeight = Math.min(
+        320,
+        Math.max(120, preferBelow ? spaceBelow : spaceAbove)
+      );
       setCoords({
         top: preferBelow ? r.bottom + 4 : Math.max(8, r.top - 4 - maxHeight),
         left: r.left,
@@ -148,11 +180,16 @@ export function PlatformCombobox({
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [open, value, items.length]);
+  }, [open]);
 
   function pick(index: number) {
     const item = items[index];
     if (!item) return;
+    if (item.kind === "create") {
+      onSelect({ create: true, prefill: value.trim() || undefined });
+      setOpen(false);
+      return;
+    }
     if (item.kind === "custom") {
       onSelect({ custom: true, label: item.label });
       onValueChange(item.label);
@@ -183,6 +220,34 @@ export function PlatformCombobox({
           }}
         >
           {items.map((item, i) => {
+            if (item.kind === "create") {
+              return (
+                <li
+                  key={CREATE_VALUE}
+                  role="option"
+                  aria-selected={i === highlight}
+                  data-testid="platform-combobox-create"
+                  className={cn(
+                    "cursor-pointer border-t border-[var(--border)] px-3 py-2.5 text-sm",
+                    i === highlight
+                      ? "bg-teal-50 text-teal-900 dark:bg-teal-950 dark:text-teal-100"
+                      : "hover:bg-[var(--muted)]"
+                  )}
+                  onMouseEnter={() => setHighlight(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pick(i);
+                  }}
+                >
+                  <div className="font-medium text-teal-800 dark:text-teal-200">
+                    {item.label}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-[var(--muted-foreground)]">
+                    Créer une plateforme à la volée
+                  </div>
+                </li>
+              );
+            }
             if (item.kind === "custom") {
               return (
                 <li
@@ -204,13 +269,17 @@ export function PlatformCombobox({
                   <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
                     Créer comme plateforme personnalisée
                   </div>
-                  <div className="mt-0.5 font-medium">
-                    « {item.label} »
-                  </div>
+                  <div className="mt-0.5 font-medium">« {item.label} »</div>
                 </li>
               );
             }
             const o = item.option;
+            const categoryLine =
+              o.categoryLabel ||
+              (o.subtitle && !/^catalogue/i.test(o.subtitle)
+                ? o.subtitle
+                : undefined);
+            const descLine = o.description;
             return (
               <li
                 key={o.value}
@@ -230,20 +299,24 @@ export function PlatformCombobox({
               >
                 <PlatformLogo src={o.logoUrl} name={o.label} size={24} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">{o.label}</div>
-                  <div className="truncate text-[11px] text-[var(--muted-foreground)]">
-                    {o.subtitle ? (
-                      <>
-                        <span className="font-medium text-teal-800/80 dark:text-teal-200/80">
-                          Preset
-                        </span>
-                        <span className="mx-1 opacity-40">·</span>
-                        {o.subtitle}
-                      </>
-                    ) : (
-                      "Suggestion catalogue"
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className="truncate font-medium">{o.label}</span>
+                    {o.isNew && (
+                      <span className="shrink-0 rounded-full bg-teal-500/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-teal-800 dark:text-teal-200">
+                        Nouvelle
+                      </span>
                     )}
                   </div>
+                  {categoryLine ? (
+                    <div className="truncate text-[11px] font-medium text-[var(--muted-foreground)]">
+                      {categoryLine}
+                    </div>
+                  ) : null}
+                  {descLine ? (
+                    <div className="truncate text-[10px] text-[var(--muted-foreground)]/90">
+                      {descLine}
+                    </div>
+                  ) : null}
                 </div>
               </li>
             );
@@ -259,8 +332,11 @@ export function PlatformCombobox({
             width: coords.width,
           }}
         >
-          Aucune suggestion
-          {allowCustom && value.trim() ? " — Entrée pour valider le texte saisi" : ""}
+          {showCreateOption
+            ? "Aucune plateforme — choisissez « Autre » pour en créer une"
+            : allowCustom && value.trim()
+              ? "Aucune suggestion — Entrée pour valider le texte saisi"
+              : "Aucune suggestion"}
         </div>
       ),
       document.body
@@ -299,7 +375,10 @@ export function PlatformCombobox({
           } else if (e.key === "Enter") {
             e.preventDefault();
             if (items[highlight]) pick(highlight);
-            else if (allowCustom && value.trim()) {
+            else if (showCreateOption) {
+              onSelect({ create: true, prefill: value.trim() || undefined });
+              setOpen(false);
+            } else if (allowCustom && value.trim()) {
               onSelect({ custom: true, label: value.trim() });
               setOpen(false);
             }

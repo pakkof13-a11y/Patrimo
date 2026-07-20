@@ -70,6 +70,8 @@ export type TransactionsListParams = {
   typeGroup?: string;
   accountType?: string;
   q?: string;
+  sortBy?: string;
+  sortDir?: "asc" | "desc";
 };
 
 /** Clé RQ pour le journal — invalidation `["transactions"]` couvre list + meta. */
@@ -82,6 +84,8 @@ export function transactionsListQueryKey(params: TransactionsListParams) {
     params.typeGroup || "all",
     params.accountType || "",
     params.q?.trim() || "",
+    params.sortBy || "date",
+    params.sortDir || "desc",
   ] as const;
 }
 
@@ -93,6 +97,8 @@ function buildTransactionsListUrl(params: TransactionsListParams): string {
   });
   if (params.accountType) sp.set("accountType", params.accountType);
   if (params.q?.trim()) sp.set("q", params.q.trim());
+  if (params.sortBy) sp.set("sortBy", params.sortBy);
+  if (params.sortDir) sp.set("sortDir", params.sortDir);
   return `/api/transactions?${sp.toString()}`;
 }
 

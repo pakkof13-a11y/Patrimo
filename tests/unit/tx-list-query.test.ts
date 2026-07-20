@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildTxListOrderBy,
   buildTxListWhere,
   mapTypeCountsToGroups,
   parseTxListQuery,
@@ -14,6 +15,18 @@ describe("parseTxListQuery", () => {
     expect(q.page).toBe(1);
     expect(q.pageSize).toBe(TX_LIST_DEFAULT_PAGE_SIZE);
     expect(q.typeGroup).toBe("all");
+    expect(q.sortBy).toBe("date");
+    expect(q.sortDir).toBe("desc");
+  });
+
+  it("lit sortBy / sortDir", () => {
+    const q = parseTxListQuery(
+      new URLSearchParams("sortBy=asset&sortDir=asc")
+    );
+    expect(q.sortBy).toBe("asset");
+    expect(q.sortDir).toBe("asc");
+    const order = buildTxListOrderBy(q);
+    expect(order[0]).toEqual({ asset: { name: "asc" } });
   });
 
   it("plafonne pageSize et page ≥ 1", () => {

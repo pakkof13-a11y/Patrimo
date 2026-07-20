@@ -1,10 +1,29 @@
 import { NextResponse } from "next/server";
 import type { ZodError, ZodType } from "zod";
 
+/** Message humain à partir d’un ZodError (champs + form). */
+export function formatZodErrorMessage(error: ZodError): string {
+  const flat = error.flatten();
+  const fieldMsgs: string[] = [];
+  for (const [key, raw] of Object.entries(flat.fieldErrors)) {
+    const msgs = Array.isArray(raw)
+      ? raw.filter((m): m is string => typeof m === "string")
+      : [];
+    if (msgs.length === 0) continue;
+    fieldMsgs.push(`${key}: ${msgs.join(", ")}`);
+  }
+  if (fieldMsgs.length > 0) return fieldMsgs.join(" · ");
+  if (flat.formErrors.length > 0) return flat.formErrors.join(" · ");
+  return "Validation échouée";
+}
+
 /** Uniform 400 shape for Zod failures across PUT/PATCH/POST. */
 export function validationErrorResponse(error: ZodError) {
   return NextResponse.json(
-    { error: "Validation échouée", details: error.flatten() },
+    {
+      error: formatZodErrorMessage(error),
+      details: error.flatten(),
+    },
     { status: 400 }
   );
 }

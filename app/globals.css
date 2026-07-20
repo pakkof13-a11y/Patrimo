@@ -60,6 +60,11 @@
   --space-8: 2rem;
   --section-gap: 1.25rem;
   --section-gap-lg: 1.75rem;
+  /* Transition KPI bandeau → module (Positions, Transactions, etc.) */
+  --module-after-kpi: 1.125rem;
+  --module-after-kpi-lg: 1.5rem;
+  /* Sous-titre d’intro sous le titre de module */
+  --module-intro-gap: 0.375rem;
 
   --app-max-width: 2560px;
   --shell-pad-x: 0.875rem;
@@ -154,6 +159,35 @@ html {
   .section-stack {
     gap: var(--section-gap-lg);
   }
+}
+
+/**
+ * Flux principal sous le header app :
+ * 1) bandeau indicateurs patrimoniaux
+ * 2) corps du module actif (titre / intro / contenu)
+ * Évite que Positions / Transactions collent aux KPI.
+ */
+.module-flow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--module-after-kpi);
+  min-width: 0;
+}
+
+@media (min-width: 640px) {
+  .module-flow {
+    gap: var(--module-after-kpi-lg);
+  }
+}
+
+.module-main {
+  min-width: 0;
+}
+
+/* Sous-titre de présentation sous le titre d’onglet (transition visuelle) */
+.module-intro {
+  margin-top: var(--module-intro-gap);
+  line-height: 1.5;
 }
 
 /* Typographie utilitaire */
@@ -683,4 +717,166 @@ body.col-resizing {
   background: var(--card) !important;
   border-color: var(--border) !important;
   color: var(--foreground) !important;
+}
+
+/* ── Skeleton shimmer ───────────────────────────────────────── */
+.skeleton-block {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(
+    90deg,
+    var(--muted) 0%,
+    color-mix(in srgb, var(--muted) 55%, var(--foreground) 8%) 50%,
+    var(--muted) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.dark .skeleton-block {
+  background: linear-gradient(
+    90deg,
+    var(--elevated) 0%,
+    color-mix(in srgb, var(--elevated) 70%, #94a3b8 12%) 50%,
+    var(--elevated) 100%
+  );
+  background-size: 200% 100%;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-block {
+    animation: none;
+    background: var(--muted);
+  }
+}
+
+/* ── Sonner toasts (4s progress, design tokens) ─────────────── */
+[data-sonner-toaster] {
+  --width: 356px;
+  z-index: 9999 !important;
+}
+
+[data-sonner-toast] {
+  --normal-bg: var(--card);
+  --normal-border: var(--border);
+  --normal-text: var(--foreground);
+  font-size: 0.8125rem !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+
+[data-sonner-toast][data-type="success"] {
+  --normal-bg: color-mix(in srgb, var(--success) 12%, var(--card));
+  --normal-border: color-mix(in srgb, var(--success) 35%, var(--border));
+  --normal-text: var(--foreground);
+}
+
+[data-sonner-toast][data-type="error"] {
+  --normal-bg: color-mix(in srgb, var(--danger) 12%, var(--card));
+  --normal-border: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+
+[data-sonner-toast][data-type="warning"] {
+  --normal-bg: color-mix(in srgb, #f59e0b 12%, var(--card));
+  --normal-border: color-mix(in srgb, #f59e0b 40%, var(--border));
+}
+
+[data-sonner-toast][data-type="info"] {
+  --normal-bg: color-mix(in srgb, var(--accent) 12%, var(--card));
+  --normal-border: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+/* Barre de progression auto-dismiss (Sonner data-styled) */
+[data-sonner-toast] [data-close-button] {
+  background: var(--muted) !important;
+  border-color: var(--border) !important;
+  color: var(--muted-foreground) !important;
+}
+
+/* Barre de progression auto-dismiss (~4s, alignée duration Toaster) */
+[data-sonner-toast] {
+  position: relative !important;
+  overflow: hidden !important;
+}
+[data-sonner-toast]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  transform-origin: left center;
+  background: var(--primary);
+  opacity: 0.85;
+  animation: toast-progress-shrink 4s linear forwards;
+  pointer-events: none;
+}
+[data-sonner-toast][data-type="success"]::after {
+  background: var(--success);
+}
+[data-sonner-toast][data-type="error"]::after {
+  background: var(--danger);
+}
+[data-sonner-toast][data-type="warning"]::after {
+  background: #f59e0b;
+}
+[data-sonner-toast][data-type="info"]::after {
+  background: var(--accent);
+}
+@keyframes toast-progress-shrink {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toast]::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* Visually hidden but available to screen readers / skip-link */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+.sr-only:focus,
+.sr-only:focus-visible,
+.focus\:not-sr-only:focus,
+.focus\:not-sr-only:focus-visible {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: inherit;
+  margin: inherit;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+
+/* Focus visible renforcé (WCAG AA) — anneau teal contrasté */
+:focus-visible {
+  outline: 2px solid transparent;
+}
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[role="menuitem"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }

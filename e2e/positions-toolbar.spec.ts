@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { gotoDashboard, clickNav } from "./helpers";
+import { gotoDashboard, clickNav, selectEnvelopeFilter } from "./helpers";
 
 /**
  * Interactions critiques vue Positions (toolbar hiérarchisée).
@@ -34,11 +34,13 @@ test.describe("Positions — toolbar & filtres", () => {
     await page.getByTestId("holdings-empty-clear-search").click();
     await expect(search).toHaveValue("");
 
-    // Enveloppe
+    // Enveloppe (button + listbox multi-cases, plus de <select>)
     const env = page.getByTestId("envelope-select");
     await expect(env).toBeVisible();
-    await env.selectOption("PEA");
+    await selectEnvelopeFilter(page, "PEA");
     await expect(page).toHaveURL(/envelope=pea|positions\/pea|pea/i);
+    // Libellé du bouton = enveloppe unique sélectionnée
+    await expect(env).toContainText(/PEA/i);
 
     // Colonnes
     await page.getByTestId("column-picker").click();

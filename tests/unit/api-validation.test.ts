@@ -6,7 +6,9 @@ import {
   updateAssetMetadataSchema,
   updateAssetTriggersSchema,
   envelopeCashUpdateSchema,
+  platformSchema,
 } from "@/app/lib/schemas";
+import { formatZodErrorMessage } from "@/app/lib/api/validation";
 
 describe("presentFields", () => {
   it("keeps only keys present on the raw body (strips Zod defaults)", () => {
@@ -107,6 +109,42 @@ describe("update schemas", () => {
       expect(r.data.stopLoss).toBeNull();
       expect(r.data.tp1).toBeNull();
       expect(r.data.tp2).toBe("12.5");
+    }
+  });
+});
+
+describe("platformSchema partial edit (Mes plateformes)", () => {
+  it("accepte changement de type + notes null (payload UI)", () => {
+    const r = platformSchema.partial().safeParse({
+      id: "cuid-ignored",
+      name: "Binance",
+      type: "EXCHANGE_CRYPTO",
+      logoUrl: null,
+      notes: null,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.type).toBe("EXCHANGE_CRYPTO");
+      expect(r.data.notes).toBeNull();
+      expect(r.data.logoUrl).toBeNull();
+    }
+  });
+
+  it("accepte Banque → Courtier titres", () => {
+    const r = platformSchema.partial().safeParse({
+      type: "COURTIER",
+      name: "Fortuneo",
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.type).toBe("COURTIER");
+  });
+
+  it("rejette un type hors enum avec message exploitable", () => {
+    const r = platformSchema.partial().safeParse({ type: "NOT_A_TYPE" });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const msg = formatZodErrorMessage(r.error);
+      expect(msg.toLowerCase()).toMatch(/type/);
     }
   });
 });

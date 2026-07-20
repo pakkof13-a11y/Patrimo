@@ -16,6 +16,11 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1", "localhost", "*.trycloudflare.com"],
+  /**
+   * Masque le badge Next.js DevTools (« N ») en bas à gauche —
+   * il recouvrait le FAB Préférences / avatar.
+   */
+  devIndicators: false,
   async headers() {
     return [
       {

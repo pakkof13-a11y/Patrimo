@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { EarningsEvent, MacroEvent } from "@/app/lib/news/service";
 import {
+  compareActualToConsensus,
   isEarningsEventPublished,
   isMacroEventPublished,
+  parseMacroNumber,
 } from "@/app/lib/news/service";
+import {
+  countryCodeFromTicker,
+  isCryptoEarningsTicker,
+} from "@/app/lib/news/earnings-live";
+import { ffRowToMacro } from "@/app/lib/news/macro-live";
 import {
   filterEarningsByRelease,
   filterMacroByRelease,
@@ -77,6 +84,61 @@ describe("isMacroEventPublished", () => {
     });
     expect(isMacroEventPublished(past, NOW)).toBe(true);
     expect(isMacroEventPublished(future, NOW)).toBe(false);
+  });
+});
+
+describe("compareActualToConsensus", () => {
+  it("colore selon écart résultat / consensus", () => {
+    expect(compareActualToConsensus("2,1 %", "2,0 %")).toBe("above");
+    expect(compareActualToConsensus("1,8 %", "2,0 %")).toBe("below");
+    expect(compareActualToConsensus("2,0 %", "2,0 %")).toBe("equal");
+    expect(compareActualToConsensus(null, "2,0 %")).toBe("na");
+  });
+
+  it("parseMacroNumber gère k et %", () => {
+    expect(parseMacroNumber("215 k")).toBe(215_000);
+    expect(parseMacroNumber("0,3 %")).toBeCloseTo(0.3);
+  });
+});
+
+describe("isCryptoEarningsTicker", () => {
+  it("exclut BTC/ETH/SOL et laisse AAPL/MC.PA", () => {
+    expect(isCryptoEarningsTicker("BTC")).toBe(true);
+    expect(isCryptoEarningsTicker("SOL")).toBe(true);
+    expect(isCryptoEarningsTicker("USDC")).toBe(true);
+    expect(isCryptoEarningsTicker("AAPL")).toBe(false);
+    expect(isCryptoEarningsTicker("MC.PA")).toBe(false);
+  });
+});
+
+describe("countryCodeFromTicker", () => {
+  it("mappe les suffixes bourse vers ISO", () => {
+    expect(countryCodeFromTicker("MC.PA")).toBe("fr");
+    expect(countryCodeFromTicker("ASML.AS")).toBe("nl");
+    expect(countryCodeFromTicker("SAP.DE")).toBe("de");
+    expect(countryCodeFromTicker("AAPL")).toBe("us");
+  });
+});
+
+describe("ffRowToMacro", () => {
+  it("mappe une ligne calendrier FF", () => {
+    const e = ffRowToMacro(
+      {
+        title: "CPI m/m",
+        country: "USD",
+        date: "2026-07-20T08:30:00-04:00",
+        impact: "High",
+        forecast: "0.2%",
+        previous: "0.1%",
+        actual: "0.3%",
+      },
+      0
+    );
+    expect(e).not.toBeNull();
+    expect(e!.country).toBe("US");
+    expect(e!.countryCode).toBe("us");
+    expect(e!.impact).toBe("high");
+    expect(e!.actual).toBe("0.3%");
   });
 });
 

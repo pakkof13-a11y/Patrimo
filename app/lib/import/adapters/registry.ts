@@ -38,11 +38,14 @@ export function listAdapters(): PlatformCsvAdapter[] {
 /**
  * Choisit l'adaptateur le mieux score pour un jeu d'en-têtes.
  * Si tout est faible → dynamic.
+ * Si 2 formats proches (≥40 et écart < 12) → ambiguous (demander à l’utilisateur).
  */
 export function detectBestAdapter(headers: string[]): {
   adapter: PlatformCsvAdapter;
   score: number;
   ranking: Array<{ id: string; score: number; label: string }>;
+  /** Formats plausibles en concurrence — l’UI doit demander confirmation */
+  ambiguous?: Array<{ id: string; score: number; label: string }>;
 } {
   const ranking = PLATFORM_ADAPTERS.map((a) => ({
     id: a.meta.id,
@@ -51,7 +54,26 @@ export function detectBestAdapter(headers: string[]): {
   })).sort((a, b) => b.score - a.score);
 
   const best = ranking[0]!;
+  const second = ranking[1];
+
   if (best.score >= 40 && best.id !== "dynamic") {
+    // Ambiguïté : second aussi fort et pas « dynamic »
+    if (
+      second &&
+      second.id !== "dynamic" &&
+      second.score >= 40 &&
+      best.score - second.score < 12
+    ) {
+      const ambiguous = ranking.filter(
+        (r) => r.id !== "dynamic" && r.score >= 40 && best.score - r.score < 12
+      );
+      return {
+        adapter: getAdapter(best.id),
+        score: best.score,
+        ranking,
+        ambiguous: ambiguous.length > 1 ? ambiguous : undefined,
+      };
+    }
     return {
       adapter: getAdapter(best.id),
       score: best.score,

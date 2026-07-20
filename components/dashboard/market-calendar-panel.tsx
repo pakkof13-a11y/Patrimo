@@ -269,6 +269,18 @@ export function MarketCalendarPanel({
                   <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
                     {clockTime(e.time)}
                   </span>
+                  <CountryFlag code={e.countryCode || "us"} showCode />
+                  {e.logoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={e.logoUrl}
+                      alt=""
+                      width={20}
+                      height={20}
+                      loading="lazy"
+                      className="h-5 w-5 shrink-0 rounded object-contain ring-1 ring-black/10 dark:ring-white/15"
+                    />
+                  ) : null}
                   <span className="min-w-0 flex-1">
                     <span className="font-medium text-[var(--foreground)]">
                       {e.companyName}

@@ -33,10 +33,11 @@ describe("nav groups", () => {
     expect(ids).not.toContain("cto"); // enveloppe hors nav primaire
   });
 
-  it("Comptes et sources is a multi-item group", () => {
+  it("Sources is a multi-item group (Banques + Mes plateformes)", () => {
     const sources = NAV_GROUPS.find((g) => g.id === "sources");
     expect(sources).toBeDefined();
-    expect(sources!.label).toMatch(/Comptes et sources/i);
+    // Libellé produit court : « Sources » (ex. « Comptes et sources »)
+    expect(sources!.label).toBe("Sources");
     expect(sources!.items.length).toBeGreaterThan(1);
     expect(sources!.items.map((i) => i.id)).toEqual(
       expect.arrayContaining(["banques", "platforms"])

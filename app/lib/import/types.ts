@@ -43,6 +43,8 @@ export type ColumnRole =
   | "side"
   | "description"
   | "product"
+  /** Nom de plateforme / courtier (création auto si absent) */
+  | "platform"
   | "ignore";
 
 export type ColumnMapping = Record<string, ColumnRole>;
@@ -69,7 +71,12 @@ export type PlatformAdapterId =
   | "coinbase"
   | "fortuneo"
   | "trade_republic"
-  | "interactive_brokers";
+  | "interactive_brokers"
+  | "cryptocom"
+  | "cryptocom_transfer"
+  | "nexo"
+  | "ascendex"
+  | "ledger_live";
 
 export type PlatformAdapterMeta = {
   id: PlatformAdapterId;

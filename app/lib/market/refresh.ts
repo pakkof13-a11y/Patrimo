@@ -43,10 +43,20 @@ export async function refreshEligiblePrices(userId: string): Promise<{
   /** Successful native quotes for trigger evaluation */
   const freshPrices = new Map<string, { priceNative: string; currency: string }>();
 
+  // Pace CoinGecko free tier (~10–30 rpm) — évite 429 sur MON en fin de lot
+  let cryptoCalls = 0;
+
   for (const asset of assets) {
     if (asset.priceProvider === "MANUAL" && !["ACTIONS", "CRYPTO"].includes(asset.assetClass)) {
       continue;
     }
+
+    const isCrypto =
+      asset.assetClass === "CRYPTO" || asset.priceProvider === "COINGECKO";
+    if (isCrypto && cryptoCalls > 0) {
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+    if (isCrypto) cryptoCalls += 1;
 
     const meta: AssetMeta = {
       id: asset.id,
@@ -65,6 +75,28 @@ export async function refreshEligiblePrices(userId: string): Promise<{
     if (quote.status === "OK") {
       const priceNative = quote.priceNative ?? quote.priceEur;
       const nativeCurrency = quote.nativeCurrency ?? "EUR";
+
+      // CRYPTO en MANUAL → bascule COINGECKO après un prix live réussi
+      if (
+        asset.assetClass === "CRYPTO" &&
+        (asset.priceProvider === "MANUAL" || !asset.priceProvider)
+      ) {
+        const { resolveCoingeckoId } = await import("./providers/coingecko");
+        const cgId = resolveCoingeckoId(
+          asset.ticker,
+          asset.providerSymbol,
+          asset.name
+        );
+        await prisma.asset.update({
+          where: { id: asset.id },
+          data: {
+            priceProvider: "COINGECKO",
+            ...(cgId && !asset.providerSymbol
+              ? { providerSymbol: cgId }
+              : {}),
+          },
+        });
+      }
 
       await prisma.priceQuote.upsert({
         where: { assetId: asset.id },

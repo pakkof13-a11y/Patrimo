@@ -3,6 +3,7 @@ import {
   ensurePlatform,
   gotoDashboard,
   parseFrenchMoney,
+  waitForHoldingInTable,
 } from "./helpers";
 
 async function holdingsCashEur(request: {
@@ -97,26 +98,8 @@ test.describe("Achat puis vente", () => {
       )
       .toBe("ok");
 
-    await gotoDashboard(page);
-    await expect(page.getByTestId("holdings-table")).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(page.getByTestId("holdings-table")).not.toContainText(
-      "Chargement",
-      { timeout: 45_000 }
-    );
-
-    // Petite valeur → pas en tête du tri « Valeur totale »
-    const search = page.getByPlaceholder(/Nom, ticker, ISIN/i).first();
-    if (await search.isVisible().catch(() => false)) {
-      await search.fill("E2H");
-      await page.waitForTimeout(400);
-    }
-
-    await expect(page.getByTestId("holdings-table")).toContainText(
-      /E2E Hybrid|E2H/i,
-      { timeout: 30_000 }
-    );
+    // Sync UI = même pattern que perf-day1 (skeleton + fetch holdings + poll)
+    await waitForHoldingInTable(page, /E2E Hybrid|E2H/i, { search: "E2H" });
 
     // KPI cash UI cohérent (tolérance large : accruals / refresh possible)
     const cashUi = parseFrenchMoney(

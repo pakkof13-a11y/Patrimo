@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { ensurePlatform, gotoDashboard, openImportCsvModal } from "./helpers";
+import {
+  ensurePlatform,
+  gotoDashboard,
+  openImportCsvModal,
+  waitForHoldingInTable,
+} from "./helpers";
 
 const SAMPLE_CSV = `date;type;ticker;name;quantity;unit_price;fees;currency;cash_amount;notes;asset_class
 01/06/2024;ACHAT;AIR.PA;Airbus;2;140;1;EUR;;E2E import;ACTIONS
@@ -38,10 +43,8 @@ test.describe("Import CSV", () => {
     const commitJson = await commit.json();
     expect(commitJson.created).toBeGreaterThanOrEqual(1);
 
-    await gotoDashboard(page);
-    await expect(page.getByTestId("holdings-table")).toContainText(/Airbus|AIR\.PA/i, {
-      timeout: 20_000,
-    });
+    // Après commit API : attendre fetch holdings + skeleton, puis le libellé
+    await waitForHoldingInTable(page, /Airbus|AIR\.PA/i, { search: "AIR" });
   });
 
   test("modale Import CSV s'ouvre et analyse un fichier", async ({ page }) => {
@@ -63,15 +66,25 @@ test.describe("Import CSV", () => {
       buffer: Buffer.from(SAMPLE_CSV, "utf-8"),
     });
 
-    await expect(page.getByText("e2e-import.csv")).toBeVisible({ timeout: 10_000 });
+    // exact: true → uniquement le label fichier, pas "8% · e2e-import.csv" (progress)
+    await expect(
+      page.getByText("e2e-import.csv", { exact: true })
+    ).toBeVisible({ timeout: 10_000 });
     const analyseBtn = page.getByRole("button", { name: /^Analyser$/i });
     await expect(analyseBtn).toBeEnabled({ timeout: 10_000 });
     await analyseBtn.click();
 
-    await expect(page.getByText(/\d+\s*ligne\(s\).*séparateur/i)).toBeVisible({
-      timeout: 15_000,
-    });
+    // Stats d’analyse (unique dans la modale)
+    await expect(
+      page.getByTestId("import-csv-modal").getByText(/\d+\s*ligne\(s\).*séparateur/i)
+    ).toBeVisible({ timeout: 15_000 });
+    // .first() : nom actif peut apparaître en mapping + tableau
     await expect(page.getByText("Airbus").first()).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole("button", { name: /Importer \d+ ligne/i })).toBeVisible();
+    // testid unique — évite l’ambiguïté de libellés de bouton
+    await expect(page.getByTestId("import-commit")).toBeVisible({
+      timeout: 10_000,
+    });
   });
 });
+
+

@@ -12,6 +12,8 @@ const yahooFinance = new YahooFinance({
 export const yahooProvider: MarketDataProvider = {
   id: "yahoo",
   supports(asset) {
+    // CRYPTO : CoinGecko exclusif — jamais Yahoo
+    if (asset.assetClass === "CRYPTO") return false;
     return (
       asset.priceProvider === "YAHOO" ||
       asset.priceProvider === "FINNHUB" ||

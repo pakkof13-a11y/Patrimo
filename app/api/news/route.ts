@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
-import {
-  getAssetRelatedNews,
-  getEconomicNews,
-} from "@/app/lib/news/service";
+import { getAssetRelatedNews } from "@/app/lib/news/service";
+import { resolveEconomicNews } from "@/app/lib/news/news-live";
 
 export async function GET(req: Request) {
   const userId = await requireUserId();
@@ -22,9 +20,10 @@ export async function GET(req: Request) {
     });
   }
 
+  const { news, source } = await resolveEconomicNews(limit);
   return NextResponse.json({
-    news: getEconomicNews(limit),
-    source: "mock",
+    news,
+    source,
     generatedAt: new Date().toISOString(),
   });
 }

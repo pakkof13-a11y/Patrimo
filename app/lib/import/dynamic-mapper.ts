@@ -47,6 +47,21 @@ const KEYWORD_RULES: Array<{ role: ColumnRole; patterns: RegExp[]; weight: numbe
     ],
   },
   {
+    role: "platform",
+    weight: 8,
+    patterns: [
+      /^platform$/,
+      /^plateforme$/,
+      /^broker$/,
+      /^courtier$/,
+      /^account$/,
+      /^compte$/,
+      /^source$/,
+      /^wallet$/,
+      /^exchange$/,
+    ],
+  },
+  {
     role: "side",
     weight: 8,
     patterns: [/^side$/, /^buy_sell$/, /^sens$/, /^direction$/],

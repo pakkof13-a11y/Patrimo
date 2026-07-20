@@ -36,8 +36,9 @@ export type HoldingsToolbarProps = {
   sourceCount: number;
   filteredCount: number;
   loading?: boolean;
-  envelopeFilter: AccountType | null;
-  onEnvelopeChange?: (v: AccountType | null) => void;
+  /** Enveloppes sélectionnées (multi). Vide = aucune (liste vide). */
+  envelopeFilters: AccountType[];
+  onEnvelopeFiltersChange?: (v: AccountType[]) => void;
   groupBy: HoldingsGroupBy;
   onGroupByChange: (v: HoldingsGroupBy) => void;
   groupMode: boolean;
@@ -48,6 +49,9 @@ export type HoldingsToolbarProps = {
   onSearchChange: (v: string) => void;
   accountFilter: string;
   onAccountFilterChange: (v: string) => void;
+  /** Filtre plateforme actif (deep-link Mes plateformes) */
+  platformFilterLabel?: string | null;
+  onClearPlatformFilter?: () => void;
   pageSize: number;
   onPageSizeChange: (n: HoldingsPageSize) => void;
   savedViews: SavedHoldingsView[];
@@ -56,10 +60,12 @@ export type HoldingsToolbarProps = {
   columns: ColumnPickerProps;
 };
 
+const ALL_ENVELOPES = Object.keys(ACCOUNT_TYPES) as AccountType[];
+
 /**
  * Toolbar Positions — hiérarchie claire :
  * 1. Titre + Colonnes / aide
- * 2. Filtres primaires : compte · recherche · enveloppe
+ * 2. Filtres primaires : recherche · enveloppe (multi-cases)
  * 3. Options d’affichage (repliables) : regroupement · vue · densité
  */
 export function HoldingsToolbar({
@@ -68,8 +74,8 @@ export function HoldingsToolbar({
   sourceCount,
   filteredCount,
   loading,
-  envelopeFilter,
-  onEnvelopeChange,
+  envelopeFilters,
+  onEnvelopeFiltersChange,
   groupBy,
   onGroupByChange,
   groupMode,
@@ -80,6 +86,8 @@ export function HoldingsToolbar({
   onSearchChange,
   accountFilter,
   onAccountFilterChange,
+  platformFilterLabel,
+  onClearPlatformFilter,
   pageSize,
   onPageSizeChange,
   savedViews,
@@ -89,8 +97,35 @@ export function HoldingsToolbar({
 }: HoldingsToolbarProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [tipsOpen, setTipsOpen] = useState(false);
+  const [envelopeOpen, setEnvelopeOpen] = useState(false);
   const hasSource = sourceCount > 0;
-  const showFilters = hasSource || Boolean(search) || Boolean(accountFilter);
+  // Toujours afficher la zone filtres si le sélecteur d’enveloppes est dispo
+  // (évite la disparition du bouton quand le filtre vide la liste)
+  const showFilters =
+    hasSource ||
+    Boolean(search) ||
+    Boolean(accountFilter) ||
+    Boolean(platformFilterLabel) ||
+    Boolean(onEnvelopeFiltersChange);
+
+  const selectedCount = envelopeFilters.length;
+  const allSelected = selectedCount === ALL_ENVELOPES.length;
+  const envelopeLabel = allSelected
+    ? "Toutes"
+    : selectedCount === 0
+      ? "Aucune"
+      : selectedCount === 1
+        ? ACCOUNT_TYPES[envelopeFilters[0]!]
+        : `${selectedCount} enveloppes`;
+
+  function toggleEnvelope(k: AccountType) {
+    if (!onEnvelopeFiltersChange) return;
+    if (envelopeFilters.includes(k)) {
+      onEnvelopeFiltersChange(envelopeFilters.filter((x) => x !== k));
+    } else {
+      onEnvelopeFiltersChange([...envelopeFilters, k]);
+    }
+  }
 
   // Ouvrir les options si regroupement actif (contrôles groupe visibles)
   useEffect(() => {
@@ -99,7 +134,7 @@ export function HoldingsToolbar({
 
   return (
     <div
-      className="flex min-w-0 flex-col gap-2.5 border-b border-[var(--border)] px-3 py-3 sm:px-4"
+      className="flex min-w-0 flex-col gap-3 border-b border-[var(--border)] px-3 py-3.5 sm:gap-3.5 sm:px-4 sm:py-4"
       data-testid="holdings-toolbar"
     >
       {/* ── 1. Titre + affichage ── */}
@@ -123,7 +158,7 @@ export function HoldingsToolbar({
               </span>
             )}
           </div>
-          <p className="text-meta mt-0.5">{subtitle}</p>
+          <p className="module-intro text-meta">{subtitle}</p>
         </div>
 
         <div
@@ -206,38 +241,128 @@ export function HoldingsToolbar({
             className="min-w-0 w-full sm:min-w-[14rem] sm:flex-1"
             search={search}
             onSearchChange={onSearchChange}
-            accountType={accountFilter}
-            onAccountTypeChange={onAccountFilterChange}
-            showAccountFilter={!envelopeFilter && hasSource}
+            showAccountFilter={false}
             searchFirst
             placeholder="Rechercher nom, ticker, ISIN…"
+            rightSlot={
+              onEnvelopeFiltersChange ? (
+                <div
+                  className={cn(CTRL_LABEL, "relative w-full sm:w-auto")}
+                  data-testid="holdings-toolbar-group-a"
+                >
+                  <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
+                    Enveloppe
+                  </span>
+                  <button
+                    type="button"
+                    className={cn(
+                      CTRL_SELECT,
+                      "inline-flex w-full min-w-[10rem] items-center justify-between gap-2 sm:!w-auto"
+                    )}
+                    aria-expanded={envelopeOpen}
+                    aria-haspopup="listbox"
+                    data-testid="envelope-select"
+                    aria-label="Filtrer par enveloppe"
+                    onClick={() => setEnvelopeOpen((v) => !v)}
+                  >
+                    <span className="truncate">{envelopeLabel}</span>
+                    <ChevronDown
+                      className={cn(
+                        "h-3.5 w-3.5 shrink-0 opacity-60 transition",
+                        envelopeOpen && "rotate-180"
+                      )}
+                      aria-hidden
+                    />
+                  </button>
+                  {envelopeOpen && (
+                    <div
+                      className="absolute left-0 top-full z-40 mt-1 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-[var(--border)] bg-[var(--card)] p-2 shadow-lg"
+                      role="listbox"
+                      aria-multiselectable
+                      data-testid="envelope-multiselect"
+                    >
+                      <ul className="max-h-56 space-y-0.5 overflow-y-auto">
+                        {ALL_ENVELOPES.map((k) => {
+                          const checked = envelopeFilters.includes(k);
+                          return (
+                            <li key={k}>
+                              <label
+                                className={cn(
+                                  "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] hover:bg-[var(--muted)]/60",
+                                  checked && "bg-teal-500/10"
+                                )}
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="rounded border-[var(--border)]"
+                                  checked={checked}
+                                  onChange={() => toggleEnvelope(k)}
+                                  data-testid={`envelope-check-${k}`}
+                                />
+                                <span>{ACCOUNT_TYPES[k]}</span>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      <div className="mt-2 flex gap-1.5 border-t border-[var(--border)] pt-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="flex-1 !text-[11px]"
+                          data-testid="envelope-select-all"
+                          onClick={() =>
+                            onEnvelopeFiltersChange([...ALL_ENVELOPES])
+                          }
+                        >
+                          Tout sélectionner
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="flex-1 !text-[11px]"
+                          data-testid="envelope-select-none"
+                          onClick={() => onEnvelopeFiltersChange([])}
+                        >
+                          Tout désélectionner
+                        </Button>
+                      </div>
+                      <button
+                        type="button"
+                        className="mt-1.5 w-full rounded-md py-1 text-[11px] text-[var(--muted-foreground)] hover:bg-[var(--muted)]/50"
+                        onClick={() => setEnvelopeOpen(false)}
+                        data-testid="envelope-close"
+                      >
+                        Fermer
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : undefined
+            }
           />
-          {onEnvelopeChange && (
-            <label
-              className={cn(CTRL_LABEL, "w-full sm:w-auto")}
-              data-testid="holdings-toolbar-group-a"
+          {platformFilterLabel && onClearPlatformFilter && (
+            <div
+              className="flex min-w-0 items-center gap-1.5"
+              data-testid="holdings-platform-filter"
             >
-              <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
-                Enveloppe
+              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-teal-700/30 bg-teal-700/10 px-2.5 py-1 text-[11px] font-medium text-teal-900 dark:text-teal-100">
+                <span className="truncate" title={platformFilterLabel}>
+                  Plateforme · {platformFilterLabel}
+                </span>
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-0.5 hover:bg-teal-700/15"
+                  onClick={onClearPlatformFilter}
+                  aria-label="Retirer le filtre plateforme"
+                  data-testid="holdings-clear-platform-filter"
+                >
+                  ×
+                </button>
               </span>
-              <select
-                className={cn(CTRL_SELECT, "w-full sm:!w-auto sm:min-w-[10rem]")}
-                value={envelopeFilter ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  onEnvelopeChange(v ? (v as AccountType) : null);
-                }}
-                data-testid="envelope-select"
-                aria-label="Filtrer par enveloppe"
-              >
-                <option value="">Toutes</option>
-                {(Object.keys(ACCOUNT_TYPES) as AccountType[]).map((k) => (
-                  <option key={k} value={k}>
-                    {ACCOUNT_TYPES[k]}
-                  </option>
-                ))}
-              </select>
-            </label>
+            </div>
           )}
         </div>
       )}
@@ -299,6 +424,7 @@ export function HoldingsToolbar({
                   <option value="assetCategory">
                     Sous-catégorie d&apos;actif
                   </option>
+                  <option value="blockchain">Blockchain (crypto)</option>
                 </select>
               </label>
 

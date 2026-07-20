@@ -41,6 +41,7 @@ describe("normalize numbers and dates", () => {
     expect(parseNumber("62\u202f956,71 CHF")).toBeCloseTo(62956.71, 2);
   });
 
+
   it("parses FR dates", () => {
     const d = parseDate("15/03/2023");
     expect(d).not.toBeNull();
@@ -73,6 +74,11 @@ describe("presets", () => {
     expect(mapTxType("Récompense de staking")).toBe("REWARD");
     expect(mapTxType("STAKING")).toBe("REWARD");
     expect(mapTxType("Learning reward")).toBe("REWARD");
+    expect(mapTxType("BUY - MARKET")).toBe("ACHAT");
+    expect(mapTxType("SELL - STOP")).toBe("VENTE");
+    expect(mapTxType("CASH TOP-UP")).toBe("APPORT");
+    expect(mapTxType("STOCKS PROMOTION REWARD")).toBe("APPORT");
+    expect(mapTxType("STOCKS PROMOTION CLAWBACK")).toBe("RETRAIT");
   });
 
   it("normalizes tickers and asset classes", () => {

@@ -15,7 +15,9 @@ import { DEMO_EMAIL } from "../app/lib/constants";
 
 const prisma = new PrismaClient();
 
-const BLOCKCHAINS = PLATFORM_PRESETS.filter((p) => p.type === "BLOCKCHAIN");
+const BLOCKCHAINS = PLATFORM_PRESETS.filter((p) =>
+  p.types.includes("BLOCKCHAIN")
+);
 
 async function main() {
   const user =
