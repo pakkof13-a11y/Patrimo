@@ -102,9 +102,19 @@ export async function POST(req: Request) {
         { status: 409 }
       );
     }
-    console.error("[platforms POST]", e);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[platforms POST]", msg);
+    // Message client non verbeux mais actionnable (pas de stack / SQL)
+    const schemaLag = /walletApiKey|column .* does not exist|Unknown arg/i.test(
+      msg
+    );
     return NextResponse.json(
-      { error: "Erreur serveur, veuillez réessayer" },
+      {
+        error: schemaLag
+          ? "Schéma base obsolète — migration plateformes requise. Réessayez après déploiement."
+          : "Erreur serveur, veuillez réessayer",
+        code: schemaLag ? "SCHEMA_LAG" : "SERVER_ERROR",
+      },
       { status: 500 }
     );
   }

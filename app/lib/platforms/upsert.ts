@@ -108,21 +108,24 @@ export async function findOrCreatePlatform(
   const preset =
     (input.logoKey ? findPreset(input.logoKey) : undefined) || findPreset(name);
 
-  const data = {
-    userId,
+  const data: Prisma.PlatformCreateInput = {
+    user: { connect: { id: userId } },
     name,
     type: input.type || (preset ? primaryType(preset) : "AUTRE"),
     subtype: input.subtype || preset?.subtype || null,
     logoKey: input.logoKey || preset?.key || null,
     logoUrl: input.logoUrl || preset?.logoUrl || null,
     walletAddress: walletIn,
-    walletApiKey: apiKeyIn,
     notes: input.notes ?? null,
   };
+  // walletApiKey : colonne optionnelle (migration 20260720120000)
+  if (apiKeyIn != null) {
+    (data as { walletApiKey?: string | null }).walletApiKey = apiKeyIn;
+  }
 
   try {
     const platform = await prisma.platform.create({
-      data: data as never,
+      data,
     });
     return { platform, created: true };
   } catch (e) {
@@ -131,6 +134,24 @@ export async function findOrCreatePlatform(
         where: { userId, name: { equals: name, mode: "insensitive" } },
       });
       if (again) return { platform: again, created: false };
+    }
+    // Schéma cloud en retard (colonne walletApiKey absente) : retry sans clé
+    const msg = e instanceof Error ? e.message : String(e);
+    if (
+      apiKeyIn != null &&
+      /walletApiKey|column .* does not exist/i.test(msg)
+    ) {
+      console.warn(
+        "[findOrCreatePlatform] retry without walletApiKey — run prisma migrate deploy"
+      );
+      const { walletApiKey: _k, ...rest } = data as typeof data & {
+        walletApiKey?: string | null;
+      };
+      void _k;
+      const platform = await prisma.platform.create({
+        data: rest as Prisma.PlatformCreateInput,
+      });
+      return { platform, created: true };
     }
     throw e;
   }
