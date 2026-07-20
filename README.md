@@ -20,6 +20,14 @@ Application locale de suivi d’investissements (actions, crypto, immobilier, ca
 Voir **[docs/readiness.md](docs/readiness.md)** pour la checklist déploiement test,
 les garde-fous secrets et la décision **déployable / non déployable**.
 
+### Workflow cloud de correction (preview + Neon staging)
+
+Voir **[docs/cloud-test-workflow.md](docs/cloud-test-workflow.md)** :
+
+- branches `fix/*` / `feat/*` → preview Vercel automatique ;
+- base **Neon `staging`** (isolée de la prod) pour les previews ;
+- validation par testeurs de confiance sur URL partageable avant merge sur `staging`.
+
 ```powershell
 npm run ready:check   # typecheck + unitaires
 ```
