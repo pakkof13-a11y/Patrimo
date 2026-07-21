@@ -142,9 +142,13 @@ export function TransactionsTab({
   const [draggingCol, setDraggingCol] = useState<string | null>(null);
   const skipSortRef = useRef(false);
 
-  useEffect(() => {
-    setPageIndex(0);
-  }, [debouncedSearch, accountType, pageSize, typeFilter, sorting]);
+  // Reset page quand filtres / tri / pageSize changent
+  const filterKey = `${debouncedSearch}|${accountType}|${pageSize}|${typeFilter}|${sorting[0]?.id}|${sorting[0]?.desc}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
+    if (pageIndex !== 0) setPageIndex(0);
+  }
 
   useEffect(() => {
     saveColumnOrder(TX_TABLE_KEY, columnOrder);
@@ -169,11 +173,11 @@ export function TransactionsTab({
   const pageCount = Math.max(1, listQ.data?.pageCount ?? 1);
   const typeCounts = listQ.data?.typeCounts ?? {};
 
-  useEffect(() => {
-    if (pageIndex > pageCount - 1) {
-      setPageIndex(Math.max(0, pageCount - 1));
-    }
-  }, [pageIndex, pageCount]);
+  // Clamp pageIndex si hors bornes (données chargées)
+  const safePageIndex = Math.min(pageIndex, Math.max(0, pageCount - 1));
+  if (safePageIndex !== pageIndex && listQ.data) {
+    setPageIndex(safePageIndex);
+  }
 
   const loading = listQ.isPending || listQ.isFetching;
   const hasLoadedOnce = Boolean(listQ.data) || listQ.isFetched;

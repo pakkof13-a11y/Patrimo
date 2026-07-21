@@ -60,13 +60,16 @@ export function KpiStrip({
   history?: HistoryPoint[];
   smartFilter?: boolean;
 }) {
-  /** true = afficher les KPI (défaut) */
-  const [visible, setVisible] = useState(true);
-  const [latentRange, setLatentRange] = useState<LatentPnlRange>("all");
+  /** true = afficher les KPI (défaut) — seed client via lazy + sync event */
+  const [visible, setVisible] = useState(() =>
+    typeof window !== "undefined" ? loadUiPref(KPI_VISIBLE_KEY, true) : true
+  );
+  const [latentRange, setLatentRange] = useState<LatentPnlRange>(() =>
+    typeof window !== "undefined" ? loadLatentPnlRange() : "all"
+  );
 
+  // Écoute changements de préférence (autres onglets / settings) — pas de setState sync init
   useEffect(() => {
-    setVisible(loadUiPref(KPI_VISIBLE_KEY, true));
-    setLatentRange(loadLatentPnlRange());
     function onPref() {
       setLatentRange(loadLatentPnlRange());
     }

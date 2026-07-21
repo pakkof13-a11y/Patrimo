@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,14 +38,16 @@ export function EditAssetCategoryModal({
   );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resetKey, setResetKey] = useState(`${open}:${assetId}:${currentCategory}`);
+  const nextKey = `${open}:${assetId}:${currentCategory}`;
 
-  useEffect(() => {
-    if (open) {
-      setValue(parseAssetCategory(currentCategory));
-      setError(null);
-      setPending(false);
-    }
-  }, [open, currentCategory, assetId]);
+  // Reset à l’ouverture / changement d’actif (adjust state while rendering)
+  if (open && nextKey !== resetKey) {
+    setResetKey(nextKey);
+    setValue(parseAssetCategory(currentCategory));
+    setError(null);
+    setPending(false);
+  }
 
   async function save() {
     setPending(true);

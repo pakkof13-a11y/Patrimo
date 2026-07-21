@@ -1,26 +1,37 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { ShieldAlert, X } from "lucide-react";
 import { cn } from "@/app/lib/utils";
 
 const STORAGE_KEY = "patrimo.securityBanner.dismissed";
+const emptySubscribe = () => () => undefined;
+
+function useIsClient() {
+  return useSyncExternalStore(emptySubscribe, () => true, () => false);
+}
 
 /**
  * Avertissement mode single-user (auth désactivée) — non sûr en exposition réseau.
  */
 export function SecurityBanner({ className }: { className?: string }) {
-  const [visible, setVisible] = useState(false);
+  const isClient = useIsClient();
+  const [userDismissed, setUserDismissed] = useState(false);
+  const [seeded, setSeeded] = useState(false);
+  const [storageDismissed, setStorageDismissed] = useState(false);
 
-  useEffect(() => {
+  // Lecture localStorage au premier paint client (pas d’effect)
+  if (isClient && !seeded) {
+    setSeeded(true);
     try {
-      if (localStorage.getItem(STORAGE_KEY) === "1") return;
+      setStorageDismissed(localStorage.getItem(STORAGE_KEY) === "1");
     } catch {
-      /* ignore */
+      setStorageDismissed(false);
     }
-    setVisible(true);
-  }, []);
+  }
 
+  // SSR / avant seed : masqué pour coller au HTML serveur
+  const visible = isClient && seeded && !storageDismissed && !userDismissed;
   if (!visible) return null;
 
   return (
@@ -50,7 +61,7 @@ export function SecurityBanner({ className }: { className?: string }) {
             } catch {
               /* ignore */
             }
-            setVisible(false);
+            setUserDismissed(true);
           }}
         >
           <X className="h-3.5 w-3.5" />

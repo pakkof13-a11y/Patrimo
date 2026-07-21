@@ -241,15 +241,18 @@ function PortfolioAppClient({
   const [newPlatformIds, setNewPlatformIds] = useState<Set<string>>(
     () => new Set()
   );
-  const [showImport, setShowImport] = useState(false);
   const [detailAssetId, setDetailAssetId] = useState<string | null>(null);
   const [assetLabel, setAssetLabel] = useState("");
   const [platformComboLabel, setPlatformComboLabel] = useState("");
   const [txPlatformLabel, setTxPlatformLabel] = useState("");
   const [cmdOpen, setCmdOpen] = useState(false);
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
-  /** Préférence onboarding « afficher à chaque démarrage » (hero empty/setup) */
-  const [showEveryStart, setShowEveryStart] = useState(true);
+  /** Préférence onboarding — seed client (SSR: true) */
+  const [showEveryStart, setShowEveryStart] = useState(() =>
+    typeof window !== "undefined"
+      ? loadOnboardingDismissState().showEveryStart
+      : true
+  );
   const baseCurrencyRef = useRef(baseCurrency);
   /** Auto-refresh cours : positions + dashboard uniquement (pas fiscal / passifs / etc.). */
   const priceRefreshEnabled =
@@ -262,18 +265,20 @@ function PortfolioAppClient({
     baseCurrencyRef.current = baseCurrency;
   }, [baseCurrency]);
 
-  // Prefs onboarding : après mount (client only)
-  useEffect(() => {
-    const { showEveryStart: every } = loadOnboardingDismissState();
-    setShowEveryStart(every);
-  }, []);
-
-  // Deep-link / e2e : ?import=1 ouvre la modale CSV
-  useEffect(() => {
-    if (searchParams.get("import") === "1") {
-      setShowImport(true);
+  // Deep-link / e2e : ?import=1 → état d’import dérivé + manuel
+  const importFromUrl = searchParams.get("import") === "1";
+  const [showImportManual, setShowImportManual] = useState(false);
+  const showImport = importFromUrl || showImportManual;
+  const setShowImport = (v: boolean) => {
+    setShowImportManual(v);
+    if (!v && importFromUrl) {
+      // Retirer le query param sans remount
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("import");
+      const q = params.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
     }
-  }, [searchParams]);
+  };
 
   // Persiste l'onglet pour un éventuel retour hors-URL (préférence)
   useEffect(() => {

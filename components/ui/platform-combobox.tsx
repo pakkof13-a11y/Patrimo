@@ -135,9 +135,12 @@ export function PlatformCombobox({
       : []),
   ];
 
-  useEffect(() => {
+  const [hiKey, setHiKey] = useState(`${value}:${open}`);
+  const nextHiKey = `${value}:${open}`;
+  if (nextHiKey !== hiKey) {
+    setHiKey(nextHiKey);
     setHighlight(0);
-  }, [value, open]);
+  }
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
