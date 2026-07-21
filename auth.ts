@@ -15,12 +15,21 @@ import { resolveAuthTrustHost } from "./app/lib/auth/trust-host";
 export { resolveAuthTrustHost } from "./app/lib/auth/trust-host";
 
 /**
- * Hash bcrypt factice (coût 10) pour comparer même si l'utilisateur n'existe pas
- * — réduit les fuites par timing (user exists vs wrong password).
- * Phrase fixe non secrète (pas un mot de passe réel).
+ * Hash bcrypt factice pour comparer même si l'utilisateur n'existe pas
+ * (anti timing user-exists vs wrong-password).
+ * Généré au runtime à partir d’une phrase publique — aucun hash bcrypt
+ * littéral dans le dépôt (évite alertes SAST / gitleaks).
  */
-const DUMMY_PASSWORD_HASH =
-  "$2b$10$Wyhz8nCkjAX99Oc.yCM5uOPMCZOy.eiSeG37U08CbAhqUlTbYCG2C";
+let dummyPasswordHashCache: string | null = null;
+function getDummyPasswordHash(): string {
+  if (!dummyPasswordHashCache) {
+    dummyPasswordHashCache = bcrypt.hashSync(
+      "patrimo-timing-dummy-not-a-password",
+      10
+    );
+  }
+  return dummyPasswordHashCache;
+}
 
 /** Erreur rate-limit — code stable pour l’UI (sans fuite d’existence de compte). */
 class RateLimitedSignIn extends CredentialsSignin {
@@ -68,7 +77,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           },
         });
 
-        const hash = user?.passwordHash || DUMMY_PASSWORD_HASH;
+        const hash = user?.passwordHash || getDummyPasswordHash();
         const ok = await bcrypt.compare(password, hash);
 
         if (!user?.passwordHash || !ok) {
@@ -112,26 +121,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     async jwt({ token, user }) {
       if (user) {
+        // `user` est typé via types/next-auth.d.ts (User.username, User.role)
         token.sub = user.id;
         token.email = user.email;
         token.name = user.name;
-        const u = user as {
-          username?: string;
-          role?: string;
-        };
-        token.username = u.username;
-        token.role = u.role === "ADMIN" ? "ADMIN" : "USER";
+        token.username = user.username;
+        token.role = user.role === "ADMIN" ? "ADMIN" : "USER";
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user && token.sub) {
+        // JWT fields typés dans next-auth/jwt (types/next-auth.d.ts)
         session.user.id = token.sub;
-        session.user.email = (token.email as string) ?? session.user.email;
-        session.user.name = (token.name as string) ?? session.user.name;
-        session.user.username = (token.username as string) ?? "";
-        session.user.role =
-          (token.role as string) === "ADMIN" ? "ADMIN" : "USER";
+        session.user.email = token.email ?? session.user.email;
+        session.user.name = token.name ?? session.user.name;
+        session.user.username = token.username ?? "";
+        session.user.role = token.role === "ADMIN" ? "ADMIN" : "USER";
       }
       return session;
     },

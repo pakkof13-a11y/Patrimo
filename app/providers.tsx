@@ -9,6 +9,9 @@ import { DisplayProvider } from "@/components/layout/display-provider";
 import { NotificationsProvider } from "@/app/lib/notifications/context";
 import { ErrorBoundary } from "@/components/layout/error-boundary";
 
+/** Durée d’affichage des toasts Sonner (source unique). */
+const TOAST_DURATION_MS = 4000;
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
     () =>
@@ -43,9 +46,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
                 visibleToasts={5}
                 gap={10}
                 offset={16}
-                duration={4000}
                 toastOptions={{
-                  duration: 4000,
+                  // Source unique de la durée par défaut (évite double prop duration)
+                  duration: TOAST_DURATION_MS,
                   closeButton: true,
                   classNames: {
                     toast: "patrimo-toast",
