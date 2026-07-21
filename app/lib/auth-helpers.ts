@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import type { UserRole } from "@/types/next-auth";
+import { normalizeRole } from "./auth/role";
 import { prisma } from "./prisma";
 import {
   getKvBackend,
@@ -9,18 +11,22 @@ import {
   kvSet,
 } from "./api/kv-store";
 
+export type { UserRole };
+export { normalizeRole } from "./auth/role";
+
 export type SessionUser = {
   id: string;
   email?: string | null;
   name?: string | null;
   username?: string;
-  role: "ADMIN" | "USER";
+  /** Toujours défini — aligné sur Session.user.role (next-auth.d.ts) */
+  role: UserRole;
 };
 
 /** Snapshot d’accès lu en base (pas le JWT seul). */
 export type UserAccess = {
   id: string;
-  role: "ADMIN" | "USER";
+  role: UserRole;
   username: string;
   email: string;
 };
@@ -32,10 +38,6 @@ const ACCESS_KEY_PREFIX = "user-access:";
 /** Cache process uniquement si mono-instance (évite privilege escalation multi-lambda). */
 type CacheEntry = { access: UserAccess | null; expiresAt: number };
 const processAccessCache = new Map<string, CacheEntry>();
-
-function normalizeRole(role: string | null | undefined): "ADMIN" | "USER" {
-  return role === "ADMIN" ? "ADMIN" : "USER";
-}
 
 function accessKey(userId: string): string {
   return `${ACCESS_KEY_PREFIX}${userId}`;

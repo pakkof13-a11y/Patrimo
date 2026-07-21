@@ -43,6 +43,14 @@ import {
   type MainTab,
   type TxRow,
 } from "@/app/lib/types/ui";
+import { asAccountType } from "@/app/lib/types/account-type";
+import {
+  asBaseAmount,
+  asEurAmount,
+  asPercentString,
+  asPriceString,
+  asQuantityString,
+} from "@/app/lib/types/money-brands";
 import { pathnameToTab, tabToPath } from "@/app/lib/types/tab-routes";
 import {
   ENVELOPE_SELECT_OPTIONS,
@@ -1192,23 +1200,29 @@ function PortfolioAppClient({
               name: d.asset.name,
               ticker: d.asset.ticker,
               assetClass: d.asset.assetClass,
-              accountType:
-                (d.asset as { accountType?: string }).accountType || "CTO",
+              accountType: asAccountType(
+                (d.asset as { accountType?: string }).accountType,
+                "CTO"
+              ),
               currency: d.asset.currency,
               platformId,
               platformName: d.asset.platformName,
               platformLogoUrl: d.asset.platformLogoUrl,
-              quantity: d.holding?.quantity || "0",
-              avgCostEur: d.holding?.avgCostEur || "0",
-              costBasisEur: "0",
-              currentPriceEur: d.asset.priceQuote?.priceEur || "0",
-              currentPriceNative: d.asset.priceQuote?.priceNative || "0",
-              marketValueEur: d.holding?.marketValueEur || "0",
-              marketValueBase: d.holding?.marketValueEur || "0",
-              costBasisBase: "0",
-              unrealizedPnlEur: "0",
-              unrealizedPnlBase: "0",
-              unrealizedPnlPct: "0",
+              quantity: asQuantityString(d.holding?.quantity || "0"),
+              avgCostEur: asEurAmount(d.holding?.avgCostEur || "0"),
+              costBasisEur: asEurAmount("0"),
+              currentPriceEur: asPriceString(
+                d.asset.priceQuote?.priceEur || "0"
+              ),
+              currentPriceNative: asPriceString(
+                d.asset.priceQuote?.priceNative || "0"
+              ),
+              marketValueEur: asEurAmount(d.holding?.marketValueEur || "0"),
+              marketValueBase: asBaseAmount(d.holding?.marketValueEur || "0"),
+              costBasisBase: asBaseAmount("0"),
+              unrealizedPnlEur: asEurAmount("0"),
+              unrealizedPnlBase: asBaseAmount("0"),
+              unrealizedPnlPct: asPercentString("0"),
               priceSource: null,
               priceStatus: null,
               lastUpdatedAt: null,

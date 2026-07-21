@@ -3,6 +3,7 @@
  * sinon mémoire process (dev / tests).
  *
  * API async : toujours `await consumeRateLimit(...)`.
+ * TTL Upstash / mémoire gère le prune des clés.
  */
 
 import { kvIncr, kvTtlMs, __resetKvMemoryForTests } from "./kv-store";
@@ -37,7 +38,8 @@ export async function consumeRateLimit(
 }
 
 /**
- * @deprecated no-op conservé pour compat imports — le TTL gère le prune Upstash/mémoire.
+ * @deprecated no-op — le TTL Upstash/mémoire purge les buckets.
+ * Conservé pour compat imports (benchmark, etc.).
  */
 export function pruneRateLimitBuckets(_maxAgeMs = 10 * 60_000): void {
   // intentional no-op
@@ -46,4 +48,14 @@ export function pruneRateLimitBuckets(_maxAgeMs = 10 * 60_000): void {
 /** Tests */
 export function __resetSimpleRateLimitForTests(): void {
   __resetKvMemoryForTests();
+}
+
+/** Alias tests (typing-brands) */
+export function __resetRateLimitBucketsForTests(): void {
+  __resetKvMemoryForTests();
+}
+
+/** Compteur buckets mémoire (tests) — 0 sous Upstash */
+export function __rateLimitBucketCountForTests(): number {
+  return 0;
 }
