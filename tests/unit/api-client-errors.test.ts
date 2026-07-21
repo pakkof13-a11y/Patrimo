@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { toErrorMessage } from "@/app/lib/api-client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchJson, toErrorMessage } from "@/app/lib/api-client";
 
 describe("toErrorMessage", () => {
   it("keeps plain strings", () => {
@@ -24,3 +24,52 @@ describe("toErrorMessage", () => {
     expect(toErrorMessage({}, "fallback")).toBe("fallback");
   });
 });
+
+describe("fetchJson empty body", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("rejette un 200 sans corps JSON (pas de {} silencieux)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response("", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+    await expect(fetchJson<{ ok: boolean }>("/api/x")).rejects.toThrow(
+      /vide ou non-JSON/i
+    );
+  });
+
+  it("accepte un 204 sans corps", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(null, {
+          status: 204,
+        })
+      )
+    );
+    await expect(fetchJson<void>("/api/x")).resolves.toBeUndefined();
+  });
+
+  it("retourne le JSON 200 valide", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      )
+    );
+    await expect(fetchJson<{ ok: boolean }>("/api/x")).resolves.toEqual({
+      ok: true,
+    });
+  });
+});
+

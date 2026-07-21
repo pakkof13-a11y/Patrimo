@@ -2,10 +2,7 @@ import { NextResponse } from "next/server";
 import YahooFinance from "yahoo-finance2";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { cacheGet, cacheSet, cachePrune } from "@/app/lib/api/memory-cache";
-import {
-  consumeRateLimit,
-  pruneRateLimitBuckets,
-} from "@/app/lib/api/simple-rate-limit";
+import { consumeRateLimit } from "@/app/lib/api/simple-rate-limit";
 
 const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey"],
@@ -42,10 +39,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
 
-  pruneRateLimitBuckets();
   cachePrune();
 
-  const rl = consumeRateLimit(
+  const rl = await consumeRateLimit(
     `benchmark:${userId}`,
     RATE_LIMIT,
     RATE_WINDOW_MS

@@ -25,8 +25,8 @@ import {
 } from "@/app/lib/auth-helpers";
 
 describe("loadUserAccess + cache", () => {
-  beforeEach(() => {
-    invalidateUserAccessCache();
+  beforeEach(async () => {
+    await invalidateUserAccessCache();
     findUnique.mockReset();
   });
 
@@ -82,8 +82,8 @@ describe("loadUserAccess + cache", () => {
 });
 
 describe("gateAdmin sans session", () => {
-  beforeEach(() => {
-    invalidateUserAccessCache();
+  beforeEach(async () => {
+    await invalidateUserAccessCache();
   });
 
   it("renvoie 401 si non authentifié", async () => {

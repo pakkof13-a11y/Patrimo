@@ -1,4 +1,19 @@
 import type { AccountType } from "@/app/lib/constants";
+import type {
+  BaseAmount,
+  EurAmount,
+  PercentString,
+  PriceString,
+  QuantityString,
+} from "@/app/lib/types/money-brands";
+
+export type {
+  BaseAmount,
+  EurAmount,
+  PercentString,
+  PriceString,
+  QuantityString,
+} from "@/app/lib/types/money-brands";
 
 export type Holding = {
   assetId: string;
@@ -12,7 +27,8 @@ export type Holding = {
    * sans impact sur les calculs de positions.
    */
   category?: string | null;
-  accountType: string;
+  /** Enveloppe fiscale / stockage — union ACCOUNT_TYPES */
+  accountType: AccountType;
   currency: string;
   platformId: string;
   /** Plateformes de l’agrégat (crypto multi-custody) — filtre Positions */
@@ -35,28 +51,28 @@ export type Holding = {
   blockchainLabel?: string | null;
   assetLogoUrl?: string | null;
   logoUrl?: string | null;
-  quantity: string;
-  avgCostEur: string;
-  costBasisEur: string;
-  currentPriceEur: string;
-  currentPriceNative: string;
-  marketValueEur: string;
-  marketValueBase: string;
-  costBasisBase: string;
-  unrealizedPnlEur: string;
-  unrealizedPnlBase: string;
-  unrealizedPnlPct: string;
+  quantity: QuantityString;
+  avgCostEur: EurAmount;
+  costBasisEur: EurAmount;
+  currentPriceEur: PriceString;
+  currentPriceNative: PriceString;
+  marketValueEur: EurAmount;
+  marketValueBase: BaseAmount;
+  costBasisBase: BaseAmount;
+  unrealizedPnlEur: EurAmount;
+  unrealizedPnlBase: BaseAmount;
+  unrealizedPnlPct: PercentString;
   priceSource: string | null;
   priceStatus: string | null;
   lastUpdatedAt: string | null;
-  acquisitionFeesEur?: string;
-  acquisitionFeesBase?: string;
-  passiveIncomeEur?: string;
-  passiveIncomeBase?: string;
-  breakEvenEur?: string;
-  breakEvenBase?: string;
-  allocationPct?: string;
-  allocationPctOfClass?: string;
+  acquisitionFeesEur?: EurAmount;
+  acquisitionFeesBase?: BaseAmount;
+  passiveIncomeEur?: EurAmount;
+  passiveIncomeBase?: BaseAmount;
+  breakEvenEur?: EurAmount;
+  breakEvenBase?: BaseAmount;
+  allocationPct?: PercentString;
+  allocationPctOfClass?: PercentString;
   stopLoss?: string | null;
   tp1?: string | null;
   tp2?: string | null;
