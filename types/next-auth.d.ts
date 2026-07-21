@@ -11,13 +11,18 @@ declare module "next-auth" {
       name?: string | null;
       image?: string | null;
       username?: string;
-      role?: UserRole;
+      /**
+       * Toujours renseigné par le callback `session` (défaut USER).
+       * Aligné sur SessionUser.role dans auth-helpers.
+       */
+      role: UserRole;
     };
   }
 
   interface User {
     id: string;
     username?: string;
+    /** Renseigné à l’authorize / jwt — optionnel seulement avant premier login */
     role?: UserRole;
   }
 }
@@ -25,6 +30,7 @@ declare module "next-auth" {
 declare module "next-auth/jwt" {
   interface JWT {
     username?: string;
+    /** Présent après login ; session callback normalise → USER si absent */
     role?: UserRole;
   }
 }

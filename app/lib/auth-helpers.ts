@@ -1,19 +1,25 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import type { UserRole } from "@/types/next-auth";
+import { normalizeRole } from "./auth/role";
 import { prisma } from "./prisma";
+
+export type { UserRole };
+export { normalizeRole } from "./auth/role";
 
 export type SessionUser = {
   id: string;
   email?: string | null;
   name?: string | null;
   username?: string;
-  role: "ADMIN" | "USER";
+  /** Toujours défini — aligné sur Session.user.role (next-auth.d.ts) */
+  role: UserRole;
 };
 
 /** Snapshot d’accès lu en base (pas le JWT seul). */
 export type UserAccess = {
   id: string;
-  role: "ADMIN" | "USER";
+  role: UserRole;
   username: string;
   email: string;
 };
@@ -21,10 +27,6 @@ export type UserAccess = {
 const ACCESS_TTL_MS = 30_000; // 30 s — un admin rétrogradé perd les droits rapidement
 type CacheEntry = { access: UserAccess | null; expiresAt: number };
 const accessCache = new Map<string, CacheEntry>();
-
-function normalizeRole(role: string | null | undefined): "ADMIN" | "USER" {
-  return role === "ADMIN" ? "ADMIN" : "USER";
-}
 
 /**
  * Invalide le cache d’accès (après changement de rôle, suppression, etc.).

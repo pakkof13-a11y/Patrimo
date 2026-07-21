@@ -10,6 +10,7 @@ import {
   recordLoginFailure,
   GENERIC_LOGIN_ERROR,
 } from "./app/lib/auth/login-rate-limit";
+import { normalizeRole } from "./app/lib/auth/role";
 
 /**
  * Hash bcrypt factice pour comparer même si l'utilisateur n'existe pas
@@ -89,7 +90,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           name: user.name ?? user.username,
           username: user.username,
-          role: user.role === "ADMIN" ? "ADMIN" : "USER",
+          role: normalizeRole(user.role),
         };
       },
     }),
@@ -123,18 +124,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.email = user.email;
         token.name = user.name;
         token.username = user.username;
-        token.role = user.role === "ADMIN" ? "ADMIN" : "USER";
+        token.role = normalizeRole(user.role);
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user && token.sub) {
         // JWT fields typés dans next-auth/jwt (types/next-auth.d.ts)
+        // role toujours défini (UserRole) — aligne Session.user.role obligatoire
         session.user.id = token.sub;
         session.user.email = token.email ?? session.user.email;
         session.user.name = token.name ?? session.user.name;
         session.user.username = token.username ?? "";
-        session.user.role = token.role === "ADMIN" ? "ADMIN" : "USER";
+        session.user.role = normalizeRole(token.role);
       }
       return session;
     },

@@ -21,6 +21,20 @@ import {
   sliceFromHoldingLeg,
   type HoldingPlatformSlice,
 } from "./holdings-platform-slice";
+import { asAccountType } from "../types/account-type";
+import {
+  asBaseAmount,
+  asEurAmount,
+  asPercentString,
+  asPriceString,
+  asQuantityString,
+  type BaseAmount,
+  type EurAmount,
+  type PercentString,
+  type PriceString,
+  type QuantityString,
+} from "../types/money-brands";
+import type { AccountType } from "../constants";
 
 function mapDbTx(row: {
   id: string;
@@ -122,8 +136,8 @@ export type HoldingRow = {
   assetClass: string;
   /** Sous-catégorie UI — hors calculs ledger */
   category: string;
-  /// CTO | PEA | AV | CRYPTO | IMMOBILIER
-  accountType: string;
+  /** CTO | PEA | AV | CRYPTO | IMMOBILIER | CFD */
+  accountType: AccountType;
   currency: string;
   platformId: string;
   /**
@@ -143,36 +157,36 @@ export type HoldingRow = {
   blockchainKey?: string | null;
   blockchainLabel?: string | null;
   assetLogoUrl: string | null;
-  quantity: string;
+  quantity: QuantityString;
   /** PRU / CUMP (EUR) — break-even unitaire frais inclus */
-  avgCostEur: string;
-  costBasisEur: string;
-  currentPriceEur: string;
-  currentPriceNative: string;
-  marketValueEur: string;
-  marketValueBase: string;
-  costBasisBase: string;
-  unrealizedPnlEur: string;
-  unrealizedPnlBase: string;
-  unrealizedPnlPct: string;
+  avgCostEur: EurAmount;
+  costBasisEur: EurAmount;
+  currentPriceEur: PriceString;
+  currentPriceNative: PriceString;
+  marketValueEur: EurAmount;
+  marketValueBase: BaseAmount;
+  costBasisBase: BaseAmount;
+  unrealizedPnlEur: EurAmount;
+  unrealizedPnlBase: BaseAmount;
+  unrealizedPnlPct: PercentString;
   priceSource: string | null;
   priceStatus: string | null;
   lastUpdatedAt: string | null;
   logoUrl: string | null;
   priceProvider: string;
   /** Fees paid on purchases (EUR, cumulative) */
-  acquisitionFeesEur: string;
-  acquisitionFeesBase: string;
+  acquisitionFeesEur: EurAmount;
+  acquisitionFeesBase: BaseAmount;
   /** Passive income: dividends, coupons, rent, interest (EUR) */
-  passiveIncomeEur: string;
-  passiveIncomeBase: string;
+  passiveIncomeEur: EurAmount;
+  passiveIncomeBase: BaseAmount;
   /** Break-even unit price (EUR) = PRU */
-  breakEvenEur: string;
-  breakEvenBase: string;
+  breakEvenEur: EurAmount;
+  breakEvenBase: BaseAmount;
   /** % of total portfolio market value */
-  allocationPct: string;
+  allocationPct: PercentString;
   /** % of same asset-class bucket */
-  allocationPctOfClass: string;
+  allocationPctOfClass: PercentString;
   /** Exit levels (native currency) — null if unset / already fired */
   stopLoss: string | null;
   tp1: string | null;
@@ -180,6 +194,13 @@ export type HoldingRow = {
   tp3: string | null;
   tp4: string | null;
 };
+
+/** Helpers locaux — toFixed → montants brandés */
+const qtyS = (v: string) => asQuantityString(v);
+const eurS = (v: string) => asEurAmount(v);
+const baseS = (v: string) => asBaseAmount(v);
+const priceS = (v: string) => asPriceString(v);
+const pctS = (v: string) => asPercentString(v);
 
 export async function getHoldings(
   userId: string,
@@ -298,7 +319,7 @@ export async function getHoldings(
       assetClass: asset.assetClass,
       category:
         (asset as { category?: string | null }).category || "UNCLASSIFIED",
-      accountType: asset.accountType || "CTO",
+      accountType: asAccountType(asset.accountType, "CTO"),
       currency: asset.currency || asset.priceQuote?.nativeCurrency || "EUR",
       platformId: pos.platformId,
       platformIds: [pos.platformId],
@@ -313,30 +334,32 @@ export async function getHoldings(
       blockchainKey: chainKey,
       blockchainLabel: blockchainLabel(chainKey),
       assetLogoUrl: assetLogo,
-      quantity: toFixed(pos.quantity, 8),
-      avgCostEur: toFixed(avg, 8),
-      costBasisEur: toFixed(pos.costBasisEur, 8),
-      currentPriceEur: toFixed(priceEur, 8),
-      currentPriceNative: toFixed(priceNative.gt(0) ? priceNative : priceEur, 8),
-      marketValueEur: toFixed(marketValue, 8),
-      marketValueBase: toBase(marketValue),
-      costBasisBase: toBase(pos.costBasisEur),
-      unrealizedPnlEur: toFixed(unrealized, 8),
-      unrealizedPnlBase: toBase(unrealized),
-      unrealizedPnlPct: toFixed(pct, 4),
+      quantity: qtyS(toFixed(pos.quantity, 8)),
+      avgCostEur: eurS(toFixed(avg, 8)),
+      costBasisEur: eurS(toFixed(pos.costBasisEur, 8)),
+      currentPriceEur: priceS(toFixed(priceEur, 8)),
+      currentPriceNative: priceS(
+        toFixed(priceNative.gt(0) ? priceNative : priceEur, 8)
+      ),
+      marketValueEur: eurS(toFixed(marketValue, 8)),
+      marketValueBase: baseS(toBase(marketValue)),
+      costBasisBase: baseS(toBase(pos.costBasisEur)),
+      unrealizedPnlEur: eurS(toFixed(unrealized, 8)),
+      unrealizedPnlBase: baseS(toBase(unrealized)),
+      unrealizedPnlPct: pctS(toFixed(pct, 4)),
       priceSource: asset.priceQuote?.source ?? (asset.manualPrice ? "manual" : "coût"),
       priceStatus: asset.priceQuote?.status ?? (asset.manualPrice ? "OK" : "OK"),
       lastUpdatedAt: asset.priceQuote?.lastUpdatedAt?.toISOString() ?? null,
       logoUrl: assetLogo,
       priceProvider: asset.priceProvider,
-      acquisitionFeesEur: toFixed(fees, 8),
-      acquisitionFeesBase: toBase(fees),
-      passiveIncomeEur: toFixed(income, 8),
-      passiveIncomeBase: toBase(income),
-      breakEvenEur: toFixed(avg, 8),
-      breakEvenBase: toBase(avg),
-      allocationPct: "0",
-      allocationPctOfClass: "0",
+      acquisitionFeesEur: eurS(toFixed(fees, 8)),
+      acquisitionFeesBase: baseS(toBase(fees)),
+      passiveIncomeEur: eurS(toFixed(income, 8)),
+      passiveIncomeBase: baseS(toBase(income)),
+      breakEvenEur: eurS(toFixed(avg, 8)),
+      breakEvenBase: baseS(toBase(avg)),
+      allocationPct: pctS("0"),
+      allocationPctOfClass: pctS("0"),
       stopLoss: asset.stopLoss?.toString() ?? null,
       tp1: asset.tp1?.toString() ?? null,
       tp2: asset.tp2?.toString() ?? null,
@@ -418,7 +441,7 @@ export async function getHoldings(
       ...prev,
       // assetId principal = plus grosse position (détail + actions)
       assetId: takeRow ? row.assetId : prev.assetId,
-      accountType: prev.accountType || row.accountType || "CTO",
+      accountType: asAccountType(prev.accountType || row.accountType, "CTO"),
       // Aligner platformId sur la jambe principale (sinon filtre Positions incohérent)
       platformId: takeRow ? row.platformId : prev.platformId,
       platformIds,
@@ -427,30 +450,29 @@ export async function getHoldings(
       platformLogoUrl: preferLive.platformLogoUrl || prev.platformLogoUrl,
       blockchainKey: prev.blockchainKey || row.blockchainKey,
       blockchainLabel: prev.blockchainLabel || row.blockchainLabel,
-      quantity: toFixed(qty, 8),
-      costBasisEur: toFixed(cost, 8),
-      avgCostEur: toFixed(avg, 8),
-      currentPriceEur: toFixed(px, 8),
+      quantity: qtyS(toFixed(qty, 8)),
+      costBasisEur: eurS(toFixed(cost, 8)),
+      avgCostEur: eurS(toFixed(avg, 8)),
+      currentPriceEur: priceS(toFixed(px, 8)),
       currentPriceNative: preferLive.currentPriceNative || prev.currentPriceNative,
-      marketValueEur: toFixed(mv, 8),
-      marketValueBase: toFixed(mvBase, 8),
-      costBasisBase: toFixed(costBase, 8),
-      unrealizedPnlEur: toFixed(unreal, 8),
-      unrealizedPnlBase: toFixed(
-        d(prev.unrealizedPnlBase).plus(d(row.unrealizedPnlBase)),
-        8
+      marketValueEur: eurS(toFixed(mv, 8)),
+      marketValueBase: baseS(toFixed(mvBase, 8)),
+      costBasisBase: baseS(toFixed(costBase, 8)),
+      unrealizedPnlEur: eurS(toFixed(unreal, 8)),
+      unrealizedPnlBase: baseS(
+        toFixed(d(prev.unrealizedPnlBase).plus(d(row.unrealizedPnlBase)), 8)
       ),
-      unrealizedPnlPct: toFixed(pct, 4),
+      unrealizedPnlPct: pctS(toFixed(pct, 4)),
       priceSource: preferLive.priceSource || prev.priceSource,
       priceProvider: preferLive.priceProvider || prev.priceProvider,
       priceStatus: preferLive.priceStatus || prev.priceStatus,
       lastUpdatedAt: preferLive.lastUpdatedAt || prev.lastUpdatedAt,
-      acquisitionFeesEur: toFixed(fees, 8),
-      acquisitionFeesBase: toBase(fees),
-      passiveIncomeEur: toFixed(income, 8),
-      passiveIncomeBase: toBase(income),
-      breakEvenEur: toFixed(avg, 8),
-      breakEvenBase: toBase(avg),
+      acquisitionFeesEur: eurS(toFixed(fees, 8)),
+      acquisitionFeesBase: baseS(toBase(fees)),
+      passiveIncomeEur: eurS(toFixed(income, 8)),
+      passiveIncomeBase: baseS(toBase(income)),
+      breakEvenEur: eurS(toFixed(avg, 8)),
+      breakEvenBase: baseS(toBase(avg)),
     });
   }
 
@@ -464,11 +486,12 @@ export async function getHoldings(
   }
   for (const r of mergedRows) {
     const mv = d(r.marketValueEur);
-    r.allocationPct = totalMv.gt(0) ? toFixed(mv.div(totalMv).times(100), 4) : "0";
+    r.allocationPct =
+      totalMv.gt(0) ? pctS(toFixed(mv.div(totalMv).times(100), 4)) : pctS("0");
     const classTotal = byClass.get(r.assetClass) || zero();
     r.allocationPctOfClass = classTotal.gt(0)
-      ? toFixed(mv.div(classTotal).times(100), 4)
-      : "0";
+      ? pctS(toFixed(mv.div(classTotal).times(100), 4))
+      : pctS("0");
   }
 
   mergedRows.sort((a, b) => d(b.marketValueEur).cmp(d(a.marketValueEur)));
@@ -713,7 +736,7 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     const v = Number(h.marketValueBase || h.marketValueEur);
     byClass[h.assetClass] = (byClass[h.assetClass] ?? 0) + v;
     byPlatform[h.platformName] = (byPlatform[h.platformName] ?? 0) + v;
-    const at = (h as HoldingRow & { accountType?: string }).accountType || "CTO";
+    const at = h.accountType;
     byAccountType[at] = (byAccountType[at] ?? 0) + v;
   }
   // Cash (poches banques + ledger) rattaché aux plateformes pour le camembert « par plateforme »
