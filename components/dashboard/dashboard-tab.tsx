@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { NewsMacroPanel } from "@/components/dashboard/news-macro-panel";
 import type { PortfolioTickerProp } from "@/components/dashboard/market-calendar-panel";
 import { PortfolioEvolutionPanel } from "@/components/dashboard/portfolio-evolution-panel";
@@ -97,15 +97,18 @@ export function DashboardTab({
   const [stableAllocation, setStableAllocation] = useState<
     PortfolioAllocation | undefined
   >(allocation);
+  const [prevAllocation, setPrevAllocation] = useState(allocation);
 
-  useEffect(() => {
-    if (!allocation) return;
-    const hasClass = (allocation.byClass?.length ?? 0) > 0;
-    const hasPlat = (allocation.byPlatform?.length ?? 0) > 0;
-    if (hasClass || hasPlat) {
-      setStableAllocation(allocation);
+  if (allocation !== prevAllocation) {
+    setPrevAllocation(allocation);
+    if (allocation) {
+      const hasClass = (allocation.byClass?.length ?? 0) > 0;
+      const hasPlat = (allocation.byPlatform?.length ?? 0) > 0;
+      if (hasClass || hasPlat) {
+        setStableAllocation(allocation);
+      }
     }
-  }, [allocation]);
+  }
 
   const displayAllocation = stableAllocation ?? allocation;
 
@@ -128,9 +131,11 @@ export function DashboardTab({
   );
 
   const [stableHistory, setStableHistory] = useState<HistoryPoint[]>(history);
-  useEffect(() => {
+  const [prevHistory, setPrevHistory] = useState(history);
+  if (history !== prevHistory) {
+    setPrevHistory(history);
     if (history.length > 0) setStableHistory(history);
-  }, [history]);
+  }
 
   const showHistoryLoading =
     Boolean(historyLoading) &&

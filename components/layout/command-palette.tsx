@@ -55,12 +55,29 @@ export function CommandPalette({
 }) {
   const [q, setQ] = useState("");
   const [hi, setHi] = useState(0);
+  const [wasOpen, setWasOpen] = useState(open);
+  const [prevQ, setPrevQ] = useState(q);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
+  // Reset query/highlight à l’ouverture (pas d’effect setState)
+  if (open && !wasOpen) {
+    setWasOpen(true);
     setQ("");
     setHi(0);
+    setPrevQ("");
+  } else if (!open && wasOpen) {
+    setWasOpen(false);
+  }
+
+  // Highlight au début de liste quand la query change
+  if (q !== prevQ) {
+    setPrevQ(q);
+    setHi(0);
+  }
+
+  // Focus input uniquement (DOM) — pas de setState
+  useEffect(() => {
+    if (!open) return;
     const t = window.setTimeout(() => inputRef.current?.focus(), 20);
     return () => window.clearTimeout(t);
   }, [open]);
@@ -219,10 +236,6 @@ export function CommandPalette({
     onOpenPreferences,
     onOpenAsset,
   ]);
-
-  useEffect(() => {
-    setHi(0);
-  }, [q]);
 
   const run = useCallback(
     (item: ActionItem) => {

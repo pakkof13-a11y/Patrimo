@@ -107,9 +107,12 @@ export function AssetAutocomplete({
   const wrapRef = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
+  const [prevValueKey, setPrevValueKey] = useState(`${valueId}:${valueLabel}`);
+  const valueKey = `${valueId}:${valueLabel}`;
+  if (valueKey !== prevValueKey) {
+    setPrevValueKey(valueKey);
     if (valueLabel) setQuery(valueLabel);
-  }, [valueLabel, valueId]);
+  }
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {

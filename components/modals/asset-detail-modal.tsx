@@ -154,14 +154,17 @@ export function AssetDetailModal({
   const txMenuRef = useRef<HTMLDivElement>(null);
 
   // Reset filtres type à chaque changement d'actif / réouverture
-  useEffect(() => {
-    if (open) {
-      setTypeFilter("all");
-      setPlatformFilter("");
-      setTxMenuOpen(false);
-      setWhtOpen(false);
-    }
-  }, [open, data?.asset.id]);
+  const resetKey = `${open}:${data?.asset.id ?? ""}`;
+  const [prevResetKey, setPrevResetKey] = useState(resetKey);
+  if (open && resetKey !== prevResetKey) {
+    setPrevResetKey(resetKey);
+    setTypeFilter("all");
+    setPlatformFilter("");
+    setTxMenuOpen(false);
+    setWhtOpen(false);
+  } else if (!open && prevResetKey.startsWith("true:")) {
+    setPrevResetKey(resetKey);
+  }
 
   useEffect(() => {
     if (!txMenuOpen) return;
@@ -209,7 +212,7 @@ export function AssetDetailModal({
       }
     }
     return [...byId.values()];
-  }, [data?.platforms, txs]);
+  }, [data, txs]);
 
   const multiPlatform = (data?.asset.platformCount ?? platformOptions.length) > 1;
 

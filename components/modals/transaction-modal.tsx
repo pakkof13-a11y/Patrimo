@@ -275,12 +275,21 @@ export function TransactionModal({
   const ratesCacheRef = useRef<Record<string, number> | null>(null);
   const skipNextCurrencyEffect = useRef(false);
 
+  const [wasOpen, setWasOpen] = useState(open);
+  // UI state reset on close (render-time setState only — refs dans l’effect)
+  if (!open && wasOpen) {
+    setWasOpen(false);
+    setFxHint(null);
+    setConvertAmounts(true);
+    setShowFxHelp(false);
+  } else if (open && !wasOpen) {
+    setWasOpen(true);
+  }
+
+  // Refs de devise : uniquement hors render
   useEffect(() => {
     if (!open) {
       prevCurrencyRef.current = null;
-      setFxHint(null);
-      setConvertAmounts(true);
-      setShowFxHelp(false);
       return;
     }
     const initial = (form.getValues("currency") || "EUR").toUpperCase();
