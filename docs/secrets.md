@@ -18,6 +18,10 @@
 
 | Variable | Usage | Requis |
 |----------|--------|--------|
+| `AUTH_URL` / `NEXTAUTH_URL` | URL canonique Auth.js (prod) | **Oui en prod** ; laisser vide en Preview Vercel multi-host |
+| `AUTH_TRUST_HOST` | Override trust Host (`true`/`false`) | Non (auto : off si `AUTH_URL`, on en preview) |
+| `UPSTASH_REDIS_REST_URL` | Rate-limit + cache accès multi-instance | **Fortement recommandé en prod Vercel** |
+| `UPSTASH_REDIS_REST_TOKEN` | Token REST Upstash | Avec l’URL |
 | `ADMIN_USERNAME` / `ADMIN_EMAIL` | Identité admin seed | Non (défauts publics) |
 | `DEMO_USERNAME` / `DEMO_EMAIL` | Identité demo seed | Non (défauts publics) |
 | `E2E_USER` / `E2E_PASS` | Playwright | `E2E_PASS` ou `DEMO_PASSWORD` |
@@ -26,6 +30,14 @@
 | `SOLANA_RPC_URL` | RPC Solana natif (défaut mainnet-beta public) | Non |
 | `CRON_SECRET` | Accrual multi-user | Non |
 | `NEXT_PUBLIC_LOGO_DEV_PUBLISHABLE_KEY` | Logos (publishable) | Non |
+
+### Upstash (rate-limit serverless)
+
+Sans Upstash, les compteurs login / API restent **process-local** : inefficaces sur Vercel (cold start = compteur à zéro). Health expose `env.rateLimitBackend` (`upstash` | `memory`) et `configWarnings` si manquant en déployé.
+
+1. Créer une DB Redis sur [Upstash](https://console.upstash.com/) (région proche de Vercel/Neon, ex. `eu-central-1`).
+2. Copier **REST URL** + **REST TOKEN** dans Vercel → Production **et** Preview.
+3. Redeploy — `/api/health` → `rateLimitBackend: "upstash"`.
 
 ## Bootstrap local
 
@@ -72,7 +84,9 @@ Voir aussi **[docs/readiness.md](readiness.md)** (décision déployable + health
 - [ ] `.env` / secrets Vercel renseignés (pas de valeurs d’exemple).
 - [ ] `ALLOW_DEMO_FALLBACK=false` hors démo pure.
 - [ ] `AUTH_SECRET` unique et fort.
-- [ ] `AUTH_URL` / `NEXTAUTH_URL` = URL publique de l’env test.
+- [ ] `AUTH_URL` / `NEXTAUTH_URL` = URL publique **production** ; Preview = vide (ou `AUTH_TRUST_HOST=true`).
+- [ ] `UPSTASH_REDIS_REST_URL` + `TOKEN` en prod (rate-limit multi-instance).
+- [ ] Headers CSP présents (`Content-Security-Policy` sur `/`).
 - [ ] Mots de passe admin/demo **différents** du CI et du local.
 - [ ] Clés Finnhub / CoinGecko en variables serveur uniquement (pas `NEXT_PUBLIC_`). `SOLANA_RPC_URL` = URL RPC (pas de secret Solscan).
 - [ ] Scan Gitleaks vert sur la branche.

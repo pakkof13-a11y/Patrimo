@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   }
 
   // 4 sync / min max — le RPC public ne tolère pas plus
-  const rl = consumeRateLimit(`solana-rpc-sync:${userId}`, 4, 60_000);
+  const rl = await consumeRateLimit(`solana-rpc-sync:${userId}`, 4, 60_000);
   if (!rl.ok) {
     return NextResponse.json(
       {

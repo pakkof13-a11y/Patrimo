@@ -120,7 +120,7 @@ export async function PATCH(req: Request) {
   });
 
   // Force re-check accès (mot de passe changé — cache accès inchangé mais propre)
-  invalidateUserAccessCache(target.id);
+  await invalidateUserAccessCache(target.id);
 
   return NextResponse.json({ ok: true, userId: target.id });
 }
@@ -144,7 +144,7 @@ export async function DELETE(req: Request) {
   }
 
   await prisma.user.delete({ where: { id: userId } });
-  invalidateUserAccessCache(userId);
+  await invalidateUserAccessCache(userId);
 
   return NextResponse.json({ ok: true });
 }

@@ -15,46 +15,46 @@ describe("login rate limit", () => {
     __resetLoginRateLimitForTests();
   });
 
-  it("autorise les premières tentatives", () => {
-    expect(checkLoginAllowed("1.1.1.1", "demo").blocked).toBe(false);
+  it("autorise les premières tentatives", async () => {
+    expect((await checkLoginAllowed("1.1.1.1", "demo")).blocked).toBe(false);
   });
 
-  it("déclenche un cooldown après THRESHOLD échecs sur l’identifiant", () => {
+  it("déclenche un cooldown après THRESHOLD échecs sur l’identifiant", async () => {
     for (let i = 0; i < LOGIN_RATE_LIMIT.THRESHOLD; i++) {
-      recordLoginFailure("1.1.1.1", "victim");
+      await recordLoginFailure("1.1.1.1", "victim");
     }
-    const gate = checkLoginAllowed("9.9.9.9", "victim");
+    const gate = await checkLoginAllowed("9.9.9.9", "victim");
     expect(gate.blocked).toBe(true);
     if (gate.blocked) {
       expect(gate.retryAfterSec).toBeGreaterThan(0);
     }
   });
 
-  it("bloque aussi par IP après plusieurs échecs multi-comptes", () => {
+  it("bloque aussi par IP après plusieurs échecs multi-comptes", async () => {
     for (let i = 0; i < LOGIN_RATE_LIMIT.THRESHOLD; i++) {
-      recordLoginFailure("2.2.2.2", `user${i}`);
+      await recordLoginFailure("2.2.2.2", `user${i}`);
     }
-    const gate = checkLoginAllowed("2.2.2.2", "other");
+    const gate = await checkLoginAllowed("2.2.2.2", "other");
     expect(gate.blocked).toBe(true);
   });
 
-  it("clearLoginFailures réautorise après succès", () => {
+  it("clearLoginFailures réautorise après succès", async () => {
     for (let i = 0; i < LOGIN_RATE_LIMIT.THRESHOLD; i++) {
-      recordLoginFailure("3.3.3.3", "demo");
+      await recordLoginFailure("3.3.3.3", "demo");
     }
-    expect(checkLoginAllowed("3.3.3.3", "demo").blocked).toBe(true);
-    clearLoginFailures("3.3.3.3", "demo");
-    expect(checkLoginAllowed("3.3.3.3", "demo").blocked).toBe(false);
+    expect((await checkLoginAllowed("3.3.3.3", "demo")).blocked).toBe(true);
+    await clearLoginFailures("3.3.3.3", "demo");
+    expect((await checkLoginAllowed("3.3.3.3", "demo")).blocked).toBe(false);
   });
 
-  it("augmente le cooldown avec les échecs suivants", () => {
+  it("augmente le cooldown avec les échecs suivants", async () => {
     for (let i = 0; i < LOGIN_RATE_LIMIT.THRESHOLD; i++) {
-      recordLoginFailure("4.4.4.4", "admin");
+      await recordLoginFailure("4.4.4.4", "admin");
     }
-    const b1 = __peekLoginBucketForTests("id", "admin");
+    const b1 = await __peekLoginBucketForTests("id", "admin");
     const lock1 = b1?.lockedUntil ?? 0;
-    recordLoginFailure("4.4.4.4", "admin");
-    const b2 = __peekLoginBucketForTests("id", "admin");
+    await recordLoginFailure("4.4.4.4", "admin");
+    const b2 = await __peekLoginBucketForTests("id", "admin");
     const lock2 = b2?.lockedUntil ?? 0;
     expect(lock2).toBeGreaterThanOrEqual(lock1);
   });
