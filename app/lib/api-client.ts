@@ -117,7 +117,17 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
     throw new Error(fromBody || `Erreur (${res.status})`);
   }
 
-  return (data ?? {}) as T;
+  // 204 / 205 : corps intentionnellement vide (mutations sans payload)
+  if (data == null && (res.status === 204 || res.status === 205)) {
+    return undefined as T;
+  }
+
+  // Ne pas masquer un corps vide en `{} as T` (faux positif silencieux)
+  if (data == null) {
+    throw new Error("Réponse serveur vide ou non-JSON");
+  }
+
+  return data as T;
 }
 
 /**
