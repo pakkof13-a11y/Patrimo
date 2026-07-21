@@ -10,6 +10,9 @@ import {
   recordLoginFailure,
   GENERIC_LOGIN_ERROR,
 } from "./app/lib/auth/login-rate-limit";
+import { resolveAuthTrustHost } from "./app/lib/auth/trust-host";
+
+export { resolveAuthTrustHost } from "./app/lib/auth/trust-host";
 
 /**
  * Hash bcrypt factice (coût 10) pour comparer même si l'utilisateur n'existe pas
@@ -50,7 +53,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const password = parsed.data.password;
         const ip = await getLoginClientIp();
 
-        const gate = checkLoginAllowed(ip, login);
+        const gate = await checkLoginAllowed(ip, login);
         if (gate.blocked) {
           throw new RateLimitedSignIn(gate.retryAfterSec);
         }
@@ -69,11 +72,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const ok = await bcrypt.compare(password, hash);
 
         if (!user?.passwordHash || !ok) {
-          recordLoginFailure(ip, login);
+          await recordLoginFailure(ip, login);
           return null; // → CredentialsSignin générique côté client
         }
 
-        clearLoginFailures(ip, login);
+        await clearLoginFailures(ip, login);
 
         return {
           id: user.id,
@@ -134,5 +137,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
   secret: process.env.AUTH_SECRET,
-  trustHost: true,
+  /**
+   * trustHost : ne pas faire aveuglément confiance au Host en prod.
+   * - AUTH_URL défini → false (URL canonique, anti host-header injection)
+   * - Preview Vercel sans AUTH_URL → true (hosts multi-preview)
+   * - Override : AUTH_TRUST_HOST=true|false
+   * @see resolveAuthTrustHost
+   */
+  trustHost: resolveAuthTrustHost(),
 });

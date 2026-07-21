@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "./prisma";
+import {
+  getKvBackend,
+  isEphemeralProcessStore,
+  kvDel,
+  kvGet,
+  kvSet,
+} from "./api/kv-store";
 
 export type SessionUser = {
   id: string;
@@ -19,26 +26,44 @@ export type UserAccess = {
 };
 
 const ACCESS_TTL_MS = 30_000; // 30 s — un admin rétrogradé perd les droits rapidement
+const ACCESS_TTL_SEC = Math.ceil(ACCESS_TTL_MS / 1000);
+const ACCESS_KEY_PREFIX = "user-access:";
+
+/** Cache process uniquement si mono-instance (évite privilege escalation multi-lambda). */
 type CacheEntry = { access: UserAccess | null; expiresAt: number };
-const accessCache = new Map<string, CacheEntry>();
+const processAccessCache = new Map<string, CacheEntry>();
 
 function normalizeRole(role: string | null | undefined): "ADMIN" | "USER" {
   return role === "ADMIN" ? "ADMIN" : "USER";
 }
 
-/**
- * Invalide le cache d’accès (après changement de rôle, suppression, etc.).
- */
-export function invalidateUserAccessCache(userId?: string): void {
-  if (userId) {
-    accessCache.delete(userId);
-    return;
-  }
-  accessCache.clear();
+function accessKey(userId: string): string {
+  return `${ACCESS_KEY_PREFIX}${userId}`;
+}
+
+function allowProcessCache(): boolean {
+  // Sur Vercel sans Upstash, ne jamais cacher le rôle en mémoire process
+  // (révocation non partagée entre lambdas + TTL illusoire).
+  if (isEphemeralProcessStore()) return false;
+  return getKvBackend() === "memory";
 }
 
 /**
- * Charge rôle + existence depuis la base (avec cache court).
+ * Invalide le cache d’accès (après changement de rôle, suppression, etc.).
+ * Async pour purger Upstash multi-instance.
+ */
+export async function invalidateUserAccessCache(userId?: string): Promise<void> {
+  if (userId) {
+    processAccessCache.delete(userId);
+    await kvDel(accessKey(userId));
+    return;
+  }
+  processAccessCache.clear();
+  // Purge globale Redis non supportée sans SCAN — les clés expirent via TTL.
+}
+
+/**
+ * Charge rôle + existence depuis la base (cache court si store sûr).
  * `null` = utilisateur absent / supprimé (hard delete Prisma cascade).
  * Pas de soft-delete dans le schéma actuel — « inactif » = n’existe plus.
  */
@@ -47,9 +72,24 @@ export async function loadUserAccess(
   opts?: { bypassCache?: boolean }
 ): Promise<UserAccess | null> {
   const now = Date.now();
-  if (!opts?.bypassCache) {
-    const hit = accessCache.get(userId);
-    if (hit && hit.expiresAt > now) return hit.access;
+  const bypass = opts?.bypassCache === true;
+
+  if (!bypass) {
+    if (allowProcessCache()) {
+      const hit = processAccessCache.get(userId);
+      if (hit && hit.expiresAt > now) return hit.access;
+    } else if (getKvBackend() === "upstash") {
+      const raw = await kvGet(accessKey(userId));
+      if (raw != null) {
+        try {
+          if (raw === "null") return null;
+          return JSON.parse(raw) as UserAccess;
+        } catch {
+          /* corrupt → recharger */
+        }
+      }
+    }
+    // ephemeral memory store : pas de cache → DB directe
   }
 
   const row = await prisma.user.findUnique({
@@ -66,7 +106,19 @@ export async function loadUserAccess(
       }
     : null;
 
-  accessCache.set(userId, { access, expiresAt: now + ACCESS_TTL_MS });
+  if (allowProcessCache()) {
+    processAccessCache.set(userId, {
+      access,
+      expiresAt: now + ACCESS_TTL_MS,
+    });
+  } else if (getKvBackend() === "upstash" && !bypass) {
+    await kvSet(
+      accessKey(userId),
+      access ? JSON.stringify(access) : "null",
+      ACCESS_TTL_SEC
+    );
+  }
+
   return access;
 }
 
@@ -116,9 +168,11 @@ export type AdminGate =
   | { ok: false; status: 401 | 403; error: string };
 
 /**
- * Admin : revalide le rôle en base (cache ≤ 30 s).
+ * Admin : revalide **toujours** le rôle en base (bypass cache).
  * - 401 : pas de session / compte supprimé
  * - 403 : session valide mais plus (ou jamais) ADMIN
+ *
+ * Évite privilege escalation via cache multi-instance / JWT stale.
  */
 export async function gateAdmin(): Promise<AdminGate> {
   const sessionUser = await getSessionUser();
@@ -126,10 +180,9 @@ export async function gateAdmin(): Promise<AdminGate> {
     return { ok: false, status: 401, error: "Non authentifié" };
   }
 
-  // Toujours revalider le rôle côté DB pour les privilèges élevés
-  const access = await loadUserAccess(sessionUser.id);
+  const access = await loadUserAccess(sessionUser.id, { bypassCache: true });
   if (!access) {
-    invalidateUserAccessCache(sessionUser.id);
+    await invalidateUserAccessCache(sessionUser.id);
     return {
       ok: false,
       status: 401,

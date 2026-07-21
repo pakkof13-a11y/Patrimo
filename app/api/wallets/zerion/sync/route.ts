@@ -46,7 +46,7 @@ export async function POST(req: Request) {
   }
 
   // 4 sync / min (chaque sync = 2 appels Zerion throttlés)
-  const rl = consumeRateLimit(`zerion-sync:${userId}`, 4, 60_000);
+  const rl = await consumeRateLimit(`zerion-sync:${userId}`, 4, 60_000);
   if (!rl.ok) {
     return NextResponse.json(
       {
