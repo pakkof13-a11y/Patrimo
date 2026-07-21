@@ -3,6 +3,7 @@
  * Ne pas logger de secrets. Utilisé par /api/health et checks ops.
  */
 import { timingSafeEqual } from "crypto";
+import { getKvBackend, type KvBackend } from "@/app/lib/api/kv-store";
 
 export type RuntimeEnvStatus = {
   /** NODE_ENV résolu */
@@ -17,6 +18,12 @@ export type RuntimeEnvStatus = {
   demoFallbackEnabled: boolean;
   /** true si l’on considère l’env « non-local » (production | test | staging) */
   isDeployedLike: boolean;
+  /** Backend rate-limit / cache partagé */
+  rateLimitBackend: KvBackend;
+  /** true si AUTH_URL ou NEXTAUTH_URL est défini */
+  authUrlConfigured: boolean;
+  /** true si Upstash Redis REST est configuré */
+  upstashConfigured: boolean;
 };
 
 function truthyEnv(name: string): boolean {
@@ -38,6 +45,14 @@ export function getRuntimeEnvStatus(): RuntimeEnvStatus {
     vercel ||
     truthyEnv("PATRIMO_DEPLOYED");
 
+  const upstashConfigured = Boolean(
+    process.env.UPSTASH_REDIS_REST_URL?.trim() &&
+      process.env.UPSTASH_REDIS_REST_TOKEN?.trim()
+  );
+  const authUrlConfigured = Boolean(
+    process.env.AUTH_URL?.trim() || process.env.NEXTAUTH_URL?.trim()
+  );
+
   return {
     nodeEnv,
     authSecretConfigured: auth.length >= 16,
@@ -45,6 +60,9 @@ export function getRuntimeEnvStatus(): RuntimeEnvStatus {
     cronSecretConfigured: cron.length >= 16,
     demoFallbackEnabled: truthyEnv("ALLOW_DEMO_FALLBACK"),
     isDeployedLike,
+    rateLimitBackend: getKvBackend(),
+    authUrlConfigured,
+    upstashConfigured,
   };
 }
 
@@ -71,6 +89,24 @@ export function getDeployBlockingConfigIssues(): string[] {
     );
   }
   return issues;
+}
+
+/** Avertissements non bloquants (health `configWarnings` — pas de 503). */
+export function getDeployConfigWarnings(): string[] {
+  const s = getRuntimeEnvStatus();
+  if (!s.isDeployedLike) return [];
+  const warnings: string[] = [];
+  if (!s.upstashConfigured) {
+    warnings.push(
+      "UPSTASH_REDIS_REST_URL/TOKEN absents — rate-limit login process-local (inefficace multi-instance). Configurer Upstash."
+    );
+  }
+  if (process.env.VERCEL_ENV === "production" && !s.authUrlConfigured) {
+    warnings.push(
+      "AUTH_URL manquant en production Vercel — définir l’URL canonique (ex. https://patrimo-psi.vercel.app) pour désactiver trustHost."
+    );
+  }
+  return warnings;
 }
 
 /**

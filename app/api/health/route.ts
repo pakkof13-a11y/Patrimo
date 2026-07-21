@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
 import {
   getDeployBlockingConfigIssues,
+  getDeployConfigWarnings,
   getRuntimeEnvStatus,
 } from "@/app/lib/env/runtime";
 
@@ -25,6 +26,7 @@ export async function GET() {
 
   const env = getRuntimeEnvStatus();
   const configIssues = getDeployBlockingConfigIssues();
+  const configWarnings = getDeployConfigWarnings();
   const configOk = configIssues.length === 0;
 
   const body = {
@@ -42,10 +44,14 @@ export async function GET() {
       cronSecretConfigured: env.cronSecretConfigured,
       demoFallbackEnabled: env.demoFallbackEnabled,
       deployedLike: env.isDeployedLike,
+      rateLimitBackend: env.rateLimitBackend,
+      authUrlConfigured: env.authUrlConfigured,
+      upstashConfigured: env.upstashConfigured,
     },
     ...(configIssues.length > 0
       ? { configIssues, configOk: false }
       : { configOk: true }),
+    ...(configWarnings.length > 0 ? { configWarnings } : {}),
   };
 
   const status =

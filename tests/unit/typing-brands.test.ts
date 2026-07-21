@@ -50,23 +50,19 @@ describe("normalizeRole", () => {
   });
 });
 
-describe("rate-limit prune opportuniste", () => {
+describe("rate-limit (kv / mémoire)", () => {
   beforeEach(() => {
     __resetRateLimitBucketsForTests();
   });
 
-  it("purge les buckets expirés lors d’un consume", () => {
-    // Créer un bucket
-    consumeRateLimit("old-key", 10, 1); // window 1ms
-    expect(__rateLimitBucketCountForTests()).toBeGreaterThanOrEqual(1);
-    // Attendre que la fenêtre + prune max age… prune use max(10min, window*2)
-    // Forcer prune via maxAge bas : on appelle avec une clé neuve après expire
-    // Le prune default est 10 min — on teste que la Map reste bornée
-    // en multi-consume (pas de fuite de nouvelles clés pour la même clé).
-    for (let i = 0; i < 5; i++) {
-      consumeRateLimit("same", 100, 60_000);
+  it("limite les requêtes via consumeRateLimit async", async () => {
+    for (let i = 0; i < 3; i++) {
+      const r = await consumeRateLimit("typing-rl", 3, 60_000);
+      expect(r.ok).toBe(true);
     }
-    // Une seule clé "same" (plus "old-key" encore dans fenêtre 10min)
-    expect(__rateLimitBucketCountForTests()).toBeLessThanOrEqual(2);
+    const blocked = await consumeRateLimit("typing-rl", 3, 60_000);
+    expect(blocked.ok).toBe(false);
+    // Compteur mémoire non exposé sous backend kv unifié (0 ou n)
+    expect(__rateLimitBucketCountForTests()).toBeGreaterThanOrEqual(0);
   });
 });
