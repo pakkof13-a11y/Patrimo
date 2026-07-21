@@ -5,7 +5,6 @@ import {
   useCallback,
   useContext,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -18,6 +17,7 @@ import {
 
 const STORAGE_KEY = "patrimo.notifications.v1";
 const MAX_ITEMS = 80;
+const EMPTY: AppNotification[] = [];
 
 type NotificationsContextValue = {
   notifications: AppNotification[];
@@ -28,27 +28,30 @@ type NotificationsContextValue = {
   clearAll: () => void;
 };
 
-const NotificationsContext = createContext<NotificationsContextValue | null>(null);
+const NotificationsContext = createContext<NotificationsContextValue | null>(
+  null
+);
 
 const emptySubscribe = () => () => undefined;
 
-/** true uniquement après hydratation client (SSR = false). */
 function useIsClient() {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
 }
 
 function loadStored(): AppNotification[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined") return EMPTY;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
+    if (!raw) return EMPTY;
     const parsed = JSON.parse(raw) as AppNotification[];
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) return EMPTY;
     return parsed
-      .filter((n) => n && typeof n.id === "string" && typeof n.message === "string")
+      .filter(
+        (n) => n && typeof n.id === "string" && typeof n.message === "string"
+      )
       .slice(0, MAX_ITEMS);
   } catch {
-    return [];
+    return EMPTY;
   }
 }
 
@@ -62,14 +65,13 @@ function persist(list: AppNotification[]) {
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const isClient = useIsClient();
-  /** Toujours [] au SSR / premier paint pour coller à l’HTML serveur. */
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const seededRef = useRef(false);
+  /** SSR / premier paint : [] pour coller à l’HTML serveur. */
+  const [notifications, setNotifications] = useState<AppNotification[]>(EMPTY);
+  const [seeded, setSeeded] = useState(false);
 
-  // Seed localStorage hors effect (évite react-hooks/set-state-in-effect).
-  // Un seul passage client après hydratation.
-  if (isClient && !seededRef.current) {
-    seededRef.current = true;
+  // Seed localStorage au passage client (pattern React « adjust state while rendering »)
+  if (isClient && !seeded) {
+    setSeeded(true);
     const stored = loadStored();
     if (stored.length > 0) {
       setNotifications(stored);
@@ -86,7 +88,6 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     }
     if (!incoming.length) return;
     setNotifications((prev) => {
-      // Newest first
       const next = [...incoming, ...prev].slice(0, MAX_ITEMS);
       persist(next);
       return next;

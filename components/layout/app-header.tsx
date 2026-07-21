@@ -115,10 +115,7 @@ export function AppHeader({
   }, []);
 
   useLayoutEffect(() => {
-    if (!openGroup) {
-      setGroupCoords(null);
-      return;
-    }
+    if (!openGroup) return;
     function update() {
       const btn = groupBtnRefs.current[openGroup!];
       if (!btn) return;
@@ -139,10 +136,7 @@ export function AppHeader({
   }, [openGroup]);
 
   useLayoutEffect(() => {
-    if (!txMenuOpen) {
-      setTxCoords(null);
-      return;
-    }
+    if (!txMenuOpen) return;
     function update() {
       const btn = txToggleRef.current;
       if (!btn) return;
@@ -164,6 +158,10 @@ export function AppHeader({
     };
   }, [txMenuOpen]);
 
+  // Coords null quand menu fermé (dérivé — évite setState dans effect au close)
+  const effectiveGroupCoords = openGroup ? groupCoords : null;
+  const effectiveTxCoords = txMenuOpen ? txCoords : null;
+
   function groupIsActive(items: { id: MainTab }[]) {
     return items.some((i) =>
       i.id === "holdings" ? positionsFamily : tab === i.id
@@ -176,7 +174,7 @@ export function AppHeader({
 
   const groupMenu =
     openGroupDef &&
-    groupCoords &&
+    effectiveGroupCoords &&
     typeof document !== "undefined" &&
     createPortal(
       <div
@@ -186,9 +184,9 @@ export function AppHeader({
         data-testid={`nav-group-menu-${openGroupDef.id}`}
         style={{
           position: "fixed",
-          top: groupCoords.top,
-          left: groupCoords.left,
-          minWidth: groupCoords.minWidth,
+          top: effectiveGroupCoords.top,
+          left: effectiveGroupCoords.left,
+          minWidth: effectiveGroupCoords.minWidth,
         }}
       >
         {openGroupDef.items.map((item) => {
@@ -224,7 +222,7 @@ export function AppHeader({
 
   const txMenu =
     txMenuOpen &&
-    txCoords &&
+    effectiveTxCoords &&
     typeof document !== "undefined" &&
     createPortal(
       <div
@@ -234,9 +232,9 @@ export function AppHeader({
         data-testid="tx-type-menu"
         style={{
           position: "fixed",
-          top: txCoords.top,
-          left: Math.max(8, txCoords.left),
-          minWidth: txCoords.minWidth,
+          top: effectiveTxCoords.top,
+          left: Math.max(8, effectiveTxCoords.left),
+          minWidth: effectiveTxCoords.minWidth,
         }}
       >
         <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">

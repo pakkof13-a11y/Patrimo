@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -18,10 +18,13 @@ export function PageJump({
   onGoToPage: (zeroBasedIndex: number) => void;
 }) {
   const [draft, setDraft] = useState(String(pageIndex + 1));
+  const [prevPageIndex, setPrevPageIndex] = useState(pageIndex);
 
-  useEffect(() => {
+  // Sync draft when pageIndex change (adjust state while rendering)
+  if (pageIndex !== prevPageIndex) {
+    setPrevPageIndex(pageIndex);
     setDraft(String(pageIndex + 1));
-  }, [pageIndex]);
+  }
 
   if (pageCount <= 3) return null;
 

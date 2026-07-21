@@ -166,12 +166,8 @@ export function AssetPriceChart({
   const [perfRange, setPerfRange] = useState<PriceHistoryRange>("7d");
   const [perfStyle, setPerfStyle] = useState<PerfChartStyle>("line");
   const [perfMetric, setPerfMetric] = useState<PerfMetricMode>("cumul");
+  const [prevPerfMetric, setPrevPerfMetric] = useState(perfMetric);
   const [benchmarkMode, setBenchmarkMode] = useState<BenchmarkMode>("none");
-
-  // Préférer Colonnes en Δ, Courbe en Σ / Dividendes (override libre ensuite)
-  useEffect(() => {
-    setPerfStyle(perfMetric === "period" ? "columns" : "line");
-  }, [perfMetric]);
 
   const firstBuyAt = useMemo(
     () => getFirstBuyAt(transactions),
@@ -189,19 +185,17 @@ export function AssetPriceChart({
     return map;
   }, [firstBuyAt]);
 
-  // Revenir au cours si Performance n'est plus pertinente
-  useEffect(() => {
-    if (!canShowPerf && mainTab === "perf") {
-      setMainTab("price");
-    }
-  }, [canShowPerf, mainTab]);
-
-  // Si la période sélectionnée devient invalide (nouvel actif / historique court) → 7J
-  useEffect(() => {
-    if (!isPerfPeriodEnabled(perfRange, firstBuyAt)) {
-      setPerfRange("7d");
-    }
-  }, [perfRange, firstBuyAt, assetId]);
+  // Ajustements d’état pendant le render (remplace les effects de sync)
+  if (perfMetric !== prevPerfMetric) {
+    setPrevPerfMetric(perfMetric);
+    setPerfStyle(perfMetric === "period" ? "columns" : "line");
+  }
+  if (!canShowPerf && mainTab === "perf") {
+    setMainTab("price");
+  }
+  if (!isPerfPeriodEnabled(perfRange, firstBuyAt) && perfRange !== "7d") {
+    setPerfRange("7d");
+  }
 
   const activeRange: PriceHistoryRange =
     mainTab === "price" ? range : perfRange;
