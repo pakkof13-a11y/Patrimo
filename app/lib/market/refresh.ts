@@ -1,6 +1,8 @@
 import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "../prisma";
 import { fetchPriceWithFallback } from "./registry";
+import { isBinanceSupported } from "./providers/binance-ws";
+import { resolveCoingeckoId } from "./providers/coingecko";
 import type { AssetMeta } from "./types";
 import {
   executeOrderTriggers,
@@ -21,11 +23,13 @@ export type RefreshItemResult = {
   lastUpdatedAt?: string;
 };
 
+/** Délai entre deux appels CoinGecko consécutifs (free tier ~10-30 rpm) */
+const COINGECKO_PACE_MS = 1200;
+
 export async function refreshEligiblePrices(userId: string): Promise<{
   results: RefreshItemResult[];
   successCount: number;
   failureCount: number;
-  /** Simulated SL/TP fills executed during this refresh */
   triggerFills: TriggerExecutionReport[];
 }> {
   const assets = await prisma.asset.findMany({
@@ -39,21 +43,19 @@ export async function refreshEligiblePrices(userId: string): Promise<{
     include: { priceQuote: true },
   });
 
-  const results: RefreshItemResult[] = [];
-  /** Successful native quotes for trigger evaluation */
-  const freshPrices = new Map<string, { priceNative: string; currency: string }>();
-
-  // Binance (primaire crypto) : cache 30 s + quotas larges → aucun pacing.
-  // On ne temporise que les assets qui retomberont sur CoinGecko (free tier
-  // ~10–30 rpm) — liquid staking, wrapped, tokens hors Binance.
-  const { isBinanceSupported } = await import("./providers/binance-ws");
-  let coingeckoCalls = 0;
+  // --- Séparer les assets en deux groupes ---
+  // Groupe A : Binance + Yahoo + Finnhub → pas de pacing, parallélisables
+  // Groupe B : CoinGecko fallback (liquid staking, wrapped…) → pacing 1200ms, séquentiel
+  const groupA: typeof assets = [];
+  const groupB: typeof assets = [];
 
   for (const asset of assets) {
-    if (asset.priceProvider === "MANUAL" && !["ACTIONS", "CRYPTO"].includes(asset.assetClass)) {
+    if (
+      asset.priceProvider === "MANUAL" &&
+      !["ACTIONS", "CRYPTO"].includes(asset.assetClass)
+    ) {
       continue;
     }
-
     const meta: AssetMeta = {
       id: asset.id,
       name: asset.name,
@@ -64,86 +66,117 @@ export async function refreshEligiblePrices(userId: string): Promise<{
       currency: asset.currency,
       manualPrice: asset.manualPrice?.toString() ?? null,
     };
-
-    const isCrypto =
-      asset.assetClass === "CRYPTO" || asset.priceProvider === "COINGECKO";
-    // Pacing uniquement pour le fallback CoinGecko (Binance ne l'exige pas)
-    const usesCoingeckoFallback =
-      isCrypto && !isBinanceSupported({ ...meta, assetClass: "CRYPTO" });
-    if (usesCoingeckoFallback && coingeckoCalls > 0) {
-      await new Promise((r) => setTimeout(r, 1200));
+    const isCrypto = asset.assetClass === "CRYPTO" || asset.priceProvider === "COINGECKO";
+    const needsCoingecko = isCrypto && !isBinanceSupported({ ...meta, assetClass: "CRYPTO" });
+    if (needsCoingecko) {
+      groupB.push(asset);
+    } else {
+      groupA.push(asset);
     }
-    if (usesCoingeckoFallback) coingeckoCalls += 1;
+  }
 
+  const now = new Date();
+  const results: RefreshItemResult[] = [];
+  const freshPrices = new Map<string, { priceNative: string; currency: string }>();
+  const dbWrites: Promise<unknown>[] = [];
+
+  // --- Groupe A : fetch en parallèle ---
+  const groupAResults = await Promise.all(
+    groupA.map(async (asset) => {
+      const meta: AssetMeta = {
+        id: asset.id,
+        name: asset.name,
+        ticker: asset.ticker,
+        assetClass: asset.assetClass,
+        priceProvider: asset.priceProvider,
+        providerSymbol: asset.providerSymbol,
+        currency: asset.currency,
+        manualPrice: asset.manualPrice?.toString() ?? null,
+      };
+      const quote = await fetchPriceWithFallback(meta);
+      return { asset, meta, quote };
+    })
+  );
+
+  // --- Groupe B : fetch séquentiel avec pacing CoinGecko ---
+  const groupBFetched: Array<{ asset: (typeof assets)[0]; meta: AssetMeta; quote: Awaited<ReturnType<typeof fetchPriceWithFallback>> }> = [];
+  for (let i = 0; i < groupB.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, COINGECKO_PACE_MS));
+    const asset = groupB[i];
+    const meta: AssetMeta = {
+      id: asset.id,
+      name: asset.name,
+      ticker: asset.ticker,
+      assetClass: asset.assetClass,
+      priceProvider: asset.priceProvider,
+      providerSymbol: asset.providerSymbol,
+      currency: asset.currency,
+      manualPrice: asset.manualPrice?.toString() ?? null,
+    };
     const quote = await fetchPriceWithFallback(meta);
-    const now = new Date();
+    groupBFetched.push({ asset, meta, quote });
+  }
 
+  // --- Traitement des résultats + préparation des écritures DB ---
+  for (const { asset, meta, quote } of [...groupAResults, ...groupBFetched]) {
     if (quote.status === "OK") {
       const priceNative = quote.priceNative ?? quote.priceEur;
       const nativeCurrency = quote.nativeCurrency ?? "EUR";
 
-      // CRYPTO en MANUAL/null : bascule vers le bon provider live selon la source
-      // qui a répondu (Binance ou CoinGecko), sans jamais figer sur COINGECKO
-      // si Binance est disponible pour ce ticker.
+      // Auto-assign provider pour les CRYPTO en MANUAL/null
       if (
         asset.assetClass === "CRYPTO" &&
         (asset.priceProvider === "MANUAL" || !asset.priceProvider)
       ) {
         const isBinanceTicker = isBinanceSupported({ ...meta, assetClass: "CRYPTO" });
-        if (isBinanceTicker) {
-          // Binance couvre ce ticker → ne pas écrire COINGECKO en base,
-          // le registry résoudra Binance en primaire à chaque refresh.
-          // Aucune mise à jour de priceProvider nécessaire.
-        } else {
-          // Token hors Binance (liquid staking, wrapped…) → figer sur COINGECKO
-          const { resolveCoingeckoId } = await import("./providers/coingecko");
-          const cgId = resolveCoingeckoId(
-            asset.ticker,
-            asset.providerSymbol,
-            asset.name
+        if (!isBinanceTicker) {
+          const cgId = resolveCoingeckoId(asset.ticker, asset.providerSymbol, asset.name);
+          dbWrites.push(
+            prisma.asset.update({
+              where: { id: asset.id },
+              data: {
+                priceProvider: "COINGECKO",
+                ...(cgId && !asset.providerSymbol ? { providerSymbol: cgId } : {}),
+              },
+            })
           );
-          await prisma.asset.update({
-            where: { id: asset.id },
-            data: {
-              priceProvider: "COINGECKO",
-              ...(cgId && !asset.providerSymbol
-                ? { providerSymbol: cgId }
-                : {}),
-            },
-          });
         }
       }
 
-      await prisma.priceQuote.upsert({
-        where: { assetId: asset.id },
-        create: {
-          assetId: asset.id,
-          priceNative: new Prisma.Decimal(priceNative),
-          nativeCurrency,
-          priceEur: new Prisma.Decimal(quote.priceEur),
-          source: quote.source,
-          status: "OK",
-          lastUpdatedAt: now,
-          rawError: null,
-        },
-        update: {
-          priceNative: new Prisma.Decimal(priceNative),
-          nativeCurrency,
-          priceEur: new Prisma.Decimal(quote.priceEur),
-          source: quote.source,
-          status: "OK",
-          lastUpdatedAt: now,
-          rawError: null,
-        },
-      });
+      dbWrites.push(
+        prisma.priceQuote.upsert({
+          where: { assetId: asset.id },
+          create: {
+            assetId: asset.id,
+            priceNative: new Prisma.Decimal(priceNative),
+            nativeCurrency,
+            priceEur: new Prisma.Decimal(quote.priceEur),
+            source: quote.source,
+            status: "OK",
+            lastUpdatedAt: now,
+            rawError: null,
+          },
+          update: {
+            priceNative: new Prisma.Decimal(priceNative),
+            nativeCurrency,
+            priceEur: new Prisma.Decimal(quote.priceEur),
+            source: quote.source,
+            status: "OK",
+            lastUpdatedAt: now,
+            rawError: null,
+          },
+        })
+      );
 
-      await prisma.priceHistory.create({
-        data: {
-          assetId: asset.id,
-          priceEur: new Prisma.Decimal(quote.priceEur),
-          source: quote.source,
-        },
-      });
+      dbWrites.push(
+        prisma.priceHistory.create({
+          data: {
+            assetId: asset.id,
+            priceEur: new Prisma.Decimal(quote.priceEur),
+            source: quote.source,
+          },
+        })
+      );
 
       results.push({
         assetId: asset.id,
@@ -162,13 +195,15 @@ export async function refreshEligiblePrices(userId: string): Promise<{
         currency: nativeCurrency || asset.currency || "EUR",
       });
     } else if (asset.priceQuote) {
-      await prisma.priceQuote.update({
-        where: { assetId: asset.id },
-        data: {
-          status: "STALE",
-          rawError: quote.error ?? "Erreur fournisseur",
-        },
-      });
+      dbWrites.push(
+        prisma.priceQuote.update({
+          where: { assetId: asset.id },
+          data: {
+            status: "STALE",
+            rawError: quote.error ?? "Erreur fournisseur",
+          },
+        })
+      );
       results.push({
         assetId: asset.id,
         name: asset.name,
@@ -193,7 +228,10 @@ export async function refreshEligiblePrices(userId: string): Promise<{
     }
   }
 
-  // Simulated SL / TP auto-execution on fresh OK quotes
+  // --- Flush toutes les écritures DB en parallèle ---
+  await Promise.allSettled(dbWrites);
+
+  // --- SL/TP triggers ---
   let triggerFills: TriggerExecutionReport[] = [];
   try {
     triggerFills = await executeOrderTriggers(userId, freshPrices);
