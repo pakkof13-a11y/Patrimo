@@ -6,8 +6,9 @@ import type { NextConfig } from "next";
  * + images logos externes (logo.dev, CoinGecko, etc.).
  *
  * Note : 'unsafe-inline' / 'unsafe-eval' sur script restent nécessaires pour
- * Next runtime / hydratation tant qu’on n’a pas de nonces middleware.
+ * Next runtime / hydratation tant qu'on n'a pas de nonces middleware.
  * frame-ancestors 'none' renforce X-Frame-Options.
+ * TODO(SEC-01): remplacer unsafe-eval / unsafe-inline par des nonces middleware
  */
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -41,11 +42,15 @@ const securityHeaders = [
     key: "Strict-Transport-Security",
     value: "max-age=63072000; includeSubDomains; preload",
   },
-  { key: "X-DNS-Prefetch-Control", value: "on" },
+  // fix(OPT-04): set to 'off' — 'on' caused DNS prefetch leaks via external logo URLs
+  { key: "X-DNS-Prefetch-Control", value: "off" },
 ];
 
+const isDev = process.env.NODE_ENV === "development";
+
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["127.0.0.1", "localhost", "*.trycloudflare.com"],
+  // fix(OPT-05): *.trycloudflare.com wildcard scoped to development only
+  ...(isDev ? { allowedDevOrigins: ["127.0.0.1", "localhost", "*.trycloudflare.com"] } : {}),
   /**
    * Masque le badge Next.js DevTools (« N ») en bas à gauche —
    * il recouvrait le FAB Préférences / avatar.
