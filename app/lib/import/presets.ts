@@ -16,6 +16,9 @@ export type ImportFormatId =
   | "nexo"
   | "ascendex"
   | "ledger_live"
+  | "paradex"
+  | "hyperliquid_trade"
+  | "hyperliquid_funding"
   | "dynamic";
 
 export type ColumnRole =
@@ -477,6 +480,51 @@ export const IMPORT_FORMATS: FormatPreset[] = [
     },
   },
   {
+    id: "paradex",
+    label: "Paradex (Fills — StarkNet)",
+    description:
+      "Export Fills Paradex pré-aplati (Date, Ticker, Side, Quantity, Price, Fee, Currency, Notes) — asset/type/strike extraits du champ market",
+    aliases: {
+      date: "date",
+      ticker: "ticker",
+      side: "side",
+      quantity: "quantity",
+      price: "unitPrice",
+      fee: "fees",
+      currency: "currency",
+      notes: "notes",
+    },
+  },
+  {
+    id: "hyperliquid_trade",
+    label: "Hyperliquid (Trade History)",
+    description:
+      "Export Trade History pré-aplati (Date, Ticker, Type, Quantity, Price, Fee, Currency)",
+    aliases: {
+      date: "date",
+      ticker: "ticker",
+      type: "type",
+      quantity: "quantity",
+      price: "unitPrice",
+      fee: "fees",
+      currency: "currency",
+    },
+  },
+  {
+    id: "hyperliquid_funding",
+    label: "Hyperliquid (Funding History)",
+    description:
+      "Export Funding History pré-aplati (Date, Ticker, Type, CashAmount, Currency, Notes)",
+    aliases: {
+      date: "date",
+      ticker: "ticker",
+      type: "type",
+      cashamount: "cashAmount",
+      currency: "currency",
+      notes: "notes",
+    },
+  },
+  {
     id: "dynamic",
     label: "Détection dynamique",
     description: "Auto-matching intelligent des colonnes (CSV non standard)",
@@ -715,6 +763,32 @@ export function detectFormatFromHeaders(headers: string[]): ImportFormatId {
   const hasAny = (...needles: string[]) =>
     needles.some((n) => keys.some((k) => k.includes(n) || k === n));
 
+  // Priorité de détection (spécifique → générique) :
+  // Paradex > Nexo > Hyperliquid Funding > Hyperliquid Trades > IBKR > reste
+  if (has("fill_type") && has("realized_funding")) return "paradex";
+  // Nexo — avant Hyperliquid/Binance (signature "Transaction" NXT très spécifique)
+  if (
+    has("transaction") &&
+    has("type") &&
+    hasAny("date_time", "date_time_utc")
+  ) {
+    return "nexo";
+  }
+  // Hyperliquid Funding History — headers exacts
+  if (has("time") && has("coin") && has("side") && has("payment") && has("rate")) {
+    return "hyperliquid_funding";
+  }
+  // Hyperliquid Trade History — headers exacts
+  if (
+    has("time") &&
+    has("coin") &&
+    has("dir") &&
+    has("px") &&
+    has("sz") &&
+    has("closedpnl")
+  ) {
+    return "hyperliquid_trade";
+  }
   if (has("pair") && (has("side") || has("executed"))) return "binance";
   // Ledger Live operations export
   if (

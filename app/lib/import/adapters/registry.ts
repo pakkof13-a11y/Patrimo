@@ -8,6 +8,7 @@ import { dynamicAdapter } from "./dynamic-adapter";
 import { hyperliquidTradeAdapter } from "./hyperliquid-trade-adapter";
 import { hyperliquidFundingAdapter } from "./hyperliquid-funding-adapter";
 import { nexoAdapter } from "./nexo-adapter";
+import { paradexAdapter } from "./paradex-adapter";
 import { IMPORT_FORMATS } from "../presets";
 
 function presetToAlias(p: (typeof IMPORT_FORMATS)[number]): AliasPreset {
@@ -24,12 +25,19 @@ const aliasAdapters: PlatformCsvAdapter[] = IMPORT_FORMATS.filter(
   (f) => f.id !== "dynamic" && f.id !== "nexo"
 ).map((p) => createAliasAdapter(presetToAlias(p)));
 
-/** Tous les adaptateurs (plateformes + dynamic en dernier) */
+/**
+ * Tous les adaptateurs (plateformes + dynamic en dernier).
+ * Ordre de priorité de détection (du plus spécifique au moins spécifique) :
+ * Paradex > Nexo > Hyperliquid Funding > Hyperliquid Trades > IBKR (aliasAdapters)
+ * > dynamic. Les fingerprints sont mutuellement exclusifs (headers exacts
+ * distincts) donc l'ordre ne sert qu'à la lisibilité / égalité de score.
+ */
 export const PLATFORM_ADAPTERS: PlatformCsvAdapter[] = [
-  ...aliasAdapters,
-  hyperliquidTradeAdapter,
-  hyperliquidFundingAdapter,
+  paradexAdapter,
   nexoAdapter,
+  hyperliquidFundingAdapter,
+  hyperliquidTradeAdapter,
+  ...aliasAdapters,
   dynamicAdapter,
 ];
 

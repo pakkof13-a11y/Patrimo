@@ -23,6 +23,13 @@ import {
   expandIbkrActivityStatement,
   isIbkrActivityStatement,
 } from "./ibkr-activity";
+import { expandParadexFills, isParadexFillsExport } from "./paradex-fills";
+import {
+  expandHyperliquidTrade,
+  expandHyperliquidFunding,
+  isHyperliquidTradeExport,
+  isHyperliquidFundingExport,
+} from "./hyperliquid-fills";
 
 export type ImportCsvOptions = {
   /** Forcer un adaptateur / format */
@@ -122,6 +129,101 @@ export function importCsv(
   }
 
   const csv = parseCsv(csvText, options.delimiter);
+
+  // ── Formats plats nécessitant un pré-aplatissement avant le pipeline
+  // alias→ColumnRole générique (extraction market/dir/payment-sign) ─────────
+  // Ordre de priorité : Paradex > Hyperliquid Funding > Hyperliquid Trades.
+  const forceFlatExpand =
+    options.formatId === "auto" || !options.formatId;
+  if (
+    (forceFlatExpand || options.formatId === "paradex") &&
+    isParadexFillsExport(csv.headers)
+  ) {
+    const expanded = expandParadexFills(csv.headers, csv.rows);
+    if (expanded.matched) {
+      const draftResult = mapCsvToDrafts(expanded.csv, "paradex");
+      const okCount = draftResult.rows.filter((r) => r.status === "ok").length;
+      return {
+        csv: expanded.csv,
+        formatId: "paradex",
+        formatLabel: getFormat("paradex").label,
+        detectedFormatId: "paradex",
+        columnMap: draftResult.columnMap as ColumnMapping,
+        confidence:
+          okCount > 0
+            ? okCount >= draftResult.rows.length * 0.7
+              ? "high"
+              : "medium"
+            : "low",
+        needsManualMapping: false,
+        transactions: [],
+        drafts: draftResult.rows,
+        warnings: expanded.warnings,
+        adapterRanking: [{ id: "paradex", score: 97, label: getFormat("paradex").label }],
+      };
+    }
+  }
+  if (
+    (forceFlatExpand || options.formatId === "hyperliquid_funding") &&
+    isHyperliquidFundingExport(csv.headers)
+  ) {
+    const expanded = expandHyperliquidFunding(csv.headers, csv.rows);
+    if (expanded.matched) {
+      const draftResult = mapCsvToDrafts(expanded.csv, "hyperliquid_funding");
+      const okCount = draftResult.rows.filter((r) => r.status === "ok").length;
+      return {
+        csv: expanded.csv,
+        formatId: "hyperliquid_funding",
+        formatLabel: getFormat("hyperliquid_funding").label,
+        detectedFormatId: "hyperliquid_funding",
+        columnMap: draftResult.columnMap as ColumnMapping,
+        confidence:
+          okCount > 0
+            ? okCount >= draftResult.rows.length * 0.7
+              ? "high"
+              : "medium"
+            : "low",
+        needsManualMapping: false,
+        transactions: [],
+        drafts: draftResult.rows,
+        warnings: expanded.warnings,
+        adapterRanking: [
+          { id: "hyperliquid_funding", score: 96, label: getFormat("hyperliquid_funding").label },
+        ],
+      };
+    }
+  }
+  if (
+    (forceFlatExpand || options.formatId === "hyperliquid_trade") &&
+    isHyperliquidTradeExport(csv.headers)
+  ) {
+    const expanded = expandHyperliquidTrade(csv.headers, csv.rows);
+    if (expanded.matched) {
+      const draftResult = mapCsvToDrafts(expanded.csv, "hyperliquid_trade");
+      const okCount = draftResult.rows.filter((r) => r.status === "ok").length;
+      return {
+        csv: expanded.csv,
+        formatId: "hyperliquid_trade",
+        formatLabel: getFormat("hyperliquid_trade").label,
+        detectedFormatId: "hyperliquid_trade",
+        columnMap: draftResult.columnMap as ColumnMapping,
+        confidence:
+          okCount > 0
+            ? okCount >= draftResult.rows.length * 0.7
+              ? "high"
+              : "medium"
+            : "low",
+        needsManualMapping: false,
+        transactions: [],
+        drafts: draftResult.rows,
+        warnings: expanded.warnings,
+        adapterRanking: [
+          { id: "hyperliquid_trade", score: 95, label: getFormat("hyperliquid_trade").label },
+        ],
+      };
+    }
+  }
+
   if (csv.headers.length === 0) {
     return {
       csv,
