@@ -348,6 +348,8 @@ export function ImportCsvModal({
   const [showMapper, setShowMapper] = useState(false);
   /** IBKR multi-comptes : comptes sélectionnés pour l'import (vide = tous) */
   const [ibkrSelectedAccounts, setIbkrSelectedAccounts] = useState<string[]>([]);
+  /** Enveloppe fiscale (CTO/PEA/AV/CFD) — courtiers titres uniquement */
+  const [accountEnvelopeType, setAccountEnvelopeType] = useState<string>("CTO");
   const [pageSize, setPageSize] = useState<PreviewPageSize>(50);
   const [pageIndex, setPageIndex] = useState(0);
   const [suspects, setSuspects] = useState<SuspectRow[]>([]);
@@ -632,6 +634,10 @@ export function ImportCsvModal({
           ibkrAccountIds: ibkrSelectedAccounts.length
             ? ibkrSelectedAccounts
             : undefined,
+          accountEnvelopeType:
+            accountEnvelopeType && accountEnvelopeType !== "CTO"
+              ? accountEnvelopeType
+              : undefined,
         }),
       });
 
@@ -796,6 +802,13 @@ export function ImportCsvModal({
         delimiter: preview?.delimiter,
         columnMap: manualMap,
         rowSelection: buildRowSelection(),
+        ibkrAccountIds: ibkrSelectedAccounts.length
+          ? ibkrSelectedAccounts
+          : undefined,
+        accountEnvelopeType:
+          accountEnvelopeType && accountEnvelopeType !== "CTO"
+            ? accountEnvelopeType
+            : undefined,
       };
 
       const analysis = await fetchJson<{
@@ -883,6 +896,10 @@ export function ImportCsvModal({
           ibkrAccountIds: ibkrSelectedAccounts.length
             ? ibkrSelectedAccounts
             : undefined,
+          accountEnvelopeType:
+            accountEnvelopeType && accountEnvelopeType !== "CTO"
+              ? accountEnvelopeType
+              : undefined,
         }),
       });
 
@@ -1892,6 +1909,34 @@ export function ImportCsvModal({
                 </p>
               </Field>
             </div>
+
+            {/* Sélecteur enveloppe fiscale — courtiers titres uniquement */}
+            {platformId &&
+              [
+                "INTERACTIVE_BROKERS",
+                "BOURSOBANK",
+                "FORTUNEO",
+                "TRADE_REPUBLIC",
+                "REVOLUT",
+              ].includes(platformId) && (
+                <Field label="Type de compte (enveloppe fiscale)">
+                  <select
+                    className="input w-full"
+                    value={accountEnvelopeType}
+                    onChange={(e) => setAccountEnvelopeType(e.target.value)}
+                    data-testid="import-account-envelope"
+                  >
+                    <option value="CTO">Compte-Titres (CTO)</option>
+                    <option value="PEA">PEA</option>
+                    <option value="AV">Assurance-Vie (AV)</option>
+                    <option value="CFD">CFD</option>
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Les actifs importés seront classés dans cette enveloppe
+                    fiscale.
+                  </p>
+                </Field>
+              )}
 
             {/* Zone fichier : drag-and-drop + choix fichier */}
             <div

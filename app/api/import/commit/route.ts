@@ -38,6 +38,7 @@ export async function POST(req: Request) {
     const csvText =
       typeof body?.csvText === "string" ? (body.csvText as string) : "";
     let rows: ImportDraftRow[] = [];
+    const accountEnvelopeType = String(body?.accountEnvelopeType || "");
 
     if (csvText.trim()) {
       if (csvText.length > IMPORT_MAX_CSV_CHARS) {
@@ -125,6 +126,7 @@ export async function POST(req: Request) {
       skipDuplicates: body?.skipDuplicates !== false,
       requireSuspectDecision: true,
       acceptSuspectLines,
+      accountEnvelopeType: accountEnvelopeType || undefined,
     });
 
     try {
