@@ -3,6 +3,7 @@ import YahooFinance from "yahoo-finance2";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { cacheGet, cacheSet, cachePrune } from "@/app/lib/api/memory-cache";
 import { consumeRateLimit } from "@/app/lib/api/simple-rate-limit";
+import { withTimeout } from "@/app/lib/utils/with-timeout";
 
 const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey"],
@@ -113,11 +114,15 @@ export async function GET(req: Request) {
   }
 
   try {
-    const result = (await yahooFinance.chart(yahooSym, {
-      period1: from,
-      period2: to,
-      interval: "1d",
-    })) as {
+    const result = (await withTimeout(
+      yahooFinance.chart(yahooSym, {
+        period1: from,
+        period2: to,
+        interval: "1d",
+      }),
+      12_000,
+      "yahooFinance.chart"
+    )) as {
       quotes?: Array<{
         date?: Date;
         close?: number | null;

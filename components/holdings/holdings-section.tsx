@@ -347,17 +347,15 @@ export function HoldingsSection({
     return () => ro.disconnect();
   }, []);
 
-  useEffect(() => {
+  // Reset page quand tab/filtres/tri changent (adjust state while rendering)
+  const paginationResetKey = `${tab}:${envelopeKey}:${holdings.length}:${debouncedSearch}:${accountFilter}:${platformFilterId}:${groupBy}`;
+  const [prevPaginationResetKey, setPrevPaginationResetKey] = useState(
+    paginationResetKey
+  );
+  if (paginationResetKey !== prevPaginationResetKey) {
+    setPrevPaginationResetKey(paginationResetKey);
     setPagination((prev) => ({ ...prev, pageIndex: 0 }));
-  }, [
-    tab,
-    envelopeKey,
-    holdings.length,
-    debouncedSearch,
-    accountFilter,
-    platformFilterId,
-    groupBy,
-  ]);
+  }
 
   function clearPlatformFilter() {
     const params = new URLSearchParams(searchParams.toString());
@@ -919,13 +917,20 @@ export function HoldingsSection({
   });
 
   // Mode regroupement : page unique = toutes les lignes triées (totaux de groupe = périmètre filtré)
-  useEffect(() => {
-    if (!groupMode) return;
-    setPagination({
-      pageIndex: 0,
-      pageSize: Math.max(filteredHoldings.length, 1),
-    });
-  }, [groupMode, filteredHoldings.length]);
+  // (adjust state while rendering)
+  const groupPaginationKey = `${groupMode}:${filteredHoldings.length}`;
+  const [prevGroupPaginationKey, setPrevGroupPaginationKey] = useState(
+    groupPaginationKey
+  );
+  if (groupPaginationKey !== prevGroupPaginationKey) {
+    setPrevGroupPaginationKey(groupPaginationKey);
+    if (groupMode) {
+      setPagination({
+        pageIndex: 0,
+        pageSize: Math.max(filteredHoldings.length, 1),
+      });
+    }
+  }
 
   /** Lignes triées (pré-pagination) pour regroupement — order = tri tableau */
   const sortedAllRows = table.getPrePaginationRowModel().rows;

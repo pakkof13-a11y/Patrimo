@@ -3,6 +3,7 @@ import type { AssetMeta, MarketDataProvider, PriceQuoteResult } from "../types";
 import { d, toFixed } from "../../money/decimal";
 import { toYahooSymbol, guessQuoteCurrency } from "../symbol";
 import { toEurAmount } from "../fx";
+import { withTimeout } from "../../utils/with-timeout";
 
 /** yahoo-finance2 v4 requires a client instance */
 const yahooFinance = new YahooFinance({
@@ -33,7 +34,11 @@ export const yahooProvider: MarketDataProvider = {
     }
 
     try {
-      const quote = (await yahooFinance.quote(symbol)) as {
+      const quote = (await withTimeout(
+        yahooFinance.quote(symbol),
+        8_000,
+        "yahooFinance.quote"
+      )) as {
         regularMarketPrice?: number;
         postMarketPrice?: number;
         preMarketPrice?: number;

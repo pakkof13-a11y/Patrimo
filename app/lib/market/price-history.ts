@@ -3,6 +3,7 @@ import { prisma } from "../prisma";
 import { d, toFixed } from "../money/decimal";
 import { toYahooSymbol } from "./symbol";
 import { getEurRates, convertToEurSync } from "./fx";
+import { withTimeout } from "../utils/with-timeout";
 import {
   coingeckoGet,
   resolveCoingeckoId,
@@ -548,11 +549,15 @@ async function fetchYahooBars(
       if (period1 < minFrom) period1 = minFrom;
     }
 
-    const result = (await yahooFinance.chart(symbol, {
-      period1,
-      period2: to,
-      interval: yahooIntervalFor(bar),
-    })) as {
+    const result = (await withTimeout(
+      yahooFinance.chart(symbol, {
+        period1,
+        period2: to,
+        interval: yahooIntervalFor(bar),
+      }),
+      12_000,
+      "yahooFinance.chart"
+    )) as {
       quotes?: Array<{
         date?: Date;
         open?: number | null;

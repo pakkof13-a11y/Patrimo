@@ -103,7 +103,7 @@ export function getDeployConfigWarnings(): string[] {
   }
   if (process.env.VERCEL_ENV === "production" && !s.authUrlConfigured) {
     warnings.push(
-      "AUTH_URL manquant en production Vercel — définir l’URL canonique (ex. https://patrimo-psi.vercel.app) pour désactiver trustHost."
+      "AUTH_URL manquant en production Vercel — recommandé pour fiabiliser les URLs canoniques (redirections, emails). N'affecte pas trustHost (voir resolveAuthTrustHost)."
     );
   }
   return warnings;
