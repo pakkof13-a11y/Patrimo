@@ -20,11 +20,14 @@ describe("resolveAuthTrustHost", () => {
     expect(resolveAuthTrustHost()).toBe(true);
   });
 
-  it("désactive trustHost si AUTH_URL est défini", () => {
+  it("AUTH_URL seul ne désactive plus trustHost sur Vercel (bug historique)", () => {
+    // @auth/core@0.41.x n'a pas de mode « valider Host vs AUTH_URL » — trustHost
+    // est un booléen brut. AUTH_URL seul ne doit donc PAS désactiver trustHost
+    // sur Vercel, sous peine de casser toute requête auth (UntrustedHost).
     vi.stubEnv("AUTH_TRUST_HOST", "");
     vi.stubEnv("AUTH_URL", "https://patrimo-psi.vercel.app");
     vi.stubEnv("VERCEL", "1");
-    expect(resolveAuthTrustHost()).toBe(false);
+    expect(resolveAuthTrustHost()).toBe(true);
   });
 
   it("active trustHost sur Vercel preview sans AUTH_URL", () => {

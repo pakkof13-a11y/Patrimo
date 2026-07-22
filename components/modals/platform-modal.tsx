@@ -43,6 +43,7 @@ export function PlatformModal({
   onComboLabelChange,
   onClose,
   onSubmit,
+  pending = false,
 }: {
   open: boolean;
   form: UseFormReturn<PlatformForm>;
@@ -50,6 +51,7 @@ export function PlatformModal({
   onComboLabelChange: (label: string) => void;
   onClose: () => void;
   onSubmit: (values: PlatformForm) => void;
+  pending?: boolean;
 }) {
   const [logoManualOpen, setLogoManualOpen] = useState(false);
   const [selectionKind, setSelectionKind] = useState<"none" | "preset" | "custom">(
@@ -480,10 +482,10 @@ export function PlatformModal({
           </Button>
           <Button
             type="submit"
-            disabled={!canSubmit}
+            disabled={!canSubmit || pending}
             data-testid="platform-create-submit"
           >
-            Créer la plateforme
+            {pending ? "Création…" : "Créer la plateforme"}
           </Button>
         </div>
       </form>

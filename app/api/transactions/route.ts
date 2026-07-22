@@ -149,7 +149,6 @@ export async function GET(req: Request) {
   ]);
 
   const pageCount = Math.max(1, Math.ceil(total / query.pageSize) || 1);
-  // Clamp page if client asked beyond last page
   const safePage = Math.min(query.page, pageCount);
 
   const typeCounts = mapTypeCountsToGroups(

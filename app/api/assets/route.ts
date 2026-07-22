@@ -71,7 +71,7 @@ export async function POST(req: Request) {
         : "MANUAL";
 
   const logoUrl =
-    (body as { logoUrl?: string }).logoUrl ||
+    parsed.data.logoUrl ||
     resolveAssetLogo({
       ticker: parsed.data.ticker,
       name: parsed.data.name,
@@ -88,42 +88,50 @@ export async function POST(req: Request) {
     }
   }
 
-  const asset = await prisma.asset.create({
-    data: {
-      userId,
-      platformId: parsed.data.platformId,
-      name: parsed.data.name,
-      ticker: parsed.data.ticker || null,
-      assetClass: parsed.data.assetClass,
-      currency,
-      countryCode: parsed.data.countryCode || null,
-      withholdingTaxRate: whtRate,
-      accountType: parsed.data.accountType || "CTO",
-      priceProvider: parsed.data.priceProvider || defaultProvider,
-      providerSymbol: parsed.data.providerSymbol || parsed.data.ticker || null,
-      logoUrl: logoUrl || null,
-      manualPrice: parsed.data.manualPrice ? new Prisma.Decimal(parsed.data.manualPrice) : null,
-      acquisitionDate: parsed.data.acquisitionDate
-        ? new Date(parsed.data.acquisitionDate)
-        : null,
-      notes: parsed.data.notes || null,
-    },
-  });
+  // Prix manuel EUR calculé avant la transaction (appel réseau FX — pas dans $transaction)
+  const priceEur = parsed.data.manualPrice
+    ? await toEurAmount(parsed.data.manualPrice, currency)
+    : null;
 
-  if (parsed.data.manualPrice) {
-    const priceEur = await toEurAmount(parsed.data.manualPrice, currency);
-    await prisma.priceQuote.create({
+  const asset = await prisma.$transaction(async (tx) => {
+    const created = await tx.asset.create({
       data: {
-        assetId: asset.id,
-        priceNative: new Prisma.Decimal(parsed.data.manualPrice),
-        nativeCurrency: currency,
-        priceEur: new Prisma.Decimal(priceEur),
-        source: "manual",
-        status: "OK",
-        lastUpdatedAt: new Date(),
+        userId,
+        platformId: parsed.data.platformId,
+        name: parsed.data.name,
+        ticker: parsed.data.ticker || null,
+        assetClass: parsed.data.assetClass,
+        currency,
+        countryCode: parsed.data.countryCode || null,
+        withholdingTaxRate: whtRate,
+        accountType: parsed.data.accountType || "CTO",
+        priceProvider: parsed.data.priceProvider || defaultProvider,
+        providerSymbol: parsed.data.providerSymbol || parsed.data.ticker || null,
+        logoUrl: logoUrl || null,
+        manualPrice: parsed.data.manualPrice ? new Prisma.Decimal(parsed.data.manualPrice) : null,
+        acquisitionDate: parsed.data.acquisitionDate
+          ? new Date(parsed.data.acquisitionDate)
+          : null,
+        notes: parsed.data.notes || null,
       },
     });
-  }
+
+    if (parsed.data.manualPrice && priceEur != null) {
+      await tx.priceQuote.create({
+        data: {
+          assetId: created.id,
+          priceNative: new Prisma.Decimal(parsed.data.manualPrice),
+          nativeCurrency: currency,
+          priceEur: new Prisma.Decimal(priceEur),
+          source: "manual",
+          status: "OK",
+          lastUpdatedAt: new Date(),
+        },
+      });
+    }
+
+    return created;
+  });
 
   return NextResponse.json({ asset, existing: false }, { status: 201 });
 }

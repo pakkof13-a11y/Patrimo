@@ -71,7 +71,6 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
       data = null;
     }
   } else {
-    // Avoid "Failed to execute 'json' on 'Response'" on empty/HTML bodies
     try {
       const text = await res.text();
       if (text?.trim().startsWith("{")) {
@@ -91,7 +90,6 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
       toErrorMessage(data?.error, "") ||
       toErrorMessage(data?.message, "") ||
       "";
-    // Enrichit « Validation échouée » avec details.fieldErrors si présents
     if (
       (!fromBody || fromBody === "Validation échouée") &&
       data?.details &&
@@ -117,12 +115,10 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
     throw new Error(fromBody || `Erreur (${res.status})`);
   }
 
-  // 204 / 205 : corps intentionnellement vide (mutations sans payload)
   if (data == null && (res.status === 204 || res.status === 205)) {
     return undefined as T;
   }
 
-  // Ne pas masquer un corps vide en `{} as T` (faux positif silencieux)
   if (data == null) {
     throw new Error("Réponse serveur vide ou non-JSON");
   }

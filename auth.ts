@@ -146,10 +146,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   secret: process.env.AUTH_SECRET,
   /**
-   * trustHost : ne pas faire aveuglément confiance au Host en prod.
-   * - AUTH_URL défini → false (URL canonique, anti host-header injection)
-   * - Preview Vercel sans AUTH_URL → true (hosts multi-preview)
-   * - Override : AUTH_TRUST_HOST=true|false
+   * trustHost : @auth/core n'a pas de mode « valider Host vs AUTH_URL » — un
+   * booléen brut (false = rejette tout en UntrustedHost, peu importe AUTH_URL).
+   * - Vercel (routage edge fiable) ou hors production → true
+   * - Override explicite : AUTH_TRUST_HOST=true|false
    * @see resolveAuthTrustHost
    */
   trustHost: resolveAuthTrustHost(),
