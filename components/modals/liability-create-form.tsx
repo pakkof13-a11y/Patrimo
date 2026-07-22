@@ -98,9 +98,14 @@ function LenderCombobox({
     value
   );
 
-  useEffect(() => {
+  // Bascule auto en mode libre si la valeur ne correspond à aucun preset connu
+  // (adjust state while rendering — customMode reste par ailleurs togglable manuellement)
+  const customModeKey = `${value}:${isKnown}`;
+  const [prevCustomModeKey, setPrevCustomModeKey] = useState(customModeKey);
+  if (customModeKey !== prevCustomModeKey) {
+    setPrevCustomModeKey(customModeKey);
     if (value && !isKnown && value !== "Autre") setCustomMode(true);
-  }, [value, isKnown]);
+  }
 
   useEffect(() => {
     if (!open) return;

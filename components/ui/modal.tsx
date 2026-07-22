@@ -75,10 +75,15 @@ export function Modal({
   const stackIdRef = useRef(Symbol("modal"));
 
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
   const suspendedRef = useRef(suspended);
-  suspendedRef.current = suspended;
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    suspendedRef.current = suspended;
+  }, [suspended]);
 
   // Stack + scroll lock + focus initial (une fois au mount)
   useEffect(() => {

@@ -68,6 +68,7 @@ function BankNameCombobox({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
+  const [prevValue, setPrevValue] = useState(value);
   const [menuBox, setMenuBox] = useState<{
     top: number;
     left: number;
@@ -77,9 +78,11 @@ function BankNameCombobox({
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLUListElement>(null);
 
-  useEffect(() => {
+  // Sync query au prop value (adjust state while rendering)
+  if (value !== prevValue) {
+    setPrevValue(value);
     setQuery(value);
-  }, [value]);
+  }
 
   const updateMenuPosition = () => {
     const el = inputRef.current;
@@ -93,10 +96,8 @@ function BankNameCombobox({
   };
 
   useLayoutEffect(() => {
-    if (!open) {
-      setMenuBox(null);
-      return;
-    }
+    // Pas de reset au close : le menu n'est rendu (JSX) que si `open` est vrai
+    if (!open) return;
     updateMenuPosition();
     const onScrollOrResize = () => updateMenuPosition();
     window.addEventListener("resize", onScrollOrResize);

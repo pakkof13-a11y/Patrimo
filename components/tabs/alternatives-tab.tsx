@@ -1,7 +1,7 @@
 "use client";
 
 import { fetchJson } from "@/app/lib/api-client";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -179,10 +179,14 @@ export function AlternativesTab({
   const [sub, setSub] = useState<AlternativesSubTab>("dashboard");
   const qc = useQueryClient();
 
-  useEffect(() => {
+  // Sync depuis l'URL (?sub=) — adjust state while rendering ; sub reste togglable manuellement
+  const subParamKey = searchParams.toString();
+  const [prevSubParamKey, setPrevSubParamKey] = useState(subParamKey);
+  if (subParamKey !== prevSubParamKey) {
+    setPrevSubParamKey(subParamKey);
     const q = (searchParams.get("sub") || "").toLowerCase();
     if (ALT_SUBS.has(q)) setSub(q as AlternativesSubTab);
-  }, [searchParams]);
+  }
 
   /** Dashboard : 1 seul HTTP (bundle). Sous-modules : listes lazy au besoin. */
   const dashQ = useQuery({

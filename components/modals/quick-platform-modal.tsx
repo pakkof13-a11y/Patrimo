@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import { Field } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
@@ -46,13 +46,17 @@ export function QuickPlatformModal({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    setName(prefillName || "");
-    setLogoUrl("");
-    setError(null);
-    setPending(false);
-  }, [open, prefillName]);
+  const resetKey = `${open}:${prefillName}`;
+  const [prevResetKey, setPrevResetKey] = useState(resetKey);
+  if (resetKey !== prevResetKey) {
+    setPrevResetKey(resetKey);
+    if (open) {
+      setName(prefillName || "");
+      setLogoUrl("");
+      setError(null);
+      setPending(false);
+    }
+  }
 
   if (!open) return null;
 
