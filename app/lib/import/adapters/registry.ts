@@ -5,6 +5,9 @@
 import type { ColumnRole, PlatformAdapterId, PlatformCsvAdapter } from "../types";
 import { createAliasAdapter, type AliasPreset } from "./alias-adapter";
 import { dynamicAdapter } from "./dynamic-adapter";
+import { hyperliquidTradeAdapter } from "./hyperliquid-trade-adapter";
+import { hyperliquidFundingAdapter } from "./hyperliquid-funding-adapter";
+import { nexoAdapter } from "./nexo-adapter";
 import { IMPORT_FORMATS } from "../presets";
 
 function presetToAlias(p: (typeof IMPORT_FORMATS)[number]): AliasPreset {
@@ -18,12 +21,15 @@ function presetToAlias(p: (typeof IMPORT_FORMATS)[number]): AliasPreset {
 }
 
 const aliasAdapters: PlatformCsvAdapter[] = IMPORT_FORMATS.filter(
-  (f) => f.id !== "dynamic"
+  (f) => f.id !== "dynamic" && f.id !== "nexo"
 ).map((p) => createAliasAdapter(presetToAlias(p)));
 
 /** Tous les adaptateurs (plateformes + dynamic en dernier) */
 export const PLATFORM_ADAPTERS: PlatformCsvAdapter[] = [
   ...aliasAdapters,
+  hyperliquidTradeAdapter,
+  hyperliquidFundingAdapter,
+  nexoAdapter,
   dynamicAdapter,
 ];
 
