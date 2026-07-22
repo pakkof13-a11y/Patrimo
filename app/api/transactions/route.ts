@@ -149,7 +149,6 @@ export async function GET(req: Request) {
   ]);
 
   const pageCount = Math.max(1, Math.ceil(total / query.pageSize) || 1);
-  // Clamp page if client asked beyond last page
   const safePage = Math.min(query.page, pageCount);
 
   const typeCounts = mapTypeCountsToGroups(
@@ -223,7 +222,14 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
 
-  const body = await req.json();
+  // fix(OPT-02): wrap req.json() in try/catch — malformed JSON now returns 400 instead of 500
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "JSON invalide" }, { status: 400 });
+  }
+
   const id = requireBodyId(body);
   if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
 
