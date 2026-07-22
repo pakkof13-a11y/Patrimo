@@ -160,6 +160,79 @@ async function fetchFinnhubGeneral(limit: number): Promise<NewsItem[]> {
 }
 
 /**
+ * Fetch + parse d'un flux Google News RSS pour une requête donnée.
+ * Générique : utilisé par le fil économie FR ET par les actualités d'un actif.
+ * `idPrefix` distingue les ids (gfr- pour l'éco, gasset- pour un titre).
+ */
+export async function fetchGoogleNewsRss(
+  query: string,
+  opts: { limit: number; idPrefix?: string; seen?: Set<string> } = {
+    limit: 12,
+  }
+): Promise<NewsItem[]> {
+  const { limit, idPrefix = "gnews", seen = new Set<string>() } = opts;
+  const items: NewsItem[] = [];
+  try {
+    const url =
+      "https://news.google.com/rss/search?q=" +
+      encodeURIComponent(query) +
+      "&hl=fr&gl=FR&ceid=FR:fr";
+    const res = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(8_000),
+      headers: {
+        Accept: "application/rss+xml, application/xml, text/xml",
+        "User-Agent": "Patrimo/1.0 (portfolio news)",
+      },
+    });
+    if (!res.ok) return items;
+    const xml = await res.text();
+    const blocks = xml.split(/<item>/i).slice(1);
+    for (const block of blocks) {
+      const title = decodeXml(
+        (block.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/i) ||
+          block.match(/<title>(.*?)<\/title>/i))?.[1] || ""
+      ).trim();
+      const link = (
+        (block.match(/<link>(.*?)<\/link>/i) || [])[1] || ""
+      ).trim();
+      const pub = (
+        (block.match(/<pubDate>(.*?)<\/pubDate>/i) || [])[1] || ""
+      ).trim();
+      const source = decodeXml(
+        (block.match(/<source[^>]*>(.*?)<\/source>/i) || [])[1] ||
+          "Google News"
+      ).trim();
+      if (!title || title.length < 12) continue;
+      const key = title.toLowerCase().slice(0, 80);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      let articleUrl = link;
+      if (!isUsableArticleUrl(articleUrl)) {
+        articleUrl = newsSearchFallbackUrl(title, source);
+      }
+      const publishedAt = pub
+        ? new Date(pub).toISOString()
+        : new Date().toISOString();
+      if (Number.isNaN(Date.parse(publishedAt))) continue;
+      const src = source || "Google News FR";
+      items.push({
+        id: `${idPrefix}-${items.length}-${publishedAt.slice(0, 13)}`,
+        title,
+        source: src,
+        url: articleUrl,
+        publishedAt,
+        sourceLogoUrl: newsSourceLogoUrl(src, articleUrl),
+      });
+      if (items.length >= limit * 2) break;
+    }
+  } catch (e) {
+    console.warn("[news-live] rss", e instanceof Error ? e.message : e);
+  }
+  return items;
+}
+
+/**
  * Google News RSS FR — économie / bourse / BCE.
  * Fournit des titres en français et des liens article.
  */
@@ -172,70 +245,13 @@ async function fetchGoogleNewsFr(limit: number): Promise<NewsItem[]> {
   ];
   const items: NewsItem[] = [];
   const seen = new Set<string>();
-
   for (const q of queries) {
-    try {
-      const url =
-        "https://news.google.com/rss/search?q=" +
-        encodeURIComponent(q) +
-        "&hl=fr&gl=FR&ceid=FR:fr";
-      const res = await fetch(url, {
-        cache: "no-store",
-        signal: AbortSignal.timeout(8_000),
-        headers: {
-          Accept: "application/rss+xml, application/xml, text/xml",
-          "User-Agent": "Patrimo/1.0 (portfolio news)",
-        },
-      });
-      if (!res.ok) continue;
-      const xml = await res.text();
-      // Parse RSS items lightly
-      const blocks = xml.split(/<item>/i).slice(1);
-      for (const block of blocks) {
-        const title = decodeXml(
-          (block.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/i) ||
-            block.match(/<title>(.*?)<\/title>/i))?.[1] || ""
-        ).trim();
-        const link = (
-          (block.match(/<link>(.*?)<\/link>/i) || [])[1] || ""
-        ).trim();
-        const pub = (
-          (block.match(/<pubDate>(.*?)<\/pubDate>/i) || [])[1] || ""
-        ).trim();
-        const source = decodeXml(
-          (block.match(/<source[^>]*>(.*?)<\/source>/i) || [])[1] ||
-            "Google News"
-        ).trim();
-        if (!title || title.length < 12) continue;
-        const key = title.toLowerCase().slice(0, 80);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        let articleUrl = link;
-        // Google RSS links are often redirect URLs — still usable
-        if (!isUsableArticleUrl(articleUrl)) {
-          articleUrl = newsSearchFallbackUrl(title, source);
-        }
-        const publishedAt = pub
-          ? new Date(pub).toISOString()
-          : new Date().toISOString();
-        if (Number.isNaN(Date.parse(publishedAt))) continue;
-        const src = source || "Google News FR";
-        items.push({
-          id: `gfr-${items.length}-${publishedAt.slice(0, 13)}`,
-          title,
-          source: src,
-          url: articleUrl,
-          publishedAt,
-          sourceLogoUrl: newsSourceLogoUrl(src, articleUrl),
-        });
-        if (items.length >= limit * 2) break;
-      }
-    } catch (e) {
-      console.warn(
-        "[news-live] google-fr",
-        e instanceof Error ? e.message : e
-      );
-    }
+    const batch = await fetchGoogleNewsRss(q, {
+      limit,
+      idPrefix: "gfr",
+      seen,
+    });
+    items.push(...batch);
   }
   return items;
 }

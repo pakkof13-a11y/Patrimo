@@ -51,15 +51,21 @@ function mapImpact(raw: string | undefined): MacroImpact | "holiday" {
   return "low";
 }
 
+/** Jour civil Europe/Paris (YYYY-MM-DD) — pas le fuseau serveur (souvent UTC). */
+function parisDay(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/** Même jour civil parisien (l'événement « du jour » pour un utilisateur FR). */
 function sameLocalDay(iso: string, now: Date): boolean {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return false;
-  const a = new Date(t);
-  return (
-    a.getFullYear() === now.getFullYear() &&
-    a.getMonth() === now.getMonth() &&
-    a.getDate() === now.getDate()
-  );
+  return parisDay(new Date(t)) === parisDay(now);
 }
 
 function emptyToNull(s: string | undefined): string | null {

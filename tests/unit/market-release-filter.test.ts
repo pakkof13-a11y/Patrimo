@@ -4,6 +4,7 @@ import {
   compareActualToConsensus,
   isEarningsEventPublished,
   isMacroEventPublished,
+  marketEventStatus,
   parseMacroNumber,
 } from "@/app/lib/news/service";
 import {
@@ -46,6 +47,26 @@ function earn(
     ...partial,
   };
 }
+
+describe("marketEventStatus", () => {
+  const NOW_MS = NOW.getTime();
+  it("published once the absolute time has passed", () => {
+    expect(marketEventStatus("2026-07-16T13:59:00.000Z", NOW_MS)).toBe(
+      "published"
+    );
+    expect(marketEventStatus("2026-07-16T14:01:00.000Z", NOW_MS)).toBe(
+      "upcoming"
+    );
+  });
+  it("published exactly at the event time", () => {
+    expect(marketEventStatus("2026-07-16T14:00:00.000Z", NOW_MS)).toBe(
+      "published"
+    );
+  });
+  it("invalid date → upcoming", () => {
+    expect(marketEventStatus("not-a-date", NOW_MS)).toBe("upcoming");
+  });
+});
 
 describe("isMacroEventPublished", () => {
   it("false without actual even if scheduled time has passed", () => {

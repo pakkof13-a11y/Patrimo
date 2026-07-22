@@ -233,57 +233,9 @@ export function getEconomicNews(limit = 8): NewsItem[] {
   }));
 }
 
-/**
- * Actualités liées à un ticker (mock contextuel).
- * Remplacer par un fournisseur (Finnhub, Polygon, etc.) en production.
- */
-export function getAssetRelatedNews(
-  ticker: string | null | undefined,
-  limit = 6
-): NewsItem[] {
-  const t = (ticker || "").trim().toUpperCase().replace(/\..*$/, "");
-  if (!t || t.length < 1) return [];
-
-  const templates: Omit<NewsItem, "id" | "publishedAt">[] = [
-    {
-      title: `${t} : les investisseurs scrutent les prochaines publications`,
-      source: "Reuters",
-      url: `https://news.google.com/search?q=${encodeURIComponent(t + " earnings")}&hl=fr&gl=FR&ceid=FR:fr`,
-    },
-    {
-      title: `Analyse : momentum et valorisation de ${t} sous surveillance`,
-      source: "Bloomberg",
-      url: `https://news.google.com/search?q=${encodeURIComponent(t + " stock")}&hl=fr&gl=FR&ceid=FR:fr`,
-    },
-    {
-      title: `${t} — flux institutionnels et consensus analystes`,
-      source: "Financial Times",
-      url: `https://news.google.com/search?q=${encodeURIComponent(t)}&hl=fr&gl=FR&ceid=FR:fr`,
-    },
-    {
-      title: `Marché : ${t} évolue dans un contexte sectoriel contrasté`,
-      source: "Les Echos",
-      url: `https://news.google.com/search?q=${encodeURIComponent(t + " marché")}&hl=fr&gl=FR&ceid=FR:fr`,
-    },
-    {
-      title: `${t} : points clés pour le suivi de position`,
-      source: "Boursorama",
-      url: `https://news.google.com/search?q=${encodeURIComponent(t + " bourse")}&hl=fr&gl=FR&ceid=FR:fr`,
-    },
-    {
-      title: `Veille : actualité et catalyseurs autour de ${t}`,
-      source: "Zonebourse",
-      url: `https://news.google.com/search?q=${encodeURIComponent(t + " zonebourse")}&hl=fr&gl=FR&ceid=FR:fr`,
-    },
-  ];
-
-  const offsets = [1, 3, 7, 14, 26, 40];
-  return templates.slice(0, Math.min(limit, templates.length)).map((n, i) => ({
-    id: `asset-news-${t}-${i + 1}`,
-    ...n,
-    publishedAt: hoursAgo(offsets[i] ?? (i + 1) * 2),
-  }));
-}
+// Note : les actualités liées à un actif sont désormais servies par
+// `resolveAssetNews` (app/lib/news/asset-news-live.ts) — vraies dépêches
+// filtrées par pertinence. L'ancien générateur de titres factices a été retiré.
 
 /**
  * Parse un chiffre affichable macro ("0,2 %", "215 k", "-1,2 M") → number | null.
@@ -389,6 +341,23 @@ export function getMacroCalendarToday(): MacroEvent[] {
       previous: e.previous ?? null,
     };
   });
+}
+
+/**
+ * Statut d'un événement de marché fondé uniquement sur l'horaire (temps absolu).
+ * « published » dès que l'instant de publication est passé, sinon « upcoming ».
+ * Les timestamps sont absolus (ISO) : la comparaison est indépendante du fuseau ;
+ * l'affichage de l'heure se fait, lui, en Europe/Paris.
+ */
+export type MarketEventStatus = "published" | "upcoming";
+
+export function marketEventStatus(
+  iso: string,
+  nowMs: number = Date.now()
+): MarketEventStatus {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "upcoming";
+  return nowMs >= t ? "published" : "upcoming";
 }
 
 /** Vrai si le chiffre macro est effectivement disponible (pas seulement l’heure). */

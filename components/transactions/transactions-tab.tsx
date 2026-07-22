@@ -25,6 +25,7 @@ import { PlatformLogo } from "@/components/ui/platform-logo";
 import { TableFilters } from "@/components/ui/table-filters";
 import { PageJump } from "@/components/ui/page-jump";
 import { ColumnPicker, type ColumnPickerItem } from "@/components/ui/column-picker";
+import { txNetPriceEur } from "@/app/lib/transactions/net-price";
 import {
   TxTypeFilters,
   txTypeFilterEmptyHint,
@@ -126,28 +127,6 @@ function saveTxColumnVisibility(v: VisibilityState) {
   } catch {
     /* ignore */
   }
-}
-
-/** Prix net final (EUR) : |qty × prix| × fx − frais×fx pour trades, sinon |impact|. */
-function txNetPriceEur(t: TxRow): number | null {
-  const qty = Number(t.quantity);
-  const px = Number(t.unitPrice);
-  const fees = Math.abs(Number(t.fees) || 0);
-  const fx = Number(t.fxRateToEur) || 1;
-  if (
-    Number.isFinite(qty) &&
-    Number.isFinite(px) &&
-    Math.abs(qty) > 0 &&
-    ["ACHAT", "VENTE", "REWARD", "AIRDROP"].includes(t.type)
-  ) {
-    const gross = Math.abs(qty * px) * fx;
-    return Math.max(0, gross - fees * fx);
-  }
-  const impact = Number(t.netCashImpactEur);
-  if (Number.isFinite(impact)) return Math.abs(impact);
-  const gross = Number(t.grossAmountEur);
-  if (Number.isFinite(gross)) return Math.abs(gross);
-  return null;
 }
 
 function loadTxColumnOrder(): string[] {
