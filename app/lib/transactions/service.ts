@@ -12,7 +12,7 @@ import {
 } from "../accounting";
 import type { createTransactionSchema } from "../schemas";
 import type { z } from "zod";
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/app/lib/prisma-client/client";
 import {
   fxRateToEur as liveFxToEur,
   fxRateToEurOnDate,

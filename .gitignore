@@ -49,6 +49,9 @@ next-env.d.ts
 
 /app/generated/prisma
 
+# Prisma 7 generated client (prisma-client generator output)
+/app/lib/prisma-client/
+
 e2e/.auth/
 
 .vercel

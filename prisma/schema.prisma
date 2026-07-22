@@ -2,12 +2,12 @@
 // Holdings from transactions; cash pockets (banks, envelopes) are explicit & optional.
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../app/lib/prisma-client"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ─── Auth.js / NextAuth ───────────────────────────────────────────────────────

@@ -3,12 +3,12 @@
  * Usage: npx tsx scripts/reset-passwords.mts
  */
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import bcrypt from "bcryptjs";
 import fs from "fs";
 import path from "path";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 const ADMIN_PASS = process.env.RESET_ADMIN_PASS?.trim() || "Kzc48++";
 const DEMO_PASS = process.env.RESET_DEMO_PASS?.trim() || "demo1234";

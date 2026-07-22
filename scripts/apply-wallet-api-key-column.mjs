@@ -2,9 +2,9 @@
  * Apply walletApiKey column if missing (bypass prisma migrate advisory lock).
  * Usage: DATABASE_URL=… node scripts/apply-wallet-api-key-column.mjs
  */
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 
-const p = new PrismaClient();
+const p = createPrismaClient();
 try {
   await p.$executeRawUnsafe(
     `ALTER TABLE "Platform" ADD COLUMN IF NOT EXISTS "walletApiKey" TEXT`

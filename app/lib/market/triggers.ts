@@ -3,7 +3,7 @@
  * Pure detection + orchestration after price refresh.
  */
 
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "../prisma";
 import { d, toFixed, zero, type Decimal } from "../money/decimal";
 import { createTransaction } from "../transactions/service";

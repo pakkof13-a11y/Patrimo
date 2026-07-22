@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 
-const p = new PrismaClient();
+const p = createPrismaClient();
 const rows = await p.$queryRaw`
   SELECT column_name
   FROM information_schema.columns
