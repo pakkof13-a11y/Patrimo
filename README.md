@@ -34,7 +34,7 @@ npm run ready:check   # typecheck + unitaires
 
 ## Prérequis Windows (PowerShell)
 
-- Node.js 20+ (`node -v`, `npm -v`)
+- Node.js 22+ (`node -v`, `npm -v`)
 - PostgreSQL 16+ **ou** Docker Desktop
 - (Optionnel) Git pour déployer sur Vercel
 
