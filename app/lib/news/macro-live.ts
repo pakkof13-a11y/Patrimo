@@ -51,15 +51,30 @@ function mapImpact(raw: string | undefined): MacroImpact | "holiday" {
   return "low";
 }
 
+/** Jour civil Europe/Paris (YYYY-MM-DD) — pas le fuseau serveur (souvent UTC). */
+function parisDay(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/** Même jour civil parisien (l'événement « du jour » pour un utilisateur FR). */
 function sameLocalDay(iso: string, now: Date): boolean {
+  return sameCalendarDay(iso, parisDay(now));
+}
+
+/**
+ * Compare la date ISO d'un événement à une date cible (YYYY-MM-DD), en
+ * jour civil parisien — évite le décalage UTC vs Europe/Paris en soirée
+ * (événements « demain UTC ») ou tôt le matin (événements « hier UTC »).
+ */
+function sameCalendarDay(iso: string, targetDate: string): boolean {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return false;
-  const a = new Date(t);
-  return (
-    a.getFullYear() === now.getFullYear() &&
-    a.getMonth() === now.getMonth() &&
-    a.getDate() === now.getDate()
-  );
+  return parisDay(new Date(t)) === targetDate;
 }
 
 function emptyToNull(s: string | undefined): string | null {
@@ -203,17 +218,24 @@ export async function resolveMacroCalendarToday(): Promise<MacroLiveResult> {
       return r;
     }
 
-    const events = rows
+    const parsed = rows
       .map((r, i) => ffRowToMacro(r, i))
-      .filter((e): e is MacroEvent => e != null)
+      .filter((e): e is MacroEvent => e != null);
+    const events = parsed
       .filter((e) => sameLocalDay(e.time, now))
       .sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
 
     if (events.length === 0) {
-      // Week-end / jour sans event : mock du jour pour ne pas vider l’UI
-      const r = mockResult(date);
-      cache = { result: r, expiresAt: nowMs + CACHE_TTL_MS };
-      return r;
+      // Source valide (rows non vide) mais rien pour le jour civil parisien
+      // (week-end, jour férié…) : diagnostic pour distinguer d'un vrai bug
+      // de filtrage, mais on ne masque pas l'état réel derrière le mock.
+      console.warn(
+        "[macro-live] 0 événement après filtre jour civil",
+        `(rows=${rows.length}, parsed=${parsed.length}, day=${parisDay(now)})`
+      );
+      const result: MacroLiveResult = { events: [], source: "forexfactory", date };
+      cache = { result, expiresAt: nowMs + CACHE_TTL_MS };
+      return result;
     }
 
     const result: MacroLiveResult = {

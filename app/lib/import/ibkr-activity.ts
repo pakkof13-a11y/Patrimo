@@ -12,6 +12,7 @@
  */
 
 import { parseLine, normalizeHeader, type ParsedCsv } from "./csv-parse";
+import { parseIbkrEasternDateTime } from "./normalize";
 
 export type IbkrActivityExpandResult = {
   /** true si le fichier est un Activity Statement IBKR */
@@ -22,12 +23,20 @@ export type IbkrActivityExpandResult = {
   dividendCount: number;
   depositCount: number;
   warnings: string[];
+  /** Comptes IBKR distincts détectés dans le relevé (ex. U18285124) */
+  accounts: string[];
+};
+
+export type IbkrActivityExpandOptions = {
+  /** Si fourni, ne conserve que les lignes des comptes listés */
+  accountIds?: string[];
 };
 
 const FLAT_HEADERS = [
   "TradeDate",
   "Symbol",
   "Buy/Sell",
+  "OperationType",
   "Quantity",
   "T. Price",
   "IBCommission",
@@ -102,7 +111,8 @@ function sideFromQty(q: number): "BUY" | "SELL" {
  * Extrait les trades Order + dividendes + dépôts → CSV plat.
  */
 export function expandIbkrActivityStatement(
-  text: string
+  text: string,
+  options: IbkrActivityExpandOptions = {}
 ): IbkrActivityExpandResult {
   const warnings: string[] = [];
   if (!isIbkrActivityStatement(text)) {
@@ -113,8 +123,12 @@ export function expandIbkrActivityStatement(
       dividendCount: 0,
       depositCount: 0,
       warnings: [],
+      accounts: [],
     };
   }
+  const accountFilter = options.accountIds?.length
+    ? new Set(options.accountIds)
+    : null;
 
   const cleaned = text
     .replace(/^\uFEFF/, "")
@@ -122,16 +136,26 @@ export function expandIbkrActivityStatement(
     .replace(/\r/g, "\n");
   const lines = cleaned.split("\n").filter((l) => l.trim().length > 0);
 
-  type SectionKind = "trades" | "dividends" | "deposits" | "other";
+  type SectionKind =
+    | "trades"
+    | "dividends"
+    | "deposits"
+    | "account_info"
+    | "other";
   let section: SectionKind = "other";
   let sectionHeaders: string[] = [];
   const flatRows: Record<string, string>[] = [];
   let tradeCount = 0;
   let dividendCount = 0;
   let depositCount = 0;
+  let currentAccount = "";
+  const accountsSeen: string[] = [];
 
   function classifySection(name: string): SectionKind {
     const n = norm(name);
+    if (n === "account_information" || n === "informations_du_compte") {
+      return "account_info";
+    }
     if (
       n === "trades" ||
       n === "transactions" ||
@@ -169,6 +193,24 @@ export function expandIbkrActivityStatement(
 
     if (!/^data$/i.test(rowType)) {
       // SubTotal / Total / Notes → ignorer
+      continue;
+    }
+
+    // Chaque relevé multi-comptes répète les sections par bloc "Account
+    // Information" — on suit le compte courant pour taguer les lignes.
+    if (section === "account_info") {
+      const fieldName = (cells[2] || "").trim();
+      if (/^account$/i.test(fieldName) || /^compte$/i.test(fieldName)) {
+        currentAccount = (cells[3] || "").trim();
+        if (currentAccount && !accountsSeen.includes(currentAccount)) {
+          accountsSeen.push(currentAccount);
+        }
+      }
+      continue;
+    }
+
+    if (accountFilter && currentAccount && !accountFilter.has(currentAccount)) {
+      // Compte exclu par l'utilisateur (sélecteur multi-comptes)
       continue;
     }
 
@@ -239,10 +281,16 @@ export function expandIbkrActivityStatement(
         return String(Math.abs(n));
       })();
 
+      // "Trade execution times are displayed in Eastern Time" (note IBKR)
+      // → convertir explicitement en UTC (DST-aware) avant stockage.
+      const tradeUtc = parseIbkrEasternDateTime(dateRaw);
+      const dateForStorage = tradeUtc ? tradeUtc.toISOString() : dateRaw;
+
       flatRows.push({
-        TradeDate: dateRaw,
+        TradeDate: dateForStorage,
         Symbol: symbol,
         "Buy/Sell": side,
+        OperationType: side === "BUY" ? "ACHAT" : "VENTE",
         Quantity: qtyAbs,
         "T. Price": priceRaw,
         IBCommission: feeAbs,
@@ -250,7 +298,7 @@ export function expandIbkrActivityStatement(
         Proceeds: proceeds,
         Description: symbol,
         AssetClass: assetCat || "ACTIONS",
-        Notes: [account, disc].filter(Boolean).join(" · "),
+        Notes: [account || currentAccount, disc].filter(Boolean).join(" · "),
       });
       tradeCount++;
       continue;
@@ -285,6 +333,7 @@ export function expandIbkrActivityStatement(
         TradeDate: dateRaw,
         Symbol: ticker || "DIV",
         "Buy/Sell": "DIVIDEND",
+        OperationType: "DIVIDENDE",
         Quantity: "",
         "T. Price": "",
         IBCommission: "0",
@@ -292,7 +341,7 @@ export function expandIbkrActivityStatement(
         Proceeds: String(Math.abs(amtNum)),
         Description: desc || "Dividende",
         AssetClass: "ACTIONS",
-        Notes: "IBKR dividend",
+        Notes: [currentAccount, "IBKR dividend"].filter(Boolean).join(" · "),
       });
       dividendCount++;
       continue;
@@ -327,6 +376,7 @@ export function expandIbkrActivityStatement(
         TradeDate: dateRaw,
         Symbol: currency || "EUR",
         "Buy/Sell": isIn ? "DEPOSIT" : "WITHDRAWAL",
+        OperationType: isIn ? "APPORT" : "RETRAIT",
         Quantity: "",
         "T. Price": "",
         IBCommission: "0",
@@ -334,7 +384,7 @@ export function expandIbkrActivityStatement(
         Proceeds: String(Math.abs(amtNum)),
         Description: desc || (isIn ? "Dépôt" : "Retrait"),
         AssetClass: "CASH",
-        Notes: "IBKR cash",
+        Notes: [currentAccount, "IBKR cash"].filter(Boolean).join(" · "),
       });
       depositCount++;
     }
@@ -352,6 +402,7 @@ export function expandIbkrActivityStatement(
 
   return {
     matched: true,
+    accounts: accountsSeen,
     csv: {
       headers: [...FLAT_HEADERS],
       rows: flatRows,

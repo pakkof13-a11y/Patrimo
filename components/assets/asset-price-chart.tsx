@@ -19,7 +19,10 @@ import {
   type ChartStyle,
   type PriceHistoryRange,
   type PriceHistoryResult,
+  type PriceBarInterval,
   barIntervalLabel,
+  barIntervalShortLabel,
+  SELECTABLE_BAR_INTERVALS,
 } from "@/app/lib/market/price-history-types";
 import {
   buildTotalReturnSeries,
@@ -64,15 +67,13 @@ export type { ChartTxMarker } from "@/components/assets/chart/chart-markers";
 type MainTab = "price" | "perf";
 type PerfChartStyle = "line" | "columns";
 
-/** Périodes vue Cours (sans 5Y) */
-const PERIODS: { id: PriceHistoryRange; label: string }[] = [
-  { id: "7d", label: "7J" },
-  { id: "1m", label: "1M" },
-  { id: "3m", label: "3M" },
-  { id: "ytd", label: "YTD" },
-  { id: "1y", label: "1A" },
-  { id: "all", label: "Tout" },
-];
+/** Unités de temps vue Cours (analyse technique, style TradingView). */
+const TIMEFRAMES: { id: PriceBarInterval; label: string; title: string }[] =
+  SELECTABLE_BAR_INTERVALS.map((iv) => ({
+    id: iv,
+    label: barIntervalShortLabel(iv),
+    title: `Bougies ${barIntervalLabel(iv)}`,
+  }));
 
 /** Périodes vue Performance — défaut 7J */
 const PERF_PERIODS: { id: PriceHistoryRange; label: string }[] = [
@@ -129,7 +130,7 @@ function ChartSkeleton() {
   return (
     <div className="space-y-3" data-testid="asset-chart-skeleton">
       <div className="flex gap-2">
-        {PERIODS.map((p) => (
+        {TIMEFRAMES.map((p) => (
           <Skeleton key={p.id} className="h-7 w-11" />
         ))}
       </div>
@@ -158,7 +159,8 @@ export function AssetPriceChart({
   holdingAvgCostEur?: number | null;
 }) {
   const [mainTab, setMainTab] = useState<MainTab>("price");
-  const [range, setRange] = useState<PriceHistoryRange>("1m");
+  /** Unité de temps du graphe de cours (TradingView-like) — défaut 1 jour */
+  const [timeframe, setTimeframe] = useState<PriceBarInterval>("1d");
   const [style, setStyle] = useState<ChartStyle>("line");
   /** Échelle Y : linéaire (défaut) ou logarithmique */
   const [yScale, setYScale] = useState<"linear" | "log">("linear");
@@ -197,19 +199,28 @@ export function AssetPriceChart({
     setPerfRange("7d");
   }
 
-  const activeRange: PriceHistoryRange =
-    mainTab === "price" ? range : perfRange;
-
   // Perf + fenêtres longues : étendre l'historique jusqu'au 1er achat
   const historySince =
     mainTab === "perf" && firstBuyAt ? firstBuyAt : null;
 
   const q = useQuery({
-    queryKey: ["asset-history", assetId, activeRange, historySince],
+    queryKey: [
+      "asset-history",
+      assetId,
+      mainTab,
+      mainTab === "price" ? `tf:${timeframe}` : `range:${perfRange}`,
+      historySince,
+    ],
     enabled: Boolean(assetId) && enabled,
     queryFn: () => {
-      const params = new URLSearchParams({ range: activeRange });
-      if (historySince) params.set("since", historySince);
+      const params = new URLSearchParams();
+      if (mainTab === "price") {
+        // Vue Cours : unité de temps explicite → fenêtre à nombre de bougies optimal
+        params.set("interval", timeframe);
+      } else {
+        params.set("range", perfRange);
+        if (historySince) params.set("since", historySince);
+      }
       return fetchJson<PriceHistoryResult>(
         `/api/assets/${assetId}/history?${params.toString()}`
       );
@@ -635,17 +646,23 @@ export function AssetPriceChart({
       {/* Ligne 2 : sélecteurs de période (sous les onglets) */}
       <div className="mb-2 flex flex-wrap items-center gap-1">
         {isPrice && (
-          <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Période">
-            {PERIODS.map((p) => (
+          <div
+            className="flex flex-wrap items-center gap-1"
+            role="tablist"
+            aria-label="Unité de temps"
+          >
+            {TIMEFRAMES.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 role="tab"
-                aria-selected={range === p.id}
-                onClick={() => setRange(p.id)}
+                title={p.title}
+                aria-selected={timeframe === p.id}
+                data-testid={`chart-timeframe-${p.id}`}
+                onClick={() => setTimeframe(p.id)}
                 className={cn(
-                  "rounded-md px-2 py-0.5 text-[10px] font-medium transition",
-                  range === p.id
+                  "rounded-md px-2 py-0.5 text-[10px] font-medium tabular-nums transition",
+                  timeframe === p.id
                     ? "bg-teal-700 text-white dark:bg-teal-600"
                     : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 )}
