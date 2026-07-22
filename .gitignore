@@ -54,6 +54,8 @@ e2e/.auth/
 .vercel
 .env*
 
-# fix(CLEAN-01): local dev artifacts — do not commit
+# logs / output
 lint-errors.txt
+
+# local dev artifacts — do not commit
 lancer_app.bat
