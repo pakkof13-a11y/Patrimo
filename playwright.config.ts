@@ -68,6 +68,12 @@ export default defineConfig({
       // Aligner NextAuth sur baseURL Playwright (évite localhost vs 127.0.0.1)
       AUTH_URL: baseURL,
       NEXTAUTH_URL: baseURL,
+      // AUTH_URL vu différemment selon le bundle (middleware vs route handler
+      // Next) selon l'environnement → Auth.js rejette le Host en UntrustedHost
+      // même quand il correspond à baseURL. Sans risque ici (E2E local/CI,
+      // serveur éphémère non exposé) : on fait confiance au Host réel de la
+      // requête plutôt qu'à une AUTH_URL canonique stricte.
+      AUTH_TRUST_HOST: "true",
     },
   },
   projects: [
