@@ -5,7 +5,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ChevronDown, Info } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { DateField } from "@/components/ui/date-input";
 import { FinanceTip } from "@/components/ui/finance-tooltip";

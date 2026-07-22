@@ -176,10 +176,15 @@ export function AlternativesTab({
   baseCurrency?: string;
 }) {
   const searchParams = useSearchParams();
-  const [sub, setSub] = useState<AlternativesSubTab>("dashboard");
+  // Init depuis l'URL (?sub=) dès le 1er rendu — honore le deep-link au montage
+  const [sub, setSub] = useState<AlternativesSubTab>(() => {
+    const q = (searchParams.get("sub") || "").toLowerCase();
+    return ALT_SUBS.has(q) ? (q as AlternativesSubTab) : "dashboard";
+  });
   const qc = useQueryClient();
 
-  // Sync depuis l'URL (?sub=) — adjust state while rendering ; sub reste togglable manuellement
+  // Sync depuis l'URL quand elle change ensuite — adjust state while rendering ;
+  // sub reste par ailleurs togglable manuellement
   const subParamKey = searchParams.toString();
   const [prevSubParamKey, setPrevSubParamKey] = useState(subParamKey);
   if (subParamKey !== prevSubParamKey) {

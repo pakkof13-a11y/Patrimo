@@ -85,7 +85,7 @@ export function HoldingsToolbar({
   search,
   onSearchChange,
   accountFilter,
-  onAccountFilterChange,
+  onAccountFilterChange: _onAccountFilterChange,
   platformFilterLabel,
   onClearPlatformFilter,
   pageSize,

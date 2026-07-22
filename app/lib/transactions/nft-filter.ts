@@ -51,9 +51,6 @@ export function looksLikeNft(input: {
 export function nftExcludePrismaClause(): {
   NOT: Array<Record<string, unknown>>;
 } {
-  const contains = (field: string) => ({
-    [field]: { contains: "nft", mode: "insensitive" as const },
-  });
   return {
     NOT: [
       { notes: { contains: "nft", mode: "insensitive" } },

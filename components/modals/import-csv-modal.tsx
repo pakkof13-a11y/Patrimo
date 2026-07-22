@@ -9,7 +9,6 @@ import {
   Download,
   FileUp,
   Loader2,
-  Wallet,
 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Field } from "@/components/ui/field";

@@ -7,6 +7,7 @@ import {
   normalizeImportInstant,
   normalizeImportNumber,
 } from "@/app/lib/import/dedupe";
+import { toIsoLocal } from "@/app/lib/import/normalize";
 
 describe("import dedupe fingerprints", () => {
   const base = {
@@ -120,11 +121,13 @@ describe("import dedupe fingerprints", () => {
       },
     ]);
     // Draft after fix: Réception → REWARD + ticker ALGO
+    // occurredAt local naïf (comme produit par toIsoLocal côté import CSV) —
+    // dérivé du même instant que l'existing pour rester indépendant du TZ d'exécution.
     const match = classifyAgainstExisting(
       {
         platformId: "plat-1",
         type: "REWARD",
-        occurredAt: "2026-06-22T12:51",
+        occurredAt: toIsoLocal(new Date("2026-06-22T10:51:00.000Z")),
         ticker: "ALGO",
         quantity: "1.989245",
         unitPrice: "0.08",
