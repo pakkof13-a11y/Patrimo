@@ -1,3 +1,5 @@
+import { parisLocalToUtcIso } from "@/app/lib/utils/timezone";
+
 export type NewsItem = {
   id: string;
   title: string;
@@ -26,6 +28,12 @@ export function newsSourceLogoUrl(
     "la tribune": "latribune.fr",
     bfmtv: "bfmtv.com",
     "bfm bourse": "bfmtv.com",
+    "bfm business": "bfmbusiness.com",
+    bfmbusiness: "bfmbusiness.com",
+    boursier: "boursier.com",
+    "boursier.com": "boursier.com",
+    capital: "capital.fr",
+    challenges: "challenges.fr",
     cointelegraph: "cointelegraph.com",
     coindesk: "coindesk.com",
     investing: "investing.com",
@@ -344,15 +352,21 @@ function simulateActualFromForecast(
 /**
  * Calendrier macro du **jour civil local** (Europe/Paris pour l’affichage horaire).
  * « À venir » = encore sans résultat · « Publiées » = réel renseigné.
+ * Jour + heure calculés en Europe/Paris (pas le fuseau du serveur, souvent
+ * UTC en production), pour un affichage correct été comme hiver.
  */
 export function getMacroCalendarToday(): MacroEvent[] {
   const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const d = now.getDate();
+  const parisYmd = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  const [y, m, d] = parisYmd.split("-").map(Number);
 
   return MACRO_POOL.map((e, i) => {
-    const t = new Date(y, m, d, e.hour, e.minute, 0, 0);
+    const t = new Date(parisLocalToUtcIso(y!, m!, d!, e.hour, e.minute));
     // Si l’heure de publication est dépassée et qu’un consensus existe,
     // simuler un « réel » (≠ consensus) pour bascule À venir → Publiées + couleurs.
     let actual = e.actual ?? null;
@@ -491,16 +505,20 @@ export function getEarningsCalendarMock(opts: {
   }
 
   const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const d = now.getDate();
+  const parisYmd = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  const [y, m, d] = parisYmd.split("-").map(Number) as [number, number, number];
   const timings: EarningsTiming[] = ["bmo", "amc", "during", "amc", "bmo"];
   const hours = [7, 17, 12, 18, 8, 16, 7, 17];
 
   return ordered.slice(0, limit).map((p, i) => {
     const timing = timings[i % timings.length]!;
     const hour = hours[i % hours.length]!;
-    const t = new Date(y, m, d, hour, i % 2 === 0 ? 0 : 30, 0, 0);
+    const t = new Date(parisLocalToUtcIso(y, m, d, hour, i % 2 === 0 ? 0 : 30));
     const est = (1.2 + (i % 5) * 0.35).toFixed(2).replace(".", ",");
     const hasActual = i % 3 === 0;
     const base = p.ticker.replace(/\..*$/, "");

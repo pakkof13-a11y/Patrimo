@@ -8,6 +8,7 @@ import {
   type ColumnDef,
   type ColumnOrderState,
   type SortingState,
+  type VisibilityState,
 } from "@tanstack/react-table";
 import {
   ChevronLeft,
@@ -23,6 +24,7 @@ import { CurrencyBadge } from "@/components/ui/currency-badge";
 import { PlatformLogo } from "@/components/ui/platform-logo";
 import { TableFilters } from "@/components/ui/table-filters";
 import { PageJump } from "@/components/ui/page-jump";
+import { ColumnPicker, type ColumnPickerItem } from "@/components/ui/column-picker";
 import {
   TxTypeFilters,
   txTypeFilterEmptyHint,
@@ -73,6 +75,58 @@ const TX_DEFAULT_ORDER = [
   "netPrice",
   "actions",
 ] as const;
+
+/** Colonnes pour le sélecteur (afficher/masquer) — mêmes ids que les colonnes TanStack. */
+const TX_COLUMN_META: ColumnPickerItem[] = [
+  { id: "date", label: "Date", locked: true, group: "mandatory" },
+  { id: "type", label: "Type", group: "optional" },
+  { id: "asset", label: "Actif", locked: true, group: "mandatory" },
+  { id: "envelope", label: "Enveloppe", group: "optional" },
+  { id: "platform", label: "Plateforme", group: "optional" },
+  { id: "blockchain", label: "Blockchain", group: "optional" },
+  { id: "quantity", label: "Quantité", group: "optional" },
+  { id: "currency", label: "Devise", group: "optional" },
+  { id: "netPrice", label: "Prix net uniquement", group: "optional" },
+  { id: "actions", label: "Actions", locked: true, group: "mandatory" },
+];
+
+const TX_VISIBILITY_KEY = "patrimo.display.txColumnVisibility.v1";
+
+function defaultTxColumnVisibility(): VisibilityState {
+  const map: VisibilityState = {};
+  for (const c of TX_COLUMN_META) map[c.id] = true;
+  return map;
+}
+
+function loadTxColumnVisibility(): VisibilityState {
+  const fallback = defaultTxColumnVisibility();
+  try {
+    const raw = localStorage.getItem(TX_VISIBILITY_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return fallback;
+    }
+    const merged = { ...fallback };
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (k in fallback && typeof v === "boolean") merged[k] = v;
+    }
+    for (const c of TX_COLUMN_META) {
+      if (c.locked) merged[c.id] = true;
+    }
+    return merged;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveTxColumnVisibility(v: VisibilityState) {
+  try {
+    localStorage.setItem(TX_VISIBILITY_KEY, JSON.stringify(v));
+  } catch {
+    /* ignore */
+  }
+}
 
 /** Prix net final (EUR) : |qty × prix| × fx − frais×fx pour trades, sinon |impact|. */
 function txNetPriceEur(t: TxRow): number | null {
@@ -137,6 +191,9 @@ export function TransactionsTab({
   const [columnOrder, setColumnOrder] = useState<ColumnOrderState>(() =>
     loadTxColumnOrder()
   );
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
+    () => loadTxColumnVisibility()
+  );
   const dragColRef = useRef<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const [draggingCol, setDraggingCol] = useState<string | null>(null);
@@ -153,6 +210,10 @@ export function TransactionsTab({
   useEffect(() => {
     saveColumnOrder(TX_TABLE_KEY, columnOrder);
   }, [columnOrder]);
+
+  useEffect(() => {
+    saveTxColumnVisibility(columnVisibility);
+  }, [columnVisibility]);
 
   const sortBy = sorting[0]?.id || "date";
   const sortDir = sorting[0]?.desc ? "desc" : "asc";
@@ -198,6 +259,7 @@ export function TransactionsTab({
     () => [
       {
         id: "date",
+        enableHiding: false,
         accessorFn: (r) => r.occurredAt,
         header: "Date",
         cell: ({ row }) => (
@@ -230,6 +292,7 @@ export function TransactionsTab({
       },
       {
         id: "asset",
+        enableHiding: false,
         accessorFn: (r) => r.asset?.name || "",
         header: "Actif",
         cell: ({ row }) => {
@@ -366,6 +429,7 @@ export function TransactionsTab({
       {
         id: "actions",
         enableSorting: false,
+        enableHiding: false,
         header: () => <span className="sr-only">Actions</span>,
         cell: ({ row }) => (
           <div
@@ -407,13 +471,16 @@ export function TransactionsTab({
   const table = useReactTable({
     data: pageRows,
     columns,
-    state: { sorting, columnOrder },
+    state: { sorting, columnOrder, columnVisibility },
     onSortingChange: setSorting,
     onColumnOrderChange: setColumnOrder,
+    onColumnVisibilityChange: setColumnVisibility,
     getCoreRowModel: getCoreRowModel(),
     manualSorting: true,
     getRowId: (r) => r.id,
   });
+
+  const visibleColumnCount = table.getVisibleLeafColumns().length;
 
   const applyColumnDrop = useCallback((targetId: string) => {
     const fromId = dragColRef.current;
@@ -507,6 +574,15 @@ export function TransactionsTab({
                 Import CSV
               </Button>
             )}
+            <ColumnPicker
+              columns={TX_COLUMN_META}
+              visibility={columnVisibility}
+              onChange={(id, visible) =>
+                setColumnVisibility((prev) => ({ ...prev, [id]: visible }))
+              }
+              onReset={() => setColumnVisibility(defaultTxColumnVisibility())}
+              testId="tx-column-picker"
+            />
           </div>
         </div>
       </div>
@@ -752,7 +828,7 @@ export function TransactionsTab({
             ))}
             {filteredTotal === 0 && !loading && (
               <tr>
-                <td colSpan={8} className="px-4 py-6">
+                <td colSpan={visibleColumnCount} className="px-4 py-6">
                   {totalDb === 0 ? (
                     <EmptyPlaceholder
                       title="Aucune transaction pour l’instant"
@@ -792,7 +868,7 @@ export function TransactionsTab({
             )}
             {loading && !hasLoadedOnce && (
               <tr>
-                <td colSpan={8} className="p-0">
+                <td colSpan={visibleColumnCount} className="p-0">
                   <div
                     className="divide-y divide-[var(--border)]"
                     data-testid="tx-loading-skeleton"
