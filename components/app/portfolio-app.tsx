@@ -1170,6 +1170,7 @@ function PortfolioAppClient({
         onComboLabelChange={setPlatformComboLabel}
         onClose={() => setShowPlatform(false)}
         onSubmit={(v) => savePlatform.mutate(v)}
+        pending={savePlatform.isPending}
       />
 
       <AssetDetailModal
