@@ -1,10 +1,10 @@
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import bcrypt from "bcryptjs";
 import { loadSeedCredentials } from "../app/lib/env/seed-credentials";
 import { seedUserPortfolio } from "./seed-portfolio";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 /** Efface tout le patrimoine d’un utilisateur (multi-tenant). */
 async function wipeUserData(userId: string) {

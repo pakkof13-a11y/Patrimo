@@ -2,7 +2,7 @@
  * Écrit les soldes Zerion / Monero dans le ledger Patrimo.
  */
 
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "@/app/lib/prisma";
 import { d, toFixed } from "@/app/lib/money/decimal";
 import { positionKey } from "@/app/lib/accounting/types";

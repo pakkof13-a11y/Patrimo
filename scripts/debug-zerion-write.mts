@@ -1,12 +1,12 @@
 /**
  * Reproduit l’écriture ledger Zerion pour la plateforme Base.
  */
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import { writeZerionBalancesToLedger } from "../app/lib/zerion/ledger-sync";
 import { fetchZerionPositions } from "../app/lib/zerion/client";
 import { createTransaction } from "../app/lib/transactions/service";
 
-const p = new PrismaClient();
+const p = createPrismaClient();
 const addr = "0x5E82A334cd5d8EB0BA6f2C5Bf0e41BeAE591AD05";
 
 const platform = await p.platform.findFirst({

@@ -1,8 +1,8 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import { getHoldings, loadLedgerForUser } from "../app/lib/portfolio/service";
 import { DEMO_EMAIL } from "../app/lib/constants";
 
-const p = new PrismaClient();
+const p = createPrismaClient();
 
 async function main() {
   const u = await p.user.findUnique({ where: { email: DEMO_EMAIL } });
