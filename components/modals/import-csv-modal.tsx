@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Check,
@@ -44,7 +44,7 @@ import { fetchJson } from "@/app/lib/api-client";
 import {
   availableApiStatusMessage,
   blockchainCatalogPresets,
-
+  blockchainSyncLabel,
   describeChainSyncFeatures,
   getChainSyncCapability,
   missingApiStatusMessage,
@@ -388,6 +388,12 @@ export function ImportCsvModal({
     /** Résumé générique (Zerion / multi) */
     summaryLine?: string | null;
   } | null>(null);
+  /** Adresse/clé réutilisées depuis une blockchain déjà configurée (pré-remplissage) */
+  const [blockchainDefaults, setBlockchainDefaults] = useState<{
+    evmAddress: string | null;
+    evmApiKey: string | null;
+    solanaApiKey: string | null;
+  } | null>(null);
 
   const chainPresets = useMemo(() => blockchainCatalogPresets(), []);
   const selectedChainCap = useMemo(
@@ -398,6 +404,38 @@ export function ImportCsvModal({
     () => chainPresets.find((p) => p.key === walletPresetKey),
     [chainPresets, walletPresetKey]
   );
+
+  // Récupère les valeurs déjà configurées sur une autre blockchain pour
+  // pré-remplir adresse/clé API — évite de ressaisir la même info à chaque ajout.
+  // Le pré-remplissage lui-même se produit dans le .then() (async, hors du
+  // corps synchrone de l'effet) et dans le onChange du select (nouveau preset).
+  useEffect(() => {
+    if (!open || importMode !== "wallet") return;
+    let cancelled = false;
+    fetchJson<{
+      evmAddress: string | null;
+      evmApiKey: string | null;
+      solanaApiKey: string | null;
+    }>("/api/platforms/blockchain-defaults")
+      .then((data) => {
+        if (cancelled) return;
+        setBlockchainDefaults(data);
+        const cap = getChainSyncCapability(walletPresetKey);
+        if (cap?.provider === "zerion") {
+          setWalletAddress((prev) => prev || data.evmAddress || "");
+          setWalletApiKey(
+            (prev) => prev || data.evmApiKey || cap.defaultApiKey || ""
+          );
+        }
+      })
+      .catch(() => {
+        /* non-bloquant */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lecture ponctuelle à l'ouverture
+  }, [open, importMode]);
 
   // Sync destination when parent crée une plateforme à la volée
   // (y compris juste après fermeture de la modale de création)
@@ -1333,28 +1371,19 @@ export function ImportCsvModal({
                     setWalletResult(null);
                     const cap = getChainSyncCapability(key);
                     if (cap?.provider === "zerion") {
+                      setWalletAddress(blockchainDefaults?.evmAddress || "");
                       setWalletApiKey(
-                        cap.defaultApiKey || ""
+                        blockchainDefaults?.evmApiKey || cap.defaultApiKey || ""
                       );
                     }
                   }}
                   data-testid="import-wallet-chain"
                 >
-                  {chainPresets.map((p) => {
-                    const cap = getChainSyncCapability(p.key);
-                    return (
-                      <option key={p.key} value={p.key}>
-                        {p.name}
-                        {cap
-                          ? cap.provider === "zerion"
-                            ? " · Zerion"
-                            : cap.provider === "helius-solana"
-                              ? " · Helius"
-                              : " · synchro"
-                          : " · API manquante"}
-                      </option>
-                    );
-                  })}
+                  {chainPresets.map((p) => (
+                    <option key={p.key} value={p.key}>
+                      {p.name} · {blockchainSyncLabel(p.key)}
+                    </option>
+                  ))}
                 </select>
               </Field>
               <Field
