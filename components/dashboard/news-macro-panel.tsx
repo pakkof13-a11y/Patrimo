@@ -21,8 +21,6 @@ import {
   newsSourceLogoUrl,
 } from "@/app/lib/news/service";
 import {
-  filterEarningsByRelease,
-  filterMacroByRelease,
   MARKET_RELEASE_FILTERS,
   type MarketReleaseFilter,
 } from "@/app/lib/news/release-filter";
@@ -47,7 +45,7 @@ const IMPACT_CLASS: Record<MacroImpact, string> = {
   high: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
 };
 
-const INITIAL = 4;
+const INITIAL = 5;
 
 function relativeTime(iso: string): string {
   try {
@@ -75,15 +73,15 @@ function clockTime(iso: string): string {
  */
 export function NewsMacroPanel({
   portfolioTickers = [],
-  compact = false,
+  compact: _compact = false,
 }: {
   portfolioTickers?: PortfolioTickerProp[];
-  /** Conservé pour API — densifie le contenu des listes */
+  /** Conservé pour API — macro/résultats affichent toujours 5 items/onglet */
   compact?: boolean;
 }) {
-  // Min. 5 actualités (demande produit) ; compact garde 5 aussi pour densité
+  // Min. 5 actualités (demande produit) ; macro/résultats : 5 par onglet, quel que soit compact
   const newsLimit = 5;
-  const listLimit = compact ? 3 : INITIAL;
+  const listLimit = INITIAL;
 
   const [newsMore, setNewsMore] = useState(false);
   const [macroMore, setMacroMore] = useState(false);
@@ -119,9 +117,12 @@ export function NewsMacroPanel({
   const macroQ = useQuery({
     queryKey: ["macro-calendar"],
     queryFn: () =>
-      fetchJson<{ events: MacroEvent[]; date: string; source?: string }>(
-        "/api/macro"
-      ),
+      fetchJson<{
+        upcoming: MacroEvent[];
+        published: MacroEvent[];
+        date: string;
+        source?: string;
+      }>("/api/macro"),
     staleTime: 5 * 60_000,
     refetchInterval: 10 * 60_000,
   });
@@ -132,7 +133,8 @@ export function NewsMacroPanel({
       const q = new URLSearchParams({ limit: "10" });
       if (tickersParam) q.set("tickers", tickersParam);
       return fetchJson<{
-        events: EarningsEvent[];
+        upcoming: EarningsEvent[];
+        published: EarningsEvent[];
         date: string;
         source?: string;
       }>(`/api/earnings?${q.toString()}`);
@@ -142,12 +144,18 @@ export function NewsMacroPanel({
 
   const newsAll = newsQ.data?.news ?? [];
   const macroAll = useMemo(
-    () => filterMacroByRelease(macroQ.data?.events ?? [], macroFilter),
-    [macroQ.data?.events, macroFilter]
+    () =>
+      macroFilter === "upcoming"
+        ? macroQ.data?.upcoming ?? []
+        : macroQ.data?.published ?? [],
+    [macroQ.data, macroFilter]
   );
   const earnAll = useMemo(
-    () => filterEarningsByRelease(earnQ.data?.events ?? [], earnFilter),
-    [earnQ.data?.events, earnFilter]
+    () =>
+      earnFilter === "upcoming"
+        ? earnQ.data?.upcoming ?? []
+        : earnQ.data?.published ?? [],
+    [earnQ.data, earnFilter]
   );
 
   // Toujours afficher au moins 5 actus si disponibles
