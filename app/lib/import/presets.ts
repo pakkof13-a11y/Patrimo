@@ -381,6 +381,7 @@ export const IMPORT_FORMATS: FormatPreset[] = [
       symbol: "ticker",
       buy_sell: "side",
       side: "side",
+      operationtype: "type",
       quantity: "quantity",
       t_price: "unitPrice",
       t_price_: "unitPrice",
@@ -686,7 +687,31 @@ const TYPE_ALIASES: Record<string, TxType> = {
   regularredemption: "RETRAIT",
 };
 
+const EXACT_TX_TYPES = new Set<TxType>([
+  "ACHAT",
+  "VENTE",
+  "DIVIDENDE",
+  "COUPON",
+  "LOYER",
+  "INTERET",
+  "REWARD",
+  "FRAIS",
+  "APPORT",
+  "RETRAIT",
+  "TRANSFERT_CASH",
+  "TRANSFERT_TITRE",
+]);
+
 export function mapTxType(raw: string | undefined | null, side?: string | null): TxType | null {
+  // Une valeur déjà résolue (ex. colonne "type" dédiée — OperationType IBKR)
+  // est prioritaire absolue : ne jamais la re-parser via "side" ni l'écraser
+  // avec null (un Buy/Sell ambigu ne doit pas invalider un type déjà correct).
+  if (raw) {
+    const upperRaw = raw.trim().toUpperCase();
+    if (EXACT_TX_TYPES.has(upperRaw as TxType)) {
+      return upperRaw as TxType;
+    }
+  }
   if (side) {
     const s = side.trim().toLowerCase();
     if (["buy", "achat", "b"].includes(s)) return "ACHAT";
