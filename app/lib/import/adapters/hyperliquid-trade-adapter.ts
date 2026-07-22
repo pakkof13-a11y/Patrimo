@@ -116,7 +116,7 @@ export const hyperliquidTradeAdapter: PlatformCsvAdapter = {
         price,
         fees: fees > 0 ? fees : undefined,
         currency: "USD",
-        cashAmount,
+        cashAmount: cashAmount ?? undefined,
         rawType: dirRaw,
         line: lineNum,
       };

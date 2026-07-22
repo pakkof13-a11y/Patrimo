@@ -30,6 +30,8 @@ export type ImportCsvOptions = {
   delimiter?: string;
   /** Mapping colonnes manuel ou mémorisé */
   columnMap?: ColumnMapping;
+  /** IBKR multi-comptes : ne conserver que ces comptes (sinon tous) */
+  ibkrAccountIds?: string[];
 };
 
 export type ImportCsvResult = {
@@ -51,6 +53,8 @@ export type ImportCsvResult = {
   drafts: ImportDraftRow[];
   warnings: string[];
   adapterRanking: Array<{ id: string; score: number; label: string }>;
+  /** IBKR multi-comptes : comptes distincts détectés dans le relevé */
+  ibkrAccounts?: string[];
 };
 
 /**
@@ -67,7 +71,9 @@ export function importCsv(
     options.formatId === "auto" ||
     !options.formatId;
   if (forceIbkr && isIbkrActivityStatement(csvText)) {
-    const expanded = expandIbkrActivityStatement(csvText);
+    const expanded = expandIbkrActivityStatement(csvText, {
+      accountIds: options.ibkrAccountIds,
+    });
     if (expanded.matched && expanded.csv.rows.length > 0) {
       const draftResult = mapCsvToDrafts(expanded.csv, "interactive_brokers");
       const okCount = draftResult.rows.filter((r) => r.status === "ok").length;
@@ -91,6 +97,7 @@ export function importCsv(
             label: getFormat("interactive_brokers").label,
           },
         ],
+        ibkrAccounts: expanded.accounts,
       };
     }
     if (expanded.matched && expanded.csv.rows.length === 0) {
@@ -109,6 +116,7 @@ export function importCsv(
           ? expanded.warnings
           : ["Activity Statement IBKR sans lignes de transactions"],
         adapterRanking: [],
+        ibkrAccounts: expanded.accounts,
       };
     }
   }

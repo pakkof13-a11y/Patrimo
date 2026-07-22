@@ -52,11 +52,15 @@ export async function POST(req: Request) {
       const formatId = String(body?.formatId || "auto");
       const delimiter = body?.delimiter as string | undefined;
       const columnMap = (body?.columnMap || null) as ColumnMapping | null;
+      const ibkrAccountIds = Array.isArray(body?.ibkrAccountIds)
+        ? (body.ibkrAccountIds as unknown[]).map(String)
+        : undefined;
 
       const parsed = importCsv(csvText, {
         formatId: formatId as "auto",
         delimiter,
         columnMap: columnMap || undefined,
+        ibkrAccountIds,
       });
 
       if (parsed.drafts.length > IMPORT_COMMIT_MAX_ROWS) {
