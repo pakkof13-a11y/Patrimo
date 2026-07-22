@@ -35,7 +35,10 @@ describe("zerion chains", () => {
   });
 
   it("clé et message d’aide", () => {
-    expect(DEFAULT_ZERION_API_KEY.startsWith("zk_")).toBe(true);
+    // Placeholder UI uniquement — jamais de clé réelle dans le bundle client
+    // (voir commit "remove client Zerion key leak"). La clé effective vient
+    // de ZERION_API_KEY côté serveur.
+    expect(DEFAULT_ZERION_API_KEY).toBe("");
     expect(ZERION_HELP_MESSAGE).toContain("Zerion");
     expect(ZERION_HELP_MESSAGE).toContain("dashboard.zerion.io");
   });

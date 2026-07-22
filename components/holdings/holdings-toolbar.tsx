@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronDown, HelpCircle, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ColumnPicker } from "@/components/ui/column-picker";
@@ -85,7 +85,7 @@ export function HoldingsToolbar({
   search,
   onSearchChange,
   accountFilter,
-  onAccountFilterChange,
+  onAccountFilterChange: _onAccountFilterChange,
   platformFilterLabel,
   onClearPlatformFilter,
   pageSize,
@@ -96,6 +96,7 @@ export function HoldingsToolbar({
   columns,
 }: HoldingsToolbarProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [prevGroupMode, setPrevGroupMode] = useState(groupMode);
   const [tipsOpen, setTipsOpen] = useState(false);
   const [envelopeOpen, setEnvelopeOpen] = useState(false);
   const hasSource = sourceCount > 0;
@@ -128,9 +129,10 @@ export function HoldingsToolbar({
   }
 
   // Ouvrir les options si regroupement actif (contrôles groupe visibles)
-  useEffect(() => {
+  if (groupMode !== prevGroupMode) {
+    setPrevGroupMode(groupMode);
     if (groupMode) setAdvancedOpen(true);
-  }, [groupMode]);
+  }
 
   return (
     <div

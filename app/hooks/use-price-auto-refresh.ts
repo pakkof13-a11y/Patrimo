@@ -55,8 +55,8 @@ export function usePriceAutoRefresh(
       ? crypto.randomUUID()
       : `t-${Date.now().toString(36)}`
   );
+  // tabId est stable (lazy init, jamais réassigné) — pas besoin de resync le ref au render
   const tabIdRef = useRef(tabId);
-  tabIdRef.current = tabId;
   const [lastPriceSync, setLastPriceSync] = useState<Date | null>(null);
   const lastPriceSyncRef = useRef<number>(0);
   const [priceSyncPulse, setPriceSyncPulse] = useState(false);

@@ -123,14 +123,17 @@ export function PreferencesPanel({
     useState<DefaultBenchmark>("none");
   const [latentRange, setLatentRange] = useState<LatentPnlRange>("all");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [prefsSeeded, setPrefsSeeded] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  // Seed prefs client-only au montage (adjust state while rendering)
+  if (!prefsSeeded) {
+    setPrefsSeeded(true);
     setThemeMounted(true);
     setDefaultBenchmark(loadDefaultBenchmark());
     setLatentRange(loadLatentPnlRange());
     setAvatarUrl(loadUserAvatarDataUrl());
-  }, []);
+  }
 
   const meQ = useQuery({
     queryKey: ["auth-me"],
@@ -143,14 +146,19 @@ export function PreferencesPanel({
   });
   const isAdmin = meQ.data?.user?.role === "ADMIN";
 
-  useEffect(() => {
-    if (embedded) return;
+  // Reset zone danger à la fermeture (adjust state while rendering)
+  const [prevOpenForReset, setPrevOpenForReset] = useState(open);
+  if (!embedded && open !== prevOpenForReset) {
+    setPrevOpenForReset(open);
     if (!open) {
       setDangerOpen(false);
       setConfirmChecked(false);
       setConfirmText("");
-      return;
     }
+  }
+
+  useEffect(() => {
+    if (embedded || !open) return;
     function onDoc(e: MouseEvent) {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     }

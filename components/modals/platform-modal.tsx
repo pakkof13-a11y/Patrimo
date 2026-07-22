@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import { ChevronDown } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
@@ -56,8 +56,9 @@ export function PlatformModal({
     "none"
   );
 
-  useEffect(() => {
-    if (!open) return;
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open && !wasOpen) {
+    setWasOpen(true);
     form.reset({
       name: "",
       type: "" as PlatformForm["type"],
@@ -70,8 +71,9 @@ export function PlatformModal({
     onComboLabelChange("");
     setLogoManualOpen(false);
     setSelectionKind("none");
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when open flips true
-  }, [open]);
+  } else if (!open && wasOpen) {
+    setWasOpen(false);
+  }
 
   const selectedType = (form.watch("type") as string) || "";
   const name = form.watch("name") || "";

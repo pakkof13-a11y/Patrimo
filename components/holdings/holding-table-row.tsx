@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useState } from "react";
 import { flexRender, type Row } from "@tanstack/react-table";
 import { ChevronRight } from "lucide-react";
 import { HoldingRecentTxs } from "@/components/holdings/holding-recent-txs";
@@ -39,9 +39,12 @@ export function TriggerLevelInput({
   onCommit: (assetId: string, field: TriggerField, value: string | null) => void;
 }) {
   const [draft, setDraft] = useState(value ?? "");
-  useEffect(() => {
+  const resetKey = `${assetId}:${field}:${value ?? ""}`;
+  const [prevResetKey, setPrevResetKey] = useState(resetKey);
+  if (resetKey !== prevResetKey) {
+    setPrevResetKey(resetKey);
     setDraft(value ?? "");
-  }, [value, assetId, field]);
+  }
 
   return (
     <input
