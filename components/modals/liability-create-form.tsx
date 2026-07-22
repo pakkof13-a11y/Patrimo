@@ -5,7 +5,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ChevronDown, Info } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { DateField } from "@/components/ui/date-input";
 import { FinanceTip } from "@/components/ui/finance-tooltip";
@@ -98,9 +97,14 @@ function LenderCombobox({
     value
   );
 
-  useEffect(() => {
+  // Bascule auto en mode libre si la valeur ne correspond à aucun preset connu
+  // (adjust state while rendering — customMode reste par ailleurs togglable manuellement)
+  const customModeKey = `${value}:${isKnown}`;
+  const [prevCustomModeKey, setPrevCustomModeKey] = useState(customModeKey);
+  if (customModeKey !== prevCustomModeKey) {
+    setPrevCustomModeKey(customModeKey);
     if (value && !isKnown && value !== "Autre") setCustomMode(true);
-  }, [value, isKnown]);
+  }
 
   useEffect(() => {
     if (!open) return;

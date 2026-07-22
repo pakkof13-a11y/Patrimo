@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { ChevronDown, SlidersHorizontal } from "lucide-react";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import type { HistoryPoint } from "@/app/lib/types/ui";
@@ -28,6 +34,12 @@ import {
   type EvolutionPrefsV4,
 } from "@/app/lib/portfolio/evolution-prefs";
 import { loadDefaultBenchmark } from "@/app/lib/portfolio/benchmark-prefs";
+
+const emptySubscribe = () => () => undefined;
+
+function useIsClient() {
+  return useSyncExternalStore(emptySubscribe, () => true, () => false);
+}
 import {
   DecomposedCumulAreas,
   DecomposedCumulColumns,
@@ -183,16 +195,18 @@ export function PortfolioEvolutionPanel({
   loading?: boolean;
   className?: string;
 }) {
+  const isClient = useIsClient();
   const [prefs, setPrefs] = useState<EvolutionPrefsV4>(DEFAULT_EVOLUTION_PREFS);
   const [userDefaultBm, setUserDefaultBm] = useState<EvolutionBenchmark>("none");
   const [hydrated, setHydrated] = useState(false);
   const styleTouched = useRef(false);
 
-  useEffect(() => {
+  // Seed prefs/benchmark depuis localStorage au passage client (adjust state while rendering)
+  if (isClient && !hydrated) {
+    setHydrated(true);
     setPrefs(loadEvolutionPrefs());
     setUserDefaultBm(loadDefaultBenchmark());
-    setHydrated(true);
-  }, []);
+  }
 
   useEffect(() => {
     if (!hydrated) return;
@@ -242,14 +256,10 @@ export function PortfolioEvolutionPanel({
     return map;
   }, [firstDate]);
 
-  useEffect(() => {
-    if (!hydrated) return;
-    if (!rangeEnabled[range]) {
-      setPrefs((p) =>
-        p.range === "7d" ? p : { ...p, range: "7d", v: 4 as const }
-      );
-    }
-  }, [range, rangeEnabled, hydrated]);
+  // Repli 7j si la période courante devient indisponible (adjust state while rendering)
+  if (hydrated && !rangeEnabled[range] && range !== "7d") {
+    setPrefs((p) => ({ ...p, range: "7d", v: 4 as const }));
+  }
 
   const { points: rawPoints, interval } = useMemo(
     () => buildEvolutionSeries(history, range, metric),

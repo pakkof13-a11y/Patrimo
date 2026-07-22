@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Check,
@@ -9,7 +9,6 @@ import {
   Download,
   FileUp,
   Loader2,
-  Wallet,
 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Field } from "@/components/ui/field";
@@ -396,29 +395,35 @@ export function ImportCsvModal({
 
   // Sync destination when parent crée une plateforme à la volée
   // (y compris juste après fermeture de la modale de création)
-  useEffect(() => {
-    if (!open) return;
-    if (defaultPlatformId && defaultPlatformId !== platformId) {
-      setPlatformId(defaultPlatformId);
-      setPlatformLabel(defaultPlatformLabel || "");
-    } else if (
-      defaultPlatformLabel &&
-      defaultPlatformId === platformId &&
-      defaultPlatformLabel !== platformLabel
-    ) {
-      setPlatformLabel(defaultPlatformLabel);
+  // adjust state while rendering — "suspended" force un recheck même si id/label inchangés
+  const syncKey = `${open}:${defaultPlatformId}:${defaultPlatformLabel}:${suspended}`;
+  const [prevSyncKey, setPrevSyncKey] = useState(syncKey);
+  if (syncKey !== prevSyncKey) {
+    setPrevSyncKey(syncKey);
+    if (open) {
+      if (defaultPlatformId && defaultPlatformId !== platformId) {
+        setPlatformId(defaultPlatformId);
+        setPlatformLabel(defaultPlatformLabel || "");
+      } else if (
+        defaultPlatformLabel &&
+        defaultPlatformId === platformId &&
+        defaultPlatformLabel !== platformLabel
+      ) {
+        setPlatformLabel(defaultPlatformLabel);
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync intentional when default changes
-  }, [open, defaultPlatformId, defaultPlatformLabel, suspended]);
+  }
 
-  useEffect(() => {
+  const [wasOpenForReset, setWasOpenForReset] = useState(open);
+  if (open !== wasOpenForReset) {
+    setWasOpenForReset(open);
     if (!open) {
       setImportMode("csv");
       setWalletAddress("");
       setWalletResult(null);
       setWalletPending(false);
     }
-  }, [open]);
+  }
 
   const selectedCount = useMemo(
     () => rows.filter((r) => r.selected).length,

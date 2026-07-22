@@ -138,8 +138,10 @@ export async function reloadHoldings(qc: QueryClient, baseCurrency: string) {
     const bust = `/api/holdings?base=${encodeURIComponent(baseCurrency)}&_=${Date.now()}`;
     const data = await fetchJson<HoldingsResponse>(bust);
     qc.setQueryData(["holdings", baseCurrency], data);
+    // Ne pas invalidateQueries ici : setQueryData suffit et évite un 2e GET + flash UI
     return data;
   } catch (e) {
+    // Fallback : invalide le cache pour forcer un re-fetch propre au prochain render
     void qc.invalidateQueries({ queryKey: ["holdings", baseCurrency] });
     throw e;
   }

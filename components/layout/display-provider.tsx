@@ -7,6 +7,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
 } from "react";
 import {
   LAYOUT_WIDTH_OPTIONS,
@@ -27,13 +28,23 @@ type DisplayContextValue = {
 
 const DisplayContext = createContext<DisplayContextValue | null>(null);
 
+const emptySubscribe = () => () => undefined;
+
+function useIsClient() {
+  return useSyncExternalStore(emptySubscribe, () => true, () => false);
+}
+
 export function DisplayProvider({ children }: { children: React.ReactNode }) {
   // Toujours "fluid" au 1er rendu (SSR = client) — localStorage après mount
+  const isClient = useIsClient();
   const [layoutWidth, setLayoutWidthState] = useState<LayoutWidthMode>("fluid");
+  const [seeded, setSeeded] = useState(false);
 
-  useEffect(() => {
+  // Seed depuis localStorage au passage client (adjust state while rendering)
+  if (isClient && !seeded) {
+    setSeeded(true);
     setLayoutWidthState(loadLayoutWidth());
-  }, []);
+  }
 
   const setLayoutWidth = useCallback((_mode: LayoutWidthMode) => {
     // Layout modes retirés de l’UI — toujours fluide

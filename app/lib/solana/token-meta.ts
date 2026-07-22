@@ -253,7 +253,7 @@ export async function resolveSolanaMintMeta(
  */
 export async function resolveSolanaMintMetas(
   mints: string[],
-  opts?: { signal?: AbortSignal; concurrency?: number }
+  _opts?: { signal?: AbortSignal; concurrency?: number }
 ): Promise<Map<string, SolanaTokenMeta>> {
   const map = new Map<string, SolanaTokenMeta>();
   const unique = [

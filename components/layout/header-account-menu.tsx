@@ -38,6 +38,8 @@ export function HeaderAccountMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarSeeded, setAvatarSeeded] = useState(false);
+  const [prevOpen, setPrevOpen] = useState(open);
   const rootRef = useRef<HTMLDivElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
@@ -51,9 +53,12 @@ export function HeaderAccountMenu({
     retry: false,
   });
 
-  useEffect(() => {
+  // Recharge l'avatar au montage et à chaque ouverture du menu (adjust state while rendering)
+  if (!avatarSeeded || open !== prevOpen) {
+    setAvatarSeeded(true);
+    setPrevOpen(open);
     setAvatarUrl(loadUserAvatarDataUrl());
-  }, [open]);
+  }
 
   useEffect(() => {
     if (!open) return;

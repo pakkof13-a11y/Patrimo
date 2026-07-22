@@ -179,13 +179,20 @@ export function PlatformsTab({
   /** Aperçu rapide (double-clic / menu / Entrée) */
   const [previewTarget, setPreviewTarget] = useState<PlatformRow | null>(null);
 
+  // Vide la liste dès que la plateforme sélectionnée n'a plus d'id Solana,
+  // et arme le loading dès qu'un (re)fetch va démarrer (adjust state while rendering).
+  const solanaPlatformId = solanaDetail?.platform.id ?? null;
+  const solanaFetchKey = `${solanaPlatformId}:${solanaDetail?.snapshot.fetchedAt ?? ""}`;
+  const [prevSolanaFetchKey, setPrevSolanaFetchKey] = useState(solanaFetchKey);
+  if (solanaFetchKey !== prevSolanaFetchKey) {
+    setPrevSolanaFetchKey(solanaFetchKey);
+    if (solanaPlatformId) setOnchainTxsLoading(true);
+    else setOnchainTxs([]);
+  }
+
   useEffect(() => {
-    if (!solanaDetail?.platform.id) {
-      setOnchainTxs([]);
-      return;
-    }
+    if (!solanaDetail?.platform.id) return;
     let cancelled = false;
-    setOnchainTxsLoading(true);
     void fetchJson<{
       transactions: typeof onchainTxs;
     }>(
