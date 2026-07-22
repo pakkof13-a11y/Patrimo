@@ -76,6 +76,8 @@ export const addAssetSchema = z.object({
   accountType: z.enum(accountTypes).default("CTO"),
   priceProvider: z.enum(priceProviders).default("FINNHUB"),
   providerSymbol: z.string().optional().or(z.literal("")),
+  /** Logo override (preset combobox / saisie manuelle) — sinon dérivé côté serveur. */
+  logoUrl: z.string().trim().max(2048).optional().or(z.literal("")),
   acquisitionDate: z.string().optional(),
   manualPrice: z.preprocess(
     (val) => (val === "" || val == null ? undefined : String(val).replace(",", ".")),

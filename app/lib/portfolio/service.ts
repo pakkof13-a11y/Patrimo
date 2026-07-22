@@ -753,9 +753,17 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     byAccountType["CASH"] = (byAccountType["CASH"] ?? 0) + cashClassBase;
   }
 
+  // walletApiKey retiré ici : /api/holdings n'en a pas besoin (pas d'UI d'édition
+  // de plateforme sur cette page) — évite de faire circuler la clé à chaque
+  // rechargement du tableau de bord. /api/platforms (platforms-tab) la garde
+  // car l'édition + la sync inline en ont besoin.
+  const platformsWithoutApiKey = platforms.map(
+    ({ walletApiKey: _walletApiKey, ...rest }) => rest
+  );
+
   return {
     holdings,
-    platforms,
+    platforms: platformsWithoutApiKey,
     summary,
     allocation: {
       byClass: Object.entries(byClass).map(([name, value]) => ({ name, value })),

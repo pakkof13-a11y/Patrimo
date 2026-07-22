@@ -16,6 +16,7 @@ import type {
 import { getEarningsCalendarMock } from "@/app/lib/news/service";
 import { toYahooSymbol, toFinnhubSymbol } from "@/app/lib/market/symbol";
 import { logoByName, logoByTicker } from "@/app/lib/logos/logodev";
+import { withTimeout } from "@/app/lib/utils/with-timeout";
 
 const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey"],
@@ -235,9 +236,13 @@ async function fetchYahooOne(
   if (!symbol) return null;
 
   try {
-    const summary = (await yahooFinance.quoteSummary(symbol, {
-      modules: ["calendarEvents"],
-    })) as { calendarEvents?: YahooCal };
+    const summary = (await withTimeout(
+      yahooFinance.quoteSummary(symbol, {
+        modules: ["calendarEvents"],
+      }),
+      8_000,
+      "yahooFinance.quoteSummary"
+    )) as { calendarEvents?: YahooCal };
 
     const earn = summary?.calendarEvents?.earnings;
     const rawDate = earn?.earningsDate?.[0];
