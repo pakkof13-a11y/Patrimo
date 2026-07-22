@@ -43,20 +43,16 @@ export async function refreshEligiblePrices(userId: string): Promise<{
   /** Successful native quotes for trigger evaluation */
   const freshPrices = new Map<string, { priceNative: string; currency: string }>();
 
-  // Pace CoinGecko free tier (~10–30 rpm) — évite 429 sur MON en fin de lot
-  let cryptoCalls = 0;
+  // Binance (primaire crypto) : cache 30 s + quotas larges → aucun pacing.
+  // On ne temporise que les assets qui retomberont sur CoinGecko (free tier
+  // ~10–30 rpm) — liquid staking, wrapped, tokens hors Binance.
+  const { isBinanceSupported } = await import("./providers/binance-ws");
+  let coingeckoCalls = 0;
 
   for (const asset of assets) {
     if (asset.priceProvider === "MANUAL" && !["ACTIONS", "CRYPTO"].includes(asset.assetClass)) {
       continue;
     }
-
-    const isCrypto =
-      asset.assetClass === "CRYPTO" || asset.priceProvider === "COINGECKO";
-    if (isCrypto && cryptoCalls > 0) {
-      await new Promise((r) => setTimeout(r, 1200));
-    }
-    if (isCrypto) cryptoCalls += 1;
 
     const meta: AssetMeta = {
       id: asset.id,
@@ -69,6 +65,16 @@ export async function refreshEligiblePrices(userId: string): Promise<{
       manualPrice: asset.manualPrice?.toString() ?? null,
     };
 
+    const isCrypto =
+      asset.assetClass === "CRYPTO" || asset.priceProvider === "COINGECKO";
+    // Pacing uniquement pour le fallback CoinGecko (Binance ne l'exige pas)
+    const usesCoingeckoFallback =
+      isCrypto && !isBinanceSupported({ ...meta, assetClass: "CRYPTO" });
+    if (usesCoingeckoFallback && coingeckoCalls > 0) {
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+    if (usesCoingeckoFallback) coingeckoCalls += 1;
+
     const quote = await fetchPriceWithFallback(meta);
     const now = new Date();
 
@@ -76,26 +82,36 @@ export async function refreshEligiblePrices(userId: string): Promise<{
       const priceNative = quote.priceNative ?? quote.priceEur;
       const nativeCurrency = quote.nativeCurrency ?? "EUR";
 
-      // CRYPTO en MANUAL → bascule COINGECKO après un prix live réussi
+      // CRYPTO en MANUAL/null : bascule vers le bon provider live selon la source
+      // qui a répondu (Binance ou CoinGecko), sans jamais figer sur COINGECKO
+      // si Binance est disponible pour ce ticker.
       if (
         asset.assetClass === "CRYPTO" &&
         (asset.priceProvider === "MANUAL" || !asset.priceProvider)
       ) {
-        const { resolveCoingeckoId } = await import("./providers/coingecko");
-        const cgId = resolveCoingeckoId(
-          asset.ticker,
-          asset.providerSymbol,
-          asset.name
-        );
-        await prisma.asset.update({
-          where: { id: asset.id },
-          data: {
-            priceProvider: "COINGECKO",
-            ...(cgId && !asset.providerSymbol
-              ? { providerSymbol: cgId }
-              : {}),
-          },
-        });
+        const isBinanceTicker = isBinanceSupported({ ...meta, assetClass: "CRYPTO" });
+        if (isBinanceTicker) {
+          // Binance couvre ce ticker → ne pas écrire COINGECKO en base,
+          // le registry résoudra Binance en primaire à chaque refresh.
+          // Aucune mise à jour de priceProvider nécessaire.
+        } else {
+          // Token hors Binance (liquid staking, wrapped…) → figer sur COINGECKO
+          const { resolveCoingeckoId } = await import("./providers/coingecko");
+          const cgId = resolveCoingeckoId(
+            asset.ticker,
+            asset.providerSymbol,
+            asset.name
+          );
+          await prisma.asset.update({
+            where: { id: asset.id },
+            data: {
+              priceProvider: "COINGECKO",
+              ...(cgId && !asset.providerSymbol
+                ? { providerSymbol: cgId }
+                : {}),
+            },
+          });
+        }
       }
 
       await prisma.priceQuote.upsert({
