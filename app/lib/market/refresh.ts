@@ -82,26 +82,36 @@ export async function refreshEligiblePrices(userId: string): Promise<{
       const priceNative = quote.priceNative ?? quote.priceEur;
       const nativeCurrency = quote.nativeCurrency ?? "EUR";
 
-      // CRYPTO en MANUAL → bascule COINGECKO après un prix live réussi
+      // CRYPTO en MANUAL/null : bascule vers le bon provider live selon la source
+      // qui a répondu (Binance ou CoinGecko), sans jamais figer sur COINGECKO
+      // si Binance est disponible pour ce ticker.
       if (
         asset.assetClass === "CRYPTO" &&
         (asset.priceProvider === "MANUAL" || !asset.priceProvider)
       ) {
-        const { resolveCoingeckoId } = await import("./providers/coingecko");
-        const cgId = resolveCoingeckoId(
-          asset.ticker,
-          asset.providerSymbol,
-          asset.name
-        );
-        await prisma.asset.update({
-          where: { id: asset.id },
-          data: {
-            priceProvider: "COINGECKO",
-            ...(cgId && !asset.providerSymbol
-              ? { providerSymbol: cgId }
-              : {}),
-          },
-        });
+        const isBinanceTicker = isBinanceSupported({ ...meta, assetClass: "CRYPTO" });
+        if (isBinanceTicker) {
+          // Binance couvre ce ticker → ne pas écrire COINGECKO en base,
+          // le registry résoudra Binance en primaire à chaque refresh.
+          // Aucune mise à jour de priceProvider nécessaire.
+        } else {
+          // Token hors Binance (liquid staking, wrapped…) → figer sur COINGECKO
+          const { resolveCoingeckoId } = await import("./providers/coingecko");
+          const cgId = resolveCoingeckoId(
+            asset.ticker,
+            asset.providerSymbol,
+            asset.name
+          );
+          await prisma.asset.update({
+            where: { id: asset.id },
+            data: {
+              priceProvider: "COINGECKO",
+              ...(cgId && !asset.providerSymbol
+                ? { providerSymbol: cgId }
+                : {}),
+            },
+          });
+        }
       }
 
       await prisma.priceQuote.upsert({
