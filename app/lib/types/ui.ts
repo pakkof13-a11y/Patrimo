@@ -78,6 +78,8 @@ export type Holding = {
   tp2?: string | null;
   tp3?: string | null;
   tp4?: string | null;
+  /** True si des niveaux SL/TP existent sur une jambe non-principale (multi-plateforme). */
+  hasSecondaryLevels?: boolean;
 };
 
 export type MainTab =

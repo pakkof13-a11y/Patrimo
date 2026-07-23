@@ -194,6 +194,12 @@ export type HoldingRow = {
   tp2: string | null;
   tp3: string | null;
   tp4: string | null;
+  /**
+   * True si un niveau SL/TP existe sur une jambe non-principale (multi-plateforme).
+   * Les niveaux affichés (stopLoss/tpN) restent ceux de la jambe principale si
+   * elle en a, sinon ceux de la jambe secondaire — ce flag signale ce cas.
+   */
+  hasSecondaryLevels: boolean;
 };
 
 /** Helpers locaux — toFixed → montants brandés */
@@ -366,6 +372,7 @@ export async function getHoldings(
       tp2: asset.tp2?.toString() ?? null,
       tp3: asset.tp3?.toString() ?? null,
       tp4: asset.tp4?.toString() ?? null,
+      hasSecondaryLevels: false,
     };
     leg.platformSlices = [sliceFromHoldingLeg(leg)];
     rows.push(leg);
@@ -438,6 +445,27 @@ export async function getHoldings(
         ? row.platformSlices
         : [sliceFromHoldingLeg(row)];
     const platformSlices = mergePlatformSlices(prevSlices, rowSlices);
+    // SL/TP : jambe principale prioritaire, repli jambe secondaire si absent
+    // (au lieu de ne garder que la jambe déterminée par takeRow — perdait les
+    // niveaux de la jambe secondaire quand la principale n'en avait pas).
+    const principalLeg = takeRow ? row : prev;
+    const secondaryLeg = takeRow ? prev : row;
+    const pickLevel = (a: string | null, b: string | null): string | null =>
+      a ?? b ?? null;
+    const stopLoss = pickLevel(principalLeg.stopLoss, secondaryLeg.stopLoss);
+    const tp1 = pickLevel(principalLeg.tp1, secondaryLeg.tp1);
+    const tp2 = pickLevel(principalLeg.tp2, secondaryLeg.tp2);
+    const tp3 = pickLevel(principalLeg.tp3, secondaryLeg.tp3);
+    const tp4 = pickLevel(principalLeg.tp4, secondaryLeg.tp4);
+    const secondaryHasOwnLevels = [
+      secondaryLeg.stopLoss,
+      secondaryLeg.tp1,
+      secondaryLeg.tp2,
+      secondaryLeg.tp3,
+      secondaryLeg.tp4,
+    ].some((v) => v != null);
+    const hasSecondaryLevels =
+      prev.hasSecondaryLevels || row.hasSecondaryLevels || secondaryHasOwnLevels;
     merged.set(key, {
       ...prev,
       // assetId principal = plus grosse position (détail + actions)
@@ -474,6 +502,12 @@ export async function getHoldings(
       passiveIncomeBase: baseS(toBase(income)),
       breakEvenEur: eurS(toFixed(avg, 8)),
       breakEvenBase: baseS(toBase(avg)),
+      stopLoss,
+      tp1,
+      tp2,
+      tp3,
+      tp4,
+      hasSecondaryLevels,
     });
   }
 
