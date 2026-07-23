@@ -568,6 +568,7 @@ export function AssetDetailModal({
 
           <AssetRelatedNews
             ticker={data.asset.ticker}
+            name={data.asset.name}
             enabled={open && Boolean(data.asset.id)}
           />
 

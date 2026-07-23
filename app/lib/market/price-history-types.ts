@@ -89,6 +89,66 @@ export function barIntervalLabel(iv: PriceBarInterval): string {
   }
 }
 
+/** Libellé court pour un sélecteur type TradingView. */
+export function barIntervalShortLabel(iv: PriceBarInterval): string {
+  switch (iv) {
+    case "15m":
+      return "15m";
+    case "1h":
+      return "1H";
+    case "4h":
+      return "4H";
+    case "1d":
+      return "1J";
+    case "1wk":
+      return "1S";
+  }
+}
+
+/** Unités de temps sélectionnables (analyse technique, style TradingView). */
+export const SELECTABLE_BAR_INTERVALS: PriceBarInterval[] = [
+  "15m",
+  "1h",
+  "4h",
+  "1d",
+  "1wk",
+];
+
+/**
+ * Nombre de bougies **cible** par unité de temps pour une vue d'ensemble
+ * lisible (assez de points pour lire la tendance sans écraser le graphe).
+ * Sert à dimensionner la fenêtre de récupération.
+ */
+export const OPTIMAL_BAR_COUNT: Record<PriceBarInterval, number> = {
+  "15m": 190,
+  "1h": 200,
+  "4h": 220,
+  "1d": 220,
+  "1wk": 260,
+};
+
+/**
+ * Fenêtre (en jours) associée à chaque unité de temps, calibrée pour viser
+ * ~OPTIMAL_BAR_COUNT bougies sur un marché continu (crypto 24/7) ; sur les
+ * marchés actions fermés la nuit/week-end, le nombre effectif est plus faible
+ * mais reste une vue d'ensemble pertinente.
+ */
+export const INTERVAL_WINDOW_DAYS: Record<PriceBarInterval, number> = {
+  "15m": 2, // ~192 bougies 15m en continu
+  "1h": 10, // ~240 en continu / ~70 séances actions
+  "4h": 45,
+  "1d": 300, // ~205 séances actions
+  "1wk": 1825, // ~5 ans → ~260 semaines
+};
+
+export function parseBarInterval(raw: string | null): PriceBarInterval | null {
+  if (!raw) return null;
+  const v = raw.toLowerCase();
+  return (SELECTABLE_BAR_INTERVALS as string[]).includes(v)
+    ? (v as PriceBarInterval)
+    : null;
+}
+
 /** Enforce OHLC invariants for a single bar. */
 export function normalizeSessionOhlc(p: {
   open: number;

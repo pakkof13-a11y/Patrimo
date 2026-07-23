@@ -17,6 +17,7 @@ import type {
 import {
   barIntervalForRange,
   normalizeSessionOhlc,
+  INTERVAL_WINDOW_DAYS,
 } from "./price-history-types";
 
 export type { PriceHistoryPoint, PriceHistoryRange, PriceHistoryResult };
@@ -58,6 +59,12 @@ export type GetAssetPriceHistoryOptions = {
    * début arbitraire des 5 ans de cours.
    */
   since?: Date | string | null;
+  /**
+   * Unité de temps explicite (sélecteur type TradingView). Quand fournie, elle
+   * remplace l'intervalle déduit du `range` et la fenêtre est dimensionnée pour
+   * viser un nombre optimal de bougies (INTERVAL_WINDOW_DAYS).
+   */
+  interval?: PriceBarInterval | null;
 };
 
 /**
@@ -691,12 +698,23 @@ export async function getAssetPriceHistory(
   if (!asset) return null;
 
   const now = new Date();
-  const bar = barIntervalForRange(range, now);
-  const { from, extendedToFirstBuy } = resolveHistoryFromDate(
-    range,
-    options?.since,
-    now
-  );
+  // Unité de temps explicite (TradingView) → fenêtre calibrée sur un nombre
+  // optimal de bougies. Sinon, intervalle + fenêtre déduits du range.
+  const explicitInterval = options?.interval ?? null;
+  const bar = explicitInterval ?? barIntervalForRange(range, now);
+  let from: Date;
+  let extendedToFirstBuy = false;
+  if (explicitInterval) {
+    from = new Date(
+      now.getTime() - INTERVAL_WINDOW_DAYS[explicitInterval] * 24 * 60 * 60 * 1000
+    );
+  } else {
+    ({ from, extendedToFirstBuy } = resolveHistoryFromDate(
+      range,
+      options?.since,
+      now
+    ));
+  }
   const to = now;
   const meta = {
     from: from.toISOString(),
@@ -713,9 +731,16 @@ export async function getAssetPriceHistory(
   const isCrypto =
     asset.assetClass === "CRYPTO" || asset.priceProvider === "COINGECKO";
 
+  // Sous-horaire (15m/1h) : CoinGecko ne fournit pas d'OHLC assez fin →
+  // on privilégie Yahoo crypto (ETH-USD…) pour de vraies bougies fines.
+  const cryptoSubHourly =
+    explicitInterval === "15m" || explicitInterval === "1h";
+
   // 1a) CRYPTO : CoinGecko market_chart (EUR) — aligné sur le pricing live
   if (isCrypto) {
-    const coinId = resolveCoingeckoId(asset.ticker, asset.providerSymbol);
+    const coinId = cryptoSubHourly
+      ? null
+      : resolveCoingeckoId(asset.ticker, asset.providerSymbol);
     if (coinId) {
       const cg = await fetchCoingeckoBars(
         coinId,

@@ -1,8 +1,8 @@
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import { refreshEligiblePrices } from "../app/lib/market/refresh.ts";
 
-const p = new PrismaClient();
+const p = createPrismaClient();
 const u = await p.user.findUnique({ where: { email: "demo@patrimo.fr" } });
 if (!u) throw new Error("no user");
 const r = await refreshEligiblePrices(u.id);

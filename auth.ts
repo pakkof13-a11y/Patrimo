@@ -12,8 +12,11 @@ import {
 } from "./app/lib/auth/login-rate-limit";
 import { normalizeRole } from "./app/lib/auth/role";
 import { resolveAuthTrustHost } from "./app/lib/auth/trust-host";
+import { assertAuthSecretConfigured } from "./app/lib/auth/startup-check";
 
 export { resolveAuthTrustHost } from "./app/lib/auth/trust-host";
+
+assertAuthSecretConfigured();
 
 /**
  * Hash bcrypt factice pour comparer même si l'utilisateur n'existe pas

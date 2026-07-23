@@ -3,7 +3,7 @@
  * ~30 positions, ~100–120 transactions sur ~3 ans, cash, dettes, AV,
  * épargne salariale, alternatives (métaux, PE, crowdlending, tangibles).
  */
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@/app/lib/prisma-client/client";
 
 const D = (v: string | number) => new Prisma.Decimal(v);
 

@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import bcrypt from "bcryptjs";
 
 /**
@@ -13,7 +13,7 @@ if (!pass) {
 }
 
 const email = process.env.DEMO_EMAIL?.trim() || "demo@patrimo.fr";
-const p = new PrismaClient();
+const p = createPrismaClient();
 const u = await p.user.findUnique({ where: { email } });
 console.log("user", u?.email, "hash=", Boolean(u?.passwordHash));
 console.log(
