@@ -1,5 +1,5 @@
 import { prisma } from "../prisma";
-import { d, toFixed, zero } from "../money/decimal";
+import { d, max, toFixed, zero } from "../money/decimal";
 import {
   replayTransactions,
   totalCash,
@@ -178,9 +178,11 @@ export type HoldingRow = {
   /** Fees paid on purchases (EUR, cumulative) */
   acquisitionFeesEur: EurAmount;
   acquisitionFeesBase: BaseAmount;
-  /** Passive income: dividends, coupons, rent, interest (EUR) */
+  /** Passive income: dividends, coupons, rent, interest (EUR net — après WHT + frais, cohérent avec total-return.ts) */
   passiveIncomeEur: EurAmount;
   passiveIncomeBase: BaseAmount;
+  /** Passive income brut (avant WHT + frais) — informatif uniquement */
+  passiveIncomeGrossEur: EurAmount;
   /** Break-even unit price (EUR) = PRU */
   breakEvenEur: EurAmount;
   breakEvenBase: BaseAmount;
@@ -226,6 +228,7 @@ export async function getHoldings(
         feesEur: true,
         grossAmountEur: true,
         netCashImpactEur: true,
+        withholdingTaxEur: true,
         fxRateToEur: true,
       },
     }),
@@ -234,6 +237,7 @@ export async function getHoldings(
   // Per-asset acquisition fees + passive income (dividends, coupons, rent, interest)
   const feesByAsset = new Map<string, ReturnType<typeof d>>();
   const incomeByAsset = new Map<string, ReturnType<typeof d>>();
+  const incomeGrossByAsset = new Map<string, ReturnType<typeof d>>();
   const INCOME = new Set(["DIVIDENDE", "COUPON", "LOYER", "INTERET"]);
   for (const t of txRows) {
     if (!t.assetId) continue;
@@ -244,8 +248,25 @@ export async function getHoldings(
       feesByAsset.set(t.assetId, (feesByAsset.get(t.assetId) || zero()).plus(feesEur));
     }
     if (INCOME.has(t.type)) {
-      // Income is positive cash impact in EUR (or gross)
-      const inc = d(t.grossAmountEur.toString()).abs();
+      // Gross (informational display) — brut avant WHT et frais
+      const gross = d(t.grossAmountEur.toString()).abs();
+      incomeGrossByAsset.set(
+        t.assetId,
+        (incomeGrossByAsset.get(t.assetId) || zero()).plus(gross)
+      );
+      // Net cash réel (cohérent avec incomeNetEur() de total-return.ts) :
+      // priorité au netCashImpactEur persisté, sinon gross − WHT − frais
+      const netCash = d(t.netCashImpactEur.toString());
+      const inc = netCash.gt(0)
+        ? netCash
+        : gross.gt(0)
+          ? max(
+              zero(),
+              gross
+                .minus(t.withholdingTaxEur ? d(t.withholdingTaxEur.toString()) : zero())
+                .minus(t.feesEur ? d(t.feesEur.toString()) : zero())
+            )
+          : zero();
       incomeByAsset.set(t.assetId, (incomeByAsset.get(t.assetId) || zero()).plus(inc));
     }
   }
@@ -293,6 +314,7 @@ export async function getHoldings(
     const avg = pos.quantity.gt(0) ? pos.costBasisEur.div(pos.quantity) : zero();
     const fees = feesByAsset.get(pos.assetId) || zero();
     const income = incomeByAsset.get(pos.assetId) || zero();
+    const incomeGross = incomeGrossByAsset.get(pos.assetId) || zero();
 
     const assetLogo = resolveAssetLogo({
       logoUrl: asset.logoUrl,
@@ -357,6 +379,7 @@ export async function getHoldings(
       acquisitionFeesBase: baseS(toBase(fees)),
       passiveIncomeEur: eurS(toFixed(income, 8)),
       passiveIncomeBase: baseS(toBase(income)),
+      passiveIncomeGrossEur: eurS(toFixed(incomeGross, 8)),
       breakEvenEur: eurS(toFixed(avg, 8)),
       breakEvenBase: baseS(toBase(avg)),
       allocationPct: pctS("0"),
@@ -405,6 +428,9 @@ export async function getHoldings(
         : `${prev.platformName}, ${row.platformName}`;
     const fees = d(prev.acquisitionFeesEur).plus(d(row.acquisitionFeesEur));
     const income = d(prev.passiveIncomeEur).plus(d(row.passiveIncomeEur));
+    const incomeGross = d(prev.passiveIncomeGrossEur).plus(
+      d(row.passiveIncomeGrossEur)
+    );
     // Prix unitaire : moyenne pondérée par qty (ou cours live le plus frais)
     const px =
       qty.gt(0) && mv.gt(0)
@@ -472,6 +498,7 @@ export async function getHoldings(
       acquisitionFeesBase: baseS(toBase(fees)),
       passiveIncomeEur: eurS(toFixed(income, 8)),
       passiveIncomeBase: baseS(toBase(income)),
+      passiveIncomeGrossEur: eurS(toFixed(incomeGross, 8)),
       breakEvenEur: eurS(toFixed(avg, 8)),
       breakEvenBase: baseS(toBase(avg)),
     });
