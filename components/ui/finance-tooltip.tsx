@@ -95,3 +95,52 @@ export function FinanceTip({
     </span>
   );
 }
+
+/**
+ * Badge d'avertissement discret (hover + focus clavier) — signale une donnée
+ * calculée/estimée plutôt que mesurée. Même idiome accessible que `FinanceTip`
+ * (title + aria-label + role="tooltip" pour le contenu flottant), packagé en
+ * badge visuel (⚠️ + libellé court) plutôt qu'une icône seule.
+ */
+export function EstimatedBadge({
+  label = "Estimé",
+  message,
+  className,
+  testId,
+}: {
+  /** Libellé visible du badge (court). */
+  label?: string;
+  /** Texte complet de l'infobulle + aria-label. */
+  message: string;
+  className?: string;
+  testId?: string;
+}) {
+  return (
+    <span
+      role="status"
+      aria-label={message}
+      title={message}
+      tabIndex={0}
+      data-testid={testId}
+      className={cn(
+        "group relative inline-flex items-center gap-1 rounded-full border border-amber-300/70 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-700",
+        "dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-400",
+        "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+        className
+      )}
+    >
+      <span aria-hidden="true">⚠️</span>
+      {label}
+      <span
+        className={cn(
+          "pointer-events-none absolute bottom-full left-1/2 z-40 mb-1.5 w-56 -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-left text-[10px] font-normal leading-snug text-slate-600 opacity-0 shadow-lg transition",
+          "group-hover:opacity-100 group-focus:opacity-100 dark:text-slate-300",
+          "motion-reduce:transition-none"
+        )}
+        role="tooltip"
+      >
+        {message}
+      </span>
+    </span>
+  );
+}
