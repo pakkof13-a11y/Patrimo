@@ -1,8 +1,8 @@
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import bcrypt from "bcryptjs";
 
-const p = new PrismaClient();
+const p = createPrismaClient();
 
 async function main() {
   const users = await p.user.findMany({

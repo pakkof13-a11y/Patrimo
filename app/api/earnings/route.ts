@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import type { PortfolioTickerRef } from "@/app/lib/news/service";
+import { isEarningsEventPublished } from "@/app/lib/news/service";
 import { resolveEarningsCalendar } from "@/app/lib/news/earnings-live";
 
 /**
@@ -42,6 +43,8 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       events,
+      upcoming: events.filter((e) => !isEarningsEventPublished(e)),
+      published: events.filter((e) => isEarningsEventPublished(e)),
       source,
       date: new Date().toISOString().slice(0, 10),
       generatedAt: new Date().toISOString(),
@@ -52,6 +55,8 @@ export async function GET(req: Request) {
       {
         error: "Calendrier des résultats indisponible",
         events: [],
+        upcoming: [],
+        published: [],
         source: "mock",
       },
       { status: 502 }

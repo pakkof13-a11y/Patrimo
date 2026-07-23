@@ -7,7 +7,8 @@ import { loadUiPref, saveUiPref } from "@/app/lib/ui-preferences";
 
 export const DEFAULT_BENCHMARK_KEY = "defaultBenchmark.v1";
 
-export type DefaultBenchmark = "none" | "cash" | "inflation" | "index";
+/** "cash" retiré (jugé inutile) — migré silencieusement vers "none". */
+export type DefaultBenchmark = "none" | "inflation" | "index";
 
 export const DEFAULT_BENCHMARK_OPTIONS: {
   id: DefaultBenchmark;
@@ -20,26 +21,22 @@ export const DEFAULT_BENCHMARK_OPTIONS: {
     hint: "Pas de comparaison automatique",
   },
   {
-    id: "cash",
-    label: "Cash",
-    hint: "Référence liquidités (capital constant)",
-  },
-  {
     id: "inflation",
-    label: "Inflation ~2 %",
-    hint: "Pouvoir d’achat (indicatif)",
+    label: "Inflation (IPC France)",
+    hint: "Pouvoir d’achat — indice des prix INSEE",
   },
   {
     id: "index",
-    label: "Indice ~7 %",
-    hint: "Proxy actions (indicatif)",
+    label: "Indice",
+    hint: "Comparaison à un indice de marché réel",
   },
 ];
 
-const VALID = new Set<string>(["none", "cash", "inflation", "index"]);
+const VALID = new Set<string>(["none", "inflation", "index"]);
 
 export function loadDefaultBenchmark(): DefaultBenchmark {
   const raw = loadUiPref<unknown>(DEFAULT_BENCHMARK_KEY, "none");
+  // Migration : ancien "cash" → "none"
   if (typeof raw === "string" && VALID.has(raw)) {
     return raw as DefaultBenchmark;
   }

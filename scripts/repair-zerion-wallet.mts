@@ -2,14 +2,14 @@
  * Ré-écrit soldes + historique Zerion pour les plateformes du wallet donné.
  * Usage: npx tsx scripts/repair-zerion-wallet.mts [address]
  */
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import { fetchZerionPortfolio } from "../app/lib/zerion/client";
 import {
   writeZerionBalancesToLedger,
   writeZerionHistoryToLedger,
 } from "../app/lib/zerion/ledger-sync";
 
-const p = new PrismaClient();
+const p = createPrismaClient();
 const addr = (
   process.argv[2] || "0x5E82A334cd5d8EB0BA6f2C5Bf0e41BeAE591AD05"
 ).trim();

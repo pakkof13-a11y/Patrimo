@@ -1,5 +1,5 @@
-import { PrismaClient } from "@prisma/client";
-const p = new PrismaClient();
+import { createPrismaClient } from "@/app/lib/prisma";
+const p = createPrismaClient();
 try {
   const [users, assets, txs] = await Promise.all([
     p.user.count(),

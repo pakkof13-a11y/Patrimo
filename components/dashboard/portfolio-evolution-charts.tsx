@@ -54,6 +54,60 @@ export const tooltipStyle = {
   fontSize: 12,
 };
 
+/** Couleur du texte de valeur : vert si positif, rouge si négatif, bleu si neutre (0). */
+function signColor(v: number): string {
+  if (v > 0) return "var(--success)";
+  if (v < 0) return "var(--danger)";
+  return "var(--accent)";
+}
+
+type EvolutionTooltipPayloadEntry = {
+  value?: unknown;
+  name?: unknown;
+  payload?: EvolutionSeriesPoint;
+};
+
+/**
+ * Tooltip custom (remplace le rendu par défaut de Recharts) : le texte reste
+ * lisible en dark mode (couleurs pilotées par variables CSS thémées, pas de
+ * couleur figée), et chaque valeur est colorée selon son signe.
+ * Props volontairement typées large : reçoit tel quel l'objet que Recharts
+ * passe au render-prop `content` du Tooltip.
+ */
+function EvolutionTooltipContent(props: {
+  active?: boolean;
+  payload?: readonly EvolutionTooltipPayloadEntry[];
+  label?: unknown;
+  baseCurrency: string;
+}) {
+  const { active, payload, label, baseCurrency } = props;
+  if (!active || !payload || payload.length === 0) return null;
+  const periodLabel = payload[0]?.payload?.periodLabel ?? label ?? "";
+  return (
+    <div style={{ ...tooltipStyle, padding: "8px 12px" }}>
+      {periodLabel ? (
+        <div
+          style={{
+            color: "var(--foreground)",
+            fontWeight: 600,
+            marginBottom: 4,
+          }}
+        >
+          {String(periodLabel)}
+        </div>
+      ) : null}
+      {payload.map((entry, i) => {
+        const num = Number(entry.value ?? 0);
+        return (
+          <div key={i} style={{ color: signColor(num), whiteSpace: "nowrap" }}>
+            {String(entry.name ?? "")}: {formatCurrency(num, baseCurrency)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Domaine Y symétrique autour de 0 (variations +/− lisibles). */
 export function symmetricZeroDomain(
   values: number[],
@@ -96,15 +150,9 @@ export function GlobalLineChart({
           domain={["auto", "auto"]}
         />
         <Tooltip
-          formatter={(v, name) => [
-            formatCurrency(Number(v ?? 0), baseCurrency),
-            String(name ?? ""),
-          ]}
-          labelFormatter={(_, pl) => {
-            const p = pl?.[0]?.payload as { periodLabel?: string } | undefined;
-            return p?.periodLabel ?? "";
-          }}
-          contentStyle={tooltipStyle}
+          content={(props: object) => (
+            <EvolutionTooltipContent {...(props as { active?: boolean; payload?: readonly EvolutionTooltipPayloadEntry[]; label?: unknown })} baseCurrency={baseCurrency} />
+          )}
         />
         {showBenchmark && (
           <Legend wrapperStyle={{ fontSize: 11 }} iconSize={8} />
@@ -185,19 +233,13 @@ export function GlobalColumnsChart({
           width={52}
         />
         <Tooltip
-          formatter={(v) => [
-            formatCurrency(Number(v ?? 0), baseCurrency),
-            "Valeur",
-          ]}
-          labelFormatter={(_, pl) => {
-            const p = pl?.[0]?.payload as { periodLabel?: string } | undefined;
-            return p?.periodLabel ?? "";
-          }}
-          contentStyle={tooltipStyle}
+          content={(props: object) => (
+            <EvolutionTooltipContent {...(props as { active?: boolean; payload?: readonly EvolutionTooltipPayloadEntry[]; label?: unknown })} baseCurrency={baseCurrency} />
+          )}
         />
         <Bar
           dataKey="total"
-          name="Patrimoine"
+          name="Valeur"
           radius={[3, 3, 0, 0]}
           maxBarSize={32}
         >
@@ -253,15 +295,9 @@ export function PeriodColumnsChart({
           strokeWidth={1.75}
         />
         <Tooltip
-          formatter={(v) => [
-            formatCurrency(Number(v ?? 0), baseCurrency),
-            "Variation",
-          ]}
-          labelFormatter={(_, pl) => {
-            const p = pl?.[0]?.payload as { periodLabel?: string } | undefined;
-            return p?.periodLabel ?? "";
-          }}
-          contentStyle={tooltipStyle}
+          content={(props: object) => (
+            <EvolutionTooltipContent {...(props as { active?: boolean; payload?: readonly EvolutionTooltipPayloadEntry[]; label?: unknown })} baseCurrency={baseCurrency} />
+          )}
         />
         <Bar dataKey="chartValue" name="Variation" radius={[3, 3, 0, 0]} maxBarSize={32}>
           {data.map((entry, i) => (
@@ -320,15 +356,9 @@ export function PeriodLineChart({
           strokeWidth={1.75}
         />
         <Tooltip
-          formatter={(v, name) => [
-            formatCurrency(Number(v ?? 0), baseCurrency),
-            String(name ?? ""),
-          ]}
-          labelFormatter={(_, pl) => {
-            const p = pl?.[0]?.payload as { periodLabel?: string } | undefined;
-            return p?.periodLabel ?? "";
-          }}
-          contentStyle={tooltipStyle}
+          content={(props: object) => (
+            <EvolutionTooltipContent {...(props as { active?: boolean; payload?: readonly EvolutionTooltipPayloadEntry[]; label?: unknown })} baseCurrency={baseCurrency} />
+          )}
         />
         {showBenchmark && (
           <Legend wrapperStyle={{ fontSize: 11 }} iconSize={8} />
@@ -407,15 +437,9 @@ export function DecomposedCumulAreas({
           width={52}
         />
         <Tooltip
-          formatter={(v, name) => [
-            formatCurrency(Number(v ?? 0), baseCurrency),
-            String(name ?? ""),
-          ]}
-          labelFormatter={(_, pl) => {
-            const p = pl?.[0]?.payload as { periodLabel?: string } | undefined;
-            return p?.periodLabel ?? "";
-          }}
-          contentStyle={tooltipStyle}
+          content={(props: object) => (
+            <EvolutionTooltipContent {...(props as { active?: boolean; payload?: readonly EvolutionTooltipPayloadEntry[]; label?: unknown })} baseCurrency={baseCurrency} />
+          )}
         />
         <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
         <Area
@@ -495,11 +519,9 @@ export function DecomposedCumulColumns({
           width={52}
         />
         <Tooltip
-          formatter={(v, name) => [
-            formatCurrency(Number(v ?? 0), baseCurrency),
-            String(name ?? ""),
-          ]}
-          contentStyle={tooltipStyle}
+          content={(props: object) => (
+            <EvolutionTooltipContent {...(props as { active?: boolean; payload?: readonly EvolutionTooltipPayloadEntry[]; label?: unknown })} baseCurrency={baseCurrency} />
+          )}
         />
         <Legend wrapperStyle={{ fontSize: 11 }} iconSize={8} />
         <Bar
@@ -584,11 +606,16 @@ export function DecomposedPeriodChart({
             strokeWidth={1.75}
           />
           <Tooltip
-            formatter={(v, name) => [
-              formatCurrency(Number(v ?? 0), baseCurrency),
-              String(name ?? ""),
-            ]}
-            contentStyle={tooltipStyle}
+            content={(props: object) => (
+              <EvolutionTooltipContent
+                {...(props as {
+                  active?: boolean;
+                  payload?: readonly EvolutionTooltipPayloadEntry[];
+                  label?: unknown;
+                })}
+                baseCurrency={baseCurrency}
+              />
+            )}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} iconSize={8} />
           {series.map((s) => (
@@ -632,11 +659,9 @@ export function DecomposedPeriodChart({
           strokeWidth={1.75}
         />
         <Tooltip
-          formatter={(v, name) => [
-            formatCurrency(Number(v ?? 0), baseCurrency),
-            String(name ?? ""),
-          ]}
-          contentStyle={tooltipStyle}
+          content={(props: object) => (
+            <EvolutionTooltipContent {...(props as { active?: boolean; payload?: readonly EvolutionTooltipPayloadEntry[]; label?: unknown })} baseCurrency={baseCurrency} />
+          )}
         />
         <Legend wrapperStyle={{ fontSize: 11 }} iconSize={8} />
         {series.map((s) => (

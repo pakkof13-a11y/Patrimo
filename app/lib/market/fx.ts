@@ -1,6 +1,11 @@
 import { d, toFixed, type DecimalInput } from "../money/decimal";
 
-type CacheEntry = { rates: Record<string, number>; fetchedAt: number };
+type CacheEntry = {
+  rates: Record<string, number>;
+  fetchedAt: number;
+  /** true si `rates` provient du FALLBACK statique (Frankfurter indisponible). */
+  isFallback: boolean;
+};
 
 let cache: CacheEntry | null = null;
 let inflight: Promise<Record<string, number>> | null = null;
@@ -16,6 +21,12 @@ const FALLBACK: Record<string, number> = {
 /**
  * Rates as 1 EUR = X foreign.
  * Never hangs the UI: short timeout + shared inflight + fallback.
+ *
+ * NOTE multi-lambda (Vercel) : ce cache est process-local. Deux lambdas
+ * peuvent servir des taux légèrement différents pendant la fenêtre TTL.
+ * Si la précision FX inter-lambda devient critique (ex. cohérence stricte
+ * entre deux refresh utilisateur simultanés), partager ce cache via Upstash
+ * (déjà utilisé pour le rate-limit, cf. app/lib/api/kv-store.ts).
  */
 export async function getEurRates(): Promise<Record<string, number>> {
   if (cache && Date.now() - cache.fetchedAt < TTL_MS) {
@@ -25,21 +36,24 @@ export async function getEurRates(): Promise<Record<string, number>> {
 
   inflight = (async () => {
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 2500);
       const res = await fetch("https://api.frankfurter.app/latest?from=EUR", {
         cache: "no-store",
-        signal: controller.signal,
+        signal: AbortSignal.timeout(2500),
       });
-      clearTimeout(timer);
       if (!res.ok) throw new Error(`FX HTTP ${res.status}`);
       const data = (await res.json()) as { rates?: Record<string, number> };
       const rates = { EUR: 1, ...FALLBACK, ...(data.rates ?? {}) };
-      cache = { rates, fetchedAt: Date.now() };
+      cache = { rates, fetchedAt: Date.now(), isFallback: false };
       return rates;
-    } catch {
+    } catch (e) {
+      console.warn(
+        "[fx] Frankfurter indisponible — fallback taux statiques",
+        e instanceof Error ? e.message : e
+      );
       const rates = { ...FALLBACK };
-      cache = { rates, fetchedAt: Date.now() };
+      // fetchedAt: 0 → ne compte jamais comme "frais" (force un re-fetch au
+      // prochain appel au lieu de figer le fallback pendant TTL_MS/1h).
+      cache = { rates, fetchedAt: 0, isFallback: true };
       return rates;
     } finally {
       inflight = null;
@@ -108,14 +122,11 @@ export async function fxRateToEurOnDate(
       : date.toISOString().slice(0, 10);
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
     // Frankfurter: 1 EUR = X foreign
     const res = await fetch(
       `https://api.frankfurter.app/${day}?from=EUR&to=${encodeURIComponent(cur)}`,
-      { cache: "no-store", signal: controller.signal }
+      { cache: "no-store", signal: AbortSignal.timeout(3000) }
     );
-    clearTimeout(timer);
     if (res.ok) {
       const data = (await res.json()) as { rates?: Record<string, number> };
       const rate = data.rates?.[cur];

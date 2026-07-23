@@ -2,6 +2,7 @@ import type { AssetMeta, MarketDataProvider, PriceQuoteResult } from "./types";
 import { finnhubProvider } from "./providers/finnhub";
 import { yahooProvider } from "./providers/yahoo";
 import { coingeckoProvider } from "./providers/coingecko";
+import { binanceProvider, isBinanceSupported } from "./providers/binance-ws";
 import { manualProvider } from "./providers/manual";
 
 function hasFinnhubKey(): boolean {
@@ -11,12 +12,13 @@ function hasFinnhubKey(): boolean {
 
 /**
  * Stocks: Finnhub (if key) then Yahoo — or Yahoo first when no key.
- * Crypto: **CoinGecko only** (jamais Yahoo / Finnhub).
+ * Crypto: **Binance temps réel en primaire**, CoinGecko en fallback
+ * (tickers non listés Binance : liquid staking, wrapped, etc.), manual en dernier.
  */
 export async function fetchPriceWithFallback(
   asset: AssetMeta
 ): Promise<PriceQuoteResult> {
-  // CRYPTO classé : ne jamais rester bloqué en MANUAL (spec : auto CoinGecko)
+  // CRYPTO classé : ne jamais rester bloqué en MANUAL (spec : auto live)
   if (
     asset.priceProvider === "MANUAL" &&
     asset.assetClass !== "CRYPTO"
@@ -27,12 +29,20 @@ export async function fetchPriceWithFallback(
     return manualProvider.fetchPrice(asset);
   }
 
-  // CRYPTO : toujours CoinGecko (y compris ex-MANUAL / staked) — plus de sticky MANUAL
+  // CRYPTO : Binance (primaire) → CoinGecko (fallback) → jamais sticky MANUAL
   if (asset.assetClass === "CRYPTO" || asset.priceProvider === "COINGECKO") {
+    const cryptoAsset: AssetMeta = { ...asset, assetClass: "CRYPTO" };
+
+    // 1) Binance temps réel si le ticker est couvert
+    if (isBinanceSupported(cryptoAsset)) {
+      const binance = await binanceProvider.fetchPrice(cryptoAsset);
+      if (binance.status === "OK") return binance;
+    }
+
+    // 2) Fallback CoinGecko (liquid staking / wrapped / tokens hors Binance)
     return coingeckoProvider.fetchPrice({
-      ...asset,
+      ...cryptoAsset,
       priceProvider: "COINGECKO",
-      assetClass: "CRYPTO",
     });
   }
 
@@ -67,14 +77,24 @@ export async function fetchPriceWithFallback(
 
 export function resolveProvider(asset: AssetMeta): MarketDataProvider {
   if (asset.priceProvider === "YAHOO") return yahooProvider;
-  if (asset.priceProvider === "COINGECKO") return coingeckoProvider;
   if (asset.priceProvider === "MANUAL") return manualProvider;
   if (asset.priceProvider === "FINNHUB") return hasFinnhubKey() ? finnhubProvider : yahooProvider;
-  if (asset.assetClass === "CRYPTO") return coingeckoProvider;
+  // CRYPTO / COINGECKO : Binance si couvert, sinon CoinGecko
+  if (asset.priceProvider === "COINGECKO" || asset.assetClass === "CRYPTO") {
+    return isBinanceSupported({ ...asset, assetClass: "CRYPTO" })
+      ? binanceProvider
+      : coingeckoProvider;
+  }
   if (asset.assetClass === "ACTIONS") return hasFinnhubKey() ? finnhubProvider : yahooProvider;
   return manualProvider;
 }
 
 export function listProviders(): MarketDataProvider[] {
-  return [finnhubProvider, yahooProvider, coingeckoProvider, manualProvider];
+  return [
+    finnhubProvider,
+    yahooProvider,
+    binanceProvider,
+    coingeckoProvider,
+    manualProvider,
+  ];
 }

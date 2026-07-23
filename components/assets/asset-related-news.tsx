@@ -29,25 +29,31 @@ function formatNewsTime(iso: string): string {
  */
 export function AssetRelatedNews({
   ticker,
+  name,
   enabled,
 }: {
   ticker: string | null | undefined;
+  name?: string | null;
   enabled: boolean;
 }) {
   const [showAll, setShowAll] = useState(false);
   const t = (ticker || "").trim();
+  const nm = (name || "").trim();
+  const hasSignal = t.length > 0 || nm.length > 0;
 
   const q = useQuery({
-    queryKey: ["asset-news", t],
-    enabled: enabled && t.length > 0,
-    queryFn: () =>
-      fetchJson<{ news: NewsItem[] }>(
-        `/api/news?ticker=${encodeURIComponent(t)}&limit=${EXPANDED}`
-      ),
+    queryKey: ["asset-news", t, nm],
+    enabled: enabled && hasSignal,
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: String(EXPANDED) });
+      if (t) params.set("ticker", t);
+      if (nm) params.set("name", nm);
+      return fetchJson<{ news: NewsItem[] }>(`/api/news?${params.toString()}`);
+    },
     staleTime: 5 * 60_000,
   });
 
-  if (!t) return null;
+  if (!hasSignal) return null;
 
   if (q.isLoading) {
     return (
@@ -75,6 +81,7 @@ export function AssetRelatedNews({
     );
   }
 
+  const label = t ? t.toUpperCase() : nm;
   const all = q.data?.news ?? [];
   if (all.length === 0) {
     return (
@@ -83,7 +90,7 @@ export function AssetRelatedNews({
         data-testid="asset-related-news"
         data-state="empty"
       >
-        Aucune actualité liée à {t.toUpperCase()}.
+        Aucune actualité liée à {label}.
       </div>
     );
   }
@@ -99,7 +106,7 @@ export function AssetRelatedNews({
       )}
       data-testid="asset-related-news"
       data-state="ready"
-      aria-label={`Actualités liées à ${t}`}
+      aria-label={`Actualités liées à ${label}`}
     >
       <div className="mb-2.5 flex items-end justify-between gap-2">
         <div>
@@ -108,7 +115,7 @@ export function AssetRelatedNews({
           </h3>
           <p className="text-meta">Contexte marché pour ce titre</p>
         </div>
-        <span className="text-meta font-mono tabular-nums">{t.toUpperCase()}</span>
+        <span className="text-meta font-mono tabular-nums">{label}</span>
       </div>
       <ul className="divide-y divide-[var(--border)]">
         {visible.map((n) => (

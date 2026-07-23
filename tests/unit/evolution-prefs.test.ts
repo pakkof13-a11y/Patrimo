@@ -9,8 +9,14 @@ import {
   loadDefaultBenchmark,
   saveDefaultBenchmark,
 } from "@/app/lib/portfolio/benchmark-prefs";
-import { withBenchmarkSeries } from "@/app/lib/portfolio/evolution-aggregate";
-import type { EvolutionSeriesPoint } from "@/app/lib/portfolio/evolution-aggregate";
+import {
+  withBenchmarkSeries,
+  benchmarkGapPct,
+} from "@/app/lib/portfolio/evolution-aggregate";
+import type {
+  EvolutionSeriesPoint,
+  IndexClosePoint,
+} from "@/app/lib/portfolio/evolution-aggregate";
 
 describe("evolution prefs v4", () => {
   beforeEach(() => {
@@ -124,14 +130,14 @@ describe("withBenchmarkSeries", () => {
     },
   ];
 
-  it("cash stays flat at first total", () => {
+  it("cash mode is removed → migrated to none (no benchmark)", () => {
+    // @ts-expect-error "cash" n'est plus un mode valide
     const out = withBenchmarkSeries(base, "cash");
-    expect(out[0]!.benchmark).toBeCloseTo(100_000, 0);
-    expect(out[1]!.benchmark).toBeCloseTo(100_000, 0);
-    expect(out[1]!.benchmarkDelta).toBeCloseTo(0, 5);
+    // Mode inconnu traité comme index sans données → pas de courbe
+    expect(out[0]!.benchmark).toBeUndefined();
   });
 
-  it("inflation grows ~1% over half year", () => {
+  it("inflation grows ~1% over half year (IPC France)", () => {
     const out = withBenchmarkSeries(base, "inflation");
     expect(out[0]!.benchmark).toBeCloseTo(100_000, 0);
     // 0.5y at 2% ≈ 0.995% growth
@@ -139,9 +145,33 @@ describe("withBenchmarkSeries", () => {
     expect(out[1]!.benchmark!).toBeLessThan(102_000);
   });
 
-  it("index grows faster than inflation", () => {
-    const infl = withBenchmarkSeries(base, "inflation");
+  it("index rebases real closes onto the first portfolio total", () => {
+    const closes: IndexClosePoint[] = [
+      { date: "2026-01-01T00:00:00.000Z", close: 7000 },
+      { date: "2026-07-01T00:00:00.000Z", close: 7700 }, // +10%
+    ];
+    const idx = withBenchmarkSeries(base, "index", { indexCloses: closes });
+    expect(idx[0]!.benchmark).toBeCloseTo(100_000, 0);
+    // +10% de l'indice rebasé sur 100 000 → 110 000
+    expect(idx[1]!.benchmark!).toBeCloseTo(110_000, 0);
+  });
+
+  it("index without closes yields no benchmark curve", () => {
     const idx = withBenchmarkSeries(base, "index");
-    expect(idx[1]!.benchmark!).toBeGreaterThan(infl[1]!.benchmark!);
+    expect(idx[0]!.benchmark).toBeUndefined();
+  });
+
+  it("benchmarkGapPct = portfolio perf − benchmark perf (points de %)", () => {
+    const closes: IndexClosePoint[] = [
+      { date: "2026-01-01T00:00:00.000Z", close: 7000 },
+      { date: "2026-07-01T00:00:00.000Z", close: 7700 }, // +10%
+    ];
+    const idx = withBenchmarkSeries(base, "index", { indexCloses: closes });
+    const gap = benchmarkGapPct(idx);
+    expect(gap).not.toBeNull();
+    // Portefeuille +10% (100k→110k), indice +10% → écart ~0
+    expect(gap!.portfolioPct).toBeCloseTo(10, 4);
+    expect(gap!.benchmarkPct).toBeCloseTo(10, 4);
+    expect(gap!.gapPct).toBeCloseTo(0, 4);
   });
 });
