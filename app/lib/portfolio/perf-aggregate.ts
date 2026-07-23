@@ -191,6 +191,8 @@ export type AggregatedPerfPoint = {
   close: number;
   qty: number;
   cumpEur: number;
+  /** Coût de revient de la position ouverte du bucket (base de rendement %). */
+  costBasisEur: number;
   cashInvestedNet: number;
   dividendsCum: number;
 };
@@ -463,10 +465,30 @@ export function groupDataByInterval(
       close: last.close,
       qty: last.qty,
       cumpEur: last.cumpEur ?? 0,
+      costBasisEur:
+        typeof last.costBasisEur === "number" &&
+        Number.isFinite(last.costBasisEur)
+          ? last.costBasisEur
+          : Math.max(0, (last.qty ?? 0) * (last.cumpEur ?? 0)),
       cashInvestedNet: last.cashInvestedNet,
       dividendsCum: dividendsNetCumEur,
     };
   });
+}
+
+/**
+ * Base de rendement % = capital réellement investi dans la position.
+ *
+ * `costBasisEur` ne s'effondre pas après une vente partielle, contrairement à
+ * `cashInvestedNet = max(0, achats − produits)` : quand les produits de vente
+ * ≈ les achats (ex. position doublée puis à moitié cédée), `cashInvestedNet`
+ * tombe ~0 alors qu'un capital reste au travail → le % devenait aberrant.
+ * Repli sur `cashInvestedNet` puis 0 si la position est entièrement soldée.
+ */
+function returnBasis(p: AggregatedPerfPoint): number {
+  if (p.costBasisEur > 1e-9) return p.costBasisEur;
+  if (p.cashInvestedNet > 1e-9) return p.cashInvestedNet;
+  return 0;
 }
 
 /** Applique le mode Δ / Σ / Dividendes sur les points agrégés (dataKey chart). */
@@ -479,16 +501,12 @@ export function applyPerfMetricMode(
     let chartValuePct = p.totalPnlPct;
     if (mode === "period") {
       chartValueEur = p.periodPnlEur;
-      chartValuePct =
-        p.cashInvestedNet > 1e-9
-          ? (p.periodPnlEur / p.cashInvestedNet) * 100
-          : 0;
+      const basis = returnBasis(p);
+      chartValuePct = basis > 1e-9 ? (p.periodPnlEur / basis) * 100 : 0;
     } else if (mode === "dividends") {
       chartValueEur = p.dividendsNetCumEur;
-      chartValuePct =
-        p.cashInvestedNet > 1e-9
-          ? (p.dividendsNetCumEur / p.cashInvestedNet) * 100
-          : 0;
+      const basis = returnBasis(p);
+      chartValuePct = basis > 1e-9 ? (p.dividendsNetCumEur / basis) * 100 : 0;
     }
     return {
       ...p,
