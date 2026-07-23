@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { getAssetPriceHistory } from "@/app/lib/market/price-history";
-import { parseHistoryRange } from "@/app/lib/market/price-history-types";
+import {
+  parseHistoryRange,
+  parseBarInterval,
+} from "@/app/lib/market/price-history-types";
 
 export async function GET(
   req: Request,
@@ -13,13 +16,18 @@ export async function GET(
   const { id } = await ctx.params;
   const { searchParams } = new URL(req.url);
   const range = parseHistoryRange(searchParams.get("range"));
+  /** Unité de temps explicite (sélecteur TradingView) — prioritaire sur range */
+  const interval = parseBarInterval(searchParams.get("interval"));
   /** ISO date du 1er achat — étend 5y/all en arrière pour la perf */
   const sinceRaw = searchParams.get("since");
   const since =
     sinceRaw && !Number.isNaN(new Date(sinceRaw).getTime()) ? sinceRaw : null;
 
   try {
-    const history = await getAssetPriceHistory(userId, id, range, { since });
+    const history = await getAssetPriceHistory(userId, id, range, {
+      since,
+      interval,
+    });
     if (!history) {
       return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });
     }

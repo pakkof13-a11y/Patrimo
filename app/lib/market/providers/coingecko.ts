@@ -12,6 +12,7 @@
 
 import type { AssetMeta, MarketDataProvider, PriceQuoteResult } from "../types";
 import { d, toFixed } from "../../money/decimal";
+import { pricePrecision } from "../price-utils";
 
 /** Plan Demo — hardcodé (pas de branchement Demo/Pro). */
 export const COINGECKO_BASE_URL = "https://api.coingecko.com/api/v3";
@@ -118,8 +119,15 @@ export function resolveCoingeckoId(
   if (t.replace(/[^A-Z0-9]/g, "") && ID_MAP[t.replace(/[^A-Z0-9]/g, "")]) {
     return ID_MAP[t.replace(/[^A-Z0-9]/g, "")];
   }
-  if (t) return t.toLowerCase();
+  // providerSymbol est généralement écrit par notre propre code comme un id
+  // CoinGecko déjà résolu (ex. refresh.ts stocke `providerSymbol: cgId` après
+  // une première résolution réussie) — le faire confiance ici est différent
+  // de deviner depuis un TICKER brut non mappé.
   if (p) return p.toLowerCase();
+  // Aucun mapping connu à partir du ticker : ne pas deviner un id CG depuis
+  // le ticker brut (ex. "PEPE2" → "pepe2" renverrait un {} silencieux côté
+  // API). Le caller gère déjà `null` (fetchPrice → ERROR explicite, ou
+  // fallback ticker brut pour les usages non-pricing).
   return null;
 }
 
@@ -343,12 +351,6 @@ export async function fetchSolanaMintPricesUsd(
     }
   }
   return map;
-}
-
-function pricePrecision(price: number): number {
-  if (price > 0 && price < 0.01) return 12;
-  if (price < 1) return 10;
-  return 8;
 }
 
 export const coingeckoProvider: MarketDataProvider = {

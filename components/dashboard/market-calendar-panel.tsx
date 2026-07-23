@@ -9,10 +9,14 @@ import type {
   MacroEvent,
   MacroImpact,
 } from "@/app/lib/news/service";
-import { earningsTimingLabel } from "@/app/lib/news/service";
+import {
+  earningsTimingLabel,
+  marketEventStatus,
+} from "@/app/lib/news/service";
 import { CountryFlag } from "@/components/ui/country-flag";
 import { cn } from "@/app/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useServerNow } from "@/app/hooks/use-server-now";
 
 const IMPACT_LABEL: Record<MacroImpact, string> = {
   low: "Faible",
@@ -26,10 +30,27 @@ const IMPACT_CLASS: Record<MacroImpact, string> = {
   high: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
 };
 
-const INITIAL_MACRO = 4;
-const INITIAL_EARN = 4;
+const INITIAL_MACRO = 5;
+const INITIAL_EARN = 5;
 const INITIAL_MACRO_COMPACT = 3;
 const INITIAL_EARN_COMPACT = 3;
+
+/** Badge statut publié / à venir (bascule sur l'heure de Paris via horloge serveur). */
+function StatusBadge({ published }: { published: boolean }) {
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
+        published
+          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+      )}
+      data-status={published ? "published" : "upcoming"}
+    >
+      {published ? "Publié" : "À venir"}
+    </span>
+  );
+}
 
 export type PortfolioTickerProp = { ticker: string; name: string };
 
@@ -80,7 +101,9 @@ export function MarketCalendarPanel({
   const macroQ = useQuery({
     queryKey: ["macro-calendar"],
     queryFn: () =>
-      fetchJson<{ events: MacroEvent[]; date: string }>("/api/macro"),
+      fetchJson<{ events: MacroEvent[]; date: string; generatedAt?: string }>(
+        "/api/macro"
+      ),
     staleTime: 5 * 60_000,
   });
 
@@ -93,10 +116,17 @@ export function MarketCalendarPanel({
         events: EarningsEvent[];
         date: string;
         source?: "yahoo" | "finnhub" | "mixed" | "mock";
+        generatedAt?: string;
       }>(`/api/earnings?${q.toString()}`);
     },
     staleTime: 5 * 60_000,
   });
+
+  // Horloge synchronisée sur le serveur (NTP côté hébergeur) → bascule live
+  // des statuts « Publié » quand l'horaire (Paris) est dépassé.
+  const serverNow = useServerNow(
+    macroQ.data?.generatedAt ?? earnQ.data?.generatedAt ?? null
+  );
 
   const earnSourceLabel =
     earnQ.data?.source === "yahoo"
@@ -189,37 +219,49 @@ export function MarketCalendarPanel({
           errorLabel="Calendrier macro indisponible"
         >
           <ul className="space-y-1.5">
-            {macroVisible.map((e) => (
-              <li
-                key={e.id}
-                className="flex flex-wrap items-center gap-1.5 rounded-[var(--radius-md)] px-1 py-1 text-xs sm:gap-2"
-              >
-                <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
-                  {clockTime(e.time)}
-                </span>
-                <CountryFlag code={e.countryCode || e.country} showCode />
-                <span className="min-w-0 flex-1 leading-snug text-[var(--foreground)]">
-                  {e.title}
-                </span>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
-                    IMPACT_CLASS[e.impact]
-                  )}
+            {macroVisible.map((e) => {
+              const published = marketEventStatus(e.time, serverNow) === "published";
+              const detail = published
+                ? [
+                    `Réel ${e.actual ?? "—"}`,
+                    e.forecast ? `Cons. ${e.forecast}` : null,
+                    e.previous ? `Préc. ${e.previous}` : null,
+                  ]
+                : [
+                    e.forecast ? `Cons. ${e.forecast}` : null,
+                    e.previous ? `Préc. ${e.previous}` : null,
+                  ];
+              const detailStr = detail.filter(Boolean).join(" · ");
+              return (
+                <li
+                  key={e.id}
+                  className="flex flex-wrap items-center gap-1.5 rounded-[var(--radius-md)] px-1 py-1 text-xs sm:gap-2"
+                  data-testid="macro-event"
                 >
-                  {IMPACT_LABEL[e.impact]}
-                </span>
-                {(e.forecast || e.previous || e.actual) && (
-                  <span className="w-full text-[10px] text-[var(--muted-foreground)] sm:pl-12">
-                    {e.actual ? `Réel ${e.actual}` : ""}
-                    {e.actual && (e.forecast || e.previous) ? " · " : ""}
-                    {e.forecast ? `Cons. ${e.forecast}` : ""}
-                    {e.forecast && e.previous ? " · " : ""}
-                    {e.previous ? `Préc. ${e.previous}` : ""}
+                  <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
+                    {clockTime(e.time)}
                   </span>
-                )}
-              </li>
-            ))}
+                  <CountryFlag code={e.countryCode || e.country} showCode />
+                  <span className="min-w-0 flex-1 leading-snug text-[var(--foreground)]">
+                    {e.title}
+                  </span>
+                  <StatusBadge published={published} />
+                  <span
+                    className={cn(
+                      "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
+                      IMPACT_CLASS[e.impact]
+                    )}
+                  >
+                    {IMPACT_LABEL[e.impact]}
+                  </span>
+                  {detailStr && (
+                    <span className="w-full text-[10px] text-[var(--muted-foreground)] sm:pl-12">
+                      {detailStr}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
           {macroAll.length > initialMacro && (
             <button
@@ -228,7 +270,7 @@ export function MarketCalendarPanel({
               data-testid="market-cal-macro-more"
               onClick={() => setMacroExpanded((v) => !v)}
             >
-              {macroExpanded ? "Voir moins" : "Voir plus"}
+              {macroExpanded ? "Réduire" : "Voir tout"}
             </button>
           )}
         </CalendarCard>
@@ -255,63 +297,72 @@ export function MarketCalendarPanel({
           errorLabel="Calendrier des résultats indisponible"
         >
           <ul className="space-y-1.5">
-            {earnVisible.map((e) => (
-              <li
-                key={e.id}
-                className={cn(
-                  "rounded-[var(--radius-md)] border border-transparent px-1.5 py-1.5 text-xs",
-                  e.inPortfolio &&
-                    "border-[var(--primary-soft)] bg-[var(--primary-soft)]/40"
-                )}
-                data-in-portfolio={e.inPortfolio ? "true" : "false"}
-              >
-                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                  <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
-                    {clockTime(e.time)}
-                  </span>
-                  <CountryFlag code={e.countryCode || "us"} showCode />
-                  {e.logoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={e.logoUrl}
-                      alt=""
-                      width={20}
-                      height={20}
-                      loading="lazy"
-                      className="h-5 w-5 shrink-0 rounded object-contain ring-1 ring-black/10 dark:ring-white/15"
-                    />
-                  ) : null}
-                  <span className="min-w-0 flex-1">
-                    <span className="font-medium text-[var(--foreground)]">
-                      {e.companyName}
-                    </span>
-                    <span className="ml-1.5 font-mono text-[10px] text-[var(--muted-foreground)]">
-                      {e.ticker}
-                    </span>
-                  </span>
-                  {e.inPortfolio && (
-                    <span className="shrink-0 rounded-full bg-[var(--primary)]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--primary)]">
-                      Portefeuille
-                    </span>
+            {earnVisible.map((e) => {
+              const published = marketEventStatus(e.time, serverNow) === "published";
+              // Publié : résultat (EPS réel) + consensus. À venir : EPS attendu.
+              const epsLine = published
+                ? [
+                    `EPS publié ${e.epsActual ?? "—"}`,
+                    e.epsEstimate ? `cons. ${e.epsEstimate}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                : e.epsEstimate
+                  ? `EPS attendu ${e.epsEstimate}`
+                  : "";
+              return (
+                <li
+                  key={e.id}
+                  className={cn(
+                    "rounded-[var(--radius-md)] border border-transparent px-1.5 py-1.5 text-xs",
+                    e.inPortfolio &&
+                      "border-[var(--primary-soft)] bg-[var(--primary-soft)]/40"
                   )}
-                  <span className="shrink-0 text-[10px] text-[var(--muted-foreground)]">
-                    {earningsTimingLabel(e.timing)}
-                  </span>
-                </div>
-                {(e.epsEstimate || e.epsActual) && (
-                  <p className="mt-0.5 pl-12 text-[10px] text-[var(--muted-foreground)]">
-                    {e.epsActual
-                      ? `EPS publié ${e.epsActual}`
-                      : e.epsEstimate
-                        ? `EPS attendu ${e.epsEstimate}`
-                        : ""}
-                    {e.epsActual && e.epsEstimate
-                      ? ` · cons. ${e.epsEstimate}`
-                      : ""}
-                  </p>
-                )}
-              </li>
-            ))}
+                  data-in-portfolio={e.inPortfolio ? "true" : "false"}
+                  data-testid="earnings-event"
+                >
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
+                      {clockTime(e.time)}
+                    </span>
+                    <CountryFlag code={e.countryCode || "us"} showCode />
+                    {e.logoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={e.logoUrl}
+                        alt=""
+                        width={20}
+                        height={20}
+                        loading="lazy"
+                        className="h-5 w-5 shrink-0 rounded object-contain ring-1 ring-black/10 dark:ring-white/15"
+                      />
+                    ) : null}
+                    <span className="min-w-0 flex-1">
+                      <span className="font-medium text-[var(--foreground)]">
+                        {e.companyName}
+                      </span>
+                      <span className="ml-1.5 font-mono text-[10px] text-[var(--muted-foreground)]">
+                        {e.ticker}
+                      </span>
+                    </span>
+                    <StatusBadge published={published} />
+                    {e.inPortfolio && (
+                      <span className="shrink-0 rounded-full bg-[var(--primary)]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--primary)]">
+                        Portefeuille
+                      </span>
+                    )}
+                    <span className="shrink-0 text-[10px] text-[var(--muted-foreground)]">
+                      {earningsTimingLabel(e.timing)}
+                    </span>
+                  </div>
+                  {epsLine && (
+                    <p className="mt-0.5 pl-12 text-[10px] text-[var(--muted-foreground)]">
+                      {epsLine}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
           {earnAll.length > initialEarn && (
             <button
@@ -320,7 +371,7 @@ export function MarketCalendarPanel({
               data-testid="market-cal-earnings-more"
               onClick={() => setEarnExpanded((v) => !v)}
             >
-              {earnExpanded ? "Voir moins" : "Voir plus"}
+              {earnExpanded ? "Réduire" : "Voir tout"}
             </button>
           )}
         </CalendarCard>

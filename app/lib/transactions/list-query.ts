@@ -13,7 +13,7 @@
  * { transactions, total, totalAll, page, pageSize, pageCount, typeCounts }
  */
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/app/lib/prisma-client/client";
 import { nftExcludePrismaClause } from "./nft-filter";
 
 export const TX_LIST_DEFAULT_PAGE_SIZE = 50;

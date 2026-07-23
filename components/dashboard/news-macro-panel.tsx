@@ -21,8 +21,6 @@ import {
   newsSourceLogoUrl,
 } from "@/app/lib/news/service";
 import {
-  filterEarningsByRelease,
-  filterMacroByRelease,
   MARKET_RELEASE_FILTERS,
   type MarketReleaseFilter,
 } from "@/app/lib/news/release-filter";
@@ -47,7 +45,7 @@ const IMPACT_CLASS: Record<MacroImpact, string> = {
   high: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
 };
 
-const INITIAL = 4;
+const INITIAL = 5;
 
 function relativeTime(iso: string): string {
   try {
@@ -75,15 +73,15 @@ function clockTime(iso: string): string {
  */
 export function NewsMacroPanel({
   portfolioTickers = [],
-  compact = false,
+  compact: _compact = false,
 }: {
   portfolioTickers?: PortfolioTickerProp[];
-  /** Conservé pour API — densifie le contenu des listes */
+  /** Conservé pour API — macro/résultats affichent toujours 5 items/onglet */
   compact?: boolean;
 }) {
-  // Min. 5 actualités (demande produit) ; compact garde 5 aussi pour densité
+  // Min. 5 actualités (demande produit) ; macro/résultats : 5 par onglet, quel que soit compact
   const newsLimit = 5;
-  const listLimit = compact ? 3 : INITIAL;
+  const listLimit = INITIAL;
 
   const [newsMore, setNewsMore] = useState(false);
   const [macroMore, setMacroMore] = useState(false);
@@ -119,9 +117,12 @@ export function NewsMacroPanel({
   const macroQ = useQuery({
     queryKey: ["macro-calendar"],
     queryFn: () =>
-      fetchJson<{ events: MacroEvent[]; date: string; source?: string }>(
-        "/api/macro"
-      ),
+      fetchJson<{
+        upcoming: MacroEvent[];
+        published: MacroEvent[];
+        date: string;
+        source?: string;
+      }>("/api/macro"),
     staleTime: 5 * 60_000,
     refetchInterval: 10 * 60_000,
   });
@@ -132,7 +133,8 @@ export function NewsMacroPanel({
       const q = new URLSearchParams({ limit: "10" });
       if (tickersParam) q.set("tickers", tickersParam);
       return fetchJson<{
-        events: EarningsEvent[];
+        upcoming: EarningsEvent[];
+        published: EarningsEvent[];
         date: string;
         source?: string;
       }>(`/api/earnings?${q.toString()}`);
@@ -142,12 +144,18 @@ export function NewsMacroPanel({
 
   const newsAll = newsQ.data?.news ?? [];
   const macroAll = useMemo(
-    () => filterMacroByRelease(macroQ.data?.events ?? [], macroFilter),
-    [macroQ.data?.events, macroFilter]
+    () =>
+      macroFilter === "upcoming"
+        ? macroQ.data?.upcoming ?? []
+        : macroQ.data?.published ?? [],
+    [macroQ.data, macroFilter]
   );
   const earnAll = useMemo(
-    () => filterEarningsByRelease(earnQ.data?.events ?? [], earnFilter),
-    [earnQ.data?.events, earnFilter]
+    () =>
+      earnFilter === "upcoming"
+        ? earnQ.data?.upcoming ?? []
+        : earnQ.data?.published ?? [],
+    [earnQ.data, earnFilter]
   );
 
   // Toujours afficher au moins 5 actus si disponibles
@@ -423,41 +431,56 @@ export function NewsMacroPanel({
                     )}
                     data-in-portfolio={e.inPortfolio ? "true" : "false"}
                   >
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <div className="flex min-w-0 items-start gap-2 mb-1.5">
                       <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
                         {clockTime(e.time)}
                       </span>
-                      <CountryFlag
-                        code={e.countryCode || "us"}
-                        showCode
-                      />
-                      <CompanyLogo
-                        src={e.logoUrl}
-                        name={e.companyName}
-                        ticker={e.ticker}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium leading-tight text-[var(--foreground)]">
-                          {e.companyName}
-                        </span>
-                        <span className="font-mono text-[10px] leading-tight text-[var(--muted-foreground)]">
-                          {e.ticker}
-                        </span>
-                      </span>
-                      {e.inPortfolio && (
-                        <span className="shrink-0 rounded-full bg-[var(--primary)]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--primary)]">
-                          Portefeuille
-                        </span>
-                      )}
-                      <span className="shrink-0 text-[10px] text-[var(--muted-foreground)]">
-                        {earningsTimingLabel(e.timing)}
-                      </span>
                     </div>
-                    <EarningsFigures
-                      estimate={e.epsEstimate}
-                      actual={e.epsActual}
-                      mode={earnFilter}
-                    />
+                    <div className="flex min-w-0 gap-3">
+                      <div className="relative shrink-0">
+                        <CompanyLogo
+                          src={e.logoUrl}
+                          name={e.companyName}
+                          ticker={e.ticker}
+                          sizeClassName="h-10 w-10"
+                          radiusClassName="rounded-lg"
+                        />
+                        <div className="absolute -bottom-0 -right-0">
+                          <CountryFlag
+                            code={e.countryCode || "us"}
+                            showCode={false}
+                            imgClassName="h-3 w-4"
+                            className="px-0.5 py-0.5 shadow-sm ring-1 ring-white dark:ring-slate-900 bg-white dark:bg-slate-900 text-[10px]"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-baseline gap-2 mb-1">
+                          <span className="block truncate font-medium leading-tight text-[var(--foreground)]">
+                            {e.companyName}
+                          </span>
+                          {e.inPortfolio && (
+                            <span className="shrink-0 rounded-full bg-[var(--primary)]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--primary)]">
+                              Portefeuille
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2 items-center text-[10px]">
+                          <span className="font-mono text-[var(--muted-foreground)]">
+                            {e.ticker}
+                          </span>
+                          <span className="text-[var(--muted-foreground)]">·</span>
+                          <span className="text-[var(--muted-foreground)]">
+                            {earningsTimingLabel(e.timing)}
+                          </span>
+                        </div>
+                        <EarningsFigures
+                          estimate={e.epsEstimate}
+                          actual={e.epsActual}
+                          mode={earnFilter}
+                        />
+                      </div>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -578,16 +601,26 @@ function CompanyLogo({
   src,
   name,
   ticker,
+  sizeClassName = "h-6 w-6",
+  radiusClassName = "rounded-md",
 }: {
   src?: string | null;
   name: string;
   ticker: string;
+  sizeClassName?: string;
+  radiusClassName?: string;
 }) {
   const [failed, setFailed] = useState(false);
+  const size = sizeClassName === "h-10 w-10" ? 40 : 24;
   if (!src || failed) {
     return (
       <span
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--muted)] text-[9px] font-bold text-[var(--muted-foreground)]"
+        className={cn(
+          "flex shrink-0 items-center justify-center border border-[var(--border)] bg-[var(--muted)] font-bold text-[var(--muted-foreground)]",
+          sizeClassName,
+          radiusClassName,
+          sizeClassName === "h-10 w-10" ? "text-[12px]" : "text-[9px]"
+        )}
         aria-hidden
         title={name || ticker}
       >
@@ -600,12 +633,16 @@ function CompanyLogo({
     <img
       src={src}
       alt=""
-      width={24}
-      height={24}
+      width={size}
+      height={size}
       loading="lazy"
       decoding="async"
       title={name || ticker}
-      className="h-6 w-6 shrink-0 rounded-md bg-white object-contain p-0.5 ring-1 ring-black/10 dark:bg-slate-900 dark:ring-white/15"
+      className={cn(
+        "shrink-0 bg-white object-contain p-0.5 ring-1 ring-black/10 dark:bg-slate-900 dark:ring-white/15",
+        sizeClassName,
+        radiusClassName
+      )}
       onError={() => setFailed(true)}
     />
   );

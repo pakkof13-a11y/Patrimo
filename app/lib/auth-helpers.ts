@@ -200,6 +200,15 @@ export async function gateAdmin(): Promise<AdminGate> {
     };
   }
 
+  if (sessionUser.role !== access.role) {
+    // JWT (session) désynchronisé du rôle DB — pas bloquant ici (la DB fait
+    // foi et vient d'être revalidée), mais signal utile pour détecter un
+    // token périmé qui traînerait plus longtemps que prévu côté client.
+    console.warn(
+      `[auth] JWT stale détecté pour ${access.id} : session.role=${sessionUser.role} vs db.role=${access.role}`
+    );
+  }
+
   return {
     ok: true,
     user: {
@@ -210,15 +219,6 @@ export async function gateAdmin(): Promise<AdminGate> {
       role: "ADMIN",
     },
   };
-}
-
-/**
- * Compat : null si non admin (ne distingue pas 401/403).
- * Préférer `gateAdmin` + `adminGateJson` sur les nouvelles routes.
- */
-export async function requireAdmin(): Promise<SessionUser | null> {
-  const gate = await gateAdmin();
-  return gate.ok ? gate.user : null;
 }
 
 /** NextResponse 401/403 pour un échec gateAdmin. */
