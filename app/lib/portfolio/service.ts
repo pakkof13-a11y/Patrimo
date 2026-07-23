@@ -11,6 +11,7 @@ import {
   type TxType,
 } from "../accounting";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
+import { parisDayKey } from "../dates/paris";
 import { resolvePlatformLogo } from "../platforms/presets";
 import { resolveAssetLogo } from "../assets/logos";
 import {
@@ -923,21 +924,7 @@ function attachIncomeSplit(
   }
 }
 
-/** Jour civil Europe/Paris → clé YYYY-MM-DD */
-function parisDayKey(isoOrDate: string | Date): string {
-  const iso =
-    typeof isoOrDate === "string" ? isoOrDate : isoOrDate.toISOString();
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Paris",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(iso));
-  const y = parts.find((p) => p.type === "year")?.value ?? "1970";
-  const m = parts.find((p) => p.type === "month")?.value ?? "01";
-  const d = parts.find((p) => p.type === "day")?.value ?? "01";
-  return `${y}-${m}-${d}`;
-}
+const HISTORY_HARD_CAP = 5500;
 
 /** Liste inclusive des jours civils YYYY-MM-DD (UTC noon step). */
 function enumerateDayKeysInclusive(first: string, last: string): string[] {
@@ -949,8 +936,7 @@ function enumerateDayKeysInclusive(first: string, last: string): string[] {
   const end = Date.UTC(y1!, m1! - 1, d1!, 12, 0, 0);
   const dayMs = 24 * 60 * 60 * 1000;
   // Garde-fou : max ~15 ans
-  const hardCap = 5500;
-  while (t <= end && out.length < hardCap) {
+  while (t <= end && out.length < HISTORY_HARD_CAP) {
     const dt = new Date(t);
     const y = dt.getUTCFullYear();
     const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
@@ -1012,6 +998,12 @@ export function buildHistoryFromOccurredAt(
       seenK.add(k);
       return true;
     });
+  }
+
+  if (keys.length >= HISTORY_HARD_CAP) {
+    console.warn(
+      `[portfolio] buildHistoryFromOccurredAt: hardCap ${HISTORY_HARD_CAP} atteint (${keys.length} points) — courbe tronquée.`
+    );
   }
 
   const points: PortfolioHistoryPoint[] = [];
