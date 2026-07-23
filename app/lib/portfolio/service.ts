@@ -1,6 +1,8 @@
 import { prisma } from "../prisma";
 import { d, toFixed, zero } from "../money/decimal";
 import {
+  applyTransaction,
+  createEmptyLedger,
   replayTransactions,
   totalCash,
   totalCostBasis,
@@ -36,7 +38,7 @@ import {
 } from "../types/money-brands";
 import type { AccountType } from "../constants";
 
-function mapDbTx(row: {
+export function mapDbTx(row: {
   id: string;
   type: string;
   platformId: string;
@@ -473,6 +475,13 @@ export async function getHoldings(
       passiveIncomeBase: baseS(toBase(income)),
       breakEvenEur: eurS(toFixed(avg, 8)),
       breakEvenBase: baseS(toBase(avg)),
+      // SL/TP de la jambe principale uniquement (sinon des niveaux d'une
+      // jambe secondaire arbitraire s'appliqueraient à la position fusionnée)
+      stopLoss: (takeRow ? row : prev).stopLoss,
+      tp1: (takeRow ? row : prev).tp1,
+      tp2: (takeRow ? row : prev).tp2,
+      tp3: (takeRow ? row : prev).tp3,
+      tp4: (takeRow ? row : prev).tp4,
     });
   }
 
@@ -502,7 +511,14 @@ export async function getPlatformCashBalances(
   userId: string,
   baseCurrency = "EUR",
   rates?: Record<string, number>,
-  ledger?: Awaited<ReturnType<typeof loadLedgerForUser>>
+  ledger?: Awaited<ReturnType<typeof loadLedgerForUser>>,
+  /**
+   * walletApiKey exclue par défaut (secure by default) — seul /api/platforms
+   * (édition + sync inline) doit passer `includeWalletApiKey: true`. Évite
+   * qu'un futur endpoint appelant cette fonction directement ne fasse fuiter
+   * la clé sans s'en rendre compte.
+   */
+  opts?: { includeWalletApiKey?: boolean }
 ) {
   const fx = rates ?? (await getEurRates());
   const { getBankPocketCashByNameEur } = await import("../cash/pockets");
@@ -590,8 +606,9 @@ export async function getPlatformCashBalances(
         name: p.name,
       }),
       walletAddress: p.walletAddress,
-      walletApiKey:
-        (p as { walletApiKey?: string | null }).walletApiKey ?? null,
+      walletApiKey: opts?.includeWalletApiKey
+        ? ((p as { walletApiKey?: string | null }).walletApiKey ?? null)
+        : null,
       cashEur: toFixed(cashEur, 8),
       cashBase: convertFromEurSync(cashEur, baseCurrency, fx),
       /** Cash issu des poches Banques/Livrets uniquement (hors ledger) */
@@ -999,7 +1016,11 @@ export function buildHistoryFromOccurredAt(
 
   const points: PortfolioHistoryPoint[] = [];
   let cursor = 0;
-  const applied: LedgerTx[] = [];
+  // Replay incrémental : `sorted` est trié une fois pour toutes, donc chaque
+  // jour ne fait qu'appliquer les tx NOUVELLEMENT couvertes par le curseur
+  // sur un état persistant, au lieu de rejouer tout `applied` depuis zéro à
+  // chaque itération (O(jours × tx) → O(jours + tx)).
+  const state = createEmptyLedger();
 
   for (const day of keys) {
     // Inclure toutes les tx du jour (et antérieures non encore appliquées)
@@ -1008,21 +1029,15 @@ export function buildHistoryFromOccurredAt(
       const tx = sorted[cursor]!;
       const tk = parisDayKey(tx.occurredAt);
       if (tk > day) break;
-      applied.push(tx);
+      try {
+        applyTransaction(state, tx);
+      } catch {
+        applyTransaction(state, tx, { allowNegativeCash: true, clampOversell: true });
+      }
       cursor += 1;
     }
 
-    if (applied.length === 0) continue;
-
-    let state;
-    try {
-      state = replayTransactions(applied);
-    } catch {
-      state = replayTransactions(applied, {
-        allowNegativeCash: true,
-        clampOversell: true,
-      });
-    }
+    if (cursor === 0) continue;
 
     const costEur = totalCostBasis(state);
     const cashEur = totalCash(state);
@@ -1060,19 +1075,74 @@ export function buildHistoryFromOccurredAt(
   return points;
 }
 
+/**
+ * Version allégée de getPortfolioBundle — ne calcule que les 6 champs
+ * scalaires nécessaires au point « live » de l'historique (getPortfolioHistory).
+ * Évite getPlatformCashBalances (breakdown par plateforme + poches banques)
+ * et les boucles d'allocation byClass/byPlatform/byAccountType, qui ne
+ * servent qu'au dashboard complet et représentaient l'essentiel du coût
+ * inutile de getPortfolioBundle() pour un simple point du graphique.
+ */
+async function getPortfolioLiveSummary(userId: string, baseCurrency = "EUR") {
+  const rates = await getEurRates();
+  const ledger = await loadLedgerForUser(userId);
+
+  const { getExplicitCashTotalEur } = await import("../cash/pockets");
+  const { getAlternativesPortfolioSlice } = await import(
+    "../alternatives/portfolio"
+  );
+
+  const [holdings, explicitCash, alternatives, esEur] = await Promise.all([
+    getHoldings(userId, baseCurrency, rates),
+    getExplicitCashTotalEur(userId),
+    getAlternativesPortfolioSlice(userId, rates).catch((err) => {
+      console.error("[portfolio] alternatives slice failed:", err);
+      return { totalEur: 0 };
+    }),
+    getEmployeeSavingsTotalEur(userId, rates),
+  ]);
+
+  const marketValue = holdings.reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
+  const costBasis = totalCostBasis(ledger);
+  const cash = explicitCash.totalEur;
+  const alternativesEur = d(String(alternatives?.totalEur ?? 0));
+  const employeeSavingsEur = esEur;
+  const realized = totalRealizedPnl(ledger);
+  const unrealized = marketValue.minus(costBasis);
+  const cashIncome = ledger.cashIncomeEur;
+  const totalAssets = marketValue.plus(cash).plus(alternativesEur).plus(employeeSavingsEur);
+
+  return {
+    portfolioPlusCashEur: toFixed(totalAssets, 8),
+    totalCashEur: toFixed(cash, 8),
+    realizedPnlEur: toFixed(realized, 8),
+    unrealizedPnlEur: toFixed(unrealized, 8),
+    cashIncomeEur: toFixed(cashIncome, 8),
+    totalCostBasisEur: toFixed(costBasis, 8),
+  };
+}
+
 /** Snapshots + reconstruction `occurredAt` + point live pour l’Évolution. */
 export async function getPortfolioHistory(
   userId: string,
-  baseCurrency = "EUR"
+  baseCurrency = "EUR",
+  /**
+   * Filtre optionnel des snapshots mark-to-market (date >= sinceDate).
+   * Omis = comportement actuel (take:2200, pas de filtre de date — export
+   * complet). Passer une date limite la fenêtre glissante pour un historique
+   * très long ; l'unique appelant actuel (api/portfolio) ne le passe pas
+   * pour préserver le comportement existant sans régression silencieuse.
+   */
+  sinceDate?: Date
 ): Promise<PortfolioHistoryPoint[]> {
   const [snapshots, rates, live, incomeRows, allTxRows] = await Promise.all([
     prisma.portfolioSnapshot.findMany({
-      where: { userId },
+      where: sinceDate ? { userId, date: { gte: sinceDate } } : { userId },
       orderBy: { date: "desc" },
       take: 2200,
     }),
     getEurRates(),
-    getPortfolioBundle(userId, baseCurrency),
+    getPortfolioLiveSummary(userId, baseCurrency),
     prisma.transaction.findMany({
       where: {
         userId,
@@ -1162,12 +1232,12 @@ export async function getPortfolioHistory(
   );
 
   // Always append current live valuation so the chart is never empty / stale
-  const liveTotal = d(live.summary.portfolioPlusCashEur);
-  const liveCash = d(live.summary.totalCashEur);
-  const liveRealized = d(String(live.summary.realizedPnlEur ?? 0));
-  const liveUnrealized = d(String(live.summary.unrealizedPnlEur ?? 0));
-  const liveIncome = d(String(live.summary.cashIncomeEur ?? 0));
-  const liveCost = d(String(live.summary.totalCostBasisEur ?? 0));
+  const liveTotal = d(live.portfolioPlusCashEur);
+  const liveCash = d(live.totalCashEur);
+  const liveRealized = d(String(live.realizedPnlEur ?? 0));
+  const liveUnrealized = d(String(live.unrealizedPnlEur ?? 0));
+  const liveIncome = d(String(live.cashIncomeEur ?? 0));
+  const liveCost = d(String(live.totalCostBasisEur ?? 0));
   const todayKey = parisDayKey(new Date());
   const last = points[points.length - 1];
   const lastKey = last ? parisDayKey(last.date) : null;

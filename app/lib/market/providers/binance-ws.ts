@@ -21,11 +21,26 @@
 import type { AssetMeta, MarketDataProvider, PriceQuoteResult } from "../types";
 import { d, toFixed } from "../../money/decimal";
 import { getEurRates, convertToEurSync } from "../fx";
+import { pricePrecision } from "../price-utils";
 
 export const BINANCE_BASE_URL = "https://api.binance.com/api/v3";
 
+// NOTE : cache local lambda — non partagé entre instances Vercel. Deux lambdas
+// peuvent servir des prix Binance décalés de ±TTL. Acceptable pour un TTL
+// court (30 s) ; voir effectiveBinanceCacheTtlMs() pour le garde-fou.
 /** Cache serveur TTL — l'aspect « temps réel » côté client vient du polling 30 s. */
 export const BINANCE_CACHE_TTL_MS = 30_000;
+
+/**
+ * TTL effectif appliqué au cache — clampe à 30 s sur Vercel si la constante
+ * est un jour relevée au-delà de 60 s (un cache long-lived cross-lambda non
+ * partagé fausserait le PnL entre deux lambdas divergentes).
+ */
+export function effectiveBinanceCacheTtlMs(): number {
+  const onVercel = process.env.VERCEL === "1";
+  if (onVercel && BINANCE_CACHE_TTL_MS > 60_000) return 30_000;
+  return BINANCE_CACHE_TTL_MS;
+}
 
 /**
  * Renommages / alias de tickers vers la base Binance réelle.
@@ -121,6 +136,19 @@ export function __resetBinanceCache(): void {
   priceCache.clear();
 }
 
+/** Snapshot du cache local — exposé pour /api/health (diagnostic, pas d'alerte). */
+export function getBinanceCacheStats(): {
+  size: number;
+  effectiveTtlMs: number;
+  onVercel: boolean;
+} {
+  return {
+    size: priceCache.size,
+    effectiveTtlMs: effectiveBinanceCacheTtlMs(),
+    onVercel: process.env.VERCEL === "1",
+  };
+}
+
 type BinanceTickerRow = { symbol: string; price: string };
 
 async function fetchBinanceTickers(
@@ -176,9 +204,10 @@ export async function getBinancePrices(
   const result = new Map<string, number>();
   const stale: string[] = [];
 
+  const ttlMs = effectiveBinanceCacheTtlMs();
   for (const s of [...new Set(symbols.filter(Boolean))]) {
     const hit = priceCache.get(s);
-    if (hit && now - hit.at < BINANCE_CACHE_TTL_MS) {
+    if (hit && now - hit.at < ttlMs) {
       result.set(s, hit.price);
     } else {
       stale.push(s);
@@ -193,12 +222,6 @@ export async function getBinancePrices(
     }
   }
   return result;
-}
-
-function pricePrecision(price: number): number {
-  if (price > 0 && price < 0.01) return 12;
-  if (price < 1) return 10;
-  return 8;
 }
 
 async function usdToEur(priceUsd: number): Promise<string> {

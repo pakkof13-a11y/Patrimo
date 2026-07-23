@@ -311,11 +311,17 @@ date;type;ticker;name;quantity;unit_price;fees;currency;cash_amount;notes;asset_
    - `AUTH_SECRET` (secret fort)
    - `AUTH_URL` / `NEXTAUTH_URL` = URL de production
    - `COINGECKO_API_KEY` (optionnel)
-5. Build : `prisma migrate deploy` puis `next build`  
-   Exemple de commande build Vercel :
+5. Build Vercel : `npm run build` uniquement (`vercel.json` → `buildCommand`).
+   **Migrations : ne pas les lancer depuis le build runner Vercel.**
+   `prisma migrate deploy` sur la base de production depuis un build (sans
+   backup automatique, sans rollback si le build échoue à mi-chemin) est
+   risqué — un build interrompu peut bloquer TOUT déploiement derrière lui.
+   Exécuter manuellement avant le déploiement, ou via un workflow CI/CD dédié
+   avec accès sécurisé à `DATABASE_URL` :
 
    ```text
-   npx prisma migrate deploy && npm run build
+   npx prisma migrate deploy --schema=./prisma/schema.prisma
+   # équivalent : npm run db:deploy
    ```
 
 6. Ne jamais exposer `COINGECKO_API_KEY` ni `AUTH_SECRET` côté client.

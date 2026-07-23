@@ -7,7 +7,9 @@ import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "../prisma";
 import { d, toFixed, zero, type Decimal } from "../money/decimal";
 import { createTransaction } from "../transactions/service";
-import { loadLedgerForUser } from "../portfolio/service";
+import { loadLedgerForUser, mapDbTx } from "../portfolio/service";
+import { replayTransactions } from "../accounting";
+import { fxRateToEur } from "./fx";
 
 export type TriggerField = "stopLoss" | "tp1" | "tp2" | "tp3" | "tp4";
 
@@ -214,82 +216,110 @@ export async function executeOrderTriggers(
       fills: [],
     };
 
-    // Allocate sells across platforms (largest first) for ledger integrity
-    const platformBuckets = openPositions
-      .map((p) => ({ platformId: p.platformId, qty: p.quantity }))
-      .sort((a, b) => b.qty.cmp(a.qty));
+    const currency = (quote.currency || asset.currency || "EUR").toUpperCase();
+    // Taux réel (pas "1" hardcodé) : une VENTE cotée hors EUR (ex. BTC via
+    // BTCUSDT) fausserait grossAmountEur en supposant 1 devise = 1 EUR.
+    const fx = await fxRateToEur(currency);
 
-    const fieldsToClear = new Set<TriggerField>();
-
-    for (const fill of result.fills) {
-      try {
-        let need = d(fill.quantity);
-        const parts: Array<{ platformId: string; qty: Decimal }> = [];
-
-        for (const bucket of platformBuckets) {
-          if (need.lte(0)) break;
-          if (bucket.qty.lte(0)) continue;
-          const take = bucket.qty.lt(need) ? bucket.qty : need;
-          if (take.lte(0)) continue;
-          parts.push({ platformId: bucket.platformId, qty: take });
-          bucket.qty = bucket.qty.minus(take);
-          need = need.minus(take);
-        }
-
-        if (parts.length === 0) continue;
-
-        let lastTxId: string | undefined;
-        for (const part of parts) {
-          const created = await createTransaction({
-            userId,
-            type: "VENTE",
-            platformId: part.platformId,
-            assetId: asset.id,
-            quantity: toFixed(part.qty, 12),
-            unitPrice: fill.unitPrice,
-            fees: "0",
-            currency: (quote.currency || asset.currency || "EUR").toUpperCase(),
-            fxRateToEur: "1",
-            occurredAt: new Date().toISOString(),
-            notes: `[Auto] ${fill.kind} @ ${fill.level} (seuil atteint)`,
-            allowNegativeCash: true,
+    // Fills d'un même asset dans UNE transaction Prisma sérialisable :
+    // deux exécutions concurrentes (double refresh, retry) qui liraient la
+    // même position en mémoire pourraient sinon toutes deux "prendre" la
+    // même quantité sur la même plateforme avant que l'une des deux ne soit
+    // committée — double-vente. La sérialisation force l'une des deux
+    // transactions concurrentes à échouer (conflit) plutôt qu'à corrompre
+    // le ledger.
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          // Relit la position réelle EN BASE dans la transaction — la
+          // quantité du ledger en mémoire (chargé avant la boucle) peut être
+          // périmée si une autre écriture a eu lieu entretemps.
+          const assetTxRows = await tx.transaction.findMany({
+            where: { userId, assetId: asset.id },
+            orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
           });
-          lastTxId = created.id;
-        }
+          let freshState;
+          try {
+            freshState = replayTransactions(assetTxRows.map(mapDbTx));
+          } catch {
+            freshState = replayTransactions(assetTxRows.map(mapDbTx), {
+              allowNegativeCash: true,
+              clampOversell: true,
+            });
+          }
+          // Allocate sells across platforms (largest first) for ledger integrity
+          const platformBuckets = [...freshState.positions.values()]
+            .filter((p) => p.assetId === asset.id && p.quantity.gt(0))
+            .map((p) => ({ platformId: p.platformId, qty: p.quantity }))
+            .sort((a, b) => b.qty.cmp(a.qty));
 
-        report.fills.push({
-          kind: fill.kind,
-          quantity: fill.quantity,
-          unitPrice: fill.unitPrice,
-          transactionId: lastTxId,
-        });
+          const fieldsToClear = new Set<TriggerField>();
 
-        // Only clear levels that actually executed (anti re-trigger)
-        fieldsToClear.add(fill.field);
-        if (fill.kind === "SL") {
-          for (const f of result.clearFields) fieldsToClear.add(f);
-        }
-      } catch (e) {
-        report.error = e instanceof Error ? e.message : "Échec exécution trigger";
-        console.error("executeOrderTriggers", asset.id, fill.kind, e);
-      }
-    }
+          for (const fill of result.fills) {
+            let need = d(fill.quantity);
+            const parts: Array<{ platformId: string; qty: Decimal }> = [];
 
-    if (fieldsToClear.size) {
-      const data: Prisma.AssetUpdateInput = {};
-      for (const f of fieldsToClear) {
-        data[f] = null;
-      }
-      try {
-        await prisma.asset.updateMany({
-          where: { id: asset.id, userId },
-          data,
-        });
-      } catch (e) {
-        console.error("clear trigger fields", asset.id, e);
-        report.error =
-          (report.error ? report.error + " · " : "") + "Échec effacement niveaux";
-      }
+            for (const bucket of platformBuckets) {
+              if (need.lte(0)) break;
+              if (bucket.qty.lte(0)) continue;
+              const take = bucket.qty.lt(need) ? bucket.qty : need;
+              if (take.lte(0)) continue;
+              parts.push({ platformId: bucket.platformId, qty: take });
+              bucket.qty = bucket.qty.minus(take);
+              need = need.minus(take);
+            }
+
+            if (parts.length === 0) continue;
+
+            let lastTxId: string | undefined;
+            for (const part of parts) {
+              const created = await createTransaction(
+                {
+                  userId,
+                  type: "VENTE",
+                  platformId: part.platformId,
+                  assetId: asset.id,
+                  quantity: toFixed(part.qty, 12),
+                  unitPrice: fill.unitPrice,
+                  fees: "0",
+                  currency,
+                  fxRateToEur: fx,
+                  occurredAt: new Date().toISOString(),
+                  notes: `[Auto] ${fill.kind} @ ${fill.level} (seuil atteint)`,
+                  allowNegativeCash: true,
+                },
+                tx
+              );
+              lastTxId = created.id;
+            }
+
+            report.fills.push({
+              kind: fill.kind,
+              quantity: fill.quantity,
+              unitPrice: fill.unitPrice,
+              transactionId: lastTxId,
+            });
+
+            // Only clear levels that actually executed (anti re-trigger)
+            fieldsToClear.add(fill.field);
+            if (fill.kind === "SL") {
+              for (const f of result.clearFields) fieldsToClear.add(f);
+            }
+          }
+
+          if (fieldsToClear.size) {
+            const data: Prisma.AssetUpdateInput = {};
+            for (const f of fieldsToClear) {
+              data[f] = null;
+            }
+            await tx.asset.updateMany({ where: { id: asset.id, userId }, data });
+          }
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      );
+    } catch (e) {
+      report.error = e instanceof Error ? e.message : "Échec exécution trigger";
+      console.error("executeOrderTriggers", asset.id, e);
     }
 
     if (report.fills.length || report.error) reports.push(report);

@@ -7,6 +7,7 @@ import {
   computeNetCashImpactEur,
   createEmptyLedger,
   replayTransactions,
+  type LedgerState,
   type LedgerTx,
   type TxType,
 } from "../accounting";
@@ -18,6 +19,10 @@ import {
   fxRateToEurOnDate,
 } from "../market/fx";
 import { resolveWhtRate } from "../tax/withholding";
+import { loadLedgerForUser } from "../portfolio/service";
+
+/** Client Prisma générique — singleton global ou `tx` d'une transaction interactive. */
+type DbClient = Prisma.TransactionClient;
 
 export type CreateTxInput = z.infer<typeof createTransactionSchema> & {
   userId: string;
@@ -58,7 +63,10 @@ function toLedgerTx(
   };
 }
 
-async function resolveIncomeWhtRate(input: CreateTxInput): Promise<number> {
+async function resolveIncomeWhtRate(
+  input: CreateTxInput,
+  client: DbClient = prisma
+): Promise<number> {
   if (
     !["DIVIDENDE", "COUPON", "LOYER", "INTERET"].includes(input.type)
   ) {
@@ -67,7 +75,7 @@ async function resolveIncomeWhtRate(input: CreateTxInput): Promise<number> {
   let countryCode: string | null = null;
   let assetRate: string | null = null;
   if (input.assetId) {
-    const asset = await prisma.asset.findFirst({
+    const asset = await client.asset.findFirst({
       where: { id: input.assetId, userId: input.userId },
       select: { countryCode: true, withholdingTaxRate: true, accountType: true },
     });
@@ -127,21 +135,21 @@ function mapExisting(row: {
   };
 }
 
-async function validateOwnership(input: CreateTxInput) {
-  const platform = await prisma.platform.findFirst({
+async function validateOwnership(input: CreateTxInput, client: DbClient = prisma) {
+  const platform = await client.platform.findFirst({
     where: { id: input.platformId, userId: input.userId },
   });
   if (!platform) throw new AccountingError("PLATFORM_NOT_FOUND", "Plateforme introuvable");
 
   if (input.toPlatformId) {
-    const to = await prisma.platform.findFirst({
+    const to = await client.platform.findFirst({
       where: { id: input.toPlatformId, userId: input.userId },
     });
     if (!to) throw new AccountingError("TO_PLATFORM_NOT_FOUND", "Plateforme de destination introuvable");
   }
 
   if (input.assetId) {
-    const asset = await prisma.asset.findFirst({
+    const asset = await client.asset.findFirst({
       where: { id: input.assetId, userId: input.userId },
     });
     if (!asset) throw new AccountingError("ASSET_NOT_FOUND", "Actif introuvable");
@@ -259,14 +267,62 @@ function validateLedger(
   }
 }
 
+function cloneLedgerState(state: LedgerState): LedgerState {
+  return {
+    positions: new Map(state.positions),
+    cashByPlatform: new Map(state.cashByPlatform),
+    realizedLots: [...state.realizedLots],
+    cashIncomeEur: state.cashIncomeEur,
+    totalFeesPaidEur: state.totalFeesPaidEur,
+  };
+}
+
+/**
+ * Valide une nouvelle transaction en l'appliquant sur une COPIE d'un ledger
+ * déjà calculé (loadLedgerForUser, caché par fingerprint) plutôt que de
+ * refaire un `findMany` + replay complet du journal à chaque écriture.
+ * Même sémantique double-tentative (stricte puis permissive) que `validateLedger`.
+ */
+function validateLedgerIncremental(
+  state: LedgerState,
+  pending: LedgerTx,
+  allowNegativeCash?: boolean
+) {
+  const soft = Boolean(allowNegativeCash);
+  try {
+    applyTransaction(cloneLedgerState(state), pending, { allowNegativeCash: soft });
+  } catch (strictErr) {
+    try {
+      applyTransaction(cloneLedgerState(state), pending, {
+        allowNegativeCash: true,
+        clampOversell: true,
+      });
+    } catch {
+      // Re-lancer l’erreur stricte d’origine (plus informative)
+      throw strictErr;
+    }
+  }
+}
+
 /**
  * Asset.platformId is home/display only. Positions live on (assetId × platformId)
  * via the ledger — never rewrite home platform when trading elsewhere.
  */
 
-export async function createTransaction(raw: CreateTxInput) {
+export async function createTransaction(
+  raw: CreateTxInput,
+  /**
+   * Client Prisma optionnel — passer le `tx` d'une transaction interactive
+   * (ex. exécution SL/TP, voir market/triggers.ts) pour que toutes les
+   * lectures/écritures de cette création partagent les garanties d'isolation
+   * de cette transaction. Sans `prismaClient`, utilise le singleton global
+   * et le cache ledger (chemin le plus courant, écritures utilisateur).
+   */
+  prismaClient?: DbClient
+) {
+  const client = prismaClient ?? prisma;
   const input = await resolveFx(raw);
-  await validateOwnership(input);
+  await validateOwnership(input, client);
 
   const occurredAt = new Date(input.occurredAt);
   if (Number.isNaN(occurredAt.getTime())) {
@@ -320,13 +376,7 @@ export async function createTransaction(raw: CreateTxInput) {
     }
   }
 
-  const existingRows = await prisma.transaction.findMany({
-    where: { userId: input.userId },
-    orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
-  });
-  const existing = existingRows.map(mapExisting);
-
-  const whtRate = await resolveIncomeWhtRate(input);
+  const whtRate = await resolveIncomeWhtRate(input, client);
   const newTx = toLedgerTx(`pending-${Date.now()}`, input, occurredAt, whtRate);
 
   // ACHAT / VENTE / REWARD / SPLIT / TRANSFERT_TITRE n’impactent pas le cash bancaire.
@@ -340,19 +390,31 @@ export async function createTransaction(raw: CreateTxInput) {
     "SPLIT",
     "TRANSFERT_TITRE",
   ].includes(input.type);
-  validateLedger(
-    existing,
-    newTx,
-    undefined,
-    Boolean(input.allowNegativeCash) || positionOnly
-  );
+  const allowNeg = Boolean(input.allowNegativeCash) || positionOnly;
+
+  if (prismaClient) {
+    // Dans une transaction interactive (ex. SL/TP, market/triggers.ts) : lecture
+    // fraîche via `tx` obligatoire pour les garanties d'isolation — ne pas
+    // réutiliser le cache loadLedgerForUser (basé sur le client singleton,
+    // hors de cette transaction, il ne verrait pas les écritures en cours).
+    const existingRows = await client.transaction.findMany({
+      where: { userId: input.userId },
+      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+    });
+    validateLedger(existingRows.map(mapExisting), newTx, undefined, allowNeg);
+  } else {
+    // Chemin normal : réutilise le ledger déjà calculé/caché par
+    // loadLedgerForUser (fingerprint) au lieu d'un findMany + replay complet.
+    const ledgerState = await loadLedgerForUser(input.userId);
+    validateLedgerIncremental(ledgerState, newTx, allowNeg);
+  }
 
   const amounts = computeNetCashImpactEur(newTx);
   const whtEur = Number(
     amounts.grossAmountEur.minus(amounts.feesEur).minus(amounts.netCashImpactEur).toString()
   );
 
-  const created = await prisma.transaction.create({
+  const created = await client.transaction.create({
     data: {
       userId: input.userId,
       ...buildPrismaData(input, occurredAt, amounts, {

@@ -17,7 +17,13 @@ export async function GET() {
   if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  const platforms = await getPlatformCashBalances(userId, user?.baseCurrency || "EUR");
+  const platforms = await getPlatformCashBalances(
+    userId,
+    user?.baseCurrency || "EUR",
+    undefined,
+    undefined,
+    { includeWalletApiKey: true }
+  );
   return NextResponse.json({ platforms, presets: PLATFORM_PRESETS });
 }
 
