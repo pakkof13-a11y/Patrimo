@@ -61,16 +61,21 @@ export function startOfCurrentCalendarYear(now = new Date()): Date {
 
 /**
  * Active/désactive les boutons de période selon l'âge réel de la position.
- * - 7J, Tout : toujours actifs
+ * - 7J, Tout : toujours actifs (sauf 7J si barCount < 2)
  * - 1M ≥ 30j · 3M ≥ 90j · 1A ≥ 365j · 5Y ≥ 1825j
  * - YTD : 1ère tx avant le 1er janvier de l'année en cours
  */
 export function isPerfPeriodEnabled(
   range: PriceHistoryRange,
   firstBuyAt: string | null,
-  now = new Date()
+  now = new Date(),
+  barCount?: number
 ): boolean {
-  if (range === "7d" || range === "all") return true;
+  if (range === "7d") {
+    if (barCount !== undefined && barCount < 2) return false;
+    return true;
+  }
+  if (range === "all") return true;
   if (!firstBuyAt) {
     return false;
   }

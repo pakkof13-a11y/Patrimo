@@ -245,4 +245,22 @@ describe("first buy & period gates", () => {
       age >= 365
     );
   });
+
+  it("respects barCount for 7d period", () => {
+    const now = new Date("2026-07-16T12:00:00.000Z");
+    const buy45 = "2026-06-01T12:00:00.000Z";
+    // 7d without barCount: always true
+    expect(isPerfPeriodEnabled("7d", buy45, now)).toBe(true);
+    // 7d with barCount undefined: always true
+    expect(isPerfPeriodEnabled("7d", buy45, now, undefined)).toBe(true);
+    // 7d with barCount < 2: false
+    expect(isPerfPeriodEnabled("7d", buy45, now, 0)).toBe(false);
+    expect(isPerfPeriodEnabled("7d", buy45, now, 1)).toBe(false);
+    // 7d with barCount >= 2: true
+    expect(isPerfPeriodEnabled("7d", buy45, now, 2)).toBe(true);
+    expect(isPerfPeriodEnabled("7d", buy45, now, 5)).toBe(true);
+    // all period: always true regardless of barCount
+    expect(isPerfPeriodEnabled("all", buy45, now, 0)).toBe(true);
+    expect(isPerfPeriodEnabled("all", buy45, now, 1)).toBe(true);
+  });
 });
