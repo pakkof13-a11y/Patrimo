@@ -193,6 +193,13 @@ Workflow `.github/workflows/ci.yml` sur push/PR :
 
 Variables CI injectées : `DATABASE_URL`, `AUTH_SECRET`, `ALLOW_DEMO_FALLBACK=true`.
 
+`DATABASE_URL` en CI pointe vers le service Postgres 16 du job, ex. :
+`postgresql://patrimo:patrimo@localhost:5432/patrimo?schema=public` — un
+Postgres classique, pas Neon. Le client Prisma (`app/lib/prisma.ts`) détecte
+ce cas (URL sans `neon.tech` et hors Vercel) et utilise l'adapter
+`@prisma/adapter-pg` (node-postgres, TCP standard) au lieu de l'adapter
+`@prisma/adapter-neon` (WebSocket, réservé à la prod Vercel/Neon).
+
 ## Architecture comptable (résumé)
 
 | Concept | Comportement |
