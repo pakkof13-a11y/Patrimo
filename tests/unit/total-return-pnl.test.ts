@@ -213,8 +213,6 @@ describe("buildTotalReturnSeries — period vs compound", () => {
     // remaining 6 @ 120 = 720, cash in 1000, cash out 480, realized 80, div 0
     // total = 720 + 0 + 80 - max(0,1000-480) = 800 - 520 = 280
     expect(p2.totalPnlEur).toBeCloseTo(280, 0);
-    // chart alias = composé
-    expect(p2.totalReturnEur).toBeCloseTo(p2.totalPnlEur, 5);
 
     expect(summary.realizedPnlEur).toBeCloseTo(80, 0);
   });

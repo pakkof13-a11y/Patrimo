@@ -52,8 +52,6 @@ function pt(
     periodPnlEur: period,
     totalPnlEur: total,
     totalPnlPct: 0,
-    totalReturnEur: total,
-    totalReturnPct: 0,
     events: opts.events ?? [],
   };
 }

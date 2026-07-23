@@ -401,7 +401,7 @@ export function AssetPriceChart({
     for (const p of perfChartData) {
       maxAbs = Math.max(
         maxAbs,
-        Math.abs(p.chartValueEur ?? p.totalReturnEur ?? 0),
+        Math.abs(p.chartValueEur ?? 0),
         Math.abs((p as { benchmarkEur?: number }).benchmarkEur ?? 0)
       );
     }
@@ -412,8 +412,8 @@ export function AssetPriceChart({
   const lastChartValue = useMemo(() => {
     if (perfChartData.length === 0) return null;
     const last = perfChartData[perfChartData.length - 1]!;
-    const eur = last.chartValueEur ?? last.totalReturnEur;
-    return { eur, up: eur >= 0, pct: last.chartValuePct ?? last.totalReturnPct };
+    const eur = last.chartValueEur;
+    return { eur, up: eur >= 0, pct: last.chartValuePct };
   }, [perfChartData]);
 
   const chartH = "h-[280px]";

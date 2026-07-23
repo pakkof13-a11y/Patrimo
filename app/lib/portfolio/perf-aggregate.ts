@@ -178,10 +178,6 @@ export type AggregatedPerfPoint = {
   pos: number;
   neg: number;
 
-  /** @deprecated alias chartValueEur */
-  totalReturnEur: number;
-  totalReturnPct: number;
-
   intervalType: AggregateInterval;
   close: number;
   qty: number;
@@ -382,14 +378,8 @@ export function groupDataByInterval(
     const periodRealizedEur = sumField(group, "periodRealizedEur");
     const incomePnlEur = sumField(group, "incomePnlEur");
 
-    const totalPnlEur =
-      typeof last.totalPnlEur === "number"
-        ? last.totalPnlEur
-        : last.totalReturnEur;
-    const totalPnlPct =
-      typeof last.totalPnlPct === "number"
-        ? last.totalPnlPct
-        : last.totalReturnPct;
+    const totalPnlEur = last.totalPnlEur ?? 0;
+    const totalPnlPct = last.totalPnlPct ?? 0;
     const latentPnlEur =
       typeof last.latentPnlEur === "number" ? last.latentPnlEur : 0;
     const latentPnlPct =
@@ -452,8 +442,6 @@ export function groupDataByInterval(
       chartValuePct,
       pos: chartValueEur >= 0 ? chartValueEur : 0,
       neg: chartValueEur < 0 ? chartValueEur : 0,
-      totalReturnEur: chartValueEur,
-      totalReturnPct: chartValuePct,
       intervalType,
       close: last.close,
       qty: last.qty,
@@ -491,8 +479,6 @@ export function applyPerfMetricMode(
       chartValuePct,
       pos: chartValueEur >= 0 ? chartValueEur : 0,
       neg: chartValueEur < 0 ? chartValueEur : 0,
-      totalReturnEur: chartValueEur,
-      totalReturnPct: chartValuePct,
     };
   });
 }

@@ -129,11 +129,6 @@ export type TotalReturnPoint = PriceBar & {
   totalPnlEur: number;
   totalPnlPct: number;
 
-  /**
-   * @deprecated Alias de totalPnlEur (compat graphe). Préférer totalPnlEur / periodPnlEur.
-   */
-  totalReturnEur: number;
-  totalReturnPct: number;
   events: ReturnEvent[];
 };
 
@@ -705,8 +700,6 @@ export function buildTotalReturnSeries(
       periodPnlEur,
       totalPnlEur,
       totalPnlPct,
-      totalReturnEur: totalPnlEur,
-      totalReturnPct: totalPnlPct,
       events: dayEvents,
     });
 
