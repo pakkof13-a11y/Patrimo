@@ -136,6 +136,23 @@ describe("FX PnL decomposition", () => {
     expect(d0.fxPnlEur).toBeGreaterThan(0);
   });
 
+  it("USD without buy lots falls back to estimated=true (drives the UI warning badge)", () => {
+    const d0 = decomposeUnrealizedPnl({
+      currency: "USD",
+      qty: 10,
+      costBasisEur: 900,
+      priceNowNative: 120,
+      priceNowEur: 114,
+      // pas de buyLots → FX d'achat inconnu
+    });
+    expect(d0.estimated).toBe(true);
+    expect(d0.isEur).toBe(false);
+    expect(d0.fxBuy).toBeNull();
+    expect(d0.fxPnlEur).toBe(0);
+    expect(d0.pricePnlEur).toBeCloseTo(d0.totalUnrealizedEur, 5);
+    expect(d0.note).toContain("FX d'achat inconnu");
+  });
+
   it("weightedBuyFx", () => {
     const w = weightedBuyFx([
       { quantity: 10, unitPriceNative: 100, fxRateToEur: 0.9 },

@@ -15,7 +15,7 @@ import { PlatformLogo } from "@/components/ui/platform-logo";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
 import { AssetPriceChart } from "@/components/assets/asset-price-chart";
 import { AssetRelatedNews } from "@/components/assets/asset-related-news";
-import { FinanceTip } from "@/components/ui/finance-tooltip";
+import { EstimatedBadge, FinanceTip } from "@/components/ui/finance-tooltip";
 import {
   TxTypeFilters,
   matchesTxTypeFilter,
@@ -1007,6 +1007,12 @@ function FxPnlPanel({
       <div className="mb-1.5 flex items-center gap-1 text-sm font-semibold tracking-tight text-[var(--foreground)]">
         Plus ou moins-value latente
         <FinanceTip term="P&L prix vs change" />
+        {d.estimated && (
+          <EstimatedBadge
+            testId="fx-pnl-estimated-badge"
+            message="Décomposition estimée — FX d'achat non disponible pour toutes les jambes"
+          />
+        )}
       </div>
       {showFxSplit ? (
         <div className="grid grid-cols-3 gap-2 text-center sm:text-left">
