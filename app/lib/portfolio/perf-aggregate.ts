@@ -9,6 +9,7 @@ import type {
   LedgerTxLite,
   TotalReturnPoint,
 } from "@/app/lib/portfolio/total-return";
+import { parisDayKey } from "@/app/lib/dates/paris";
 
 export type AggregateInterval = "day" | "week" | "month";
 
@@ -113,10 +114,10 @@ export function clipSeriesFromFirstBuy(
 
   const buyT = new Date(firstBuyAt).getTime();
   if (!Number.isFinite(buyT)) return [];
-  const buyDay = parisYmdKey(firstBuyAt);
+  const buyDay = parisDayKey(firstBuyAt);
 
   let startIdx = series.findIndex((p) => {
-    const barDay = parisYmdKey(p.date);
+    const barDay = parisDayKey(p.date);
     if (buyDay && barDay) return barDay >= buyDay;
     return new Date(p.date).getTime() >= buyT;
   });
@@ -131,17 +132,6 @@ export function clipSeriesFromFirstBuy(
   }
 
   return series.slice(startIdx);
-}
-
-function parisYmdKey(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Paris",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
 }
 
 export type AggregatedPerfPoint = {

@@ -33,6 +33,8 @@
  *   latentPnlEur(t) = (close − CUMP(t)) × qty(t)
  */
 
+import { parisDayKey } from "@/app/lib/dates/paris";
+
 export type LedgerTxLite = {
   type: string;
   occurredAt: string;
@@ -179,17 +181,6 @@ export type BuildTotalReturnOptions = {
   barInterval?: PerfBarInterval;
 };
 
-function parisDayKey(msOrIso: number | string): string {
-  const date = typeof msOrIso === "number" ? new Date(msOrIso) : new Date(msOrIso);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Paris",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
-}
-
 function parisWeekdayMon0(msOrIso: number | string | Date): number {
   const date =
     msOrIso instanceof Date
@@ -262,7 +253,7 @@ export function eventAppliesToBar(
   }
 
   // 1d ou inconnu : jour calendaire Paris (corrige barres Yahoo 00:00 UTC)
-  const ed = parisDayKey(eventT);
+  const ed = parisDayKey(new Date(eventT));
   const bd = parisDayKey(barDate);
   if (!ed || !bd) return eventT <= barT;
   return ed <= bd;
@@ -712,9 +703,10 @@ export function buildTotalReturnSeries(
     if (ev.kind === "BUY") {
       const q = n(ev.tx.quantity);
       if (q > 0) {
+        const cost = buyCostEur(ev.tx);
         qty += q;
-        costBasis += buyCostEur(ev.tx);
-        cashIn += buyCostEur(ev.tx);
+        costBasis += cost;
+        cashIn += cost;
       }
     } else if (ev.kind === "SELL") {
       const q = n(ev.tx.quantity);

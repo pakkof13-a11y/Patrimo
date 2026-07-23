@@ -9,6 +9,7 @@ import {
   type TxType,
 } from "../accounting";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
+import { parisDayKey } from "../dates/paris";
 import { resolvePlatformLogo } from "../platforms/presets";
 import { resolveAssetLogo } from "../assets/logos";
 import {
@@ -904,22 +905,6 @@ function attachIncomeSplit(
       if (sum > 0) p.cashIncomeBase = sum;
     }
   }
-}
-
-/** Jour civil Europe/Paris → clé YYYY-MM-DD */
-function parisDayKey(isoOrDate: string | Date): string {
-  const iso =
-    typeof isoOrDate === "string" ? isoOrDate : isoOrDate.toISOString();
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Paris",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(iso));
-  const y = parts.find((p) => p.type === "year")?.value ?? "1970";
-  const m = parts.find((p) => p.type === "month")?.value ?? "01";
-  const d = parts.find((p) => p.type === "day")?.value ?? "01";
-  return `${y}-${m}-${d}`;
 }
 
 /** Liste inclusive des jours civils YYYY-MM-DD (UTC noon step). */
