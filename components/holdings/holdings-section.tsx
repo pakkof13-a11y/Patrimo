@@ -769,19 +769,30 @@ export function HoldingsSection({
         accessorKey: "stopLoss",
         header: "Stop Loss",
         enableSorting: false,
-        cell: ({ row }) =>
-          onTriggerLevelChange ? (
-            <TriggerLevelInput
-              assetId={row.original.assetId}
-              field="stopLoss"
-              value={row.original.stopLoss}
-              onCommit={onTriggerLevelChange}
-            />
-          ) : (
-            <span className="tabular-nums text-xs text-zinc-500">
-              {row.original.stopLoss || "—"}
-            </span>
-          ),
+        cell: ({ row }) => (
+          <div className="flex flex-col items-end gap-0.5">
+            {onTriggerLevelChange ? (
+              <TriggerLevelInput
+                assetId={row.original.assetId}
+                field="stopLoss"
+                value={row.original.stopLoss}
+                onCommit={onTriggerLevelChange}
+              />
+            ) : (
+              <span className="tabular-nums text-xs text-zinc-500">
+                {row.original.stopLoss || "—"}
+              </span>
+            )}
+            {row.original.hasSecondaryLevels && (
+              <span
+                className="text-[10px] leading-tight text-zinc-400"
+                title="Niveaux SL/TP présents sur une jambe secondaire (autre plateforme) — la jambe principale est affichée en priorité"
+              >
+                Niveaux sur jambe secondaire inclus
+              </span>
+            )}
+          </div>
+        ),
       },
       {
         id: "tp1",
