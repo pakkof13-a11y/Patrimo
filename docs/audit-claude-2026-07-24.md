@@ -21,6 +21,8 @@ ce qui **n'a pas** été audité dans cette passe.
 | Accessibilité des modales | Lecture du primitif partagé | ✅ Sain (très bon niveau) |
 | Validation Zod des routes mutantes | Exhaustif | ✅ Sain |
 | Requêtes N+1 | Ciblé par grep | ⚠️ Acceptable (voir §4) |
+| Parsing numérique des imports CSV | Exhaustif sur les 3 chemins de parse | ❌ Corruption 1000× corrigée |
+| Empreinte de dédoublonnage import | Lecture complète | ❌ Fragilité corrigée |
 | **Non audité** | — | Voir §5 |
 
 ---
@@ -99,7 +101,54 @@ en production sans signal.
   reproches tombent, et l'intervalle s'arrête au départ du dernier abonné.
 - `nexo-adapter.ts` — `prefer-const`.
 
-### 2.4 Decimal — accumulation d'intérêts en float
+### 2.4 Import — séparateur décimal déduit par valeur au lieu du fichier
+
+**Sévérité : élevée** (corruption silencieuse des montants importés, facteur 1000).
+
+`parseNumber` traitait toute virgule isolée comme un séparateur décimal :
+
+```
+parseNumber("1,000")  -> 1        (attendu 1000 en locale EN)
+parseNumber("1,500")  -> 1.5      (attendu 1500)
+parseNumber("12,345") -> 12.345   (attendu 12345)
+```
+
+Tout export anglophone employant le séparateur de milliers **sans centimes**
+était donc divisé par 1000 à l'import, sans erreur ni avertissement.
+
+Une valeur isolée est réellement indécidable (`1,234` vaut 1.234 en FR et 1234
+en EN) — mais un fichier est homogène. `inferDecimalSeparator()` balaie une
+colonne entière et tranche sur le signal le plus fort disponible :
+
+1. les deux séparateurs présents (`1,234.56`) → le dernier est le décimal ;
+2. un groupe décimal de taille ≠ 3 (`0,00000502`, `12.5`) → ce séparateur est
+   le décimal (aucun groupe de milliers ne fait 2 ou 8 chiffres) ;
+3. virgules multiples (`1,234,567`) → virgule séparatrice de milliers.
+
+Appliqué aux **trois** chemins de parse : `mapCsvToDrafts` (mapper générique),
+puis `alias-adapter` et `dynamic-adapter` via `inferRowsDecimalSeparator()`.
+Les colonnes numériques sont mises en commun, un CSV n'employant qu'une locale.
+
+Comportement **inchangé** quand le fichier n'offre aucun signal : les quantités
+crypto FR type `0,00000502` sont parsées comme avant.
+
+Tests : `tests/unit/import-decimal-separator.test.ts` (20 cas, dont la preuve
+de bout en bout via `parseCsv` → `mapCsvToDrafts`).
+
+### 2.5 Import — empreinte de dédoublonnage sensible au formatage
+
+`normalizeImportNumber` utilisait un `.replace(",", ".")` **non global** et
+sans gestion des milliers : `"1,234.56"` devenait `"1.234.56"`, échouait à
+`Number()`, et retombait sur la chaîne brute. Elle ne correspondait donc plus à
+la valeur canonique `"1234.56"` stockée en base — un même montant écrit de deux
+façons produisait deux empreintes, et le doublon passait au travers.
+
+Latent et non actif dans le flux principal (les drafts portent des valeurs
+canoniques), mais atteignable dès qu'une valeur est saisie à la main dans
+l'aperçu d'import. Le passage par `parseNumber` rend l'empreinte indépendante
+du formatage.
+
+### 2.6 Decimal — accumulation d'intérêts en float
 
 `applyDueInterestForUser` sommait les intérêts crédités en `number`
 (`totalInterest += Number(...)`), en contradiction avec la règle Decimal.js du
@@ -152,8 +201,11 @@ savoir pour ne pas les ré-auditer :
 
 À ne pas considérer comme validé :
 
-- Adaptateurs d'import CSV (IBKR, Nexo, Hyperliquid, Paradex) — logique de
-  parsing et de dédoublonnage non relue ligne à ligne.
+- Adaptateurs d'import **dédiés** (IBKR, Nexo, Hyperliquid, Paradex) — leur
+  logique métier propre (mapping des types, conventions de signe, sens des
+  opérations) n'a pas été relue ligne à ligne. Seul le parsing numérique
+  partagé a été audité et corrigé (§2.4). Ces exports étant au format US, le
+  bug du séparateur ne les touchait pas en pratique.
 - Sync wallets (Solana RPC, Zerion, Monero) — au-delà du scoping tenant.
 - Amortissement des passifs et avenants.
 - Épargne salariale, assurance-vie, private equity, crowdlending, métaux,
@@ -175,7 +227,9 @@ Par valeur décroissante :
 2. **Étendre le contrôle « prix de revient inconnu » au-delà du fiscal.** La
    même absence de lot affecte le P&L réalisé affiché ailleurs dans l'app ; le
    signalement mis en place ne couvre que l'onglet Fiscalité.
-3. **Tester les adaptateurs d'import sur fichiers réels.** C'est la principale
-   porte d'entrée de données fausses, et la zone non auditée la plus à risque.
+3. **Relire les conventions métier des adaptateurs dédiés** (sens des
+   opérations, mapping des types, signes) sur des fichiers réels. Le parsing
+   numérique est désormais couvert, mais la sémantique de chaque courtier ne
+   l'est pas.
 4. **Découper les 4 fichiers monolithiques**, en commençant par
    `import-csv-modal.tsx`, après avoir figé le comportement par des tests.
