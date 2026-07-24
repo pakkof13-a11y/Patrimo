@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Info, Shield } from "lucide-react";
+import { AlertTriangle, Info, Shield } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import type {
   FiscalEnvelopeBucket,
@@ -10,7 +10,7 @@ import type {
 } from "@/app/lib/tax/fiscal-year";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FinanceTip } from "@/components/ui/finance-tooltip";
+import { EstimatedBadge, FinanceTip } from "@/components/ui/finance-tooltip";
 import {
   ModuleCallout,
   ModuleCard,
@@ -232,6 +232,32 @@ export function FiscalYearTab({
               />
             </div>
           </div>
+
+          {report.totals.unresolvedSellCount > 0 && (
+            <ModuleCallout tone="warn" testId="fiscal-unresolved-cost-basis">
+              <div className="flex gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />
+                <div className="min-w-0 space-y-1.5">
+                  <p>
+                    <strong>
+                      {report.totals.unresolvedSellCount} vente
+                      {report.totals.unresolvedSellCount > 1 ? "s" : ""} sans
+                      prix de revient connu
+                    </strong>{" "}
+                    — aucun achat n’est enregistré pour le lot (actif ×
+                    plateforme) correspondant.
+                  </p>
+                  <p>
+                    Ces ventes comptent pour <strong>0 €</strong> de plus-value :
+                    le réalisé et le PFU estimé ci-dessus sont donc{" "}
+                    <strong>sous-évalués</strong>. Ajoutez les transactions
+                    d’achat manquantes (ou importez l’historique du courtier)
+                    pour obtenir une estimation complète.
+                  </p>
+                </div>
+              </div>
+            </ModuleCallout>
+          )}
 
           <ModuleCallout tone="info" testId="fiscal-pfu-scope">
             <div className="flex gap-2">
@@ -455,7 +481,20 @@ function EnvelopeRow({
           moneyClass(b.realizedPnlEur)
         )}
       >
-        {formatCurrency(b.realizedPnlEur, currency)}
+        <span className="inline-flex items-center justify-end gap-1">
+          {formatCurrency(b.realizedPnlEur, currency)}
+          {b.unresolvedSellCount > 0 && (
+            <EstimatedBadge
+              label="Partiel"
+              message={`${b.unresolvedSellCount} vente${
+                b.unresolvedSellCount > 1 ? "s" : ""
+              } sans prix de revient connu — comptée${
+                b.unresolvedSellCount > 1 ? "s" : ""
+              } pour 0 €. Le réalisé de cette enveloppe est sous-évalué.`}
+              testId="envelope-unresolved-badge"
+            />
+          )}
+        </span>
       </td>
       <td className="px-3 py-2.5 text-right tabular-nums text-[var(--foreground)]">
         {formatCurrency(b.dividendsNetEur, currency)}

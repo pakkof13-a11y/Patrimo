@@ -21,6 +21,12 @@ export type FiscalEnvelopeBucket = {
   withholdingTaxEur: number;
   sellCount: number;
   incomeCount: number;
+  /**
+   * Ventes de l'enveloppe dont le prix de revient est introuvable (aucun achat
+   * tracé sur le lot actif × plateforme). Elles comptent pour 0 € de réalisé :
+   * le total est donc **sous-estimé** tant que ces achats ne sont pas saisis.
+   */
+  unresolvedSellCount: number;
 };
 
 export type FiscalYearReport = {
@@ -35,6 +41,12 @@ export type FiscalYearReport = {
     withholdingTaxEur: number;
     /** Estimation PFU 30 % sur (réalisé CTO + div nets hors PEA/AV) — indicative */
     estimatedPfuEur: number;
+    /**
+     * Total des ventes sans prix de revient connu, toutes enveloppes.
+     * > 0 ⇒ le réalisé (et donc le PFU estimé) est sous-évalué : l'UI doit le
+     * signaler explicitement plutôt que d'afficher un chiffre faussement net.
+     */
+    unresolvedSellCount: number;
   };
 };
 
@@ -97,6 +109,7 @@ function emptyBucket(accountType: string): FiscalEnvelopeBucket {
     withholdingTaxEur: 0,
     sellCount: 0,
     incomeCount: 0,
+    unresolvedSellCount: 0,
   };
 }
 
@@ -145,8 +158,10 @@ export function buildFiscalYearReport(
         // Aligné ledger : (qty × px − fees) − qty × CUMP
         realized = qty * sellPxEur - fees - qty * cumpFn;
       } else {
-        // Fallback : pas de coût → 0 (évite faux positif)
+        // Prix de revient introuvable : compter 0 plutôt qu'un gain fictif,
+        // et tracer la vente pour que l'UI signale la sous-estimation.
         realized = 0;
+        b.unresolvedSellCount += 1;
       }
       b.realizedPnlEur += realized;
       b.sellCount += 1;
@@ -181,12 +196,14 @@ export function buildFiscalYearReport(
   let dividendsGrossEur = 0;
   let withholdingTaxEur = 0;
   let pfuBase = 0;
+  let unresolvedSellCount = 0;
 
   for (const b of byEnvelope) {
     realizedPnlEur += b.realizedPnlEur;
     dividendsNetEur += b.dividendsNetEur;
     dividendsGrossEur += b.dividendsGrossEur;
     withholdingTaxEur += b.withholdingTaxEur;
+    unresolvedSellCount += b.unresolvedSellCount;
     // PFU indicatif : CTO / CRYPTO / CFD uniquement (pas PEA/AV)
     if (b.accountType === "CTO" || b.accountType === "CRYPTO" || b.accountType === "CFD") {
       pfuBase += Math.max(0, b.realizedPnlEur) + Math.max(0, b.dividendsNetEur);
@@ -207,6 +224,7 @@ export function buildFiscalYearReport(
       dividendsGrossEur,
       withholdingTaxEur,
       estimatedPfuEur: pfuBase * 0.3,
+      unresolvedSellCount,
     },
   };
 }
@@ -279,7 +297,13 @@ export function buildCumpAtSellLookup(
       const q0 = qty.get(key) ?? 0;
       const c0 = cost.get(key) ?? 0;
       const cump = q0 > 1e-12 ? c0 / q0 : 0;
-      if (tx.id) realizedCump.set(tx.id, cump);
+      // Prix de revient connu uniquement si une quantité est tracée sur ce lot.
+      // Sinon (historique d'achat antérieur à l'import), ne rien enregistrer :
+      // retomber sur un CUMP de 0 ferait passer la vente pour 100 % de
+      // plus-value et gonflerait l'estimation fiscale.
+      // NB : q0 > 0 avec c0 = 0 reste légitime (REWARD / AIRDROP reçus
+      // gratuitement) — dans ce cas le CUMP nul est bien la bonne valeur.
+      if (tx.id && q0 > 1e-12) realizedCump.set(tx.id, cump);
       const sold = Math.min(q, q0);
       qty.set(key, Math.max(0, q0 - sold));
       cost.set(key, Math.max(0, c0 - cump * sold));

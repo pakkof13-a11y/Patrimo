@@ -1,6 +1,7 @@
 import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "../prisma";
 import { owned } from "../db/tenant-scope";
+import { d } from "./decimal";
 import {
   creditDueInterest,
   type PayoutFrequency,
@@ -82,15 +83,21 @@ export async function applyDueInterestForSavings(
 export async function applyDueInterestForUser(userId: string, now: Date = new Date()) {
   const rows = await prisma.savingsAccount.findMany({ where: { userId } });
   let periods = 0;
-  let totalInterest = 0;
+  // Cumul en Decimal : sommer des intérêts en float dérive dès quelques
+  // livrets (0.1 + 0.2 ≠ 0.3) sur un montant restitué tel quel par l'API.
+  let totalInterest = d(0);
   for (const r of rows) {
     const res = await applyDueInterestForSavings(userId, r.id, now);
     if (res) {
       periods += res.periodsCredited;
-      totalInterest += Number(res.totalInterest || 0);
+      totalInterest = totalInterest.plus(d(res.totalInterest || 0));
     }
   }
-  return { accounts: rows.length, periodsCredited: periods, totalInterest };
+  return {
+    accounts: rows.length,
+    periodsCredited: periods,
+    totalInterest: totalInterest.toString(),
+  };
 }
 
 export function mapSavingsRowForApi(
