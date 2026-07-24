@@ -4,6 +4,7 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { safeParseBody } from "@/app/lib/api/validation";
 import { consumeRateLimit } from "@/app/lib/api/simple-rate-limit";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 import {
   isSolanaAddress,
   SolanaRpcError,
@@ -215,7 +216,7 @@ export async function POST(req: Request) {
         { status }
       );
     }
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = clientErrorMessage(e);
     console.error("[solana-sync]", msg);
     const isTimeout = /timeout|TIMEOUT|aborted| supprimé| supprim/i.test(msg);
     return NextResponse.json(

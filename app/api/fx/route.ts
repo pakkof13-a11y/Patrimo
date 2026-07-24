@@ -6,6 +6,7 @@ import {
   fxRateToEur,
 } from "@/app/lib/market/fx";
 import { requireUserId } from "@/app/lib/auth-helpers";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 export async function GET(req: Request) {
   const userId = await requireUserId();
@@ -55,7 +56,7 @@ export async function GET(req: Request) {
   } catch (e) {
     console.error("GET /api/fx", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erreur de conversion FX" },
+      { error: clientErrorMessage(e, "Erreur de conversion FX") },
       { status: 500 }
     );
   }

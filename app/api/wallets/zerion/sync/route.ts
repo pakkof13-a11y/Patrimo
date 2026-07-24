@@ -4,6 +4,7 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { safeParseBody } from "@/app/lib/api/validation";
 import { consumeRateLimit } from "@/app/lib/api/simple-rate-limit";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 import {
   fetchZerionPortfolio,
   getZerionChain,
@@ -196,7 +197,7 @@ export async function POST(req: Request) {
         });
       } catch (e) {
         ledgerError =
-          e instanceof Error ? e.message : "Échec écriture ledger";
+          clientErrorMessage(e, "Échec écriture ledger");
         console.error("[zerion-sync ledger]", ledgerError);
       }
     }
@@ -270,7 +271,7 @@ export async function POST(req: Request) {
         { status }
       );
     }
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = clientErrorMessage(e);
     console.error("[zerion-sync]", msg);
     const isTimeout = /timeout|TIMEOUT|aborted/i.test(msg);
     return NextResponse.json(

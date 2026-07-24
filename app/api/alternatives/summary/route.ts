@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { getAlternativesDashboardBundle } from "@/app/lib/alternatives/portfolio";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 /**
  * GET /api/alternatives/summary
@@ -33,7 +34,7 @@ export async function GET(req: Request) {
   } catch (e) {
     console.error("[alternatives/summary]", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erreur" },
+      { error: clientErrorMessage(e, "Erreur") },
       { status: 500 }
     );
   }

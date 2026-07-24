@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { getPortfolioBundle } from "@/app/lib/portfolio/service";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 /**
  * Single bundle endpoint — avoids triple ledger/FX loads that froze the UI on refresh.
@@ -26,7 +27,7 @@ export async function GET(req: Request) {
     });
   } catch (e) {
     console.error("GET /api/holdings", e);
-    const msg = e instanceof Error ? e.message : "Erreur chargement portefeuille";
+    const msg = clientErrorMessage(e, "Erreur chargement portefeuille");
     const prismaStale =
       /Cannot read propert(y|ies) of undefined/i.test(msg) ||
       /findMany/i.test(msg) ||

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
+import { serverErrorDetail } from "@/app/lib/api/error-response";
 import {
   getDeployBlockingConfigIssues,
   getDeployConfigWarnings,
@@ -20,7 +21,8 @@ export async function GET() {
     db = "error";
     // Détail uniquement en développement local (évite fuite infra en test/prod)
     if (process.env.NODE_ENV === "development" && !process.env.VERCEL) {
-      dbError = e instanceof Error ? e.message : "db error";
+      // Déjà borné au dev local : on veut ici le détail brut de l'erreur DB.
+      dbError = serverErrorDetail(e);
     }
   }
 

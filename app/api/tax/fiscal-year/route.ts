@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { getFiscalYearReport } from "@/app/lib/tax/fiscal-year-service";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 export async function GET(req: Request) {
   const userId = await requireUserId();
@@ -22,7 +23,7 @@ export async function GET(req: Request) {
   } catch (e) {
     console.error("[fiscal-year]", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erreur fiscale" },
+      { error: clientErrorMessage(e, "Erreur fiscale") },
       { status: 500 }
     );
   }

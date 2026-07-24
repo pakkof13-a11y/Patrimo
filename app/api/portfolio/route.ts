@@ -8,6 +8,7 @@ import {
 import { prisma } from "@/app/lib/prisma";
 import { portfolioBaseCurrencySchema } from "@/app/lib/schemas";
 import { validationErrorResponse } from "@/app/lib/api/validation";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 export async function GET(req: Request) {
   try {
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
   } catch (e) {
     console.error("GET /api/portfolio", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erreur portfolio" },
+      { error: clientErrorMessage(e, "Erreur portfolio") },
       { status: 500 }
     );
   }

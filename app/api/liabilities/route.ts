@@ -3,6 +3,7 @@ import { Prisma } from "@/app/lib/prisma-client/client";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { liabilitySchema, liabilityUpdateSchema } from "@/app/lib/schemas";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 import {
   presentFields,
   requireBodyId,
@@ -23,7 +24,7 @@ export async function GET() {
     const data = await listLiabilities(userId);
     return NextResponse.json(data);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Erreur passifs";
+    const msg = clientErrorMessage(e, "Erreur passifs");
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
@@ -48,7 +49,7 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ liability });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Erreur";
+      const msg = clientErrorMessage(e, "Erreur");
       return NextResponse.json({ error: msg }, { status: 400 });
     }
   }
@@ -64,7 +65,7 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ liability });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Erreur";
+      const msg = clientErrorMessage(e, "Erreur");
       return NextResponse.json({ error: msg }, { status: 400 });
     }
   }
@@ -80,7 +81,7 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ liability });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Erreur";
+      const msg = clientErrorMessage(e, "Erreur");
       return NextResponse.json({ error: msg }, { status: 400 });
     }
   }

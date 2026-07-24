@@ -11,6 +11,7 @@ import {
 import { getPlatformCashBalances } from "@/app/lib/portfolio/service";
 import { PLATFORM_PRESETS } from "@/app/lib/platforms/presets";
 import { findOrCreatePlatform } from "@/app/lib/platforms/upsert";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 export async function GET() {
   const userId = await requireUserId();
@@ -108,7 +109,7 @@ export async function POST(req: Request) {
         { status: 409 }
       );
     }
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = clientErrorMessage(e);
     console.error("[platforms POST]", msg);
     // Message client non verbeux mais actionnable (pas de stack / SQL)
     const schemaLag = /walletApiKey|column .* does not exist|Unknown arg/i.test(
@@ -293,7 +294,7 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ ok: true, force: false });
   } catch (e) {
     console.error("[platforms DELETE]", e);
-    const msg = e instanceof Error ? e.message : "Erreur serveur";
+    const msg = clientErrorMessage(e, "Erreur serveur");
     // Prisma FK / timeout : message utile côté UI
     const friendly =
       /Foreign key|Restrict|P2003/i.test(msg)
