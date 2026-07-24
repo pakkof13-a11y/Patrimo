@@ -9,6 +9,7 @@ import {
   inferRowsDecimalSeparator,
   rowToTransactionImport,
 } from "@/app/lib/import/adapters/row-utils";
+import { normalizeImportNumber } from "@/app/lib/import/dedupe";
 
 /**
  * Régression : `parseNumber("1,000")` renvoyait 1 et `"1,500"` renvoyait 1.5.
@@ -193,5 +194,38 @@ describe("adaptateur générique — même déduction sur le fichier", () => {
     const { tx } = rowToTransactionImport(rows[0]!, columnMap, 2, sep);
     expect(tx?.quantity).toBeCloseTo(0.00000502, 12);
     expect(tx?.price).toBeCloseTo(69635.02, 2);
+  });
+});
+
+describe("empreinte de dédoublonnage — écritures équivalentes", () => {
+  it("normalise deux écritures d'un même montant vers la même clé", () => {
+    // « 1234.56 » côté base vs « 1,234.56 » saisi dans l'aperçu d'import :
+    // sans normalisation robuste, deux empreintes → doublon non détecté.
+    expect(normalizeImportNumber("1,234.56")).toBe(
+      normalizeImportNumber("1234.56")
+    );
+    expect(normalizeImportNumber("1.234,56")).toBe(
+      normalizeImportNumber("1234.56")
+    );
+    expect(normalizeImportNumber("1 234,56")).toBe(
+      normalizeImportNumber("1234.56")
+    );
+    expect(normalizeImportNumber("1,234,567")).toBe(
+      normalizeImportNumber("1234567")
+    );
+  });
+
+  it("garde des clés distinctes pour des montants réellement différents", () => {
+    expect(normalizeImportNumber("1234.56")).not.toBe(
+      normalizeImportNumber("1234.57")
+    );
+    expect(normalizeImportNumber("0.00000502")).not.toBe(
+      normalizeImportNumber("0.00000503")
+    );
+  });
+
+  it("conserve -0 → 0 et la troncature à 8 décimales", () => {
+    expect(normalizeImportNumber("-0")).toBe("0");
+    expect(normalizeImportNumber("0.00000502")).toBe("0.00000502");
   });
 });
