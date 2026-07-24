@@ -2,9 +2,11 @@ import type { ParsedCsv } from "./csv-parse";
 import { normalizeHeader } from "./csv-parse";
 import {
   extractCurrencyHint,
+  inferDecimalSeparator,
   parseDate,
   parseNumber,
   toIsoLocal,
+  type DecimalSeparator,
 } from "./normalize";
 import {
   getFormat,
@@ -78,14 +80,20 @@ const FIAT = new Set([
   "ZAR",
 ]);
 
-function parseQtyField(qtyRaw: string): number | null {
-  let qty = parseNumber(qtyRaw);
+function parseQtyField(
+  qtyRaw: string,
+  decimalSeparator?: DecimalSeparator
+): number | null {
+  let qty = parseNumber(qtyRaw, decimalSeparator);
   if (qty == null && qtyRaw) {
     const m = qtyRaw.replace(/\s/g, "").match(/^([\d.,]+)([A-Za-z]+)?$/);
-    if (m) qty = parseNumber(m[1]);
+    if (m) qty = parseNumber(m[1], decimalSeparator);
   }
   return qty;
 }
+
+/** Colonnes numériques dont on déduit le séparateur décimal du fichier. */
+const NUMERIC_ROLES = ["quantity", "unitPrice", "fees", "cashAmount"] as const;
 
 export function mapCsvToDrafts(
   csv: ParsedCsv,
@@ -99,6 +107,16 @@ export function mapCsvToDrafts(
   ) as Record<string, string>;
   const formatLabel = getFormat(formatId as ImportFormatId).label;
   const rows: ImportDraftRow[] = [];
+
+  // Séparateur décimal déduit une fois pour tout le fichier : `1,000` seul est
+  // indécidable (1 en FR, 1000 en EN) et était systématiquement lu en décimal
+  // FR — un export EN sans centimes se retrouvait divisé par 1000. Les colonnes
+  // numériques sont mises en commun car un même CSV n'emploie qu'une locale.
+  const decimalSeparator = inferDecimalSeparator(
+    NUMERIC_ROLES.flatMap((role) =>
+      csv.rows.map((raw) => getByRole(raw, columnMap, role))
+    )
+  );
 
   csv.rows.forEach((raw, idx) => {
     const line = idx + 2; // header is line 1
@@ -159,7 +177,7 @@ export function mapCsvToDrafts(
       }
       // Card / transfer cash flows
       if (/^transfer$/i.test(typeRaw) && !sideRaw) {
-        const amt = parseNumber(cashRaw);
+        const amt = parseNumber(cashRaw, decimalSeparator);
         if (amt != null && amt > 0) typeRaw = "deposit";
         if (amt != null && amt < 0) typeRaw = "withdraw";
       }
@@ -400,17 +418,17 @@ export function mapCsvToDrafts(
       forcedClass = "ACTIONS";
     }
 
-    let qty = parseQtyField(qtyField || qtyRaw);
+    let qty = parseQtyField(qtyField || qtyRaw, decimalSeparator);
     // Crypto.com / Nexo : quantités signées
     if (qty != null && qty < 0) qty = Math.abs(qty);
-    let unitPrice = parseNumber(priceRaw);
-    let fees = parseNumber(feesRaw) ?? 0;
+    let unitPrice = parseNumber(priceRaw, decimalSeparator);
+    let fees = parseNumber(feesRaw, decimalSeparator) ?? 0;
     if (feesRaw && fees === 0) {
       const fm = feesRaw.replace(/\s/g, "").match(/^([\d.,]+)/);
-      if (fm) fees = parseNumber(fm[1]) ?? 0;
+      if (fm) fees = parseNumber(fm[1], decimalSeparator) ?? 0;
     }
 
-    let cashAmount = parseNumber(cashRaw);
+    let cashAmount = parseNumber(cashRaw, decimalSeparator);
     // Revolut Amount is often signed
     if (cashAmount != null && cashAmount < 0) {
       if (type === "RETRAIT" || type === "FRAIS" || type === "VENTE") {
