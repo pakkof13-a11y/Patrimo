@@ -19,6 +19,9 @@ export async function POST(req: Request) {
     const formatId = String(body?.formatId || "auto");
     const delimiter = body?.delimiter as string | undefined;
     const columnMap = (body?.columnMap || null) as ColumnMapping | null;
+    const ibkrAccountIds = Array.isArray(body?.ibkrAccountIds)
+      ? (body.ibkrAccountIds as unknown[]).map(String)
+      : undefined;
 
     if (!csvText.trim()) {
       return NextResponse.json({ error: "Fichier CSV vide" }, { status: 400 });
@@ -45,6 +48,7 @@ export async function POST(req: Request) {
       formatId: formatId as "auto",
       delimiter,
       columnMap: columnMap || undefined,
+      ibkrAccountIds,
     });
 
     const rows = result.drafts;
@@ -72,6 +76,7 @@ export async function POST(req: Request) {
         fees: t.fees ?? null,
       })),
       adapterRanking: result.adapterRanking.slice(0, 8),
+      ibkrAccounts: result.ibkrAccounts || [],
       warnings: result.warnings.slice(0, 50),
       rows: rows.slice(0, IMPORT_PREVIEW_MAX_ROWS),
       truncated: rows.length > IMPORT_PREVIEW_MAX_ROWS,

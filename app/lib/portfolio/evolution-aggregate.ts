@@ -549,22 +549,60 @@ export function isEvolutionRangeEnabled(
   }
 }
 
-export type EvolutionBenchmarkMode = "none" | "cash" | "inflation" | "index";
+export type EvolutionBenchmarkMode = "none" | "inflation" | "index";
+
+/** Clôture d'indice brute (rebasée ensuite sur le premier total du portefeuille). */
+export type IndexClosePoint = { date: string; close: number };
+
+/**
+ * Inflation France — glissement annuel de l'IPC (indice des prix à la
+ * consommation, INSEE). Constante documentée : moyenne annuelle 2024 ≈ 2,0 %.
+ * À rafraîchir quand l'INSEE publie une nouvelle référence annuelle.
+ * Utilisée comme taux annualisé et appliquée au prorata du temps écoulé, donc
+ * automatiquement adaptée à la périodicité affichée (jour / semaine / mois…).
+ */
+export const FRENCH_ANNUAL_CPI_RATE = 0.02;
+
+export type BenchmarkOptions = {
+  /** Clôtures d'indice (mode "index"), brutes — rebasées sur baseTotal. */
+  indexCloses?: IndexClosePoint[];
+  /** Taux d'inflation annuel (défaut : IPC France). */
+  annualInflationRate?: number;
+};
+
+/** Sélectionne la dernière clôture d'indice ≤ date de barre (tolérance 36 h). */
+function makeIndexPicker(indexCloses: IndexClosePoint[]) {
+  const sorted = [...indexCloses]
+    .filter((c) => Number.isFinite(Date.parse(c.date)) && c.close > 0)
+    .sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+  return (barDate: string): number | null => {
+    const t = Date.parse(barDate);
+    if (!Number.isFinite(t)) return null;
+    let best: number | null = null;
+    for (const c of sorted) {
+      if (Date.parse(c.date) <= t + 36e5) best = c.close;
+      else break;
+    }
+    return best;
+  };
+}
 
 /**
  * Attache une série comparative **rebasée** sur le premier total du portefeuille.
  * Alignement temporel : même dates que la série principale.
  *
- * - cash : capital constant = premier total (alternative liquidités sans performance)
- * - inflation : 2 % annualisés (indicatif)
- * - index : proxy actions ~7 % annualisés (indicatif)
+ * - inflation : capital initial revalorisé au taux IPC France (pouvoir d'achat),
+ *   appliqué au prorata du temps → s'adapte à la périodicité choisie.
+ * - index : performance réelle de l'indice choisi (clôtures Yahoo), rebasée sur
+ *   le premier total → directement comparable au portefeuille en €.
  *
- * En mode périodique, `benchmark` reste le stock rebasé ; le graphe peut dériver
- * le Δ via le point précédent.
+ * En mode périodique, `benchmark` reste le stock rebasé ; le graphe dérive le Δ
+ * via le point précédent.
  */
 export function withBenchmarkSeries(
   points: EvolutionSeriesPoint[],
-  mode: EvolutionBenchmarkMode
+  mode: EvolutionBenchmarkMode,
+  opts: BenchmarkOptions = {}
 ): EvolutionSeriesPoint[] {
   if (mode === "none" || points.length === 0) {
     return points.map((p) => ({ ...p, benchmark: undefined }));
@@ -572,14 +610,8 @@ export function withBenchmarkSeries(
 
   const t0 = Date.parse(points[0]!.date);
   const baseTotal = points[0]!.total;
-  if (!Number.isFinite(baseTotal)) {
+  if (!Number.isFinite(baseTotal) || baseTotal <= 0) {
     return points.map((p) => ({ ...p, benchmark: undefined }));
-  }
-
-  function levelAt(years: number): number {
-    if (mode === "cash") return baseTotal;
-    if (mode === "inflation") return baseTotal * Math.pow(1.02, years);
-    return baseTotal * Math.pow(1.07, years);
   }
 
   function yearsSince(iso: string): number {
@@ -588,10 +620,29 @@ export function withBenchmarkSeries(
     return Math.max(0, (t - t0) / (365.25 * 24 * 60 * 60 * 1000));
   }
 
+  let levelAt: (iso: string) => number;
+
+  if (mode === "inflation") {
+    const rate = opts.annualInflationRate ?? FRENCH_ANNUAL_CPI_RATE;
+    levelAt = (iso) => baseTotal * Math.pow(1 + rate, yearsSince(iso));
+  } else {
+    // index : rebasage des clôtures réelles sur baseTotal
+    const closes = opts.indexCloses ?? [];
+    const pick = makeIndexPicker(closes);
+    const baseClose = pick(points[0]!.date);
+    if (baseClose == null || baseClose <= 0) {
+      // Pas de données indice → pas de courbe (évite une ligne plate trompeuse)
+      return points.map((p) => ({ ...p, benchmark: undefined }));
+    }
+    levelAt = (iso) => {
+      const c = pick(iso) ?? baseClose;
+      return baseTotal * (c / baseClose);
+    };
+  }
+
   return points.map((p, i) => {
-    const benchmark = levelAt(yearsSince(p.date));
-    const prevBm =
-      i > 0 ? levelAt(yearsSince(points[i - 1]!.date)) : benchmark;
+    const benchmark = levelAt(p.date);
+    const prevBm = i > 0 ? levelAt(points[i - 1]!.date) : benchmark;
     return {
       ...p,
       benchmark,
@@ -604,11 +655,33 @@ export function benchmarkLabel(mode: EvolutionBenchmarkMode): string {
   switch (mode) {
     case "none":
       return "Aucun";
-    case "cash":
-      return "Cash";
     case "inflation":
-      return "Inflation ~2 %";
+      return "Inflation (IPC France)";
     case "index":
-      return "Indice ~7 %";
+      return "Indice";
   }
+}
+
+/**
+ * Écart de performance (points de %) entre le portefeuille et le benchmark sur
+ * la période affichée : perf portefeuille − perf benchmark.
+ * `null` si non calculable (pas de benchmark ou base nulle).
+ */
+export function benchmarkGapPct(
+  points: EvolutionSeriesPoint[]
+): { portfolioPct: number; benchmarkPct: number; gapPct: number } | null {
+  if (points.length < 2) return null;
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
+  if (!(first.total > 0)) return null;
+  const portfolioPct = ((last.total - first.total) / first.total) * 100;
+  const b0 = first.benchmark;
+  const b1 = last.benchmark;
+  if (b0 == null || b1 == null || !(b0 > 0)) return null;
+  const benchmarkPct = ((b1 - b0) / b0) * 100;
+  return {
+    portfolioPct,
+    benchmarkPct,
+    gapPct: portfolioPct - benchmarkPct,
+  };
 }

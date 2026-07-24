@@ -1,9 +1,9 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import { createTransaction } from "../app/lib/transactions/service";
 import { loadLedgerForUser } from "../app/lib/portfolio/service";
 import { positionKey } from "../app/lib/accounting/types";
 
-const p = new PrismaClient();
+const p = createPrismaClient();
 const platformId = "cmrtc459h00mrudt5ddclwciz";
 const userId = "cmrnf4d2k0000v1bhjgdkw6gq";
 const assetId = "cmrtc46fd00mtudt5cevx2rqd";

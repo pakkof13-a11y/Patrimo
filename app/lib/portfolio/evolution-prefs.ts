@@ -11,11 +11,16 @@ import {
   type EvolutionRange,
   type EvolutionViewMode,
 } from "@/app/lib/portfolio/evolution-aggregate";
+import {
+  isMarketIndexKey,
+  type MarketIndexKey,
+} from "@/app/lib/portfolio/market-indices";
 
 /** Clé versionnée — incrémenter si le schéma change de façon incompatible. */
 export const EVOLUTION_PREFS_KEY = "evolutionPrefs.v4";
 
-export type EvolutionBenchmark = "none" | "cash" | "inflation" | "index";
+/** "cash" retiré (jugé inutile) — migré silencieusement vers "none". */
+export type EvolutionBenchmark = "none" | "inflation" | "index";
 
 /**
  * `default` = hériter du benchmark préférences utilisateur.
@@ -31,6 +36,8 @@ export type EvolutionPrefsV4 = {
   view: EvolutionViewMode;
   /** Override dashboard ou "default" → préférences utilisateur */
   benchmark: EvolutionBenchmarkChoice;
+  /** Indice choisi pour le mode "index" */
+  indexKey: MarketIndexKey;
   /** Zone Style / Vue / Vs dépliée */
   advancedOpen: boolean;
 };
@@ -45,6 +52,7 @@ export const DEFAULT_EVOLUTION_PREFS: EvolutionPrefsV4 = {
   style: "line",
   view: "global",
   benchmark: "default",
+  indexKey: "cac40",
   advancedOpen: false,
 };
 
@@ -52,13 +60,15 @@ const RANGES = new Set<string>(EVOLUTION_RANGES);
 const METRICS = new Set(["period", "cumul"]);
 const STYLES = new Set(["line", "columns"]);
 const VIEWS = new Set(["global", "decomposed"]);
-const BENCHMARKS = new Set([
-  "none",
-  "cash",
-  "inflation",
-  "index",
-  "default",
-]);
+const BENCHMARKS = new Set(["none", "inflation", "index", "default"]);
+
+/** Normalise un benchmark stocké (migre l'ancien "cash" → "none"). */
+function coerceBenchmark(v: unknown): EvolutionBenchmarkChoice {
+  if (v === "cash") return "none";
+  return typeof v === "string" && BENCHMARKS.has(v)
+    ? (v as EvolutionBenchmarkChoice)
+    : "default";
+}
 
 function isEvolutionPrefsV4(raw: unknown): raw is EvolutionPrefsV4 {
   if (!raw || typeof raw !== "object") return false;
@@ -79,21 +89,20 @@ export function loadEvolutionPrefs(): EvolutionPrefsV4 {
   const raw = loadUiPref<unknown>(EVOLUTION_PREFS_KEY, null);
   // Migration v3 → v4 (même clé legacy)
   const legacy = loadUiPref<unknown>("evolutionPrefs.v3", null);
-  const candidate = raw ?? legacy;
-  if (candidate == null) return { ...DEFAULT_EVOLUTION_PREFS };
+  const source = raw ?? legacy;
+  if (source == null || typeof source !== "object") {
+    return { ...DEFAULT_EVOLUTION_PREFS };
+  }
+  const o = source as Record<string, unknown>;
+  // Normalise avant validation (migre "cash", complète indexKey)
+  const candidate = {
+    ...o,
+    v: 4,
+    benchmark: coerceBenchmark(o.benchmark),
+    indexKey: isMarketIndexKey(o.indexKey) ? o.indexKey : "cac40",
+  };
   if (isEvolutionPrefsV4(candidate)) {
-    return {
-      ...candidate,
-      v: 4,
-      benchmark:
-        candidate.benchmark === "default" ||
-        candidate.benchmark === "none" ||
-        candidate.benchmark === "cash" ||
-        candidate.benchmark === "inflation" ||
-        candidate.benchmark === "index"
-          ? candidate.benchmark
-          : "default",
-    };
+    return candidate as EvolutionPrefsV4;
   }
   saveUiPref(EVOLUTION_PREFS_KEY, DEFAULT_EVOLUTION_PREFS);
   return { ...DEFAULT_EVOLUTION_PREFS };
@@ -106,7 +115,8 @@ export function saveEvolutionPrefs(prefs: EvolutionPrefsV4): void {
     metric: prefs.metric,
     style: prefs.style,
     view: prefs.view,
-    benchmark: prefs.benchmark,
+    benchmark: coerceBenchmark(prefs.benchmark),
+    indexKey: isMarketIndexKey(prefs.indexKey) ? prefs.indexKey : "cac40",
     advancedOpen: prefs.advancedOpen,
   };
   if (!isEvolutionPrefsV4(payload)) {

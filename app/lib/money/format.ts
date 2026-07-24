@@ -51,16 +51,22 @@ export function formatDateParis(isoOrDate: string | Date): string {
   }).format(date);
 }
 
+/** Format DD/MM/YYYY HH:MM:SS (heure Paris) — dates stockées en UTC en base. */
 export function formatDateTimeParis(isoOrDate: string | Date): string {
   const date = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
-  return new Intl.DateTimeFormat("fr-FR", {
+  const parts = new Intl.DateTimeFormat("fr-FR", {
     timeZone: "Europe/Paris",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(date);
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")}:${get("second")}`;
 }
 
 export function currencyBadge(code: string): string {

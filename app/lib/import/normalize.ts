@@ -235,6 +235,72 @@ export function parseDate(raw: string | undefined | null): Date | null {
   return Number.isNaN(fallback.getTime()) ? null : fallback;
 }
 
+const ET_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+/**
+ * Convertit une date/heure murale US Eastern Time (IBKR "Trade execution
+ * times are displayed in Eastern Time") en instant UTC — DST-aware
+ * (EST -05:00 / EDT -04:00) sans dépendance à une lib de fuseaux.
+ * Stratégie : essayer les deux offsets possibles et garder celui qui,
+ * reformaté en America/New_York, redonne l'heure murale d'origine.
+ */
+export function parseEasternDateTimeToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number
+): Date | null {
+  for (const offsetHours of [4, 5]) {
+    const candidateMs = Date.UTC(year, month - 1, day, hour + offsetHours, minute, second);
+    const parts = ET_FORMATTER.formatToParts(new Date(candidateMs));
+    const get = (t: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find((p) => p.type === t)?.value ?? NaN);
+    if (
+      get("year") === year &&
+      get("month") === month &&
+      get("day") === day &&
+      get("hour") === hour &&
+      get("minute") === minute &&
+      get("second") === second
+    ) {
+      return new Date(candidateMs);
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse "YYYY-MM-DD, HH:MM:SS" (format IBKR Trades Date/Time) comme heure
+ * Eastern Time et renvoie l'instant UTC équivalent (ou null si invalide).
+ */
+export function parseIbkrEasternDateTime(raw: string | undefined | null): Date | null {
+  if (!raw) return null;
+  const m = String(raw)
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2}),?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s] = m;
+  return parseEasternDateTimeToUtc(
+    Number(y),
+    Number(mo),
+    Number(d),
+    Number(h),
+    Number(mi),
+    Number(s ?? "0")
+  );
+}
+
 /** Extrait un code devise depuis un champ Prix/Value Revolut ("1,00 CHF", "0,35€"). */
 export function extractCurrencyHint(
   ...fields: Array<string | undefined | null>

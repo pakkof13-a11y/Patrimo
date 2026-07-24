@@ -113,6 +113,38 @@ describe("IBKR Activity Statement", () => {
     expect(d!.getDate()).toBe(21);
   });
 
+  it("sets OperationType=ACHAT for a BUY trade", () => {
+    const exp = expandIbkrActivityStatement(SAMPLE_EN);
+    const buy = exp.csv.rows.find((r) => r.Symbol === "ADBE");
+    expect(buy?.["Buy/Sell"]).toBe("BUY");
+    expect(buy?.OperationType).toBe("ACHAT");
+  });
+
+  it("sets OperationType=DIVIDENDE for a dividend row", () => {
+    const exp = expandIbkrActivityStatement(SAMPLE_EN);
+    const div = exp.csv.rows.find((r) => r["Buy/Sell"] === "DIVIDEND");
+    expect(div?.OperationType).toBe("DIVIDENDE");
+  });
+
+  it("sets OperationType=APPORT for a deposit row", () => {
+    const exp = expandIbkrActivityStatement(SAMPLE_EN);
+    const deposit = exp.csv.rows.find((r) => r["Buy/Sell"] === "DEPOSIT");
+    expect(deposit?.OperationType).toBe("APPORT");
+  });
+
+  it("resolves the required Type d'opération field end-to-end via importCsv", () => {
+    const r = importCsv(SAMPLE_EN, { formatId: "interactive_brokers" });
+    const errors = r.drafts.filter((d) => d.status === "error");
+    expect(errors.filter((e) => e.errors.some((m) => /type/i.test(m)))).toEqual(
+      []
+    );
+    expect(r.drafts.some((d) => d.type === "ACHAT")).toBe(true);
+    expect(r.drafts.some((d) => d.type === "DIVIDENDE")).toBe(true);
+    expect(r.drafts.some((d) => d.type === "APPORT" || d.type === "RETRAIT")).toBe(
+      true
+    );
+  });
+
   it("imports real download folder CSVs when present", () => {
     const dir = "C:/Users/Pak-M/Downloads/IBKR";
     const files = [

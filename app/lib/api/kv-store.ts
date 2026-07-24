@@ -36,11 +36,16 @@ export function getKvBackend(): KvBackend {
 /**
  * true si on est en multi-instance (Vercel / Lambda) **sans** store partagé.
  * Les appelants doivent alors éviter les caches process-only pour la sécu.
+ *
+ * Couvre aussi VERCEL_ENV=preview : les preview deployments tournent en
+ * lambda au même titre que la prod (un rôle ADMIN révoqué ne doit pas rester
+ * cacheable en process sur une preview, même hors env "production").
  */
 export function isEphemeralProcessStore(): boolean {
   if (getKvBackend() === "upstash") return false;
   return Boolean(
     process.env.VERCEL === "1" ||
+      process.env.VERCEL_ENV === "preview" ||
       process.env.AWS_LAMBDA_FUNCTION_NAME ||
       process.env.PATRIMO_DEPLOYED === "true"
   );
@@ -84,6 +89,35 @@ function memorySet(key: string, value: string, ttlSec?: number): void {
   });
 }
 
+/**
+ * true si l'environnement est multi-instance (Vercel / Lambda), indépendamment
+ * de la config Upstash — utilisé ici pour détecter un fallback dangereux
+ * (Upstash configuré mais en échec RÉSEAU ponctuel, pas juste absent).
+ * `isEphemeralProcessStore()` ne convient pas : elle renvoie déjà `false` dès
+ * qu'Upstash est configuré, même si l'appel en cours vient d'échouer.
+ */
+function isMultiInstanceEnv(): boolean {
+  return Boolean(
+    process.env.VERCEL === "1" ||
+      process.env.AWS_LAMBDA_FUNCTION_NAME ||
+      process.env.PATRIMO_DEPLOYED === "true"
+  );
+}
+
+function warnUpstashUnavailable(op: string, e: unknown): void {
+  console.warn(
+    `[kv-store] Upstash indisponible (${op}) — fallback mémoire`,
+    e instanceof Error ? e.message : e
+  );
+  // Fallback mémoire = non partagé entre lambdas Vercel : le rate-limit
+  // (login, API) devient inopérant multi-instance tant qu'Upstash est down.
+  if (isMultiInstanceEnv()) {
+    console.error(
+      `[security] kv-store fallback mémoire non partagée en environnement multi-lambda (${op})`
+    );
+  }
+}
+
 export async function kvGet(key: string): Promise<string | null> {
   const redis = getRedis();
   if (redis) {
@@ -91,8 +125,8 @@ export async function kvGet(key: string): Promise<string | null> {
       const v = await redis.get<string | number | null>(key);
       if (v == null) return null;
       return typeof v === "string" ? v : String(v);
-    } catch {
-      // Fallback mémoire si Upstash indisponible (ne pas planter l'auth)
+    } catch (e) {
+      warnUpstashUnavailable("get", e);
       return memoryGet(key);
     }
   }
@@ -113,8 +147,8 @@ export async function kvSet(
         await redis.set(key, value);
       }
       return;
-    } catch {
-      // fallback below
+    } catch (e) {
+      warnUpstashUnavailable("set", e);
     }
   }
   memorySet(key, value, ttlSec);
@@ -125,8 +159,8 @@ export async function kvDel(key: string): Promise<void> {
   if (redis) {
     try {
       await redis.del(key);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      warnUpstashUnavailable("del", e);
     }
   }
   memory.delete(key);
@@ -148,8 +182,8 @@ export async function kvIncr(
         await redis.expire(key, ttlSec);
       }
       return n;
-    } catch {
-      // fallback mémoire
+    } catch (e) {
+      warnUpstashUnavailable("incr", e);
     }
   }
 

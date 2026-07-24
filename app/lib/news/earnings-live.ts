@@ -17,6 +17,7 @@ import { getEarningsCalendarMock } from "@/app/lib/news/service";
 import { toYahooSymbol, toFinnhubSymbol } from "@/app/lib/market/symbol";
 import { logoByName, logoByTicker } from "@/app/lib/logos/logodev";
 import { withTimeout } from "@/app/lib/utils/with-timeout";
+import { parisLocalToUtcIso } from "@/app/lib/utils/timezone";
 
 const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey"],
@@ -341,7 +342,7 @@ function finnhubRowToEvent(
 
   const [y, m, d] = row.date.split("-").map(Number);
   if (!y || !m || !d) return null;
-  const time = new Date(Date.UTC(y, m - 1, d, hh - 2, mm, 0)).toISOString();
+  const time = parisLocalToUtcIso(y, m, d, hh, mm);
 
   const base = normalizeKey(symbol);
   const name =

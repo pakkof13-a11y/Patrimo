@@ -1,8 +1,8 @@
 /** Simulate API GET /api/transactions payload shape */
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import { DEMO_EMAIL } from "../app/lib/constants";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 async function main() {
   const user = await prisma.user.findUnique({ where: { email: DEMO_EMAIL } });

@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "@/app/lib/prisma";
 import type { PeType, PrivateEquityDto, PrivateEquitySummary } from "./types";
 import { PE_TYPES } from "./types";

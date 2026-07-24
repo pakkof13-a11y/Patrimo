@@ -12,6 +12,8 @@ import { formatCurrency, cn } from "@/app/lib/utils";
 import type { HistoryPoint } from "@/app/lib/types/ui";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/app/lib/api-client";
 import {
   buildEvolutionSeries,
   evolutionDeltaSummary,
@@ -20,10 +22,12 @@ import {
   isEvolutionRangeEnabled,
   withBenchmarkSeries,
   benchmarkLabel,
+  benchmarkGapPct,
   type EvolutionChartStyle,
   type EvolutionMetric,
   type EvolutionRange,
   type EvolutionViewMode,
+  type IndexClosePoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
 import {
   DEFAULT_EVOLUTION_PREFS,
@@ -34,6 +38,11 @@ import {
   type EvolutionPrefsV4,
 } from "@/app/lib/portfolio/evolution-prefs";
 import { loadDefaultBenchmark } from "@/app/lib/portfolio/benchmark-prefs";
+import {
+  MARKET_INDICES,
+  marketIndexLabel,
+  type MarketIndexKey,
+} from "@/app/lib/portfolio/market-indices";
 
 const emptySubscribe = () => () => undefined;
 
@@ -99,16 +108,15 @@ const BENCHMARK_CHOICES: {
     title: "Benchmark défini dans Préférences",
   },
   { id: "none", label: "Aucun", title: "Pas de comparaison" },
-  { id: "cash", label: "Cash", title: "Capital constant (alternative cash)" },
   {
     id: "inflation",
     label: "Inflation",
-    title: "Référence indicative ~2 % / an",
+    title: "Pouvoir d'achat — indice des prix INSEE (IPC France)",
   },
   {
     id: "index",
     label: "Indice",
-    title: "Proxy actions ~7 % / an (indicatif)",
+    title: "Comparaison à un indice de marché réel (au choix)",
   },
 ];
 
@@ -222,7 +230,8 @@ export function PortfolioEvolutionPanel({
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  const { range, metric, style, view, benchmark, advancedOpen } = prefs;
+  const { range, metric, style, view, benchmark, indexKey, advancedOpen } =
+    prefs;
 
   /** Benchmark effectif (héritage préférences ou override dashboard) */
   const activeBenchmark: EvolutionBenchmark =
@@ -266,13 +275,51 @@ export function PortfolioEvolutionPanel({
     [history, range, metric]
   );
 
+  // Mode "index" : récupère les clôtures réelles de l'indice choisi sur la
+  // fenêtre affichée (marge amont pour disposer d'une clôture de base).
+  const wantIndex = view === "global" && activeBenchmark === "index";
+  const idxFromKey = rawPoints[0]?.date.slice(0, 10) ?? "";
+  const idxToKey = rawPoints[rawPoints.length - 1]?.date.slice(0, 10) ?? "";
+  const indexQ = useQuery({
+    queryKey: ["evolution-index", indexKey, idxFromKey, idxToKey],
+    enabled: wantIndex && rawPoints.length > 1,
+    staleTime: 30 * 60_000,
+    queryFn: () => {
+      const fromMs = Date.parse(rawPoints[0]!.date) - 7 * 24 * 60 * 60 * 1000;
+      const from = new Date(fromMs).toISOString();
+      const to = rawPoints[rawPoints.length - 1]!.date;
+      const params = new URLSearchParams({ symbol: indexKey, from, to });
+      return fetchJson<{ points: IndexClosePoint[] }>(
+        `/api/benchmark?${params.toString()}`
+      );
+    },
+  });
+  const indexData = indexQ.data;
+  const indexCloses = useMemo<IndexClosePoint[]>(
+    () => indexData?.points ?? [],
+    [indexData]
+  );
+
   const points = useMemo(
     () =>
       view === "global" && activeBenchmark !== "none"
-        ? withBenchmarkSeries(rawPoints, activeBenchmark)
+        ? withBenchmarkSeries(rawPoints, activeBenchmark, { indexCloses })
         : withBenchmarkSeries(rawPoints, "none"),
-    [rawPoints, view, activeBenchmark]
+    [rawPoints, view, activeBenchmark, indexCloses]
   );
+
+  const gap = useMemo(
+    () =>
+      view === "global" && activeBenchmark !== "none"
+        ? benchmarkGapPct(points)
+        : null,
+    [points, view, activeBenchmark]
+  );
+
+  const benchmarkDisplayName =
+    activeBenchmark === "index"
+      ? marketIndexLabel(indexKey)
+      : benchmarkLabel(activeBenchmark);
 
   const summary = useMemo(() => evolutionDeltaSummary(points), [points]);
 
@@ -456,6 +503,29 @@ export function PortfolioEvolutionPanel({
                 muted
               />
             </div>
+            {activeBenchmark === "index" && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                  Indice
+                </span>
+                <select
+                  className="input !h-7 !w-auto !min-w-0 !py-0 !pl-2 !pr-6 text-[11px]"
+                  value={indexKey}
+                  onChange={(e) =>
+                    update({ indexKey: e.target.value as MarketIndexKey })
+                  }
+                  data-testid="evolution-index-select"
+                  aria-label="Choix de l'indice de comparaison"
+                  title="Indice de marché comparé au portefeuille"
+                >
+                  {MARKET_INDICES.map((idx) => (
+                    <option key={idx.key} value={idx.key} title={idx.hint}>
+                      {idx.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             {view === "decomposed" && activeBenchmark !== "none" && (
               <p className="text-meta w-full basis-full">
                 Comparaison disponible en vue globale
@@ -518,7 +588,7 @@ export function PortfolioEvolutionPanel({
               data={points}
               baseCurrency={baseCurrency}
               showBenchmark={showBenchmark}
-              benchmarkName={benchmarkLabel(activeBenchmark)}
+              benchmarkName={benchmarkDisplayName}
             />
           ) : (
             <PeriodColumnsChart data={points} baseCurrency={baseCurrency} />
@@ -530,7 +600,7 @@ export function PortfolioEvolutionPanel({
             data={points}
             baseCurrency={baseCurrency}
             showBenchmark={showBenchmark}
-            benchmarkName={benchmarkLabel(activeBenchmark)}
+            benchmarkName={benchmarkDisplayName}
           />
         )}
         </div>
@@ -542,11 +612,33 @@ export function PortfolioEvolutionPanel({
         </p>
       )}
       {showBenchmark && (
-        <p className="text-meta mt-1.5 shrink-0">
-          Vs {benchmarkLabel(activeBenchmark)}
-          {activeBenchmark === "inflation" || activeBenchmark === "index"
-            ? " · référence indicative"
-            : ""}
+        <p className="text-meta mt-1.5 shrink-0" data-testid="evolution-vs-note">
+          Vs {benchmarkDisplayName}
+          {gap ? (
+            <>
+              {" · écart "}
+              <span
+                className={cn(
+                  "font-semibold tabular-nums",
+                  gap.gapPct >= 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--danger)]"
+                )}
+                title="Écart de performance portefeuille − indice sur la période"
+                data-testid="evolution-vs-gap"
+              >
+                {gap.gapPct >= 0 ? "+" : ""}
+                {gap.gapPct.toFixed(1)} pts
+              </span>
+            </>
+          ) : wantIndex && indexQ.isLoading ? (
+            " · chargement de l'indice…"
+          ) : wantIndex && indexQ.isError ? (
+            " · indice indisponible"
+          ) : (
+            ""
+          )}
+          {activeBenchmark === "inflation" ? " · IPC France" : ""}
           {benchmark === "default" ? " · défaut préférences" : ""}
         </p>
       )}

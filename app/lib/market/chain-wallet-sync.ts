@@ -180,6 +180,18 @@ export function availableApiStatusMessage(): string {
   return "API existante, synchronisation disponible";
 }
 
+/**
+ * Label neutre pour le dropdown blockchain — ne nomme jamais le
+ * fournisseur (Zerion / Helius) à l'utilisateur final.
+ */
+export function blockchainSyncLabel(presetKey: string): string {
+  const cap = getChainSyncCapability(presetKey);
+  if (cap?.provider === "zerion" || cap?.provider === "helius-solana") {
+    return "API disponible";
+  }
+  return "Saisie manuelle";
+}
+
 export function describeChainSyncFeatures(cap: ChainSyncCapability): string {
   const parts: string[] = [];
   if (cap.provider === "helius-solana") parts.push("Solana via Helius / RPC");

@@ -4,7 +4,7 @@
  */
 
 import { prisma } from "@/app/lib/prisma";
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/app/lib/prisma-client/client";
 import { isSolanaAddress } from "./address";
 import {
   mapPool,

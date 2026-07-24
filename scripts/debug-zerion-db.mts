@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 
-const p = new PrismaClient();
+const p = createPrismaClient();
 const needle = "5E82A334";
 
 const platforms = await p.platform.findMany({

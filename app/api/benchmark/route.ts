@@ -4,17 +4,14 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { cacheGet, cacheSet, cachePrune } from "@/app/lib/api/memory-cache";
 import { consumeRateLimit } from "@/app/lib/api/simple-rate-limit";
 import { withTimeout } from "@/app/lib/utils/with-timeout";
+import { MARKET_INDEX_SYMBOLS } from "@/app/lib/portfolio/market-indices";
 
 const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey"],
 });
 
-/** Symboles indices supportés */
-const SYMBOLS: Record<string, string> = {
-  cac40: "^FCHI",
-  sp500: "^GSPC",
-  eurostoxx50: "^STOXX50E",
-};
+/** Symboles indices supportés (catalogue partagé UI ↔ API). */
+const SYMBOLS: Record<string, string> = MARKET_INDEX_SYMBOLS;
 
 const CACHE_TTL_MS = 60 * 60_000; // 1 h — clôtures journalières
 const RATE_LIMIT = 30; // req / user / fenêtre

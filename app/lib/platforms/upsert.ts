@@ -3,7 +3,7 @@
  * Aucune migration Prisma : s’appuie sur @@unique([userId, name]) + relecture.
  */
 
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "@/app/lib/prisma";
 import { findPreset, primaryType } from "@/app/lib/platforms/presets";
 

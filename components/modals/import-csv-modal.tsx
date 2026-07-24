@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Check,
@@ -44,7 +44,7 @@ import { fetchJson } from "@/app/lib/api-client";
 import {
   availableApiStatusMessage,
   blockchainCatalogPresets,
-
+  blockchainSyncLabel,
   describeChainSyncFeatures,
   getChainSyncCapability,
   missingApiStatusMessage,
@@ -162,6 +162,8 @@ type PreviewResponse = {
   previewLimit?: number;
   stats: { ok: number; warning: number; error: number };
   warnings?: string[];
+  /** Comptes IBKR distincts détectés (relevé multi-comptes) */
+  ibkrAccounts?: string[];
 };
 
 type CreatedPlatformRow = {
@@ -344,6 +346,10 @@ export function ImportCsvModal({
   const [committing, setCommitting] = useState(false);
   const [manualMap, setManualMap] = useState<Record<string, ColumnRole>>({});
   const [showMapper, setShowMapper] = useState(false);
+  /** IBKR multi-comptes : comptes sélectionnés pour l'import (vide = tous) */
+  const [ibkrSelectedAccounts, setIbkrSelectedAccounts] = useState<string[]>([]);
+  /** Enveloppe fiscale (CTO/PEA/AV/CFD) — courtiers titres uniquement */
+  const [accountEnvelopeType, setAccountEnvelopeType] = useState<string>("CTO");
   const [pageSize, setPageSize] = useState<PreviewPageSize>(50);
   const [pageIndex, setPageIndex] = useState(0);
   const [suspects, setSuspects] = useState<SuspectRow[]>([]);
@@ -382,6 +388,12 @@ export function ImportCsvModal({
     /** Résumé générique (Zerion / multi) */
     summaryLine?: string | null;
   } | null>(null);
+  /** Adresse/clé réutilisées depuis une blockchain déjà configurée (pré-remplissage) */
+  const [blockchainDefaults, setBlockchainDefaults] = useState<{
+    evmAddress: string | null;
+    evmApiKey: string | null;
+    solanaApiKey: string | null;
+  } | null>(null);
 
   const chainPresets = useMemo(() => blockchainCatalogPresets(), []);
   const selectedChainCap = useMemo(
@@ -392,6 +404,38 @@ export function ImportCsvModal({
     () => chainPresets.find((p) => p.key === walletPresetKey),
     [chainPresets, walletPresetKey]
   );
+
+  // Récupère les valeurs déjà configurées sur une autre blockchain pour
+  // pré-remplir adresse/clé API — évite de ressaisir la même info à chaque ajout.
+  // Le pré-remplissage lui-même se produit dans le .then() (async, hors du
+  // corps synchrone de l'effet) et dans le onChange du select (nouveau preset).
+  useEffect(() => {
+    if (!open || importMode !== "wallet") return;
+    let cancelled = false;
+    fetchJson<{
+      evmAddress: string | null;
+      evmApiKey: string | null;
+      solanaApiKey: string | null;
+    }>("/api/platforms/blockchain-defaults")
+      .then((data) => {
+        if (cancelled) return;
+        setBlockchainDefaults(data);
+        const cap = getChainSyncCapability(walletPresetKey);
+        if (cap?.provider === "zerion") {
+          setWalletAddress((prev) => prev || data.evmAddress || "");
+          setWalletApiKey(
+            (prev) => prev || data.evmApiKey || cap.defaultApiKey || ""
+          );
+        }
+      })
+      .catch(() => {
+        /* non-bloquant */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lecture ponctuelle à l'ouverture
+  }, [open, importMode]);
 
   // Sync destination when parent crée une plateforme à la volée
   // (y compris juste après fermeture de la modale de création)
@@ -625,6 +669,13 @@ export function ImportCsvModal({
           csvText,
           formatId,
           columnMap: columnMap || undefined,
+          ibkrAccountIds: ibkrSelectedAccounts.length
+            ? ibkrSelectedAccounts
+            : undefined,
+          accountEnvelopeType:
+            accountEnvelopeType && accountEnvelopeType !== "CTO"
+              ? accountEnvelopeType
+              : undefined,
         }),
       });
 
@@ -789,6 +840,13 @@ export function ImportCsvModal({
         delimiter: preview?.delimiter,
         columnMap: manualMap,
         rowSelection: buildRowSelection(),
+        ibkrAccountIds: ibkrSelectedAccounts.length
+          ? ibkrSelectedAccounts
+          : undefined,
+        accountEnvelopeType:
+          accountEnvelopeType && accountEnvelopeType !== "CTO"
+            ? accountEnvelopeType
+            : undefined,
       };
 
       const analysis = await fetchJson<{
@@ -873,6 +931,13 @@ export function ImportCsvModal({
           rowSelection: buildRowSelection(),
           skipDuplicates: true,
           acceptSuspectLines,
+          ibkrAccountIds: ibkrSelectedAccounts.length
+            ? ibkrSelectedAccounts
+            : undefined,
+          accountEnvelopeType:
+            accountEnvelopeType && accountEnvelopeType !== "CTO"
+              ? accountEnvelopeType
+              : undefined,
         }),
       });
 
@@ -1306,28 +1371,19 @@ export function ImportCsvModal({
                     setWalletResult(null);
                     const cap = getChainSyncCapability(key);
                     if (cap?.provider === "zerion") {
+                      setWalletAddress(blockchainDefaults?.evmAddress || "");
                       setWalletApiKey(
-                        cap.defaultApiKey || ""
+                        blockchainDefaults?.evmApiKey || cap.defaultApiKey || ""
                       );
                     }
                   }}
                   data-testid="import-wallet-chain"
                 >
-                  {chainPresets.map((p) => {
-                    const cap = getChainSyncCapability(p.key);
-                    return (
-                      <option key={p.key} value={p.key}>
-                        {p.name}
-                        {cap
-                          ? cap.provider === "zerion"
-                            ? " · Zerion"
-                            : cap.provider === "helius-solana"
-                              ? " · Helius"
-                              : " · synchro"
-                          : " · API manquante"}
-                      </option>
-                    );
-                  })}
+                  {chainPresets.map((p) => (
+                    <option key={p.key} value={p.key}>
+                      {p.name} · {blockchainSyncLabel(p.key)}
+                    </option>
+                  ))}
                 </select>
               </Field>
               <Field
@@ -1791,11 +1847,60 @@ export function ImportCsvModal({
                     className="mt-1.5 text-[11px] text-teal-800 dark:text-teal-200"
                     data-testid="import-detected-format"
                   >
-                    Détecté : {preview.formatLabel}
+                    Détecté automatiquement : {preview.formatLabel}
                     {preview.confidence
                       ? ` · confiance ${preview.confidence}`
                       : ""}
                   </p>
+                )}
+                {preview?.ibkrAccounts && preview.ibkrAccounts.length > 1 && (
+                  <div
+                    className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--muted)]/30 px-2.5 py-2"
+                    data-testid="import-ibkr-account-selector"
+                  >
+                    <p className="text-[11px] font-medium text-[var(--foreground)]">
+                      Relevé multi-comptes IBKR — choisissez le(s) compte(s) à
+                      importer
+                    </p>
+                    <div className="mt-1.5 flex flex-wrap gap-2">
+                      {preview.ibkrAccounts.map((acc) => {
+                        const checked =
+                          ibkrSelectedAccounts.length === 0 ||
+                          ibkrSelectedAccounts.includes(acc);
+                        return (
+                          <label
+                            key={acc}
+                            className="flex items-center gap-1.5 text-[11px]"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                setIbkrSelectedAccounts((prev) => {
+                                  const all = preview.ibkrAccounts || [];
+                                  const current = prev.length ? prev : all;
+                                  if (e.target.checked) {
+                                    return all.filter(
+                                      (a) => a === acc || current.includes(a)
+                                    );
+                                  }
+                                  return current.filter((a) => a !== acc);
+                                });
+                              }}
+                            />
+                            {acc}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-1.5 text-[11px] underline"
+                      onClick={() => void runPreview()}
+                    >
+                      Ré-analyser avec cette sélection
+                    </button>
+                  </div>
                 )}
               </Field>
               <Field label="Plateforme par défaut">
@@ -1833,6 +1938,34 @@ export function ImportCsvModal({
                 </p>
               </Field>
             </div>
+
+            {/* Sélecteur enveloppe fiscale — courtiers titres uniquement */}
+            {platformId &&
+              [
+                "INTERACTIVE_BROKERS",
+                "BOURSOBANK",
+                "FORTUNEO",
+                "TRADE_REPUBLIC",
+                "REVOLUT",
+              ].includes(platformId) && (
+                <Field label="Type de compte (enveloppe fiscale)">
+                  <select
+                    className="input w-full"
+                    value={accountEnvelopeType}
+                    onChange={(e) => setAccountEnvelopeType(e.target.value)}
+                    data-testid="import-account-envelope"
+                  >
+                    <option value="CTO">Compte-Titres (CTO)</option>
+                    <option value="PEA">PEA</option>
+                    <option value="AV">Assurance-Vie (AV)</option>
+                    <option value="CFD">CFD</option>
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Les actifs importés seront classés dans cette enveloppe
+                    fiscale.
+                  </p>
+                </Field>
+              )}
 
             {/* Zone fichier : drag-and-drop + choix fichier */}
             <div

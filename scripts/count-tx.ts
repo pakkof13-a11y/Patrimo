@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 
-const p = new PrismaClient();
+const p = createPrismaClient();
 
 async function main() {
   const users = await p.user.findMany({ select: { id: true, email: true } });

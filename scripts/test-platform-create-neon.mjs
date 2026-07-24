@@ -2,9 +2,9 @@
  * Smoke test: create a blockchain platform on Neon (same columns as API).
  * Usage: DATABASE_URL=… node scripts/test-platform-create-neon.mjs
  */
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 const name = `E2E Cloud Plat ${Date.now()}`;
 
 try {

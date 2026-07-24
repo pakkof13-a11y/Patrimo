@@ -38,6 +38,7 @@ export async function POST(req: Request) {
     const csvText =
       typeof body?.csvText === "string" ? (body.csvText as string) : "";
     let rows: ImportDraftRow[] = [];
+    const accountEnvelopeType = String(body?.accountEnvelopeType || "");
 
     if (csvText.trim()) {
       if (csvText.length > IMPORT_MAX_CSV_CHARS) {
@@ -52,11 +53,15 @@ export async function POST(req: Request) {
       const formatId = String(body?.formatId || "auto");
       const delimiter = body?.delimiter as string | undefined;
       const columnMap = (body?.columnMap || null) as ColumnMapping | null;
+      const ibkrAccountIds = Array.isArray(body?.ibkrAccountIds)
+        ? (body.ibkrAccountIds as unknown[]).map(String)
+        : undefined;
 
       const parsed = importCsv(csvText, {
         formatId: formatId as "auto",
         delimiter,
         columnMap: columnMap || undefined,
+        ibkrAccountIds,
       });
 
       if (parsed.drafts.length > IMPORT_COMMIT_MAX_ROWS) {
@@ -121,6 +126,7 @@ export async function POST(req: Request) {
       skipDuplicates: body?.skipDuplicates !== false,
       requireSuspectDecision: true,
       acceptSuspectLines,
+      accountEnvelopeType: accountEnvelopeType || undefined,
     });
 
     try {

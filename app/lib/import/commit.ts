@@ -61,7 +61,8 @@ export type AnalyzeImportResult = {
 async function resolveOrCreateAsset(
   userId: string,
   platformId: string,
-  row: ImportDraftRow
+  row: ImportDraftRow,
+  overrideAccountType?: string
 ): Promise<string | null> {
   const needsAsset =
     row.type &&
@@ -82,11 +83,12 @@ async function resolveOrCreateAsset(
         ? "YAHOO"
         : "MANUAL";
   const accountType =
-    assetClass === "CRYPTO"
+    overrideAccountType ||
+    (assetClass === "CRYPTO"
       ? "CRYPTO"
       : assetClass === "IMMOBILIER"
         ? "IMMOBILIER"
-        : "CTO";
+        : "CTO");
 
   if (ticker) {
     const byTicker = await prisma.asset.findFirst({
@@ -364,6 +366,8 @@ export async function commitImportRows(params: {
    * Si false (legacy), comportement analyse + import direct sans UI.
    */
   requireSuspectDecision?: boolean;
+  /** Enveloppe fiscale à appliquer (CTO, PEA, AV, CFD) */
+  accountEnvelopeType?: string;
 }): Promise<CommitResult> {
   const { userId, platformId } = params;
   const skipDuplicates = params.skipDuplicates !== false;
@@ -452,7 +456,7 @@ export async function commitImportRows(params: {
         continue;
       }
 
-      const assetId = await resolveOrCreateAsset(userId, rowPlatformId, row);
+      const assetId = await resolveOrCreateAsset(userId, rowPlatformId, row, params.accountEnvelopeType);
       await createTransaction({
         userId,
         type: row.type as TxType,

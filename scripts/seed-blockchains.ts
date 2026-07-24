@@ -9,11 +9,11 @@
  * - If missing → insert with type BLOCKCHAIN + subtype
  */
 
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import { PLATFORM_PRESETS } from "../app/lib/platforms/presets";
 import { DEMO_EMAIL } from "../app/lib/constants";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 const BLOCKCHAINS = PLATFORM_PRESETS.filter((p) =>
   p.types.includes("BLOCKCHAIN")

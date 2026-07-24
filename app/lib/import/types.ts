@@ -76,7 +76,10 @@ export type PlatformAdapterId =
   | "cryptocom_transfer"
   | "nexo"
   | "ascendex"
-  | "ledger_live";
+  | "ledger_live"
+  | "hyperliquid_trade"
+  | "hyperliquid_funding"
+  | "paradex";
 
 export type PlatformAdapterMeta = {
   id: PlatformAdapterId;

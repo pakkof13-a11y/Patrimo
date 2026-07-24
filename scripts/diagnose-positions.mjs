@@ -1,10 +1,10 @@
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import { createTransaction } from "../app/lib/transactions/service.ts";
 import { getHoldings, loadLedgerForUser } from "../app/lib/portfolio/service.ts";
 import { requireUserId } from "../app/lib/auth-helpers.ts";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 const userId = await requireUserId();
 if (!userId) throw new Error("no user");

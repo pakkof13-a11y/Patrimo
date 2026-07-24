@@ -1,10 +1,10 @@
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "@/app/lib/prisma";
 import { createTransaction, updateTransaction } from "../app/lib/transactions/service.ts";
 import { getHoldings } from "../app/lib/portfolio/service.ts";
 import { requireUserId } from "../app/lib/auth-helpers.ts";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 const userId = await requireUserId();
 const asset = await prisma.asset.findFirst({ where: { userId, name: { contains: "LVMH" } } });
 if (!asset || !userId) throw new Error("missing");
