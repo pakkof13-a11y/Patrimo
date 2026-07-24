@@ -88,9 +88,10 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      - name: Lint (non-blocking)
+      # Bloquant : deux erreurs (setState-in-effect, prefer-const) sont parties
+      # en production pendant que cette étape était en continue-on-error.
+      - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Production build
         run: npm run build
