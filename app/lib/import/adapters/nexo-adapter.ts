@@ -196,7 +196,7 @@ export const nexoAdapter: PlatformCsvAdapter = {
       // Determine ticker and amount based on transaction direction
       let ticker = inputCurrencyRaw.trim().toUpperCase();
       let quantity = parseNumber(inputAmountRaw);
-      let cashAmount = parseNumber(usdEquivalentRaw);
+      const cashAmount = parseNumber(usdEquivalentRaw);
 
       // For exchanges/swaps, prefer output currency
       if (type === "BUY" && outputCurrencyRaw && outputAmountRaw) {
