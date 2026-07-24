@@ -97,9 +97,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          e instanceof Error
-            ? e.message
-            : "Échec récupération métadonnées Monero",
+          clientErrorMessage(e, "Échec récupération métadonnées Monero"),
         code: "MONERO_UNAVAILABLE",
       },
       { status: 502 }
