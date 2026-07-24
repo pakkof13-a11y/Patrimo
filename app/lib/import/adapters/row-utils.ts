@@ -1,4 +1,9 @@
-import { parseDate, parseNumber } from "../normalize";
+import {
+  inferDecimalSeparator,
+  parseDate,
+  parseNumber,
+  type DecimalSeparator,
+} from "../normalize";
 import { mapTxType, normalizeTicker } from "../presets";
 import type { CanonicalTxKind, ColumnMapping, TransactionImport } from "../types";
 import type { TxType } from "../../accounting/types";
@@ -23,10 +28,28 @@ export function txTypeToCanonical(t: TxType | null): CanonicalTxKind {
   return "OTHER";
 }
 
+/** Colonnes numériques servant à déduire le séparateur décimal du fichier. */
+const NUMERIC_ROLES = ["quantity", "unitPrice", "fees", "cashAmount"] as const;
+
+/**
+ * Déduit le séparateur décimal sur l'ensemble des lignes d'un fichier.
+ * À appeler une fois par import, puis à passer à `rowToTransactionImport` :
+ * `1,000` seul est indécidable, la colonne entière ne l'est pas.
+ */
+export function inferRowsDecimalSeparator(
+  rows: Record<string, string>[],
+  map: ColumnMapping
+): DecimalSeparator | undefined {
+  return inferDecimalSeparator(
+    NUMERIC_ROLES.flatMap((role) => rows.map((row) => getByRole(row, map, role)))
+  );
+}
+
 export function rowToTransactionImport(
   row: Record<string, string>,
   map: ColumnMapping,
-  line: number
+  line: number,
+  decimalSeparator?: DecimalSeparator
 ): { tx: TransactionImport | null; errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -54,10 +77,10 @@ export function rowToTransactionImport(
   const ticker = normalizeTicker(tickerRaw) || nameRaw.trim() || "";
   if (!ticker && kind !== "OTHER") errors.push("Ticker manquant");
 
-  let quantity = parseNumber(qtyRaw) ?? 0;
-  let price = parseNumber(priceRaw);
-  const fees = parseNumber(feesRaw) ?? 0;
-  const cash = parseNumber(cashRaw);
+  let quantity = parseNumber(qtyRaw, decimalSeparator) ?? 0;
+  let price = parseNumber(priceRaw, decimalSeparator);
+  const fees = parseNumber(feesRaw, decimalSeparator) ?? 0;
+  const cash = parseNumber(cashRaw, decimalSeparator);
 
   if (price == null && quantity && cash != null && quantity !== 0) {
     price = Math.abs(cash / quantity);

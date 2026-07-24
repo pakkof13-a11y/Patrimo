@@ -5,6 +5,10 @@ import {
 } from "@/app/lib/import/normalize";
 import { parseCsv } from "@/app/lib/import/csv-parse";
 import { mapCsvToDrafts } from "@/app/lib/import/map-rows";
+import {
+  inferRowsDecimalSeparator,
+  rowToTransactionImport,
+} from "@/app/lib/import/adapters/row-utils";
 
 /**
  * Régression : `parseNumber("1,000")` renvoyait 1 et `"1,500"` renvoyait 1.5.
@@ -134,5 +138,60 @@ describe("mapCsvToDrafts — séparateur déduit sur le fichier entier", () => {
     const { rows } = mapCsvToDrafts(csv, "generic");
     // Colonne entièrement ambiguë → décimal FR par défaut, comme avant.
     expect(Number(rows[0]!.quantity)).toBeCloseTo(1.234, 6);
+  });
+});
+
+describe("adaptateur générique — même déduction sur le fichier", () => {
+  it("dynamicAdapter ne divise plus un montant EN par 1000", () => {
+    const rows = [
+      {
+        Date: "15/03/2024",
+        Type: "BUY",
+        Ticker: "AAPL",
+        Quantity: "1,000",
+        Price: "1,250.50",
+      },
+    ];
+    const columnMap = {
+      Date: "date",
+      Type: "type",
+      Ticker: "ticker",
+      Quantity: "quantity",
+      Price: "unitPrice",
+    } as const;
+
+    const sep = inferRowsDecimalSeparator(rows, columnMap);
+    expect(sep).toBe("dot");
+
+    const { tx, errors } = rowToTransactionImport(rows[0]!, columnMap, 2, sep);
+    expect(errors).toEqual([]);
+    expect(tx?.quantity).toBeCloseTo(1000, 6);
+    expect(tx?.price).toBeCloseTo(1250.5, 6);
+  });
+
+  it("laisse intactes les quantités crypto FR", () => {
+    const rows = [
+      {
+        Date: "15/03/2024",
+        Type: "BUY",
+        Ticker: "BTC",
+        Quantity: "0,00000502",
+        Price: "69635,02",
+      },
+    ];
+    const columnMap = {
+      Date: "date",
+      Type: "type",
+      Ticker: "ticker",
+      Quantity: "quantity",
+      Price: "unitPrice",
+    } as const;
+
+    const sep = inferRowsDecimalSeparator(rows, columnMap);
+    expect(sep).toBe("comma");
+
+    const { tx } = rowToTransactionImport(rows[0]!, columnMap, 2, sep);
+    expect(tx?.quantity).toBeCloseTo(0.00000502, 12);
+    expect(tx?.price).toBeCloseTo(69635.02, 2);
   });
 });

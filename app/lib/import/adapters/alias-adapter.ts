@@ -15,7 +15,10 @@ import type {
   PlatformAdapterMeta,
   TransactionImport,
 } from "../types";
-import { rowToTransactionImport } from "./row-utils";
+import {
+  inferRowsDecimalSeparator,
+  rowToTransactionImport,
+} from "./row-utils";
 
 export type AliasPreset = {
   id: PlatformAdapterId;
@@ -213,11 +216,14 @@ export function createAliasAdapter(preset: AliasPreset): PlatformCsvAdapter {
 
       const transactions: TransactionImport[] = [];
       const warnings: string[] = [];
+      // Séparateur décimal déduit une fois sur tout le fichier (cf. row-utils).
+      const decimalSeparator = inferRowsDecimalSeparator(input.rows, columnMap);
       input.rows.forEach((row, idx) => {
         const { tx, errors, warnings: w } = rowToTransactionImport(
           row,
           columnMap,
-          idx + 2
+          idx + 2,
+          decimalSeparator
         );
         warnings.push(...w.map((x) => `L${idx + 2}: ${x}`));
         if (tx && errors.length === 0 && tx.type !== "OTHER") {
