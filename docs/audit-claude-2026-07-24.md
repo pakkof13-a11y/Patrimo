@@ -28,6 +28,9 @@ ce qui **n'a pas** été audité dans cette passe.
 | UX / UI — dashboard, positions, mobile | Constaté sur l'app réelle (captures) | ❌ 3 défauts corrigés |
 | Contraste WCAG AA — clair et sombre | Mesuré sur tous les textes du dashboard | ❌ 5 échecs corrigés → 0 |
 | Nav mobile · onboarding compte vierge | Parcourus sur l'app réelle | ❌ 1 défaut corrigé · onboarding sain |
+| Courbe de croissance du patrimoine | Données API + rendu, toutes plages | ❌ 37 faux krachs corrigés |
+| Plus/moins-values cumulées et décomposées | Les 4 combinaisons mode × vue | ❌ Axe illisible corrigé |
+| Détail de position (expansion + décompo.) | Ouvert sur l'app réelle | ❌ Signe des frais corrigé |
 | **Non audité** | — | Voir §5 |
 
 ---
@@ -281,6 +284,58 @@ inutilisé — il sert désormais à la mesure.
   sous la carte sur un écran large.
 - **Thème sombre.** Appliqué correctement (`html.dark`, fonds et surfaces
   cohérents). Les seuls défauts étaient les contrastes ci-dessus.
+
+### Courbe de patrimoine : 37 faux krachs
+
+**Sévérité : élevée** (la courbe de patrimoine était mensongère).
+
+Sur « Tout », la courbe tombait de ~830 k à ~360 k puis remontait dès le point
+suivant, deux fois, plus une dent de scie mensuelle : **37 chutes de −58 %**.
+Aucune transaction n'existe dans ces fenêtres — c'était donc purement de
+l'affichage.
+
+La courbe fusionne deux sources : la reconstruction jour par jour depuis le
+ledger et les `PortfolioSnapshot`. Tout snapshot portant un latent non nul
+**remplaçait le point reconstruit en entier**. Or les deux ne mesurent pas le
+même patrimoine :
+
+| | Reconstruction | Snapshot |
+|---|---|---|
+| Cash | 301 400 € (poches incluses) | 28 000 € |
+| Coût des positions | 581 222 € | 340 000 € (figé) |
+
+Le snapshot ne couvre que le périmètre « titres » : son `cashTotalEur` ignore
+les poches explicites (banques, livrets, AV, enveloppes), son `totalCostEur`
+ignore les actifs alternatifs — et sur le jeu de démonstration il reste figé à
+340 000 € quelle que soit la date.
+
+**Correctif** — la reconstruction prime partout où elle existe ; les snapshots
+ne comblent plus que les jours qu'elle n'atteint pas. Aucun mark-to-market n'est
+perdu : la reconstruction est volontairement valorisée au coût, et la valeur de
+marché du jour est ajoutée séparément en point « live ». La logique est extraite
+dans `mergeHistorySources()` pour être testable hors base.
+
+Vérifié de bout en bout : plus aucune variation supérieure à 25 % entre deux
+points consécutifs.
+
+### Axe de la vue décomposée illisible
+
+Les graduations affichaient « 219,2 k », « 80,8 k », « −69,2 k » : la borne
+valait `maxAbs × 1,12`, donc un nombre quelconque, que Recharts découpait en
+graduations tout aussi quelconques. `symmetricZeroDomain` arrondit désormais au
+palier 1 / 2 / 2,5 / 5 × 10ⁿ — le même graphe lit « 200 k / 100 k / 0 / −100 k /
+−200 k ». La symétrie autour de zéro est inchangée.
+
+### Frais retranchés sur un achat
+
+**Sévérité : moyenne** (deux chiffres contradictoires sur la même ligne).
+
+Deux affichages calculaient `brut − frais` pour **tous** les types de trade.
+Juste pour une vente, faux pour un achat. Un bien acheté 285 000 € avec
+12 000 € de frais s'affichait à 273 000 €, quand la colonne PRU de la **même
+ligne** indiquait 297 000 € — le coût de revient réellement retenu par
+`applyBuy`. Les frais sont désormais signés par le sens de l'opération, et
+l'opérateur affiché suit (`+` à l'achat) pour que l'arithmétique reste lisible.
 
 ---
 
