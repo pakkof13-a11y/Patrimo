@@ -23,6 +23,8 @@ ce qui **n'a pas** été audité dans cette passe.
 | Requêtes N+1 | Ciblé par grep | ⚠️ Acceptable (voir §4) |
 | Parsing numérique des imports CSV | Exhaustif sur les 3 chemins de parse | ❌ Corruption 1000× corrigée |
 | Empreinte de dédoublonnage import | Lecture complète | ❌ Fragilité corrigée |
+| Conventions de signe à l'import | Vérifié bout en bout (qty, frais, prix) | ❌ Frais négatifs corrigés |
+| Sémantique métier des adaptateurs | Nexo complet · HL/Paradex partiel | ❌ Aperçu ≠ commit corrigé |
 | **Non audité** | — | Voir §5 |
 
 ---
@@ -148,7 +150,39 @@ canoniques), mais atteignable dès qu'une valeur est saisie à la main dans
 l'aperçu d'import. Le passage par `parseNumber` rend l'empreinte indépendante
 du formatage.
 
-### 2.6 Decimal — accumulation d'intérêts en float
+### 2.6 Import — un frais négatif retranchait du coût de revient
+
+**Sévérité : moyenne** (coût de revient faux, plus-value surévaluée).
+
+De nombreux courtiers écrivent la commission en **débit négatif** (« -1,00 »).
+`applyBuy` calcule `coût = qty × prix + frais` : un frais négatif était donc
+*retranché* du coût de revient au lieu de s'y ajouter. Écart total = **deux
+fois** le montant des frais, répercuté sur le CUMP puis sur la plus-value à la
+revente.
+
+`ibkr-activity` normalisait déjà de son côté (`feeAbs`, commentaire « Fees
+souvent négatifs dans IBKR »), mais le **mapper générique** — qui sert tous les
+autres courtiers — ne le faisait pas. Les quantités, elles, étaient déjà
+absolutisées ; seul le signe des frais manquait.
+
+### 2.7 Import — l'aperçu annonçait autre chose que ce qui était importé
+
+`mapNexoType` renvoyait `"BUY"` pour les lignes d'intérêt : l'aperçu affichait
+« Achat » alors que le chemin de commit les classe correctement en revenu. Le
+commentaire indiquait déjà « canonical DIVIDEND » — seul le type de retour
+interdisait cette valeur.
+
+Reformulé au passage l'avertissement de réception crypto. Une réception est
+importée avec un **coût d'acquisition nul** : exact pour un staking ou un
+airdrop, faux pour un transfert d'actifs déjà détenus — la position affiche
+alors 100 % de plus-value et gonfle l'estimation fiscale à la revente. Le
+libellé « Staking / reward » masquait cette conséquence, il l'énonce désormais.
+
+**Laissé en l'état, volontairement** : le commit bascule un `INTERET` libellé en
+crypto vers `REWARD` (+qty, coût 0). C'est la modélisation la plus juste d'un
+intérêt payé en nature, et non un bug.
+
+### 2.8 Decimal — accumulation d'intérêts en float
 
 `applyDueInterestForUser` sommait les intérêts crédités en `number`
 (`totalInterest += Number(...)`), en contradiction avec la règle Decimal.js du
