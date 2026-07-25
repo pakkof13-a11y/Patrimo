@@ -109,6 +109,20 @@ function EvolutionTooltipContent(props: {
 }
 
 /** Domaine Y symétrique autour de 0 (variations +/− lisibles). */
+/**
+ * Plus petit palier « lisible » ≥ v, sur l'échelle 1 / 2 / 2,5 / 5 × 10ⁿ.
+ * Borner à `maxAbs × 1,12` donnait des graduations comme 219,2 k ou 80,8 k :
+ * exactes, mais illisibles sur un axe monétaire.
+ */
+function niceCeil(v: number): number {
+  if (!Number.isFinite(v) || v <= 0) return 1;
+  const exp = Math.floor(Math.log10(v));
+  const pow = Math.pow(10, exp);
+  const frac = v / pow;
+  const step = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 2.5 ? 2.5 : frac <= 5 ? 5 : 10;
+  return step * pow;
+}
+
 export function symmetricZeroDomain(
   values: number[],
   padRatio = 0.12
@@ -117,8 +131,12 @@ export function symmetricZeroDomain(
   for (const v of values) {
     if (Number.isFinite(v)) maxAbs = Math.max(maxAbs, Math.abs(v));
   }
-  const pad = Math.max(maxAbs * (1 + padRatio), 1);
-  return [-pad, pad];
+  if (maxAbs <= 0) return [-1, 1];
+  // Le palier arrondi englobe déjà les données ; il ne sert à rien d'y ajouter
+  // la marge relative, sauf s'il tombe pile sur la valeur extrême.
+  const nice = niceCeil(maxAbs);
+  const bound = nice > maxAbs ? nice : niceCeil(maxAbs * (1 + padRatio));
+  return [-bound, bound];
 }
 
 export function GlobalLineChart({
