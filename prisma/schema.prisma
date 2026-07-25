@@ -303,6 +303,83 @@ model AssetDailyClose {
   @@index([assetId, day])
 }
 
+// ─── DVF — référentiel des ventes immobilières (données publiques) ────────────
+
+/// Vente immobilière issue des données DVF (Etalab), **agrégée au niveau
+/// mutation**.
+///
+/// Un fichier DVF a une ligne par lot, pas par vente : une maison vendue avec
+/// son garage et son terrain produit plusieurs lignes qui partagent le même
+/// `id_mutation` et **répètent** la même `valeur_fonciere`. Traiter chaque
+/// ligne comme une vente compterait la même transaction plusieurs fois dans
+/// les comparables ; sommer les valeurs foncières triplerait le prix. Le
+/// regroupement est donc fait une fois pour toutes à l'import.
+///
+/// Contrairement au reste du schéma, ce modèle n'a **pas** de `userId` : ce
+/// sont des données publiques, identiques pour tous les comptes, et aucune
+/// donnée utilisateur n'y transite. Ce n'est pas un oubli d'isolation, c'est un
+/// référentiel partagé, reconstructible intégralement depuis la source.
+model DvfSale {
+  id            String   @id @default(cuid())
+  /// id_mutation DVF — plusieurs lignes source partagent cet identifiant
+  mutationId    String
+  soldOn        DateTime
+  /// MAISON | APPARTEMENT
+  propertyType  String
+  /// valeur_fonciere de la mutation entière, en euros
+  valueEur      Decimal  @db.Decimal(14, 2)
+  /// Somme des surfaces bâties des SEULS locaux d'habitation — inclure le
+  /// garage gonflerait la surface et écraserait le prix au m².
+  builtAreaM2   Int
+  rooms         Int
+  landAreaM2    Int?
+  /// valueEur / builtAreaM2 — dénormalisé : filtre d'aberrations et tri
+  pricePerM2    Decimal  @db.Decimal(12, 2)
+  latitude      Float
+  longitude     Float
+  postalCode    String?
+  inseeCode     String
+  communeName   String
+  department    String
+  /// La mutation portait aussi un garage / parking / dépendance
+  hasDependency Boolean  @default(false)
+  /// Nombre de lignes DVF fusionnées — trace d'audit
+  sourceRows    Int      @default(1)
+  importId      String
+
+  import DvfImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@unique([mutationId, propertyType])
+  @@index([latitude, longitude])
+  @@index([department, soldOn])
+  @@index([inseeCode])
+  @@index([importId])
+}
+
+/// Traçabilité d'un chargement DVF : un département × un millésime.
+/// L'unicité `(department, year)` rend l'import rejouable — recharger un
+/// millésime remplace ses ventes au lieu de les dupliquer.
+model DvfImport {
+  id            String    @id @default(cuid())
+  department    String
+  year          Int
+  sourceUrl     String
+  /// RUNNING | DONE | ERROR
+  status        String    @default("RUNNING")
+  rowsRead      Int       @default(0)
+  salesStored   Int       @default(0)
+  rejected      Int       @default(0)
+  /// Décompte par motif de rejet — permet de voir ce qui a été écarté
+  rejectReasons Json?
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  error         String?
+
+  sales DvfSale[]
+
+  @@unique([department, year])
+}
+
 model PortfolioSnapshot {
   id               String   @id @default(cuid())
   userId           String

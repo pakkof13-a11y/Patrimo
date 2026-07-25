@@ -568,3 +568,116 @@ vérifié en amorçant le cache directement. Le code de fetch réutilise la casc
 `getAssetPriceHistory` déjà en production pour les graphiques de cours, mais
 cette étape précise reste à confirmer sur un environnement disposant d'un accès
 sortant.
+
+---
+
+## 8. Volet B — Estimation immobilière DVF (25 juillet)
+
+### 8.1 Le piège central du format DVF
+
+Un fichier DVF décrit **un lot par ligne, pas une vente par ligne**. Une maison
+vendue avec son garage et son terrain occupe trois lignes qui partagent le même
+`id_mutation` et **répètent** la même `valeur_fonciere`. Deux erreurs guettent :
+traiter chaque ligne comme une vente (la même transaction pèse alors trois fois
+dans les comparables, un immeuble de 30 lots en pèserait trente), ou sommer les
+valeurs foncières (un bien à 300 k€ en vaut 900).
+
+D'où la décision structurante : **agréger à l'import**, une ligne stockée par
+`(mutation, type de bien)`. La table est 3 à 4 fois plus petite, la requête
+d'estimation devient triviale, et le piège est éliminé une fois pour toutes au
+lieu d'être re-géré à chaque requête.
+
+Vérifié sur données fabriquées : une mutation de 2 lignes à 300 000 € répétés
+donne bien 300 000 € pour 60 m², soit 5 000 €/m² — et non 600 000 €.
+
+### 8.2 Surfaces : les dépendances exclues
+
+La surface ne cumule que les **locaux d'habitation**. Inclure le garage
+gonflerait la surface et écraserait mécaniquement le prix au m². Une maison de
+125 m² habitables avec 25 m² de garage est donc valorisée sur 125 m², la
+présence de la dépendance étant conservée dans `hasDependency` plutôt que jetée.
+
+### 8.3 Filtres d'admission
+
+Chacun est compté par motif dans `DvfImport.rejectReasons` : un import qui
+écarte 40 % de ses lignes doit pouvoir dire pourquoi, sinon on ne distingue pas
+un filtrage sain d'un mapping de colonnes cassé.
+
+| Règle | Raison |
+|---|---|
+| `nature_mutation` = Vente / VEFA | adjudications et expropriations ne reflètent pas le marché |
+| Maison ou appartement | les dépendances ne se valorisent pas au m² habitable |
+| Mutation mono-type | une vente groupant maison + appartement a une valeur globale inattribuable |
+| Surface et valeur > 0 | sans quoi le prix au m² est indéfini |
+| Coordonnées présentes | sans géolocalisation, la ligne est inutilisable |
+| 100 ≤ prix/m² ≤ 50 000 € | écarte les ventes à 1 € et les erreurs de saisie |
+
+### 8.4 Géographie sans PostGIS
+
+Boîte englobante servie par un index B-tree `(latitude, longitude)`, puis
+Haversine sur le résidu. Sans la seconde étape, un « rayon de 1 km » serait un
+carré de 2 km de côté : 27 % de surface en trop, concentrée dans les coins,
+donc un biais silencieux vers les biens en diagonale. La largeur en longitude
+suit le cosinus de la latitude — un degré vaut ~111 km à l'équateur mais ~82 km
+à Marseille ; une constante perdrait des comparables vers le nord.
+
+### 8.5 Médiane, et pas d'élagage
+
+Médiane du prix au m², jamais moyenne : le marché produit des valeurs extrêmes
+structurelles qu'une moyenne absorbe mal. Aucun élagage des aberrations n'est
+appliqué **avant** le calcul — la médiane y est déjà insensible, et la fourchette
+interquartile est justement ce qu'on affiche comme incertitude ; la rétrécir
+afficherait une précision qui n'existe pas.
+
+Sous 15 comparables au plus large rayon (10 km), **aucun montant n'est renvoyé**.
+Une médiane sur trois ventes serait un chiffre habillé en estimation.
+
+### 8.6 Deux défauts trouvés et corrigés en cours de route
+
+- **Le compteur d'import mentait** : il additionnait ce qu'on *tentait*
+  d'insérer, pas ce qui l'était. Un millésime recouvrant un autre annonçait
+  « 93 ventes enregistrées » alors que zéro ligne était écrite. `createMany`
+  rend le vrai décompte ; les doublons sont désormais comptés à part.
+- **Un import raté détruisait les données existantes.** La purge précédait le
+  téléchargement : une URL injoignable ou un fichier malformé effaçait le
+  millésime déjà chargé sans rien mettre à la place. La source est maintenant
+  ouverte et son en-tête validé **avant** toute suppression. Vérifié : après un
+  fichier malformé puis une URL en échec, les 93 ventes précédentes sont
+  toujours là.
+
+### 8.7 Vérifications
+
+Chaîne complète éprouvée sur un fichier DVF fabriqué reproduisant les pièges du
+format réel (mutations multi-lignes, valeur répétée, dépendances, immeuble
+mixte, adjudication, vente à 1 €, ligne sans coordonnées) :
+
+- chaque piège écarté exactement une fois, avec son motif ;
+- appartement 60 m² au Vieux-Port → 240 000 €, médiane 4 000 €/m², IQR
+  3 500–4 500, 61 comparables, rayon **non élargi** (1 km), confiance HIGH ;
+- une vente située à 5 km n'entre pas dans le rayon de 1 km ;
+- zone sans données → `insufficientData`, aucun montant, rayon poussé à 10 km ;
+- import rejouable : réimporter le même millésime laisse 93 ventes, pas 186 ;
+- route non authentifiée → 307 vers `/login`, paramètres invalides → 400 détaillé.
+
+Portes : **739 tests**, lint, typecheck, build — tous verts.
+
+### 8.8 Limites assumées
+
+- **Aucune donnée n'a été chargée** : data.gouv.fr est bloqué par la politique
+  réseau de cet environnement (403 au proxy, comme Yahoo). Le script a été
+  éprouvé sur fichier local ; le chemin de téléchargement HTTPS n'a pas pu être
+  exécuté de bout en bout.
+- **Estimation strictement consultative** : rien n'est écrit sur les actifs, le
+  patrimoine net continue de reposer sur les valeurs saisies et sur le principe
+  « transactions = source de vérité ».
+- **`DvfSale` et `DvfImport` n'ont pas de `userId`** — premiers modèles du schéma
+  dans ce cas. Ce sont des données publiques identiques pour tous, entièrement
+  reconstructibles ; ce n'est pas une entorse à l'isolation mais un référentiel
+  partagé, documenté comme tel dans le schéma.
+- **DVF ne couvre ni l'Alsace-Moselle (57, 67, 68) ni Mayotte**, régimes de
+  publicité foncière distincts. `isDvfCoveredDepartment()` permet de le dire à
+  l'utilisateur plutôt que de lui montrer un secteur apparemment sans ventes.
+- **Index géographique** : B-tree pour l'instant. `cube` et `earthdistance` sont
+  disponibles sur la base si un département réel se révèle lent — à mesurer,
+  pas à ajouter par précaution.
+- **DVF+ (Cerema) non intégré** : conditions d'accès non vérifiables d'ici.
