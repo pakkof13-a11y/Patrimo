@@ -65,6 +65,13 @@ export type GetAssetPriceHistoryOptions = {
    * viser un nombre optimal de bougies (INTERVAL_WINDOW_DAYS).
    */
   interval?: PriceBarInterval | null;
+  /**
+   * Borne basse explicite de la fenêtre de fetch. Court-circuite le calcul
+   * dérivé du `range` / de l'`interval`, qui vise un nombre de bougies confortable
+   * à l'écran — inadapté quand l'appelant veut une profondeur précise (remplissage
+   * du cache de clôtures journalières sur l'historique réel du portefeuille).
+   */
+  from?: Date | null;
 };
 
 /**
@@ -710,7 +717,9 @@ export async function getAssetPriceHistory(
   const bar = explicitInterval ?? barIntervalForRange(range, now);
   let from: Date;
   let extendedToFirstBuy = false;
-  if (explicitInterval) {
+  if (options?.from instanceof Date && !Number.isNaN(options.from.getTime())) {
+    from = options.from;
+  } else if (explicitInterval) {
     from = new Date(
       now.getTime() - INTERVAL_WINDOW_DAYS[explicitInterval] * 24 * 60 * 60 * 1000
     );

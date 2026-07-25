@@ -199,6 +199,7 @@ model Asset {
   transactions Transaction[]
   priceQuote   PriceQuote?
   priceHistory PriceHistory[]
+  dailyCloses  AssetDailyClose[]
 
   @@index([userId])
   @@index([platformId])
@@ -278,6 +279,28 @@ model PriceHistory {
   asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
   @@index([assetId, capturedAt])
+}
+
+/// Clôture journalière d'un actif, en EUR — cache alimenté depuis les
+/// fournisseurs de cours (barres 1d). Sert à valoriser l'historique au marché
+/// pour le P&L par classe d'actif, que `PriceHistory` ne permet pas : cette
+/// dernière n'enregistre que des captures spot au moment des rafraîchissements,
+/// donc creuse et irrégulière.
+/// Ce n'est qu'un cache : il peut être vidé et reconstruit sans perte, la
+/// source de vérité restant les transactions.
+model AssetDailyClose {
+  id       String   @id @default(cuid())
+  assetId  String
+  /// Jour civil Europe/Paris, format YYYY-MM-DD (tri lexicographique = chronologique)
+  day      String
+  closeEur Decimal  @db.Decimal(28, 12)
+  source   String
+  fetchedAt DateTime @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, day])
+  @@index([assetId, day])
 }
 
 model PortfolioSnapshot {
