@@ -76,6 +76,43 @@ export function AppHeader({
   const [txMenuOpen, setTxMenuOpen] = useState(false);
   const [txCoords, setTxCoords] = useState<MenuCoords | null>(null);
   const navRef = useRef<HTMLElement>(null);
+  // La barre d'onglets déborde sur mobile : elle défile bien, mais rien ne
+  // l'indiquait. On estompe le bord uniquement du côté où il reste des onglets
+  // à atteindre — pas de fondu quand tout tient à l'écran.
+  const [navEdges, setNavEdges] = useState({ left: false, right: false });
+
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+    const update = () => {
+      const left = el.scrollLeft > 4;
+      const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 4;
+      setNavEdges((prev) =>
+        prev.left === left && prev.right === right ? prev : { left, right }
+      );
+    };
+    // Mesure initiale hors du corps de l'effet : un setState synchrone ici
+    // déclencherait le rendu en cascade que la règle React interdit.
+    const raf = requestAnimationFrame(update);
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      cancelAnimationFrame(raf);
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, []);
+
+  const navMask =
+    navEdges.left && navEdges.right
+      ? "linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%)"
+      : navEdges.right
+        ? "linear-gradient(to right, #000 calc(100% - 24px), transparent 100%)"
+        : navEdges.left
+          ? "linear-gradient(to right, transparent 0, #000 24px)"
+          : undefined;
+
   const groupBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const groupMenuRef = useRef<HTMLDivElement>(null);
   const txRef = useRef<HTMLDivElement>(null);
@@ -443,6 +480,8 @@ export function AppHeader({
         )}
         aria-label="Navigation principale"
         data-testid="primary-nav"
+        data-nav-overflow={navEdges.right ? "right" : navEdges.left ? "left" : "none"}
+        style={navMask ? { maskImage: navMask, WebkitMaskImage: navMask } : undefined}
       >
         {NAV_GROUPS.map((group) => {
           const single = group.items.length === 1;
