@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { LayoutGrid, PieChart as PieIcon } from "lucide-react";
-import { CHART_COLORS } from "@/app/lib/types/ui";
+import { CHART_COLORS, readableInkOn } from "@/app/lib/types/ui";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import {
   EmptyPlaceholder,
@@ -236,13 +236,21 @@ function AllocationTiles({
         const showPct = pxH >= 24 && pxW >= 52;
         const showName = fitsName(t);
         const rowMode = pxH < 48;
+        const ink = readableInkOn(t.color);
+        // L'ombre portée ne sert qu'à décoller le texte clair d'un aplat vif ;
+        // sur encre foncée elle salit le rendu.
+        const textShadow =
+          ink === "#ffffff" ? "0 1px 2px rgba(0,0,0,0.55)" : "none";
 
         return (
           <div
             key={t.name}
             title={`${t.name} · ${t.pct.toFixed(1)} % · ${t.amountLabel}`}
-            className="absolute box-border overflow-hidden text-white transition-[filter] duration-150 hover:brightness-110"
+            className="absolute box-border overflow-hidden transition-[filter] duration-150 hover:brightness-110"
             style={{
+              // Encre choisie selon la tuile : le blanc systématique passait
+              // sous 4.5:1 sur l'ambre et le bleu de la palette.
+              color: ink,
               left: `${t.x * 100}%`,
               top: `${t.y * 100}%`,
               width: `${t.w * 100}%`,
@@ -263,7 +271,7 @@ function AllocationTiles({
                 className="min-w-0 font-semibold leading-tight"
                 style={{
                   fontSize: nameFs,
-                  textShadow: "0 1px 2px rgba(0,0,0,0.55)",
+                  textShadow,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -275,7 +283,7 @@ function AllocationTiles({
             )}
             <div
               className="min-w-0 shrink-0"
-              style={{ textShadow: "0 1px 2px rgba(0,0,0,0.55)" }}
+              style={{ textShadow }}
             >
               {showPct && (
                 <div

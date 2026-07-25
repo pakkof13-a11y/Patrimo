@@ -676,7 +676,7 @@ export function PreferencesPanel({
           isFab
             ? cn(
                 "relative h-11 w-11 overflow-hidden rounded-full p-0 shadow-lg",
-                "bg-[var(--primary)] text-white hover:opacity-95",
+                "bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-95",
                 open && "ring-2 ring-teal-500/40 ring-offset-2"
               )
             : cn(

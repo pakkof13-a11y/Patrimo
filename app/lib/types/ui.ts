@@ -294,4 +294,41 @@ export const TAB_STORAGE_KEY = "patrimo.mainTab";
 
 export const HOLDINGS_PAGE_SIZE = 40;
 export const CHART_COLORS = ["#0f766e", "#0284c7", "#7c3aed", "#d97706", "#be123c", "#475569"];
+
+/** Luminance relative WCAG d'une couleur `#rrggbb`. */
+function relativeLuminance(hex: string): number {
+  const h = hex.replace("#", "");
+  const full =
+    h.length === 3
+      ? h
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : h;
+  const chan = (i: number) => {
+    const v = parseInt(full.slice(i * 2, i * 2 + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * chan(0) + 0.7152 * chan(1) + 0.0722 * chan(2);
+}
+
+function contrastWith(hex: string, luminance: number): number {
+  const l = relativeLuminance(hex);
+  const [hi, lo] = l > luminance ? [l, luminance] : [luminance, l];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * Couleur de texte lisible sur un aplat de la palette graphique.
+ *
+ * Le blanc systématique tombait sous le seuil WCAG AA (4.5:1) sur les teintes
+ * claires de la palette — 3.19:1 sur l'ambre `#d97706`, 4.1:1 sur le bleu
+ * `#0284c7`. On retient donc, entre blanc et encre foncée, celle qui contraste
+ * le mieux avec le fond ; le calcul suit la palette si elle évolue.
+ */
+export function readableInkOn(background: string): "#ffffff" | "#0b1220" {
+  const white = contrastWith("#ffffff", relativeLuminance(background));
+  const ink = contrastWith("#0b1220", relativeLuminance(background));
+  return ink > white ? "#0b1220" : "#ffffff";
+}
 export const EMPTY_HOLDINGS: Holding[] = [];

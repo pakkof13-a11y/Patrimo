@@ -128,7 +128,7 @@ export function HeaderAccountMenu({
             className="h-5 w-5 shrink-0 rounded-full object-cover"
           />
         ) : (
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-[9px] font-bold text-white">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-[9px] font-bold text-[var(--primary-foreground)]">
             {initials}
           </span>
         )}
@@ -168,7 +168,7 @@ export function HeaderAccountMenu({
                   className="h-10 w-10 shrink-0 rounded-full object-cover"
                 />
               ) : (
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-sm font-bold text-white">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-sm font-bold text-[var(--primary-foreground)]">
                   {initials}
                 </span>
               )}
