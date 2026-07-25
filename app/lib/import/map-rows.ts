@@ -568,8 +568,15 @@ export function mapCsvToDrafts(
         unitPrice = unitPrice ?? 0;
         cashAmount = null;
         if (formatId !== "ledger_live") {
+          // Le libellé doit énoncer la conséquence : une réception est importée
+          // avec un coût d'acquisition nul. C'est exact pour un staking / airdrop,
+          // mais faux pour un transfert d'actifs déjà détenus — auquel cas la
+          // position afficherait 100 % de plus-value et gonflerait l'estimation
+          // fiscale à la revente. L'utilisateur doit pouvoir trancher.
           warnings.push(
-            "Réception crypto → Staking / reward (entrée de quantité, hors apport cash)"
+            "Réception crypto → coût d'acquisition 0 (staking / reward). " +
+              "S'il s'agit d'un transfert d'actifs déjà détenus, corrigez le prix " +
+              "de revient : sinon la revente comptera 100 % de plus-value."
           );
         }
       }

@@ -41,7 +41,9 @@ describe("Nexo Parser", () => {
 
     expect(result.transactions).toHaveLength(1);
     const tx = result.transactions[0];
-    expect(tx?.type).toBe("BUY");
+    // Revenu, pas une acquisition : l'aperçu doit annoncer le même sens que le
+    // commit (qui classe la ligne en INTERET), pas « Achat ».
+    expect(tx?.type).toBe("DIVIDEND");
     expect(tx?.ticker).toBe("USDT");
     expect(tx?.quantity).toBe(0.48399900);
     expect(tx?.currency).toBe("USD");
