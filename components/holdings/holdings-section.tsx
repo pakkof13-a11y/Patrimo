@@ -633,7 +633,10 @@ export function HoldingsSection({
       {
         accessorKey: "unrealizedPnlBase",
         id: "unrealizedPnlBase",
-        header: "P&L latent (€)",
+        // Unité placée avant « latent » : tronqués, « P&L latent (€) » et
+        // « P&L latent (%) » donnaient tous deux « P&L LAT… » — deux colonnes
+        // voisines impossibles à distinguer sans survoler chaque en-tête.
+        header: "P&L € latent",
         cell: ({ row }) => (
           <span className={cn("tabular-nums font-medium", getChangeColor(row.original.unrealizedPnlBase))}>
             {formatCurrency(
@@ -646,7 +649,7 @@ export function HoldingsSection({
       {
         accessorKey: "unrealizedPnlPct",
         id: "unrealizedPnlPct",
-        header: "P&L latent (%)",
+        header: "P&L % latent",
         cell: ({ row }) => (
           <span className={cn("tabular-nums", getChangeColor(row.original.unrealizedPnlPct))}>
             {formatPercent(row.original.unrealizedPnlPct)}

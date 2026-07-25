@@ -135,14 +135,14 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
   },
   {
     id: "unrealizedPnlBase",
-    label: "P&L latent (€)",
+    label: "P&L € latent",
     group: "mandatory",
     locked: true,
     minWidth: 110,
   },
   {
     id: "unrealizedPnlPct",
-    label: "P&L latent (%)",
+    label: "P&L % latent",
     group: "mandatory",
     locked: true,
     minWidth: 100,
