@@ -478,3 +478,93 @@ Par valeur décroissante :
    l'est pas.
 4. **Découper les 4 fichiers monolithiques**, en commençant par
    `import-csv-modal.tsx`, après avoir figé le comportement par des tests.
+
+---
+
+## 7. Suite — P&L journalier par classe d'actif (25 juillet)
+
+### 7.1 Le blocage levé
+
+L'audit avait laissé la vue « Décomposée / Périodique » en l'état, faute de
+données : l'historique du portefeuille est volontairement valorisé **au coût**
+(`buildHistoryFromOccurredAt` pose `unrealizedPnlBase: 0`), et `PriceHistory`
+n'enregistre qu'une capture spot à chaque rafraîchissement de cours — série
+creuse, irrégulière, et vide tant que l'utilisateur n'a lancé aucun refresh.
+Impossible, dans ces conditions, de dire ce que la journée a fait sur les
+actions par rapport aux cryptos.
+
+Quatre couches ont été ajoutées, chacune validée avant la suivante.
+
+**1. Cœur de calcul** (`app/lib/portfolio/class-history.ts`) — pur, sans Prisma
+ni réseau. La définition retenue du P&L journalier neutralise les flux :
+
+```
+P&L(jour, classe) = Σ actifs [ q_j × close_j − q_{j-1} × close_{j-1} − flux_j ]
+                    + revenus_j
+```
+
+Une simple différence de valeur de marché aurait été fausse : acheter 10 k€
+d'actions un mardi serait apparu comme un gain de 10 k€. Les revenus encaissés
+sont rattachés à la classe de l'actif payeur, sans quoi un détachement de
+dividende se lirait comme une perte sèche.
+
+**2. Extraction depuis le journal** — les conventions suivent exactement
+`applyTransaction` : frais capitalisés à l'achat comme le fait `applyBuy`,
+produit net de frais à la vente, revenus nets de retenue à la source. Un test
+recoupe le flux d'achat contre le coût de revient que le ledger inscrit
+réellement, pour que les deux ne puissent pas diverger en silence. Les
+réceptions gratuites (REWARD / AIRDROP) portent un flux nul : rien n'a été
+dépensé, la valeur qui apparaît est bien un revenu en nature.
+
+Les quantités viennent du **rejeu** du ledger, seule source de vérité pour
+l'état des positions — une somme de quantités signées serait fausse dès le
+premier split (test dédié).
+
+**3. Cache de clôtures** (`AssetDailyClose`, migration
+`20260725120000_asset_daily_close`) — un point régulier par jour civil, alimenté
+depuis les fournisseurs déjà utilisés par les graphiques de cours. C'est un
+cache et rien d'autre : le vider ne perd aucune donnée, les transactions restent
+la source de vérité. Le remplissage est best effort et ne remonte jamais
+d'erreur. Les séries `mock` sont refusées à l'écriture : ce qui évite un
+graphique vide à l'écran deviendrait ici un P&L inventé présenté comme réel.
+
+**4. Branchement UI** — servi par sa propre route `/api/portfolio/class-pnl`,
+et non replié dans `getPortfolioHistory` : le remplissage du cache peut appeler
+des fournisseurs, et le dashboard ne doit pas payer ce coût pour un panneau que
+l'utilisateur n'ouvrira peut-être pas. La requête ne part qu'en vue décomposée
+périodique. Les jours sont reventilés sur l'intervalle affiché (le P&L est un
+flux, les buckets se somment). La décomposition comptable reste le repli quand
+les cours journaliers manquent — un découpage exact vaut mieux qu'un découpage
+parlant et faux.
+
+### 7.2 Défaut de palette corrigé
+
+« Obligations » (ardoise) et « Autre » (gris) se retrouvaient côte à côte dans
+la même pile de colonnes à **dE 18,2** — sous le seuil où l'œil sépare deux
+teintes de façon fiable sur de petits aplats. Obligations passe au cyan sur les
+graphiques (dE 28,3, plus aucune paire rapprochée). Un test verrouille la
+contrainte sur l'ensemble de la palette plutôt qu'un commentaire.
+
+### 7.3 Vérifications
+
+Mesuré dans l'application réelle à 1440 px, cache amorcé :
+
+- 5 classes empilées, légende en clair (« Actions / ETF », « Cryptomonnaies »…) ;
+- colonnes centrées sur leur repère, largeur 26 px pour un pas de 78 px entre
+  jours — **aucun débordement** sur le jour voisin ;
+- reventilation hebdomadaire correcte sur 1M (25 segments / 5 semaines) ;
+- chaîne serveur complète en 135 ms sur 30 actifs et 10 jours ;
+- cas cible reproduit de bout en bout sur la vraie base : **−21 k€ actions,
+  +30 k€ cryptos** le même jour.
+
+Portes : **639 tests**, lint, typecheck, build — tous verts.
+
+### 7.4 Limite assumée
+
+L'appel fournisseur lui-même (`fillDailyCloses` → Yahoo / CoinGecko) **n'a pas
+pu être exécuté** : la politique réseau de l'environnement de développement
+refuse `query2.finance.yahoo.com` (403 au proxy). Tout le reste du chemin a été
+vérifié en amorçant le cache directement. Le code de fetch réutilise la cascade
+`getAssetPriceHistory` déjà en production pour les graphiques de cours, mais
+cette étape précise reste à confirmer sur un environnement disposant d'un accès
+sortant.
