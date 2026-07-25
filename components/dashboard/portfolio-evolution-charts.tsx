@@ -652,10 +652,22 @@ export function DecomposedPeriodChart({
     );
   }
 
-  // Colonnes côte à côte (pas stack) — 0 au milieu, signe via teinte
+  // Colonnes empilées par signe — 0 au milieu, positifs au-dessus / négatifs en dessous
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+      {/*
+        `stackOffset="sign"` est indispensable : l'empilement par défaut somme
+        les valeurs signées, donc un Δ Cash de −178 k venait s'annuler avec les
+        Δ positifs et disparaissait du graphe (les rectangles se superposaient
+        sur une hauteur nette). Avec "sign", les positifs s'empilent au-dessus de
+        zéro et les négatifs en dessous : chaque composante reste visible et la
+        lecture du signe est immédiate.
+      */}
+      <BarChart
+        data={data}
+        margin={{ top: 8, right: 8, left: 0, bottom: 4 }}
+        stackOffset="sign"
+      >
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
         <XAxis
           dataKey="label"
@@ -682,33 +694,30 @@ export function DecomposedPeriodChart({
           )}
         />
         <Legend wrapperStyle={{ fontSize: 11 }} iconSize={8} />
+        {/*
+          Colonnes **empilées**, et non côte à côte.
+          Auparavant chaque critère avait sa propre colonne : jusqu'à 7 barres
+          par jour, groupe forcément décalé du repère et largeur qui s'effondrait
+          à 1 px dès 3 mois (7 séries dans une bande de 110 px) — les barres
+          devenaient des filets illisibles et débordaient sur le jour voisin.
+
+          L'empilement rétablit une colonne unique par jour, centrée sur son
+          repère par construction et de largeur indépendante du nombre de
+          critères. C'est aussi le bon encodage pour une décomposition de P&L :
+          les segments s'additionnent à la variation du jour. Recharts empile les
+          valeurs positives au-dessus de zéro et les négatives en dessous, donc
+          le signe reste lisible sans recolorier chaque cellule.
+        */}
         {series.map((s) => (
           <Bar
             key={s.key}
             dataKey={s.key}
             name={s.name}
             fill={s.color}
-            maxBarSize={18}
-            radius={[2, 2, 0, 0]}
-          >
-            {data.map((entry, i) => {
-              const raw = Number(
-                (entry as Record<string, unknown>)[s.key] ?? 0
-              );
-              const up = raw >= 0;
-              return (
-                <Cell
-                  key={i}
-                  fill={
-                    up
-                      ? s.color
-                      : EVOLUTION_CHART_COLORS.neg
-                  }
-                  fillOpacity={up ? 0.9 : 0.85}
-                />
-              );
-            })}
-          </Bar>
+            stackId="pnl"
+            maxBarSize={26}
+            fillOpacity={0.9}
+          />
         ))}
       </BarChart>
     </ResponsiveContainer>
