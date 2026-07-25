@@ -1,14 +1,16 @@
 import type { AssetMeta, MarketDataProvider, PriceQuoteResult } from "./types";
-import { finnhubProvider } from "./providers/finnhub";
+import { finnhubProvider, hasFinnhubApiKey } from "./providers/finnhub";
 import { yahooProvider } from "./providers/yahoo";
 import { coingeckoProvider } from "./providers/coingecko";
 import { binanceProvider, isBinanceSupported } from "./providers/binance-ws";
 import { manualProvider } from "./providers/manual";
 
-function hasFinnhubKey(): boolean {
-  const key = (process.env.FINNHUB_API_KEY || "").trim().replace(/^["']|["']$/g, "");
-  return Boolean(key && key !== "demo" && key !== "votre-cle-finnhub");
-}
+/**
+ * Présence d'une clé Finnhub exploitable — délégué au provider, qui applique la
+ * même normalisation (guillemets, valeurs de gabarit) que l'appel réel. Deux
+ * implémentations de ce test finissaient toujours par diverger.
+ */
+const hasFinnhubKey = hasFinnhubApiKey;
 
 /**
  * Stocks: Finnhub (if key) then Yahoo — or Yahoo first when no key.
