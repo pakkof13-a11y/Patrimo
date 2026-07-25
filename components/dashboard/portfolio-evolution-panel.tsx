@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/app/lib/api-client";
 import {
+  bucketKey,
   buildEvolutionSeries,
   evolutionDeltaSummary,
   evolutionIntervalHint,
@@ -44,12 +45,20 @@ import {
   type MarketIndexKey,
 } from "@/app/lib/portfolio/market-indices";
 
+/** Réponse de `/api/portfolio/class-pnl` (P&L journalier par classe d'actif). */
+type ClassPnlResponse = {
+  points: { day: string; pnlByClass: Record<string, number> }[];
+  classes: string[];
+  estimated: boolean;
+};
+
 const emptySubscribe = () => () => undefined;
 
 function useIsClient() {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
 }
 import {
+  classPnlKey,
   DecomposedCumulAreas,
   DecomposedCumulColumns,
   DecomposedPeriodChart,
@@ -326,6 +335,57 @@ export function PortfolioEvolutionPanel({
   const empty = !loading && history.length === 0;
   const noPoints = !loading && !empty && points.length === 0;
 
+  // P&L par classe d'actif — uniquement en décomposée périodique, la seule vue
+  // qui l'affiche. Le calcul peut déclencher des appels fournisseurs côté
+  // serveur pour compléter le cache de cours : on ne le demande donc pas tant
+  // que l'utilisateur n'a pas ouvert cette vue.
+  const wantClassPnl = view === "decomposed" && metric === "period";
+  const classPnlQ = useQuery({
+    queryKey: ["class-pnl", range],
+    enabled: wantClassPnl && !empty,
+    staleTime: 15 * 60_000,
+    queryFn: () =>
+      fetchJson<ClassPnlResponse>(`/api/portfolio/class-pnl?range=${range}`),
+  });
+
+  /**
+   * Reventile le P&L journalier par classe sur les points affichés, qui peuvent
+   * être hebdomadaires ou mensuels : chaque point reçoit la **somme** des jours
+   * de son bucket, le P&L étant un flux.
+   */
+  const classPoints = useMemo(() => {
+    const daily = classPnlQ.data?.points;
+    if (!wantClassPnl || !daily?.length || points.length === 0) return points;
+
+    const interval = points[0]!.intervalType;
+    const byBucket = new Map<string, Record<string, number>>();
+    for (const day of daily) {
+      const key = bucketKey(`${day.day}T12:00:00Z`, interval);
+      const acc = byBucket.get(key) ?? {};
+      for (const [cls, v] of Object.entries(day.pnlByClass)) {
+        acc[cls] = (acc[cls] ?? 0) + v;
+      }
+      byBucket.set(key, acc);
+    }
+
+    return points.map((p) => {
+      const acc = byBucket.get(bucketKey(p.date, interval));
+      if (!acc) return p;
+      const merged: Record<string, unknown> = { ...p };
+      for (const [cls, v] of Object.entries(acc)) {
+        merged[classPnlKey(cls)] = v;
+      }
+      return merged as typeof p;
+    });
+  }, [points, classPnlQ.data, wantClassPnl]);
+
+  const classNames = useMemo(() => {
+    if (!wantClassPnl) return undefined;
+    const list = classPnlQ.data?.classes;
+    return list?.length ? list : undefined;
+  }, [classPnlQ.data, wantClassPnl]);
+
+
   const showBenchmark =
     view === "global" && activeBenchmark !== "none";
 
@@ -578,9 +638,10 @@ export function PortfolioEvolutionPanel({
           )
         ) : view === "decomposed" && metric === "period" ? (
           <DecomposedPeriodChart
-            data={points}
+            data={classPoints}
             baseCurrency={baseCurrency}
             style={style}
+            classes={classNames}
           />
         ) : metric === "period" ? (
           style === "line" ? (
@@ -607,8 +668,14 @@ export function PortfolioEvolutionPanel({
       </div>
 
       {view === "decomposed" && !empty && points.length > 0 && (
-        <p className="text-meta mt-2 shrink-0">
-          Revenus du journal · dividendes, coupons, loyers
+        <p className="text-meta mt-2 shrink-0" data-testid="evolution-decomposed-note">
+          {classNames
+            ? `P&L par classe d'actif · valorisation au cours de clôture, flux neutralisés${
+                classPnlQ.data?.estimated
+                  ? " · estimé (cours manquants sur certains jours)"
+                  : ""
+              }`
+            : "Revenus du journal · dividendes, coupons, loyers"}
         </p>
       )}
       {showBenchmark && (

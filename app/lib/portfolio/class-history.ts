@@ -46,6 +46,7 @@
 
 import { parisDayKey } from "../dates/paris";
 import { toEur } from "../accounting/fx";
+import { applyTransaction, createEmptyLedger } from "../accounting/ledger";
 import type { LedgerTx } from "../accounting/types";
 import { d, zero, type Decimal } from "../money/decimal";
 
@@ -189,6 +190,63 @@ export function buildClassDailyPnl(
     });
 
     prevValueByAsset = valueByAsset;
+  }
+
+  return out;
+}
+
+/**
+ * Rejoue le journal jour par jour et relève, à chaque clôture, la quantité
+ * détenue par actif (toutes plateformes confondues).
+ *
+ * Le rejeu est la seule source de vérité pour l'état des positions : il porte
+ * les splits, les transferts entre plateformes et les ventes bornées. Le
+ * reconstruire depuis une simple somme de quantités signées serait faux dès le
+ * premier split.
+ *
+ * `days` doit être trié et couvrir la fenêtre voulue ; les transactions
+ * antérieures au premier jour sont appliquées d'abord, pour que la fenêtre
+ * démarre sur l'état réel du portefeuille et non sur un portefeuille vide.
+ */
+export function buildDailyQuantities(
+  txs: LedgerTx[],
+  days: DayKey[]
+): Map<DayKey, Record<string, number>> {
+  const out = new Map<DayKey, Record<string, number>>();
+  if (days.length === 0) return out;
+
+  const sorted = [...txs].sort((a, b) => {
+    const t = a.occurredAt.getTime() - b.occurredAt.getTime();
+    return t !== 0 ? t : a.id.localeCompare(b.id);
+  });
+
+  const state = createEmptyLedger();
+  let cursor = 0;
+
+  for (const day of days) {
+    while (cursor < sorted.length) {
+      const tx = sorted[cursor]!;
+      if (parisDayKey(tx.occurredAt) > day) break;
+      try {
+        applyTransaction(state, tx);
+      } catch {
+        // Même tolérance que la reconstruction de la courbe de patrimoine :
+        // un journal importé peut être localement incohérent, on ne veut pas
+        // perdre tout l'historique pour autant.
+        applyTransaction(state, tx, {
+          allowNegativeCash: true,
+          clampOversell: true,
+        });
+      }
+      cursor += 1;
+    }
+
+    // Positions agrégées par actif : le P&L par classe ignore la plateforme.
+    const byAsset = new Map<string, Decimal>();
+    for (const pos of state.positions.values()) {
+      addTo(byAsset, pos.assetId, pos.quantity);
+    }
+    out.set(day, toRecord(byAsset));
   }
 
   return out;

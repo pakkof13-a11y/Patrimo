@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDailyFlows,
+  buildDailyQuantities,
   txAssetImpact,
 } from "@/app/lib/portfolio/class-history";
 import { applyTransaction, createEmptyLedger } from "@/app/lib/accounting/ledger";
@@ -181,5 +182,70 @@ describe("buildDailyFlows", () => {
       tx({ type: "APPORT", assetId: null }),
     ]);
     expect(flows.size).toBe(0);
+  });
+});
+
+describe("buildDailyQuantities", () => {
+  const day = (n: number) => new Date(`2026-03-${String(n).padStart(2, "0")}T10:00:00Z`);
+
+  it("relève la quantité détenue à la clôture de chaque jour", () => {
+    const q = buildDailyQuantities(
+      [
+        tx({ type: "ACHAT", quantity: 10, unitPrice: 100, occurredAt: day(10) }),
+        tx({ type: "ACHAT", quantity: 5, unitPrice: 110, occurredAt: day(12) }),
+      ],
+      ["2026-03-10", "2026-03-11", "2026-03-12"]
+    );
+    expect(q.get("2026-03-10")).toEqual({ AAPL: 10 });
+    // Jour sans opération : la position est reportée, pas oubliée
+    expect(q.get("2026-03-11")).toEqual({ AAPL: 10 });
+    expect(q.get("2026-03-12")).toEqual({ AAPL: 15 });
+  });
+
+  it("applique les splits — une somme de quantités signées serait fausse", () => {
+    const q = buildDailyQuantities(
+      [
+        tx({ type: "ACHAT", quantity: 10, unitPrice: 100, occurredAt: day(10) }),
+        tx({ type: "SPLIT", quantity: 4, occurredAt: day(11) }),
+      ],
+      ["2026-03-10", "2026-03-11"]
+    );
+    expect(q.get("2026-03-11")).toEqual({ AAPL: 40 });
+  });
+
+  it("agrège les plateformes : un transfert de titres est neutre", () => {
+    const q = buildDailyQuantities(
+      [
+        tx({ type: "ACHAT", quantity: 10, unitPrice: 100, occurredAt: day(10) }),
+        tx({
+          type: "TRANSFERT_TITRE",
+          quantity: 4,
+          platformId: "pf-1",
+          toPlatformId: "pf-2",
+          occurredAt: day(11),
+        }),
+      ],
+      ["2026-03-10", "2026-03-11"]
+    );
+    expect(q.get("2026-03-11")).toEqual({ AAPL: 10 });
+  });
+
+  it("part de l'état réel quand la fenêtre s'ouvre après les premiers achats", () => {
+    const q = buildDailyQuantities(
+      [tx({ type: "ACHAT", quantity: 7, unitPrice: 100, occurredAt: day(1) })],
+      ["2026-03-10"]
+    );
+    expect(q.get("2026-03-10")).toEqual({ AAPL: 7 });
+  });
+
+  it("solde la position après une vente totale", () => {
+    const q = buildDailyQuantities(
+      [
+        tx({ type: "ACHAT", quantity: 10, unitPrice: 100, occurredAt: day(10) }),
+        tx({ type: "VENTE", quantity: 10, unitPrice: 120, occurredAt: day(11) }),
+      ],
+      ["2026-03-10", "2026-03-11"]
+    );
+    expect(q.get("2026-03-11")).toEqual({});
   });
 });

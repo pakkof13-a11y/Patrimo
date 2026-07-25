@@ -21,6 +21,10 @@ import {
   ReferenceLine,
 } from "recharts";
 import { formatCurrency } from "@/app/lib/utils";
+import {
+  assetClassChartColor,
+  assetClassLabel,
+} from "@/app/lib/constants";
 import type {
   EvolutionChartStyle,
   EvolutionSeriesPoint,
@@ -562,14 +566,33 @@ export function DecomposedCumulColumns({
   );
 }
 
+/** Préfixe des clés de P&L par classe injectées dans les points du graphique. */
+export const CLASS_PNL_KEY_PREFIX = "cls_";
+
+export function classPnlKey(assetClass: string): string {
+  return `${CLASS_PNL_KEY_PREFIX}${assetClass}`;
+}
+
 export function DecomposedPeriodChart({
   data,
   baseCurrency,
   style,
+  /**
+   * Classes d'actifs à empiler, par poids décroissant. Quand elle est fournie,
+   * la décomposition se fait **par classe** (« −21 k actions, +30 k cryptos »)
+   * plutôt que par contributeur comptable (Δ positions / Δ cash / Δ réalisé).
+   *
+   * C'est la lecture que demande un tableau de bord patrimonial : savoir *où*
+   * la journée s'est jouée. La décomposition comptable reste le repli quand
+   * les cours journaliers manquent — mieux vaut un découpage exact et moins
+   * parlant qu'un découpage parlant et faux.
+   */
+  classes,
 }: {
   data: EvolutionSeriesPoint[];
   baseCurrency: string;
   style: EvolutionChartStyle;
+  classes?: string[];
 }) {
   const hasSplit = data.some(
     (p) =>
@@ -578,8 +601,14 @@ export function DecomposedPeriodChart({
       Math.abs(p.dRents) > 0.01
   );
 
+  const byClass = (classes ?? []).map((cls) => ({
+    key: classPnlKey(cls),
+    name: assetClassLabel(cls),
+    color: assetClassChartColor(cls),
+  }));
+
   // Latente en premier (centrée sur le repère jour), puis les autres critères
-  const series = [
+  const accountingSeries = [
     { key: "dUnrealized", name: "Δ Latente", color: EVOLUTION_CHART_COLORS.unrealized },
     { key: "dPositions", name: "Δ Positions", color: EVOLUTION_CHART_COLORS.positions },
     { key: "dCash", name: "Δ Cash", color: EVOLUTION_CHART_COLORS.cash },
@@ -591,7 +620,9 @@ export function DecomposedPeriodChart({
         ]
       : [{ key: "dIncome", name: "Δ Revenus", color: EVOLUTION_CHART_COLORS.dividends }]),
     { key: "dRealized", name: "Δ Réalisé", color: EVOLUTION_CHART_COLORS.realized },
-  ] as const;
+  ];
+
+  const series = byClass.length > 0 ? byClass : accountingSeries;
 
   const yDomain = symmetricZeroDomain(
     data.flatMap((p) =>
