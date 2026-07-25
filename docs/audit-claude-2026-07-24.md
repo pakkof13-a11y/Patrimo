@@ -26,6 +26,8 @@ ce qui **n'a pas** été audité dans cette passe.
 | Conventions de signe à l'import | Vérifié bout en bout (qty, frais, prix) | ❌ Frais négatifs corrigés |
 | Sémantique métier des adaptateurs | Nexo complet · HL/Paradex partiel | ❌ Aperçu ≠ commit corrigé |
 | UX / UI — dashboard, positions, mobile | Constaté sur l'app réelle (captures) | ❌ 3 défauts corrigés |
+| Contraste WCAG AA — clair et sombre | Mesuré sur tous les textes du dashboard | ❌ 5 échecs corrigés → 0 |
+| Nav mobile · onboarding compte vierge | Parcourus sur l'app réelle | ❌ 1 défaut corrigé · onboarding sain |
 | **Non audité** | — | Voir §5 |
 
 ---
@@ -235,6 +237,51 @@ du pourcentage sans survoler chaque en-tête, et impossible tout court au
 tactile. L'unité passe avant « latent » pour survivre à la troncature à
 n'importe quelle largeur de colonne.
 
+### Contraste : 5 paires sous le seuil AA
+
+Mesuré au ratio WCAG sur chaque nœud de texte du dashboard, en thème clair et
+sombre — pas à l'œil.
+
+| Texte | Fond | Ratio | Seuil |
+|---|---|---|---|
+| Tuiles « Cryptomonnaies », « 6.2 % » | ambre `#d97706` | 3,19 | 4,5 |
+| Tuiles « Actions / ETF », « 27.9 % », montant | bleu `#0284c7` | 4,10 | 4,5 |
+| Initiales d'avatar (sombre uniquement) | `--primary` teal | **1,86** | 4,5 |
+
+La mosaïque écrivait en blanc sur **toutes** les teintes. `readableInkOn()`
+choisit désormais, entre blanc et encre foncée, celle qui contraste le mieux
+avec l'aplat : le calcul suit la palette si elle évolue, et l'ombre portée n'est
+conservée que là où l'encre est claire.
+
+Les initiales d'avatar utilisaient `text-white` en dur sur `--primary`, or
+`--primary` est un teal **clair** en thème sombre. Le design system définissait
+déjà `--primary-foreground` correctement apparié par thème (`#ffffff` /
+`#042f2e`) — les composants le contournaient simplement.
+
+Après correctif : **0 violation** dans les deux thèmes.
+
+### Barre d'onglets mobile : défilement sans affordance
+
+625 px d'onglets dans 367 px de large. La nav défile bien
+(`overflow-x-auto`), mais rien ne l'indiquait : le dernier onglet était
+simplement coupé. Le bord s'estompe maintenant du côté où il reste des onglets
+à atteindre, et pas du tout quand tout tient. `navRef` était déclaré et
+inutilisé — il sert désormais à la mesure.
+
+---
+
+## 2 ter. Parcours vérifiés et jugés sains
+
+- **Onboarding d'un compte vierge.** Testé sur un utilisateur créé sans aucune
+  donnée : parcours guidé en 3 étapes (Plateforme → Journal → Positions), barre
+  de progression, CTA principal explicite, étapes suivantes verrouillées tant
+  que la précédente n'est pas faite, et le principe métier énoncé d'emblée
+  (« Les transactions sont la source de vérité »). **Aucun correctif** — c'est
+  déjà de bonne facture. Seule réserve, non traitée : beaucoup d'espace vide
+  sous la carte sur un écran large.
+- **Thème sombre.** Appliqué correctement (`html.dark`, fonds et surfaces
+  cohérents). Les seuls défauts étaient les contrastes ci-dessus.
+
 ---
 
 ## 3. Points vérifiés et jugés sains
@@ -299,8 +346,9 @@ savoir pour ne pas les ré-auditer :
   Épargne salariale / Alternatifs / Passifs.
 - Design system : cohérence des espacements, typographie, densité, dark mode
   (les captures ont été prises en thème clair uniquement).
-- Le débordement horizontal de la barre d'onglets sur mobile (nav coupée à
-  droite sans affordance de défilement) est **constaté mais non corrigé**.
+- Contraste vérifié sur le **dashboard** uniquement : les autres onglets
+  (Positions, Transactions, modules métier) n'ont pas été mesurés.
+- Espace vide sous la carte d'onboarding sur grand écran : constaté, non traité.
 - Suite e2e Playwright — exécutée par la CI, non analysée.
 
 ---
