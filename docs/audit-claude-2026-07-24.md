@@ -363,6 +363,29 @@ jamais masquer une provenance.
 Contraste re-mesuré après l'ajout du fond teinté : toujours **0 violation**
 WCAG AA dans les deux thèmes.
 
+### Tableau Positions : en-têtes et noms coupés
+
+Six en-têtes sur dix étaient tronqués à 1440 px. Le tableau tient pourtant dans
+son conteneur (1288 px pour 1289 px) : ce sont les **libellés** qui débordaient
+de leur emplacement, pas les colonnes qui manquaient de place. Raccourcis à ce
+que le contexte rend déjà non ambigu — *Cours, Qté, Enveloppe, Valeur, P&L %,
+P&L €* — le libellé complet restant dans l'infobulle et le sélecteur de
+colonnes, qui ont la place. La devise quitte l'en-tête « Valeur » puisque
+chaque cellule porte déjà le symbole. Mesuré après : **10 sur 10 propres**.
+
+Les noms d'actifs, eux, étaient coupés en plein mot **sans ellipse**
+(« Appartement Loca »), ce qui se lit comme un bug. La ligne flex n'avait pas
+de `min-w-0`, donc la colonne de texte refusait de rétrécir sous sa largeur de
+contenu et la cellule la rognait. Corrigé avec `truncate` et le nom complet au
+survol.
+
+### Carte d'onboarding isolée en haut de page
+
+En maturité `empty` / `setup`, `dashboardBlocksFor` désactive tous les autres
+blocs : la carte d'activation reste seule, suivie de plusieurs centaines de
+pixels vides. Centrée verticalement dans ce seul cas. Vérifié sur un compte
+réellement vierge et sur un compte actif (aucune classe ajoutée).
+
 ---
 
 ## 3. Points vérifiés et jugés sains
@@ -386,6 +409,11 @@ savoir pour ne pas les ré-auditer :
   reliés d'après une capture basse résolution ; vérification faite au zoom, la
   ligne est correctement tracée. Le palier suivi d'un saut vient des données de
   seed (prix rafraîchis le jour même), pas du rendu.
+- **Transitions des graphiques.** Supposées inexistantes lors d'un changement
+  de plage ; mesure faite, le tracé est bien interpolé (6 valeurs de `path`
+  distinctes sur 720 ms) et aucun attribut `isAnimationActive` ne fuit dans le
+  DOM. Aucun correctif — la suggestion venait d'une impression, pas d'un
+  constat.
 - **Agrégats d'allocation en float.** `byClass` / `byPlatform` /
   `byAccountType` sont en `number`, mais alimentent des camemberts — les totaux
   patrimoniaux, eux, passent bien par Decimal. Pas de correctif nécessaire.
