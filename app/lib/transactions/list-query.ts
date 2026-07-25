@@ -177,11 +177,11 @@ export function buildTxListWhere(
 ): Prisma.TransactionWhereInput {
   const types = opts?.omitTypeFilter ? null : resolveTypeFilter(query);
 
-  const nftNot = nftExcludePrismaClause();
+  const nftExclude = nftExcludePrismaClause();
   const where: Prisma.TransactionWhereInput = {
     userId,
     // Vue principale : pas de NFT (toutes blockchains)
-    AND: [{ NOT: nftNot.NOT as Prisma.TransactionWhereInput[] }],
+    AND: nftExclude.AND as Prisma.TransactionWhereInput[],
   };
 
   if (types && types.length > 0) {

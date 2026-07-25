@@ -681,3 +681,92 @@ Portes : **739 tests**, lint, typecheck, build — tous verts.
   disponibles sur la base si un département réel se révèle lent — à mesurer,
   pas à ajouter par précaution.
 - **DVF+ (Cerema) non intégré** : conditions d'accès non vérifiables d'ici.
+
+---
+
+## 9. Vérification de bout en bout des transactions (25 juillet)
+
+### 9.1 Défaut majeur trouvé — le journal masquait 92 % des transactions
+
+`GET /api/transactions` ne renvoyait que **10 lignes sur 127** pour le compte de
+démonstration, **uniquement des APPORT**. Achats, ventes, dividendes, loyers :
+tous invisibles dans le journal, alors que la base les contenait bien.
+
+Cause : l'exclusion des NFT était écrite en `NOT [ … ]` sur des `contains`. En
+SQL, `NOT (colonne LIKE '%nft%')` vaut `UNKNOWN` quand la colonne est `NULL`, et
+un `WHERE` ne conserve que ce qui est **vrai**. Deux effets se cumulaient :
+
+- `NOT (notes LIKE …)` écartait toute transaction **sans notes** (127 → 115) ;
+- `NOT (asset.notes LIKE …)` — champ presque toujours vide — écartait **toute
+  transaction portant un actif** (127 → 15).
+
+Reste 10. Et zéro transaction NFT réelle dans le jeu de données : le filtre
+n'écartait que des faux positifs.
+
+**Correction** : la clause s'exprime désormais en `AND` de conditions déjà
+négatives, chacune gérant ses propres valeurs nulles (`notes IS NULL`,
+`assetId IS NULL`, `asset.notes IS NULL`). Trois pièges Prisma rencontrés au
+passage, chacun corrigé après mesure : `mode` doit être frère de `not` et non
+imbriqué ; une relation optionnelle exige `is:` explicite ; et `Asset.name`
+étant non nullable, lui appliquer un filtre `null` fait rejeter la requête
+entière.
+
+Mesuré après correction : **127/127 visibles**, les 13 types présents. Contrôle
+inverse — 6 transactions créées dont 4 marquées NFT (notes « OpenSea »,
+« ERC-721 », « metaplex », actif nommé « Bored Ape NFT ») : seules les 2
+normales apparaissent. Le filtre fait son travail sans emporter le reste.
+
+Verrouillé par 9 tests (`tests/unit/transactions/nft-filter-nulls.test.ts`) qui
+imposent qu'aucune condition ne puisse à nouveau perdre les valeurs nulles.
+
+### 9.2 Saisie manuelle — 40/40
+
+Banc `scripts/check-transactions-e2e.mjs`, tous types exercés via l'API :
+
+| Contrôle | Résultat |
+|---|---|
+| Type, quantité, prix, frais, date conservés à l'identique | conforme |
+| PRU intègre les frais d'achat (10 × 100 + 5 → 100,50) | conforme |
+| Second achat : **une seule ligne**, PRU recalculé 113,67 | conforme |
+| Vente partielle : quantité 15 → 9, **PRU inchangé** (CUMP) | conforme |
+| 13 types créés et relus avec le bon tag | conforme |
+| Split 2:1 : quantité doublée, coût de revient inchangé, PRU divisé par 2 | conforme |
+| REWARD + AIRDROP : quantité +3, **coût d'acquisition nul** | conforme |
+
+### 9.3 Import CSV — 13/13
+
+Banc `scripts/check-import-sync-e2e.mjs`, format français (point-virgule,
+décimales à la virgule, dates JJ/MM/AAAA) :
+
+- `20/02/2026` lu comme le 20 février, pas le 2 décembre ;
+- `120,50` et `2,50` lus comme 120,5 et 2,5 ;
+- ACHAT et VENTE correctement tagués ;
+- position préexistante **incrémentée** : 10 + 5 + 3 − 4 = 14 titres sur une
+  seule ligne, coût de revient 1 552,44 € exactement conforme au calcul CUMP ;
+- **import rejoué** : 3 lignes détectées comme doublons strictes, aucune
+  écriture créée.
+
+### 9.4 Synchronisation on-chain
+
+Le réseau étant bloqué dans cet environnement, la synchro RPC n'a pas pu être
+exécutée en direct. Le **mapping** a été éprouvé en injectant des transactions
+Solana en base, comme le ferait la sync, puis en appelant
+`writeOnchainTxsToLedger` :
+
+- une écriture au journal par transaction on-chain ;
+- date reprise du `blockTime`, **pas** de la date de synchronisation ;
+- réception gratuite taguée `REWARD`, actif classé `CRYPTO` ;
+- quantités fidèles aux montants on-chain (2,5 et 1,25 SOL) ;
+- rejeu **idempotent** : 2 doublons détectés, aucune écriture ;
+- position SOL existante **incrémentée** de 51,75 à 55,50, sur une seule ligne
+  agrégeant les deux plateformes, **sans augmentation du coût d'acquisition**
+  (réception gratuite).
+
+### 9.5 Point de conception confirmé, pas un défaut
+
+`getHoldings` agrège par actif **toutes plateformes confondues** et expose la
+liste dans `platformIds`. Un même titre détenu chez deux courtiers apparaît donc
+en une ligne — comportement voulu, vérifié explicitement.
+
+Portes : **748 tests**, lint, typecheck, build — tous verts. Données de test
+purgées, base de démonstration restaurée à ses 115 transactions d'origine.
