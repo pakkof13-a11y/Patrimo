@@ -147,9 +147,20 @@ export function DashboardTab({
     Boolean(onImport) &&
     Boolean(onAddTransaction);
 
+  // En maturité `empty` / `setup`, `dashboardBlocksFor` désactive tous les
+  // autres blocs : la carte d'activation est seule à l'écran et laissait
+  // plusieurs centaines de pixels vides en dessous, ce qui se lit comme une page
+  // inachevée plutôt que comme un point de départ. On la centre verticalement
+  // dans ce cas — `section-stack` est déjà un flex column, donc il suffit de la
+  // hauteur et de l'alignement.
+  const onboardingAlone = blocks.showOnboardingHero && canActivate;
+
   return (
     <div
-      className="section-stack"
+      className={cn(
+        "section-stack",
+        onboardingAlone && "min-h-[62vh] justify-center"
+      )}
       data-testid="dashboard-tab"
       data-maturity={maturity}
     >
