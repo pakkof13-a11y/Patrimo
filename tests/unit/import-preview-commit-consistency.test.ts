@@ -89,3 +89,42 @@ describe("réception crypto — l'avertissement énonce le coût nul", () => {
     expect(draft.status).toBe("warning");
   });
 });
+
+describe("convention de signe des frais", () => {
+  const H = "date,type,ticker,quantity,unit_price,fees";
+
+  it("un frais exporté en débit négatif reste un coût", () => {
+    // Convention courante (IBKR, Degiro…) : la commission est écrite « -1 ».
+    // Laissée négative, elle retranchait du coût de revient au lieu de s'y
+    // ajouter — écart du double des frais sur le CUMP.
+    const res = importCsv([H, "15/03/2024,ACHAT,AAPL,10,150,-1"].join("\n"), {
+      formatId: "generic",
+    });
+    expect(res.drafts[0]!.fees).toBe("1");
+  });
+
+  it("un frais déjà positif est inchangé", () => {
+    const res = importCsv([H, "15/03/2024,ACHAT,AAPL,10,150,1"].join("\n"), {
+      formatId: "generic",
+    });
+    expect(res.drafts[0]!.fees).toBe("1");
+  });
+
+  it("les deux écritures produisent le même coût de revient", () => {
+    const neg = importCsv([H, "15/03/2024,ACHAT,AAPL,10,150,-1"].join("\n"), {
+      formatId: "generic",
+    });
+    const pos = importCsv([H, "15/03/2024,ACHAT,AAPL,10,150,1"].join("\n"), {
+      formatId: "generic",
+    });
+    expect(neg.drafts[0]!.fees).toBe(pos.drafts[0]!.fees);
+  });
+
+  it("une quantité négative reste absolutisée (vente courtier)", () => {
+    const res = importCsv([H, "15/03/2024,VENTE,AAPL,-10,150,1"].join("\n"), {
+      formatId: "generic",
+    });
+    expect(res.drafts[0]!.type).toBe("VENTE");
+    expect(Number(res.drafts[0]!.quantity)).toBe(10);
+  });
+});

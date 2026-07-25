@@ -427,6 +427,13 @@ export function mapCsvToDrafts(
       const fm = feesRaw.replace(/\s/g, "").match(/^([\d.,]+)/);
       if (fm) fees = parseNumber(fm[1], decimalSeparator) ?? 0;
     }
+    // Beaucoup de courtiers écrivent la commission en débit négatif (« -1,00 »).
+    // Un frais est toujours un coût : `applyBuy` fait coût = qty × prix + frais,
+    // donc un frais négatif *retranchait* du coût de revient — soit un écart du
+    // double des frais, et une plus-value d'autant surévaluée à la revente.
+    // ibkr-activity normalisait déjà de son côté (feeAbs) ; on aligne le
+    // chemin générique, qui sert tous les autres courtiers.
+    if (fees < 0) fees = Math.abs(fees);
 
     let cashAmount = parseNumber(cashRaw, decimalSeparator);
     // Revolut Amount is often signed
