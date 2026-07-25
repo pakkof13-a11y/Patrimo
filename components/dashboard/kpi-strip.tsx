@@ -29,20 +29,23 @@ import {
 import type { HistoryPoint } from "@/app/lib/types/ui";
 
 /**
- * Grille fluide des 8 KPI (CSS Grid auto-fit) :
- * - min ~11.5rem par tuile → wrap élégant (2+ lignes) si l’espace manque
- * - 1fr → les tuiles se partagent l’espace restant sans écrasement
- * - largeur suffisante (≈ 8×11.5rem) → une seule ligne sur desktop XL
- * - min(100%, …) → une colonne pleine largeur sur très petit écran
+ * Grille du bandeau d'indicateurs — nombre de colonnes fixé par palier
+ * (2 → 4 → 8) plutôt que dérivé d'un `auto-fit`.
+ *
+ * `auto-fit` calait le nombre de colonnes sur la largeur disponible, sans
+ * rapport avec le nombre de tuiles : 9 colonnes pour 8 tuiles à 1920 px (une
+ * colonne fantôme), et 6 colonnes à 1440 px, donc 2 tuiles orphelines sur une
+ * seconde ligne aux quatre cinquièmes vide. Un déséquilibre bien visible sur le
+ * bandeau le plus regardé de l'application.
+ *
+ * Les paliers divisent exactement les 8 tuiles du cas nominal (4 × 2 ou 8 × 1).
+ * `smartFilter` peut en masquer jusqu'à trois ; la dernière ligne est alors
+ * partiellement remplie, ce qui reste lisible — l'important est qu'on ne se
+ * retrouve plus avec une ligne quasi vide alors que la place ne manque pas.
  */
 const KPI_GRID_CLASS =
   "grid w-full min-w-0 gap-2.5 sm:gap-3 " +
-  // Mobile : 11.25rem manquait de peu les 2 colonnes sur un écran de 390 px
-  // (2 × 180 + gap > largeur utile), donc les 8 tuiles s'empilaient et il
-  // fallait dérouler tout le bandeau avant d'atteindre le moindre contenu.
-  // 9.5rem en fait tenir deux, ce qui divise par deux cette hauteur.
-  "[grid-template-columns:repeat(auto-fit,minmax(min(100%,9.5rem),1fr))] " +
-  "sm:[grid-template-columns:repeat(auto-fit,minmax(min(100%,11.25rem),1fr))]";
+  "grid-cols-2 md:grid-cols-4 2xl:grid-cols-8"
 
 /**
  * Bandeau des 8 indicateurs — même grille / taille de tuiles sur tous les onglets.
@@ -240,6 +243,8 @@ export function KpiStrip({
                 ? "up"
                 : "down"
             }
+            accent
+            testId="kpi-net-worth"
           />
         </div>
       )}

@@ -65,7 +65,7 @@ import {
   getChangeColor,
   cn,
 } from "@/app/lib/utils";
-import { type Holding, type MainTab } from "@/app/lib/types/ui";
+import { priceSourceLabel, type Holding, type MainTab } from "@/app/lib/types/ui";
 import {
   HOLDINGS_GROUP_BY_KEY,
   HOLDINGS_GROUP_COLLAPSED_KEY,
@@ -599,8 +599,8 @@ export function HoldingsSection({
                 { crypto: row.original.assetClass === "CRYPTO" }
               )}
             </div>
-            <div className="text-[10px] uppercase tracking-wide text-slate-400">
-              {row.original.priceSource || "n/a"}
+            <div className="text-[10px] tracking-wide text-slate-400">
+              {priceSourceLabel(row.original.priceSource)}
               {row.original.priceStatus === "STALE" && (
                 <span className="ml-1 text-amber-500">· périmé</span>
               )}

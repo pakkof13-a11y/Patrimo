@@ -12,17 +12,27 @@ export function Kpi({
   value,
   tone,
   testId,
+  accent = false,
 }: {
   icon: React.ReactNode;
   label: React.ReactNode;
   value: string;
   tone?: "up" | "down";
   testId?: string;
+  /**
+   * Met la tuile en avant : fond teinté, liseré, valeur agrandie.
+   * Réservé à l'indicateur de tête d'un bandeau — le patrimoine net avait
+   * exactement le même poids visuel que sept autres tuiles, en dernière
+   * position, alors que c'est le chiffre que l'on vient lire en premier.
+   */
+  accent?: boolean;
 }) {
   return (
     <div
       className={cn(
         "kpi-tile flex min-h-[5.25rem] min-w-0 flex-col justify-between gap-2 p-3 sm:p-3.5",
+        accent &&
+          "bg-[var(--primary-soft)] ring-1 ring-inset ring-[var(--primary)]/20",
         tone === "up" &&
           "border-l-[3px] border-l-[var(--success)]/80 dark:border-l-[var(--success)]/70",
         tone === "down" &&
@@ -43,7 +53,10 @@ export function Kpi({
       </div>
       <div
         className={cn(
-          "kpi-value min-w-0 text-[1.05rem] leading-none break-words sm:text-lg xl:text-[1.2rem]",
+          "kpi-value min-w-0 leading-none break-words",
+          accent
+            ? "text-[1.2rem] sm:text-xl xl:text-[1.4rem]"
+            : "text-[1.05rem] sm:text-lg xl:text-[1.2rem]",
           tone === "up" && "text-[var(--success)]",
           tone === "down" && "text-[var(--danger)]",
           !tone && "text-[var(--foreground)]"

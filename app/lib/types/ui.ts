@@ -332,3 +332,38 @@ export function readableInkOn(background: string): "#ffffff" | "#0b1220" {
   return ink > white ? "#0b1220" : "#ffffff";
 }
 export const EMPTY_HOLDINGS: Holding[] = [];
+
+/**
+ * Libellé lisible d'une source de cours.
+ *
+ * `priceSource` porte un jeton interne (`seed`, `yahoo`, `coingecko`…) qui était
+ * affiché brut, en capitales, sous chaque cours du tableau Positions : « SEED »,
+ * « COINGECKO ». Du vocabulaire de développeur exposé sur l'écran le plus
+ * consulté. On mappe donc vers le nom réel du fournisseur, et on laisse passer
+ * tel quel — simplement capitalisé — toute source inconnue, pour ne jamais
+ * masquer une provenance.
+ */
+const PRICE_SOURCE_LABELS: Record<string, string> = {
+  seed: "Démo",
+  yahoo: "Yahoo Finance",
+  "yahoo-finance": "Yahoo Finance",
+  binance: "Binance",
+  coingecko: "CoinGecko",
+  zerion: "Zerion",
+  solana: "Solana RPC",
+  monero: "Monero",
+  mock: "Simulé",
+  manual: "Saisie manuelle",
+  "coût": "Au coût",
+  cout: "Au coût",
+  cost: "Au coût",
+};
+
+export function priceSourceLabel(source: string | null | undefined): string {
+  const raw = (source ?? "").trim();
+  if (!raw) return "Source inconnue";
+  const hit = PRICE_SOURCE_LABELS[raw.toLowerCase()];
+  if (hit) return hit;
+  // Source non répertoriée : capitaliser sans crier.
+  return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+}
