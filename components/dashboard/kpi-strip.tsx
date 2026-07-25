@@ -36,7 +36,13 @@ import type { HistoryPoint } from "@/app/lib/types/ui";
  * - min(100%, …) → une colonne pleine largeur sur très petit écran
  */
 const KPI_GRID_CLASS =
-  "grid w-full min-w-0 gap-2.5 sm:gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,11.25rem),1fr))]";
+  "grid w-full min-w-0 gap-2.5 sm:gap-3 " +
+  // Mobile : 11.25rem manquait de peu les 2 colonnes sur un écran de 390 px
+  // (2 × 180 + gap > largeur utile), donc les 8 tuiles s'empilaient et il
+  // fallait dérouler tout le bandeau avant d'atteindre le moindre contenu.
+  // 9.5rem en fait tenir deux, ce qui divise par deux cette hauteur.
+  "[grid-template-columns:repeat(auto-fit,minmax(min(100%,9.5rem),1fr))] " +
+  "sm:[grid-template-columns:repeat(auto-fit,minmax(min(100%,11.25rem),1fr))]";
 
 /**
  * Bandeau des 8 indicateurs — même grille / taille de tuiles sur tous les onglets.
