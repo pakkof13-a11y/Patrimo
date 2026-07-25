@@ -35,10 +35,22 @@ const TX_QUICK: { type: string; label: string }[] = [
   { type: "FRAIS", label: "Frais" },
 ];
 
+/**
+ * Décomposition « brut ± frais = net » d'un trade.
+ *
+ * Le signe suit le sens de l'opération : à l'achat les frais s'ajoutent (on
+ * décaisse davantage), à la vente ils se retranchent (on encaisse moins).
+ * L'affichage soustrayait dans les deux cas, ce qui annonçait 273 000 € sur un
+ * achat de 285 000 € + 12 000 € de frais — alors que la colonne PRU de la même
+ * ligne affichait 297 000 €, le coût de revient réellement retenu par
+ * `applyBuy`. Deux chiffres voisins pour la même opération, écartés du double
+ * des frais.
+ */
 function tradePriceMath(tx: RecentTx): {
   gross: number;
   fees: number;
   net: number;
+  feesAdd: boolean;
 } | null {
   const qty = Number(tx.quantity);
   const px = Number(tx.unitPrice);
@@ -54,13 +66,15 @@ function tradePriceMath(tx: RecentTx): {
   }
   const gross = Math.abs(qty * px) * fx;
   const fees = Math.abs(feesN) * fx;
-  const net = Math.max(0, gross - fees);
-  return { gross, fees, net };
+  // Seule la vente encaisse : ses frais viennent en déduction du produit.
+  const feesAdd = tx.type !== "VENTE";
+  const net = Math.max(0, feesAdd ? gross + fees : gross - fees);
+  return { gross, fees, net, feesAdd };
 }
 
 /**
  * Aperçu rapide de l’historique d’une position (expansion ligne).
- * Layout : « Achat - Date | Qté »  ·  « brut − frais = net » (bleu/rouge/vert).
+ * Layout : « Achat - Date | Qté »  ·  « brut ± frais = net » (bleu/rouge/vert).
  */
 export function HoldingRecentTxs({
   assetId,
@@ -286,7 +300,9 @@ export function HoldingRecentTxs({
                       <span className="font-medium text-sky-700 dark:text-sky-300">
                         {formatCurrencyPrecise(math.gross, "EUR")}
                       </span>
-                      <span className="text-[var(--muted-foreground)]">−</span>
+                      <span className="text-[var(--muted-foreground)]">
+                        {math.feesAdd ? "+" : "−"}
+                      </span>
                       <span className="font-medium text-red-600 dark:text-red-400">
                         {formatCurrencyPrecise(math.fees, "EUR")}
                       </span>
