@@ -44,6 +44,9 @@
  * badge d'estimation au lieu d'un faux −100 %.
  */
 
+import { parisDayKey } from "../dates/paris";
+import { toEur } from "../accounting/fx";
+import type { LedgerTx } from "../accounting/types";
 import { d, zero, type Decimal } from "../money/decimal";
 
 /** Jour civil Europe/Paris, format `YYYY-MM-DD`. */
@@ -189,6 +192,125 @@ export function buildClassDailyPnl(
   }
 
   return out;
+}
+
+/**
+ * Flux net et revenu d'une transaction, du point de vue d'un actif.
+ *
+ * Le « flux » est le montant net investi dans l'actif : positif à l'achat,
+ * négatif à la vente. Les conventions suivent exactement celles du ledger
+ * (`applyTransaction`), sans quoi le P&L dériverait de la comptabilité :
+ *
+ * - `ACHAT` : coût complet, frais inclus — c'est ce qu'`applyBuy` immobilise ;
+ * - `VENTE` : produit net des frais, en négatif — c'est `proceedsEur` ;
+ * - `REWARD` / `AIRDROP` : flux nul. Une réception gratuite n'immobilise rien,
+ *   donc la valeur qui apparaît est bien du résultat — c'est un revenu en
+ *   nature, et le traiter autrement le ferait disparaître du graphique ;
+ * - `TRANSFERT_TITRE` : flux nul. Le transfert déplace une position entre
+ *   plateformes ; agrégée par actif, l'opération est neutre ;
+ * - `SPLIT` : flux nul. Le coût total est inchangé et les cours fournis sont
+ *   ajustés des splits, donc valeur et quantité restent cohérentes ;
+ * - revenus (`DIVIDENDE`, `COUPON`, `LOYER`, `INTERET`) : montant net de
+ *   retenue à la source et de frais, rattaché à l'actif payeur s'il y en a un ;
+ * - mouvements purement cash (`APPORT`, `RETRAIT`, `FRAIS`, `TRANSFERT_CASH`) :
+ *   sans actif, donc hors de ce découpage par classe.
+ */
+export function txAssetImpact(
+  tx: LedgerTx
+): { assetId: string; flowEur: Decimal; incomeEur: Decimal } | null {
+  if (!tx.assetId) return null;
+  const feesEur = toEur(tx.fees, tx.fxRateToEur);
+  const qty = d(tx.quantity ?? 0);
+  const unitEur = toEur(tx.unitPrice ?? 0, tx.fxRateToEur);
+
+  switch (tx.type) {
+    case "ACHAT":
+      return {
+        assetId: tx.assetId,
+        flowEur: qty.times(unitEur).plus(feesEur),
+        incomeEur: zero(),
+      };
+    case "VENTE":
+      return {
+        assetId: tx.assetId,
+        flowEur: qty.times(unitEur).minus(feesEur).negated(),
+        incomeEur: zero(),
+      };
+    case "DIVIDENDE":
+    case "COUPON":
+    case "LOYER":
+    case "INTERET": {
+      const grossEur = toEur(
+        tx.cashAmountOriginal ?? qty.times(d(tx.unitPrice ?? 0)),
+        tx.fxRateToEur
+      );
+      let whtEur = zero();
+      if (tx.withholdingTaxEur != null && !d(tx.withholdingTaxEur).isZero()) {
+        whtEur = d(tx.withholdingTaxEur);
+      } else if (
+        tx.withholdingTaxRate != null &&
+        d(tx.withholdingTaxRate).gt(0)
+      ) {
+        whtEur = grossEur.times(d(tx.withholdingTaxRate));
+      }
+      return {
+        assetId: tx.assetId,
+        flowEur: zero(),
+        incomeEur: grossEur.minus(whtEur).minus(feesEur),
+      };
+    }
+    case "REWARD":
+    case "AIRDROP":
+    case "TRANSFERT_TITRE":
+    case "SPLIT":
+      return { assetId: tx.assetId, flowEur: zero(), incomeEur: zero() };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Agrège, par jour civil Europe/Paris, les flux et revenus par actif.
+ *
+ * Les quantités ne sont pas calculées ici : elles viennent du rejeu du ledger,
+ * seule source de vérité pour l'état des positions (splits, transferts et
+ * ventes bornées inclus). Cette fonction ne fournit que les deux termes que le
+ * rejeu ne matérialise pas jour par jour.
+ */
+export function buildDailyFlows(txs: LedgerTx[]): Map<
+  DayKey,
+  { netFlowByAsset: Record<string, number>; incomeByAsset: Record<string, number> }
+> {
+  const out = new Map<
+    DayKey,
+    { flow: Map<string, Decimal>; income: Map<string, Decimal> }
+  >();
+
+  for (const tx of txs) {
+    const impact = txAssetImpact(tx);
+    if (!impact) continue;
+    if (impact.flowEur.isZero() && impact.incomeEur.isZero()) continue;
+    const day = parisDayKey(tx.occurredAt);
+    let acc = out.get(day);
+    if (!acc) {
+      acc = { flow: new Map(), income: new Map() };
+      out.set(day, acc);
+    }
+    addTo(acc.flow, impact.assetId, impact.flowEur);
+    addTo(acc.income, impact.assetId, impact.incomeEur);
+  }
+
+  const result = new Map<
+    DayKey,
+    { netFlowByAsset: Record<string, number>; incomeByAsset: Record<string, number> }
+  >();
+  for (const [day, acc] of out) {
+    result.set(day, {
+      netFlowByAsset: toRecord(acc.flow),
+      incomeByAsset: toRecord(acc.income),
+    });
+  }
+  return result;
 }
 
 /**
