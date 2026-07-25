@@ -449,16 +449,25 @@ export function HoldingsSection({
           return compareAssetNames(a, b);
         },
         cell: ({ row }) => (
-          <div className="flex items-center gap-2.5">
+          // `min-w-0` sur le conteneur ET la colonne de texte : sans lui, un
+          // enfant flex refuse de rétrécir sous sa largeur de contenu, donc le
+          // nom débordait et se faisait couper net par la cellule — « Appartement
+          // Loca », sans ellipse, ce qui se lit comme un bug plutôt que comme une
+          // troncature. Le nom complet reste accessible au survol.
+          <div className="flex min-w-0 items-center gap-2.5">
             <PlatformLogo
               src={row.original.assetLogoUrl || row.original.logoUrl}
               name={row.original.name}
               size={28}
             />
-            <div>
-              <div className="font-medium">{row.original.name}</div>
+            <div className="min-w-0">
+              <div className="truncate font-medium" title={row.original.name}>
+                {row.original.name}
+              </div>
               {row.original.isin && (
-                <div className="font-mono text-[10px] text-slate-500">{row.original.isin}</div>
+                <div className="truncate font-mono text-[10px] text-slate-500">
+                  {row.original.isin}
+                </div>
               )}
             </div>
           </div>
@@ -477,7 +486,7 @@ export function HoldingsSection({
       {
         accessorKey: "accountType",
         id: "accountType",
-        header: "Type de compte",
+        header: "Enveloppe",
         cell: ({ row }) => (
           <select
             className="input !w-auto !py-1 text-xs"
@@ -567,7 +576,7 @@ export function HoldingsSection({
       {
         accessorKey: "quantity",
         id: "quantity",
-        header: "Quantité",
+        header: "Qté",
         cell: ({ getValue }) => (
           <span className="font-semibold tabular-nums text-base">
             {Number(getValue<string>()).toLocaleString("fr-FR", {
@@ -589,7 +598,7 @@ export function HoldingsSection({
       {
         accessorKey: "currentPriceNative",
         id: "currentPriceNative",
-        header: "Cours actuel",
+        header: "Cours",
         cell: ({ row }) => (
           <div>
             <div className="tabular-nums">
@@ -617,7 +626,9 @@ export function HoldingsSection({
       {
         accessorKey: "marketValueBase",
         id: "marketValueBase",
-        header: `Valeur totale (${baseCurrency})`,
+        // La devise est déjà portée par chaque cellule (« 312 000,00 € ») :
+        // la répéter en en-tête ne faisait que le faire tronquer.
+        header: "Valeur",
         cell: ({ row }) => (
           <div>
             <span className="font-medium tabular-nums">
@@ -636,7 +647,7 @@ export function HoldingsSection({
         // Unité placée avant « latent » : tronqués, « P&L latent (€) » et
         // « P&L latent (%) » donnaient tous deux « P&L LAT… » — deux colonnes
         // voisines impossibles à distinguer sans survoler chaque en-tête.
-        header: "P&L € latent",
+        header: "P&L €",
         cell: ({ row }) => (
           <span className={cn("tabular-nums font-medium", getChangeColor(row.original.unrealizedPnlBase))}>
             {formatCurrency(
@@ -649,7 +660,7 @@ export function HoldingsSection({
       {
         accessorKey: "unrealizedPnlPct",
         id: "unrealizedPnlPct",
-        header: "P&L % latent",
+        header: "P&L %",
         cell: ({ row }) => (
           <span className={cn("tabular-nums", getChangeColor(row.original.unrealizedPnlPct))}>
             {formatPercent(row.original.unrealizedPnlPct)}
