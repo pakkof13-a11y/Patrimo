@@ -1146,6 +1146,47 @@ async function getPortfolioLiveSummary(userId: string, baseCurrency = "EUR") {
 }
 
 /** Snapshots + reconstruction `occurredAt` + point live pour l’Évolution. */
+/**
+ * Fusionne les deux sources de la courbe de patrimoine : la reconstruction jour
+ * par jour depuis le ledger (`fromTx`) et les `PortfolioSnapshot` (`fromSnaps`).
+ *
+ * **La reconstruction prime partout où elle existe.** Les deux séries ne
+ * mesurent pas le même patrimoine : un snapshot ne couvre que le périmètre
+ * « titres » — son `cashTotalEur` ignore les poches explicites (banques,
+ * livrets, AV, enveloppes) et son `totalCostEur` ignore les actifs alternatifs.
+ * Les écraser point par point injectait donc un périmètre plus étroit sur des
+ * jours isolés, encadrés de jours complets : la courbe plongeait de plusieurs
+ * centaines de milliers d'euros puis remontait le lendemain — un faux krach par
+ * snapshot, et 37 sur le jeu de démonstration.
+ *
+ * Aucun mark-to-market rétroactif n'est perdu au passage : la reconstruction est
+ * volontairement valorisée au coût (cf. `buildHistoryFromOccurredAt`), et la
+ * valeur de marché du jour est ajoutée séparément en point « live » en fin de
+ * courbe. Les snapshots ne servent donc plus qu'à couvrir les jours que la
+ * reconstruction n'atteint pas.
+ */
+export function mergeHistorySources(
+  fromTx: PortfolioHistoryPoint[],
+  fromSnaps: PortfolioHistoryPoint[]
+): Map<string, PortfolioHistoryPoint> {
+  const byDay = new Map<string, PortfolioHistoryPoint>();
+  for (const p of fromTx) {
+    byDay.set(parisDayKey(p.date), p);
+  }
+  const firstTxDay = fromTx.length > 0 ? parisDayKey(fromTx[0]!.date) : null;
+
+  for (const p of fromSnaps) {
+    const day = parisDayKey(p.date);
+    // Ne pas injecter de snapshot antérieur au 1er occurredAt (artefacts)
+    if (firstTxDay && day < firstTxDay) continue;
+    // Jour déjà reconstruit : la reconstruction est la source de vérité.
+    if (byDay.has(day)) continue;
+    byDay.set(day, p);
+  }
+
+  return byDay;
+}
+
 export async function getPortfolioHistory(
   userId: string,
   baseCurrency = "EUR",
@@ -1230,25 +1271,7 @@ export async function getPortfolioHistory(
   // Source de vérité temporelle = occurredAt des transactions (jamais createdAt).
   // Snapshots mark-to-market : utiles en fin de courbe, mais ne doivent pas
   // « collapser » l’historique sur la date d’import seule.
-  const byDay = new Map<string, PortfolioHistoryPoint>();
-  for (const p of fromTx) {
-    byDay.set(parisDayKey(p.date), p);
-  }
-  const firstTxDay = fromTx.length > 0 ? parisDayKey(fromTx[0]!.date) : null;
-  for (const p of fromSnaps) {
-    const day = parisDayKey(p.date);
-    // Ne pas injecter de snapshot antérieur au 1er occurredAt (artefacts)
-    if (firstTxDay && day < firstTxDay) continue;
-    const existing = byDay.get(day);
-    // Sur un jour déjà reconstruit au coût : n’écraser que si le snapshot
-    // apporte un mark-to-market (latent ≠ 0) ou cash différent — sinon garder
-    // la reconstruction occurredAt (évite courbe plate « jour d’import »).
-    if (existing && Math.abs(p.unrealizedPnlBase ?? 0) < 1e-9) {
-      // Snapshot purement au coût / bootstrap : conserver fromTx
-      continue;
-    }
-    byDay.set(day, p);
-  }
+  const byDay = mergeHistorySources(fromTx, fromSnaps);
 
   const points = [...byDay.values()].sort(
     (a, b) => Date.parse(a.date) - Date.parse(b.date)
