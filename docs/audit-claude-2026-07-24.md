@@ -25,6 +25,7 @@ ce qui **n'a pas** été audité dans cette passe.
 | Empreinte de dédoublonnage import | Lecture complète | ❌ Fragilité corrigée |
 | Conventions de signe à l'import | Vérifié bout en bout (qty, frais, prix) | ❌ Frais négatifs corrigés |
 | Sémantique métier des adaptateurs | Nexo complet · HL/Paradex partiel | ❌ Aperçu ≠ commit corrigé |
+| UX / UI — dashboard, positions, mobile | Constaté sur l'app réelle (captures) | ❌ 3 défauts corrigés |
 | **Non audité** | — | Voir §5 |
 
 ---
@@ -192,6 +193,50 @@ chaîne). Le seul consommateur UI ne lit que `periodsCredited`.
 
 ---
 
+## 2 bis. Passe UX / UI
+
+Menée **sur l'application réellement lancée** (build de prod, base seedée,
+captures Chromium en 1440×900 et 390×844), pas sur lecture de code — plusieurs
+hypothèses formulées depuis le code se sont d'ailleurs révélées fausses (voir
+§3).
+
+### Une classe d'allocation non identifiable
+
+La mosaïque applique une divulgation progressive selon la taille de tuile
+(nom → % → montant). La plus petite tombait sous le seuil du **nom** et
+s'affichait en bloc gris sans nom, ni %, ni montant. Sa seule identification
+était l'attribut `title` natif : survol prolongé requis, inexistant au tactile.
+
+→ Les classes qui ne peuvent pas porter leur libellé sont désormais listées en
+légende sous la mosaïque (« Autre 2,8 % »). Le seuil est centralisé dans
+`fitsName()` pour que tuiles et légende ne divergent pas.
+
+### Allocation muette pour les lecteurs d'écran
+
+`role="img"` rend les enfants présentationnels : l'`aria-label` générique
+(« Allocation par classe d'actifs ») était donc **tout** ce qu'une aide
+technique recevait — la répartition elle-même était inaudible. L'`aria-label`
+énumère maintenant chaque classe avec sa part et son montant.
+
+### Bandeau KPI : 8 tuiles empilées sur mobile
+
+La grille demandait un minimum de `11.25rem`, ce qui rate les deux colonnes
+sur un écran de 390 px à quelques pixels près. Les 8 indicateurs s'empilaient
+donc un par ligne : ~750 px à dérouler avant d'atteindre le moindre contenu.
+Un minimum de `9.5rem` en dessous de `sm` en fait tenir deux (366 px), la
+grille desktop restant inchangée. Vérifié à 360 / 390 / 414 px : aucune valeur
+tronquée, aucun défilement horizontal introduit.
+
+### Positions : deux colonnes P&L indiscernables
+
+Tronqués, « P&L latent (€) » et « P&L latent (%) » s'affichaient tous deux
+« P&L LAT… » dans deux colonnes voisines — impossible de distinguer le montant
+du pourcentage sans survoler chaque en-tête, et impossible tout court au
+tactile. L'unité passe avant « latent » pour survivre à la troncature à
+n'importe quelle largeur de colonne.
+
+---
+
 ## 3. Points vérifiés et jugés sains
 
 Ces points ont été audités et **n'ont pas** nécessité de correctif — utile à
@@ -209,6 +254,10 @@ savoir pour ne pas les ré-auditer :
   `describedby`.
 - **Validation.** Toutes les routes mutantes acceptant un corps valident en Zod.
   Les 8 sans schéma n'acceptent pas de corps.
+- **Courbe d'évolution du portefeuille.** Soupçonnée de tracer des points non
+  reliés d'après une capture basse résolution ; vérification faite au zoom, la
+  ligne est correctement tracée. Le palier suivi d'un saut vient des données de
+  seed (prix rafraîchis le jour même), pas du rendu.
 - **Agrégats d'allocation en float.** `byClass` / `byPlatform` /
   `byAccountType` sont en `number`, mais alimentent des camemberts — les totaux
   patrimoniaux, eux, passent bien par Decimal. Pas de correctif nécessaire.
@@ -245,8 +294,13 @@ savoir pour ne pas les ré-auditer :
 - Épargne salariale, assurance-vie, private equity, crowdlending, métaux,
   tangibles — modules métier non relus.
 - Refresh des prix / providers (Binance, CoinGecko, Yahoo) et stratégie de cache.
-- Parcours UX complets (onboarding, command palette, préférences d'affichage).
-- Design system : cohérence des espacements, typographie, densité, dark mode.
+- Parcours UX non parcourus : onboarding d'un compte vierge, command palette,
+  préférences d'affichage, import CSV de bout en bout, onglets Banques / AV /
+  Épargne salariale / Alternatifs / Passifs.
+- Design system : cohérence des espacements, typographie, densité, dark mode
+  (les captures ont été prises en thème clair uniquement).
+- Le débordement horizontal de la barre d'onglets sur mobile (nav coupée à
+  droite sans affordance de défilement) est **constaté mais non corrigé**.
 - Suite e2e Playwright — exécutée par la CI, non analysée.
 
 ---
