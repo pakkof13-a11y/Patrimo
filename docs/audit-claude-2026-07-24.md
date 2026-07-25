@@ -29,6 +29,7 @@ ce qui **n'a pas** été audité dans cette passe.
 | Contraste WCAG AA — clair et sombre | Mesuré sur tous les textes du dashboard | ❌ 5 échecs corrigés → 0 |
 | Nav mobile · onboarding compte vierge | Parcourus sur l'app réelle | ❌ 1 défaut corrigé · onboarding sain |
 | Courbe de croissance du patrimoine | Données API + rendu, toutes plages | ❌ 37 faux krachs corrigés |
+| Finition bandeau KPI · tableau Positions | Mesuré à 390 / 1024 / 1440 / 1920 px | ❌ 3 défauts de finition corrigés |
 | Plus/moins-values cumulées et décomposées | Les 4 combinaisons mode × vue | ❌ Axe illisible corrigé |
 | Détail de position (expansion + décompo.) | Ouvert sur l'app réelle | ❌ Signe des frais corrigé |
 | **Non audité** | — | Voir §5 |
@@ -336,6 +337,31 @@ Juste pour une vente, faux pour un achat. Un bien acheté 285 000 € avec
 ligne** indiquait 297 000 € — le coût de revient réellement retenu par
 `applyBuy`. Les frais sont désormais signés par le sens de l'opération, et
 l'opérateur affiché suit (`+` à l'achat) pour que l'arithmétique reste lisible.
+
+### Finition « premium » du bandeau et du tableau
+
+Trois détails qui faisaient « inachevé » sur les deux écrans les plus vus.
+
+**Grille KPI déséquilibrée.** `auto-fit` calait le nombre de colonnes sur la
+largeur disponible, sans rapport avec le nombre de tuiles : 9 colonnes pour 8
+tuiles à 1920 px, et 6 colonnes à 1440 px — donc 2 tuiles orphelines sur une
+seconde ligne aux quatre cinquièmes vide. Paliers fixes (2 / 4 / 8) qui divisent
+exactement les huit du cas nominal. Mesuré : 8×1 à 1920, 4×2 à 1440 et 1024,
+2×4 à 390 ; aucune valeur tronquée, aucun défilement horizontal.
+
+**Aucune hiérarchie sur le chiffre de tête.** Le patrimoine net avait le même
+poids visuel que les sept autres tuiles, en dernière position. Nouvelle prop
+`accent` sur `Kpi` (fond teinté, liseré interne, valeur agrandie) plutôt qu'un
+`className` brut, pour que la mise en avant reste dans le design system.
+
+**Jetons internes exposés.** La source de cours sous chaque valeur du tableau
+Positions affichait le jeton brut en capitales : « SEED », et en production
+« COINGECKO » ou « COÛT ». `priceSourceLabel()` renvoie le nom réel du
+fournisseur et se contente de capitaliser une source non répertoriée, pour ne
+jamais masquer une provenance.
+
+Contraste re-mesuré après l'ajout du fond teinté : toujours **0 violation**
+WCAG AA dans les deux thèmes.
 
 ---
 
