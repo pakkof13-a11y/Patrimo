@@ -257,8 +257,14 @@ function buildMockSeries(
   let i = 0;
   for (let t = from.getTime(); t <= to.getTime(); t += step, i++) {
     const d0 = new Date(t);
-    // Skip weekends for day/week bars
-    if ((bar === "1d" || bar === "1wk") && (d0.getUTCDay() === 0 || d0.getUTCDay() === 6)) {
+    // Week-ends écartés pour les barres journalières uniquement.
+    //
+    // Une barre hebdomadaire couvre une semaine entière : la filtrer comme un
+    // week-end n'a pas de sens. Et le pas étant de 7 jours, tous les points
+    // générés tombent sur le même jour de la semaine — le filtre était donc
+    // tout-ou-rien : selon le jour sur lequel démarre la fenêtre, la série
+    // sortait complète ou entièrement vide.
+    if (bar === "1d" && (d0.getUTCDay() === 0 || d0.getUTCDay() === 6)) {
       continue;
     }
     // For intraday, skip off-hours roughly (weekends only — markets vary)
