@@ -115,8 +115,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         path.startsWith("/_next") ||
         path.startsWith("/patrimo") ||
         path === "/favicon.ico" ||
-        path === "/icon.jpg" ||
-        path === "/apple-icon.jpg" ||
+        path === "/icon.png" ||
+        path === "/apple-icon.png" ||
         path === "/api/health"
       ) {
         return true;

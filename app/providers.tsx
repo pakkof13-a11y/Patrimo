@@ -8,6 +8,7 @@ import { Toaster } from "sonner";
 import { DisplayProvider } from "@/components/layout/display-provider";
 import { NotificationsProvider } from "@/app/lib/notifications/context";
 import { ErrorBoundary } from "@/components/layout/error-boundary";
+import { BrandPageBackground } from "@/components/branding/brand-page-background";
 
 /** Durée d’affichage des toasts Sonner (source unique). */
 const TOAST_DURATION_MS = 4000;
@@ -40,6 +41,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         sur <html>/<body> + logos en fallback light tant que le thème n’est pas monté.
       */}
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        <BrandPageBackground />
         <DisplayProvider>
           <NotificationsProvider>
             <QueryClientProvider client={client}>

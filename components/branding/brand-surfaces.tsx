@@ -71,37 +71,3 @@ export function BrandBannerSurface({ className, children }: SurfaceProps) {
     </div>
   );
 }
-
-/**
- * Fond abstrait discret sous le contenu principal (positions, etc.).
- * Opacité ~10 % — purement décoratif, ne gêne pas la lecture.
- */
-export function BrandContentBackground({ className, children }: SurfaceProps) {
-  const theme = useBrandTheme();
-  const src =
-    theme === "dark" ? BRAND.background.dark : BRAND.background.light;
-
-  return (
-    <div
-      className={cn("brand-content-bg relative isolate min-w-0", className)}
-      data-testid="brand-content-bg"
-    >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={src}
-        alt=""
-        aria-hidden
-        decoding="async"
-        onError={(e) => {
-          e.currentTarget.style.display = "none";
-        }}
-        className={cn(
-          "pointer-events-none absolute inset-0 h-full w-full",
-          "object-cover object-center opacity-[0.10] dark:opacity-[0.12]",
-          "transition-opacity duration-300 ease-in-out"
-        )}
-      />
-      <div className="relative z-10 min-w-0">{children}</div>
-    </div>
-  );
-}
