@@ -476,10 +476,10 @@ export function AssetDetailModal({
               data-testid="asset-detail-cost-breakdown"
             >
               <div>
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-700 dark:text-stone-300">
                   Valeur dépensée brute
                 </div>
-                <div className="mt-0.5 text-sm font-semibold tabular-nums text-sky-700 dark:text-sky-300">
+                <div className="mt-0.5 text-sm font-semibold tabular-nums text-stone-700 dark:text-stone-300">
                   {formatCurrency(acquisitionBreakdown.gross, "EUR")}
                 </div>
                 <p className="text-[10px] text-[var(--muted-foreground)]">
@@ -758,7 +758,7 @@ export function AssetDetailModal({
                           className="flex flex-wrap items-center justify-end gap-x-1 text-right text-[11px] tabular-nums sm:text-xs"
                           data-testid="asset-detail-tx-price-math"
                         >
-                          <span className="font-medium text-sky-700 dark:text-sky-300">
+                          <span className="font-medium text-stone-700 dark:text-stone-300">
                             {formatCurrencyPrecise(gross!, "EUR")}
                           </span>
                           <span className="text-[var(--muted-foreground)]">

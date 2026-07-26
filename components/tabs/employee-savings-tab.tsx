@@ -422,7 +422,7 @@ export function EmployeeSavingsTab({
           </div>
           <button
             type="button"
-            className="text-[11px] font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
+            className="text-[11px] font-medium text-stone-700 underline-offset-2 hover:underline dark:text-stone-300"
             onClick={() => setShowUnlockHelp((v) => !v)}
             aria-expanded={showUnlockHelp}
           >
@@ -431,7 +431,7 @@ export function EmployeeSavingsTab({
         </div>
 
         {showUnlockHelp && (
-          <div className="mb-3 space-y-1.5 rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2.5 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+          <div className="mb-3 space-y-1.5 rounded-lg border border-stone-500/20 bg-stone-500/5 px-3 py-2.5 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
             <p>
               <strong>PEE</strong> — blocage usuel de {PEE_LOCK_YEARS} ans après
               la date de versement. Sans date de déblocage saisie, Aurea

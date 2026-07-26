@@ -501,7 +501,7 @@ export function AssetPriceChart({
               className={cn(
                 "text-[10px] font-medium tabular-nums",
                 delta.up
-                  ? "text-sky-600 dark:text-sky-400"
+                  ? "text-stone-600 dark:text-stone-400"
                   : "text-[var(--muted-foreground)]"
               )}
             >

@@ -297,7 +297,7 @@ export function HoldingRecentTxs({
                 >
                   {math ? (
                     <span className="inline-flex flex-wrap items-center justify-end gap-x-1">
-                      <span className="font-medium text-sky-700 dark:text-sky-300">
+                      <span className="font-medium text-stone-700 dark:text-stone-300">
                         {formatCurrencyPrecise(math.gross, "EUR")}
                       </span>
                       <span className="text-[var(--muted-foreground)]">

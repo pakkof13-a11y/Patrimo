@@ -2187,7 +2187,7 @@ export function ImportCsvModal({
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
                           Aperçu brut (5 premières lignes)
                         </p>
-                        <div className="max-h-40 overflow-auto rounded-lg border border-[var(--border)] bg-slate-950/40">
+                        <div className="max-h-40 overflow-auto rounded-lg border border-[var(--border)] bg-black/40">
                           <table className="w-full text-left text-[10px]">
                             <thead className="sticky top-0 bg-slate-900/90 text-slate-400">
                               <tr>

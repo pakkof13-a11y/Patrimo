@@ -151,7 +151,7 @@ export function ModuleCallout({
       className={cn(
         "rounded-[var(--radius-xl)] px-4 py-3 text-[11px] leading-relaxed",
         tone === "info" &&
-          "border border-sky-500/20 bg-sky-500/[0.05] text-[var(--foreground)]/85",
+          "border border-stone-500/20 bg-stone-500/[0.05] text-[var(--foreground)]/85",
         tone === "warn" &&
           "border border-amber-500/25 bg-amber-500/[0.06] text-amber-950/90 dark:text-amber-50/90",
         tone === "muted" &&

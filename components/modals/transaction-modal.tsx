@@ -726,7 +726,7 @@ export function TransactionModal({
 
             <button
               type="button"
-              className="text-[11px] font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
+              className="text-[11px] font-medium text-stone-700 underline-offset-2 hover:underline dark:text-stone-300"
               onClick={() => setShowFxHelp((v) => !v)}
               aria-expanded={showFxHelp}
             >
@@ -735,7 +735,7 @@ export function TransactionModal({
                 : "Aide conversion & impact €"}
             </button>
             {showFxHelp && (
-              <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-2.5 py-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+              <div className="rounded-lg border border-stone-500/20 bg-stone-500/5 px-2.5 py-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
                 <p>
                   Le <strong>taux → EUR</strong> convertit prix, cash et frais
                   pour le PRU et l&apos;impact cash en euros. En revenu non-EUR,
@@ -752,7 +752,7 @@ export function TransactionModal({
 
             {fxHint && (
               <p
-                className="text-[11px] text-sky-700 dark:text-sky-300"
+                className="text-[11px] text-stone-700 dark:text-stone-300"
                 data-testid="tx-fx-hint"
               >
                 {fxHint}

@@ -12,7 +12,7 @@ const SOURCE_META: Record<
     label: "Yahoo",
     title: "Cours de marché (Yahoo Finance), convertis en EUR",
     className:
-      "bg-sky-50 text-sky-800 ring-sky-200 dark:bg-sky-950/50 dark:text-sky-200 dark:ring-sky-800",
+      "bg-stone-50 text-stone-800 ring-stone-200 dark:bg-stone-950/50 dark:text-stone-200 dark:ring-stone-800",
   },
   coingecko: {
     label: "CoinGecko",

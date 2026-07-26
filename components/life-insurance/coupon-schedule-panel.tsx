@@ -181,7 +181,7 @@ export function CouponSchedulePanel({ className }: { className?: string }) {
               )}
               {p.couponMemory && (
                 <span
-                  className="shrink-0 rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300"
+                  className="shrink-0 rounded bg-stone-500/10 px-1.5 py-0.5 text-[10px] font-medium text-stone-700 dark:text-stone-300"
                   title="Un coupon non versé se rattrape à une constatation ultérieure favorable"
                 >
                   mémoire

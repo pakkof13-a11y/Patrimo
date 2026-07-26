@@ -46,7 +46,7 @@ export const TX_TYPE_FILTERS: Array<{
     label: "Ventes",
     types: ["VENTE"],
     emptyHint: "Aucune vente enregistrée",
-    accent: "bg-sky-700 text-white dark:bg-sky-400 dark:text-sky-950",
+    accent: "bg-stone-700 text-white dark:bg-stone-400 dark:text-stone-950",
   },
   {
     id: "reward",
@@ -122,7 +122,7 @@ export function txTypeChipClass(txType: string): string {
     case "ACHAT":
       return "bg-emerald-50 text-emerald-800 ring-emerald-200/80 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-800/60";
     case "VENTE":
-      return "bg-sky-50 text-sky-800 ring-sky-200/80 dark:bg-sky-950/50 dark:text-sky-200 dark:ring-sky-800/60";
+      return "bg-stone-50 text-stone-800 ring-stone-200/80 dark:bg-stone-950/50 dark:text-stone-200 dark:ring-stone-800/60";
     case "REWARD":
       return "bg-fuchsia-50 text-fuchsia-900 ring-fuchsia-200/80 dark:bg-fuchsia-950/40 dark:text-fuchsia-200 dark:ring-fuchsia-800/50";
     case "AIRDROP":

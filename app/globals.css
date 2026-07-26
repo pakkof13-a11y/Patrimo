@@ -35,7 +35,9 @@
   --primary-soft: rgba(13, 107, 99, 0.08);
   --success: #147a3f;
   --danger: #b42318;
-  --accent: #1d6fbf;
+  /* Graphite chaud — remplace un bleu générique qui entrait en concurrence
+     avec le doré de marque plutôt que de le mettre en valeur. */
+  --accent: #57534e;
   --ring: rgb(13 107 99 / 0.28);
   --focus-ring: 0 0 0 2px var(--card), 0 0 0 4px var(--ring);
 
@@ -86,31 +88,38 @@
 }
 
 .dark {
-  --background: #0a101c;
+  /*
+   * Surfaces désaturées vers un charcoal neutre — c'était un bleu marine
+   * (#0a101c, #0d1524…) qui donnait aux fenêtres un ton bleuté même
+   * derrière le flou liquid glass. Même luminosité, teinte neutre : le
+   * doré de marque ressort au lieu de se battre avec le bleu.
+   */
+  --background: #0b0b0d;
   --background-gradient: linear-gradient(
     180deg,
-    #0d1524 0%,
-    #0a101c 55%,
-    #080e18 100%
+    #121214 0%,
+    #0b0b0d 55%,
+    #08080a 100%
   );
   --foreground: #e6ebf4;
-  --card: rgba(14, 22, 38, 0.94);
+  --card: rgba(20, 20, 22, 0.94);
   --card-foreground: #e6ebf4;
-  --elevated: #121c30;
-  --muted: #152033;
-  --muted-foreground: #8b97ab;
-  --border: rgba(148, 163, 184, 0.12);
-  --border-strong: rgba(148, 163, 184, 0.22);
-  --input-bg: #0c1424;
-  --table-head: rgba(10, 18, 32, 0.95);
-  --header-bg: rgba(10, 16, 28, 0.9);
+  --elevated: #1a1a1d;
+  --muted: #1c1c1f;
+  --muted-foreground: #9a9a9f;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --input-bg: #131316;
+  --table-head: rgba(18, 18, 20, 0.95);
+  --header-bg: rgba(14, 14, 16, 0.9);
 
   --primary: #2dd4bf;
   --primary-foreground: #042f2e;
   --primary-soft: rgba(45, 212, 191, 0.1);
   --success: #34d399;
   --danger: #f87171;
-  --accent: #5ba3e8;
+  /* Graphite clair chaud — même logique qu'en clair, cf. :root --accent. */
+  --accent: #a8a29e;
   --ring: rgb(45 212 191 / 0.32);
   --focus-ring: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
 
@@ -125,8 +134,8 @@
   --gold-border: color-mix(in srgb, var(--gold-2) 22%, var(--border));
   --nav-active-gold: color-mix(in srgb, var(--gold-1) 55%, var(--gold-2));
   --warning: #d97706;
-  --banner-fill: #0c121c;
-  --banner-edge: #0a101c;
+  --banner-fill: #121212;
+  --banner-edge: #0b0b0d;
 
   color-scheme: dark;
 }
@@ -816,9 +825,12 @@ body.col-resizing {
 
 .dark .card {
   box-shadow: var(--shadow-sm);
-  background: color-mix(in srgb, var(--card) 78%, transparent);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  /* Plus opaque qu'avant (78 % → 92 %) : les fenêtres se distinguaient mal
+     d'un fond déjà sombre et laissaient trop transparaître la teinte bleutée
+     sous-jacente. Le flou monte en retour pour garder l'effet liquid glass. */
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  backdrop-filter: blur(26px) saturate(1.2);
+  -webkit-backdrop-filter: blur(26px) saturate(1.2);
 }
 
 /* Carte plate (toolbar / table chrome) — moins de « boîte dans boîte » */

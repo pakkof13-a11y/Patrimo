@@ -698,7 +698,7 @@ function SupportRow({
                 ? "bg-violet-500/10 text-violet-700 dark:text-violet-300"
                 : support.kind === "FONDS_EURO"
                   ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                  : "bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                  : "bg-stone-500/10 text-stone-700 dark:text-stone-300"
             )}
           >
             {supportKindLabel(support.kind)}

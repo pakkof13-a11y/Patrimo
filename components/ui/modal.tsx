@@ -233,9 +233,11 @@ export function Modal({
       className={cn(
         "fixed inset-0 flex items-center justify-center p-4",
         zClass,
+        // Noir neutre (pas slate, teinté bleu) : le fond assombri derrière une
+        // modale ne doit pas ajouter sa propre dominante de couleur.
         suspended
-          ? "pointer-events-none bg-slate-950/40 backdrop-blur-[1px]"
-          : "bg-slate-950/60 backdrop-blur-sm",
+          ? "pointer-events-none bg-black/40 backdrop-blur-[1px]"
+          : "bg-black/65 backdrop-blur-md",
         suspended && "opacity-90"
       )}
       data-testid="modal-overlay"

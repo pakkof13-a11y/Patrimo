@@ -506,7 +506,7 @@ export function NewsMacroPanel({
 const RESULT_COLOR = {
   above: "text-emerald-700 dark:text-emerald-300 font-semibold",
   below: "text-red-700 dark:text-red-300 font-semibold",
-  equal: "text-sky-700 dark:text-sky-300 font-semibold",
+  equal: "text-stone-700 dark:text-stone-300 font-semibold",
   na: "text-[var(--muted-foreground)]",
 } as const;
 
