@@ -97,6 +97,14 @@ export type MainTab =
   | "cfd"
   | "epargne-salariale"
   | "alternatifs"
+  /**
+   * Saisie des contrats d'assurance-vie et de leurs supports.
+   *
+   * Distinct de `av`, qui est l'enveloppe côté Positions : celui-ci est un
+   * écran de saisie, comme `banques`, là où `av` filtre des positions déjà
+   * enregistrées.
+   */
+  | "assurance-vie"
   | "fiscal";
 
 export type PlatformRow = {

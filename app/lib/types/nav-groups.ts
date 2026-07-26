@@ -35,6 +35,11 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Sources",
     items: [
       { id: "banques", label: "Banques", testId: "banques" },
+      {
+        id: "assurance-vie",
+        label: "Assurance-vie",
+        testId: "assurance-vie",
+      },
       { id: "platforms", label: "Mes plateformes", testId: "platforms" },
     ],
   },

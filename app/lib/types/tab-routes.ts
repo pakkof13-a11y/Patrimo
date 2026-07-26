@@ -26,6 +26,8 @@ export function tabToPath(tab: MainTab): string {
       return "/positions/cfd";
     case "banques":
       return "/banques";
+    case "assurance-vie":
+      return "/assurance-vie";
     case "epargne-salariale":
       return "/epargne-salariale";
     case "alternatifs":
@@ -67,6 +69,11 @@ export function pathToTab(slug?: string[] | null): MainTab {
     return "platforms";
   }
   if (head === "banques" || head === "banks") return "banques";
+  // Écran de saisie des contrats. `/positions/assurance-vie` reste l'enveloppe
+  // `av` — c'est la branche `positions` plus bas qui le résout.
+  if (head === "assurance-vie" || head === "life-insurance") {
+    return "assurance-vie";
+  }
   if (head === "epargne-salariale" || head === "epargne") {
     return "epargne-salariale";
   }

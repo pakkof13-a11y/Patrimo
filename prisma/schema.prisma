@@ -201,6 +201,7 @@ model Asset {
   priceHistory PriceHistory[]
   dailyCloses  AssetDailyClose[]
   realEstate   RealEstateDetail?
+  lifeSupport  LifeInsuranceSupport?
   liabilities  Liability[]
 
   @@index([userId])
@@ -611,8 +612,94 @@ model LifeInsurance {
 
   user     User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   products LifeInsuranceProduct[]
+  supports LifeInsuranceSupport[]
 
   @@index([userId])
+}
+
+/// Support d'un contrat d'assurance-vie — extension 1:1 de `Asset`, sur le
+/// modèle de `RealEstateDetail`.
+///
+/// ## Pourquoi une table d'extension
+///
+/// Un support d'AV est une position comme une autre : sa valeur et son prix de
+/// revient viennent du journal de transactions, pas d'ici. Ce qui vit ici, c'est
+/// ce que le journal ne sait pas porter — le contrat de rattachement, et les
+/// caractéristiques d'un produit structuré. Les mettre sur `Asset` imposerait
+/// vingt colonnes vides à chaque action et chaque crypto.
+///
+/// ## Le lien au contrat
+///
+/// `lifeInsuranceId` comble le maillon qui manquait : rien ne reliait
+/// techniquement une position AV à son contrat, si bien que le rapprochement
+/// devait se faire par nom — au risque de confondre deux supports homonymes
+/// détenus chez deux assureurs.
+///
+/// ## Champs structurés
+///
+/// Ils ne concernent que `kind = "STRUCTURED"` et sont donc tous facultatifs. Un
+/// fonds euro ou une UC classique n'a ni barrière ni date de constatation ;
+/// exiger ces champs pour tous aurait obligé à inventer des valeurs.
+model LifeInsuranceSupport {
+  id      String @id @default(cuid())
+  assetId String @unique
+  /// Contrat de rattachement — null si le support n'a pas encore été rattaché
+  lifeInsuranceId String?
+
+  /// FONDS_EURO | UC | STRUCTURED
+  kind String @default("UC")
+
+  // ── Identification (tous supports) ────────────────────────────────────────
+  isin String?
+  /// Société de gestion (UC) ou émetteur (structuré)
+  issuer String?
+
+  // ── Produit structuré uniquement ──────────────────────────────────────────
+  /// Sous-jacent : indice, action ou panier (« Euro Stoxx 50 »)
+  underlying String?
+  /// Nominal souscrit, en euros
+  nominalEur Decimal? @db.Decimal(28, 12)
+  /// Niveau initial de constatation du sous-jacent (strike)
+  strikeLevel Decimal? @db.Decimal(28, 12)
+
+  /// Coupon annuel, en %
+  couponRatePct Decimal? @db.Decimal(10, 6)
+  /// MONTHLY | QUARTERLY | SEMIANNUAL | ANNUAL | MATURITY
+  couponFrequency String @default("ANNUAL")
+  /// Barrière de versement du coupon, en % du niveau initial
+  couponBarrierPct Decimal? @db.Decimal(10, 6)
+  /// Coupon à mémoire : les coupons non versés se rattrapent
+  couponMemory Boolean @default(false)
+
+  /// Barrière de rappel anticipé (autocall), en % du niveau initial
+  autocallBarrierPct Decimal? @db.Decimal(10, 6)
+  /// Barrière de protection du capital à l'échéance, en % du niveau initial
+  capitalProtectionPct Decimal? @db.Decimal(10, 6)
+
+  /// Date de constatation initiale
+  strikeDate DateTime?
+  /// Échéance finale
+  maturityDate DateTime?
+  /// Prochaine date de constatation (coupon / rappel)
+  nextObservationDate DateTime?
+  /// Dernière constatation confirmée — curseur, comme les loyers
+  lastCouponAppliedAt DateTime?
+
+  /// Frais d'entrée sur le support, en %
+  entryFeePct Decimal? @db.Decimal(10, 6)
+  /// Frais de gestion annuels sur encours, en %
+  managementFeePct Decimal? @db.Decimal(10, 6)
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  asset         Asset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  lifeInsurance LifeInsurance? @relation(fields: [lifeInsuranceId], references: [id], onDelete: SetNull)
+
+  @@index([lifeInsuranceId])
+  @@index([kind])
 }
 
 model LifeInsuranceProduct {

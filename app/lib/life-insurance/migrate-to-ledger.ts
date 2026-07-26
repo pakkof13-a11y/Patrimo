@@ -321,6 +321,11 @@ export async function migrateLifeInsuranceToLedger(
           currency: c.currency,
           // L'ouverture du contrat est la seule date connue ; à défaut, aujourd'hui.
           occurredAt: c.openDate ?? new Date(),
+          // Rattachement au contrat dès la reprise : sans lui, la position
+          // arriverait « sans contrat » dans l'onglet de saisie et l'encours du
+          // contrat resterait à zéro.
+          lifeInsuranceId: c.id,
+          kind: isEuroFundName(support.name) ? "FONDS_EURO" : "UC",
         });
         result.created++;
         if (isCash) {
@@ -378,7 +383,14 @@ async function ensurePlatform(userId: string, insurer: string): Promise<string> 
 async function createSupportPosition(
   userId: string,
   platformId: string,
-  input: { name: string; valueEur: string; currency: string; occurredAt: Date }
+  input: {
+    name: string;
+    valueEur: string;
+    currency: string;
+    occurredAt: Date;
+    lifeInsuranceId: string;
+    kind: string;
+  }
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const asset = await tx.asset.create({
@@ -395,6 +407,14 @@ async function createSupportPosition(
         acquisitionDate: input.occurredAt,
       },
       select: { id: true },
+    });
+
+    await tx.lifeInsuranceSupport.create({
+      data: {
+        assetId: asset.id,
+        lifeInsuranceId: input.lifeInsuranceId,
+        kind: input.kind,
+      },
     });
 
     await createTransaction(

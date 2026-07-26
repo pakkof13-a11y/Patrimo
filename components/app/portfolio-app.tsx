@@ -126,6 +126,13 @@ const BanksTab = dynamic(
     })),
   { loading: () => <TabChunkFallback />, ssr: false }
 );
+const AssuranceVieTab = dynamic(
+  () =>
+    import("@/components/tabs/assurance-vie-tab").then((m) => ({
+      default: m.AssuranceVieTab,
+    })),
+  { loading: () => <TabChunkFallback />, ssr: false }
+);
 const LiabilitiesTab = dynamic(
   () =>
     import("@/components/tabs/liabilities-tab").then((m) => ({
@@ -1056,6 +1063,8 @@ function PortfolioAppClient({
             </div>
 
             {tab === "banques" && <BanksTab baseCurrency={baseCurrency} />}
+
+            {tab === "assurance-vie" && <AssuranceVieTab />}
 
             {tab === "epargne-salariale" && (
               <EmployeeSavingsTab baseCurrency={baseCurrency} />
