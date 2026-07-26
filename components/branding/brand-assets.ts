@@ -19,8 +19,12 @@ export const BRAND = {
     dark: "/branding/banner-dark.png",
     light: "/branding/banner-light.png",
   },
+  /**
+   * Fonds full-bleed (liquid glass) — light/dark via next-themes.
+   * Sources : « fond white mode.png » / « fond dark mode.png » (Downloads).
+   */
   background: {
     dark: "/branding/bg-dark.png",
-    light: "/branding/bg-light.jpg",
+    light: "/branding/bg-light.png",
   },
 } as const;

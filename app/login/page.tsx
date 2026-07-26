@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ThemeModeToggle } from "@/components/ui/theme-mode-toggle";
 import { BrandLogo } from "@/components/branding/brand-logo";
+import { BrandPageBackground } from "@/components/branding/brand-page-background";
 import { BRAND } from "@/components/branding/brand-assets";
 import { cn } from "@/app/lib/utils";
 import {
@@ -94,27 +95,18 @@ export default function LoginPage() {
   return (
     <div
       className={cn(
-        "relative flex min-h-screen flex-col",
+        "relative flex min-h-screen flex-col overflow-hidden",
         "bg-[var(--background)] text-[var(--foreground)]",
         "transition-colors duration-300 ease-in-out"
       )}
     >
-      {/* Halos marque — crossfade light/dark */}
+      {/* Même fond marque light/dark que le dashboard */}
+      <BrandPageBackground fillContainer />
+
+      {/* Voile léger pour lisibilité (n’écrase pas le fond) */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-100 transition-opacity duration-300 ease-in-out dark:opacity-0"
-        style={{
-          background:
-            "radial-gradient(ellipse 70% 45% at 50% -10%, rgba(212,175,55,0.16), transparent), radial-gradient(ellipse 50% 35% at 100% 100%, rgba(13,107,99,0.08), transparent)",
-        }}
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 ease-in-out dark:opacity-100"
-        style={{
-          background:
-            "radial-gradient(ellipse 70% 45% at 50% -10%, rgba(212,175,55,0.22), transparent), radial-gradient(ellipse 50% 35% at 100% 100%, rgba(45,212,191,0.08), transparent)",
-        }}
+        className="pointer-events-none absolute inset-0 z-[1] bg-[var(--background)]/25 transition-colors duration-300 ease-in-out dark:bg-[var(--background)]/35"
       />
 
       <div className="absolute right-4 top-4 z-20 sm:right-6 sm:top-5">

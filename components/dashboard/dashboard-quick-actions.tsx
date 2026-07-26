@@ -75,7 +75,7 @@ export function DashboardQuickActions({
     <section
       className={cn(
         "cockpit-panel relative z-[1] rounded-[var(--radius-xl)] border border-[var(--border)]",
-        "bg-[var(--card)]/95 px-3 py-3 shadow-[var(--shadow-sm)] backdrop-blur-sm",
+        "px-3 py-3",
         "transition-[border-color,box-shadow,background-color] duration-300 ease-in-out",
         "sm:px-4 sm:py-3.5",
         className
