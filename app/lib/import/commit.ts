@@ -1,5 +1,5 @@
 import { prisma } from "../prisma";
-import { createTransaction } from "../transactions/service";
+import { createTransaction, createOwnershipCache } from "../transactions/service";
 import { loadLedgerForUser } from "../portfolio/service";
 import { invalidateLedgerCache } from "../portfolio/ledger-cache";
 import { resolveAssetLogo } from "../assets/logos";
@@ -64,7 +64,13 @@ async function resolveOrCreateAsset(
   userId: string,
   platformId: string,
   row: ImportDraftRow,
-  overrideAccountType?: string
+  overrideAccountType?: string,
+  /**
+   * Cache d'actifs du lot. Un relevé courtier répète les mêmes quelques
+   * tickers sur des centaines de lignes (111 lignes Revolut = 5 tickers) :
+   * sans cache, chaque ligne refait les deux findFirst de résolution.
+   */
+  assetCache?: Map<string, string>
 ): Promise<string | null> {
   const needsAsset =
     row.type &&
@@ -92,12 +98,22 @@ async function resolveOrCreateAsset(
         ? "IMMOBILIER"
         : "CTO");
 
+  // Clé = tout ce dont dépend la résolution ci-dessous.
+  const cacheKey = `${platformId}|${accountType}|${ticker ?? ""}|${name.toLowerCase()}`;
+  const memo = assetCache?.get(cacheKey);
+  if (memo) return memo;
+
+  const remember = (id: string) => {
+    assetCache?.set(cacheKey, id);
+    return id;
+  };
+
   if (ticker) {
     const byTicker = await prisma.asset.findFirst({
       where: assetReuseByTickerWhere(userId, ticker, accountType),
       orderBy: { createdAt: "asc" },
     });
-    if (byTicker) return byTicker.id;
+    if (byTicker) return remember(byTicker.id);
   }
 
   const byName = await prisma.asset.findFirst({
@@ -107,7 +123,7 @@ async function resolveOrCreateAsset(
       name: { equals: name, mode: "insensitive" },
     },
   });
-  if (byName) return byName.id;
+  if (byName) return remember(byName.id);
 
   const logoUrl = resolveAssetLogo({
     ticker,
@@ -136,7 +152,7 @@ async function resolveOrCreateAsset(
     },
   });
 
-  return created.id;
+  return remember(created.id);
 }
 
 async function loadExistingLite(
@@ -446,6 +462,10 @@ export async function commitImportRows(params: {
   // après chaque insertion force un replay complet du journal à CHAQUE ligne,
   // en O(n²) sur un CSV de plusieurs centaines de lignes (timeout serverless).
   const ledgerState = await loadLedgerForUser(userId);
+  // Mémos du lot : évitent de revérifier en base, à chaque ligne, la même
+  // plateforme et les mêmes tickers (cf. OwnershipCache / resolveOrCreateAsset).
+  const ownership = createOwnershipCache(userId);
+  const assetCache = new Map<string, string>();
 
   for (const row of toImport) {
     try {
@@ -464,7 +484,13 @@ export async function commitImportRows(params: {
         continue;
       }
 
-      const assetId = await resolveOrCreateAsset(userId, rowPlatformId, row, params.accountEnvelopeType);
+      const assetId = await resolveOrCreateAsset(
+        userId,
+        rowPlatformId,
+        row,
+        params.accountEnvelopeType,
+        assetCache
+      );
       await createTransaction(
         {
           userId,
@@ -485,7 +511,7 @@ export async function commitImportRows(params: {
           allowNegativeCash: true,
         },
         undefined,
-        { ledgerState, skipInvalidate: true }
+        { ledgerState, skipInvalidate: true, ownership }
       );
       seenStrict.add(sfp);
       created++;

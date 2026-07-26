@@ -135,24 +135,57 @@ function mapExisting(row: {
   };
 }
 
-async function validateOwnership(input: CreateTxInput, client: DbClient = prisma) {
-  const platform = await client.platform.findFirst({
-    where: { id: input.platformId, userId: input.userId },
-  });
-  if (!platform) throw new AccountingError("PLATFORM_NOT_FOUND", "Plateforme introuvable");
+/**
+ * Mémo des appartenances déjà vérifiées pour UN utilisateur, sur la durée d'un
+ * lot (import CSV). Un import répète la même plateforme et les mêmes quelques
+ * tickers sur des centaines de lignes : revérifier à chaque ligne coûte un
+ * aller-retour SQL pour un résultat déjà connu.
+ *
+ * L'isolation multi-tenant est préservée : le cache porte son `userId`, n'est
+ * consulté que pour ce même userId, et ne vit que le temps d'un appel.
+ * Une entrée signifie « cet id appartient bien à cet utilisateur, vérifié en
+ * base plus tôt dans ce même lot » — jamais « non vérifié, on laisse passer ».
+ */
+export type OwnershipCache = {
+  userId: string;
+  platforms: Set<string>;
+  assets: Set<string>;
+};
 
-  if (input.toPlatformId) {
+export function createOwnershipCache(userId: string): OwnershipCache {
+  return { userId, platforms: new Set(), assets: new Set() };
+}
+
+async function validateOwnership(
+  input: CreateTxInput,
+  client: DbClient = prisma,
+  cache?: OwnershipCache
+) {
+  // Le cache n'est utilisable que s'il a été constitué pour CE utilisateur.
+  const memo = cache && cache.userId === input.userId ? cache : null;
+
+  if (!memo?.platforms.has(input.platformId)) {
+    const platform = await client.platform.findFirst({
+      where: { id: input.platformId, userId: input.userId },
+    });
+    if (!platform) throw new AccountingError("PLATFORM_NOT_FOUND", "Plateforme introuvable");
+    memo?.platforms.add(input.platformId);
+  }
+
+  if (input.toPlatformId && !memo?.platforms.has(input.toPlatformId)) {
     const to = await client.platform.findFirst({
       where: { id: input.toPlatformId, userId: input.userId },
     });
     if (!to) throw new AccountingError("TO_PLATFORM_NOT_FOUND", "Plateforme de destination introuvable");
+    memo?.platforms.add(input.toPlatformId);
   }
 
-  if (input.assetId) {
+  if (input.assetId && !memo?.assets.has(input.assetId)) {
     const asset = await client.asset.findFirst({
       where: { id: input.assetId, userId: input.userId },
     });
     if (!asset) throw new AccountingError("ASSET_NOT_FOUND", "Actif introuvable");
+    memo?.assets.add(input.assetId);
   }
 }
 
@@ -329,11 +362,16 @@ export async function createTransaction(
    * réussie ; l'appelant invalide le cache une seule fois à la fin du lot
    * via `skipInvalidate`.
    */
-  opts?: { ledgerState?: LedgerState; skipInvalidate?: boolean }
+  opts?: {
+    ledgerState?: LedgerState;
+    skipInvalidate?: boolean;
+    /** Mémo d'appartenances du lot — voir OwnershipCache. */
+    ownership?: OwnershipCache;
+  }
 ) {
   const client = prismaClient ?? prisma;
   const input = await resolveFx(raw);
-  await validateOwnership(input, client);
+  await validateOwnership(input, client, opts?.ownership);
 
   const occurredAt = new Date(input.occurredAt);
   if (Number.isNaN(occurredAt.getTime())) {
