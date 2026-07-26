@@ -76,6 +76,7 @@ import { AssetDetailModal } from "@/components/modals/asset-detail-modal";
 import { ImportCsvModal } from "@/components/modals/import-csv-modal";
 import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
 import { PropertyModal } from "@/components/modals/property-modal";
+import { PropertyPanel } from "@/components/real-estate/property-panel";
 import { REAL_ESTATE_PLATFORM_TYPE } from "@/app/lib/real-estate/platform-type";
 import { CommandPalette } from "@/components/layout/command-palette";
 import {
@@ -1015,6 +1016,16 @@ function PortfolioAppClient({
           )}
 
           <div className="module-main" data-slot="module-main">
+            {/*
+              Onglet Immobilier : le tableau Positions montre déjà la valeur de
+              chaque bien, mais pas la dette rattachée, le net qui en découle ni
+              les rendements. Ces chiffres n'ont de sens que rapprochés, d'où ce
+              panneau au-dessus du tableau.
+            */}
+            {tab === "immobilier" && (
+              <PropertyPanel holdings={allHoldings} className="mb-3" />
+            )}
+
             <div data-slot="positions">
               {positionsView ? (
                 <HoldingsSection

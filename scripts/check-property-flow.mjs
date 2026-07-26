@@ -189,6 +189,24 @@ if (buy) {
   check("date d'achat saisie conservée", buy.occurredAt.startsWith("2024-09-12"), buy.occurredAt.slice(0, 10));
 }
 
+// Panneau immobilier
+console.log(`\n━━ Panneau immobilier ━━`);
+await page.goto(`${BASE}/positions/immobilier`, { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(3500);
+const panel = page.locator('[data-testid="property-panel"]');
+check("panneau immobilier affiché", (await panel.count()) > 0);
+if (await panel.count()) {
+  const txt = (await panel.innerText()).replace(/\n+/g, " | ");
+  console.log(`  ${txt.slice(0, 400)}`);
+  // Le libellé est mis en capitales par le CSS : comparaison insensible à la casse.
+  check("bloc de synthèse présent", txt.toLowerCase().includes("net immobilier"));
+  check("fiche du bien présente", txt.includes(PROPERTY.slice(0, 20)));
+  check("bouton d'estimation présent",
+    (await page.locator('[data-testid="property-estimate"]').count()) > 0);
+  await panel.screenshot({ path: "/tmp/property-panel.png" });
+  console.log("  capture: /tmp/property-panel.png");
+}
+
 await page.screenshot({ path: "/tmp/property-done.png" });
 
 const failed = results.filter((r) => !r.ok);

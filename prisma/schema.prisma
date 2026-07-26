@@ -360,6 +360,20 @@ model RealEstateDetail {
   /// Taux d'occupation moyen en % — surtout utile en location saisonnière
   occupancyRatePct     Decimal? @db.Decimal(5, 2)
 
+  // ── Écritures récurrentes ──
+  /// Jour du mois d'encaissement du loyer (1–31), null = pas d'automatisation.
+  /// Le mécanisme reprend celui de `Liability.paymentDay` : même calcul
+  /// d'échéances, même curseur, plutôt qu'un second planificateur.
+  rentDay             Int?
+  /// Dernière échéance de loyer déjà générée — curseur de reprise.
+  lastRentAppliedAt   DateTime?
+  /// Dernière échéance de charges déjà générée.
+  lastChargesAppliedAt DateTime?
+  /// Début de la période locative (première échéance possible).
+  rentalStartDate     DateTime?
+  /// Fin du bail — au-delà, plus aucune échéance n'est générée.
+  rentalEndDate       DateTime?
+
   // ── Descriptif ──
   constructionYear Int?
   /// DPE : A à G
