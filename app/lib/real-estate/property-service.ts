@@ -24,9 +24,9 @@ import { d } from "../money/decimal";
 import { AccountingError } from "../accounting";
 import { createTransaction } from "../transactions/service";
 import { isDvfEstimable } from "./constants";
+import { REAL_ESTATE_PLATFORM_TYPE } from "./platform-type";
 
-/** Type de plateforme accueillant les biens immobiliers. */
-export const REAL_ESTATE_PLATFORM_TYPE = "NOTAIRE_IMMOBILIER";
+export { REAL_ESTATE_PLATFORM_TYPE } from "./platform-type";
 
 export class RealEstateInputError extends Error {}
 

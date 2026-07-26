@@ -232,6 +232,8 @@ export function TransactionModal({
   onAssetLabelChange,
   onRequestCreatePlatform,
   onSelectCatalogPlatform,
+  realEstatePlatformIds,
+  onRequestAddProperty,
 }: {
   open: boolean;
   editing: boolean;
@@ -249,6 +251,10 @@ export function TransactionModal({
   onRequestCreatePlatform?: (prefill?: string) => void;
   /** Sélection d’un courtier du catalogue → upsert + sélection */
   onSelectCatalogPlatform?: (opt: PlatformOption) => void | Promise<void>;
+  /** Plateformes « Notaire / immobilier » — la saisie y suit un autre chemin. */
+  realEstatePlatformIds?: readonly string[];
+  /** Ouvre le formulaire immobilier dédié pour cette plateforme. */
+  onRequestAddProperty?: (platformId: string) => void;
 }) {
   const currency = form.watch("currency") || "EUR";
   const fxRateToEur = form.watch("fxRateToEur") || "1";
@@ -261,6 +267,18 @@ export function TransactionModal({
   const occurredAt = form.watch("occurredAt");
   const isIncome = ["DIVIDENDE", "COUPON", "LOYER", "INTERET"].includes(
     String(txType || "")
+  );
+
+  /**
+   * Plateforme immobilière sélectionnée : la saisie d'un bien ne passe pas par
+   * ce formulaire. Un bien n'a ni ticker ni cours, et son acquisition crée en
+   * une fois l'actif, ses caractéristiques et la transaction d'achat — trois
+   * écritures que ce modal ne sait pas produire ensemble.
+   */
+  const selectedPlatformId = form.watch("platformId") || "";
+  const isRealEstatePlatform = Boolean(
+    selectedPlatformId &&
+      realEstatePlatformIds?.includes(selectedPlatformId)
   );
 
   const vis = useMemo(() => visibilityForType(String(txType || "")), [txType]);
@@ -511,14 +529,40 @@ export function TransactionModal({
               </p>
             </Field>
           </div>
-          <p
-            className="rounded-lg border border-teal-500/20 bg-teal-500/5 px-2.5 py-1.5 text-[11px] leading-snug text-teal-800 dark:text-teal-200"
-            data-testid="tx-type-hint"
-          >
-            <span className="font-semibold">{typeLabel}</span>
-            {" — "}
-            {vis.typeHint}
-          </p>
+          {isRealEstatePlatform ? (
+            <div
+              className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-2.5 text-[11px] leading-snug text-violet-900 dark:text-violet-200"
+              data-testid="tx-real-estate-redirect"
+            >
+              <p className="font-semibold">Plateforme immobilière</p>
+              <p className="mt-0.5">
+                Un bien se saisit dans un formulaire dédié : type, surface,
+                adresse, quote-part et prêt associé. L&apos;acquisition y crée
+                d&apos;un coup le bien et sa transaction d&apos;achat.
+              </p>
+              <button
+                type="button"
+                className="btn btn-primary mt-2 text-[11px]"
+                data-testid="tx-open-property-form"
+                onClick={() => onRequestAddProperty?.(selectedPlatformId)}
+              >
+                Ajouter un bien immobilier
+              </button>
+              <p className="mt-2 opacity-80">
+                Les loyers, charges et travaux de biens déjà saisis restent à
+                enregistrer ici, comme des transactions ordinaires.
+              </p>
+            </div>
+          ) : (
+            <p
+              className="rounded-lg border border-teal-500/20 bg-teal-500/5 px-2.5 py-1.5 text-[11px] leading-snug text-teal-800 dark:text-teal-200"
+              data-testid="tx-type-hint"
+            >
+              <span className="font-semibold">{typeLabel}</span>
+              {" — "}
+              {vis.typeHint}
+            </p>
+          )}
         </Section>
 
         {/* ── 2. Actif ── */}

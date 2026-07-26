@@ -75,6 +75,8 @@ import { PlatformModal } from "@/components/modals/platform-modal";
 import { AssetDetailModal } from "@/components/modals/asset-detail-modal";
 import { ImportCsvModal } from "@/components/modals/import-csv-modal";
 import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
+import { PropertyModal } from "@/components/modals/property-modal";
+import { REAL_ESTATE_PLATFORM_TYPE } from "@/app/lib/real-estate/platform-type";
 import { CommandPalette } from "@/components/layout/command-palette";
 import {
   sortPlatformsByRecentUsage,
@@ -723,6 +725,23 @@ function PortfolioAppClient({
   /** KPI globaux : toujours hors dashboard ; sur dashboard seulement si mature */
   const showGlobalKpis = !isDashboard || dashBlocks.showKpiStrip;
 
+  /**
+   * Plateformes « Notaire / immobilier » : la saisie d'un bien y suit un
+   * formulaire dédié plutôt que le modal de transaction.
+   */
+  const realEstatePlatformIds = useMemo(
+    () =>
+      platforms
+        .filter((p) => p.type === REAL_ESTATE_PLATFORM_TYPE)
+        .map((p) => p.id),
+    [platforms]
+  );
+  const [propertyPlatformId, setPropertyPlatformId] = useState<string | null>(
+    null
+  );
+  const propertyPlatformName =
+    platforms.find((p) => p.id === propertyPlatformId)?.name ?? "";
+
   const platformSelectOptions = useMemo(() => {
     // Comptes user (usage récent) + catalogue courtiers avec logos
     const ownedSorted = sortPlatformsByRecentUsage(
@@ -1160,6 +1179,19 @@ function PortfolioAppClient({
         onSelectCatalogPlatform={(opt) =>
           handleCatalogPlatformPick("tx", opt)
         }
+        realEstatePlatformIds={realEstatePlatformIds}
+        onRequestAddProperty={(platformId) => {
+          setShowTx(false);
+          setPropertyPlatformId(platformId);
+        }}
+      />
+
+      <PropertyModal
+        open={Boolean(propertyPlatformId)}
+        platformId={propertyPlatformId ?? ""}
+        platformName={propertyPlatformName}
+        onClose={() => setPropertyPlatformId(null)}
+        onCreated={(assetId) => setDetailAssetId(assetId)}
       />
 
       {/* Création / ajout plateforme (Mes plateformes → Ajouter une plateforme). */}
