@@ -53,7 +53,11 @@ export function BrandBannerSurface({ className, children }: SurfaceProps) {
         }}
         className={cn(
           "pointer-events-none absolute inset-0 h-full w-full",
-          "object-cover object-center",
+          // contain, pas cover : la bannière (2172×724) est bien plus large que
+          // haute par rapport au bandeau KPI — en cover, l'agrandissement
+          // nécessaire pour remplir la largeur coupait la pointe et la base
+          // du monogramme, pourtant présentes avec de la marge dans la source.
+          "object-contain object-center",
           "transition-opacity duration-300 ease-in-out"
         )}
       />
