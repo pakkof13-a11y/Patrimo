@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  ANNUAL_ALLOWANCE_COUPLE_EUR,
+  ANNUAL_ALLOWANCE_SINGLE_EUR,
   ANTERIORITY_YEARS,
+  annualAllowanceEur,
+  checkPremiumsSplit,
   contractAge,
   contractAgeLabel,
+  exceedsPfuOutstandingThreshold,
   fullMonthsBetween,
+  PFU_OUTSTANDING_THRESHOLD_EUR,
+  totalLifeInsuranceOutstandingEur,
 } from "@/app/lib/life-insurance/fiscal";
 
 const at = (iso: string) => new Date(`${iso}T12:00:00.000Z`);
@@ -81,5 +88,86 @@ describe("contractAgeLabel", () => {
 
   it("ne dit rien sur une date illisible plutôt que d'inventer", () => {
     expect(contractAgeLabel("pas-une-date", at("2026-07-26"))).toBe("");
+  });
+});
+
+describe("checkPremiumsSplit", () => {
+  it("accepte une répartition dont la somme est le total versé", () => {
+    const split = checkPremiumsSplit({
+      premiumsBefore2017Eur: "40000",
+      premiumsAfter2017Eur: "60000",
+      totalPremiumsEur: "100000",
+    });
+    expect(split.ok).toBe(true);
+    expect(split.totalPremiumsEur).toBe("100000");
+    expect(split.premiumsBefore2017Eur).toBe("40000");
+    expect(split.premiumsAfter2017Eur).toBe("60000");
+    expect(split.beforeShare).toBeCloseTo(0.4, 8);
+    expect(split.afterShare).toBeCloseTo(0.6, 8);
+    // Critère d'acceptation : avant + après = total, sans recalcul manuel.
+    expect(
+      Number(split.premiumsBefore2017Eur) + Number(split.premiumsAfter2017Eur)
+    ).toBeCloseTo(Number(split.totalPremiumsEur), 6);
+  });
+
+  it("déduit le total quand il n'est pas déclaré", () => {
+    const split = checkPremiumsSplit({
+      premiumsBefore2017Eur: "25000.50",
+      premiumsAfter2017Eur: "10000,50",
+    });
+    expect(split.ok).toBe(true);
+    expect(Number(split.totalPremiumsEur)).toBeCloseTo(35001, 6);
+  });
+
+  it("refuse un total déclaré qui ne correspond pas à la somme", () => {
+    const split = checkPremiumsSplit({
+      premiumsBefore2017Eur: "10000",
+      premiumsAfter2017Eur: "5000",
+      totalPremiumsEur: "20000",
+    });
+    expect(split.ok).toBe(false);
+    expect(split.error).toMatch(/ne correspond pas au total déclaré/i);
+  });
+
+  it("refuse les montants négatifs", () => {
+    const split = checkPremiumsSplit({
+      premiumsBefore2017Eur: "-1",
+      premiumsAfter2017Eur: "10",
+    });
+    expect(split.ok).toBe(false);
+    expect(split.error).toMatch(/négatifs/i);
+  });
+
+  it("partage à zéro quand aucun versement n'est saisi", () => {
+    const split = checkPremiumsSplit({
+      premiumsBefore2017Eur: "0",
+      premiumsAfter2017Eur: "0",
+    });
+    expect(split.ok).toBe(true);
+    expect(split.totalPremiumsEur).toBe("0");
+    expect(split.beforeShare).toBe(0);
+    expect(split.afterShare).toBe(0);
+  });
+});
+
+describe("annualAllowanceEur / encours global", () => {
+  it("choisit l'abattement selon le foyer", () => {
+    expect(annualAllowanceEur("SINGLE")).toBe(ANNUAL_ALLOWANCE_SINGLE_EUR);
+    expect(annualAllowanceEur("COUPLE")).toBe(ANNUAL_ALLOWANCE_COUPLE_EUR);
+  });
+
+  it("somme les encours de tous les contrats", () => {
+    expect(
+      totalLifeInsuranceOutstandingEur(["80000", "70000.5", "0"])
+    ).toBe("150000.5");
+  });
+
+  it("détecte le dépassement du seuil de 150 000 €", () => {
+    expect(exceedsPfuOutstandingThreshold(PFU_OUTSTANDING_THRESHOLD_EUR)).toBe(
+      false
+    );
+    expect(
+      exceedsPfuOutstandingThreshold(PFU_OUTSTANDING_THRESHOLD_EUR + 0.01)
+    ).toBe(true);
   });
 });

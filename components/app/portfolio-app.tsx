@@ -1015,7 +1015,10 @@ function PortfolioAppClient({
           */}
           {showGlobalKpis && (
             <div className="module-kpi-band min-w-0" data-slot="kpi-band">
-              <BrandBannerSurface className="p-2.5 sm:p-3">
+              <BrandBannerSurface
+                className="p-2.5 sm:p-3"
+                extendBelow={isDashboard && dashBlocks.showQuickActions}
+              >
                 <KpiStrip
                   summary={summary}
                   baseCurrency={baseCurrency}

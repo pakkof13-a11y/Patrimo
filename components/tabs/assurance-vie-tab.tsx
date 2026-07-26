@@ -24,8 +24,15 @@ import {
   supportKindLabel,
   underlyingPerformancePct,
 } from "@/app/lib/life-insurance/constants";
-import { contractAgeLabel } from "@/app/lib/life-insurance/fiscal";
+import {
+  annualAllowanceEur,
+  checkPremiumsSplit,
+  contractAgeLabel,
+  PFU_OUTSTANDING_THRESHOLD_EUR,
+  type TaxHousehold,
+} from "@/app/lib/life-insurance/fiscal";
 import { CouponSchedulePanel } from "@/components/life-insurance/coupon-schedule-panel";
+import { RedemptionSimulatorPanel } from "@/components/life-insurance/redemption-simulator-panel";
 import { cn, formatCurrency, formatDate } from "@/app/lib/utils";
 
 /* ─── Types API ─────────────────────────────────────────────────────── */
@@ -37,7 +44,18 @@ type Policy = {
   cashEuro: string;
   currency: string;
   notes: string | null;
+  premiumsBefore2017Eur?: string;
+  premiumsAfter2017Eur?: string;
+  premiumsTotalEur?: string;
+  outstandingEur?: string;
   products: Array<{ id: string; name: string; currentValue: string }>;
+};
+
+type LifeInsuranceResponse = {
+  policies: Policy[];
+  taxHousehold?: TaxHousehold;
+  totalOutstandingEur?: string;
+  exceedsPfuThreshold?: boolean;
 };
 
 type Support = {
@@ -65,6 +83,8 @@ type Support = {
   notes: string | null;
   /** Valorisation totale de la position, quantité incluse. */
   currentValueEur: string | null;
+  costBasisEur?: string | null;
+  unrealizedPnlEur?: string | null;
   quantity: string;
 };
 
@@ -897,7 +917,7 @@ export function AssuranceVieTab() {
 
   const policiesQ = useQuery({
     queryKey: ["life-insurance"],
-    queryFn: () => fetchJson<{ policies: Policy[] }>("/api/life-insurance"),
+    queryFn: () => fetchJson<LifeInsuranceResponse>("/api/life-insurance"),
   });
   const supportsQ = useQuery({
     queryKey: ["life-insurance-supports"],
@@ -907,12 +927,34 @@ export function AssuranceVieTab() {
 
   const [insurer, setInsurer] = useState("");
   const [openDate, setOpenDate] = useState("");
+  const [premiumsBefore, setPremiumsBefore] = useState("");
+  const [premiumsAfter, setPremiumsAfter] = useState("");
 
   const avOptions = useMemo(() => assuranceVieOptions(), []);
   const policies = policiesQ.data?.policies ?? [];
+  const taxHousehold: TaxHousehold = policiesQ.data?.taxHousehold ?? "SINGLE";
   const supports = useMemo(
     () => supportsQ.data?.supports ?? [],
     [supportsQ.data?.supports]
+  );
+
+  /** Encours global = max(API legacy, somme des supports au marché). */
+  const totalOutstandingEur = useMemo(() => {
+    const fromSupports = supports.reduce(
+      (acc, s) => acc + (num(s.currentValueEur) ?? 0),
+      0
+    );
+    const fromApi = Number(policiesQ.data?.totalOutstandingEur ?? 0);
+    return String(Math.max(fromSupports, fromApi));
+  }, [supports, policiesQ.data?.totalOutstandingEur]);
+
+  const newSplit = useMemo(
+    () =>
+      checkPremiumsSplit({
+        premiumsBefore2017Eur: premiumsBefore || "0",
+        premiumsAfter2017Eur: premiumsAfter || "0",
+      }),
+    [premiumsBefore, premiumsAfter]
   );
 
   const refresh = async () => {
@@ -924,9 +966,26 @@ export function AssuranceVieTab() {
     ]);
   };
 
-  const addPolicy = useMutation({
-    mutationFn: () =>
+  const saveTaxHousehold = useMutation({
+    mutationFn: (next: TaxHousehold) =>
       fetchJson("/api/life-insurance", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "tax-profile", taxHousehold: next }),
+      }),
+    onSuccess: async () => {
+      toast.success("Situation fiscale enregistrée");
+      await refresh();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const addPolicy = useMutation({
+    mutationFn: () => {
+      if (!newSplit.ok) {
+        throw new Error(newSplit.error || "Répartition des versements invalide");
+      }
+      return fetchJson("/api/life-insurance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -934,12 +993,18 @@ export function AssuranceVieTab() {
           openDate: openDate || null,
           cashEuro: "0",
           currency: "EUR",
+          premiumsBefore2017Eur: newSplit.premiumsBefore2017Eur,
+          premiumsAfter2017Eur: newSplit.premiumsAfter2017Eur,
+          totalPremiumsEur: newSplit.totalPremiumsEur,
         }),
-      }),
+      });
+    },
     onSuccess: async () => {
       toast.success("Contrat ajouté");
       setInsurer("");
       setOpenDate("");
+      setPremiumsBefore("");
+      setPremiumsAfter("");
       await refresh();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -976,11 +1041,49 @@ export function AssuranceVieTab() {
       */}
       <CouponSchedulePanel />
 
+      <RedemptionSimulatorPanel
+        policies={policies}
+        supports={supports}
+        taxHousehold={taxHousehold}
+        totalOutstandingEur={totalOutstandingEur}
+      />
+
+      <section className="card p-4" data-testid="av-tax-profile">
+        <h2 className="mb-1 text-base font-semibold">Situation fiscale</h2>
+        <p className="text-meta mb-3">
+          Abattement annuel sur les gains après 8 ans :{" "}
+          {formatCurrency(String(annualAllowanceEur("SINGLE")), "EUR")} (seul)
+          ou {formatCurrency(String(annualAllowanceEur("COUPLE")), "EUR")}{" "}
+          (couple). Seuil d&apos;encours{" "}
+          {formatCurrency(String(PFU_OUTSTANDING_THRESHOLD_EUR), "EUR")} tous
+          contrats.
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Foyer fiscal">
+            <select
+              className="input"
+              value={taxHousehold}
+              data-testid="av-tax-household"
+              onChange={(e) =>
+                saveTaxHousehold.mutate(e.target.value as TaxHousehold)
+              }
+            >
+              <option value="SINGLE">Personne seule</option>
+              <option value="COUPLE">Couple (imposition commune)</option>
+            </select>
+          </Field>
+          <p className="text-meta" data-testid="av-total-outstanding">
+            Encours tous contrats :{" "}
+            {formatCurrency(totalOutstandingEur, "EUR")}
+          </p>
+        </div>
+      </section>
+
       <section className="card p-4">
         <h2 className="mb-1 text-base font-semibold">Nouveau contrat</h2>
         <p className="text-meta mb-3">
-          La date d&apos;ouverture commande l&apos;antériorité fiscale des 8 ans
-          — abattement annuel et taux réduit sur les rachats.
+          Date d&apos;ouverture (antériorité 8 ans) et répartition des
+          versements avant / après le 27/09/2017 (taux PFU).
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <label className="min-w-[16rem] flex-1 text-xs sm:max-w-sm">
@@ -1012,9 +1115,29 @@ export function AssuranceVieTab() {
               data-testid="av-open-date"
             />
           </Field>
+          <Field label="Versé avant le 27/09/2017 (€)">
+            <input
+              className="input w-36"
+              inputMode="decimal"
+              placeholder="0"
+              value={premiumsBefore}
+              onChange={(e) => setPremiumsBefore(e.target.value)}
+              data-testid="av-premiums-before"
+            />
+          </Field>
+          <Field label="Versé à partir du 27/09/2017 (€)">
+            <input
+              className="input w-36"
+              inputMode="decimal"
+              placeholder="0"
+              value={premiumsAfter}
+              onChange={(e) => setPremiumsAfter(e.target.value)}
+              data-testid="av-premiums-after"
+            />
+          </Field>
           <Button
             size="sm"
-            disabled={!insurer || addPolicy.isPending}
+            disabled={!insurer || addPolicy.isPending || !newSplit.ok}
             onClick={() => addPolicy.mutate()}
             data-testid="av-add-policy"
           >
@@ -1076,6 +1199,89 @@ export function AssuranceVieTab() {
               >
                 <Trash2 className="h-3.5 w-3.5 text-red-500" />
               </Button>
+            </div>
+
+            <div className="space-y-2 border-b border-[var(--border)] px-4 py-3">
+              <p className="text-xs font-medium">Versements (répartition PFU)</p>
+              <div className="flex flex-wrap items-end gap-3">
+                <Field label="Avant le 27/09/2017 (€)">
+                  <input
+                    className="input w-36"
+                    inputMode="decimal"
+                    defaultValue={p.premiumsBefore2017Eur ?? "0"}
+                    key={`${p.id}-b-${p.premiumsBefore2017Eur ?? "0"}`}
+                    data-testid="av-contract-premiums-before"
+                    onBlur={(e) => {
+                      const before = e.target.value || "0";
+                      const after = p.premiumsAfter2017Eur ?? "0";
+                      const split = checkPremiumsSplit({
+                        premiumsBefore2017Eur: before,
+                        premiumsAfter2017Eur: after,
+                      });
+                      if (!split.ok) {
+                        toast.error(split.error || "Répartition invalide");
+                        return;
+                      }
+                      fetchJson("/api/life-insurance", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          id: p.id,
+                          premiumsBefore2017Eur: split.premiumsBefore2017Eur,
+                          premiumsAfter2017Eur: split.premiumsAfter2017Eur,
+                          totalPremiumsEur: split.totalPremiumsEur,
+                        }),
+                      })
+                        .then(refresh)
+                        .catch((err: Error) => toast.error(err.message));
+                    }}
+                  />
+                </Field>
+                <Field label="À partir du 27/09/2017 (€)">
+                  <input
+                    className="input w-36"
+                    inputMode="decimal"
+                    defaultValue={p.premiumsAfter2017Eur ?? "0"}
+                    key={`${p.id}-a-${p.premiumsAfter2017Eur ?? "0"}`}
+                    data-testid="av-contract-premiums-after"
+                    onBlur={(e) => {
+                      const after = e.target.value || "0";
+                      const before = p.premiumsBefore2017Eur ?? "0";
+                      const split = checkPremiumsSplit({
+                        premiumsBefore2017Eur: before,
+                        premiumsAfter2017Eur: after,
+                      });
+                      if (!split.ok) {
+                        toast.error(split.error || "Répartition invalide");
+                        return;
+                      }
+                      fetchJson("/api/life-insurance", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          id: p.id,
+                          premiumsBefore2017Eur: split.premiumsBefore2017Eur,
+                          premiumsAfter2017Eur: split.premiumsAfter2017Eur,
+                          totalPremiumsEur: split.totalPremiumsEur,
+                        }),
+                      })
+                        .then(refresh)
+                        .catch((err: Error) => toast.error(err.message));
+                    }}
+                  />
+                </Field>
+                <p className="text-meta">
+                  Total :{" "}
+                  {formatCurrency(
+                    p.premiumsTotalEur ??
+                      String(
+                        (num(p.premiumsBefore2017Eur) ?? 0) +
+                          (num(p.premiumsAfter2017Eur) ?? 0)
+                      ),
+                    "EUR"
+                  )}
+                </p>
+              </div>
             </div>
 
             <div className="space-y-2 px-4 py-3">

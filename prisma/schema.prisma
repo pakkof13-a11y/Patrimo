@@ -24,6 +24,8 @@ model User {
   emailVerified DateTime?
   image         String?
   baseCurrency  String    @default("EUR")
+  /// Situation fiscale du foyer pour l'abattement AV : SINGLE | COUPLE
+  taxHousehold  String    @default("SINGLE")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -607,6 +609,10 @@ model LifeInsurance {
   cashEuro  Decimal   @default(0) @db.Decimal(28, 12)
   currency  String    @default("EUR")
   notes     String?
+  /// Cumul des versements effectués avant le 27/09/2017 (seuil fiscal PFU).
+  premiumsBefore2017Eur Decimal @default(0) @db.Decimal(28, 12)
+  /// Cumul des versements effectués à compter du 27/09/2017.
+  premiumsAfter2017Eur  Decimal @default(0) @db.Decimal(28, 12)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 

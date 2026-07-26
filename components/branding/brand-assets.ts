@@ -4,7 +4,13 @@
  */
 export const BRAND = {
   name: "Aurea",
+  /** Sous-titre court (header, méta). */
   tagline: "Suivi de patrimoine",
+  /**
+   * Slogan marketing — login, onboarding, hero.
+   * Source unique : ne pas hardcoder ailleurs.
+   */
+  slogan: "Wealth. Unified",
   logo: {
     dark: "/branding/logo-dark.png",
     light: "/branding/logo-light.png",

@@ -315,12 +315,23 @@ export const savingsAccountSchema = z.object({
 
 export type SavingsAccountForm = z.infer<typeof savingsAccountSchema>;
 
+export const taxHouseholds = ["SINGLE", "COUPLE"] as const;
+
 export const lifeInsuranceSchema = z.object({
   insurer: z.string().min(1, "Assureur requis"),
   openDate: z.string().optional().nullable(),
   cashEuro: decimalString.default("0"),
   currency: z.string().min(3).max(3).default("EUR"),
   notes: z.string().optional().nullable(),
+  /** Versements avant le 27/09/2017 (régime antérieur PFU). */
+  premiumsBefore2017Eur: decimalString.default("0"),
+  /** Versements à compter du 27/09/2017. */
+  premiumsAfter2017Eur: decimalString.default("0"),
+  /**
+   * Total versé déclaré (optionnel). S'il est fourni, il doit égaler
+   * avant + après — contrôlé côté serveur via `checkPremiumsSplit`.
+   */
+  totalPremiumsEur: decimalString.optional().nullable(),
 });
 
 export const employeeSavingsPlanTypes = ["PEE", "PER", "PERCO"] as const;
@@ -558,6 +569,15 @@ export const lifeInsuranceUpdateSchema = z.object({
   cashEuro: decimalString.optional(),
   currency: currencyCode.optional(),
   notes: z.string().optional().nullable(),
+  premiumsBefore2017Eur: decimalString.optional(),
+  premiumsAfter2017Eur: decimalString.optional(),
+  totalPremiumsEur: decimalString.optional().nullable(),
+});
+
+/** PUT /api/life-insurance kind=tax-profile — situation fiscale du foyer */
+export const lifeInsuranceTaxProfileSchema = z.object({
+  kind: z.literal("tax-profile"),
+  taxHousehold: z.enum(taxHouseholds),
 });
 
 export type LifeInsuranceUpdateForm = z.infer<typeof lifeInsuranceUpdateSchema>;

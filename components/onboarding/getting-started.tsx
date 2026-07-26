@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Building2, FileUp, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/app/lib/utils";
+import { BRAND } from "@/components/branding/brand-assets";
 
 export type OnboardingStepId = "platform" | "import" | "transaction";
 
@@ -147,9 +148,15 @@ export function GettingStartedPanel({
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-semibold text-teal-900 dark:text-teal-100">
-            Bienvenue sur Aurea
+            Bienvenue sur {BRAND.name}
           </h2>
-          <p className="mt-0.5 text-xs text-teal-800/80 dark:text-teal-200/70">
+          <p
+            className="brand-gold-text brand-gold-shine brand-slogan mt-1.5 text-sm"
+            data-testid="onboarding-slogan"
+          >
+            {BRAND.slogan}
+          </p>
+          <p className="mt-1 text-xs text-teal-800/80 dark:text-teal-200/70">
             Trois étapes pour suivre votre patrimoine. Les transactions sont la
             source de vérité (quantités, CUMP, P&amp;L dérivés).
           </p>

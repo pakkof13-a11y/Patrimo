@@ -16,6 +16,7 @@ import {
   type DashboardMaturity,
   type OnboardingSignals,
 } from "@/app/lib/dashboard/maturity";
+import { BRAND } from "@/components/branding/brand-assets";
 
 type Props = {
   maturity: Extract<DashboardMaturity, "empty" | "setup">;
@@ -118,9 +119,16 @@ export function DashboardActivation({
               <Sparkles className="h-3.5 w-3.5" aria-hidden />
               {isEmpty ? "Votre cockpit patrimonial" : "Configuration en cours"}
             </p>
-            <h2 className="text-xl font-semibold tracking-tight text-[var(--foreground)] sm:text-[1.35rem]">
+            <h2
+              className={cn(
+                "text-xl sm:text-[1.35rem]",
+                isEmpty
+                  ? "brand-gold-text brand-gold-shine brand-slogan"
+                  : "font-semibold tracking-tight text-[var(--foreground)]"
+              )}
+            >
               {isEmpty
-                ? "Prenez le contrôle de votre patrimoine"
+                ? BRAND.slogan
                 : "Encore quelques pas pour activer le tableau de bord"}
             </h2>
             <p className="text-sm leading-relaxed text-[var(--muted-foreground)]">

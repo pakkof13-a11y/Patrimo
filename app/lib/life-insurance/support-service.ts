@@ -405,6 +405,9 @@ export type SupportRow = {
    * multipliait la position par la quantité.
    */
   currentValueEur: string | null;
+  /** Prix de revient au journal (CUMP × qté) — pour la quote-part de gains. */
+  costBasisEur: string | null;
+  unrealizedPnlEur: string | null;
   /** Quantité au journal — 1 pour un support créé ici. */
   quantity: string;
 };
@@ -472,6 +475,9 @@ export async function listSupports(userId: string): Promise<SupportRow[]> {
       managementFeePct: s?.managementFeePct?.toString() ?? null,
       notes: s?.notes ?? null,
       currentValueEur: h?.marketValueEur ?? null,
+      /** Prix de revient journal — base de la quote-part de gains au rachat. */
+      costBasisEur: h?.costBasisEur ?? null,
+      unrealizedPnlEur: h?.unrealizedPnlEur ?? null,
       quantity: h?.quantity ?? "0",
     };
   });

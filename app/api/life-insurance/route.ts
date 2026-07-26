@@ -4,6 +4,7 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import {
   lifeInsuranceSchema,
+  lifeInsuranceTaxProfileSchema,
   lifeInsuranceUpdateSchema,
   lifeProductSchema,
   lifeProductUpdateSchema,
@@ -14,12 +15,36 @@ import {
   validationErrorResponse,
 } from "@/app/lib/api/validation";
 import { listLifeInsurances } from "@/app/lib/cash/pockets";
+import {
+  checkPremiumsSplit,
+  exceedsPfuOutstandingThreshold,
+  isTaxHousehold,
+  totalLifeInsuranceOutstandingEur,
+  type TaxHousehold,
+} from "@/app/lib/life-insurance/fiscal";
 
 export async function GET() {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 401 });
-  const policies = await listLifeInsurances(userId);
-  return NextResponse.json({ policies });
+  const [policies, user] = await Promise.all([
+    listLifeInsurances(userId),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { taxHousehold: true },
+    }),
+  ]);
+  const taxHousehold: TaxHousehold = isTaxHousehold(user?.taxHousehold)
+    ? user!.taxHousehold
+    : "SINGLE";
+  const totalOutstandingEur = totalLifeInsuranceOutstandingEur(
+    policies.map((p) => p.outstandingEur)
+  );
+  return NextResponse.json({
+    policies,
+    taxHousehold,
+    totalOutstandingEur,
+    exceedsPfuThreshold: exceedsPfuOutstandingThreshold(totalOutstandingEur),
+  });
 }
 
 export async function POST(req: Request) {
@@ -53,6 +78,14 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return validationErrorResponse(parsed.error);
   }
+  const split = checkPremiumsSplit({
+    premiumsBefore2017Eur: parsed.data.premiumsBefore2017Eur || "0",
+    premiumsAfter2017Eur: parsed.data.premiumsAfter2017Eur || "0",
+    totalPremiumsEur: parsed.data.totalPremiumsEur,
+  });
+  if (!split.ok) {
+    return NextResponse.json({ error: split.error }, { status: 400 });
+  }
   const policy = await prisma.lifeInsurance.create({
     data: {
       userId,
@@ -61,6 +94,8 @@ export async function POST(req: Request) {
       cashEuro: new Prisma.Decimal(parsed.data.cashEuro || "0"),
       currency: (parsed.data.currency || "EUR").toUpperCase(),
       notes: parsed.data.notes || null,
+      premiumsBefore2017Eur: new Prisma.Decimal(split.premiumsBefore2017Eur),
+      premiumsAfter2017Eur: new Prisma.Decimal(split.premiumsAfter2017Eur),
     },
   });
   return NextResponse.json({ policy }, { status: 201 });
@@ -70,6 +105,19 @@ export async function PUT(req: Request) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 401 });
   const body = await req.json();
+
+  // Situation fiscale du foyer (une fois pour tous les contrats).
+  if (body?.kind === "tax-profile") {
+    const parsed = lifeInsuranceTaxProfileSchema.safeParse(body);
+    if (!parsed.success) return validationErrorResponse(parsed.error);
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { taxHousehold: parsed.data.taxHousehold },
+      select: { taxHousehold: true },
+    });
+    return NextResponse.json({ taxHousehold: user.taxHousehold });
+  }
+
   const id = requireBodyId(body);
   if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
 
@@ -116,6 +164,25 @@ export async function PUT(req: Request) {
   if (f.cashEuro !== undefined) data.cashEuro = new Prisma.Decimal(f.cashEuro || "0");
   if (f.currency !== undefined) data.currency = f.currency;
   if (f.notes !== undefined) data.notes = f.notes || null;
+
+  const touchesPremiums =
+    f.premiumsBefore2017Eur !== undefined ||
+    f.premiumsAfter2017Eur !== undefined ||
+    f.totalPremiumsEur !== undefined;
+  if (touchesPremiums) {
+    const split = checkPremiumsSplit({
+      premiumsBefore2017Eur:
+        f.premiumsBefore2017Eur ?? existing.premiumsBefore2017Eur.toString(),
+      premiumsAfter2017Eur:
+        f.premiumsAfter2017Eur ?? existing.premiumsAfter2017Eur.toString(),
+      totalPremiumsEur: f.totalPremiumsEur,
+    });
+    if (!split.ok) {
+      return NextResponse.json({ error: split.error }, { status: 400 });
+    }
+    data.premiumsBefore2017Eur = new Prisma.Decimal(split.premiumsBefore2017Eur);
+    data.premiumsAfter2017Eur = new Prisma.Decimal(split.premiumsAfter2017Eur);
+  }
 
   const write = await prisma.lifeInsurance.updateMany({
     where: { id, userId },

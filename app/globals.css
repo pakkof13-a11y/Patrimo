@@ -69,6 +69,14 @@
   --app-max-width: 2560px;
   --shell-pad-x: 0.875rem;
   --shell-pad-y: 1rem;
+
+  /* Marque or (slogan / wordmark) + teinte bannière KPI */
+  --gold-1: #fcd34d;
+  --gold-2: #ca8a04;
+  --gold-3: #a16207;
+  --banner-fill: #f7f4ec;
+  --banner-edge: #f4f3ef;
+
   color-scheme: light;
 }
 
@@ -104,6 +112,12 @@
   --shadow-xs: 0 1px 0 rgb(0 0 0 / 0.25);
   --shadow-sm: 0 2px 8px rgb(0 0 0 / 0.28);
   --shadow-md: 0 8px 28px rgb(0 0 0 / 0.35);
+
+  --gold-1: #fde68a;
+  --gold-2: #eab308;
+  --gold-3: #a16207;
+  --banner-fill: #0c121c;
+  --banner-edge: #0a101c;
 
   color-scheme: dark;
 }
@@ -191,6 +205,145 @@ html {
   transition-property: opacity, filter;
   transition-duration: 300ms;
   transition-timing-function: ease-in-out;
+}
+
+/* ── Bannière KPI : fondus latéraux thématiques ──────────────── */
+.brand-banner-fade-x {
+  background: linear-gradient(
+    90deg,
+    var(--banner-edge) 0%,
+    color-mix(in srgb, var(--banner-fill) 88%, transparent) 8%,
+    transparent 22%,
+    transparent 78%,
+    color-mix(in srgb, var(--banner-fill) 88%, transparent) 92%,
+    var(--banner-edge) 100%
+  );
+}
+
+/* Prolonge le motif sous le Cockpit (padding bas du surface) */
+.brand-banner--extend-below {
+  margin-bottom: -0.75rem;
+}
+
+@media (min-width: 640px) {
+  .brand-banner--extend-below {
+    margin-bottom: -1rem;
+  }
+}
+
+/* ── Typographie or premium + brillance ──────────────────────── */
+.brand-gold-text {
+  display: inline-block;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  background-image: linear-gradient(
+    125deg,
+    var(--gold-1) 0%,
+    var(--gold-2) 45%,
+    var(--gold-3) 100%
+  );
+  background-size: 100% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Slogan type Apple — aéré, confident, tracking ouvert */
+.brand-slogan {
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1.45;
+}
+
+/* Shine : bande claire qui traverse le dégradé métallique */
+.brand-gold-shine {
+  background-image: linear-gradient(
+    110deg,
+    var(--gold-1) 0%,
+    var(--gold-2) 22%,
+    #fef3c7 38%,
+    var(--gold-2) 52%,
+    var(--gold-3) 72%,
+    var(--gold-1) 100%
+  );
+  background-size: 220% 100%;
+  background-position: 0% 50%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: brand-gold-shine 4.5s ease-in-out infinite;
+}
+
+@keyframes brand-gold-shine {
+  0%,
+  12% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  88%,
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-gold-shine {
+    animation: none;
+    background-image: linear-gradient(
+      125deg,
+      var(--gold-1) 0%,
+      var(--gold-2) 45%,
+      var(--gold-3) 100%
+    );
+    background-size: 100% 100%;
+    background-position: 0 0;
+  }
+}
+
+/* Cockpit — halo or discret + CTA primaire */
+.cockpit-panel {
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 1px color-mix(in srgb, var(--gold-2) 10%, transparent);
+}
+
+.cockpit-btn-primary {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold-2) 20%, transparent);
+}
+
+/* Carte login premium */
+.login-card {
+  border: 1px solid color-mix(in srgb, var(--gold-2) 22%, var(--border));
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 1px color-mix(in srgb, var(--primary) 8%, transparent),
+    0 12px 40px color-mix(in srgb, var(--gold-3) 8%, transparent);
+  backdrop-filter: blur(12px);
+  transition:
+    border-color 350ms ease-in-out,
+    box-shadow 350ms ease-in-out,
+    background-color 350ms ease-in-out;
+}
+
+.dark .login-card {
+  border-color: color-mix(in srgb, var(--gold-2) 18%, var(--border));
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent),
+    0 16px 48px rgb(0 0 0 / 0.45),
+    0 0 40px color-mix(in srgb, var(--gold-2) 6%, transparent);
+}
+
+.login-logo {
+  box-shadow: var(--shadow-md);
+  outline: 1px solid color-mix(in srgb, var(--gold-2) 28%, var(--border));
+  outline-offset: 0;
 }
 
 /* Sous-titre de présentation sous le titre d’onglet (transition visuelle) */

@@ -198,6 +198,11 @@ export async function listLifeInsurances(userId: string, base = "EUR") {
       zero()
     );
     const cash = av.cashEuro.toString();
+    const premiumsBefore2017Eur = av.premiumsBefore2017Eur.toString();
+    const premiumsAfter2017Eur = av.premiumsAfter2017Eur.toString();
+    // Encours « connu » du contrat (legacy cash + produits) — le journal
+    // des supports s'y ajoute côté API si fourni.
+    const outstandingEur = toFixed(d(cash).plus(productsTotal), 8);
     return {
       id: av.id,
       insurer: av.insurer,
@@ -205,6 +210,13 @@ export async function listLifeInsurances(userId: string, base = "EUR") {
       cashEuro: cash,
       currency: av.currency,
       notes: av.notes,
+      premiumsBefore2017Eur,
+      premiumsAfter2017Eur,
+      premiumsTotalEur: toFixed(
+        d(premiumsBefore2017Eur).plus(d(premiumsAfter2017Eur)),
+        8
+      ),
+      outstandingEur,
       products,
       cashCounts: positiveCashOnly(cash),
       cashBase: positiveCashOnly(cash)

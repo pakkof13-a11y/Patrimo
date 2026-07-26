@@ -62,8 +62,6 @@ export default function LoginPage() {
         callbackUrl,
       });
       if (!res || res.error) {
-        // Messages génériques — pas de distinction « user existe / mauvais mdp ».
-        // rate_limited : cooldown sans confirmer l’existence du compte.
         const code = (res as { code?: string } | undefined)?.code;
         if (code === "rate_limited") {
           setError(
@@ -75,10 +73,7 @@ export default function LoginPage() {
         setPending(false);
         return;
       }
-      // Nouveau login → l'aide réapparaît si « Afficher à chaque démarrage »
-      // (dismiss permanent en localStorage n'est pas touché).
       clearSessionPref(ONBOARDING_SESSION_DISMISS_KEY);
-      // Ne pas utiliser res.url absolu (AUTH_URL=localhost alors que e2e = 127.0.0.1)
       router.replace(toAppPath(callbackUrl, "/dashboard"));
       router.refresh();
     } catch {
@@ -90,24 +85,18 @@ export default function LoginPage() {
   return (
     <div
       className={cn(
-        "relative flex min-h-screen flex-col items-center justify-center px-4",
+        "relative flex min-h-screen flex-col",
         "bg-[var(--background)] text-[var(--foreground)]",
         "transition-colors duration-300 ease-in-out"
       )}
     >
-      {/*
-        Halo doré — teinte reprise du monogramme (pas --primary, qui est teal
-        et sert déjà à l'action). Deux calques superposés qui se crossfadent
-        en opacité plutôt qu'un gradient qu'on tenterait de transitionner
-        directement (les navigateurs n'interpolent pas les dégradés de façon
-        fiable) — même technique que BrandBannerSurface / BrandPageBackground.
-      */}
+      {/* Halos marque — crossfade light/dark */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 opacity-100 transition-opacity duration-300 ease-in-out dark:opacity-0"
         style={{
           background:
-            "radial-gradient(ellipse 70% 45% at 50% -10%, rgba(212,175,55,0.16), transparent), radial-gradient(ellipse 50% 35% at 100% 100%, rgba(212,175,55,0.08), transparent)",
+            "radial-gradient(ellipse 70% 45% at 50% -10%, rgba(212,175,55,0.16), transparent), radial-gradient(ellipse 50% 35% at 100% 100%, rgba(13,107,99,0.08), transparent)",
         }}
       />
       <div
@@ -115,96 +104,129 @@ export default function LoginPage() {
         className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 ease-in-out dark:opacity-100"
         style={{
           background:
-            "radial-gradient(ellipse 70% 45% at 50% -10%, rgba(212,175,55,0.22), transparent), radial-gradient(ellipse 50% 35% at 100% 100%, rgba(212,175,55,0.10), transparent)",
+            "radial-gradient(ellipse 70% 45% at 50% -10%, rgba(212,175,55,0.22), transparent), radial-gradient(ellipse 50% 35% at 100% 100%, rgba(45,212,191,0.08), transparent)",
         }}
       />
 
-      <div className="absolute right-4 top-4 z-10">
+      <div className="absolute right-4 top-4 z-20 sm:right-6 sm:top-5">
         <ThemeModeToggle />
       </div>
 
-      <div className="relative z-10 w-full max-w-sm">
-        <div className="mb-8 flex flex-col items-center text-center">
+      <div
+        className={cn(
+          "relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col items-center justify-center",
+          "px-4 py-12 sm:px-6 lg:px-8",
+          "lg:grid lg:grid-cols-2 lg:items-center lg:gap-12 xl:gap-16"
+        )}
+      >
+        {/* Hero — bas mobile, colonne gauche desktop */}
+        <div
+          className={cn(
+            "mb-8 flex w-full max-w-md flex-col items-center text-center",
+            "lg:mb-0 lg:max-w-none lg:items-start lg:text-left"
+          )}
+        >
           <BrandLogo
-            size={120}
+            size={112}
             priority
             alt={BRAND.name}
-            className="rounded-2xl shadow-lg ring-1 ring-[var(--border)]"
+            className="login-logo rounded-2xl shadow-[var(--shadow-md)]"
           />
-          <p className="mt-5 text-base font-medium tracking-wide text-[var(--muted-foreground)] sm:text-lg">
-            Prenez les commandes de votre avenir financier.
+          <h1
+            className={cn(
+              "brand-gold-text brand-gold-shine mt-6 text-3xl tracking-tight sm:text-4xl",
+              "lg:text-[2.5rem]"
+            )}
+          >
+            {BRAND.name}
+          </h1>
+          <p
+            className={cn(
+              "brand-gold-text brand-gold-shine brand-slogan mt-4 max-w-sm",
+              "text-[1.05rem] sm:text-lg lg:max-w-md lg:text-xl"
+            )}
+            data-testid="login-slogan"
+          >
+            {BRAND.slogan}
+          </p>
+          <p className="mt-4 hidden max-w-md text-sm leading-relaxed text-[var(--muted-foreground)] lg:block">
+            Positions, P&amp;L et allocations à partir de votre journal —
+            un cockpit clair pour piloter votre patrimoine.
           </p>
         </div>
 
-        <form
-          method="post"
-          action="#"
-          onSubmit={onSubmit}
-          className={cn(
-            "rounded-2xl border border-[var(--border)] bg-[var(--card)]/90 p-6 shadow-2xl backdrop-blur",
-            "transition-colors duration-300 ease-in-out"
-          )}
-          data-testid="login-form"
-          data-hydrated={hydrated ? "true" : "false"}
-        >
-          <h1 className="mb-1 text-center text-lg font-semibold text-[var(--foreground)]">
-            Connexion
-          </h1>
-          <p className="mb-5 text-center text-xs text-[var(--muted-foreground)]">
-            Accès sécurisé multi-compte
-          </p>
-
-          <label className="mb-3 block text-xs font-medium text-[var(--muted-foreground)]">
-            Identifiant
-            <input
-              className="input mt-1 w-full"
-              autoComplete="username"
-              name="username"
-              data-testid="login-username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              autoFocus
-            />
-          </label>
-
-          <label className="mb-4 block text-xs font-medium text-[var(--muted-foreground)]">
-            Mot de passe
-            <input
-              className="input mt-1 w-full"
-              type="password"
-              autoComplete="current-password"
-              name="password"
-              data-testid="login-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </label>
-
-          {error && (
-            <p
-              className="mb-3 rounded-lg bg-[var(--danger)]/10 px-3 py-2 text-center text-xs text-[var(--danger)]"
-              data-testid="login-error"
-              role="alert"
-            >
-              {error}
-            </p>
-          )}
-
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={pending || !hydrated}
-            data-testid="login-submit"
+        {/* Formulaire */}
+        <div className="w-full max-w-sm lg:max-w-md lg:justify-self-end">
+          <form
+            method="post"
+            action="#"
+            onSubmit={onSubmit}
+            className={cn(
+              "login-card rounded-2xl p-6 sm:p-7",
+              "transition-colors duration-300 ease-in-out"
+            )}
+            data-testid="login-form"
+            data-hydrated={hydrated ? "true" : "false"}
           >
-            {pending ? "Connexion…" : "Se connecter"}
-          </Button>
-        </form>
+            <h2 className="mb-1 text-center text-lg font-semibold text-[var(--foreground)] lg:text-left">
+              Connexion
+            </h2>
+            <p className="mb-5 text-center text-xs text-[var(--muted-foreground)] lg:text-left">
+              Accès sécurisé multi-compte
+            </p>
 
-        <p className="mt-6 text-center text-[10px] text-[var(--muted-foreground)]">
-          {BRAND.name} · Europe/Paris
-        </p>
+            <label className="mb-3 block text-xs font-medium text-[var(--muted-foreground)]">
+              Identifiant
+              <input
+                className="input mt-1 w-full"
+                autoComplete="username"
+                name="username"
+                data-testid="login-username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                autoFocus
+              />
+            </label>
+
+            <label className="mb-4 block text-xs font-medium text-[var(--muted-foreground)]">
+              Mot de passe
+              <input
+                className="input mt-1 w-full"
+                type="password"
+                autoComplete="current-password"
+                name="password"
+                data-testid="login-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </label>
+
+            {error && (
+              <p
+                className="mb-3 rounded-lg bg-[var(--danger)]/10 px-3 py-2 text-center text-xs text-[var(--danger)]"
+                data-testid="login-error"
+                role="alert"
+              >
+                {error}
+              </p>
+            )}
+
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={pending || !hydrated}
+              data-testid="login-submit"
+            >
+              {pending ? "Connexion…" : "Se connecter"}
+            </Button>
+          </form>
+
+          <p className="mt-6 text-center text-[10px] text-[var(--muted-foreground)] lg:text-left">
+            {BRAND.name} · Europe/Paris
+          </p>
+        </div>
       </div>
     </div>
   );
