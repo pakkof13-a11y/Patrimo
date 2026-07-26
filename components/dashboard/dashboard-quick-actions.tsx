@@ -85,7 +85,7 @@ export function DashboardQuickActions({
     >
       <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2 sm:mb-3">
         <div className="min-w-0">
-          <h2 className="section-heading">Cockpit</h2>
+          <h2 className="section-heading section-heading--gold">Cockpit</h2>
           <p className="text-meta">Accès rapide aux vues essentielles</p>
         </div>
       </div>
@@ -99,14 +99,14 @@ export function DashboardQuickActions({
               key={item.id}
               type="button"
               size="sm"
-              variant={item.primary ? "default" : "outline"}
+              variant={item.primary ? "gold" : "outline"}
               className={cn(
                 "h-10 min-h-10 w-full justify-center gap-1.5 px-3 text-xs sm:h-9 sm:w-auto sm:min-w-0",
                 "rounded-[var(--radius-md)] transition-[background-color,border-color,color,box-shadow,transform] duration-300 ease-in-out",
                 "active:scale-[0.98] motion-reduce:active:scale-100",
                 item.primary
                   ? "cockpit-btn-primary"
-                  : "border-[var(--border)] bg-[var(--card)] hover:border-[var(--border-strong)] hover:bg-[var(--primary-soft)]"
+                  : "border-[var(--border)] bg-[var(--card)] hover:border-[var(--border-strong)] hover:bg-[var(--gold-muted)]"
               )}
               data-testid={`dashboard-action-${item.id}`}
               title={item.hint}

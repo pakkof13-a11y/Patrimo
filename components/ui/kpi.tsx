@@ -32,7 +32,7 @@ export function Kpi({
       className={cn(
         "kpi-tile flex min-h-[5.25rem] min-w-0 flex-col justify-between gap-2 p-3 sm:p-3.5",
         accent &&
-          "bg-[var(--primary-soft)] ring-1 ring-inset ring-[var(--primary)]/20",
+          "bg-[var(--gold-muted)] ring-1 ring-inset ring-[var(--gold-2)]/25",
         tone === "up" &&
           "border-l-[3px] border-l-[var(--success)]/80 dark:border-l-[var(--success)]/70",
         tone === "down" &&
@@ -55,11 +55,11 @@ export function Kpi({
         className={cn(
           "kpi-value min-w-0 leading-none break-words",
           accent
-            ? "text-[1.2rem] sm:text-xl xl:text-[1.4rem]"
+            ? "kpi-value--primary text-[1.2rem] sm:text-xl xl:text-[1.4rem]"
             : "text-[1.05rem] sm:text-lg xl:text-[1.2rem]",
           tone === "up" && "text-[var(--success)]",
           tone === "down" && "text-[var(--danger)]",
-          !tone && "text-[var(--foreground)]"
+          !tone && !accent && "text-[var(--foreground)]"
         )}
       >
         {value}

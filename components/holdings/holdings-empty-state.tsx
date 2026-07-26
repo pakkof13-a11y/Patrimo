@@ -73,6 +73,7 @@ export function HoldingsEmptyState({
           {onAddTransaction && (
             <Button
               type="button"
+              variant="gold"
               size="sm"
               onClick={onAddTransaction}
               data-testid="holdings-empty-add-tx"
@@ -84,7 +85,7 @@ export function HoldingsEmptyState({
           {onImport && (
             <Button
               type="button"
-              variant="outline"
+              variant="gold"
               size="sm"
               onClick={onImport}
               data-testid="holdings-empty-import"

@@ -2,7 +2,8 @@ import * as React from "react";
 import { cn } from "@/app/lib/utils";
 
 type Props = React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "default" | "outline" | "ghost" | "danger";
+  /** default = teal (formulaires) · gold = CTA prestige (ajouter, importer…) */
+  variant?: "default" | "outline" | "ghost" | "danger" | "gold";
   size?: "sm" | "md" | "lg";
 };
 
@@ -38,6 +39,8 @@ export const Button = React.forwardRef<HTMLButtonElement, Props>(function Button
           "text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] active:bg-[var(--muted)]",
         variant === "danger" &&
           "bg-[var(--danger)] text-white hover:brightness-110 active:brightness-95",
+        variant === "gold" &&
+          "bg-[var(--gold-2)] text-[#0a0800] hover:bg-[var(--gold-1)] active:bg-[var(--gold-3)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--gold-2)_30%,transparent)]",
         size === "sm" && "h-8 px-2.5 text-xs",
         size === "md" && "h-9 px-3.5 text-sm",
         size === "lg" && "h-10 px-4 text-sm",

@@ -242,7 +242,7 @@ export function AppHeader({
                 "block w-full px-3 py-2 text-left text-sm transition",
                 "focus-visible:bg-[var(--muted)] focus-visible:outline-none",
                 sel
-                  ? "bg-teal-50 font-medium text-teal-900 dark:bg-teal-950/40 dark:text-teal-100"
+                  ? "bg-[var(--gold-muted)] font-medium text-[var(--nav-active-gold)]"
                   : "hover:bg-[var(--muted)]"
               )}
               onClick={() => {
@@ -398,7 +398,7 @@ export function AppHeader({
           {onOpenImport && (
             <Button
               type="button"
-              variant="outline"
+              variant="gold"
               size="sm"
               onClick={(e) => {
                 e.preventDefault();
@@ -407,10 +407,6 @@ export function AppHeader({
               }}
               data-testid="open-import-csv"
               title="Importer un relevé CSV"
-              className={cn(
-                "border-slate-200 dark:border-slate-700",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40"
-              )}
             >
               <FileUp className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Importer</span>
@@ -420,12 +416,10 @@ export function AppHeader({
           <div ref={txRef} className="relative inline-flex shrink-0 shadow-sm">
             <Button
               size="sm"
+              variant="gold"
               onClick={() => onOpenTransaction()}
               data-testid="open-tx-form"
-              className={cn(
-                "rounded-r-none pr-2.5",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:ring-offset-1"
-              )}
+              className="rounded-r-none pr-2.5"
               title="Nouvelle transaction (n) — source de vérité du portefeuille"
               aria-keyshortcuts="n"
             >
@@ -435,10 +429,8 @@ export function AppHeader({
             <Button
               ref={txToggleRef}
               size="sm"
-              className={cn(
-                "rounded-l-none border-l border-teal-900/20 px-1.5 dark:border-teal-950/40",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
-              )}
+              variant="gold"
+              className="rounded-l-none border-l border-[#0a0800]/20 px-1.5"
               aria-label="Choisir un type d'opération"
               aria-expanded={txMenuOpen}
               aria-haspopup="menu"
@@ -498,9 +490,10 @@ export function AppHeader({
                   "shrink-0 rounded-[var(--radius-md)] px-2.5 py-1.5 text-[13px] font-medium whitespace-nowrap transition",
                   "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
                   active
-                    ? "bg-[var(--primary-soft)] text-[var(--primary)]"
+                    ? "nav-item-active"
                     : "text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
                 )}
+                aria-current={active ? "page" : undefined}
               >
                 {item.label}
               </button>
@@ -523,9 +516,10 @@ export function AppHeader({
                   "inline-flex items-center gap-1 rounded-[var(--radius-md)] px-2.5 py-1.5 text-[13px] font-medium whitespace-nowrap transition",
                   "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
                   active
-                    ? "bg-[var(--primary-soft)] text-[var(--primary)]"
+                    ? "nav-item-active"
                     : "text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
                 )}
+                aria-current={active ? "true" : undefined}
               >
                 {group.label}
                 <ChevronDown
