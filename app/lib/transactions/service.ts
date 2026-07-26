@@ -287,13 +287,13 @@ function validateLedgerIncremental(
   state: LedgerState,
   pending: LedgerTx,
   allowNegativeCash?: boolean
-) {
+): LedgerState {
   const soft = Boolean(allowNegativeCash);
   try {
-    applyTransaction(cloneLedgerState(state), pending, { allowNegativeCash: soft });
+    return applyTransaction(cloneLedgerState(state), pending, { allowNegativeCash: soft });
   } catch (strictErr) {
     try {
-      applyTransaction(cloneLedgerState(state), pending, {
+      return applyTransaction(cloneLedgerState(state), pending, {
         allowNegativeCash: true,
         clampOversell: true,
       });
@@ -318,7 +318,18 @@ export async function createTransaction(
    * de cette transaction. Sans `prismaClient`, utilise le singleton global
    * et le cache ledger (chemin le plus courant, écritures utilisateur).
    */
-  prismaClient?: DbClient
+  prismaClient?: DbClient,
+  /**
+   * `ledgerState` : état partagé et réutilisé entre plusieurs écritures d'un
+   * même lot (import CSV — voir commit.ts). Évite un `loadLedgerForUser` +
+   * replay complet à CHAQUE ligne : sans ça, invalider le cache après
+   * chaque insertion rend l'import en O(n²) sur le nombre de lignes déjà
+   * en base, et un CSV de quelques centaines de lignes dépasse le timeout
+   * serverless (10s). L'état est mis à jour en place après chaque écriture
+   * réussie ; l'appelant invalide le cache une seule fois à la fin du lot
+   * via `skipInvalidate`.
+   */
+  opts?: { ledgerState?: LedgerState; skipInvalidate?: boolean }
 ) {
   const client = prismaClient ?? prisma;
   const input = await resolveFx(raw);
@@ -405,8 +416,13 @@ export async function createTransaction(
   } else {
     // Chemin normal : réutilise le ledger déjà calculé/caché par
     // loadLedgerForUser (fingerprint) au lieu d'un findMany + replay complet.
-    const ledgerState = await loadLedgerForUser(input.userId);
-    validateLedgerIncremental(ledgerState, newTx, allowNeg);
+    const ledgerState = opts?.ledgerState ?? (await loadLedgerForUser(input.userId));
+    const nextState = validateLedgerIncremental(ledgerState, newTx, allowNeg);
+    if (opts?.ledgerState) {
+      // Lot (import CSV) : reporter la tx validée dans l'état partagé pour
+      // que la ligne suivante la voie sans repasser par la DB.
+      Object.assign(opts.ledgerState, nextState);
+    }
   }
 
   const amounts = computeNetCashImpactEur(newTx);
@@ -424,8 +440,10 @@ export async function createTransaction(
     },
   });
 
-  const { invalidateLedgerCache } = await import("../portfolio/ledger-cache");
-  invalidateLedgerCache(input.userId);
+  if (!opts?.skipInvalidate) {
+    const { invalidateLedgerCache } = await import("../portfolio/ledger-cache");
+    invalidateLedgerCache(input.userId);
+  }
 
   return created;
 }

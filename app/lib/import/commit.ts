@@ -1,5 +1,7 @@
 import { prisma } from "../prisma";
 import { createTransaction } from "../transactions/service";
+import { loadLedgerForUser } from "../portfolio/service";
+import { invalidateLedgerCache } from "../portfolio/ledger-cache";
 import { resolveAssetLogo } from "../assets/logos";
 import { assetReuseByTickerWhere } from "../assets/reuse";
 import { resolveCoingeckoId } from "../market/providers/coingecko";
@@ -439,6 +441,12 @@ export async function commitImportRows(params: {
   const assetCountBefore = await prisma.asset.count({ where: { userId } });
   const seenStrict = new Set<string>();
 
+  // État de ledger chargé une seule fois et mis à jour en place au fil des
+  // lignes (voir createTransaction/service.ts) — sans ça, invalider le cache
+  // après chaque insertion force un replay complet du journal à CHAQUE ligne,
+  // en O(n²) sur un CSV de plusieurs centaines de lignes (timeout serverless).
+  const ledgerState = await loadLedgerForUser(userId);
+
   for (const row of toImport) {
     try {
       const rowPlatformId = await resolveRowPlatformId(
@@ -457,24 +465,28 @@ export async function commitImportRows(params: {
       }
 
       const assetId = await resolveOrCreateAsset(userId, rowPlatformId, row, params.accountEnvelopeType);
-      await createTransaction({
-        userId,
-        type: row.type as TxType,
-        platformId: rowPlatformId,
-        assetId: assetId || null,
-        quantity: row.quantity || undefined,
-        unitPrice: row.unitPrice || undefined,
-        cashAmount: row.cashAmount || undefined,
-        fees: row.fees || "0",
-        currency: row.currency || "EUR",
-        fxRateToEur: "1",
-        occurredAt: row.occurredAt || new Date().toISOString(),
-        notes: row.notes
-          ? `[Import CSV L${row.line}] ${row.notes}`
-          : `[Import CSV L${row.line}]`,
-        autoFundCash: true,
-        allowNegativeCash: true,
-      });
+      await createTransaction(
+        {
+          userId,
+          type: row.type as TxType,
+          platformId: rowPlatformId,
+          assetId: assetId || null,
+          quantity: row.quantity || undefined,
+          unitPrice: row.unitPrice || undefined,
+          cashAmount: row.cashAmount || undefined,
+          fees: row.fees || "0",
+          currency: row.currency || "EUR",
+          fxRateToEur: "1",
+          occurredAt: row.occurredAt || new Date().toISOString(),
+          notes: row.notes
+            ? `[Import CSV L${row.line}] ${row.notes}`
+            : `[Import CSV L${row.line}]`,
+          autoFundCash: true,
+          allowNegativeCash: true,
+        },
+        undefined,
+        { ledgerState, skipInvalidate: true }
+      );
       seenStrict.add(sfp);
       created++;
     } catch (e) {
@@ -487,6 +499,10 @@ export async function commitImportRows(params: {
       errors.push({ line: row.line, message });
       skipped++;
     }
+  }
+
+  if (created > 0) {
+    invalidateLedgerCache(userId);
   }
 
   const assetCountAfter = await prisma.asset.count({ where: { userId } });
