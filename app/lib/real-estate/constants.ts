@@ -35,18 +35,113 @@ export function isDvfEstimable(propertyType: string): boolean {
   return (DVF_ESTIMABLE_TYPES as readonly string[]).includes(propertyType);
 }
 
-/** Usage du bien — porté par l'actif, pas par la plateforme. */
+/**
+ * Usage du bien — porté par l'actif, pas par la plateforme.
+ *
+ * L'usage décrit **ce qu'on fait du bien**, rien d'autre. Le régime fiscal et
+ * le dispositif de défiscalisation sont deux dimensions distinctes, déclarées
+ * plus bas : un Pinel n'est pas un usage, c'est un locatif nu assorti d'une
+ * réduction d'impôt. Les fondre dans une liste unique (« RENTAL_PINEL »,
+ * « RENTAL_FURNISHED »…) rendrait inexprimables les combinaisons réelles —
+ * un meublé au réel avec amortissement, un nu au micro-foncier sous
+ * Denormandie — et obligerait à rallonger la liste à chaque loi de finances.
+ */
 export const PROPERTY_USAGES = {
   RESIDENCE_PRINCIPALE: "Résidence principale",
   RESIDENCE_SECONDAIRE: "Résidence secondaire",
   LOCATIF_NU: "Locatif nu",
   LOCATIF_MEUBLE: "Locatif meublé",
-  LOCATIF_SAISONNIER: "Locatif saisonnier",
-  MIXTE: "Mixte",
+  LOCATIF_SAISONNIER: "Locatif saisonnier (Airbnb, meublé de tourisme)",
+  MIXTE: "Mixte (habitation + professionnel)",
   AUTRE: "Autre",
 } as const;
 
 export type PropertyUsage = keyof typeof PROPERTY_USAGES;
+
+/**
+ * Régime d'imposition des revenus locatifs.
+ *
+ * Le régime dépend du **mode de location** : nu → revenus fonciers,
+ * meublé → BIC. Proposer un micro-foncier sur un meublé serait une erreur de
+ * déclaration, d'où `regimesForUsage` qui restreint la liste.
+ */
+export const RENTAL_REGIMES = {
+  MICRO_FONCIER: "Micro-foncier (abattement 30 %)",
+  REEL_FONCIER: "Réel foncier (charges réelles, 2044)",
+  MICRO_BIC: "Micro-BIC (abattement 50 %)",
+  REEL_BIC: "Réel BIC (charges + amortissement)",
+  LMP: "Loueur en meublé professionnel",
+} as const;
+
+export type RentalRegimeKey = keyof typeof RENTAL_REGIMES;
+
+/** Régimes ouverts en location nue. */
+export const BARE_REGIMES: readonly RentalRegimeKey[] = [
+  "MICRO_FONCIER",
+  "REEL_FONCIER",
+];
+
+/** Régimes ouverts en location meublée. */
+export const FURNISHED_REGIMES: readonly RentalRegimeKey[] = [
+  "MICRO_BIC",
+  "REEL_BIC",
+  "LMP",
+];
+
+/** Vrai si l'usage correspond à une location meublée. */
+export function isFurnishedUsage(usage: string): boolean {
+  return usage === "LOCATIF_MEUBLE" || usage === "LOCATIF_SAISONNIER";
+}
+
+/** Régimes proposables pour un usage donné. */
+export function regimesForUsage(usage: string): readonly RentalRegimeKey[] {
+  if (!isRentalUsage(usage)) return [];
+  return isFurnishedUsage(usage) ? FURNISHED_REGIMES : BARE_REGIMES;
+}
+
+/**
+ * Dispositif de défiscalisation adossé au bien.
+ *
+ * Orthogonal à l'usage et au régime : un Pinel reste un locatif nu déclaré
+ * au foncier ; le dispositif n'ajoute qu'une réduction d'impôt conditionnée à
+ * un engagement de durée. Aucun de ces dispositifs n'est calculé pour
+ * l'instant — le champ sert à qualifier le bien et à porter l'échéance
+ * d'engagement, que l'on ne veut pas perdre de vue.
+ */
+export const TAX_SCHEMES = {
+  AUCUN: "Aucun",
+  PINEL: "Pinel",
+  PINEL_PLUS: "Pinel+ (qualité d'usage)",
+  DENORMANDIE: "Denormandie (ancien à rénover)",
+  MALRAUX: "Malraux (secteur sauvegardé)",
+  MONUMENT_HISTORIQUE: "Monument historique",
+  LOC_AVANTAGES: "Loc'Avantages (ex-Cosse)",
+  CENSI_BOUVARD: "Censi-Bouvard (résidence services)",
+  DEFICIT_FONCIER: "Déficit foncier",
+} as const;
+
+export type TaxScheme = keyof typeof TAX_SCHEMES;
+
+/** Dispositifs comportant un engagement de location à durée déterminée. */
+export const SCHEMES_WITH_COMMITMENT: readonly TaxScheme[] = [
+  "PINEL",
+  "PINEL_PLUS",
+  "DENORMANDIE",
+  "LOC_AVANTAGES",
+  "CENSI_BOUVARD",
+];
+
+export function hasCommitment(scheme: string): boolean {
+  return (SCHEMES_WITH_COMMITMENT as readonly string[]).includes(scheme);
+}
+
+export function rentalRegimeLabel(value: string): string {
+  return RENTAL_REGIMES[value as RentalRegimeKey] ?? value;
+}
+
+export function taxSchemeLabel(value: string): string {
+  return TAX_SCHEMES[value as TaxScheme] ?? value;
+}
 
 /** Usages générant un revenu locatif — pilote l'affichage du rendement. */
 export const RENTAL_USAGES: readonly PropertyUsage[] = [

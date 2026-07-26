@@ -31,6 +31,14 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [{ id: "holdings", label: "Positions", testId: "holdings" }],
   },
   {
+    // Entrée directe et non un sous-menu de « Patrimoine étendu » : un bien
+    // porte un usage, un régime, un dispositif, un bail et une dette. C'est
+    // une catégorie à part entière, au même rang que Positions.
+    id: "real-estate",
+    label: "Immobilier",
+    items: [{ id: "immobilier", label: "Immobilier", testId: "immobilier" }],
+  },
+  {
     id: "sources",
     label: "Sources",
     items: [
@@ -76,12 +84,9 @@ export const ENVELOPE_SELECT_OPTIONS: {
   { value: "PEA", label: "PEA", tab: "pea", param: "pea" },
   { value: "AV", label: "Assurance-vie", tab: "av", param: "av" },
   { value: "CRYPTO", label: "Cryptomonnaies", tab: "crypto", param: "crypto" },
-  {
-    value: "IMMOBILIER",
-    label: "Immobilier",
-    tab: "immobilier",
-    param: "immobilier",
-  },
+  // Pas d'entrée IMMOBILIER : l'immobilier a son onglet de premier niveau.
+  // La laisser ici ferait quitter la page Positions depuis un sélecteur censé
+  // n'en filtrer que le tableau.
   { value: "CFD", label: "CFD", tab: "cfd", param: "cfd" },
 ];
 

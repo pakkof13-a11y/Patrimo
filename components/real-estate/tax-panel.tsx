@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/app/lib/api-client";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
@@ -45,15 +45,17 @@ type TaxBundle = {
     taxEur: string;
     effectiveRatePct: string;
   };
-  rental: {
-    grossRentEur: string;
-    deductibleChargesEur: string;
-    marginalTaxRatePct: number;
-    furnished: boolean;
-    outcomes: RegimeOutcome[];
-    bestRegime: string | null;
-    savingVsNextEur: string;
-  };
+  marginalTaxRatePct: number;
+  rental: { bare: RentalSection; furnished: RentalSection };
+};
+
+type RentalSection = {
+  count: number;
+  grossRentEur: string;
+  deductibleChargesEur: string;
+  outcomes: RegimeOutcome[];
+  bestRegime: string | null;
+  savingVsNextEur: string;
 };
 
 const REGIME_LABELS: Record<string, string> = {
@@ -74,6 +76,120 @@ function num(v: string | null | undefined): number {
 }
 
 /**
+ * Arbitrage de régime pour un mode de location (nu ou meublé).
+ *
+ * Rendue vide quand aucun bien ne relève de ce mode : afficher une section
+ * « meublé » à zéro pour un parc entièrement nu n'apprendrait rien.
+ */
+function RentalSectionView({
+  title,
+  section,
+  testId,
+}: {
+  title: string;
+  section: RentalSection;
+  testId: string;
+}) {
+  if (section.count === 0) return null;
+
+  const best = section.outcomes.find((o) => o.regime === section.bestRegime);
+
+  return (
+    <div className="mt-3" data-testid={testId}>
+      <h4 className="text-sm font-medium">{title}</h4>
+      <p className="text-meta mt-0.5">
+        {section.count} bien{section.count > 1 ? "s" : ""} ·{" "}
+        {formatCurrency(num(section.grossRentEur))} de recettes annuelles ·{" "}
+        {formatCurrency(num(section.deductibleChargesEur))} de charges déclarées.
+      </p>
+
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {section.outcomes.map((o) => {
+          const isBest = o.regime === section.bestRegime;
+          return (
+            <div
+              key={o.regime}
+              className={cn(
+                "rounded-[var(--radius-md)] border px-3 py-2.5",
+                isBest
+                  ? "border-teal-500/40 bg-teal-500/5"
+                  : "border-[var(--border)]",
+                !o.eligible && "opacity-60"
+              )}
+              data-testid={`re-regime-${o.regime}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">
+                  {REGIME_LABELS[o.regime] ?? o.regime}
+                </p>
+                {isBest ? (
+                  <span className="rounded bg-teal-500/15 px-1.5 py-0.5 text-[10px] font-medium text-teal-700 dark:text-teal-300">
+                    Le moins imposé
+                  </span>
+                ) : null}
+              </div>
+
+              {o.eligible ? (
+                <>
+                  <p className="mt-1 text-lg font-semibold tabular-nums">
+                    {formatCurrency(num(o.totalTaxEur))}
+                    <span className="text-meta ml-1 text-xs font-normal">
+                      d&apos;impôt
+                    </span>
+                  </p>
+                  <dl className="text-meta mt-1 space-y-0.5">
+                    <div className="flex justify-between gap-2">
+                      <dt>Déduction</dt>
+                      <dd className="tabular-nums">
+                        {formatCurrency(num(o.deductionEur))}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <dt>Base imposable</dt>
+                      <dd className="tabular-nums">
+                        {formatCurrency(num(o.taxableIncomeEur))}
+                      </dd>
+                    </div>
+                    {num(o.deficitOffsetGlobalEur) > 0 ? (
+                      <div className="flex justify-between gap-2">
+                        <dt>Déficit sur revenu global</dt>
+                        <dd className="tabular-nums">
+                          {formatCurrency(num(o.deficitOffsetGlobalEur))}
+                        </dd>
+                      </div>
+                    ) : null}
+                    {num(o.deficitCarriedForwardEur) > 0 ? (
+                      <div className="flex justify-between gap-2">
+                        <dt>Déficit reporté</dt>
+                        <dd className="tabular-nums">
+                          {formatCurrency(num(o.deficitCarriedForwardEur))}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                </>
+              ) : (
+                <p className="text-meta mt-1 leading-snug">
+                  {o.ineligibilityReason}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {best && num(section.savingVsNextEur) > 0 ? (
+        <p className="text-meta mt-1.5">
+          {REGIME_LABELS[best.regime] ?? best.regime} économise{" "}
+          <strong>{formatCurrency(num(section.savingVsNextEur))}</strong> par an
+          sur l&apos;autre régime, à cette TMI.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * Synthèse fiscale du parc immobilier : assiette IFI et arbitrage de régime
  * locatif.
  *
@@ -86,23 +202,14 @@ function num(v: string | null | undefined): number {
  */
 export function RealEstateTaxPanel({ className }: { className?: string }) {
   const [tmi, setTmi] = useState(30);
-  const [furnished, setFurnished] = useState(false);
 
   const q = useQuery({
-    queryKey: ["real-estate-tax", tmi, furnished],
-    queryFn: () =>
-      fetchJson<TaxBundle>(
-        `/api/real-estate/tax?tmi=${tmi}&furnished=${furnished}`
-      ),
+    queryKey: ["real-estate-tax", tmi],
+    queryFn: () => fetchJson<TaxBundle>(`/api/real-estate/tax?tmi=${tmi}`),
   });
 
   const ifi = q.data?.ifi;
   const rental = q.data?.rental;
-
-  const best = useMemo(
-    () => rental?.outcomes.find((o) => o.regime === rental.bestRegime) ?? null,
-    [rental]
-  );
 
   if (q.isPending) {
     return (
@@ -252,136 +359,49 @@ export function RealEstateTaxPanel({ className }: { className?: string }) {
         </div>
       </div>
 
-      {/* ── Régime locatif ── */}
-      {num(rental.grossRentEur) > 0 ? (
+      {/* ── Régime locatif : nu et meublé séparés ── */}
+      {rental.bare.count > 0 || rental.furnished.count > 0 ? (
         <div className="mt-5 border-t border-[var(--border)] pt-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-title text-sm">Régime locatif</h3>
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="text-meta flex items-center gap-1.5">
-                TMI
-                <select
-                  className="input h-7 py-0 text-xs"
-                  value={tmi}
-                  onChange={(e) => setTmi(Number(e.target.value))}
-                  aria-label="Tranche marginale d'imposition"
-                  data-testid="re-tax-tmi"
-                >
-                  {TMI_OPTIONS.map((t) => (
-                    <option key={t} value={t}>
-                      {t} %
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-meta flex items-center gap-1.5">
-                <input
-                  type="checkbox"
-                  checked={furnished}
-                  onChange={(e) => setFurnished(e.target.checked)}
-                  data-testid="re-tax-furnished"
-                />
-                Meublé
-              </label>
-            </div>
+            <label className="text-meta flex items-center gap-1.5">
+              TMI
+              <select
+                className="input h-7 py-0 text-xs"
+                value={tmi}
+                onChange={(e) => setTmi(Number(e.target.value))}
+                aria-label="Tranche marginale d'imposition"
+                data-testid="re-tax-tmi"
+              >
+                {TMI_OPTIONS.map((t) => (
+                  <option key={t} value={t}>
+                    {t} %
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
-          <p className="text-meta mt-1">
-            {formatCurrency(num(rental.grossRentEur))} de recettes annuelles ·{" "}
-            {formatCurrency(num(rental.deductibleChargesEur))} de charges
-            déclarées sur les fiches des biens.
-          </p>
+          <RentalSectionView
+            title="Location nue — revenus fonciers"
+            section={rental.bare}
+            testId="re-rental-bare"
+          />
+          <RentalSectionView
+            title="Location meublée — bénéfices industriels et commerciaux"
+            section={rental.furnished}
+            testId="re-rental-furnished"
+          />
 
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            {rental.outcomes.map((o) => {
-              const isBest = o.regime === rental.bestRegime;
-              return (
-                <div
-                  key={o.regime}
-                  className={cn(
-                    "rounded-[var(--radius-md)] border px-3 py-2.5",
-                    isBest
-                      ? "border-teal-500/40 bg-teal-500/5"
-                      : "border-[var(--border)]",
-                    !o.eligible && "opacity-60"
-                  )}
-                  data-testid={`re-regime-${o.regime}`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">
-                      {REGIME_LABELS[o.regime] ?? o.regime}
-                    </p>
-                    {isBest ? (
-                      <span className="rounded bg-teal-500/15 px-1.5 py-0.5 text-[10px] font-medium text-teal-700 dark:text-teal-300">
-                        Le moins imposé
-                      </span>
-                    ) : null}
-                  </div>
-
-                  {o.eligible ? (
-                    <>
-                      <p className="mt-1 text-lg font-semibold tabular-nums">
-                        {formatCurrency(num(o.totalTaxEur))}
-                        <span className="text-meta ml-1 text-xs font-normal">
-                          d&apos;impôt
-                        </span>
-                      </p>
-                      <dl className="text-meta mt-1 space-y-0.5">
-                        <div className="flex justify-between gap-2">
-                          <dt>Déduction</dt>
-                          <dd className="tabular-nums">
-                            {formatCurrency(num(o.deductionEur))}
-                          </dd>
-                        </div>
-                        <div className="flex justify-between gap-2">
-                          <dt>Base imposable</dt>
-                          <dd className="tabular-nums">
-                            {formatCurrency(num(o.taxableIncomeEur))}
-                          </dd>
-                        </div>
-                        {num(o.deficitOffsetGlobalEur) > 0 ? (
-                          <div className="flex justify-between gap-2">
-                            <dt>Déficit sur revenu global</dt>
-                            <dd className="tabular-nums">
-                              {formatCurrency(num(o.deficitOffsetGlobalEur))}
-                            </dd>
-                          </div>
-                        ) : null}
-                        {num(o.deficitCarriedForwardEur) > 0 ? (
-                          <div className="flex justify-between gap-2">
-                            <dt>Déficit reporté</dt>
-                            <dd className="tabular-nums">
-                              {formatCurrency(num(o.deficitCarriedForwardEur))}
-                            </dd>
-                          </div>
-                        ) : null}
-                      </dl>
-                    </>
-                  ) : (
-                    <p className="text-meta mt-1 leading-snug">
-                      {o.ineligibilityReason}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {best && num(rental.savingVsNextEur) > 0 ? (
-            <p className="text-meta mt-2">
-              {REGIME_LABELS[best.regime] ?? best.regime} économise{" "}
-              <strong>{formatCurrency(num(rental.savingVsNextEur))}</strong> par
-              an sur l&apos;autre régime, à cette TMI.
-            </p>
-          ) : null}
-
-          <p className="text-meta mt-2 leading-snug">
-            Estimation indicative : le choix d&apos;un régime engage
-            généralement plusieurs années et dépend de votre situation
-            d&apos;ensemble.
+          <p className="text-meta mt-3 leading-snug">
+            Nu et meublé sont présentés séparément : ils relèvent de deux
+            fiscalités distinctes, avec des plafonds propres, et leurs recettes
+            ne s&apos;additionnent pas. Estimation indicative — le choix d&apos;un régime
+            engage plusieurs années.
           </p>
         </div>
       ) : null}
+
     </section>
   );
 }

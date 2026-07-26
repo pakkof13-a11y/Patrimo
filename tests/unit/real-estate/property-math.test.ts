@@ -74,7 +74,9 @@ describe("isRentalUsage", () => {
 describe("libellés", () => {
   it("traduit les codes connus", () => {
     expect(propertyTypeLabel("APPARTEMENT")).toBe("Appartement");
-    expect(propertyUsageLabel("LOCATIF_SAISONNIER")).toBe("Locatif saisonnier");
+    expect(propertyUsageLabel("LOCATIF_SAISONNIER")).toBe(
+      "Locatif saisonnier (Airbnb, meublé de tourisme)"
+    );
   });
 
   it("replie sur le code brut plutôt que sur du vide", () => {

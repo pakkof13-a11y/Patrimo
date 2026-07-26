@@ -225,7 +225,10 @@ export const POSITIONS_TABS: readonly MainTab[] = [
   "pea",
   "av",
   "crypto",
-  "immobilier",
+  // `immobilier` n'est plus un clone filtré de Positions : l'onglet dédié
+  // rend sa propre vue. Le mapping vers l'enveloppe IMMOBILIER est conservé
+  // dans TAB_TO_ACCOUNT_TYPE, encore utilisé pour filtrer les positions
+  // affichées à l'intérieur de cet onglet.
   "cfd",
 ] as const;
 
@@ -241,6 +244,11 @@ export const PRIMARY_NAV: { id: MainTab; label: string }[] = [
   { id: "dashboard", label: "Tableau de bord" },
   { id: "holdings", label: "Positions" },
   { id: "banques", label: "Banques" },
+  // Catégorie à part entière, au même rang que Banques ou Épargne salariale :
+  // un bien porte un usage, un régime fiscal, un dispositif, un bail et une
+  // dette. Le réduire à un filtre d'enveloppe du tableau Positions n'en
+  // montrait que la valeur.
+  { id: "immobilier", label: "Immobilier" },
   { id: "epargne-salariale", label: "Épargne Salariale" },
   { id: "alternatifs", label: "Actifs Alternatifs" },
   { id: "transactions", label: "Transactions" },
@@ -259,7 +267,8 @@ export const ENVELOPE_NAV: { id: MainTab; label: string; short: string }[] = [
   { id: "pea", label: "PEA", short: "PEA" },
   { id: "av", label: "Assurance-Vie", short: "AV" },
   { id: "crypto", label: "Cryptomonnaies", short: "Crypto" },
-  { id: "immobilier", label: "Immobilier", short: "Immo" },
+  // `immobilier` est passé en navigation primaire : le laisser aussi ici
+  // afficherait deux entrées pour la même vue.
   { id: "cfd", label: "CFD", short: "CFD" },
 ];
 

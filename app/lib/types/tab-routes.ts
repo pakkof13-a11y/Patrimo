@@ -21,7 +21,7 @@ export function tabToPath(tab: MainTab): string {
     case "crypto":
       return "/positions/crypto";
     case "immobilier":
-      return "/positions/immobilier";
+      return "/immobilier";
     case "cfd":
       return "/positions/cfd";
     case "banques":

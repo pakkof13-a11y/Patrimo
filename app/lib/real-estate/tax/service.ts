@@ -15,7 +15,10 @@
 import { prisma } from "@/app/lib/prisma";
 import { d, zero, type Decimal } from "@/app/lib/money/decimal";
 import { getHoldings } from "@/app/lib/portfolio/service";
-import { isRentalUsage } from "@/app/lib/real-estate/constants";
+import {
+  isFurnishedUsage,
+  isRentalUsage,
+} from "@/app/lib/real-estate/constants";
 import { computeIfi, type IfiAsset, type IfiResult } from "./ifi";
 import {
   compareRentalRegimes,
@@ -44,17 +47,30 @@ export type PropertyTaxRow = {
   annualPropertyTaxEur: string | null;
   purchaseDate: string | null;
   purchasePriceEur: string | null;
+  /** Régime déclaré sur la fiche (null si non renseigné). */
+  rentalRegime: string | null;
+  /** Dispositif de défiscalisation adossé au bien. */
+  taxScheme: string | null;
+  commitmentEndDate: string | null;
+  /** Location meublée (meublé classique ou saisonnier). */
+  isFurnished: boolean;
+  isClassifiedTourism: boolean;
+};
+
+/** Arbitrage de régime pour un mode de location donné. */
+export type RentalSection = {
+  /** Nombre de biens concernés — 0 signifie « section sans objet ». */
+  count: number;
+  grossRentEur: string;
+  deductibleChargesEur: string;
+  comparison: RentalComparison;
 };
 
 export type RealEstateTaxBundle = {
   properties: PropertyTaxRow[];
   ifi: IfiResult;
-  /** Revenus fonciers agrégés sur les biens locatifs nus. */
-  rental: {
-    grossRentEur: string;
-    deductibleChargesEur: string;
-    comparison: RentalComparison;
-  };
+  /** Nu et meublé sont traités séparément — fiscalités non comparables. */
+  rental: { bare: RentalSection; furnished: RentalSection };
 };
 
 const PRIMARY_RESIDENCE_USAGE = "RESIDENCE_PRINCIPALE";
@@ -115,6 +131,11 @@ export async function loadPropertyTaxRows(
       annualPropertyTaxEur: detail.annualPropertyTaxEur?.toString() ?? null,
       purchaseDate: detail.asset.acquisitionDate?.toISOString() ?? null,
       purchasePriceEur: holding?.costBasisEur ?? null,
+      rentalRegime: detail.rentalRegime,
+      taxScheme: detail.taxScheme,
+      commitmentEndDate: detail.commitmentEndDate?.toISOString() ?? null,
+      isFurnished: isFurnishedUsage(detail.usage),
+      isClassifiedTourism: detail.isClassifiedTourism,
     };
   });
 }
@@ -134,55 +155,93 @@ export function toIfiAssets(rows: readonly PropertyTaxRow[]): IfiAsset[] {
   }));
 }
 
-/**
- * Agrège les loyers et charges annuels des biens locatifs.
- *
- * Les montants proviennent de la fiche du bien (loyer mensuel déclaré), pas du
- * journal : ils décrivent la situation locative *courante*, alors que le
- * journal décrit ce qui a été encaissé. Pour un arbitrage de régime fiscal,
- * c'est bien la situation courante annualisée qui est pertinente.
- */
-export function aggregateRentalBase(rows: readonly PropertyTaxRow[]): {
+export type RentalBase = {
   grossRent: Decimal;
   charges: Decimal;
+  /** Nombre de biens contribuant à cette base. */
+  count: number;
+  /** Au moins un meublé de tourisme classé — ouvre l'abattement majoré. */
+  hasClassifiedTourism: boolean;
+};
+
+/**
+ * Agrège les loyers et charges annuels, **séparément pour le nu et le meublé**.
+ *
+ * Les deux ne peuvent pas être additionnés : ils relèvent de fiscalités
+ * distinctes (revenus fonciers contre BIC), avec des plafonds et des
+ * abattements différents. Les sommer produirait un total qui franchit un
+ * plafond qu'aucun des deux ne franchit réellement, et proposerait un
+ * arbitrage entre régimes qui ne s'opposent pas.
+ *
+ * Les montants viennent de la fiche du bien (loyer mensuel déclaré) et non du
+ * journal : ils décrivent la situation locative *courante*, alors que le
+ * journal décrit ce qui a été encaissé. Pour choisir un régime, c'est bien la
+ * situation courante annualisée qui compte.
+ */
+export function aggregateRentalBase(rows: readonly PropertyTaxRow[]): {
+  bare: RentalBase;
+  furnished: RentalBase;
 } {
-  let grossRent = zero();
-  let charges = zero();
+  const empty = (): RentalBase => ({
+    grossRent: zero(),
+    charges: zero(),
+    count: 0,
+    hasClassifiedTourism: false,
+  });
+
+  const bare = empty();
+  const furnished = empty();
 
   for (const r of rows) {
     if (!r.isRental) continue;
-    if (r.monthlyRentEur) grossRent = grossRent.plus(d(r.monthlyRentEur).times(12));
-    if (r.monthlyChargesEur) charges = charges.plus(d(r.monthlyChargesEur).times(12));
-    if (r.annualPropertyTaxEur) charges = charges.plus(d(r.annualPropertyTaxEur));
+    const bucket = r.isFurnished ? furnished : bare;
+
+    if (r.monthlyRentEur) {
+      bucket.grossRent = bucket.grossRent.plus(d(r.monthlyRentEur).times(12));
+    }
+    if (r.monthlyChargesEur) {
+      bucket.charges = bucket.charges.plus(d(r.monthlyChargesEur).times(12));
+    }
+    if (r.annualPropertyTaxEur) {
+      bucket.charges = bucket.charges.plus(d(r.annualPropertyTaxEur));
+    }
+    bucket.count += 1;
+    if (r.isClassifiedTourism) bucket.hasClassifiedTourism = true;
   }
 
-  return { grossRent, charges };
+  return { bare, furnished };
 }
 
 export async function getRealEstateTaxBundle(
   userId: string,
-  options: { marginalTaxRatePct?: number; furnished?: boolean } = {}
+  options: { marginalTaxRatePct?: number } = {}
 ): Promise<RealEstateTaxBundle> {
   const properties = await loadPropertyTaxRows(userId);
   const ifi = computeIfi(toIfiAssets(properties));
-  const { grossRent, charges } = aggregateRentalBase(properties);
+  const { bare, furnished } = aggregateRentalBase(properties);
+  const tmi = options.marginalTaxRatePct ?? 30;
 
-  const comparison = compareRentalRegimes(
-    {
-      grossRentEur: grossRent,
-      deductibleChargesEur: charges,
-      marginalTaxRatePct: options.marginalTaxRatePct ?? 30,
-    },
-    Boolean(options.furnished)
-  );
+  const section = (base: RentalBase, isFurnished: boolean): RentalSection => ({
+    count: base.count,
+    grossRentEur: base.grossRent.toFixed(2),
+    deductibleChargesEur: base.charges.toFixed(2),
+    comparison: compareRentalRegimes(
+      {
+        grossRentEur: base.grossRent,
+        deductibleChargesEur: base.charges,
+        marginalTaxRatePct: tmi,
+        isClassifiedTourism: base.hasClassifiedTourism,
+      },
+      isFurnished
+    ),
+  });
 
   return {
     properties,
     ifi,
     rental: {
-      grossRentEur: grossRent.toFixed(2),
-      deductibleChargesEur: charges.toFixed(2),
-      comparison,
+      bare: section(bare, false),
+      furnished: section(furnished, true),
     },
   };
 }

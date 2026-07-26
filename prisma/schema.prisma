@@ -356,6 +356,20 @@ model RealEstateDetail {
   dvfConfidence  String?
   dvfComparables Int?
 
+  // ── Régime fiscal et dispositif ──
+  /// MICRO_FONCIER | REEL_FONCIER | MICRO_BIC | REEL_BIC | LMP
+  /// Null tant que le bien n'est pas loué. Le mode de location (nu / meublé)
+  /// découle de `usage` et n'est pas dupliqué ici.
+  rentalRegime String?
+  /// PINEL | DENORMANDIE | MALRAUX | … — orthogonal au régime : un Pinel reste
+  /// un locatif nu déclaré au foncier, assorti d'une réduction d'impôt.
+  taxScheme    String?
+  /// Fin de l'engagement de location (Pinel 6/9/12 ans, Denormandie…).
+  /// Conservée parce qu'une sortie anticipée fait reprendre la réduction.
+  commitmentEndDate DateTime?
+  /// Meublé de tourisme classé — ouvre l'abattement micro-BIC majoré (71 %).
+  isClassifiedTourism Boolean @default(false)
+
   // ── Exploitation ──
   monthlyRentEur       Decimal? @db.Decimal(12, 2)
   monthlyChargesEur    Decimal? @db.Decimal(12, 2)
