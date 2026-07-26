@@ -46,6 +46,7 @@ import { createGunzip } from "node:zlib";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
+import { basename } from "node:path";
 import { createPrismaClient } from "@/app/lib/prisma";
 import { parseLine } from "@/app/lib/import/csv-parse";
 import {
@@ -63,6 +64,16 @@ const INSERT_BATCH = 2000;
 
 function sourceUrl(department: string, year: number): string {
   return `${BASE_URL}/${year}/departements/${department}.csv.gz`;
+}
+
+/**
+ * Trace de provenance stockée en base — le seul nom du fichier, jamais son
+ * chemin complet : un chemin local contient souvent le nom d'utilisateur du
+ * poste qui a lancé l'import (`C:\Users\<nom>\...`), qui n'a rien à faire
+ * dans une table de référentiel partagée.
+ */
+function describeSource(url: string, localFile: string | null): string {
+  return localFile ? `local:${basename(localFile)}` : url;
 }
 
 const DEPARTMENT_PATTERN = /^\d{2,3}[AB]?$/i;
@@ -270,7 +281,12 @@ async function importOne(
   // ventes, ce qui rend l'opération rejouable sans jamais créer de doublon.
   await prisma.dvfImport.deleteMany({ where: { department, year } });
   const importRow = await prisma.dvfImport.create({
-    data: { department, year, sourceUrl: url, status: "RUNNING" },
+    data: {
+      department,
+      year,
+      sourceUrl: describeSource(url, localFile),
+      status: "RUNNING",
+    },
   });
 
   const totals = emptyTotals();
@@ -394,7 +410,7 @@ async function importNational(
       data: {
         department,
         year,
-        sourceUrl: `local:${localFile}`,
+        sourceUrl: describeSource("", localFile),
         status: "RUNNING",
       },
     });
