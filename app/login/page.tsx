@@ -4,8 +4,10 @@ import { FormEvent, useState, useSyncExternalStore } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { ThemeModeToggle } from "@/components/ui/theme-mode-toggle";
 import { BrandLogo } from "@/components/branding/brand-logo";
 import { BRAND } from "@/components/branding/brand-assets";
+import { cn } from "@/app/lib/utils";
 import {
   ONBOARDING_SESSION_DISMISS_KEY,
   clearSessionPref,
@@ -86,26 +88,50 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center bg-slate-950 px-4 text-slate-100">
-      {/* Fond discret */}
+    <div
+      className={cn(
+        "relative flex min-h-screen flex-col items-center justify-center px-4",
+        "bg-[var(--background)] text-[var(--foreground)]",
+        "transition-colors duration-300 ease-in-out"
+      )}
+    >
+      {/*
+        Halo doré — teinte reprise du monogramme (pas --primary, qui est teal
+        et sert déjà à l'action). Deux calques superposés qui se crossfadent
+        en opacité plutôt qu'un gradient qu'on tenterait de transitionner
+        directement (les navigateurs n'interpolent pas les dégradés de façon
+        fiable) — même technique que BrandBannerSurface / BrandPageBackground.
+      */}
       <div
-        className="pointer-events-none absolute inset-0 opacity-40"
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-100 transition-opacity duration-300 ease-in-out dark:opacity-0"
         style={{
           background:
-            "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(13,148,136,0.25), transparent), radial-gradient(ellipse 60% 40% at 100% 100%, rgba(30,58,138,0.2), transparent)",
+            "radial-gradient(ellipse 70% 45% at 50% -10%, rgba(212,175,55,0.16), transparent), radial-gradient(ellipse 50% 35% at 100% 100%, rgba(212,175,55,0.08), transparent)",
         }}
       />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 ease-in-out dark:opacity-100"
+        style={{
+          background:
+            "radial-gradient(ellipse 70% 45% at 50% -10%, rgba(212,175,55,0.22), transparent), radial-gradient(ellipse 50% 35% at 100% 100%, rgba(212,175,55,0.10), transparent)",
+        }}
+      />
+
+      <div className="absolute right-4 top-4 z-10">
+        <ThemeModeToggle />
+      </div>
 
       <div className="relative z-10 w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center text-center">
           <BrandLogo
             size={120}
-            forceTheme="dark"
             priority
             alt={BRAND.name}
-            className="rounded-2xl shadow-lg ring-1 ring-white/10"
+            className="rounded-2xl shadow-lg ring-1 ring-[var(--border)]"
           />
-          <p className="mt-5 text-base font-medium tracking-wide text-gray-400 sm:text-lg">
+          <p className="mt-5 text-base font-medium tracking-wide text-[var(--muted-foreground)] sm:text-lg">
             Prenez les commandes de votre avenir financier.
           </p>
         </div>
@@ -114,21 +140,24 @@ export default function LoginPage() {
           method="post"
           action="#"
           onSubmit={onSubmit}
-          className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl backdrop-blur"
+          className={cn(
+            "rounded-2xl border border-[var(--border)] bg-[var(--card)]/90 p-6 shadow-2xl backdrop-blur",
+            "transition-colors duration-300 ease-in-out"
+          )}
           data-testid="login-form"
           data-hydrated={hydrated ? "true" : "false"}
         >
-          <h1 className="mb-1 text-center text-lg font-semibold text-white">
+          <h1 className="mb-1 text-center text-lg font-semibold text-[var(--foreground)]">
             Connexion
           </h1>
-          <p className="mb-5 text-center text-xs text-slate-500">
+          <p className="mb-5 text-center text-xs text-[var(--muted-foreground)]">
             Accès sécurisé multi-compte
           </p>
 
-          <label className="mb-3 block text-xs font-medium text-slate-400">
+          <label className="mb-3 block text-xs font-medium text-[var(--muted-foreground)]">
             Identifiant
             <input
-              className="input mt-1 w-full border-slate-700 bg-slate-950 text-slate-100"
+              className="input mt-1 w-full"
               autoComplete="username"
               name="username"
               data-testid="login-username"
@@ -139,10 +168,10 @@ export default function LoginPage() {
             />
           </label>
 
-          <label className="mb-4 block text-xs font-medium text-slate-400">
+          <label className="mb-4 block text-xs font-medium text-[var(--muted-foreground)]">
             Mot de passe
             <input
-              className="input mt-1 w-full border-slate-700 bg-slate-950 text-slate-100"
+              className="input mt-1 w-full"
               type="password"
               autoComplete="current-password"
               name="password"
@@ -155,7 +184,7 @@ export default function LoginPage() {
 
           {error && (
             <p
-              className="mb-3 rounded-lg bg-rose-950/50 px-3 py-2 text-center text-xs text-rose-300"
+              className="mb-3 rounded-lg bg-[var(--danger)]/10 px-3 py-2 text-center text-xs text-[var(--danger)]"
               data-testid="login-error"
               role="alert"
             >
@@ -173,7 +202,7 @@ export default function LoginPage() {
           </Button>
         </form>
 
-        <p className="mt-6 text-center text-[10px] text-slate-600">
+        <p className="mt-6 text-center text-[10px] text-[var(--muted-foreground)]">
           {BRAND.name} · Europe/Paris
         </p>
       </div>
