@@ -25,6 +25,7 @@ import {
   underlyingPerformancePct,
 } from "@/app/lib/life-insurance/constants";
 import { contractAgeLabel } from "@/app/lib/life-insurance/fiscal";
+import { CouponSchedulePanel } from "@/components/life-insurance/coupon-schedule-panel";
 import { cn, formatCurrency, formatDate } from "@/app/lib/utils";
 
 /* ─── Types API ─────────────────────────────────────────────────────── */
@@ -969,6 +970,12 @@ export function AssuranceVieTab() {
 
   return (
     <div className="space-y-4" data-testid="assurance-vie-tab">
+      {/*
+        En tête : une constatation échue est une décision en attente, elle passe
+        avant la saisie. Le panneau disparaît quand il n'y a rien à trancher.
+      */}
+      <CouponSchedulePanel />
+
       <section className="card p-4">
         <h2 className="mb-1 text-base font-semibold">Nouveau contrat</h2>
         <p className="text-meta mb-3">
