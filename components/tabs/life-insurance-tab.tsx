@@ -70,6 +70,9 @@ type LifeInsuranceResponse = {
   policies: Policy[];
   taxHousehold: TaxHousehold;
   totalOutstandingEur: string;
+  /** Primes tous contrats — base du seuil de 150 k€ (pas l'encours). */
+  totalPremiumsBefore2017Eur?: string;
+  totalPremiumsAfter2017Eur?: string;
   exceedsPfuThreshold: boolean;
 };
 
@@ -218,6 +221,8 @@ export function LifeInsuranceTab({
         supports={simSupports}
         taxHousehold={taxHousehold}
         totalOutstandingEur={simOutstanding}
+        totalPremiumsBefore2017Eur={q.data?.totalPremiumsBefore2017Eur ?? "0"}
+        totalPremiumsAfter2017Eur={q.data?.totalPremiumsAfter2017Eur ?? "0"}
       />
 
       {legacy.length > 0 && (

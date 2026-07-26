@@ -15,6 +15,8 @@ import {
   validationErrorResponse,
 } from "@/app/lib/api/validation";
 import { listLifeInsurances } from "@/app/lib/cash/pockets";
+import { listSupports } from "@/app/lib/life-insurance/support-service";
+import { d } from "@/app/lib/money/decimal";
 import {
   checkPremiumsSplit,
   exceedsPfuOutstandingThreshold,
@@ -26,24 +28,62 @@ import {
 export async function GET() {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 401 });
-  const [policies, user] = await Promise.all([
+  const [legacyPolicies, user, supports] = await Promise.all([
     listLifeInsurances(userId),
     prisma.user.findUnique({
       where: { id: userId },
       select: { taxHousehold: true },
     }),
+    listSupports(userId),
   ]);
+
+  /**
+   * Encours d'un contrat = supports du journal + reliquat de l'ancienne saisie.
+   *
+   * `listLifeInsurances` ne connaît que les champs historiques (`cashEuro` et
+   * `products`), remis à zéro par la migration vers le journal. Sans cet ajout,
+   * un contrat portant 156 000 € de supports s'affichait « Encours 0 € », et
+   * chaque onglet rattrapait le chiffre de son côté.
+   */
+  const supportsByContract = new Map<string, ReturnType<typeof d>>();
+  for (const s of supports) {
+    if (!s.lifeInsuranceId) continue;
+    const current = supportsByContract.get(s.lifeInsuranceId) ?? d(0);
+    supportsByContract.set(
+      s.lifeInsuranceId,
+      current.plus(d(s.currentValueEur ?? "0"))
+    );
+  }
+  const policies = legacyPolicies.map((p) => ({
+    ...p,
+    outstandingEur: d(p.outstandingEur)
+      .plus(supportsByContract.get(p.id) ?? d(0))
+      .toFixed(8),
+  }));
   const taxHousehold: TaxHousehold = isTaxHousehold(user?.taxHousehold)
     ? user!.taxHousehold
     : "SINGLE";
   const totalOutstandingEur = totalLifeInsuranceOutstandingEur(
     policies.map((p) => p.outstandingEur)
   );
+  // Le seuil fiscal de 150 000 € porte sur les PRIMES VERSÉES, jamais sur
+  // l'encours : sinon la performance des marchés changerait le taux
+  // d'imposition. L'encours reste rendu pour l'affichage du patrimoine.
+  const totalPremiumsBefore2017Eur = totalLifeInsuranceOutstandingEur(
+    policies.map((p) => p.premiumsBefore2017Eur)
+  );
+  const totalPremiumsAfter2017Eur = totalLifeInsuranceOutstandingEur(
+    policies.map((p) => p.premiumsAfter2017Eur)
+  );
   return NextResponse.json({
     policies,
     taxHousehold,
     totalOutstandingEur,
-    exceedsPfuThreshold: exceedsPfuOutstandingThreshold(totalOutstandingEur),
+    totalPremiumsBefore2017Eur,
+    totalPremiumsAfter2017Eur,
+    exceedsPfuThreshold: exceedsPfuOutstandingThreshold(
+      d(totalPremiumsBefore2017Eur).plus(d(totalPremiumsAfter2017Eur)).toString()
+    ),
   });
 }
 

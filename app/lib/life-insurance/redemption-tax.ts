@@ -12,9 +12,31 @@
  * - Abattement annuel post-8 ans (4 600 € / 9 200 €) : s'applique uniquement
  *   à l'IR, pas aux PS ; non reportable d'une année sur l'autre.
  * - Taux PFU post-8 ans : 7,5 % sur la part de gains rattachée aux versements
- *   d'avant le 27/09/2017, et 7,5 % ou 12,8 % sur le reste selon l'encours
- *   global (seuil 150 000 €). Avant 8 ans : 12,8 % sur la totalité des gains,
- *   sans abattement.
+ *   d'avant le 27/09/2017 ; la part rattachée aux versements postérieurs se
+ *   partage entre 7,5 % et 12,8 % au prorata du seuil de 150 000 €.
+ *   Avant 8 ans : 12,8 % sur la totalité des gains, sans abattement.
+ *
+ * ## Le seuil de 150 000 € porte sur les PRIMES, et se proratise
+ *
+ * Deux erreurs faciles, toutes deux corrigées ici :
+ *
+ * 1. **La base est le cumul des primes versées, pas l'encours.** Apprécier le
+ *    seuil sur la valeur de rachat ferait dépendre le taux d'imposition de la
+ *    performance des marchés : 60 000 € versés valant 160 000 € basculeraient à
+ *    12,8 % alors que le versement reste très en deçà du seuil.
+ * 2. **C'est un prorata, pas un tout-ou-rien.** La loi taxe à 7,5 % « la
+ *    fraction des produits correspondant aux primes n'excédant pas 150 000 € ».
+ *    Basculer la totalité à 12,8 % dès le premier euro au-delà du seuil
+ *    surtaxe : sur 300 000 € de primes, la moitié des gains relève encore du
+ *    taux réduit.
+ *
+ * Fraction au taux réduit (BOI-RPPM-RCM-20-10-20-50) :
+ *
+ * ```
+ * (150 000 − primes avant 27/09/2017) / primes à compter du 27/09/2017
+ * ```
+ *
+ * bornée à [0, 1], appréciée sur **l'ensemble des contrats du foyer**.
  *
  * Ce n'est **pas** un simulateur fiscal certifié : les cas particuliers
  * (option barème, rachats en perte, prélèvements sociaux déjà acquittés sur
@@ -23,7 +45,6 @@
 
 import {
   annualAllowanceEur,
-  exceedsPfuOutstandingThreshold,
   PFU_OUTSTANDING_THRESHOLD_EUR,
   SOCIAL_CHARGES_RATE,
   type TaxHousehold,
@@ -71,10 +92,20 @@ export type RedemptionTaxInput = {
   /** Cumul des versements à compter du 27/09/2017 (ce contrat). */
   premiumsAfter2017Eur: string | number;
   /**
-   * Encours total d'assurance-vie, tous contrats du foyer.
-   * Sert uniquement au seuil de 150 000 € (taux post-réforme).
+   * Cumul des versements **avant** le 27/09/2017, tous contrats du foyer.
+   *
+   * Sert au seuil de 150 000 €, qu'il vient réduire : la fraction au taux
+   * réduit se calcule sur ce qu'il reste de l'enveloppe après les versements
+   * pré-réforme.
    */
-  totalOutstandingAllContractsEur: string | number;
+  totalPremiumsBefore2017AllContractsEur: string | number;
+  /**
+   * Cumul des versements **à compter** du 27/09/2017, tous contrats du foyer.
+   *
+   * Dénominateur de la fraction au taux réduit. C'est bien un cumul de primes,
+   * jamais un encours : la valeur de rachat n'entre pas dans ce calcul.
+   */
+  totalPremiumsAfter2017AllContractsEur: string | number;
   taxHousehold: TaxHousehold;
   /**
    * Abattement **déjà consommé cette année civile** sur d'autres rachats.
@@ -121,6 +152,31 @@ export type RedemptionTaxResult = {
   netReceivedEur: string;
 };
 
+/**
+ * Fraction des gains post-réforme relevant du taux réduit de 7,5 %.
+ *
+ * ```
+ * (150 000 − primes avant 27/09/2017) / primes à compter du 27/09/2017
+ * ```
+ *
+ * bornée à [0, 1], sur l'ensemble des contrats du foyer.
+ *
+ * Deux bornes qui ne sont pas des détails :
+ * - numérateur négatif (les seuls versements pré-réforme dépassent déjà le
+ *   seuil) ⇒ 0, tout le post-réforme au taux plein ;
+ * - dénominateur nul (aucun versement post-réforme) ⇒ 1 par convention, mais
+ *   la base à laquelle il s'applique est alors elle-même nulle.
+ */
+export function reducedRateShareOfPostReformGains(
+  totalPremiumsBefore2017Eur: number,
+  totalPremiumsAfter2017Eur: number
+): number {
+  if (totalPremiumsAfter2017Eur <= MONEY_EPS) return 1;
+  const room = PFU_OUTSTANDING_THRESHOLD_EUR - totalPremiumsBefore2017Eur;
+  if (room <= 0) return 0;
+  return Math.min(1, room / totalPremiumsAfter2017Eur);
+}
+
 function invalid(message: string): RedemptionTaxResult {
   return {
     ok: false,
@@ -154,7 +210,8 @@ export function computeRedemptionTax(
   const gainsRaw = parseMoney(input.gainsInRedemptionEur);
   const before = parseMoney(input.premiumsBefore2017Eur);
   const after = parseMoney(input.premiumsAfter2017Eur);
-  const outstanding = parseMoney(input.totalOutstandingAllContractsEur);
+  const allBefore = parseMoney(input.totalPremiumsBefore2017AllContractsEur);
+  const allAfter = parseMoney(input.totalPremiumsAfter2017AllContractsEur);
   const usedRaw = parseMoney(input.allowanceAlreadyUsedThisYearEur ?? 0);
 
   if (
@@ -162,12 +219,20 @@ export function computeRedemptionTax(
     gainsRaw === null ||
     before === null ||
     after === null ||
-    outstanding === null ||
+    allBefore === null ||
+    allAfter === null ||
     usedRaw === null
   ) {
     return invalid("Montants invalides");
   }
-  if (redemption < 0 || gainsRaw < 0 || before < 0 || after < 0 || outstanding < 0) {
+  if (
+    redemption < 0 ||
+    gainsRaw < 0 ||
+    before < 0 ||
+    after < 0 ||
+    allBefore < 0 ||
+    allAfter < 0
+  ) {
     return invalid("Les montants ne peuvent pas être négatifs");
   }
   if (usedRaw < 0) {
@@ -206,35 +271,27 @@ export function computeRedemptionTax(
     allowanceApplied = Math.min(gains, allowanceBudget);
     taxableGains = Math.max(0, gains - allowanceApplied);
 
+    // 1) Répartition des gains du CONTRAT entre régime pré- et post-réforme,
+    //    au prorata de ses propres versements.
+    //
+    //    Sans historique de versements sur ce contrat, tout bascule en
+    //    post-réforme : c'est l'hypothèse la plus chargée, et un simulateur ne
+    //    doit pas promettre un impôt plus faible que la réalité faute de
+    //    données.
     const premiumsTotal = before + after;
     const beforeShare = premiumsTotal > MONEY_EPS ? before / premiumsTotal : 0;
-    const afterShare = premiumsTotal > MONEY_EPS ? after / premiumsTotal : 1;
-
-    // Répartition des gains imposables proportionnelle aux versements.
     const gainsFromBefore = taxableGains * beforeShare;
-    const gainsFromAfter = taxableGains * afterShare;
+    const gainsFromAfter = taxableGains - gainsFromBefore;
 
-    // Part pré-réforme : toujours 7,5 % après 8 ans.
+    // 2) Les gains pré-réforme sont à 7,5 % après huit ans, sans condition de
+    //    seuil : celui-ci ne concerne que les versements postérieurs.
     pfuReducedBase = gainsFromBefore;
-    // Part post-réforme : 7,5 % si encours global ≤ 150 k€, sinon 12,8 %.
-    const postAtReduced = !exceedsPfuOutstandingThreshold(outstanding);
-    if (postAtReduced) {
-      pfuReducedBase += gainsFromAfter;
-      pfuStandardBase = 0;
-    } else {
-      pfuStandardBase = gainsFromAfter;
-    }
 
-    // Sans historique de versements : tout le taxable au taux post-réforme.
-    if (premiumsTotal <= MONEY_EPS) {
-      if (postAtReduced) {
-        pfuReducedBase = taxableGains;
-        pfuStandardBase = 0;
-      } else {
-        pfuReducedBase = 0;
-        pfuStandardBase = taxableGains;
-      }
-    }
+    // 3) Les gains post-réforme se partagent au prorata du seuil de 150 000 €,
+    //    apprécié sur les PRIMES de tous les contrats du foyer.
+    const reducedShare = reducedRateShareOfPostReformGains(allBefore, allAfter);
+    pfuReducedBase += gainsFromAfter * reducedShare;
+    pfuStandardBase = gainsFromAfter * (1 - reducedShare);
   }
 
   pfuReducedBase = roundMoney(pfuReducedBase);

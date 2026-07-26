@@ -55,6 +55,9 @@ type LifeInsuranceResponse = {
   policies: Policy[];
   taxHousehold?: TaxHousehold;
   totalOutstandingEur?: string;
+  /** Primes tous contrats — base du seuil de 150 k€ (pas l'encours). */
+  totalPremiumsBefore2017Eur?: string;
+  totalPremiumsAfter2017Eur?: string;
   exceedsPfuThreshold?: boolean;
 };
 
@@ -1046,6 +1049,12 @@ export function AssuranceVieTab() {
         supports={supports}
         taxHousehold={taxHousehold}
         totalOutstandingEur={totalOutstandingEur}
+        totalPremiumsBefore2017Eur={
+          policiesQ.data?.totalPremiumsBefore2017Eur ?? "0"
+        }
+        totalPremiumsAfter2017Eur={
+          policiesQ.data?.totalPremiumsAfter2017Eur ?? "0"
+        }
       />
 
       <section className="card p-4" data-testid="av-tax-profile">

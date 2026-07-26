@@ -10,6 +10,7 @@ import {
   PFU_OUTSTANDING_THRESHOLD_EUR,
   PFU_REDUCED_RATE,
   PFU_STANDARD_RATE,
+  reducedRateShareOfPostReformGains,
   type RedemptionTaxInput,
 } from "@/app/lib/life-insurance/redemption-tax";
 
@@ -22,7 +23,8 @@ function base(over: Partial<RedemptionTaxInput> = {}): RedemptionTaxInput {
     hasAnteriority: true,
     premiumsBefore2017Eur: "50000",
     premiumsAfter2017Eur: "50000",
-    totalOutstandingAllContractsEur: "100000",
+    totalPremiumsBefore2017AllContractsEur: "50000",
+    totalPremiumsAfter2017AllContractsEur: "50000",
     taxHousehold: "SINGLE",
     allowanceAlreadyUsedThisYearEur: 0,
     ...over,
@@ -80,7 +82,8 @@ describe("computeRedemptionTax — abattement non reportable", () => {
         // Encours bas + tout en pré-2017 pour isoler l'abattement.
         premiumsBefore2017Eur: "100000",
         premiumsAfter2017Eur: "0",
-        totalOutstandingAllContractsEur: "80000",
+        totalPremiumsBefore2017AllContractsEur: "0",
+        totalPremiumsAfter2017AllContractsEur: "80000",
       })
     );
     expect(yearN.ok).toBe(true);
@@ -103,7 +106,8 @@ describe("computeRedemptionTax — abattement non reportable", () => {
         allowanceAlreadyUsedThisYearEur: 0, // nouvelle année
         premiumsBefore2017Eur: "100000",
         premiumsAfter2017Eur: "0",
-        totalOutstandingAllContractsEur: "80000",
+        totalPremiumsBefore2017AllContractsEur: "0",
+        totalPremiumsAfter2017AllContractsEur: "80000",
       })
     );
     expect(yearN1.ok).toBe(true);
@@ -128,7 +132,8 @@ describe("computeRedemptionTax — abattement non reportable", () => {
         allowanceAlreadyUsedThisYearEur: 3000,
         premiumsBefore2017Eur: "100000",
         premiumsAfter2017Eur: "0",
-        totalOutstandingAllContractsEur: "50000",
+        totalPremiumsBefore2017AllContractsEur: "0",
+        totalPremiumsAfter2017AllContractsEur: "50000",
       })
     );
     expect(secondSameYear.ok).toBe(true);
@@ -145,7 +150,8 @@ describe("computeRedemptionTax — abattement non reportable", () => {
         taxHousehold: "COUPLE",
         premiumsBefore2017Eur: "100000",
         premiumsAfter2017Eur: "0",
-        totalOutstandingAllContractsEur: "50000",
+        totalPremiumsBefore2017AllContractsEur: "0",
+        totalPremiumsAfter2017AllContractsEur: "50000",
       })
     );
     expect(n(r.allowanceAppliedEur)).toBe(ANNUAL_ALLOWANCE_COUPLE_EUR);
@@ -164,7 +170,8 @@ describe("computeRedemptionTax — sans antériorité de 8 ans", () => {
         // le taux réduit et l'abattement restent fermés.
         premiumsBefore2017Eur: "200000",
         premiumsAfter2017Eur: "0",
-        totalOutstandingAllContractsEur: "50000",
+        totalPremiumsBefore2017AllContractsEur: "0",
+        totalPremiumsAfter2017AllContractsEur: "50000",
         taxHousehold: "COUPLE",
       })
     );
@@ -184,7 +191,8 @@ describe("computeRedemptionTax — sans antériorité de 8 ans", () => {
         hasAnteriority: false,
         gainsInRedemptionEur: "1000",
         redemptionEur: "1000",
-        totalOutstandingAllContractsEur: "1",
+        totalPremiumsBefore2017AllContractsEur: "0",
+        totalPremiumsAfter2017AllContractsEur: "1",
         premiumsBefore2017Eur: "1",
         premiumsAfter2017Eur: "0",
       })
@@ -205,7 +213,8 @@ describe("computeRedemptionTax — après 8 ans, taux selon versements / encours
         taxHousehold: "SINGLE",
         premiumsBefore2017Eur: "0",
         premiumsAfter2017Eur: "100000",
-        totalOutstandingAllContractsEur: PFU_OUTSTANDING_THRESHOLD_EUR,
+        totalPremiumsBefore2017AllContractsEur: "0",
+        totalPremiumsAfter2017AllContractsEur: PFU_OUTSTANDING_THRESHOLD_EUR,
       })
     );
     const taxable = gains - ANNUAL_ALLOWANCE_SINGLE_EUR;
@@ -215,7 +224,7 @@ describe("computeRedemptionTax — après 8 ans, taux selon versements / encours
     expect(n(r.pfuTaxEur)).toBeCloseTo(taxable * PFU_REDUCED_RATE, 2);
   });
 
-  it("mixe 7,5 % (pré-2017) et 12,8 % (post-2017) au-delà de 150 k€ d'encours", () => {
+  it("mixe 7,5 % (pré-2017) et taux prorata (post-2017) selon les primes", () => {
     const gains = 10_000;
     const r = computeRedemptionTax(
       base({
@@ -223,19 +232,149 @@ describe("computeRedemptionTax — après 8 ans, taux selon versements / encours
         gainsInRedemptionEur: String(gains),
         hasAnteriority: true,
         taxHousehold: "SINGLE",
-        // 40 % pré / 60 % post
+        // Ce contrat : 40 % pré / 60 % post.
         premiumsBefore2017Eur: "40000",
         premiumsAfter2017Eur: "60000",
-        totalOutstandingAllContractsEur: PFU_OUTSTANDING_THRESHOLD_EUR + 1,
+        // Foyer : 40 k€ pré + 120 k€ post = 160 k€ de primes (> 150 k€).
+        // Enveloppe restante = 150 − 40 = 110 k€ sur 120 k€ post → 91,67 %.
+        totalPremiumsBefore2017AllContractsEur: "40000",
+        totalPremiumsAfter2017AllContractsEur: "120000",
       })
     );
     const taxable = gains - ANNUAL_ALLOWANCE_SINGLE_EUR;
+    const share = (150_000 - 40_000) / 120_000;
+    const fromBefore = taxable * 0.4;
+    const fromAfter = taxable * 0.6;
+
     expect(n(r.taxableGainsEur)).toBe(taxable);
-    expect(n(r.pfuReducedBaseEur)).toBeCloseTo(taxable * 0.4, 2);
-    expect(n(r.pfuStandardBaseEur)).toBeCloseTo(taxable * 0.6, 2);
-    const expectedTax =
-      taxable * 0.4 * PFU_REDUCED_RATE + taxable * 0.6 * PFU_STANDARD_RATE;
-    expect(n(r.pfuTaxEur)).toBeCloseTo(expectedTax, 2);
+    // Le pré-2017 est intégralement au taux réduit, plus la fraction éligible
+    // du post-2017 : ce n'est PAS un basculement en bloc à 12,8 %.
+    expect(n(r.pfuReducedBaseEur)).toBeCloseTo(
+      fromBefore + fromAfter * share,
+      2
+    );
+    expect(n(r.pfuStandardBaseEur)).toBeCloseTo(fromAfter * (1 - share), 2);
+    expect(n(r.pfuTaxEur)).toBeCloseTo(
+      (fromBefore + fromAfter * share) * PFU_REDUCED_RATE +
+        fromAfter * (1 - share) * PFU_STANDARD_RATE,
+      2
+    );
+  });
+
+  it("proratise au lieu de tout basculer à 12,8 % au-delà du seuil", () => {
+    // 300 k€ de primes post-2017 : la moitié de l'enveloppe reste au taux
+    // réduit (150/300). Un basculement en bloc surtaxerait de ~26 %.
+    const gains = 20_000;
+    const r = computeRedemptionTax(
+      base({
+        redemptionEur: String(gains),
+        gainsInRedemptionEur: String(gains),
+        hasAnteriority: true,
+        taxHousehold: "SINGLE",
+        premiumsBefore2017Eur: "0",
+        premiumsAfter2017Eur: "300000",
+        totalPremiumsBefore2017AllContractsEur: "0",
+        totalPremiumsAfter2017AllContractsEur: "300000",
+      })
+    );
+    const taxable = gains - ANNUAL_ALLOWANCE_SINGLE_EUR; // 15 400
+
+    expect(n(r.pfuReducedBaseEur)).toBeCloseTo(taxable * 0.5, 2);
+    expect(n(r.pfuStandardBaseEur)).toBeCloseTo(taxable * 0.5, 2);
+    expect(n(r.pfuTaxEur)).toBeCloseTo(
+      taxable * 0.5 * PFU_REDUCED_RATE + taxable * 0.5 * PFU_STANDARD_RATE,
+      2
+    );
+    // Le calcul en tout-ou-rien aurait donné 1 971,20 €.
+    expect(n(r.pfuTaxEur)).toBeLessThan(taxable * PFU_STANDARD_RATE);
+  });
+
+  it("ne fait pas dépendre le taux de la performance des marchés", () => {
+    // 60 k€ versés, très en deçà du seuil, mais l'encours a doublé.
+    // Apprécier le seuil sur l'encours basculerait à tort à 12,8 %.
+    const gains = 10_000;
+    const r = computeRedemptionTax(
+      base({
+        redemptionEur: String(gains),
+        gainsInRedemptionEur: String(gains),
+        hasAnteriority: true,
+        taxHousehold: "SINGLE",
+        premiumsBefore2017Eur: "0",
+        premiumsAfter2017Eur: "60000",
+        totalPremiumsBefore2017AllContractsEur: "0",
+        totalPremiumsAfter2017AllContractsEur: "60000",
+      })
+    );
+    const taxable = gains - ANNUAL_ALLOWANCE_SINGLE_EUR;
+    expect(n(r.pfuStandardBaseEur)).toBe(0);
+    expect(n(r.pfuReducedBaseEur)).toBeCloseTo(taxable, 2);
+    expect(n(r.pfuTaxEur)).toBeCloseTo(taxable * PFU_REDUCED_RATE, 2);
+  });
+
+  it("bascule tout au taux plein quand le pré-2017 sature déjà le seuil", () => {
+    // 200 k€ versés avant la réforme : l'enveloppe de 150 k€ est épuisée,
+    // il ne reste rien au taux réduit pour les versements postérieurs.
+    const gains = 10_000;
+    const r = computeRedemptionTax(
+      base({
+        redemptionEur: String(gains),
+        gainsInRedemptionEur: String(gains),
+        hasAnteriority: true,
+        taxHousehold: "SINGLE",
+        premiumsBefore2017Eur: "0",
+        premiumsAfter2017Eur: "50000",
+        totalPremiumsBefore2017AllContractsEur: "200000",
+        totalPremiumsAfter2017AllContractsEur: "50000",
+      })
+    );
+    const taxable = gains - ANNUAL_ALLOWANCE_SINGLE_EUR;
+    expect(n(r.pfuReducedBaseEur)).toBe(0);
+    expect(n(r.pfuStandardBaseEur)).toBeCloseTo(taxable, 2);
+  });
+
+  it("garde le pré-2017 à 7,5 % même quand le foyer dépasse le seuil", () => {
+    // Le seuil ne concerne que les versements postérieurs à la réforme :
+    // les gains rattachés aux primes pré-2017 restent au taux réduit.
+    const gains = 10_000;
+    const r = computeRedemptionTax(
+      base({
+        redemptionEur: String(gains),
+        gainsInRedemptionEur: String(gains),
+        hasAnteriority: true,
+        taxHousehold: "SINGLE",
+        premiumsBefore2017Eur: "100000",
+        premiumsAfter2017Eur: "0",
+        totalPremiumsBefore2017AllContractsEur: "100000",
+        totalPremiumsAfter2017AllContractsEur: "400000",
+      })
+    );
+    const taxable = gains - ANNUAL_ALLOWANCE_SINGLE_EUR;
+    expect(n(r.pfuStandardBaseEur)).toBe(0);
+    expect(n(r.pfuReducedBaseEur)).toBeCloseTo(taxable, 2);
+  });
+});
+
+describe("reducedRateShareOfPostReformGains", () => {
+  it("rend 1 sous le seuil", () => {
+    expect(reducedRateShareOfPostReformGains(0, 100_000)).toBe(1);
+    expect(reducedRateShareOfPostReformGains(50_000, 100_000)).toBe(1);
+  });
+
+  it("proratise au-delà du seuil", () => {
+    expect(reducedRateShareOfPostReformGains(0, 300_000)).toBeCloseTo(0.5, 8);
+    expect(reducedRateShareOfPostReformGains(40_000, 120_000)).toBeCloseTo(
+      110_000 / 120_000,
+      8
+    );
+  });
+
+  it("rend 0 quand le pré-2017 sature déjà l'enveloppe", () => {
+    expect(reducedRateShareOfPostReformGains(150_000, 50_000)).toBe(0);
+    expect(reducedRateShareOfPostReformGains(200_000, 50_000)).toBe(0);
+  });
+
+  it("ne divise pas par zéro sans versement post-réforme", () => {
+    expect(reducedRateShareOfPostReformGains(0, 0)).toBe(1);
   });
 });
 

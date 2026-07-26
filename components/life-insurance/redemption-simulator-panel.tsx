@@ -78,13 +78,22 @@ export function RedemptionSimulatorPanel({
   supports,
   taxHousehold,
   totalOutstandingEur,
+  totalPremiumsBefore2017Eur,
+  totalPremiumsAfter2017Eur,
   className,
 }: {
   policies: SimulatorPolicy[];
   supports: SimulatorSupport[];
   taxHousehold: TaxHousehold;
-  /** Encours global (tous contrats) — seuil 150 k€. */
+  /** Encours global (tous contrats) — affichage patrimonial uniquement. */
   totalOutstandingEur: string;
+  /**
+   * Primes versées, tous contrats — c'est **cela** qui commande le seuil de
+   * 150 000 €, pas l'encours : sinon la performance des marchés changerait le
+   * taux d'imposition.
+   */
+  totalPremiumsBefore2017Eur: string;
+  totalPremiumsAfter2017Eur: string;
   className?: string;
 }) {
   const [policyId, setPolicyId] = useState("");
@@ -175,7 +184,8 @@ export function RedemptionSimulatorPanel({
       hasAnteriority,
       premiumsBefore2017Eur: policy.premiumsBefore2017Eur ?? "0",
       premiumsAfter2017Eur: policy.premiumsAfter2017Eur ?? "0",
-      totalOutstandingAllContractsEur: totalOutstandingEur,
+      totalPremiumsBefore2017AllContractsEur: totalPremiumsBefore2017Eur,
+      totalPremiumsAfter2017AllContractsEur: totalPremiumsAfter2017Eur,
       taxHousehold,
       allowanceAlreadyUsedThisYearEur: allowanceUsed || "0",
     });
@@ -184,13 +194,15 @@ export function RedemptionSimulatorPanel({
     redemptionN,
     splitGains,
     hasAnteriority,
-    totalOutstandingEur,
+    totalPremiumsBefore2017Eur,
+    totalPremiumsAfter2017Eur,
     taxHousehold,
     allowanceUsed,
   ]);
 
   const allowanceCap = annualAllowanceEur(taxHousehold);
-  const outstandingN = money(totalOutstandingEur);
+  const premiumsAllN =
+    money(totalPremiumsBefore2017Eur) + money(totalPremiumsAfter2017Eur);
 
   if (policies.length === 0) {
     return null;
@@ -340,14 +352,23 @@ export function RedemptionSimulatorPanel({
             />
             <Row
               label="Encours tous contrats"
-              value={`${formatCurrency(totalOutstandingEur, "EUR")}${
-                outstandingN > PFU_OUTSTANDING_THRESHOLD_EUR
-                  ? " · > 150 k€"
-                  : " · ≤ 150 k€"
+              value={formatCurrency(totalOutstandingEur, "EUR")}
+            />
+            {/*
+              C'est cette ligne — et non l'encours — qui commande le seuil.
+              Les afficher côte à côte évite de croire qu'une plus-value fait
+              basculer le taux d'imposition.
+            */}
+            <Row
+              label="Primes versées tous contrats"
+              value={`${formatCurrency(String(premiumsAllN), "EUR")}${
+                premiumsAllN > PFU_OUTSTANDING_THRESHOLD_EUR
+                  ? " · > 150 k€ (taux mixte)"
+                  : " · ≤ 150 k€ (7,5 %)"
               }`}
             />
             <Row
-              label="Versements avant / après 2017"
+              label="Versements avant / après 2017 (ce contrat)"
               value={`${formatCurrency(policy.premiumsBefore2017Eur ?? "0", "EUR")} / ${formatCurrency(policy.premiumsAfter2017Eur ?? "0", "EUR")}`}
             />
           </div>
