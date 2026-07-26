@@ -13,7 +13,9 @@ import {
   ASSURANCE_VIE_SUBTYPES,
   PLATFORM_PRESETS,
 } from "@/app/lib/platforms/presets";
-import { formatDate } from "@/app/lib/utils";
+import { formatCurrency, formatDate } from "@/app/lib/utils";
+import { contractAgeLabel } from "@/app/lib/life-insurance/fiscal";
+import type { Holding } from "@/app/lib/types/ui";
 import { toast } from "sonner";
 
 const AV_SUBTYPE_RANK = new Map(
@@ -43,37 +45,50 @@ function assuranceVieComboboxOptions(): PlatformComboboxOption[] {
     }));
 }
 
-export function LifeInsuranceTab() {
+type Policy = {
+  id: string;
+  insurer: string;
+  openDate: string | null;
+  cashEuro: string;
+  currency: string;
+  products: Array<{ id: string; name: string; currentValue: string }>;
+};
+
+/**
+ * Contrats d'assurance-vie — enveloppe et antériorité fiscale.
+ *
+ * Ce panneau ne porte **plus** de valorisation. Elle y était saisie à la main,
+ * en parallèle du journal de transactions, et alimentait le patrimoine net par
+ * le cash : un support saisi ici et au journal comptait deux fois, et une UC
+ * actions se retrouvait rangée dans « Cash ». Les supports sont désormais des
+ * positions du journal comme les autres, listées ci-dessous en lecture seule.
+ *
+ * Ce qui reste ici n'a pas d'équivalent dans le journal : l'assureur et la
+ * **date d'ouverture**, dont dépend l'antériorité des huit ans qui commande la
+ * fiscalité des rachats.
+ */
+export function LifeInsuranceTab({
+  avHoldings = [],
+}: {
+  /** Positions de l'enveloppe AV, déjà calculées par le parent. */
+  avHoldings?: Holding[];
+}) {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["life-insurance"],
-    queryFn: () =>
-      fetchJson<{
-        policies: Array<{
-          id: string;
-          insurer: string;
-          openDate: string | null;
-          cashEuro: string;
-          currency: string;
-          cashCounts: boolean;
-          products: Array<{
-            id: string;
-            name: string;
-            currentValue: string;
-            currency: string;
-          }>;
-        }>;
-      }>("/api/life-insurance"),
+    queryFn: () => fetchJson<{ policies: Policy[] }>("/api/life-insurance"),
   });
 
   const [insurer, setInsurer] = useState("");
   const [openDate, setOpenDate] = useState("");
-  const [cashEuro, setCashEuro] = useState("0");
-  const [productName, setProductName] = useState("");
-  const [productValue, setProductValue] = useState("0");
-  const [productParent, setProductParent] = useState("");
 
   const avOptions = useMemo(() => assuranceVieComboboxOptions(), []);
+
+  const supportsTotal = useMemo(
+    () =>
+      avHoldings.reduce((sum, h) => sum + Number(h.marketValueEur || 0), 0),
+    [avHoldings]
+  );
 
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["life-insurance"] });
@@ -87,46 +102,79 @@ export function LifeInsuranceTab() {
         body: JSON.stringify({
           insurer,
           openDate: openDate || null,
-          cashEuro: cashEuro || "0",
+          cashEuro: "0",
           currency: "EUR",
         }),
       }),
     onSuccess: async () => {
       toast.success("Contrat ajouté");
       setInsurer("");
-      setCashEuro("0");
+      setOpenDate("");
       await refresh();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const addProduct = useMutation({
-    mutationFn: () =>
-      fetchJson("/api/life-insurance", {
-        method: "POST",
-        body: JSON.stringify({
-          kind: "product",
-          lifeInsuranceId: productParent,
-          name: productName,
-          currentValue: productValue || "0",
-          currency: "EUR",
-        }),
-      }),
-    onSuccess: async () => {
-      toast.success("Produit structuré ajouté");
-      setProductName("");
-      setProductValue("0");
-      await refresh();
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  const policies = q.data?.policies ?? [];
+
+  /**
+   * Reliquats de l'ancienne saisie : un contrat peut encore porter une
+   * valorisation si la migration vers le journal n'a pas été lancée. On le
+   * signale plutôt que de l'ignorer — ces montants ne sont plus comptés dans le
+   * patrimoine, et un chiffre affiché nulle part ailleurs passerait pour perdu.
+   */
+  const legacy = policies.filter(
+    (p) => Number(p.cashEuro || 0) > 0 || p.products.length > 0
+  );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {legacy.length > 0 && (
+        <section
+          className="card border-amber-500/40 bg-amber-500/5 p-3.5"
+          data-testid="av-legacy-warning"
+        >
+          <p className="text-sm font-semibold">
+            Valorisations à reprendre au journal
+          </p>
+          <p className="text-meta mt-1">
+            {legacy.length} contrat{legacy.length > 1 ? "s" : ""} porte
+            {legacy.length > 1 ? "nt" : ""} encore des montants saisis à la main.
+            Ils ne sont <strong>plus comptés</strong>{" "}
+            dans le patrimoine net :
+            les supports d&apos;assurance-vie sont désormais des positions du
+            journal, au même titre qu&apos;une action. Lancez{" "}
+            <code className="rounded bg-[var(--muted)] px-1 py-0.5 text-[11px]">
+              npx tsx scripts/migrate-life-insurance.ts --apply
+            </code>{" "}
+            pour les reprendre automatiquement, ou saisissez-les via
+            « Transaction ».
+          </p>
+          <ul className="text-meta mt-2 space-y-0.5">
+            {legacy.map((p) => (
+              <li key={p.id}>
+                {p.insurer} —{" "}
+                {Number(p.cashEuro || 0) > 0
+                  ? `fonds euro ${formatCurrency(p.cashEuro, "EUR")}`
+                  : ""}
+                {p.products.length > 0
+                  ? `${Number(p.cashEuro || 0) > 0 ? " · " : ""}${p.products.length} support(s)`
+                  : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className="card p-4">
-        <h2 className="mb-3 text-base font-semibold">Nouveau contrat</h2>
+        <h2 className="mb-1 text-base font-semibold">Contrats d&apos;assurance-vie</h2>
+        <p className="text-meta mb-3">
+          L&apos;enveloppe et sa date d&apos;ouverture — c&apos;est elle qui
+          commande l&apos;antériorité des 8 ans. Les supports se saisissent comme
+          toute position, par une transaction.
+        </p>
         <div className="flex flex-wrap items-end gap-3">
-          <label className="text-xs min-w-[16rem] flex-1 sm:max-w-sm">
+          <label className="min-w-[16rem] flex-1 text-xs sm:max-w-sm">
             Courtier / Assureur
             <div className="mt-1">
               <PlatformCombobox
@@ -145,9 +193,6 @@ export function LifeInsuranceTab() {
                 }}
               />
             </div>
-            <span className="mt-0.5 block text-[10px] text-zinc-400">
-              Liste des courtiers AV (sous-catégories) · saisie libre possible
-            </span>
           </label>
           <label className="text-xs">
             Date d&apos;ouverture
@@ -156,14 +201,7 @@ export function LifeInsuranceTab() {
               className="input mt-1"
               value={openDate}
               onChange={(e) => setOpenDate(e.target.value)}
-            />
-          </label>
-          <label className="text-xs">
-            Cash / Fonds euro
-            <input
-              className="input mt-1 !w-32"
-              value={cashEuro}
-              onChange={(e) => setCashEuro(e.target.value)}
+              data-testid="av-open-date"
             />
           </label>
           <Button size="sm" onClick={() => addPolicy.mutate()} disabled={!insurer}>
@@ -172,10 +210,10 @@ export function LifeInsuranceTab() {
         </div>
       </section>
 
-      {(q.data?.policies || []).map((p) => (
-        <section key={p.id} className="card overflow-hidden">
+      {policies.map((p) => (
+        <section key={p.id} className="card overflow-hidden" data-testid="av-policy">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
-            <div>
+            <div className="min-w-0">
               <input
                 className="input !w-auto font-semibold"
                 defaultValue={p.insurer}
@@ -188,158 +226,83 @@ export function LifeInsuranceTab() {
                   }
                 }}
               />
-              <div className="mt-1 text-xs text-zinc-500">
+              <div className="text-meta mt-1">
                 Ouverture : {p.openDate ? formatDate(p.openDate) : "—"}
+                {p.openDate ? ` · ${contractAgeLabel(p.openDate)}` : ""}
               </div>
             </div>
-            <div className="text-right text-sm">
-              <div className="text-xs text-zinc-500">Cash / Fonds euro</div>
+            <label className="text-xs">
+              Date d&apos;ouverture
               <input
-                className="input !w-32 text-right font-semibold"
-                defaultValue={p.cashEuro}
+                type="date"
+                className="input mt-1"
+                defaultValue={p.openDate ? p.openDate.slice(0, 10) : ""}
                 onBlur={(e) => {
-                  if (e.target.value !== p.cashEuro) {
+                  const next = e.target.value || null;
+                  const current = p.openDate ? p.openDate.slice(0, 10) : "";
+                  if ((next ?? "") !== current) {
                     fetchJson("/api/life-insurance", {
                       method: "PUT",
-                      body: JSON.stringify({ id: p.id, cashEuro: e.target.value }),
+                      body: JSON.stringify({ id: p.id, openDate: next }),
                     }).then(refresh);
                   }
                 }}
               />
-              <div className="text-[10px] text-zinc-400">
-                {p.cashCounts ? "Inclus patrimoine" : "Ignoré (0)"}
-              </div>
-            </div>
+            </label>
             <Button
               variant="ghost"
               size="sm"
+              aria-label="Supprimer le contrat"
               onClick={() =>
-                fetchJson(`/api/life-insurance?id=${p.id}`, { method: "DELETE" }).then(refresh)
+                fetchJson(`/api/life-insurance?id=${p.id}`, {
+                  method: "DELETE",
+                }).then(refresh)
               }
             >
               <Trash2 className="h-3.5 w-3.5 text-red-500" />
             </Button>
           </div>
-
-          <div className="px-4 py-3">
-            <h3 className="mb-2 text-sm font-semibold">Produits structurés</h3>
-            <table className="mb-3 w-full text-sm">
-              <thead className="text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="py-1 text-left">Nom</th>
-                  <th className="py-1 text-right">Valorisation</th>
-                  <th className="py-1 text-right" />
-                </tr>
-              </thead>
-              <tbody>
-                {p.products.map((pr) => (
-                  <tr key={pr.id} className="border-t border-[var(--border)]">
-                    <td className="py-2">
-                      <input
-                        className="input !py-1"
-                        defaultValue={pr.name}
-                        onBlur={(e) => {
-                          if (e.target.value !== pr.name) {
-                            fetchJson("/api/life-insurance", {
-                              method: "PUT",
-                              body: JSON.stringify({
-                                kind: "product",
-                                id: pr.id,
-                                name: e.target.value,
-                              }),
-                            }).then(refresh);
-                          }
-                        }}
-                      />
-                    </td>
-                    <td className="py-2 text-right">
-                      <input
-                        className="input !w-28 !py-1 text-right"
-                        defaultValue={pr.currentValue}
-                        onBlur={(e) => {
-                          if (e.target.value !== pr.currentValue) {
-                            fetchJson("/api/life-insurance", {
-                              method: "PUT",
-                              body: JSON.stringify({
-                                kind: "product",
-                                id: pr.id,
-                                currentValue: e.target.value,
-                              }),
-                            }).then(refresh);
-                          }
-                        }}
-                      />
-                    </td>
-                    <td className="py-2 text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          fetchJson(`/api/life-insurance?id=${pr.id}&kind=product`, {
-                            method: "DELETE",
-                          }).then(refresh)
-                        }
-                      >
-                        <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-                {p.products.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="py-3 text-center text-xs text-zinc-400">
-                      Aucun produit structuré
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
         </section>
       ))}
 
-      <section className="card p-4">
-        <h3 className="mb-2 text-sm font-semibold">Ajouter un produit structuré</h3>
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="text-xs">
-            Contrat
-            <select
-              className="input mt-1"
-              value={productParent}
-              onChange={(e) => setProductParent(e.target.value)}
-            >
-              <option value="">—</option>
-              {(q.data?.policies || []).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.insurer}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs">
-            Nom
-            <input
-              className="input mt-1"
-              value={productName}
-              onChange={(e) => setProductName(e.target.value)}
-            />
-          </label>
-          <label className="text-xs">
-            Valorisation
-            <input
-              className="input mt-1 !w-28"
-              value={productValue}
-              onChange={(e) => setProductValue(e.target.value)}
-            />
-          </label>
-          <Button
-            size="sm"
-            disabled={!productParent || !productName}
-            onClick={() => addProduct.mutate()}
-          >
-            <Plus className="h-3.5 w-3.5" /> Produit
-          </Button>
+      <section className="card p-4" data-testid="av-supports">
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="text-sm font-semibold">Supports détenus</h3>
+          <span className="text-meta">
+            {avHoldings.length} support{avHoldings.length > 1 ? "s" : ""} ·{" "}
+            {formatCurrency(String(supportsTotal), "EUR")}
+          </span>
         </div>
+        {avHoldings.length === 0 ? (
+          <p className="text-meta">
+            Aucun support dans l&apos;enveloppe AV. Ajoutez-en un par
+            « Transaction », en choisissant une plateforme d&apos;assurance-vie.
+          </p>
+        ) : (
+          <ul className="divide-y divide-[var(--border)]">
+            {avHoldings.map((h) => (
+              <li
+                key={h.assetId}
+                className="flex items-center gap-3 py-1.5 text-xs"
+              >
+                <span className="min-w-0 flex-1 truncate" title={h.name}>
+                  {h.name}
+                </span>
+                <span className="text-[var(--muted-foreground)]">
+                  {h.platformName}
+                </span>
+                <span className="tabular-nums font-medium">
+                  {formatCurrency(h.marketValueEur, "EUR")}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-meta mt-2">
+          Ces lignes viennent du journal — elles portent donc un prix de revient
+          et une plus-value, ce qu&apos;une valorisation saisie à la main ne
+          permettait pas.
+        </p>
       </section>
     </div>
   );

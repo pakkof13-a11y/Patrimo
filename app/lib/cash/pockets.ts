@@ -16,14 +16,10 @@ export async function getExplicitCashTotalEur(userId: string) {
   const rates = await getEurRates();
   let total = zero();
 
-  const [banks, savings, envelopes, avs] = await Promise.all([
+  const [banks, savings, envelopes] = await Promise.all([
     prisma.bankAccount.findMany({ where: { userId } }),
     prisma.savingsAccount.findMany({ where: { userId } }),
     prisma.envelopeCash.findMany({ where: { userId } }),
-    prisma.lifeInsurance.findMany({
-      where: { userId },
-      include: { products: true },
-    }),
   ]);
 
   for (const b of banks) {
@@ -56,15 +52,17 @@ export async function getExplicitCashTotalEur(userId: string) {
     total = total.plus(d(convertToEurSync(e.balance.toString(), e.currency, rates)));
   }
 
-  for (const av of avs) {
-    if (positiveCashOnly(av.cashEuro.toString())) {
-      total = total.plus(d(convertToEurSync(av.cashEuro.toString(), av.currency, rates)));
-    }
-    for (const p of av.products) {
-      if (!positiveCashOnly(p.currentValue.toString())) continue;
-      total = total.plus(d(convertToEurSync(p.currentValue.toString(), p.currency, rates)));
-    }
-  }
+  // L'assurance-vie n'entre PAS ici.
+  //
+  // Elle y entrait, et cela produisait trois erreurs mesurables : un support
+  // saisi à la fois dans la table AV et au journal comptait deux fois dans le
+  // patrimoine net ; une UC actions se retrouvait rangée dans « Cash », faussant
+  // l'allocation par classe ; et le fonds euro du contrat, également listé comme
+  // produit, se comptait lui-même deux fois.
+  //
+  // Les supports d'AV sont désormais des positions du journal comme les autres
+  // (cf. `life-insurance/migrate-to-ledger.ts`), donc déjà comptés par
+  // `marketValue`. Les additionner ici les compterait une seconde fois.
 
   return { totalEur: total, rates };
 }

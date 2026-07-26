@@ -1058,18 +1058,10 @@ export async function seedUserPortfolio(
       cashEuro: D("15200"),
       currency: "EUR",
       notes: note("Contrat multi-supports"),
+      // Le fonds euro vit dans `cashEuro` ci-dessus — le répéter ici le
+      // compterait deux fois au patrimoine.
       products: {
         create: [
-          {
-            name: "Fonds euro Spirica",
-            currentValue: D("15200"),
-            currency: "EUR",
-          },
-          {
-            name: "UC Amundi MSCI World",
-            currentValue: D("28500"),
-            currency: "EUR",
-          },
           {
             name: "UC Carmignac Patrimoine",
             currentValue: D("8400"),
@@ -1087,13 +1079,9 @@ export async function seedUserPortfolio(
       cashEuro: D("5000"),
       currency: "EUR",
       notes: note("Second contrat"),
+      // Idem : pas de reprise du fonds euro en support.
       products: {
         create: [
-          {
-            name: "Fonds euro Generali",
-            currentValue: D("5000"),
-            currency: "EUR",
-          },
           {
             name: "ETF World tracker",
             currentValue: D("9200"),

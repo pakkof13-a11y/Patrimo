@@ -1065,7 +1065,9 @@ export function HoldingsSection({
         <>
           <EnvelopeCashPanel envelope="AV" />
           <div className="mb-1 sm:mb-2">
-            <LifeInsuranceTab />
+            <LifeInsuranceTab
+              avHoldings={holdings.filter((h) => h.accountType === "AV")}
+            />
           </div>
         </>
       )}
