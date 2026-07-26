@@ -63,9 +63,18 @@ export default function LoginPage() {
       });
       if (!res || res.error) {
         const code = (res as { code?: string } | undefined)?.code;
+        const err = res?.error;
         if (code === "rate_limited") {
           setError(
             "Trop de tentatives. Réessayez dans quelques instants."
+          );
+        } else if (
+          err === "Configuration" ||
+          err === "MissingSecret" ||
+          err === "UntrustedHost"
+        ) {
+          setError(
+            "Erreur de configuration auth (serveur). Vérifiez AUTH_SECRET, AUTH_URL et les migrations Prisma sur Vercel — ce n’est pas un mauvais mot de passe."
           );
         } else {
           setError("Identifiant ou mot de passe incorrect.");

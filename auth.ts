@@ -66,38 +66,62 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const password = parsed.data.password;
         const ip = await getLoginClientIp();
 
-        const gate = await checkLoginAllowed(ip, login);
-        if (gate.blocked) {
-          throw new RateLimitedSignIn(gate.retryAfterSec);
+        try {
+          const gate = await checkLoginAllowed(ip, login);
+          if (gate.blocked) {
+            throw new RateLimitedSignIn(gate.retryAfterSec);
+          }
+
+          /**
+           * Select explicite (pas `include` / full model) : le login ne doit
+           * pas dépendre de colonnes métier ajoutées plus tard (ex. taxHousehold).
+           * Un `findFirst` sans select charge tout le modèle Prisma → si une
+           * migration n'est pas encore appliquée en prod, Auth.js renvoie
+           * `error=Configuration` (affiché à tort comme mauvais mot de passe).
+           */
+          const user = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { username: login },
+                { email: login },
+                { email: `${login}@patrimo.local` },
+              ],
+            },
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              username: true,
+              role: true,
+              passwordHash: true,
+            },
+          });
+
+          const hash = user?.passwordHash || getDummyPasswordHash();
+          const ok = await bcrypt.compare(password, hash);
+
+          if (!user?.passwordHash || !ok) {
+            await recordLoginFailure(ip, login);
+            return null; // → CredentialsSignin générique côté client
+          }
+
+          await clearLoginFailures(ip, login);
+
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name ?? user.username,
+            username: user.username,
+            role: normalizeRole(user.role),
+          };
+        } catch (e) {
+          // Rate-limit : laisser Auth.js propager le code stable
+          if (e instanceof RateLimitedSignIn) throw e;
+          // Toute autre erreur (DB, migration manquante, Upstash…) → log + null
+          // plutôt qu'un `Configuration` opaque côté navigateur.
+          console.error("[auth.authorize]", e);
+          return null;
         }
-
-        const user = await prisma.user.findFirst({
-          where: {
-            OR: [
-              { username: login },
-              { email: login },
-              { email: `${login}@patrimo.local` },
-            ],
-          },
-        });
-
-        const hash = user?.passwordHash || getDummyPasswordHash();
-        const ok = await bcrypt.compare(password, hash);
-
-        if (!user?.passwordHash || !ok) {
-          await recordLoginFailure(ip, login);
-          return null; // → CredentialsSignin générique côté client
-        }
-
-        await clearLoginFailures(ip, login);
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name ?? user.username,
-          username: user.username,
-          role: normalizeRole(user.role),
-        };
       },
     }),
   ],
