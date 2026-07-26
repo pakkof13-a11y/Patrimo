@@ -31,6 +31,7 @@ export const TX_TYPE_GROUPS: Record<string, string[] | null> = {
   cash: ["APPORT", "RETRAIT"],
   transfer: ["TRANSFERT_CASH", "TRANSFERT_TITRE"],
   split: ["SPLIT"],
+  works: ["TRAVAUX"],
 };
 
 export type TxListSortBy =

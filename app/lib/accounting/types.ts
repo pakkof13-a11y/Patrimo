@@ -26,6 +26,16 @@ export const TX_TYPES = [
   "TRANSFERT_TITRE",
   /** Split / reverse split : quantity = ratio (ex. 2 = 2-for-1). Coût total inchangé. */
   "SPLIT",
+  /**
+   * Dépense capitalisée sur un actif détenu (travaux immobiliers immobilisés) :
+   * `cashAmount` s'ajoute au coût de revient, la quantité ne bouge pas.
+   *
+   * Distinct de `FRAIS`, qui passe la dépense en charge sans toucher au coût de
+   * revient. Le choix entre les deux est celui de l'utilisateur, et il a une
+   * conséquence : seuls les travaux capitalisés viendront réduire la plus-value
+   * à la revente.
+   */
+  "TRAVAUX",
 ] as const;
 
 export type TxType = (typeof TX_TYPES)[number];

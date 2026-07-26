@@ -62,9 +62,20 @@ export function mapDbTx(row: {
   const cashAmountOriginal =
     qty && unit
       ? qty.times(unit)
-      : ["APPORT", "RETRAIT", "FRAIS", "DIVIDENDE", "COUPON", "LOYER", "INTERET", "TRANSFERT_CASH"].includes(
-            row.type
-          )
+      : [
+            "APPORT",
+            "RETRAIT",
+            "FRAIS",
+            "DIVIDENDE",
+            "COUPON",
+            "LOYER",
+            "INTERET",
+            "TRANSFERT_CASH",
+            // Travaux capitalisés : le montant porte la dépense immobilisée et
+            // n'est déductible d'aucune quantité × prix. L'omettre ici ferait
+            // rejouer un montant nul, et le ledger rejetterait la transaction.
+            "TRAVAUX",
+          ].includes(row.type)
         ? fx.isZero()
           ? grossEur
           : grossEur.div(fx)

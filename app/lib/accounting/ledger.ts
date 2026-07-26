@@ -2,6 +2,7 @@ import { d, zero, type Decimal } from "../money/decimal";
 import { toEur } from "./fx";
 import {
   applyBuy,
+  applyCapitalisedCost,
   applySell,
   applySplit,
   applyTransferIn,
@@ -248,6 +249,22 @@ export function applyTransaction(
       // No cash impact for title transfers
       break;
     }
+    case "TRAVAUX": {
+      // Travaux capitalisés : le coût de revient monte, la quantité ne bouge
+      // pas. Pas d'impact cash — comme ACHAT / VENTE, le financement est suivi
+      // ailleurs (prêt, apport) plutôt que sur la trésorerie du portefeuille.
+      //
+      // Les travaux ne sont pas comptés dans `totalFeesPaidEur` : ce sont des
+      // dépenses immobilisées, pas des frais.
+      const assetId = requireAsset(tx);
+      const amountEur = toEur(cashAmountOriginal(tx), tx.fxRateToEur).plus(feesEur);
+      const next = applyCapitalisedCost(
+        getPos(state, assetId, tx.platformId),
+        amountEur
+      );
+      setPos(state, assetId, tx.platformId, next);
+      break;
+    }
     case "SPLIT": {
       // quantity = ratio multiplicatif (2 = 2-for-1). Coût total inchangé, pas de cash.
       const assetId = requireAsset(tx);
@@ -381,6 +398,13 @@ export function computeNetCashImpactEur(tx: LedgerTx): {
     case "SPLIT": {
       // Ratio stocké en quantity — pas de cash, pas de P&L
       return { grossAmountEur: zero(), feesEur: zero(), netCashImpactEur: zero() };
+    }
+    case "TRAVAUX": {
+      // Le brut porte la dépense immobilisée : sans ce cas, le montant serait
+      // enregistré à zéro et le rejeu du journal rejetterait la transaction.
+      // Pas d'impact cash — comme un achat, le financement est suivi ailleurs.
+      const gross = toEur(cashAmountOriginal(tx), tx.fxRateToEur);
+      return { grossAmountEur: gross, feesEur, netCashImpactEur: zero() };
     }
     default:
       return { grossAmountEur: zero(), feesEur, netCashImpactEur: zero() };

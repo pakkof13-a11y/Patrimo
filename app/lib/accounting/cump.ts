@@ -39,6 +39,46 @@ export function applyBuy(
   };
 }
 
+/**
+ * Dépense capitalisée sur une position existante : le coût de revient augmente,
+ * la quantité ne bouge pas.
+ *
+ * Sert aux travaux immobiliers immobilisés. `applyBuy` ne peut pas s'en charger :
+ * il exige une quantité strictement positive, à juste titre — un achat sans
+ * quantité n'a pas de sens. Des travaux, si : on ne détient pas « plus de
+ * maison » après avoir refait la toiture, mais elle a coûté davantage.
+ *
+ * Conséquence directe et voulue : le prix de revient unitaire monte, et la
+ * plus-value calculée à la revente est diminuée d'autant — ce qui est
+ * exactement le traitement attendu de travaux capitalisés.
+ *
+ * Une position inexistante est refusée. L'accepter créerait une ligne de
+ * quantité nulle portant un coût positif : elle gonflerait le coût de revient
+ * du portefeuille sans aucune contrepartie visible.
+ */
+export function applyCapitalisedCost(
+  pos: CumpPosition,
+  amountEur: DecimalInput
+): CumpPosition {
+  const amount = d(amountEur);
+  if (amount.lte(0)) {
+    throw new AccountingError(
+      "INVALID_AMOUNT",
+      "Le montant capitalisé doit être strictement positif"
+    );
+  }
+  if (pos.quantity.lte(0)) {
+    throw new AccountingError(
+      "NO_POSITION",
+      "Aucune position à laquelle rattacher cette dépense"
+    );
+  }
+  return {
+    quantity: pos.quantity,
+    costBasisEur: pos.costBasisEur.plus(amount),
+  };
+}
+
 export type SellResult = {
   position: CumpPosition;
   costReleasedEur: Decimal;

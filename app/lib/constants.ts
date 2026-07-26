@@ -100,6 +100,8 @@ export const TRANSACTION_TYPES = {
   TRANSFERT_TITRE: "Transfert titres",
   /** Ratio dans quantité (2 = doublement de titres, CUMP / 2). */
   SPLIT: "Split / division",
+  /** Travaux immobilisés : s'ajoutent au coût de revient, pas à la quantité. */
+  TRAVAUX: "Travaux capitalisés",
 } as const;
 
 export type TransactionTypeLabel = keyof typeof TRANSACTION_TYPES;

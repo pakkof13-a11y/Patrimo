@@ -124,6 +124,7 @@ export const createTransactionSchema = z
       "COUPON",
       "LOYER",
       "SPLIT",
+      "TRAVAUX",
     ].includes(data.type);
     if (needsAsset && !data.assetId) {
       ctx.addIssue({ code: "custom", message: "Actif requis", path: ["assetId"] });
@@ -171,9 +172,19 @@ export const createTransactionSchema = z
       });
     }
     if (
-      ["APPORT", "RETRAIT", "FRAIS", "TRANSFERT_CASH", "DIVIDENDE", "COUPON", "LOYER", "INTERET"].includes(
-        data.type
-      )
+      [
+        "APPORT",
+        "RETRAIT",
+        "FRAIS",
+        "TRANSFERT_CASH",
+        "DIVIDENDE",
+        "COUPON",
+        "LOYER",
+        "INTERET",
+        // Travaux capitalisés : le montant EST la dépense immobilisée,
+        // il n'y a ni quantité ni prix unitaire pour la déduire.
+        "TRAVAUX",
+      ].includes(data.type)
     ) {
       if (!data.cashAmount || Number(data.cashAmount) <= 0) {
         if (!["DIVIDENDE", "COUPON", "LOYER"].includes(data.type) || !data.cashAmount) {
