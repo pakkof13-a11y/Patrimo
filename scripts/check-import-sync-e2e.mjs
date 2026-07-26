@@ -82,7 +82,7 @@ console.log(`  position initiale : ${posBefore?.quantity} titres, PRU ${posBefor
 // ── Import CSV ───────────────────────────────────────────────────────────────
 console.log("\n━━ Import CSV ━━");
 
-// Format générique Patrimo : point-virgule, décimales à la virgule (locale FR)
+// Format générique Aurea : point-virgule, décimales à la virgule (locale FR)
 const csvText = [
   "Date;Type;Ticker;Quantite;Prix;Frais;Devise",
   `20/02/2026;ACHAT;${TICKER};5;120,50;2,50;EUR`,

@@ -1,5 +1,5 @@
 /**
- * API toasts Patrimo — enveloppe fine autour de Sonner.
+ * API toasts Aurea — enveloppe fine autour de Sonner.
  * Durée 4 s, file gérée par Sonner, non bloquant pour la navigation.
  */
 import { toast as sonnerToast } from "sonner";

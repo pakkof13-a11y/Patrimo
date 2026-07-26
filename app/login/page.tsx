@@ -1,10 +1,11 @@
 "use client";
 
 import { FormEvent, useState, useSyncExternalStore } from "react";
-import Image from "next/image";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { BrandLogo } from "@/components/branding/brand-logo";
+import { BRAND } from "@/components/branding/brand-assets";
 import {
   ONBOARDING_SESSION_DISMISS_KEY,
   clearSessionPref,
@@ -97,13 +98,12 @@ export default function LoginPage() {
 
       <div className="relative z-10 w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center text-center">
-          <Image
-            src="/patrimo.jpg"
-            alt="Patrimo"
-            width={120}
-            height={120}
+          <BrandLogo
+            size={120}
+            forceTheme="dark"
             priority
-            className="rounded-2xl object-cover shadow-lg ring-1 ring-white/10"
+            alt={BRAND.name}
+            className="rounded-2xl shadow-lg ring-1 ring-white/10"
           />
           <p className="mt-5 text-base font-medium tracking-wide text-gray-400 sm:text-lg">
             Prenez les commandes de votre avenir financier.
@@ -174,7 +174,7 @@ export default function LoginPage() {
         </form>
 
         <p className="mt-6 text-center text-[10px] text-slate-600">
-          Patrimo · Europe/Paris
+          {BRAND.name} · Europe/Paris
         </p>
       </div>
     </div>

@@ -1,5 +1,5 @@
 /**
- * Convertit les BlockchainOnchainTx (RPC Solana) en écritures du journal Patrimo.
+ * Convertit les BlockchainOnchainTx (RPC Solana) en écritures du journal Aurea.
  *
  * - Date = `blockTime` on-chain en ISO UTC (pas createdAt / date d’import)
  * - Dédup : notes contiennent `[onchain:<signature>]`

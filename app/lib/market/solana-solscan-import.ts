@@ -1,5 +1,5 @@
 /**
- * Import des transfers Solscan (block_time réel) → journal Patrimo.
+ * Import des transfers Solscan (block_time réel) → journal Aurea.
  * Si clé/plan Solscan insuffisant → no-op (retour 0).
  */
 

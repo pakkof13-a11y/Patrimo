@@ -182,7 +182,7 @@ export async function fetchGoogleNewsRss(
       signal: AbortSignal.timeout(8_000),
       headers: {
         Accept: "application/rss+xml, application/xml, text/xml",
-        "User-Agent": "Patrimo/1.0 (portfolio news)",
+        "User-Agent": "Aurea/1.0 (portfolio news)",
       },
     });
     if (!res.ok) return items;

@@ -13,7 +13,7 @@
 |--------|------|
 | `csv-parse.ts` | Parseur léger `,` / `;` / tab, quotes, BOM |
 | `normalize.ts` | Nombres FR/EN, dates ISO & DD/MM/YYYY |
-| `presets.ts` | Formats Patrimo, generic, Binance, Boursorama, Revolut, Coinbase |
+| `presets.ts` | Formats Aurea, generic, Binance, Boursorama, Revolut, Coinbase |
 | `map-rows.ts` | Mapping → `ImportDraftRow` (validation + warnings) |
 | `commit.ts` | Création assets + transactions en base |
 | API `preview` / `commit` | Flux UI modal d’import |
@@ -28,7 +28,7 @@
 5. **Décimales** — OK pour FR/EN basiques ; espaces insécables / `−` unicode incomplets.
 6. **CSV inconnu** — format `generic` limité ; pas de mapping manuel ni mémorisation.
 7. **Nouvelles plateformes** (Fortuneo, TR, IBKR) — absentes.
-8. **Contrat `TransactionImport`** — non formalisé (drafts Patrimo uniquement).
+8. **Contrat `TransactionImport`** — non formalisé (drafts Aurea uniquement).
 
 ### Correctifs appliqués
 
@@ -94,7 +94,7 @@ interface PlatformCsvAdapter {
 
 Voir `tests/unit/import-csv.test.ts` (étendu) et `tests/unit/import-adapters.test.ts`.
 
-Scénarios couverts : Patrimo, Binance, Coinbase, Revolut, nombres FR, dates, auto-match, `importCsv()` end-to-end.
+Scénarios couverts : Aurea, Binance, Coinbase, Revolut, nombres FR, dates, auto-match, `importCsv()` end-to-end.
 
 ---
 

@@ -89,7 +89,7 @@ describe("presets", () => {
 });
 
 describe("mapCsvToDrafts", () => {
-  it("maps Patrimo template rows", () => {
+  it("maps Aurea template rows", () => {
     const text = `date;type;ticker;name;quantity;unit_price;fees;currency;cash_amount;notes;asset_class
 15/03/2023;ACHAT;MC.PA;LVMH;8;612.5;12.5;EUR;;Achat;ACTIONS
 10/05/2024;APPORT;;;;;;EUR;5000;Apport;CASH

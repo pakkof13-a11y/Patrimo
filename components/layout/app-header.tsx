@@ -12,6 +12,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { HeaderAccountMenu } from "@/components/layout/header-account-menu";
+import { BrandLogo } from "@/components/branding/brand-logo";
+import { BRAND } from "@/components/branding/brand-assets";
 import { formatDateTimeParis } from "@/app/lib/money/format";
 import { cn } from "@/app/lib/utils";
 import { NAV_GROUPS } from "@/app/lib/types/nav-groups";
@@ -321,19 +323,16 @@ export function AppHeader({
           className="flex min-w-0 shrink-0 items-center gap-2.5"
           data-testid="header-brand"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/patrimo.jpg"
+          <BrandLogo
+            size={36}
             alt=""
-            width={36}
-            height={36}
-            className="h-8 w-8 shrink-0 rounded-lg object-cover shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:h-9 sm:w-9"
+            className="h-8 w-8 rounded-lg shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:h-9 sm:w-9"
           />
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold tracking-tight text-[var(--foreground)]">
-              Patrimo
+              {BRAND.name}
             </div>
-            <div className="text-meta hidden md:block">Suivi de patrimoine</div>
+            <div className="text-meta hidden md:block">{BRAND.tagline}</div>
           </div>
         </div>
 

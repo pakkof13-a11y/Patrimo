@@ -108,7 +108,7 @@ export function DashboardActivation({
       data-testid="dashboard-activation"
       data-maturity={maturity}
       aria-label={
-        isEmpty ? "Bienvenue — démarrer Patrimo" : "Configuration en cours"
+        isEmpty ? "Bienvenue — démarrer Aurea" : "Configuration en cours"
       }
     >
       <div className="border-b border-[var(--border)] px-4 py-5 sm:px-6 sm:py-6">
@@ -125,7 +125,7 @@ export function DashboardActivation({
             </h2>
             <p className="text-sm leading-relaxed text-[var(--muted-foreground)]">
               {isEmpty
-                ? "Patrimo construit positions, P&L et allocations à partir de votre journal. Commencez par une plateforme, puis importez ou saisissez vos opérations."
+                ? "Aurea construit positions, P&L et allocations à partir de votre journal. Commencez par une plateforme, puis importez ou saisissez vos opérations."
                 : "Les modules d’analyse (courbes, allocations, actualité) s’afficheront dès que le journal et les positions seront en place — sans bruit inutile d’ici là."}
             </p>
             <p className="text-meta font-medium text-[var(--primary)]">

@@ -34,7 +34,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <SessionProvider>
-      <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      {/*
+        disableTransitionOnChange retiré : permet une transition douce (CSS)
+        sur logos / fonds marque. Anti-flash initial : suppressHydrationWarning
+        sur <html>/<body> + logos en fallback light tant que le thème n’est pas monté.
+      */}
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <DisplayProvider>
           <NotificationsProvider>
             <QueryClientProvider client={client}>
@@ -51,10 +56,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
                   duration: TOAST_DURATION_MS,
                   closeButton: true,
                   classNames: {
-                    toast: "patrimo-toast",
+                    toast: "aurea-toast",
                     title: "text-[0.8125rem] font-medium",
                     description: "text-[0.75rem] opacity-80",
-                    closeButton: "patrimo-toast-close",
+                    closeButton: "aurea-toast-close",
                   },
                 }}
               />

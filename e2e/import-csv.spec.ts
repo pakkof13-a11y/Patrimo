@@ -59,7 +59,7 @@ test.describe("Import CSV", () => {
     await expect(page.getByTestId("import-mode-select")).toBeVisible();
     await expect(page.getByTestId("import-mode-select")).toHaveValue("csv");
 
-    // Modèle téléchargeable uniquement pour le format Patrimo
+    // Modèle téléchargeable uniquement pour le format Aurea
     await page.getByTestId("import-format-select").selectOption("patrimo");
     await expect(
       page.getByRole("button", { name: /Télécharger le modèle/i })

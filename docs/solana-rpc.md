@@ -88,7 +88,7 @@ Ce n’est **pas** un indexeur on-chain type Solscan/Helius Enhanced.
 
 ## Écarts vs ancien comportement Solscan Pro
 
-| Capacité | Solscan Pro | RPC natif Patrimo |
+| Capacité | Solscan Pro | RPC natif Aurea |
 |----------|-------------|-------------------|
 | SOL + SPL balances | ✅ portfolio enrichi | ✅ `getBalance` + token accounts |
 | Prix / valeur USD | ✅ dans portfolio | ⚠️ CoinGecko (partiel, mints non listés = 0) |

@@ -1,5 +1,5 @@
 /**
- * Raccourcis clavier globaux Patrimo.
+ * Raccourcis clavier globaux Aurea.
  * Voir docs/keyboard-shortcuts.md
  */
 

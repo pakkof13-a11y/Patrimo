@@ -21,7 +21,7 @@ export function ShortcutsHelpPanel({
       <div className="space-y-3" data-testid="shortcuts-help-panel">
         <p className="flex items-start gap-2 text-[12px] leading-relaxed text-[var(--muted-foreground)]">
           <Keyboard className="mt-0.5 h-4 w-4 shrink-0 text-teal-500" aria-hidden />
-          Navigation clavier Patrimo — les raccourcis sont désactivés pendant la
+          Navigation clavier Aurea — les raccourcis sont désactivés pendant la
           saisie dans un champ.
         </p>
         <ul className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">

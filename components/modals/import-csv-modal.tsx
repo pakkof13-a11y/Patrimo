@@ -1333,7 +1333,7 @@ export function ImportCsvModal({
 
         {phase !== "success" && importMode === "csv" && (
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Importez un export broker/exchange ou le modèle Patrimo. Les actifs
+            Importez un export broker/exchange ou le modèle Aurea. Les actifs
             manquants sont créés automatiquement. Les{" "}
             <strong className="font-medium text-[var(--foreground)]">
               doublons
@@ -1818,7 +1818,7 @@ export function ImportCsvModal({
                 </select>
                 <p className="mt-1 text-[11px] text-slate-500">
                   {formatId === "auto"
-                    ? "Détecte Crypto.com, Nexo, Coinbase, Binance, Revolut, AscendEX, Fortuneo, IBKR, Trade Republic, Boursorama, Patrimo — sinon mapping dynamique."
+                    ? "Détecte Crypto.com, Nexo, Coinbase, Binance, Revolut, AscendEX, Fortuneo, IBKR, Trade Republic, Boursorama, Aurea — sinon mapping dynamique."
                     : IMPORT_FORMATS.find((f) => f.id === formatId)
                         ?.description}
                 </p>
@@ -1992,7 +1992,7 @@ export function ImportCsvModal({
                   </p>
                   <p className="mt-0.5 text-[11px] text-[var(--muted-foreground)]">
                     ou sélectionnez un fichier · formats broker / modèle
-                    Patrimo
+                    Aurea
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center justify-center gap-2">
@@ -2009,7 +2009,7 @@ export function ImportCsvModal({
                       }
                     />
                   </label>
-                  {/* Modèle Patrimo uniquement si format = modèle Patrimo */}
+                  {/* Modèle Aurea uniquement si format = modèle Aurea */}
                   {formatId === "patrimo" && (
                     <Button
                       type="button"

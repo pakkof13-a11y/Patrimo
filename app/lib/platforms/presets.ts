@@ -1,5 +1,5 @@
 /**
- * Catalogue plateformes Patrimo (`PLATFORM_PRESETS`).
+ * Catalogue plateformes Aurea (`PLATFORM_PRESETS`).
  *
  * ## Classification (2026-07)
  * - Une banque / assureur remonte ici UNIQUEMENT si elle propose

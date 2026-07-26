@@ -1,4 +1,4 @@
-# Raccourcis clavier — Patrimo
+# Raccourcis clavier — Aurea
 
 Accessibilité WCAG 2.1 · navigation clavier.
 

@@ -633,7 +633,7 @@ export function PropertyCreateForm({
                 label="Jour d'encaissement du loyer"
                 htmlFor="prop-rent-day"
                 optional
-                hint="Renseigné, Patrimo proposera chaque mois l'écriture à confirmer"
+                hint="Renseigné, Aurea proposera chaque mois l'écriture à confirmer"
               >
                 <input
                   id="prop-rent-day"

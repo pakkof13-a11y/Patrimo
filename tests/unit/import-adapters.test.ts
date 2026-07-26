@@ -77,7 +77,7 @@ describe("adapter registry", () => {
     expect(["binance", "generic", "dynamic"]).toContain(adapter.meta.id);
   });
 
-  it("detects Revolut Invest stocks over Patrimo", () => {
+  it("detects Revolut Invest stocks over Aurea", () => {
     const { adapter, score } = detectBestAdapter([
       "Date",
       "Ticker",
@@ -155,7 +155,7 @@ ALGO,Réception,"1,989245","0,08€","0,15€","0,00€","22 juin 2026, 12:51:01
 });
 
 describe("importCsv end-to-end", () => {
-  it("imports Patrimo ACHAT / VENTE / DIVIDENDE", () => {
+  it("imports Aurea ACHAT / VENTE / DIVIDENDE", () => {
     const text = `date;type;ticker;name;quantity;unit_price;fees;currency;cash_amount;notes;asset_class
 15/03/2023;ACHAT;MC.PA;LVMH;8;612,50;12,5;EUR;;Achat;ACTIONS
 20/06/2023;DIVIDENDE;MC.PA;LVMH;;;EUR;120;Div;ACTIONS

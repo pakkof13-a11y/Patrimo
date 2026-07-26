@@ -1,5 +1,5 @@
 /**
- * Client CoinGecko — plan Demo (confirmé pour Patrimo).
+ * Client CoinGecko — plan Demo (confirmé pour Aurea).
  *
  * - Base : https://api.coingecko.com/api/v3
  * - Auth : header x-cg-demo-api-key (clé COINGECKO_API_KEY, préfixe CG-)

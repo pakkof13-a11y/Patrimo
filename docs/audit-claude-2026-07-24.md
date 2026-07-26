@@ -1,4 +1,4 @@
-# Audit Patrimo — 2026-07-24
+# Audit Aurea — 2026-07-24
 
 Passe d'audit technique menée sur `claude/patrimo-repo-cleanup-06wxab`
 (rebasée sur `main` @ `0bfd3bf`).

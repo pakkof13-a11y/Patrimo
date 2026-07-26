@@ -1,5 +1,5 @@
 /**
- * Calendrier des résultats — sources live accessibles dans Patrimo.
+ * Calendrier des résultats — sources live accessibles dans Aurea.
  *
  * Priorité :
  * 1. Yahoo Finance (yahoo-finance2, déjà dépendance) — sans clé, EU + US

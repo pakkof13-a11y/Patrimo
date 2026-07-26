@@ -434,7 +434,7 @@ export function EmployeeSavingsTab({
           <div className="mb-3 space-y-1.5 rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2.5 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
             <p>
               <strong>PEE</strong> — blocage usuel de {PEE_LOCK_YEARS} ans après
-              la date de versement. Sans date de déblocage saisie, Patrimo
+              la date de versement. Sans date de déblocage saisie, Aurea
               calcule versement + {PEE_LOCK_YEARS} ans.
             </p>
             <p>

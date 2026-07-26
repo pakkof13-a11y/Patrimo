@@ -7,7 +7,7 @@ type Props = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 /**
- * Boutons Patrimo — sobriété finance.
+ * Boutons Aurea — sobriété finance.
  * Focus ring via --focus-ring ; pas d’ombre gratuite.
  */
 export const Button = React.forwardRef<HTMLButtonElement, Props>(function Button(

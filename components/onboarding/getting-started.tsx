@@ -107,7 +107,7 @@ export function GettingStartedPanel({
         data-testid="getting-started-compact"
       >
         <p className="text-teal-900/90 dark:text-teal-100/90">
-          <strong>Découvrir Patrimo</strong> — plateforme, import CSV, premier
+          <strong>Découvrir Aurea</strong> — plateforme, import CSV, premier
           achat. Les transactions sont la source de vérité.
         </p>
         <div className="flex flex-wrap items-center gap-2">
@@ -147,7 +147,7 @@ export function GettingStartedPanel({
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-semibold text-teal-900 dark:text-teal-100">
-            Bienvenue sur Patrimo
+            Bienvenue sur Aurea
           </h2>
           <p className="mt-0.5 text-xs text-teal-800/80 dark:text-teal-200/70">
             Trois étapes pour suivre votre patrimoine. Les transactions sont la

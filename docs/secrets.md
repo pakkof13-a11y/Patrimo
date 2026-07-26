@@ -1,4 +1,4 @@
-# Secrets & hygiène de configuration — Patrimo
+# Secrets & hygiène de configuration — Aurea
 
 ## Principes
 

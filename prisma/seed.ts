@@ -47,7 +47,7 @@ async function wipeUserData(userId: string) {
 }
 
 /**
- * Seed Patrimo — ~30 positions + ~100–120 transactions sur ~3 ans + tous onglets.
+ * Seed Aurea — ~30 positions + ~100–120 transactions sur ~3 ans + tous onglets.
  *
  * - Défaut : portfolio sur **admin** et **demo** (wipe des deux cibles seedées).
  * - `SEED_DEMO_ONLY=1` : wipe + seed **demo uniquement** (admin non touché).
@@ -78,12 +78,12 @@ async function main() {
 
   console.log(
     LIGHT
-      ? "Seeding Patrimo — E2E/LIGHT → wipe+seed **demo uniquement** (admin préservé)…"
+      ? "Seeding Aurea — E2E/LIGHT → wipe+seed **demo uniquement** (admin préservé)…"
       : DEMO_ONLY
-        ? "Seeding Patrimo — portfolio DEMO uniquement (admin non wipe)…"
+        ? "Seeding Aurea — portfolio DEMO uniquement (admin non wipe)…"
         : ADMIN_ONLY
-          ? "Seeding Patrimo — portfolio ADMIN uniquement…"
-          : "Seeding Patrimo — portfolios ADMIN + DEMO (3 ans, multi-onglets)…"
+          ? "Seeding Aurea — portfolio ADMIN uniquement…"
+          : "Seeding Aurea — portfolios ADMIN + DEMO (3 ans, multi-onglets)…"
   );
 
   const adminHash = await bcrypt.hash(adminPassword, 12);
@@ -112,7 +112,7 @@ async function main() {
     where: { email: demoEmail },
     update: {
       passwordHash: demoHash,
-      name: "Démo Patrimo",
+      name: "Démo Aurea",
       baseCurrency: "EUR",
       username: demoUsername,
       role: "USER",
@@ -120,7 +120,7 @@ async function main() {
     create: {
       email: demoEmail,
       username: demoUsername,
-      name: "Démo Patrimo",
+      name: "Démo Aurea",
       passwordHash: demoHash,
       role: "USER",
       baseCurrency: "EUR",

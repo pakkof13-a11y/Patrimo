@@ -67,6 +67,10 @@ import {
 import dynamic from "next/dynamic";
 import { AppHeader } from "@/components/layout/app-header";
 import { Shell } from "@/components/layout/display-provider";
+import {
+  BrandBannerSurface,
+  BrandContentBackground,
+} from "@/components/branding/brand-surfaces";
 import { KpiStrip } from "@/components/dashboard/kpi-strip";
 import { DashboardTab } from "@/components/dashboard/dashboard-tab";
 import { HoldingsSection } from "@/components/holdings/holdings-section";
@@ -1007,16 +1011,19 @@ function PortfolioAppClient({
           */}
           {showGlobalKpis && (
             <div className="module-kpi-band min-w-0" data-slot="kpi-band">
-              <KpiStrip
-                summary={summary}
-                baseCurrency={baseCurrency}
-                history={historyQ.data?.history}
-                smartFilter={isDashboard && dashBlocks.kpiSmartFilter}
-              />
+              <BrandBannerSurface className="p-2.5 sm:p-3">
+                <KpiStrip
+                  summary={summary}
+                  baseCurrency={baseCurrency}
+                  history={historyQ.data?.history}
+                  smartFilter={isDashboard && dashBlocks.kpiSmartFilter}
+                />
+              </BrandBannerSurface>
             </div>
           )}
 
           <div className="module-main" data-slot="module-main">
+            <BrandContentBackground className="rounded-[var(--radius-lg)]">
             {/*
               Onglet Immobilier : le tableau Positions montre déjà la valeur de
               chaque bien, mais pas la dette rattachée, le net qui en découle ni
@@ -1164,6 +1171,7 @@ function PortfolioAppClient({
             )}
 
             {tab === "fiscal" && <FiscalYearTab baseCurrency={baseCurrency} />}
+            </BrandContentBackground>
           </div>
         </div>
       </Shell>

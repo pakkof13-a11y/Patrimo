@@ -14,14 +14,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Patrimo — Suivi de patrimoine",
+  title: "Aurea — Suivi de patrimoine",
   description:
     "Tableau de bord d'investissement : transactions, CUMP, multi-devises, plateformes.",
-  icons: {
-    icon: [{ url: "/patrimo.jpg", type: "image/jpeg" }],
-    apple: [{ url: "/patrimo.jpg", type: "image/jpeg" }],
-    shortcut: "/patrimo.jpg",
-  },
+  // Favicon / apple-icon : convention fichiers app/icon.png + app/apple-icon.png
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -169,7 +169,7 @@ export function createAliasAdapter(preset: AliasPreset): PlatformCsvAdapter {
         if (hasPriceAt && hasTxType && hasAsset) return 96;
         if (hasTxType && hasAsset) return 88;
       }
-      // Modèle Patrimo exporté (date;type;ticker;unit_price;…)
+      // Modèle Aurea exporté (date;type;ticker;unit_price;…)
       // Ne pas voler les exports broker (Price per share / Total Amount / FX Rate)
       if (preset.id === "patrimo") {
         const looksBroker =

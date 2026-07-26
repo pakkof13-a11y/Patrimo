@@ -123,5 +123,5 @@ summarize("REVOLUT raw auto", revText);
 summarize("REVOLUT forced revolut", revText, "revolut");
 
 const patText = decodeCsvBuffer(fs.readFileSync(patPath));
-summarize("PATRIMO converted auto", patText);
-summarize("PATRIMO forced patrimo", patText, "patrimo");
+summarize("AUREA converted auto", patText);
+summarize("AUREA forced patrimo", patText, "patrimo");

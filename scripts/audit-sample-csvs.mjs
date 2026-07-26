@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const root = "C:\\Users\\Pak-M\\Downloads\\Patrimo";
+const root = "C:\\Users\\Pak-M\\Downloads\\Aurea";
 
 function walk(dir, acc = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

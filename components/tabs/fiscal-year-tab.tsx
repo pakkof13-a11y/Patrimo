@@ -432,7 +432,7 @@ export function FiscalYearTab({
                 <p>{report.disclaimer}</p>
                 <ul className="list-inside list-disc space-y-1 opacity-90">
                   <li>
-                    Les montants proviennent de vos transactions Patrimo
+                    Les montants proviennent de vos transactions Aurea
                     (année civile Europe/Paris).
                   </li>
                   <li>
