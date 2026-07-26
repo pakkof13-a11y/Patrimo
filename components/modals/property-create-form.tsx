@@ -74,6 +74,8 @@ type FormState = {
   monthlyChargesEur: string;
   annualPropertyTaxEur: string;
   occupancyRatePct: string;
+  rentDay: string;
+  rentalStartDate: string;
   constructionYear: string;
   energyRating: string;
   parkingSpots: string;
@@ -103,6 +105,8 @@ const EMPTY: FormState = {
   monthlyChargesEur: "",
   annualPropertyTaxEur: "",
   occupancyRatePct: "",
+  rentDay: "",
+  rentalStartDate: "",
   constructionYear: "",
   energyRating: "",
   parkingSpots: "",
@@ -226,6 +230,10 @@ export function PropertyCreateForm({
             : null,
           occupancyRatePct: form.occupancyRatePct
             ? form.occupancyRatePct.replace(",", ".")
+            : null,
+          rentDay: form.rentDay ? num(form.rentDay) : null,
+          rentalStartDate: form.rentalStartDate
+            ? new Date(form.rentalStartDate).toISOString()
             : null,
           constructionYear: form.constructionYear
             ? num(form.constructionYear)
@@ -619,6 +627,40 @@ export function PropertyCreateForm({
                     onChange={(e) => set("occupancyRatePct", e.target.value)}
                   />
                 </Field>
+              )}
+
+              <Field
+                label="Jour d'encaissement du loyer"
+                htmlFor="prop-rent-day"
+                optional
+                hint="Renseigné, Patrimo proposera chaque mois l'écriture à confirmer"
+              >
+                <input
+                  id="prop-rent-day"
+                  type="number"
+                  min={1}
+                  max={31}
+                  className="input mt-1 w-full"
+                  placeholder="5"
+                  value={form.rentDay}
+                  onChange={(e) => set("rentDay", e.target.value)}
+                  data-testid="property-rent-day"
+                />
+              </Field>
+
+              <DateField
+                label="Début du bail"
+                optional
+                value={form.rentalStartDate}
+                onChange={(e) => set("rentalStartDate", e.target.value)}
+                hint="Première échéance possible"
+              />
+
+              {form.rentDay && !form.rentalStartDate && (
+                <p className="text-meta sm:col-span-2">
+                  Sans date de début, seule l&apos;échéance du mois en cours sera
+                  proposée — précisez-la pour rattraper les mois écoulés.
+                </p>
               )}
 
               {yieldPct != null && (

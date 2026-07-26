@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchJson } from "@/app/lib/api-client";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
@@ -68,6 +68,13 @@ export function PropertyPanel({
   holdings: Holding[];
   className?: string;
 }) {
+  const qc = useQueryClient();
+  /** Bien dont la valeur est en cours de saisie, et le montant tapé. */
+  const [editing, setEditing] = useState<{ assetId: string; value: string } | null>(
+    null
+  );
+  const [saving, setSaving] = useState(false);
+
   const propsQ = useQuery({
     queryKey: ["real-estate-properties"],
     staleTime: 60_000,
@@ -100,6 +107,41 @@ export function PropertyPanel({
     return { value, debt, cost, net: value - debt };
   }, [properties, byAsset]);
 
+  /**
+   * Une revalorisation change la valeur de la position, donc le patrimoine
+   * total : rafraîchir le seul panneau laisserait le reste de l'écran afficher
+   * l'ancien chiffre.
+   */
+  function refreshAfterValuation() {
+    void propsQ.refetch();
+    void qc.invalidateQueries({ queryKey: ["holdings"] });
+    void qc.invalidateQueries({ queryKey: ["portfolio"] });
+  }
+
+  /** Valeur du bien entier saisie à la main — bascule le bien en mode manuel. */
+  async function saveManual(assetId: string, name: string, raw: string) {
+    const value = raw.trim().replace(/\s/g, "").replace(",", ".");
+    if (!/^\d+(\.\d+)?$/.test(value) || Number(value) <= 0) {
+      toast.error("Montant invalide");
+      return;
+    }
+    setSaving(true);
+    try {
+      await fetchJson(`/api/real-estate/properties/${assetId}/valuation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "manual", valueEur: value }),
+      });
+      toast.success(`${name} valorisé à ${formatCurrency(value, "EUR")}`);
+      setEditing(null);
+      refreshAfterValuation();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Valorisation impossible");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function estimate(assetId: string, name: string) {
     try {
       const out = await fetchJson<{ kind: string; valueEur?: string; reason?: string; comparables?: number }>(
@@ -114,7 +156,7 @@ export function PropertyPanel({
         toast.success(
           `${name} réévalué à ${formatCurrency(out.valueEur ?? "0", "EUR")} · ${out.comparables} ventes comparables`
         );
-        void propsQ.refetch();
+        refreshAfterValuation();
         return;
       }
       if (out.kind === "insufficient-data") {
@@ -304,17 +346,78 @@ export function PropertyPanel({
                     ? ` · au ${new Date(p.lastValuedAt).toLocaleDateString("fr-FR")}`
                     : ""}
                 </p>
-                {isDvfEstimable(p.propertyType) && (
+                <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     className="btn btn-ghost text-[11px]"
-                    data-testid="property-estimate"
-                    onClick={() => estimate(p.assetId, p.name)}
+                    data-testid="property-set-value"
+                    onClick={() =>
+                      setEditing((cur) =>
+                        cur?.assetId === p.assetId
+                          ? null
+                          : {
+                              assetId: p.assetId,
+                              value: wholeValue ? String(wholeValue) : "",
+                            }
+                      )
+                    }
                   >
-                    Estimer depuis les ventes réelles
+                    Saisir une valeur
                   </button>
-                )}
+                  {isDvfEstimable(p.propertyType) && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost text-[11px]"
+                      data-testid="property-estimate"
+                      onClick={() => estimate(p.assetId, p.name)}
+                    >
+                      Estimer depuis les ventes réelles
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {editing?.assetId === p.assetId && (
+                <form
+                  className="mt-2 flex flex-wrap items-center gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void saveManual(p.assetId, p.name, editing.value);
+                  }}
+                >
+                  <input
+                    autoFocus
+                    inputMode="decimal"
+                    className="input h-8 w-40 text-xs"
+                    placeholder="Valeur du bien entier"
+                    aria-label={`Valeur de ${p.name}`}
+                    data-testid="property-value-input"
+                    value={editing.value}
+                    onChange={(ev) =>
+                      setEditing({ assetId: p.assetId, value: ev.target.value })
+                    }
+                  />
+                  <button
+                    type="submit"
+                    className="btn btn-primary text-[11px]"
+                    disabled={saving}
+                    data-testid="property-value-save"
+                  >
+                    {saving ? "Enregistrement…" : "Valider"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost text-[11px]"
+                    onClick={() => setEditing(null)}
+                  >
+                    Annuler
+                  </button>
+                  <span className="text-meta">
+                    Valeur du bien <strong>entier</strong>
+                    {pos ? ` — votre part : ${formatOwnershipShare(pos.quantity)}` : ""}
+                  </span>
+                </form>
+              )}
 
               {rental && !p.monthlyRentEur && (
                 <p className="text-meta mt-1">

@@ -23,7 +23,7 @@ import { prisma } from "../prisma";
 import { d } from "../money/decimal";
 import { AccountingError } from "../accounting";
 import { createTransaction } from "../transactions/service";
-import { isDvfEstimable } from "./constants";
+import { isDvfEstimable, isRentalUsage } from "./constants";
 import { REAL_ESTATE_PLATFORM_TYPE } from "./platform-type";
 
 export { REAL_ESTATE_PLATFORM_TYPE } from "./platform-type";
@@ -62,6 +62,11 @@ export type CreatePropertyInput = {
   annualPropertyTaxEur?: string | null;
   occupancyRatePct?: string | null;
 
+  /** Jour du mois d'encaissement (1–31) — active la proposition d'échéances. */
+  rentDay?: number | null;
+  rentalStartDate?: string | null;
+  rentalEndDate?: string | null;
+
   constructionYear?: number | null;
   energyRating?: string | null;
   parkingSpots?: number | null;
@@ -81,6 +86,13 @@ export type CreatePropertyResult = {
   /** Coût de revient de la part, frais inclus. */
   costBasisEur: string;
 };
+
+/** Date optionnelle — une chaîne vide ou invalide vaut « non renseignée ». */
+function parseOptionalDate(raw: string | null | undefined): Date | null {
+  if (!raw) return null;
+  const dt = new Date(raw);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
 
 function requirePositive(value: string, label: string): void {
   const n = d(value);
@@ -172,6 +184,8 @@ export async function createProperty(
   const dec = (v: string | null | undefined): Prisma.Decimal | null =>
     v == null || v === "" ? null : new Prisma.Decimal(d(v).toFixed(6));
 
+  const rentalUsage = isRentalUsage(input.usage);
+
   return prisma.$transaction(async (tx) => {
     const asset = await tx.asset.create({
       data: {
@@ -210,6 +224,12 @@ export async function createProperty(
         monthlyChargesEur: dec(input.monthlyChargesEur),
         annualPropertyTaxEur: dec(input.annualPropertyTaxEur),
         occupancyRatePct: dec(input.occupancyRatePct),
+        // L'échéancier ne s'arme que sur un usage locatif : proposer des loyers
+        // sur une résidence principale n'aurait aucun sens, même si le jour a
+        // été saisi par inadvertance.
+        rentDay: rentalUsage ? (input.rentDay ?? null) : null,
+        rentalStartDate: rentalUsage ? parseOptionalDate(input.rentalStartDate) : null,
+        rentalEndDate: rentalUsage ? parseOptionalDate(input.rentalEndDate) : null,
         constructionYear: input.constructionYear ?? null,
         energyRating: input.energyRating || null,
         parkingSpots: input.parkingSpots ?? null,

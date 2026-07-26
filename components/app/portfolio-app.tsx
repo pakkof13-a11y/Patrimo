@@ -77,6 +77,7 @@ import { ImportCsvModal } from "@/components/modals/import-csv-modal";
 import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
 import { PropertyModal } from "@/components/modals/property-modal";
 import { PropertyPanel } from "@/components/real-estate/property-panel";
+import { RentSchedulePanel } from "@/components/real-estate/rent-schedule-panel";
 import { REAL_ESTATE_PLATFORM_TYPE } from "@/app/lib/real-estate/platform-type";
 import { CommandPalette } from "@/components/layout/command-palette";
 import {
@@ -1023,7 +1024,10 @@ function PortfolioAppClient({
               panneau au-dessus du tableau.
             */}
             {tab === "immobilier" && (
-              <PropertyPanel holdings={allHoldings} className="mb-3" />
+              <>
+                <RentSchedulePanel className="mb-3" />
+                <PropertyPanel holdings={allHoldings} className="mb-3" />
+              </>
             )}
 
             <div data-slot="positions">

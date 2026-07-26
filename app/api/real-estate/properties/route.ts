@@ -55,6 +55,10 @@ const createSchema = z.object({
   annualPropertyTaxEur: decimalString.optional().nullable(),
   occupancyRatePct: decimalString.optional().nullable(),
 
+  rentDay: z.coerce.number().int().min(1).max(31).optional().nullable(),
+  rentalStartDate: z.string().optional().nullable(),
+  rentalEndDate: z.string().optional().nullable(),
+
   constructionYear: z.coerce.number().int().min(1000).max(2200).optional().nullable(),
   energyRating: z.enum(ENERGY_RATINGS).optional().nullable(),
   parkingSpots: z.coerce.number().int().min(0).max(1000).optional().nullable(),
