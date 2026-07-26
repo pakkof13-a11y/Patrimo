@@ -5,15 +5,19 @@
  * npx tsx scripts/import-dvf.ts --department 13 --year 2024
  * npx tsx scripts/import-dvf.ts --department 13 --year 2023,2024,2025
  * npx tsx scripts/import-dvf.ts --department 13 --year 2024 --file ./13.csv.gz
+ *
+ * # Fichier national (toutes communes de France), un seul millésime :
+ * npx tsx scripts/import-dvf.ts --national-file ./full_2024.csv.gz --department 13,75,69 --year 2024
  * ```
  *
  * ## Traitement en flux
  *
- * Un département-millésime pèse plusieurs dizaines de mégaoctets décompressés.
- * Le fichier est donc lu en flux — HTTPS → gunzip → lignes — sans jamais être
- * chargé entier en mémoire. Les lignes d'une même mutation étant contiguës dans
- * les fichiers Etalab, le tampon est vidé à chaque changement d'`id_mutation` :
- * l'empreinte mémoire reste celle d'une seule mutation.
+ * Un département-millésime pèse plusieurs dizaines de mégaoctets décompressés,
+ * un fichier national plusieurs gigaoctets. Le fichier est donc lu en flux —
+ * disque/HTTPS → gunzip → lignes — sans jamais être chargé entier en mémoire.
+ * Les lignes d'une même mutation étant contiguës dans les fichiers Etalab, le
+ * tampon est vidé à chaque changement d'`id_mutation` : l'empreinte mémoire
+ * reste celle d'une seule mutation (par département suivi, en mode national).
  *
  * ## En-têtes validés, pas devinés
  *
@@ -26,6 +30,16 @@
  * `DvfImport` est unique sur (département, millésime). Relancer un import
  * supprime les ventes du précédent — en cascade — puis réinsère. Aucun doublon
  * possible, et un import interrompu se reprend simplement en le relançant.
+ *
+ * ## Mode national
+ *
+ * Un fichier national mélange tous les départements de France ; on ne veut en
+ * charger qu'une partie (`--department` est alors obligatoire, une exécution
+ * "toute la France" prendrait des heures et des gigaoctets en base pour un
+ * bénéfice nul si l'utilisateur n'a des biens que dans deux ou trois
+ * départements). Chaque département demandé reçoit son propre `DvfImport`,
+ * exactement comme s'il avait été téléchargé séparément — l'estimation en
+ * aval ne voit aucune différence entre les deux modes.
  */
 
 import { createGunzip } from "node:zlib";
@@ -51,11 +65,29 @@ function sourceUrl(department: string, year: number): string {
   return `${BASE_URL}/${year}/departements/${department}.csv.gz`;
 }
 
+const DEPARTMENT_PATTERN = /^\d{2,3}[AB]?$/i;
+
 type Args = {
-  department: string;
+  department: string[];
   years: number[];
   file: string | null;
+  nationalFile: string | null;
 };
+
+function parseDepartments(raw: string): string[] {
+  const list = raw
+    .split(",")
+    .map((d) => d.trim().toUpperCase())
+    .filter((d) => d.length > 0);
+  if (list.length === 0) {
+    throw new Error("--department requis (ex. 13 ou 13,75,69)");
+  }
+  const invalid = list.filter((d) => !DEPARTMENT_PATTERN.test(d));
+  if (invalid.length > 0) {
+    throw new Error(`Département(s) invalide(s) : ${invalid.join(", ")}`);
+  }
+  return list;
+}
 
 function parseArgs(argv: string[]): Args {
   const get = (name: string): string | null => {
@@ -63,12 +95,7 @@ function parseArgs(argv: string[]): Args {
     return i >= 0 && i + 1 < argv.length ? argv[i + 1]! : null;
   };
 
-  const department = (get("department") ?? "").trim();
-  if (!/^\d{2,3}[AB]?$/i.test(department)) {
-    throw new Error(
-      "--department requis (ex. 13, 2A, 974)"
-    );
-  }
+  const department = parseDepartments(get("department") ?? "");
 
   const yearsRaw = (get("year") ?? "").trim();
   const years = yearsRaw
@@ -79,29 +106,51 @@ function parseArgs(argv: string[]): Args {
     throw new Error("--year requis (ex. 2024 ou 2023,2024,2025)");
   }
 
-  return { department: department.toUpperCase(), years, file: get("file") };
-}
+  const file = get("file");
+  const nationalFile = get("national-file");
 
-/** Flux de lignes, depuis un fichier local ou l'URL Etalab. */
-async function openLineStream(
-  url: string,
-  localFile: string | null
-): Promise<AsyncIterable<string>> {
-  const gunzip = createGunzip();
-
-  if (localFile) {
-    createReadStream(localFile).pipe(gunzip);
-  } else {
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Téléchargement impossible (HTTP ${res.status}) — ${url}`);
-    }
-    if (!res.body) throw new Error("Réponse sans corps");
-    Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]).pipe(
-      gunzip
+  if (file && nationalFile) {
+    throw new Error("--file et --national-file sont mutuellement exclusifs");
+  }
+  if (nationalFile && years.length > 1) {
+    throw new Error(
+      "--national-file ne prend qu'un seul --year : un fichier national ne couvre qu'un millésime. Relancez une fois par fichier."
+    );
+  }
+  if (file && department.length > 1) {
+    throw new Error(
+      "--file ne prend qu'un seul --department à la fois (il est déjà propre à ce département)"
     );
   }
 
+  return { department, years, file, nationalFile };
+}
+
+/** Un flux gzip n'est décompressé que si le fichier local en est un. */
+function isGzipPath(path: string): boolean {
+  return /\.gz$/i.test(path);
+}
+
+/** Flux de lignes, depuis un fichier local (gzippé ou non) ou l'URL Etalab. */
+async function openLineStream(
+  url: string | null,
+  localFile: string | null
+): Promise<AsyncIterable<string>> {
+  if (localFile) {
+    const raw = createReadStream(localFile);
+    const input = isGzipPath(localFile) ? raw.pipe(createGunzip()) : raw;
+    return createInterface({ input, crlfDelay: Infinity });
+  }
+
+  const res = await fetch(url!);
+  if (!res.ok) {
+    throw new Error(`Téléchargement impossible (HTTP ${res.status}) — ${url}`);
+  }
+  if (!res.body) throw new Error("Réponse sans corps");
+  const gunzip = createGunzip();
+  Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]).pipe(
+    gunzip
+  );
   return createInterface({ input: gunzip, crlfDelay: Infinity });
 }
 
@@ -126,6 +175,76 @@ function emptyRejects(): Record<RejectReason, number> {
   };
 }
 
+function emptyTotals(): Totals {
+  return { rowsRead: 0, salesStored: 0, duplicates: 0, rejected: emptyRejects() };
+}
+
+function reportTotals(department: string, year: number, totals: Totals): void {
+  const rejectedTotal = Object.values(totals.rejected).reduce((a, b) => a + b, 0);
+  console.log(
+    `  ✓ ${department} ${year} : ${totals.salesStored} ventes enregistrées`
+  );
+  if (totals.duplicates > 0) {
+    console.log(
+      `    ${totals.duplicates} déjà présentes (autre millésime) — ignorées`
+    );
+  }
+  if (rejectedTotal > 0) {
+    console.log(`    ${rejectedTotal} mutations écartées :`);
+    for (const [reason, count] of Object.entries(totals.rejected)) {
+      if (count > 0) console.log(`      ${reason.padEnd(24)} ${count}`);
+    }
+  }
+}
+
+function cellsToRow(cells: string[], indexOf: Record<string, number>): DvfRawRow {
+  const at = (col: string): string => cells[indexOf[col]!] ?? "";
+  return {
+    id_mutation: at("id_mutation"),
+    date_mutation: at("date_mutation"),
+    nature_mutation: at("nature_mutation"),
+    valeur_fonciere: at("valeur_fonciere"),
+    code_postal: at("code_postal"),
+    code_commune: at("code_commune"),
+    nom_commune: at("nom_commune"),
+    code_departement: at("code_departement"),
+    code_type_local: at("code_type_local"),
+    type_local: at("type_local"),
+    surface_reelle_bati: at("surface_reelle_bati"),
+    nombre_pieces_principales: at("nombre_pieces_principales"),
+    surface_terrain: at("surface_terrain"),
+    longitude: at("longitude"),
+    latitude: at("latitude"),
+  };
+}
+
+async function readValidatedHeader(
+  iterator: AsyncIterator<string>,
+  source: string
+): Promise<Record<string, number>> {
+  let headerLine: string | null = null;
+  for (;;) {
+    const next = await iterator.next();
+    if (next.done) break;
+    if (next.value.trim() !== "") {
+      headerLine = next.value;
+      break;
+    }
+  }
+  if (!headerLine) throw new Error(`Fichier vide — ${source}`);
+
+  const headers = parseLine(headerLine, ",").map((h) => h.trim().toLowerCase());
+  const missing = missingDvfColumns(headers);
+  if (missing.length > 0) {
+    throw new Error(
+      `Colonnes absentes du fichier source : ${missing.join(", ")}.\n` +
+        `En-tête reçu : ${headers.join(", ")}\n` +
+        `Aucune donnée existante n'a été supprimée.`
+    );
+  }
+  return Object.fromEntries(headers.map((h, i) => [h, i]));
+}
+
 async function importOne(
   prisma: ReturnType<typeof createPrismaClient>,
   department: string,
@@ -143,34 +262,9 @@ async function importOne(
   // millésime disparaissait et le nouveau n'arrivait jamais. Les deux échecs
   // les plus probables — réseau et colonnes inattendues — se produisent
   // maintenant alors que la base est encore intacte.
-  const lines = await openLineStream(url, localFile);
+  const lines = await openLineStream(localFile ? null : url, localFile);
   const iterator = lines[Symbol.asyncIterator]();
-
-  let headerLine: string | null = null;
-  for (;;) {
-    const next = await iterator.next();
-    if (next.done) break;
-    if (next.value.trim() !== "") {
-      headerLine = next.value;
-      break;
-    }
-  }
-  if (!headerLine) {
-    throw new Error(`Fichier vide — ${localFile ?? url}`);
-  }
-
-  const headers = parseLine(headerLine, ",").map((h) => h.trim().toLowerCase());
-  const missing = missingDvfColumns(headers);
-  if (missing.length > 0) {
-    throw new Error(
-      `Colonnes absentes du fichier source : ${missing.join(", ")}.\n` +
-        `En-tête reçu : ${headers.join(", ")}\n` +
-        `Aucune donnée existante n'a été supprimée.`
-    );
-  }
-  const indexOf: Record<string, number> = Object.fromEntries(
-    headers.map((h, i) => [h, i])
-  );
+  const indexOf = await readValidatedHeader(iterator, localFile ?? url);
 
   // Source saine : on peut remplacer l'import précédent. La cascade emporte ses
   // ventes, ce qui rend l'opération rejouable sans jamais créer de doublon.
@@ -179,12 +273,7 @@ async function importOne(
     data: { department, year, sourceUrl: url, status: "RUNNING" },
   });
 
-  const totals: Totals = {
-    rowsRead: 0,
-    salesStored: 0,
-    duplicates: 0,
-    rejected: emptyRejects(),
-  };
+  const totals = emptyTotals();
 
   try {
     let currentId: string | null = null;
@@ -225,27 +314,8 @@ async function importOne(
       const line = next.value;
       if (line.trim() === "") continue;
 
-      const cells = parseLine(line, ",");
+      const row = cellsToRow(parseLine(line, ","), indexOf);
       totals.rowsRead++;
-
-      const at = (col: string): string => cells[indexOf[col]!] ?? "";
-      const row: DvfRawRow = {
-        id_mutation: at("id_mutation"),
-        date_mutation: at("date_mutation"),
-        nature_mutation: at("nature_mutation"),
-        valeur_fonciere: at("valeur_fonciere"),
-        code_postal: at("code_postal"),
-        code_commune: at("code_commune"),
-        nom_commune: at("nom_commune"),
-        code_departement: at("code_departement"),
-        code_type_local: at("code_type_local"),
-        type_local: at("type_local"),
-        surface_reelle_bati: at("surface_reelle_bati"),
-        nombre_pieces_principales: at("nombre_pieces_principales"),
-        surface_terrain: at("surface_terrain"),
-        longitude: at("longitude"),
-        latitude: at("latitude"),
-      };
 
       const id = row.id_mutation.trim();
       if (!id) continue;
@@ -277,16 +347,7 @@ async function importOne(
       },
     });
 
-    console.log(`  ✓ ${totals.salesStored} ventes enregistrées`);
-    if (totals.duplicates > 0) {
-      console.log(
-        `    ${totals.duplicates} déjà présentes (autre millésime) — ignorées`
-      );
-    }
-    console.log(`    ${rejectedTotal} mutations écartées :`);
-    for (const [reason, count] of Object.entries(totals.rejected)) {
-      if (count > 0) console.log(`      ${reason.padEnd(24)} ${count}`);
-    }
+    reportTotals(department, year, totals);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await prisma.dvfImport.update({
@@ -299,13 +360,169 @@ async function importOne(
   return totals;
 }
 
+/**
+ * Importe un fichier national en n'en retenant que les départements demandés.
+ *
+ * Un `id_mutation` appartient toujours à un seul département (une vente ne
+ * chevauche pas une frontière départementale), donc les rows de chaque
+ * département suivi peuvent être bufferisées indépendamment, même si le
+ * fichier entrelace les départements — ce qui n'arrive pas dans les exports
+ * Etalab (triés par département) mais ne serait pas un problème si c'était
+ * le cas.
+ */
+async function importNational(
+  prisma: ReturnType<typeof createPrismaClient>,
+  departments: string[],
+  year: number,
+  localFile: string
+): Promise<void> {
+  console.log(`\n▸ Fichier national ${localFile}, millésime ${year}`);
+  console.log(`  départements retenus : ${departments.join(", ")}`);
+
+  const lines = await openLineStream(null, localFile);
+  const iterator = lines[Symbol.asyncIterator]();
+  const indexOf = await readValidatedHeader(iterator, localFile);
+
+  const wanted = new Set(departments);
+
+  // En-tête validé : on peut remplacer les imports précédents des départements
+  // demandés. Un département non demandé n'est jamais touché.
+  const importRows = new Map<string, { id: string; totals: Totals }>();
+  for (const department of departments) {
+    await prisma.dvfImport.deleteMany({ where: { department, year } });
+    const row = await prisma.dvfImport.create({
+      data: {
+        department,
+        year,
+        sourceUrl: `local:${localFile}`,
+        status: "RUNNING",
+      },
+    });
+    importRows.set(department, { id: row.id, totals: emptyTotals() });
+  }
+
+  type DeptState = {
+    currentId: string | null;
+    buffer: DvfRawRow[];
+    pending: AggregatedSale[];
+  };
+  const states = new Map<string, DeptState>();
+  const stateFor = (dept: string): DeptState => {
+    let s = states.get(dept);
+    if (!s) {
+      s = { currentId: null, buffer: [], pending: [] };
+      states.set(dept, s);
+    }
+    return s;
+  };
+
+  const flushPending = async (dept: string, force: boolean) => {
+    const s = stateFor(dept);
+    if (s.pending.length === 0) return;
+    if (!force && s.pending.length < INSERT_BATCH) return;
+    const entry = importRows.get(dept)!;
+    const written = await prisma.dvfSale.createMany({
+      data: s.pending.map((sale) => ({ ...sale, importId: entry.id })),
+      skipDuplicates: true,
+    });
+    entry.totals.salesStored += written.count;
+    entry.totals.duplicates += s.pending.length - written.count;
+    s.pending = [];
+  };
+
+  const closeMutation = async (dept: string) => {
+    const s = stateFor(dept);
+    if (s.buffer.length === 0) return;
+    const entry = importRows.get(dept)!;
+    const sale = aggregateMutation(s.buffer, entry.totals.rejected);
+    if (sale) s.pending.push(sale);
+    s.buffer = [];
+    await flushPending(dept, false);
+  };
+
+  let rowsReadGlobal = 0;
+
+  try {
+    for (;;) {
+      const next = await iterator.next();
+      if (next.done) break;
+      const line = next.value;
+      if (line.trim() === "") continue;
+
+      const row = cellsToRow(parseLine(line, ","), indexOf);
+      const dept = row.code_departement.trim().toUpperCase();
+      if (!wanted.has(dept)) continue;
+
+      rowsReadGlobal++;
+      const entry = importRows.get(dept)!;
+      entry.totals.rowsRead++;
+
+      const id = row.id_mutation.trim();
+      if (!id) continue;
+
+      const s = stateFor(dept);
+      if (s.currentId !== null && id !== s.currentId) {
+        await closeMutation(dept);
+      }
+      s.currentId = id;
+      s.buffer.push(row);
+
+      if (rowsReadGlobal % 200_000 === 0) {
+        process.stdout.write(`\r  lignes lues (retenues) ${rowsReadGlobal}   `);
+      }
+    }
+
+    for (const dept of departments) {
+      await closeMutation(dept);
+      await flushPending(dept, true);
+    }
+    process.stdout.write("\n");
+
+    for (const dept of departments) {
+      const entry = importRows.get(dept)!;
+      const rejectedTotal = Object.values(entry.totals.rejected).reduce(
+        (a, b) => a + b,
+        0
+      );
+      await prisma.dvfImport.update({
+        where: { id: entry.id },
+        data: {
+          status: "DONE",
+          rowsRead: entry.totals.rowsRead,
+          salesStored: entry.totals.salesStored,
+          rejected: rejectedTotal,
+          rejectReasons: {
+            ...entry.totals.rejected,
+            deja_presentes: entry.totals.duplicates,
+          },
+          finishedAt: new Date(),
+        },
+      });
+      reportTotals(dept, year, entry.totals);
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    for (const entry of importRows.values()) {
+      await prisma.dvfImport.update({
+        where: { id: entry.id },
+        data: { status: "ERROR", error: message, finishedAt: new Date() },
+      });
+    }
+    throw e;
+  }
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const prisma = createPrismaClient();
 
   try {
-    for (const year of args.years) {
-      await importOne(prisma, args.department, year, args.file);
+    if (args.nationalFile) {
+      await importNational(prisma, args.department, args.years[0]!, args.nationalFile);
+    } else {
+      for (const year of args.years) {
+        await importOne(prisma, args.department[0]!, year, args.file);
+      }
     }
     console.log("\nTerminé.");
   } finally {
