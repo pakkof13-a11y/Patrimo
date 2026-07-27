@@ -61,6 +61,12 @@ export type TransactionsListResponse = {
   pageSize: number;
   pageCount: number;
   typeCounts?: Partial<Record<string, number>>;
+  kpis?: {
+    buysEur: number;
+    sellsEur: number;
+    feesEur: number;
+    incomeEur: number;
+  };
 };
 
 export type TransactionsListParams = {
@@ -72,6 +78,10 @@ export type TransactionsListParams = {
   q?: string;
   sortBy?: string;
   sortDir?: "asc" | "desc";
+  /** Bornes "YYYY-MM-DD" (inclusives) */
+  dateFrom?: string;
+  dateTo?: string;
+  platformId?: string;
 };
 
 /** Clé RQ pour le journal — invalidation `["transactions"]` couvre list + meta. */
@@ -86,6 +96,9 @@ export function transactionsListQueryKey(params: TransactionsListParams) {
     params.q?.trim() || "",
     params.sortBy || "date",
     params.sortDir || "desc",
+    params.dateFrom || "",
+    params.dateTo || "",
+    params.platformId || "",
   ] as const;
 }
 
@@ -99,6 +112,9 @@ function buildTransactionsListUrl(params: TransactionsListParams): string {
   if (params.q?.trim()) sp.set("q", params.q.trim());
   if (params.sortBy) sp.set("sortBy", params.sortBy);
   if (params.sortDir) sp.set("sortDir", params.sortDir);
+  if (params.dateFrom) sp.set("dateFrom", params.dateFrom);
+  if (params.dateTo) sp.set("dateTo", params.dateTo);
+  if (params.platformId) sp.set("platformId", params.platformId);
   return `/api/transactions?${sp.toString()}`;
 }
 

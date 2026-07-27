@@ -1154,6 +1154,7 @@ function PortfolioAppClient({
                 onEdit={openEditTx}
                 onDelete={(id) => deleteTx.mutate(id)}
                 onImport={() => setShowImport(true)}
+                platforms={platforms}
               />
             )}
 

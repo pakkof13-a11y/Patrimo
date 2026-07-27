@@ -158,14 +158,20 @@ export function TransactionsTab({
   onEdit,
   onDelete,
   onImport,
+  platforms,
 }: {
   onEdit: (t: TxRow) => void;
   onDelete: (id: string) => void;
   onImport?: () => void;
+  /** Pour le filtre plateforme (courtier / exchange) */
+  platforms?: Array<{ id: string; name: string }>;
 }) {
   const [search, setSearch] = useState("");
   const [accountType, setAccountType] = useState("");
   const [typeFilter, setTypeFilter] = useState<TxTypeFilterId>("all");
+  const [platformFilter, setPlatformFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
   const [pageSize, setPageSize] = useState<PageSize>(50);
   const [pageIndex, setPageIndex] = useState(0);
@@ -185,7 +191,7 @@ export function TransactionsTab({
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   // Reset page quand filtres / tri / pageSize changent
-  const filterKey = `${debouncedSearch}|${accountType}|${pageSize}|${typeFilter}|${sorting[0]?.id}|${sorting[0]?.desc}`;
+  const filterKey = `${debouncedSearch}|${accountType}|${pageSize}|${typeFilter}|${platformFilter}|${dateFrom}|${dateTo}|${sorting[0]?.id}|${sorting[0]?.desc}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
   if (filterKey !== prevFilterKey) {
     setPrevFilterKey(filterKey);
@@ -211,6 +217,9 @@ export function TransactionsTab({
     q: debouncedSearch.trim() || undefined,
     sortBy,
     sortDir,
+    platformId: platformFilter || undefined,
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
   });
 
   const pageRows = listQ.data?.transactions ?? [];
@@ -218,6 +227,7 @@ export function TransactionsTab({
   const totalDb = listQ.data?.totalAll ?? 0;
   const pageCount = Math.max(1, listQ.data?.pageCount ?? 1);
   const typeCounts = listQ.data?.typeCounts ?? {};
+  const kpis = listQ.data?.kpis;
 
   // Clamp pageIndex si hors bornes (données chargées)
   const safePageIndex = Math.min(pageIndex, Math.max(0, pageCount - 1));
@@ -238,7 +248,10 @@ export function TransactionsTab({
   const hasActiveFilters =
     typeFilter !== "all" ||
     Boolean(accountType) ||
-    Boolean(debouncedSearch.trim());
+    Boolean(debouncedSearch.trim()) ||
+    Boolean(platformFilter) ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
 
   const columns = useMemo<ColumnDef<TxRow>[]>(
     () => [
@@ -521,6 +534,58 @@ export function TransactionsTab({
           </div>
         </div>
 
+        {kpis && (
+          <div
+            className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+            data-testid="tx-kpis"
+          >
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 px-3 py-2">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                Achats
+              </div>
+              <div
+                className="text-sm font-semibold tabular-nums"
+                data-testid="tx-kpi-buys"
+              >
+                {formatCurrency(kpis.buysEur, "EUR")}
+              </div>
+            </div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 px-3 py-2">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                Ventes
+              </div>
+              <div
+                className="text-sm font-semibold tabular-nums"
+                data-testid="tx-kpi-sells"
+              >
+                {formatCurrency(kpis.sellsEur, "EUR")}
+              </div>
+            </div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 px-3 py-2">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                Frais
+              </div>
+              <div
+                className="text-sm font-semibold tabular-nums text-red-600 dark:text-red-400"
+                data-testid="tx-kpi-fees"
+              >
+                {formatCurrency(kpis.feesEur, "EUR")}
+              </div>
+            </div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 px-3 py-2">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                Revenus
+              </div>
+              <div
+                className="text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400"
+                data-testid="tx-kpi-income"
+              >
+                {formatCurrency(kpis.incomeEur, "EUR")}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div
           className={cn(
             "flex w-full min-w-0 flex-col gap-2",
@@ -537,6 +602,70 @@ export function TransactionsTab({
             accountFilterLabel="Enveloppe"
             placeholder="Nom, ticker, ISIN, plateforme…"
           />
+
+          {platforms && platforms.length > 0 && (
+            <label className="flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+              <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
+                Plateforme
+              </span>
+              <select
+                className="input !w-auto min-w-0 max-w-full !py-1.5 text-sm"
+                value={platformFilter}
+                onChange={(e) => setPlatformFilter(e.target.value)}
+                data-testid="tx-platform-filter"
+                aria-label="Filtrer par plateforme"
+              >
+                <option value="">Toutes</option>
+                {platforms.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <div className="flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+            <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
+              Du
+            </span>
+            <input
+              type="date"
+              className="input !w-auto !py-1.5 text-sm"
+              value={dateFrom}
+              max={dateTo || undefined}
+              onChange={(e) => setDateFrom(e.target.value)}
+              data-testid="tx-date-from"
+              aria-label="Date de début"
+            />
+            <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
+              Au
+            </span>
+            <input
+              type="date"
+              className="input !w-auto !py-1.5 text-sm"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={(e) => setDateTo(e.target.value)}
+              data-testid="tx-date-to"
+              aria-label="Date de fin"
+            />
+            {(dateFrom || dateTo) && (
+              <button
+                type="button"
+                className="shrink-0 rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"
+                onClick={() => {
+                  setDateFrom("");
+                  setDateTo("");
+                }}
+                aria-label="Effacer la période"
+                title="Effacer la période"
+                data-testid="tx-date-clear"
+              >
+                ×
+              </button>
+            )}
+          </div>
 
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:shrink-0">
             <Button
