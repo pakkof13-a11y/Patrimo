@@ -51,6 +51,10 @@ export type Holding = {
   blockchainLabel?: string | null;
   assetLogoUrl?: string | null;
   logoUrl?: string | null;
+  /** Position adossée à un protocole DeFi — exclue de la vue Comptant. */
+  isDefiPosition?: boolean;
+  /** Position adossée à un NFT — exclue de la vue Comptant. */
+  isNftItem?: boolean;
   quantity: QuantityString;
   avgCostEur: EurAmount;
   costBasisEur: EurAmount;
@@ -97,6 +101,17 @@ export type MainTab =
   | "cfd"
   | "epargne-salariale"
   | "alternatifs"
+  /**
+   * Positions à levier / dérivés — futures crypto pour l'instant.
+   *
+   * Onglet à part et non un sous-onglet de `crypto` : une position à levier
+   * n'est pas un actif détenu mais un pari collatéralisé par une marge. Elle
+   * ne pèse au patrimoine ni par sa taille ni par son notionnel, seulement
+   * par marge + P&L latent. Elle n'a donc pas sa place à côté du comptant,
+   * de la DeFi et des NFT, qui sont tous trois des actifs détenus valorisés
+   * depuis le journal.
+   */
+  | "trading"
   /**
    * Saisie des contrats d'assurance-vie et de leurs supports.
    *
@@ -261,12 +276,13 @@ export const PRIMARY_NAV: { id: MainTab; label: string }[] = [
   // dette. Le réduire à un filtre d'enveloppe du tableau Positions n'en
   // montrait que la valeur.
   { id: "immobilier", label: "Immobilier" },
-  // Même raisonnement : comptant, DeFi, NFT et futures sont quatre lectures
-  // différentes du même patrimoine, avec leur propre KPI strip et leurs
-  // propres flux de saisie — plus un simple filtre d'enveloppe.
-  { id: "crypto", label: "Crypto" },
+  // Même raisonnement : comptant, DeFi et NFT sont trois lectures différentes
+  // du même patrimoine, avec leur propre vue d'ensemble et leurs propres flux
+  // de saisie — plus un simple filtre d'enveloppe.
+  { id: "crypto", label: "Cryptos" },
   { id: "epargne-salariale", label: "Épargne Salariale" },
   { id: "alternatifs", label: "Actifs Alternatifs" },
+  { id: "trading", label: "Trading" },
   { id: "transactions", label: "Transactions" },
   { id: "fiscal", label: "Fiscalité" },
   { id: "liabilities", label: "Passifs" },
@@ -315,6 +331,7 @@ export const MAIN_TAB_IDS: readonly MainTab[] = [
   "cfd",
   "epargne-salariale",
   "alternatifs",
+  "trading",
   "fiscal",
 ] as const;
 

@@ -79,9 +79,10 @@ import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
 import { PropertyModal } from "@/components/modals/property-modal";
 import { RealEstateTab } from "@/components/real-estate/real-estate-tab";
 import {
-  CryptoTab,
+  CryptosTab,
   type CryptoSubTab,
-} from "@/components/crypto/crypto-tab";
+} from "@/components/crypto/cryptos-tab";
+import { TradingTab } from "@/components/trading/trading-tab";
 import { REAL_ESTATE_PLATFORM_TYPE } from "@/app/lib/real-estate/platform-type";
 import { CommandPalette } from "@/components/layout/command-palette";
 import {
@@ -257,7 +258,7 @@ function PortfolioAppClient({
     () => new Set()
   );
   const [detailAssetId, setDetailAssetId] = useState<string | null>(null);
-  const [cryptoSub, setCryptoSub] = useState<CryptoSubTab>("SPOT");
+  const [cryptoSub, setCryptoSub] = useState<CryptoSubTab>("DASHBOARD");
   const [assetLabel, setAssetLabel] = useState("");
   const [platformComboLabel, setPlatformComboLabel] = useState("");
   const [txPlatformLabel, setTxPlatformLabel] = useState("");
@@ -365,8 +366,20 @@ function PortfolioAppClient({
     if (manualEnvelopeFilters != null) return manualEnvelopeFilters;
     const fromTab = TAB_TO_ACCOUNT_TYPE[tab];
     if (fromTab) return [fromTab];
+    /**
+     * `/positions?envelope=crypto` — isoler dans la vue transverse une
+     * enveloppe qui a son propre onglet de premier niveau (crypto,
+     * immobilier) et n'apparaît donc pas dans `ENVELOPE_SELECT_OPTIONS`.
+     *
+     * Piloté par l'URL et non par un état local posé avant navigation : le
+     * filtre survit au rafraîchissement, se partage, et ne dépend pas de
+     * l'ordre dans lequel le changement d'onglet et le `setState`
+     * s'appliquent.
+     */
+    const q = (envelopeFromQuery || "").trim().toUpperCase();
+    if (q && q in ACCOUNT_TYPES) return [q as AccountType];
     return [...ALL_ENVELOPE_TYPES];
-  }, [manualEnvelopeFilters, tab, ALL_ENVELOPE_TYPES]);
+  }, [manualEnvelopeFilters, tab, ALL_ENVELOPE_TYPES, envelopeFromQuery]);
 
   const onEnvelopeFiltersChange = useCallback(
     (next: AccountType[]) => {
@@ -733,11 +746,26 @@ function PortfolioAppClient({
   const txCount =
     txMetaQ.data?.totalAll ?? txMetaQ.data?.total ?? 0;
 
-  // Sous l'onglet Crypto, le tableau Positions rend la vue « Comptant ». Les
-  // vues DeFi et Futures le remplacent : afficher les deux montrerait deux
-  // fois le même patrimoine sous deux formes, sans dire laquelle fait foi.
-  const positionsView =
-    isPositionsTab(tab) && !(tab === "crypto" && cryptoSub !== "SPOT");
+  /**
+   * Positions crypto comptant — hors DeFi et NFT, qui ont leurs propres vues.
+   * Alimente les cartes par coin : la consolidation se recalcule à chaque
+   * lecture depuis le journal, jamais depuis un instantané stocké.
+   */
+  const cryptoSpotHoldings = useMemo(
+    () =>
+      allHoldings.filter(
+        (h) =>
+          (h.accountType || "") === "CRYPTO" &&
+          !h.isDefiPosition &&
+          !h.isNftItem
+      ),
+    [allHoldings]
+  );
+
+  // L'onglet Cryptos rend désormais ses quatre vues lui-même (dont le
+  // comptant, en cartes par coin). Le tableau Positions y ferait doublon —
+  // il reste la lecture comptable transverse, accessible depuis son onglet.
+  const positionsView = isPositionsTab(tab) && tab !== "crypto";
   const isDashboard = tab === "dashboard";
 
   /** Maturité du compte → densité du dashboard + KPI strip */
@@ -1057,12 +1085,23 @@ function PortfolioAppClient({
             )}
 
             {tab === "crypto" && (
-              <CryptoTab
+              <CryptosTab
                 sub={cryptoSub}
                 onSubChange={setCryptoSub}
+                holdings={cryptoSpotHoldings}
+                baseCurrency={baseCurrency}
+                onOpenPositions={() => {
+                  // Vers la lecture comptable : Positions filtré sur
+                  // l'enveloppe crypto, via l'URL (refresh-safe, partageable).
+                  skipEnvelopeResetRef.current = true;
+                  setManualEnvelopeFilters(null);
+                  router.push("/positions?envelope=crypto", { scroll: false });
+                }}
                 className="mb-3"
               />
             )}
+
+            {tab === "trading" && <TradingTab baseCurrency={baseCurrency} />}
 
             <div data-slot="positions">
               {positionsView ? (

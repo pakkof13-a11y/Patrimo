@@ -39,12 +39,14 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [{ id: "immobilier", label: "Immobilier", testId: "immobilier" }],
   },
   {
-    // Même raisonnement que l'immobilier : quatre sous-catégories (comptant,
-    // DeFi, NFT, futures), un KPI strip propre, des flux de saisie dédiés —
-    // ce n'est plus un simple filtre d'enveloppe sur le tableau Positions.
-    id: "crypto",
-    label: "Crypto",
-    items: [{ id: "crypto", label: "Crypto", testId: "crypto" }],
+    // Même raisonnement que l'immobilier : trois sous-catégories d'actifs
+    // détenus (comptant, DeFi, NFT), une vue d'ensemble propre, des flux de
+    // saisie dédiés — ce n'est plus un simple filtre d'enveloppe sur le
+    // tableau Positions. Les futures sont partis dans l'onglet Trading : un
+    // pari à levier n'est pas un actif détenu.
+    id: "cryptos",
+    label: "Cryptos",
+    items: [{ id: "crypto", label: "Cryptos", testId: "crypto" }],
   },
   {
     id: "sources",
@@ -63,6 +65,15 @@ export const NAV_GROUPS: NavGroup[] = [
     id: "operations",
     label: "Opérations",
     items: [{ id: "transactions", label: "Opérations", testId: "transactions" }],
+  },
+  {
+    // Entrée de premier niveau : les positions à levier ne se valorisent pas
+    // comme un actif détenu (marge + P&L latent, pas quantité × prix), elles
+    // ne peuvent donc pas vivre sous « Patrimoine étendu » à côté de poches
+    // qui, elles, s'additionnent au patrimoine net.
+    id: "trading",
+    label: "Trading",
+    items: [{ id: "trading", label: "Trading", testId: "trading" }],
   },
   {
     id: "extended",

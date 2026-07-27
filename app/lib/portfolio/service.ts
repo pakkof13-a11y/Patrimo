@@ -171,6 +171,10 @@ export type HoldingRow = {
   blockchainKey?: string | null;
   blockchainLabel?: string | null;
   assetLogoUrl: string | null;
+  /** Position adossée à un protocole DeFi — exclue du comptant. */
+  isDefiPosition?: boolean;
+  /** Position adossée à un NFT — exclue du comptant. */
+  isNftItem?: boolean;
   quantity: QuantityString;
   /** PRU / CUMP (EUR) — break-even unitaire frais inclus */
   avgCostEur: EurAmount;
@@ -237,9 +241,12 @@ export async function getHoldings(
       include: {
         platform: true,
         priceQuote: true,
-        // Relation 1:1 : sert uniquement à empêcher la fusion d'une position
-        // DeFi avec le solde comptant de même ticker (cf. `mergeKey`).
+        // Relations 1:1 : empêchent la fusion d'une position DeFi/NFT avec le
+        // solde comptant de même ticker (cf. `mergeKey`), et permettent à
+        // l'onglet Cryptos d'isoler le comptant de la DeFi et des NFT sans
+        // second aller-retour serveur.
         defiPosition: { select: { id: true } },
+        nftItem: { select: { id: true } },
       },
     }),
     prisma.transaction.findMany({
@@ -360,6 +367,12 @@ export async function getHoldings(
       blockchainKey: chainKey,
       blockchainLabel: blockchainLabel(chainKey),
       assetLogoUrl: assetLogo,
+      isDefiPosition: Boolean(
+        (asset as { defiPosition?: { id: string } | null }).defiPosition
+      ),
+      isNftItem: Boolean(
+        (asset as { nftItem?: { id: string } | null }).nftItem
+      ),
       quantity: qtyS(toFixed(pos.quantity, 8)),
       avgCostEur: eurS(toFixed(avg, 8)),
       costBasisEur: eurS(toFixed(pos.costBasisEur, 8)),
@@ -509,6 +522,10 @@ export async function getHoldings(
       platformLogoUrl: preferLive.platformLogoUrl || prev.platformLogoUrl,
       blockchainKey: prev.blockchainKey || row.blockchainKey,
       blockchainLabel: prev.blockchainLabel || row.blockchainLabel,
+      // Une jambe DeFi/NFT ne fusionne jamais avec du comptant (cf. mergeKey) :
+      // le OR ne fait que propager le marqueur entre jambes de même nature.
+      isDefiPosition: prev.isDefiPosition || row.isDefiPosition,
+      isNftItem: prev.isNftItem || row.isNftItem,
       quantity: qtyS(toFixed(qty, 8)),
       costBasisEur: eurS(toFixed(cost, 8)),
       avgCostEur: eurS(toFixed(avg, 8)),

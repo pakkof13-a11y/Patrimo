@@ -19,7 +19,7 @@ export function tabToPath(tab: MainTab): string {
     case "av":
       return "/positions/av";
     case "crypto":
-      return "/crypto";
+      return "/cryptos";
     case "immobilier":
       return "/immobilier";
     case "cfd":
@@ -32,6 +32,8 @@ export function tabToPath(tab: MainTab): string {
       return "/epargne-salariale";
     case "alternatifs":
       return "/alternatifs";
+    case "trading":
+      return "/trading";
     case "transactions":
       return "/transactions";
     case "fiscal":
@@ -78,6 +80,12 @@ export function pathToTab(slug?: string[] | null): MainTab {
     return "epargne-salariale";
   }
   if (head === "alternatifs" || head === "alternatives") return "alternatifs";
+  if (head === "trading") return "trading";
+  // `/cryptos` est l'URL canonique ; `/crypto` reste accepté (anciens liens,
+  // favoris) et redirige vers le même onglet.
+  if (head === "cryptos" || head === "crypto" || head === "cryptomonnaies") {
+    return "crypto";
+  }
 
   if (head === "positions" || head === "holdings" || head === "portefeuille") {
     if (!sub || sub === "all" || sub === "tout") return "holdings";
