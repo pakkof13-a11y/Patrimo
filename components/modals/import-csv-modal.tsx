@@ -1134,7 +1134,12 @@ export function ImportCsvModal({
           body: JSON.stringify({
             id: platformId,
             walletAddress: addr,
-            ...(cap?.provider === "zerion" ? { walletApiKey: apiKey } : {}),
+            // Vide = ne pas toucher à la clé déjà enregistrée : le champ est
+            // omis plutôt qu'envoyé vide, sinon on écraserait une clé
+            // existante à chaque resync sans nouvelle clé saisie.
+            ...(cap?.provider === "zerion" && apiKey.length > 0
+              ? { walletApiKey: apiKey }
+              : {}),
           }),
         });
       }
