@@ -143,3 +143,19 @@ export const finnhubRestLimiter: RateLimiter = createRateLimiter({
   limit: FINNHUB_REST_LIMIT_PER_MINUTE,
   windowMs: 60_000,
 });
+
+/**
+ * Free tier OpenSea (clé obtenue via `POST /api/v2/auth/keys`, sans
+ * inscription) : 4 requêtes GET par seconde, 2 POST par seconde. Aurea ne
+ * fait que du GET (floor price, NFT d'un wallet) — seul ce budget est câblé.
+ *
+ * Comme pour Finnhub, on garde une marge (3 au lieu de 4) : la fenêtre
+ * d'OpenSea et la nôtre ne démarrent pas au même instant.
+ */
+export const OPENSEA_GET_LIMIT_PER_SECOND = 3;
+
+/** Budget partagé par tous les appels GET OpenSea du processus. */
+export const openSeaGetLimiter: RateLimiter = createRateLimiter({
+  limit: OPENSEA_GET_LIMIT_PER_SECOND,
+  windowMs: 1_000,
+});

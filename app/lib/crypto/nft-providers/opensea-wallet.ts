@@ -4,8 +4,12 @@
  * Même dégradation que `opensea.ts` : sans `OPENSEA_API_KEY`, renvoie
  * `not-configured` plutôt que d'échouer. La saisie manuelle reste le seul
  * chemin fonctionnel tant que la clé n'est pas renseignée.
+ *
+ * Partage `openSeaGetLimiter` avec le floor price : c'est le même budget
+ * OpenSea (4 GET/s en free tier) pour tout le processus, pas un par client.
  */
 
+import { openSeaGetLimiter } from "@/app/lib/market/rate-limit";
 import type { WalletNftFetchResult, WalletNftItem, WalletNftProvider } from "./wallet-types";
 
 const OPENSEA_BASE = "https://api.opensea.io/api/v2";
@@ -43,6 +47,7 @@ export const fetchOpenSeaWalletNfts: WalletNftProvider = async (address, chain) 
   if (!chainParam) return { ok: false, reason: "not-found" };
 
   try {
+    await openSeaGetLimiter.acquire();
     const res = await fetch(
       `${OPENSEA_BASE}/chain/${chainParam}/account/${address}/nfts?limit=50`,
       { headers: { "X-API-KEY": apiKey, Accept: "application/json" } }

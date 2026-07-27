@@ -9,9 +9,15 @@
  * manque tant qu'`OPENSEA_API_KEY` n'est pas renseignée est le rafraîchissement
  * automatique du floor price. Le jour où la clé arrive, aucun code n'a besoin
  * de changer.
+ *
+ * Le free tier (clé obtenue via `POST /api/v2/auth/keys`, sans inscription)
+ * plafonne à 4 requêtes GET par seconde — `openSeaGetLimiter` sérialise tous
+ * les appels du processus derrière ce budget, comme `finnhubRestLimiter` pour
+ * les actions.
  */
 
 import { d } from "@/app/lib/money/decimal";
+import { openSeaGetLimiter } from "@/app/lib/market/rate-limit";
 import type { FloorPriceProvider, FloorPriceResult } from "../nft-estimate";
 
 const OPENSEA_BASE = "https://api.opensea.io/api/v2";
@@ -52,6 +58,7 @@ export const fetchOpenSeaFloorPrice: FloorPriceProvider = async (query) => {
     let slug = query.collectionSlug;
     if (!slug && query.contractAddr) {
       const chainParam = CHAIN_MAP[query.chain.toLowerCase()] || query.chain;
+      await openSeaGetLimiter.acquire();
       const res = await fetch(
         `${OPENSEA_BASE}/chain/${chainParam}/contract/${query.contractAddr}`,
         { headers }
@@ -63,6 +70,7 @@ export const fetchOpenSeaFloorPrice: FloorPriceProvider = async (query) => {
     }
     if (!slug) return { ok: false, source: "OPENSEA", reason: "not-found" };
 
+    await openSeaGetLimiter.acquire();
     const statsRes = await fetch(`${OPENSEA_BASE}/collections/${slug}/stats`, { headers });
     if (statsRes.status === 429) return { ok: false, source: "OPENSEA", reason: "rate-limited" };
     if (!statsRes.ok) return { ok: false, source: "OPENSEA", reason: "not-found" };
