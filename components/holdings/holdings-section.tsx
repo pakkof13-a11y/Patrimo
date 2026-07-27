@@ -25,7 +25,7 @@ import {
   type ColumnOrderState,
   type ColumnSizingState,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, GripVertical, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
 import { PlatformLogo } from "@/components/ui/platform-logo";
@@ -46,10 +46,12 @@ import {
 import {
   formatRelativeUpdate,
   HOLDINGS_EXPAND_COL_PX,
+  HOLDINGS_SELECT_COL_PX,
   renderHoldingRow,
   TriggerLevelInput,
   type TriggerField,
 } from "@/components/holdings/holding-table-row";
+import { holdingsToCsv } from "@/app/lib/portfolio/holdings-csv";
 import { PageJump } from "@/components/ui/page-jump";
 import {
   ACCOUNT_TYPES,
@@ -177,6 +179,16 @@ export function HoldingsSection({
   const platformNameFromUrl = (searchParams.get("platformName") || "").trim();
   /** Asset ids with expanded recent-transactions panel */
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  /** Asset ids sélectionnés (checkboxes) — export CSV de la sélection */
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const toggleSelected = useCallback((assetId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(assetId)) next.delete(assetId);
+      else next.add(assetId);
+      return next;
+    });
+  }, []);
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: DEFAULT_PAGE_SIZE,
@@ -357,6 +369,7 @@ export function HoldingsSection({
   if (paginationResetKey !== prevPaginationResetKey) {
     setPrevPaginationResetKey(paginationResetKey);
     setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+    setSelectedIds(new Set());
   }
 
   function clearPlatformFilter() {
@@ -438,6 +451,12 @@ export function HoldingsSection({
 
   const groupMode =
     groupBy === "assetCategory" || groupBy === "blockchain";
+
+  const allFilteredSelected =
+    filteredHoldings.length > 0 &&
+    filteredHoldings.every((h) => selectedIds.has(h.assetId));
+  const someFilteredSelected =
+    !allFilteredSelected && filteredHoldings.some((h) => selectedIds.has(h.assetId));
 
   const columns = useMemo<ColumnDef<Holding>[]>(
     () => [
@@ -1021,7 +1040,8 @@ export function HoldingsSection({
     () => (visibleLeafKey ? visibleLeafKey.split("|") : []),
     [visibleLeafKey]
   );
-  const visibleColCount = visibleLeafIds.length + 1;
+  /** +2 : colonne sélection + colonne expand (plus de colonne ⋯ — actions dans l’historique) */
+  const visibleColCount = visibleLeafIds.length + 2;
   const isResizingColumn = table.getState().columnSizingInfo.isResizingColumn;
 
   useEffect(() => {
@@ -1080,6 +1100,22 @@ export function HoldingsSection({
     if (!fromId || fromId === targetId) return;
     setColumnOrder((prev) => reorderColumnIds(prev, fromId, targetId));
     skipSortRef.current = true;
+  }
+
+  /** Export CSV de la sélection courante — colonnes = celles visibles à l'écran, dans leur ordre. */
+  function downloadSelectionCsv() {
+    const selected = filteredHoldings.filter((h) => selectedIds.has(h.assetId));
+    if (selected.length === 0) return;
+    const csv = holdingsToCsv(selected, visibleLeafIds, baseCurrency);
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `positions-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -1203,6 +1239,37 @@ export function HoldingsSection({
             },
           }}
         />
+        {selectedIds.size > 0 && (
+          <div
+            className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--primary-soft)] px-4 py-2 text-sm"
+            data-testid="holdings-selection-bar"
+          >
+            <span className="font-medium text-[var(--primary)]">
+              {selectedIds.size} position{selectedIds.size !== 1 ? "s" : ""}{" "}
+              sélectionnée{selectedIds.size !== 1 ? "s" : ""}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadSelectionCsv}
+                data-testid="holdings-export-csv"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Exporter CSV
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedIds(new Set())}
+                data-testid="holdings-clear-selection"
+              >
+                <X className="h-3.5 w-3.5" />
+                Désélectionner
+              </Button>
+            </div>
+          </div>
+        )}
         <div
           ref={scrollWrapRef}
           className="table-container-responsive table-fluid-wrap holdings-table-scroll"
@@ -1224,6 +1291,31 @@ export function HoldingsSection({
             <thead className="table-head text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id}>
+                  <th
+                    className="px-0 py-3 text-center"
+                    style={{
+                      width: HOLDINGS_SELECT_COL_PX,
+                      minWidth: HOLDINGS_SELECT_COL_PX,
+                      maxWidth: HOLDINGS_SELECT_COL_PX,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      className="accent-teal-700"
+                      checked={allFilteredSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someFilteredSelected;
+                      }}
+                      aria-label="Tout sélectionner"
+                      data-testid="holdings-select-all"
+                      onChange={() => {
+                        setSelectedIds((prev) => {
+                          if (allFilteredSelected) return new Set();
+                          return new Set(filteredHoldings.map((h) => h.assetId));
+                        });
+                      }}
+                    />
+                  </th>
                   <th
                     className="holdings-expand-col px-0 py-3 text-center"
                     style={{
@@ -1448,6 +1540,8 @@ export function HoldingsSection({
                     onRowDoubleClick,
                     onOpenTransactionForAsset,
                     onEditCategory: setEditCategoryHolding,
+                    selectedIds,
+                    toggleSelected,
                   })
                 )}
               {!loading &&
@@ -1482,6 +1576,8 @@ export function HoldingsSection({
                             onRowDoubleClick,
                             onOpenTransactionForAsset,
                             onEditCategory: setEditCategoryHolding,
+                            selectedIds,
+                            toggleSelected,
                           });
                         })}
                     </Fragment>

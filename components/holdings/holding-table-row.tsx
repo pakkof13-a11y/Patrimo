@@ -17,6 +17,8 @@ import { fr } from "date-fns/locale";
 
 /** Fixed first column for expand/collapse (must be added to table total width). */
 export const HOLDINGS_EXPAND_COL_PX = 44;
+/** Fixed column for the row selection checkbox (must be added to table total width). */
+export const HOLDINGS_SELECT_COL_PX = 36;
 
 export type TriggerField = "stopLoss" | "tp1" | "tp2" | "tp3" | "tp4";
 
@@ -127,6 +129,8 @@ export type HoldingRowRenderOpts = {
   onRowDoubleClick: (id: string) => void;
   onOpenTransactionForAsset?: (type: string, holding: Holding) => void;
   onEditCategory: (holding: Holding) => void;
+  selectedIds: Set<string>;
+  toggleSelected: (id: string) => void;
 };
 
 /**
@@ -137,6 +141,7 @@ export function renderHoldingRow(row: Row<Holding>, opts: HoldingRowRenderOpts) 
   const assetId = row.original.assetId;
   const holding = row.original;
   const expanded = opts.expandedIds.has(assetId);
+  const selected = opts.selectedIds.has(assetId);
   return (
     <Fragment key={row.id}>
       <tr
@@ -146,7 +151,27 @@ export function renderHoldingRow(row: Row<Holding>, opts: HoldingRowRenderOpts) 
         data-expanded={expanded ? "true" : "false"}
         data-category={parseAssetCategory(holding.category)}
         data-stale={holding.priceStatus === "STALE" ? "true" : "false"}
+        data-selected={selected ? "true" : "false"}
       >
+        <td
+          className="px-0 py-2 align-middle text-center"
+          style={{
+            width: HOLDINGS_SELECT_COL_PX,
+            minWidth: HOLDINGS_SELECT_COL_PX,
+            maxWidth: HOLDINGS_SELECT_COL_PX,
+          }}
+        >
+          <input
+            type="checkbox"
+            className="accent-teal-700"
+            checked={selected}
+            aria-label={`Sélectionner ${holding.name}`}
+            data-testid={`holding-select-${assetId}`}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onChange={() => opts.toggleSelected(assetId)}
+          />
+        </td>
         <td
           className="holdings-expand-col px-0 py-2 align-middle text-center"
           style={{
