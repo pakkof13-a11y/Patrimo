@@ -206,6 +206,7 @@ model Asset {
   realEstate   RealEstateDetail?
   indirectRealEstate IndirectRealEstateDetail?
   defiPosition DefiPositionDetail?
+  nftItem NftItemDetail?
   lifeSupport  LifeInsuranceSupport?
   liabilities  Liability[]
 
@@ -1100,4 +1101,55 @@ model CryptoFuturesPosition {
   @@index([userId, exchange])
   @@index([userId, closedAt])
   @@unique([userId, exchangeTradeId])
+}
+
+/// NFT — extension 1:1 d'un Asset, comme RealEstateDetail et DefiPositionDetail.
+///
+/// Un NFT est un actif détenu au sens plein : on l'a payé, il a une valeur qui
+/// fluctue, on peut le céder. Il suit donc le même patron que l'immobilier ou
+/// la DeFi, et pas celui des futures : le journal reste la source de vérité
+/// pour la quantité et le coût de revient, ce modèle ne porte que ce qu'un
+/// Asset générique ne sait pas exprimer — la collection, la rareté, et
+/// l'estimation de floor price (l'équivalent de l'estimation DVF pour un
+/// bien immobilier).
+model NftItemDetail {
+  id      String @id @default(cuid())
+  assetId String @unique
+
+  tokenId      String
+  contractAddr String?
+  /// ethereum | base | polygon | arbitrum | optimism | solana
+  chain        String
+  collectionName String?
+  collectionSlug String?
+  imageUrl       String?
+  metadataUrl    String?
+  /// ERC_721 | ERC_1155 | SPL
+  standard       String?
+
+  /// DVF_AUTO-like : MANUAL tant que l'utilisateur fixe la valeur, FLOOR_AUTO
+  /// une fois un rafraîchissement de floor price appliqué.
+  valuationMode String    @default("MANUAL")
+  lastValuedAt  DateTime?
+  floorPriceNative Decimal? @db.Decimal(24, 10)
+  floorPriceCurrency String?
+  floorPriceEur      Decimal? @db.Decimal(18, 2)
+  /// OPENSEA | BLUR | MAGIC_EDEN | TENSOR | RESERVOIR | MANUAL
+  estimateSource     String?
+  estimateDate       DateTime?
+
+  rarityRank  Int?
+  rarityScore Decimal? @db.Decimal(10, 4)
+
+  /// Masque un spam/scam de la galerie sans supprimer la position.
+  isHidden Boolean @default(false)
+  notes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([chain])
+  @@index([collectionSlug])
 }
