@@ -90,6 +90,9 @@ export function NftPanel({ className }: { className?: string }) {
   const [showHidden, setShowHidden] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [showSync, setShowSync] = useState(false);
+  const [syncPlatformId, setSyncPlatformId] = useState("");
+  const [syncChain, setSyncChain] = useState("ethereum");
 
   const q = useQuery({
     queryKey: ["crypto-nft", showHidden],
@@ -190,6 +193,36 @@ export function NftPanel({ className }: { className?: string }) {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const sync = useMutation({
+    mutationFn: () =>
+      fetchJson<{
+        ok: boolean;
+        reason: string | null;
+        itemsFound: number;
+        assetsCreated: number;
+        assetsExisting: number;
+      }>("/api/crypto/nft/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platformId: syncPlatformId, chain: syncChain }),
+      }),
+    onSuccess: (r) => {
+      if (!r.ok) {
+        toast.info(
+          `Synchronisation impossible — ${REASON_LABELS[r.reason ?? ""] ?? r.reason ?? "raison inconnue"}. Configurez les clés API pour l'activer.`
+        );
+        return;
+      }
+      toast.success(
+        r.assetsCreated > 0
+          ? `${r.assetsCreated} NFT découvert(s) sur ce wallet`
+          : `Aucun nouveau NFT — ${r.assetsExisting} déjà connu(s)`
+      );
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const set = (k: keyof typeof form, v: string) =>
     setForm((f) => ({ ...f, [k]: v }));
 
@@ -234,6 +267,14 @@ export function NftPanel({ className }: { className?: string }) {
             </Button>
             <Button
               type="button"
+              variant={showSync ? "outline" : "default"}
+              onClick={() => setShowSync((v) => !v)}
+              data-testid="nft-sync-toggle"
+            >
+              {showSync ? "Annuler" : "Synchroniser un wallet"}
+            </Button>
+            <Button
+              type="button"
               variant={showForm ? "outline" : "default"}
               onClick={() => setShowForm((v) => !v)}
               data-testid="nft-form-toggle"
@@ -243,6 +284,58 @@ export function NftPanel({ className }: { className?: string }) {
           </div>
         }
       />
+
+      {showSync && (
+        <div
+          className="mt-3 flex flex-wrap items-end gap-2 rounded-[var(--radius-md)] border border-[var(--primary)]/20 bg-[var(--primary-soft)] p-3"
+          data-testid="nft-sync-form"
+        >
+          <label className="text-meta block">
+            Plateforme (wallet)
+            <select
+              className="input mt-1 w-full"
+              value={syncPlatformId}
+              onChange={(e) => setSyncPlatformId(e.target.value)}
+              data-testid="nft-sync-platform"
+            >
+              <option value="">— choisir —</option>
+              {(platformsQ.data?.platforms ?? []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-meta block">
+            Chaîne
+            <select
+              className="input mt-1 w-full"
+              value={syncChain}
+              onChange={(e) => setSyncChain(e.target.value)}
+              data-testid="nft-sync-chain"
+            >
+              <option value="ethereum">Ethereum</option>
+              <option value="base">Base</option>
+              <option value="polygon">Polygon</option>
+              <option value="arbitrum">Arbitrum</option>
+              <option value="optimism">Optimism</option>
+              <option value="solana">Solana</option>
+            </select>
+          </label>
+          <Button
+            type="button"
+            disabled={!syncPlatformId || sync.isPending}
+            onClick={() => sync.mutate()}
+            data-testid="nft-sync-submit"
+          >
+            {sync.isPending ? "Recherche…" : "Rechercher les NFT du wallet"}
+          </Button>
+          <p className="text-meta w-full">
+            Nécessite l&apos;adresse du wallet sur la plateforme choisie, et
+            une clé OpenSea (EVM) ou Magic Eden (Solana) côté serveur.
+          </p>
+        </div>
+      )}
 
       {showForm && (
         <div

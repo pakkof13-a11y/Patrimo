@@ -15,6 +15,7 @@ import {
   resolveZerionApiKey,
   ZERION_HISTORY_TRUNCATED_MESSAGE,
 } from "@/app/lib/zerion";
+import { syncDefiPositions } from "@/app/lib/crypto/defi-sync";
 
 /**
  * POST /api/wallets/zerion/sync
@@ -164,6 +165,8 @@ export async function POST(req: Request) {
     let ledger = null;
     let history = null;
     let ledgerError: string | null = null;
+    let defi = null;
+    let defiError: string | null = null;
     if (writeLedgerOpt !== false) {
       try {
         // 1) Historique on-chain (mined_at) — dates réelles
@@ -200,6 +203,16 @@ export async function POST(req: Request) {
           clientErrorMessage(e, "Échec écriture ledger");
         console.error("[zerion-sync ledger]", ledgerError);
       }
+
+      // Positions DeFi — appel Zerion `only_complex` séparé, non bloquant :
+      // un échec ici ne doit pas faire échouer la synchronisation des soldes
+      // simples, qui vient de réussir.
+      try {
+        defi = await syncDefiPositions(userId, platform.id, address, apiKey);
+      } catch (e) {
+        defiError = clientErrorMessage(e, "Échec synchronisation DeFi");
+        console.error("[zerion-sync defi]", defiError);
+      }
     }
 
     const historyTruncated = Boolean(portfolio.historyTruncated);
@@ -235,6 +248,8 @@ export async function POST(req: Request) {
       ledger,
       history,
       ledgerError,
+      defi,
+      defiError,
       historyTruncated,
       historyTruncatedMessage: historyTruncated
         ? ZERION_HISTORY_TRUNCATED_MESSAGE
@@ -245,6 +260,8 @@ export async function POST(req: Request) {
         assetsTouched: ledger?.assetsTouched ?? 0,
         ledgerTxs: ledger?.txsCreated ?? 0,
         historyTxs: history?.historyTxsCreated ?? 0,
+        defiPositionsSeen: defi?.positionsSeen ?? 0,
+        defiTxs: defi?.txsCreated ?? 0,
         historyTruncated,
       },
     });
