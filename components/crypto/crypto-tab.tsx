@@ -1,14 +1,16 @@
 "use client";
 
-import { Coins, Layers } from "lucide-react";
+import { Coins, Layers, TrendingUp } from "lucide-react";
 import { cn } from "@/app/lib/utils";
 import { DefiPanel } from "@/components/crypto/defi-panel";
+import { FuturesPanel } from "@/components/crypto/futures-panel";
 
-export type CryptoSubTab = "SPOT" | "DEFI";
+export type CryptoSubTab = "SPOT" | "DEFI" | "FUTURES";
 
 const SUB_NAV: { id: CryptoSubTab; label: string; icon: React.ReactNode }[] = [
   { id: "SPOT", label: "Comptant", icon: <Coins className="h-3.5 w-3.5" /> },
   { id: "DEFI", label: "DeFi", icon: <Layers className="h-3.5 w-3.5" /> },
+  { id: "FUTURES", label: "Futures", icon: <TrendingUp className="h-3.5 w-3.5" /> },
 ];
 
 /**
@@ -25,6 +27,11 @@ const SUB_NAV: { id: CryptoSubTab; label: string; icon: React.ReactNode }[] = [
  * Les deux ensembles sont disjoints par construction : Zerion est interrogé
  * avec `only_simple` pour le comptant et `only_complex` pour le DeFi, si bien
  * qu'un ETH staké ne peut pas être compté deux fois.
+ *
+ * - **Futures** — troisième vue, à part des deux autres : une position à
+ *   levier n'est pas un actif détenu, elle ne touche donc ni le journal ni
+ *   le patrimoine coté. Ses totaux (marge engagée, exposition nette, P&L
+ *   latent) sont propres à ce panneau.
  */
 export function CryptoTab({
   sub,
@@ -63,6 +70,7 @@ export function CryptoTab({
 
       {/* Le comptant est rendu par le tableau Positions, en dessous. */}
       {sub === "DEFI" && <DefiPanel />}
+      {sub === "FUTURES" && <FuturesPanel />}
     </div>
   );
 }

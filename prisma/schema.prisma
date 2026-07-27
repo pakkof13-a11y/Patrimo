@@ -44,6 +44,7 @@ model User {
   privateEquityPositions  PrivateEquityPosition[]
   crowdlendingPositions   CrowdlendingPosition[]
   tangibleAssets          TangibleAsset[]
+  cryptoFuturesPositions  CryptoFuturesPosition[]
 
   @@index([role])
 }
@@ -1034,4 +1035,69 @@ model DefiPositionDetail {
 
   @@index([protocol])
   @@index([positionType])
+}
+
+/// Position futures / perpétuelle sur un exchange crypto.
+///
+/// Rattachée directement à l'utilisateur, pas à un `Asset` : contrairement à
+/// un solde ou une position DeFi, un contrat à terme n'est pas un actif
+/// détenu — c'est un pari collatéralisé par une marge. Ce que la position
+/// pèse au patrimoine n'est ni sa taille ni son notionnel, mais marge + P&L
+/// latent, un calcul qui n'a pas de sens dans le modèle quantité × prix du
+/// journal. L'étendre en extension d'Asset comme RealEstateDetail aurait
+/// forcé cette sémantique où elle ne s'applique pas.
+model CryptoFuturesPosition {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// BINANCE | BYBIT | OKX | HYPERLIQUID | DYDX | OTHER
+  exchange       String
+  subAccountLabel String?
+
+  /// « BTC/USDT-PERP », « ETH/USD-0927 »…
+  pair         String
+  /// PERPETUAL | QUARTERLY | MONTHLY
+  contractType String @default("PERPETUAL")
+  /// USDT_M | COIN_M
+  marginType   String
+  baseCurrency  String
+  quoteCurrency String
+
+  /// LONG | SHORT
+  direction        String
+  leverage         Decimal  @db.Decimal(8, 2)
+  sizeContracts    Decimal  @db.Decimal(28, 10)
+  notionalUsd      Decimal? @db.Decimal(20, 2)
+  entryPrice       Decimal  @db.Decimal(20, 8)
+  markPrice        Decimal? @db.Decimal(20, 8)
+  /// Dernier prix de liquidation connu de l'exchange — l'estimation servie à
+  /// l'écran est recalculée, ce champ ne fait que la doubler si disponible.
+  liquidationPrice Decimal? @db.Decimal(20, 8)
+
+  marginUsed     Decimal? @db.Decimal(20, 2)
+  fundingPaid    Decimal? @db.Decimal(20, 2)
+  commissionPaid Decimal? @db.Decimal(20, 2)
+
+  unrealizedPnl Decimal? @db.Decimal(20, 2)
+  realizedPnl   Decimal? @db.Decimal(20, 2)
+
+  stopLoss   Decimal? @db.Decimal(20, 8)
+  takeProfit Decimal? @db.Decimal(20, 8)
+
+  isOpen   Boolean   @default(true)
+  openedAt DateTime?
+  closedAt DateTime?
+
+  /// Identifiant du trade côté exchange — clé d'upsert de l'import CSV, pour
+  /// qu'un même relevé importé deux fois ne double pas les positions.
+  exchangeTradeId String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId, isOpen])
+  @@index([userId, exchange])
+  @@index([userId, closedAt])
+  @@unique([userId, exchangeTradeId])
 }

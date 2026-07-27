@@ -725,11 +725,11 @@ function PortfolioAppClient({
   const txCount =
     txMetaQ.data?.totalAll ?? txMetaQ.data?.total ?? 0;
 
-  // Sous l'onglet Crypto, le tableau Positions rend la vue « Comptant ». La
-  // vue DeFi le remplace : afficher les deux montrerait deux fois le même
-  // patrimoine sous deux formes, sans dire laquelle fait foi.
+  // Sous l'onglet Crypto, le tableau Positions rend la vue « Comptant ». Les
+  // vues DeFi et Futures le remplacent : afficher les deux montrerait deux
+  // fois le même patrimoine sous deux formes, sans dire laquelle fait foi.
   const positionsView =
-    isPositionsTab(tab) && !(tab === "crypto" && cryptoSub === "DEFI");
+    isPositionsTab(tab) && !(tab === "crypto" && cryptoSub !== "SPOT");
   const isDashboard = tab === "dashboard";
 
   /** Maturité du compte → densité du dashboard + KPI strip */
