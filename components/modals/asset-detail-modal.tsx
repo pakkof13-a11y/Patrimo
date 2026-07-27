@@ -151,6 +151,9 @@ export function AssetDetailModal({
   const [platformFilter, setPlatformFilter] = useState("");
   const [txMenuOpen, setTxMenuOpen] = useState(false);
   const [whtOpen, setWhtOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"summary" | "transactions">(
+    "summary"
+  );
   const txMenuRef = useRef<HTMLDivElement>(null);
 
   // Reset filtres type à chaque changement d'actif / réouverture
@@ -162,6 +165,7 @@ export function AssetDetailModal({
     setPlatformFilter("");
     setTxMenuOpen(false);
     setWhtOpen(false);
+    setActiveTab("summary");
   } else if (!open && prevResetKey.startsWith("true:")) {
     setPrevResetKey(resetKey);
   }
@@ -403,6 +407,44 @@ export function AssetDetailModal({
             )}
           </div>
 
+          <div
+            className="inline-flex w-fit rounded-md border border-[var(--border)] p-0.5"
+            role="tablist"
+            aria-label="Sections de la fiche actif"
+            data-testid="asset-detail-tabs"
+          >
+            {(
+              [
+                { key: "summary", label: "Fiche actif" },
+                { key: "transactions", label: "Transactions" },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === t.key}
+                className={cn(
+                  "rounded px-3 py-1 text-xs font-medium transition",
+                  activeTab === t.key
+                    ? "bg-teal-700 text-white"
+                    : "text-slate-500 hover:bg-[var(--muted)] hover:text-slate-800 dark:hover:text-slate-200"
+                )}
+                data-testid={`asset-detail-tab-${t.key}`}
+                onClick={() => setActiveTab(t.key)}
+              >
+                {t.label}
+                {t.key === "transactions" && txs.length > 0 && (
+                  <span className="ml-1 tabular-nums opacity-75">
+                    ({txs.length})
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === "summary" && (
+            <>
           {isCrypto &&
             (data.custodyDistribution?.length ?? 0) > 0 && (
               <div
@@ -571,7 +613,10 @@ export function AssetDetailModal({
             name={data.asset.name}
             enabled={open && Boolean(data.asset.id)}
           />
+            </>
+          )}
 
+          {activeTab === "transactions" && (
           <div data-testid="asset-detail-history">
             {/* Ligne 1 — titre + compteur (+ catégorie discrète) */}
             <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
@@ -842,6 +887,7 @@ export function AssetDetailModal({
               )}
             </div>
           </div>
+          )}
 
           {/* Fiscalité — secondaire, replié par défaut */}
           <details

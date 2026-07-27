@@ -60,6 +60,7 @@ test.describe("Positions — chemins d’action", () => {
     await expect(page.getByTestId("modal-overlay")).toBeVisible({
       timeout: 10_000,
     });
+    await page.getByTestId("asset-detail-tab-transactions").click();
     await expect(page.getByTestId("asset-detail-history")).toBeVisible({
       timeout: 10_000,
     });
