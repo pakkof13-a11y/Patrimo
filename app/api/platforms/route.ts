@@ -20,10 +20,7 @@ export async function GET() {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   const platforms = await getPlatformCashBalances(
     userId,
-    user?.baseCurrency || "EUR",
-    undefined,
-    undefined,
-    { includeWalletApiKey: true }
+    user?.baseCurrency || "EUR"
   );
   return NextResponse.json({ platforms, presets: PLATFORM_PRESETS });
 }

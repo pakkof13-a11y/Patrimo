@@ -42,8 +42,13 @@ function looksLikeSolanaAddress(addr: string | null | undefined): boolean {
 }
 
 function shortAddr(addr: string): string {
-  if (addr.length <= 12) return addr;
-  return `${addr.slice(0, 4)}…${addr.slice(-4)}`;
+  // EVM (0x…) : 4 car. de préfixe = seulement 2 hex utiles ("0x" fixe pour
+  // toutes les adresses) — 0x1a…4b2c et 0x1b…4b2c ne se distinguent qu'au
+  // 4ᵉ caractère. 6+4 double la marge utile ; Solana (base58) reste en 4+4.
+  const isEvm = addr.startsWith("0x") || addr.startsWith("0X");
+  const headLen = isEvm ? 6 : 4;
+  if (addr.length <= headLen + 4) return addr;
+  return `${addr.slice(0, headLen)}…${addr.slice(-4)}`;
 }
 
 function formatUsd(n: number | null | undefined): string {
@@ -85,6 +90,11 @@ function formatLastTx(iso: string | null | undefined): string {
   }
 }
 
+/** Valeur affichée pour une plateforme — même repli partout (tri, carte). */
+function resolvePlatformValue(p: PlatformRow): string {
+  return p.totalValueBase || p.totalValueEur || p.cashBase || p.cashEur || "0";
+}
+
 /** Types éditables = enum backend `platformTypes` (aligné Zod / API). */
 const TYPE_OPTIONS = Object.entries(PLATFORM_TYPES).sort(([, a], [, b]) =>
   a.localeCompare(b, "fr")
@@ -117,7 +127,9 @@ export function PlatformsTab({
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [search, setSearch] = useState("");
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  /** Un conteneur par carte (indexé par id) — un clic rapide entre deux
+   * cartes ne doit jamais laisser le "outside click" tester le mauvais menu. */
+  const menuRefs = useRef<Map<string, HTMLElement>>(new Map());
   const cardRefs = useRef<Map<string, HTMLElement>>(new Map());
   const debouncedSearch = useDebouncedValue(search, 300);
 
@@ -150,7 +162,20 @@ export function PlatformsTab({
   const [solanaSnaps, setSolanaSnaps] = useState<
     Record<string, SolanaPortfolioSnapshot>
   >({});
-  const [solanaLoadingId, setSolanaLoadingId] = useState<string | null>(null);
+  /** Plateformes en cours de synchro (Solana RPC ou Zerion EVM) — un Set, pas
+   * un seul id, pour permettre des syncs parallèles sur deux plateformes
+   * différentes sans que l'une écrase visuellement l'état de l'autre. */
+  const [syncingPlatformIds, setSyncingPlatformIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  function markSyncing(id: string, syncing: boolean) {
+    setSyncingPlatformIds((prev) => {
+      const next = new Set(prev);
+      if (syncing) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
   /** Sync Zerion plafonnée (800 txs) — bannière par plateforme */
   const [historyTruncatedByPlatform, setHistoryTruncatedByPlatform] = useState<
     Record<string, boolean>
@@ -220,7 +245,8 @@ export function PlatformsTab({
   useEffect(() => {
     if (!menuOpenId) return;
     function onDoc(e: MouseEvent) {
-      if (!menuRef.current?.contains(e.target as Node)) setMenuOpenId(null);
+      const openMenuEl = menuRefs.current.get(menuOpenId!);
+      if (!openMenuEl?.contains(e.target as Node)) setMenuOpenId(null);
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -251,8 +277,8 @@ export function PlatformsTab({
       ])
     );
     return searched.sort((a, b) => {
-      const va = Number(b.totalValueBase || b.totalValueEur || b.cashBase || 0);
-      const vb = Number(a.totalValueBase || a.totalValueEur || a.cashBase || 0);
+      const va = Number(resolvePlatformValue(b));
+      const vb = Number(resolvePlatformValue(a));
       if (va !== vb) return va - vb;
       return a.name.localeCompare(b.name, "fr", { sensitivity: "base" });
     });
@@ -274,11 +300,9 @@ export function PlatformsTab({
       type: p.type,
       logoKey: p.logoKey,
     });
-    setEditApiKey(
-      (p as { walletApiKey?: string | null }).walletApiKey ||
-        cap?.defaultApiKey ||
-        ""
-    );
+    // Le secret n'est jamais renvoyé par le serveur — champ vide par défaut ;
+    // `hasWalletApiKey` alimente juste un hint dans le placeholder (voir JSX).
+    setEditApiKey(cap?.defaultApiKey || "");
     setEditMoneroAmount("");
   }
 
@@ -321,7 +345,10 @@ export function PlatformsTab({
           logoUrl: logo.length > 0 ? logo : null,
           notes: editNotes.trim().length > 0 ? editNotes.trim() : null,
           walletAddress: wallet.length > 0 ? wallet : null,
-          walletApiKey: apiKey.length > 0 ? apiKey : null,
+          // Champ vide = ne pas toucher à la clé déjà enregistrée (jamais
+          // renvoyée par le serveur, donc jamais "vide" pour une vraie mise à
+          // jour) — omis plutôt que null, sinon on écraserait la clé existante.
+          ...(apiKey.length > 0 ? { walletApiKey: apiKey } : {}),
         }),
       });
       toast.success("Plateforme mise à jour");
@@ -403,9 +430,10 @@ export function PlatformsTab({
         body: JSON.stringify({
           id: editTarget.id,
           walletAddress: wallet,
+          // Vide = ne pas toucher à la clé déjà enregistrée (voir saveEdit)
           walletApiKey:
-            cap.provider === "zerion"
-              ? apiKey || null
+            cap.provider === "zerion" && apiKey.length > 0
+              ? apiKey
               : undefined,
           type: editType === "BLOCKCHAIN" ? editType : "BLOCKCHAIN",
         }),
@@ -536,12 +564,9 @@ export function PlatformsTab({
     if (!mergeSource || !mergeTargetId) return;
     const target = platforms.find((p) => p.id === mergeTargetId);
     if (!target) return;
-    const ok = window.confirm(
-      `Fusionner « ${mergeSource.name} » dans « ${target.name} » ?\n\n` +
-        `Tous les actifs et transactions de « ${mergeSource.name} » seront rattachés à « ${target.name} », ` +
-        `puis « ${mergeSource.name} » sera supprimé. Irréversible.`
-    );
-    if (!ok) return;
+    // La modale de fusion (bouton "Fusionner") est déjà la confirmation —
+    // ce window.confirm() natif était redondant (double-prompt, bloquant,
+    // ignore le thème, parfois bloqué en iframe/mobile).
     setMergePending(true);
     try {
       await fetchJson("/api/platforms/merge", {
@@ -576,7 +601,7 @@ export function PlatformsTab({
       return;
     }
     setMenuOpenId(null);
-    setSolanaLoadingId(p.id);
+    markSyncing(p.id, true);
     try {
       const res = await fetchJson<{
         ok: boolean;
@@ -640,7 +665,7 @@ export function PlatformsTab({
         err instanceof Error ? err.message : "Échec lecture wallet Solana"
       );
     } finally {
-      setSolanaLoadingId(null);
+      markSyncing(p.id, false);
     }
   }
 
@@ -668,7 +693,7 @@ export function PlatformsTab({
       return;
     }
     setMenuOpenId(null);
-    setSolanaLoadingId(p.id);
+    markSyncing(p.id, true);
     try {
       const res = await fetchJson<{
         ok?: boolean;
@@ -706,7 +731,8 @@ export function PlatformsTab({
           // Filtre chaîne plateforme (évite de fusionner toutes les EVM)
           allChains: false,
           chainPreset: p.logoKey || cap?.presetKey,
-          apiKey: (p as { walletApiKey?: string | null }).walletApiKey || undefined,
+          // Pas de clé côté client à renvoyer : le serveur retombe sur celle
+          // déjà enregistrée pour cette plateforme si `apiKey` est omis.
         }),
       });
       const pos =
@@ -762,7 +788,7 @@ export function PlatformsTab({
         err instanceof Error ? err.message : "Échec synchronisation wallet"
       );
     } finally {
-      setSolanaLoadingId(null);
+      markSyncing(p.id, false);
     }
   }
 
@@ -870,7 +896,7 @@ export function PlatformsTab({
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {sorted.map((p) => {
-            const total = p.totalValueBase || p.totalValueEur || p.cashBase || p.cashEur;
+            const total = resolvePlatformValue(p);
             const posCount = p.positionCount ?? 0;
             return (
               <article
@@ -925,7 +951,10 @@ export function PlatformsTab({
 
                   <div
                     className="relative shrink-0"
-                    ref={menuOpenId === p.id ? menuRef : undefined}
+                    ref={(el) => {
+                      if (el) menuRefs.current.set(p.id, el);
+                      else menuRefs.current.delete(p.id);
+                    }}
                   >
                     <Button
                       type="button"
@@ -979,7 +1008,7 @@ export function PlatformsTab({
                           onClick={() => openEdit(p)}
                         >
                           <Pencil className="h-3.5 w-3.5" />
-                          Enrichir
+                          Modifier
                         </button>
                         {platforms.length > 1 && (
                           <button
@@ -1078,7 +1107,7 @@ export function PlatformsTab({
                       size="sm"
                       variant="outline"
                       className="w-full"
-                      disabled={solanaLoadingId === p.id}
+                      disabled={syncingPlatformIds.has(p.id)}
                       onClick={() => void syncChainWallet(p)}
                       data-testid={
                         looksLikeSolanaAddress(p.walletAddress)
@@ -1089,10 +1118,10 @@ export function PlatformsTab({
                       <RefreshCw
                         className={cn(
                           "h-3.5 w-3.5",
-                          solanaLoadingId === p.id && "animate-spin"
+                          syncingPlatformIds.has(p.id) && "animate-spin"
                         )}
                       />
-                      {solanaLoadingId === p.id
+                      {syncingPlatformIds.has(p.id)
                         ? "Sync…"
                         : looksLikeSolanaAddress(p.walletAddress) &&
                             solanaSnaps[p.id]
@@ -1140,10 +1169,10 @@ export function PlatformsTab({
         </div>
       )}
 
-      {/* Enrichissement optionnel */}
+      {/* Modification optionnelle (nom, type, logo, wallet/API…) */}
       {editTarget && (
         <Modal
-          title={`Enrichir · ${editTarget.name}`}
+          title={`Modifier · ${editTarget.name}`}
           onClose={() => setEditTarget(null)}
           panelClassName="max-w-md"
         >
@@ -1220,7 +1249,11 @@ export function PlatformsTab({
                           className="input w-full font-mono text-sm"
                           value={editApiKey}
                           onChange={(e) => setEditApiKey(e.target.value)}
-                          placeholder="zk_…"
+                          placeholder={
+                            editTarget?.hasWalletApiKey
+                              ? "Clé déjà enregistrée — laisser vide pour la conserver"
+                              : "zk_…"
+                          }
                           autoComplete="off"
                           spellCheck={false}
                           data-testid="platform-edit-api-key"
@@ -1418,13 +1451,7 @@ export function PlatformsTab({
                 Valeur totale (cash + titres)
               </p>
               <p className="mt-0.5 text-xl font-semibold tabular-nums tracking-tight text-teal-800 dark:text-teal-300">
-                {formatCurrency(
-                  previewTarget.totalValueBase ||
-                    previewTarget.totalValueEur ||
-                    previewTarget.cashBase ||
-                    "0",
-                  baseCurrency
-                )}
+                {formatCurrency(resolvePlatformValue(previewTarget), baseCurrency)}
               </p>
             </div>
 
@@ -1487,6 +1514,21 @@ export function PlatformsTab({
                   Voir dans Positions
                 </Button>
               )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="w-full sm:w-auto"
+                data-testid="platform-preview-edit"
+                onClick={() => {
+                  const p = previewTarget;
+                  setPreviewTarget(null);
+                  openEdit(p);
+                }}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Modifier
+              </Button>
               <Button
                 type="button"
                 size="sm"
@@ -1665,13 +1707,13 @@ export function PlatformsTab({
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={solanaLoadingId === solanaDetail.platform.id}
+                disabled={syncingPlatformIds.has(solanaDetail.platform.id)}
                 onClick={() => void syncSolanaWallet(solanaDetail.platform)}
               >
                 <RefreshCw
                   className={cn(
                     "h-3.5 w-3.5",
-                    solanaLoadingId === solanaDetail.platform.id &&
+                    syncingPlatformIds.has(solanaDetail.platform.id) &&
                       "animate-spin"
                   )}
                 />

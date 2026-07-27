@@ -120,7 +120,11 @@ export type PlatformRow = {
   logoUrl: string | null;
   logoKey?: string | null;
   walletAddress?: string | null;
-  walletApiKey?: string | null;
+  /**
+   * Le secret n'est jamais renvoyé au client (voir getPlatformCashBalances) —
+   * seul ce booléen indique qu'une clé est déjà enregistrée côté serveur.
+   */
+  hasWalletApiKey?: boolean;
   notes?: string | null;
   /** Positions titres ouvertes (qty > 0) */
   positionCount?: number;

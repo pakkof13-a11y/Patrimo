@@ -571,14 +571,7 @@ export async function getPlatformCashBalances(
   userId: string,
   baseCurrency = "EUR",
   rates?: Record<string, number>,
-  ledger?: Awaited<ReturnType<typeof loadLedgerForUser>>,
-  /**
-   * walletApiKey exclue par défaut (secure by default) — seul /api/platforms
-   * (édition + sync inline) doit passer `includeWalletApiKey: true`. Évite
-   * qu'un futur endpoint appelant cette fonction directement ne fasse fuiter
-   * la clé sans s'en rendre compte.
-   */
-  opts?: { includeWalletApiKey?: boolean }
+  ledger?: Awaited<ReturnType<typeof loadLedgerForUser>>
 ) {
   const fx = rates ?? (await getEurRates());
   const { getBankPocketCashByNameEur } = await import("../cash/pockets");
@@ -666,9 +659,11 @@ export async function getPlatformCashBalances(
         name: p.name,
       }),
       walletAddress: p.walletAddress,
-      walletApiKey: opts?.includeWalletApiKey
-        ? ((p as { walletApiKey?: string | null }).walletApiKey ?? null)
-        : null,
+      // Le secret ne quitte jamais le serveur (voir doc du paramètre plus haut) —
+      // seule sa présence est exposée, pour préremplir un hint côté UI.
+      hasWalletApiKey: Boolean(
+        (p as { walletApiKey?: string | null }).walletApiKey
+      ),
       cashEur: toFixed(cashEur, 8),
       cashBase: convertFromEurSync(cashEur, baseCurrency, fx),
       /** Cash issu des poches Banques/Livrets uniquement (hors ledger) */
@@ -830,17 +825,9 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     byAccountType["CASH"] = (byAccountType["CASH"] ?? 0) + cashClassBase;
   }
 
-  // walletApiKey retiré ici : /api/holdings n'en a pas besoin (pas d'UI d'édition
-  // de plateforme sur cette page) — évite de faire circuler la clé à chaque
-  // rechargement du tableau de bord. /api/platforms (platforms-tab) la garde
-  // car l'édition + la sync inline en ont besoin.
-  const platformsWithoutApiKey = platforms.map(
-    ({ walletApiKey: _walletApiKey, ...rest }) => rest
-  );
-
   return {
     holdings,
-    platforms: platformsWithoutApiKey,
+    platforms,
     summary,
     allocation: {
       byClass: Object.entries(byClass).map(([name, value]) => ({ name, value })),
