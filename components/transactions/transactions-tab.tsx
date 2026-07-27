@@ -49,6 +49,7 @@ import {
   shouldShowPaginationNav,
 } from "@/app/lib/ui/pagination";
 import { EmptyPlaceholder } from "@/components/ui/panel";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   ModuleCard,
   moduleTableHeadClass,
@@ -87,7 +88,7 @@ const TX_COLUMN_META: ColumnPickerItem[] = [
   { id: "blockchain", label: "Blockchain", group: "optional" },
   { id: "quantity", label: "Quantité", group: "optional" },
   { id: "currency", label: "Devise", group: "optional" },
-  { id: "netPrice", label: "Prix net uniquement", group: "optional" },
+  { id: "netPrice", label: "Montant net (€)", group: "optional" },
   { id: "actions", label: "Actions", locked: true, group: "mandatory" },
 ];
 
@@ -95,7 +96,11 @@ const TX_VISIBILITY_KEY = "patrimo.display.txColumnVisibility.v1";
 
 function defaultTxColumnVisibility(): VisibilityState {
   const map: VisibilityState = {};
-  for (const c of TX_COLUMN_META) map[c.id] = true;
+  for (const c of TX_COLUMN_META) {
+    // Masquée par défaut : "—" pour tout portefeuille sans actif crypto,
+    // pollution visuelle pour rien. Activable en un clic (ColumnPicker).
+    map[c.id] = c.id === "blockchain" ? false : true;
+  }
   return map;
 }
 
@@ -177,6 +182,7 @@ export function TransactionsTab({
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const [draggingCol, setDraggingCol] = useState<string | null>(null);
   const skipSortRef = useRef(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   // Reset page quand filtres / tri / pageSize changent
   const filterKey = `${debouncedSearch}|${accountType}|${pageSize}|${typeFilter}|${sorting[0]?.id}|${sorting[0]?.desc}`;
@@ -334,6 +340,10 @@ export function TransactionsTab({
         id: "blockchain",
         accessorFn: (r) => r.blockchainLabel || r.blockchainKey || "",
         header: "Blockchain",
+        // blockchainKey est calculé applicativement (non stocké), donc pas
+        // triable côté serveur — sans ce flag la flèche de tri s'affichait
+        // alors que le clic n'avait aucun effet (retombe sur "date").
+        enableSorting: false,
         cell: ({ row }) => {
           const isCrypto =
             row.original.asset?.accountType === "CRYPTO" ||
@@ -391,7 +401,7 @@ export function TransactionsTab({
       {
         id: "netPrice",
         accessorFn: (r) => txNetPriceEur(r) ?? 0,
-        header: "Prix net uniquement",
+        header: "Montant net (€)",
         cell: ({ row }) => {
           const net = txNetPriceEur(row.original);
           return (
@@ -430,11 +440,7 @@ export function TransactionsTab({
               variant="ghost"
               size="sm"
               className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--danger)]"
-              onClick={() => {
-                if (confirm("Supprimer cette transaction ?")) {
-                  onDelete(row.original.id);
-                }
-              }}
+              onClick={() => setDeleteTargetId(row.original.id)}
               title="Supprimer"
               aria-label="Supprimer la transaction"
             >
@@ -444,7 +450,7 @@ export function TransactionsTab({
         ),
       },
     ],
-    [onEdit, onDelete]
+    [onEdit]
   );
 
   const table = useReactTable({
@@ -488,7 +494,7 @@ export function TransactionsTab({
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <h2 className="break-words text-base font-semibold leading-snug tracking-tight text-[var(--foreground)]">
-              Journal des transactions
+              Journal des opérations
             </h2>
             <p className="module-intro text-meta">
               Source de vérité pour positions, cash et fiscalité — édition,
@@ -583,6 +589,9 @@ export function TransactionsTab({
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="tabular-nums">
               {formatRangeLabel(pageIndex, pageSize, filteredTotal)}
+              {totalDb > 0 && filteredTotal !== totalDb
+                ? ` · ${totalDb} au total`
+                : ""}
             </span>
             <label className="flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
               <span className="sr-only sm:not-sr-only sm:inline">Par page</span>
@@ -905,6 +914,18 @@ export function TransactionsTab({
           </span>
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteTargetId != null}
+        title="Supprimer la transaction"
+        message="Cette opération sera définitivement supprimée du journal. Cette action est irréversible."
+        onCancel={() => setDeleteTargetId(null)}
+        onConfirm={() => {
+          if (deleteTargetId) onDelete(deleteTargetId);
+          setDeleteTargetId(null);
+        }}
+        testId="tx-delete-confirm"
+      />
     </ModuleCard>
   );
 }

@@ -242,7 +242,10 @@ export async function PUT(req: Request) {
       ...parsed.data,
       userId,
       id,
-      autoFundCash: Boolean(bodyObj.autoFundCash),
+      autoFundCash:
+        bodyObj.autoFundCash === undefined
+          ? true
+          : Boolean(bodyObj.autoFundCash),
       allowNegativeCash: Boolean(bodyObj.allowNegativeCash),
     });
     return NextResponse.json({ transaction: updated });

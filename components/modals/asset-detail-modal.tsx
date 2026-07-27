@@ -10,6 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { PlatformLogo } from "@/components/ui/platform-logo";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
@@ -151,6 +152,7 @@ export function AssetDetailModal({
   const [platformFilter, setPlatformFilter] = useState("");
   const [txMenuOpen, setTxMenuOpen] = useState(false);
   const [whtOpen, setWhtOpen] = useState(false);
+  const [deleteTxId, setDeleteTxId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"summary" | "transactions">(
     "summary"
   );
@@ -166,6 +168,7 @@ export function AssetDetailModal({
     setTxMenuOpen(false);
     setWhtOpen(false);
     setActiveTab("summary");
+    setDeleteTxId(null);
   } else if (!open && prevResetKey.startsWith("true:")) {
     setPrevResetKey(resetKey);
   }
@@ -269,6 +272,7 @@ export function AssetDetailModal({
   if (!open) return null;
 
   return (
+    <>
     <Modal
       title={data?.asset.name || "Détail de l'actif"}
       onClose={onClose}
@@ -416,7 +420,7 @@ export function AssetDetailModal({
             {(
               [
                 { key: "summary", label: "Fiche actif" },
-                { key: "transactions", label: "Transactions" },
+                { key: "transactions", label: "Opérations" },
               ] as const
             ).map((t) => (
               <button
@@ -865,11 +869,7 @@ export function AssetDetailModal({
                           )}
                           aria-label="Supprimer la transaction"
                           title="Supprimer"
-                          onClick={() => {
-                            if (confirm("Supprimer cette transaction ?")) {
-                              onDeleteTx(t.id);
-                            }
-                          }}
+                          onClick={() => setDeleteTxId(t.id)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -997,6 +997,18 @@ export function AssetDetailModal({
         </div>
       )}
     </Modal>
+    <ConfirmDialog
+      open={deleteTxId != null}
+      title="Supprimer la transaction"
+      message="Cette opération sera définitivement supprimée du journal. Cette action est irréversible."
+      onCancel={() => setDeleteTxId(null)}
+      onConfirm={() => {
+        if (deleteTxId) onDeleteTx(deleteTxId);
+        setDeleteTxId(null);
+      }}
+      testId="asset-detail-tx-delete-confirm"
+    />
+    </>
   );
 }
 

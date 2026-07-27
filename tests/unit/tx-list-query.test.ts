@@ -101,4 +101,19 @@ describe("mapTypeCountsToGroups", () => {
     expect(out.sell).toBe(3);
     expect(out.dividend).toBe(3);
   });
+
+  it("un airdrop ne compte que dans le badge airdrop, pas aussi dans reward", () => {
+    const out = mapTypeCountsToGroups([
+      { type: "REWARD", _count: 5 },
+      { type: "AIRDROP", _count: 2 },
+    ]);
+    expect(out.reward).toBe(5);
+    expect(out.airdrop).toBe(2);
+    expect(out.all).toBe(7);
+  });
+
+  it("les travaux (TRAVAUX) sont comptés dans le groupe works", () => {
+    const out = mapTypeCountsToGroups([{ type: "TRAVAUX", _count: 4 }]);
+    expect(out.works).toBe(4);
+  });
 });

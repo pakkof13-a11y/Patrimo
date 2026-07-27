@@ -16,7 +16,8 @@ export type TxTypeFilterId =
   | "fees"
   | "cash"
   | "transfer"
-  | "split";
+  | "split"
+  | "works";
 
 export const TX_TYPE_FILTERS: Array<{
   id: TxTypeFilterId;
@@ -51,8 +52,10 @@ export const TX_TYPE_FILTERS: Array<{
   {
     id: "reward",
     label: "Rewards",
-    types: ["REWARD", "AIRDROP"],
-    emptyHint: "Aucun staking / reward / airdrop enregistré",
+    // Distinct de "airdrop" (voir plus bas) : un airdrop ne doit être compté
+    // que dans un seul badge, pas les deux à la fois.
+    types: ["REWARD"],
+    emptyHint: "Aucun staking / reward enregistré",
     accent: "bg-fuchsia-700 text-white dark:bg-fuchsia-400 dark:text-fuchsia-950",
   },
   {
@@ -97,6 +100,13 @@ export const TX_TYPE_FILTERS: Array<{
     types: ["SPLIT"],
     emptyHint: "Aucun split enregistré",
     accent: "bg-teal-700 text-white dark:bg-teal-400 dark:text-teal-950",
+  },
+  {
+    id: "works",
+    label: "Travaux",
+    types: ["TRAVAUX"],
+    emptyHint: "Aucuns travaux / charges enregistrés",
+    accent: "bg-orange-700 text-white dark:bg-orange-400 dark:text-orange-950",
   },
 ];
 

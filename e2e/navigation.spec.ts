@@ -24,7 +24,7 @@ test.describe("Navigation & shell", () => {
 
     await clickNav(page, "Transactions");
     await expect(page).toHaveURL(/\/transactions/);
-    await expect(page.getByText("Journal des transactions")).toBeVisible();
+    await expect(page.getByText("Journal des opérations")).toBeVisible();
 
     // Produit : « Mes plateformes » (groupe Sources) → /comptes
     await clickNav(page, "Mes plateformes");

@@ -24,7 +24,9 @@ export const TX_TYPE_GROUPS: Record<string, string[] | null> = {
   all: null,
   buy: ["ACHAT"],
   sell: ["VENTE"],
-  reward: ["REWARD", "AIRDROP"],
+  // Distincts (voir TX_TYPE_FILTERS) : un airdrop ne doit compter que dans
+  // un seul badge.
+  reward: ["REWARD"],
   airdrop: ["AIRDROP"],
   dividend: ["DIVIDENDE", "COUPON", "LOYER", "INTERET"],
   fees: ["FRAIS"],

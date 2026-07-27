@@ -62,7 +62,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     id: "operations",
     label: "Opérations",
-    items: [{ id: "transactions", label: "Transactions", testId: "transactions" }],
+    items: [{ id: "transactions", label: "Opérations", testId: "transactions" }],
   },
   {
     id: "extended",
