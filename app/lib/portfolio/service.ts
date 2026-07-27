@@ -617,6 +617,7 @@ export async function getPlatformCashBalances(
   }
 
   const positionsValueByPlatform = new Map<string, ReturnType<typeof zero>>();
+  const costBasisByPlatform = new Map<string, ReturnType<typeof zero>>();
   const openPositionCountByPlatform = new Map<string, number>();
   for (const pos of led.positions.values()) {
     if (pos.quantity.lte(0)) continue;
@@ -634,6 +635,10 @@ export async function getPlatformCashBalances(
       platformId,
       (positionsValueByPlatform.get(platformId) || zero()).plus(mv)
     );
+    costBasisByPlatform.set(
+      platformId,
+      (costBasisByPlatform.get(platformId) || zero()).plus(pos.costBasisEur)
+    );
   }
 
   return platforms.map((p) => {
@@ -646,6 +651,11 @@ export async function getPlatformCashBalances(
     const positionsValueEur = positionsValueByPlatform.get(p.id) || zero();
     const totalValueEur = cashEur.plus(positionsValueEur);
     const lastAt = lastTxByPlatform.get(p.id);
+    const costBasisEur = costBasisByPlatform.get(p.id) || zero();
+    const unrealizedPnlEur = positionsValueEur.minus(costBasisEur);
+    const unrealizedPnlPct = costBasisEur.gt(0)
+      ? unrealizedPnlEur.div(costBasisEur).times(100)
+      : zero();
     return {
       id: p.id,
       name: p.name,
@@ -674,6 +684,10 @@ export async function getPlatformCashBalances(
       positionsValueBase: convertFromEurSync(positionsValueEur, baseCurrency, fx),
       totalValueEur: toFixed(totalValueEur, 8),
       totalValueBase: convertFromEurSync(totalValueEur, baseCurrency, fx),
+      /** P&L latent des positions ouvertes (hors cash) — marché vs coût de revient */
+      unrealizedPnlEur: toFixed(unrealizedPnlEur, 8),
+      unrealizedPnlBase: convertFromEurSync(unrealizedPnlEur, baseCurrency, fx),
+      unrealizedPnlPct: toFixed(unrealizedPnlPct, 4),
       lastTransactionAt: lastAt ? lastAt.toISOString() : null,
     };
   });

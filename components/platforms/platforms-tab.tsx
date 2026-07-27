@@ -20,7 +20,7 @@ import { Modal } from "@/components/ui/modal";
 import { Field } from "@/components/ui/field";
 import { PLATFORM_TYPES } from "@/app/lib/constants";
 import { useDebouncedValue } from "@/app/hooks/use-debounced-value";
-import { formatCurrency, cn } from "@/app/lib/utils";
+import { formatCurrency, formatPercent, getChangeColor, cn } from "@/app/lib/utils";
 import { fetchJson } from "@/app/lib/api-client";
 import type { PlatformRow } from "@/app/lib/types/ui";
 import type { SolanaPortfolioSnapshot } from "@/app/lib/solana";
@@ -38,6 +38,7 @@ import {
   parsePlatformSortMode,
   type PlatformSortMode,
 } from "@/app/lib/platforms/sort";
+import { summarizePlatforms } from "@/app/lib/platforms/summary";
 
 /** Base58 Solana (aligné côté serveur) — pas d’appel API si EVM. */
 function looksLikeSolanaAddress(addr: string | null | undefined): boolean {
@@ -320,6 +321,8 @@ export function PlatformsTab({
     );
     return searched.sort((a, b) => comparePlatforms(a, b, sortMode));
   }, [platforms, typeFilter, debouncedSearch, sortMode]);
+
+  const summary = useMemo(() => summarizePlatforms(platforms), [platforms]);
 
   function openEdit(p: PlatformRow) {
     setMenuOpenId(null);
@@ -848,6 +851,70 @@ export function PlatformsTab({
         )}
       </header>
 
+      {platforms.length > 0 && (
+        <div
+          className="grid gap-2 sm:grid-cols-3"
+          data-testid="platforms-summary"
+        >
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 px-3 py-2">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+              Valeur totale
+            </p>
+            <p
+              className="mt-0.5 text-lg font-semibold tabular-nums"
+              data-testid="platforms-summary-total"
+            >
+              {formatCurrency(String(summary.totalValue), baseCurrency)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 px-3 py-2">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+              Actives / inactives
+            </p>
+            <p
+              className="mt-0.5 text-lg font-semibold tabular-nums"
+              data-testid="platforms-summary-active"
+            >
+              {summary.activeCount}
+              <span className="text-sm font-normal text-[var(--muted-foreground)]">
+                {" "}
+                / {summary.inactiveCount} sans position
+              </span>
+            </p>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 px-3 py-2">
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+              Répartition par type
+            </p>
+            <div className="flex h-2 w-full overflow-hidden rounded-full bg-[var(--muted)]">
+              {summary.byType.map((t, i) => (
+                <div
+                  key={t.type}
+                  className={cn(
+                    "h-full",
+                    i % 4 === 0 && "bg-teal-600",
+                    i % 4 === 1 && "bg-amber-500",
+                    i % 4 === 2 && "bg-violet-500",
+                    i % 4 === 3 && "bg-rose-500"
+                  )}
+                  style={{
+                    width: `${summary.totalValue > 0 ? (t.value / summary.totalValue) * 100 : 100 / summary.byType.length}%`,
+                  }}
+                  title={`${typeLabel(t.type)} · ${t.count} plateforme${t.count !== 1 ? "s" : ""} · ${formatCurrency(String(t.value), baseCurrency)}`}
+                />
+              ))}
+            </div>
+            <p className="mt-1 truncate text-[10px] text-[var(--muted-foreground)]">
+              {summary.byType
+                .slice(0, 3)
+                .map((t) => typeLabel(t.type))
+                .join(" · ")}
+              {summary.byType.length > 3 ? "…" : ""}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div
         className={cn(
           "flex min-w-0 flex-col gap-2.5",
@@ -1254,6 +1321,22 @@ export function PlatformsTab({
                       </>
                     )}
                   </p>
+                  {posCount > 0 && p.unrealizedPnlPct != null && (
+                    <p
+                      className={cn(
+                        "mt-1 text-[11px] font-medium tabular-nums",
+                        getChangeColor(p.unrealizedPnlPct)
+                      )}
+                      data-testid={`platform-pnl-${p.id}`}
+                      title="P&L latent des positions (hors cash) — marché vs coût de revient"
+                    >
+                      {formatCurrency(
+                        p.unrealizedPnlBase || p.unrealizedPnlEur || "0",
+                        baseCurrency
+                      )}{" "}
+                      ({formatPercent(p.unrealizedPnlPct)})
+                    </p>
+                  )}
                 </div>
               </article>
             );
@@ -1545,6 +1628,24 @@ export function PlatformsTab({
               <p className="mt-0.5 text-xl font-semibold tabular-nums tracking-tight text-teal-800 dark:text-teal-300">
                 {formatCurrency(resolvePlatformValue(previewTarget), baseCurrency)}
               </p>
+              {(previewTarget.positionCount ?? 0) > 0 &&
+                previewTarget.unrealizedPnlPct != null && (
+                <p
+                  className={cn(
+                    "mt-1 text-xs font-medium tabular-nums",
+                    getChangeColor(previewTarget.unrealizedPnlPct)
+                  )}
+                  title="P&L latent des positions (hors cash) — marché vs coût de revient"
+                >
+                  {formatCurrency(
+                    previewTarget.unrealizedPnlBase ||
+                      previewTarget.unrealizedPnlEur ||
+                      "0",
+                    baseCurrency
+                  )}{" "}
+                  ({formatPercent(previewTarget.unrealizedPnlPct)})
+                </p>
+              )}
             </div>
 
             {previewTarget.notes && (

@@ -133,6 +133,10 @@ export type PlatformRow = {
   /** Cash + titres */
   totalValueEur?: string;
   totalValueBase?: string;
+  /** P&L latent des positions ouvertes (hors cash) — marché vs coût de revient */
+  unrealizedPnlEur?: string;
+  unrealizedPnlBase?: string;
+  unrealizedPnlPct?: string;
   lastTransactionAt?: string | null;
 };
 
