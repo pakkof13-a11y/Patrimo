@@ -32,7 +32,34 @@ type RegimeOutcome = {
   netAfterTaxEur: string;
 };
 
+type SchemeRow = {
+  assetId: string;
+  label: string;
+  scheme: string;
+  eligibleBaseEur: string;
+  totalReductionEur: string;
+  annualReductionEur: string;
+  yearsElapsed: number;
+  yearsRemaining: number;
+  finished: boolean;
+  subjectToGlobalCap: boolean;
+  baseWasCapped: boolean;
+  note: string | null;
+};
+
+type SchemesBlock = {
+  rows: SchemeRow[];
+  summary: {
+    totalAnnualEur: string;
+    cappedAnnualEur: string;
+    uncappedAnnualEur: string;
+    cappedAwayEur: string;
+    effectiveAnnualEur: string;
+  };
+};
+
 type TaxBundle = {
+  schemes: SchemesBlock;
   properties: Array<{ assetId: string; label: string; isRental: boolean }>;
   ifi: {
     lines: IfiLine[];
@@ -63,6 +90,16 @@ const REGIME_LABELS: Record<string, string> = {
   REEL_FONCIER: "Réel foncier",
   MICRO_BIC: "Micro-BIC",
   REEL_BIC: "Réel BIC",
+};
+
+const SCHEME_LABELS: Record<string, string> = {
+  PINEL: "Pinel",
+  PINEL_PLUS: "Pinel+",
+  DENORMANDIE: "Denormandie",
+  MALRAUX: "Malraux",
+  MONUMENT_HISTORIQUE: "Monument historique",
+  LOC_AVANTAGES: "Loc'Avantages",
+  CENSI_BOUVARD: "Censi-Bouvard",
 };
 
 const TMI_OPTIONS = [0, 11, 30, 41, 45];
@@ -185,6 +222,154 @@ function RentalSectionView({
           sur l&apos;autre régime, à cette TMI.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Réductions d'impôt des dispositifs, et leur plafonnement global.
+ *
+ * Le plafond de 10 000 € porte sur la somme des avantages concernés, pas sur
+ * chacun pris isolément : deux Pinel de 6 000 € annoncent 12 000 € mais n'en
+ * procurent que 10 000. Le montant perdu est donc affiché explicitement —
+ * c'est l'information qui manque partout ailleurs.
+ */
+function SchemesView({ schemes }: { schemes: SchemesBlock }) {
+  if (schemes.rows.length === 0) return null;
+  const s = schemes.summary;
+  const lost = num(s.cappedAwayEur);
+
+  return (
+    <div
+      className="mt-5 border-t border-[var(--border)] pt-4"
+      data-testid="re-schemes"
+    >
+      <h3 className="text-title text-sm">Dispositifs de défiscalisation</h3>
+
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {[
+          { label: "Réduction annuelle brute", value: num(s.totalAnnualEur) },
+          { label: "Perdu au plafonnement", value: -lost },
+          {
+            label: "Réduction imputable",
+            value: num(s.effectiveAnnualEur),
+            strong: true,
+          },
+        ].map((k) => (
+          <div
+            key={k.label}
+            className={cn(
+              "rounded-[var(--radius-md)] border border-[var(--border)] px-2.5 py-2",
+              k.strong && "bg-[var(--muted)]/40"
+            )}
+          >
+            <p className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
+              {k.label}
+            </p>
+            <p className="mt-0.5 text-sm font-semibold tabular-nums">
+              {formatCurrency(k.value)}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {lost > 0 ? (
+        <div
+          className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] leading-snug text-amber-900 dark:text-amber-200"
+          data-testid="re-schemes-capped"
+        >
+          <p className="font-semibold">
+            Plafond des niches fiscales atteint — {formatCurrency(lost)} perdus
+          </p>
+          <p className="mt-0.5">
+            Les avantages concernés totalisent{" "}
+            {formatCurrency(num(s.cappedAnnualEur))} alors que le plafond annuel
+            est de 10 000 €. Malraux et les Monuments historiques échappent à ce
+            plafond et ne sont pas comptés ici.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
+            <tr>
+              <th className="py-1.5 pr-2 font-medium">Bien</th>
+              <th className="py-1.5 pr-2 font-medium">Dispositif</th>
+              <th className="py-1.5 pr-2 text-right font-medium">Base retenue</th>
+              <th className="py-1.5 pr-2 text-right font-medium">Total</th>
+              <th className="py-1.5 pr-2 text-right font-medium">Par an</th>
+              <th className="py-1.5 text-right font-medium">Reste</th>
+            </tr>
+          </thead>
+          <tbody>
+            {schemes.rows.map((r) => (
+              <tr
+                key={r.assetId}
+                className={cn(
+                  "border-t border-[var(--border)]",
+                  r.finished && "opacity-60"
+                )}
+                data-testid={`re-scheme-${r.assetId}`}
+              >
+                <td className="py-1.5 pr-2">{r.label}</td>
+                <td className="py-1.5 pr-2">
+                  {SCHEME_LABELS[r.scheme] ?? r.scheme}
+                  {!r.subjectToGlobalCap && num(r.totalReductionEur) > 0 ? (
+                    <span className="ml-1.5 rounded bg-teal-500/10 px-1 py-0.5 text-[9px] text-teal-700 dark:text-teal-300">
+                      hors plafond
+                    </span>
+                  ) : null}
+                </td>
+                <td className="py-1.5 pr-2 text-right tabular-nums">
+                  {num(r.eligibleBaseEur) > 0
+                    ? formatCurrency(num(r.eligibleBaseEur))
+                    : "—"}
+                  {r.baseWasCapped ? (
+                    <span
+                      className="text-meta ml-1 text-[9px]"
+                      title="Base ramenée au plafond légal"
+                    >
+                      plafonnée
+                    </span>
+                  ) : null}
+                </td>
+                <td className="py-1.5 pr-2 text-right tabular-nums">
+                  {num(r.totalReductionEur) > 0
+                    ? formatCurrency(num(r.totalReductionEur))
+                    : "—"}
+                </td>
+                <td className="py-1.5 pr-2 text-right font-medium tabular-nums">
+                  {r.finished
+                    ? "terminé"
+                    : formatCurrency(num(r.annualReductionEur))}
+                </td>
+                <td className="py-1.5 text-right tabular-nums">
+                  {r.finished ? "—" : `${r.yearsRemaining} an${r.yearsRemaining > 1 ? "s" : ""}`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {schemes.rows.some((r) => r.note) ? (
+        <ul className="text-meta mt-2 space-y-0.5 leading-snug">
+          {schemes.rows
+            .filter((r) => r.note)
+            .map((r) => (
+              <li key={r.assetId}>
+                <strong>{r.label}</strong> — {r.note}
+              </li>
+            ))}
+        </ul>
+      ) : null}
+
+      <p className="text-meta mt-2 leading-snug">
+        Le calcul suppose l&apos;engagement de location tenu et les plafonds de
+        loyer et de ressources respectés — conditions que l&apos;application ne
+        vérifie pas.
+      </p>
     </div>
   );
 }
@@ -402,6 +587,7 @@ export function RealEstateTaxPanel({ className }: { className?: string }) {
         </div>
       ) : null}
 
+      {q.data?.schemes ? <SchemesView schemes={q.data.schemes} /> : null}
     </section>
   );
 }

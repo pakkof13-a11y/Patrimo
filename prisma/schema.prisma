@@ -370,6 +370,17 @@ model RealEstateDetail {
   commitmentEndDate DateTime?
   /// Meublé de tourisme classé — ouvre l'abattement micro-BIC majoré (71 %).
   isClassifiedTourism Boolean @default(false)
+  /// Année de l'investissement — détermine le barème du dispositif, qui a été
+  /// raboté en 2023 puis en 2024 pour le Pinel.
+  schemeStartYear     Int?
+  /// Durée d'engagement en années (6, 9 ou 12 en Pinel).
+  schemeCommitmentYears Int?
+  /// Base du dispositif : prix de revient du logement, ou montant des travaux
+  /// pour Malraux. Distincte du prix d'acquisition au journal, qui inclut les
+  /// frais et ne correspond pas à l'assiette légale.
+  schemeBaseEur       Decimal? @db.Decimal(14, 2)
+  /// Taux Malraux retenu : 30 % (PSMV) ou 22 % (PVAP).
+  schemeRatePct       Decimal? @db.Decimal(6, 3)
 
   // ── Exploitation ──
   monthlyRentEur       Decimal? @db.Decimal(12, 2)

@@ -83,6 +83,31 @@ export async function GET(req: Request) {
           taxEur: bundle.ifi.taxEur.toFixed(2),
           effectiveRatePct: bundle.ifi.effectiveRatePct.toFixed(4),
         },
+        schemes: {
+          rows: bundle.schemes.rows.map((r) => ({
+            assetId: r.assetId,
+            label: r.label,
+            scheme: r.scheme,
+            eligibleBaseEur: r.eligibleBaseEur.toFixed(2),
+            totalReductionEur: r.totalReductionEur.toFixed(2),
+            annualReductionEur: r.annualReductionEur.toFixed(2),
+            yearsElapsed: r.yearsElapsed,
+            yearsRemaining: r.yearsRemaining,
+            finished: r.finished,
+            subjectToGlobalCap: r.subjectToGlobalCap,
+            baseWasCapped: r.baseWasCapped,
+            note: r.note,
+          })),
+          summary: {
+            totalAnnualEur: bundle.schemes.summary.totalAnnualEur.toFixed(2),
+            cappedAnnualEur: bundle.schemes.summary.cappedAnnualEur.toFixed(2),
+            uncappedAnnualEur:
+              bundle.schemes.summary.uncappedAnnualEur.toFixed(2),
+            cappedAwayEur: bundle.schemes.summary.cappedAwayEur.toFixed(2),
+            effectiveAnnualEur:
+              bundle.schemes.summary.effectiveAnnualEur.toFixed(2),
+          },
+        },
         marginalTaxRatePct,
         rental: {
           bare: serializeRentalSection(bundle.rental.bare),

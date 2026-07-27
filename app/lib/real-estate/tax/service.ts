@@ -23,6 +23,12 @@ import {
   assessIndirectForIfi,
   expectedAnnualIncomeEur,
 } from "@/app/lib/real-estate/indirect";
+import {
+  computeSchemeReduction,
+  summarizeSchemes,
+  type SchemeResult,
+  type SchemesSummary,
+} from "./schemes";
 import { computeIfi, type IfiAsset, type IfiResult } from "./ifi";
 import {
   compareRentalRegimes,
@@ -59,6 +65,12 @@ export type PropertyTaxRow = {
   /** Location meublée (meublé classique ou saisonnier). */
   isFurnished: boolean;
   isClassifiedTourism: boolean;
+  schemeStartYear: number | null;
+  schemeCommitmentYears: number | null;
+  schemeBaseEur: string | null;
+  schemeRatePct: string | null;
+  /** Surface habitable — nécessaire au plafond Pinel de 5 500 €/m². */
+  livingAreaM2: number | null;
 };
 
 /** Véhicule indirect, tel qu'affiché et pris en compte dans l'IFI. */
@@ -91,8 +103,13 @@ export type RentalSection = {
   comparison: RentalComparison;
 };
 
+/** Réduction d'un dispositif, rattachée au bien qui la porte. */
+export type SchemeRow = SchemeResult & { assetId: string; label: string };
+
 export type RealEstateTaxBundle = {
   properties: PropertyTaxRow[];
+  /** Dispositifs de défiscalisation et leur plafonnement global. */
+  schemes: { rows: SchemeRow[]; summary: SchemesSummary };
   /** Véhicules indirects — entrent dans l'IFI, pas dans les revenus fonciers. */
   indirect: IndirectRow[];
   ifi: IfiResult;
@@ -163,6 +180,11 @@ export async function loadPropertyTaxRows(
       commitmentEndDate: detail.commitmentEndDate?.toISOString() ?? null,
       isFurnished: isFurnishedUsage(detail.usage),
       isClassifiedTourism: detail.isClassifiedTourism,
+      schemeStartYear: detail.schemeStartYear,
+      schemeCommitmentYears: detail.schemeCommitmentYears,
+      schemeBaseEur: detail.schemeBaseEur?.toString() ?? null,
+      schemeRatePct: detail.schemeRatePct?.toString() ?? null,
+      livingAreaM2: detail.livingAreaM2,
     };
   });
 }
@@ -339,8 +361,29 @@ export async function getRealEstateTaxBundle(
     ),
   });
 
+  // Les dispositifs : un bien sans dispositif renseigné n'en produit aucun.
+  // `grossRentEur` n'est passé que pour Loc'Avantages, seul dispositif dont
+  // la base est le loyer et non un prix de revient immobilisé.
+  const schemeRows: SchemeRow[] = properties
+    .filter((p) => p.taxScheme && p.taxScheme !== "AUCUN" && p.schemeStartYear)
+    .map((p) => ({
+      assetId: p.assetId,
+      label: p.label,
+      ...computeSchemeReduction({
+        scheme: p.taxScheme!,
+        startYear: p.schemeStartYear!,
+        commitmentYears: p.schemeCommitmentYears,
+        baseEur: p.schemeBaseEur,
+        surfaceM2: p.livingAreaM2,
+        malrauxRatePct: p.schemeRatePct,
+        locAvantagesRatePct: p.schemeRatePct,
+        grossRentEur: p.monthlyRentEur ? d(p.monthlyRentEur).times(12) : null,
+      }),
+    }));
+
   return {
     properties,
+    schemes: { rows: schemeRows, summary: summarizeSchemes(schemeRows) },
     indirect,
     ifi,
     rental: {
