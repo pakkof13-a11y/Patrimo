@@ -31,7 +31,22 @@ type PositionRow = {
   ltvPct: number | null;
   healthRisk: "CRITICAL" | "WARNING" | "OK" | null;
   ltvRisk: "CRITICAL" | "WARNING" | "OK" | null;
+  /** Indicatif, LP uniquement — cf. impermanent-loss.ts. Absent si non calculable. */
+  impermanentLossPct: string | null;
+  impermanentLossEur: string | null;
 };
+
+/** Jeton au-delà du second, saisi pour une LP à 3-5 actifs (Curve, Balancer…). */
+type ExtraLegForm = {
+  symbol: string;
+  amount: string;
+  entryPriceEur: string;
+  allocationPct: string;
+};
+
+function emptyExtraLeg(): ExtraLegForm {
+  return { symbol: "", amount: "", entryPriceEur: "", allocationPct: "" };
+}
 
 type ProtocolRow = {
   protocol: string;
@@ -78,6 +93,18 @@ const emptyForm = {
   rewardsValueEur: "",
   healthFactor: "",
   ltvPct: "",
+
+  // LP uniquement — ignorés pour les autres natures de position.
+  numberOfAssets: 2 as 2 | 3 | 4 | 5,
+  pairedSymbol: "",
+  pairedAmount: "",
+  pairedEntryPriceEur: "",
+  extraLegs: [] as ExtraLegForm[],
+  isConcentrated: false,
+  priceRangeMin: "",
+  priceRangeMax: "",
+  token1AllocationPct: "",
+  pairedAllocationPct: "",
 };
 
 /** Couleur d'un badge de risque — le rouge est réservé au liquidable. */
@@ -120,16 +147,47 @@ export function DefiPanel({ className }: { className?: string }) {
 
   const create = useMutation({
     mutationFn: async () => {
+      const isLp = form.positionType === "LP";
       const res = await fetch("/api/crypto/defi/positions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...form,
+          platformId: form.platformId,
+          assetSymbol: form.assetSymbol,
+          protocol: form.protocol,
+          positionType: form.positionType,
+          quantity: form.quantity,
+          unitPriceEur: form.unitPriceEur,
+          openedAt: form.openedAt,
           chain: form.chain || null,
           apyPct: form.apyPct || null,
           rewardsValueEur: form.rewardsValueEur || null,
           healthFactor: form.healthFactor || null,
           ltvPct: form.ltvPct || null,
+          ...(isLp
+            ? {
+                pairedSymbol: form.pairedSymbol,
+                pairedAmount: form.pairedAmount,
+                pairedEntryPriceEur: form.pairedEntryPriceEur,
+                extraLegs: form.extraLegs
+                  .slice(0, form.numberOfAssets - 2)
+                  .map((l) => ({
+                    symbol: l.symbol,
+                    amount: l.amount,
+                    entryPriceEur: l.entryPriceEur,
+                    allocationPct: l.allocationPct || null,
+                  })),
+                isConcentrated: form.isConcentrated,
+                priceRangeMin: form.isConcentrated ? form.priceRangeMin : null,
+                priceRangeMax: form.isConcentrated ? form.priceRangeMax : null,
+                token1AllocationPct: form.isConcentrated
+                  ? form.token1AllocationPct || null
+                  : null,
+                pairedAllocationPct: form.isConcentrated
+                  ? form.pairedAllocationPct || null
+                  : null,
+              }
+            : {}),
         }),
       });
       const json = await res.json();
@@ -147,16 +205,46 @@ export function DefiPanel({ className }: { className?: string }) {
 
   const positions = q.data?.positions ?? [];
   const summary = q.data?.summary;
-  const set = (k: keyof typeof form, v: string) =>
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
+  const setExtraLeg = (
+    index: number,
+    patch: Partial<ExtraLegForm>
+  ) =>
+    setForm((f) => {
+      const legs = [...f.extraLegs];
+      while (legs.length <= index) legs.push(emptyExtraLeg());
+      legs[index] = { ...legs[index]!, ...patch };
+      return { ...f, extraLegs: legs };
+    });
+
+  const setNumberOfAssets = (n: 2 | 3 | 4 | 5) =>
+    setForm((f) => {
+      const legs = [...f.extraLegs];
+      const needed = Math.max(0, n - 2);
+      while (legs.length < needed) legs.push(emptyExtraLeg());
+      return { ...f, numberOfAssets: n, extraLegs: legs.slice(0, needed) };
+    });
+
   const isDebtForm = isDebtPosition(form.positionType);
+  const isLpForm = form.positionType === "LP";
+  const activeExtraLegs = form.extraLegs.slice(0, form.numberOfAssets - 2);
+
   const canSubmit =
     form.platformId &&
     form.assetSymbol.trim() &&
     form.protocol.trim() &&
     form.quantity &&
-    form.unitPriceEur;
+    form.unitPriceEur &&
+    (!isLpForm ||
+      (form.pairedSymbol.trim() &&
+        form.pairedAmount &&
+        form.pairedEntryPriceEur &&
+        activeExtraLegs.every(
+          (l) => l.symbol.trim() && l.amount && l.entryPriceEur
+        ) &&
+        (!form.isConcentrated || (form.priceRangeMin && form.priceRangeMax))));
 
   if (q.isPending) {
     return <Skeleton className={cn("h-64 w-full", className)} />;
@@ -334,10 +422,193 @@ export function DefiPanel({ className }: { className?: string }) {
             )}
           </div>
 
+          {isLpForm && (
+            <div
+              className="mt-3 space-y-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--card)] p-3"
+              data-testid="defi-lp-section"
+            >
+              <div>
+                <span className="text-meta block">Nombre d&apos;actifs de la LP</span>
+                <div className="mt-1 flex gap-1.5" role="group" aria-label="Nombre d'actifs">
+                  {([2, 3, 4, 5] as const).map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setNumberOfAssets(n)}
+                      aria-pressed={form.numberOfAssets === n}
+                      data-testid={`defi-lp-nassets-${n}`}
+                      className={cn(
+                        "rounded-md border px-3 py-1 text-xs font-medium transition",
+                        form.numberOfAssets === n
+                          ? "border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)]"
+                          : "border-[var(--border)] text-[var(--muted-foreground)] hover:bg-[var(--muted)]/40"
+                      )}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                <label className="text-meta block">
+                  Jeton 2 (second actif)
+                  <input
+                    className="input mt-1 w-full"
+                    placeholder="USDC"
+                    value={form.pairedSymbol}
+                    onChange={(e) => set("pairedSymbol", e.target.value)}
+                    data-testid="defi-lp-token2-symbol"
+                  />
+                </label>
+                <label className="text-meta block">
+                  Quantité jeton 2
+                  <input
+                    inputMode="decimal"
+                    className="input mt-1 w-full"
+                    value={form.pairedAmount}
+                    onChange={(e) => set("pairedAmount", e.target.value)}
+                    data-testid="defi-lp-token2-amount"
+                  />
+                </label>
+                <label className="text-meta block">
+                  Prix d&apos;entrée jeton 2 (€)
+                  <input
+                    inputMode="decimal"
+                    className="input mt-1 w-full"
+                    value={form.pairedEntryPriceEur}
+                    onChange={(e) => set("pairedEntryPriceEur", e.target.value)}
+                    data-testid="defi-lp-token2-entry"
+                  />
+                </label>
+
+                {activeExtraLegs.map((leg, i) => (
+                  <div key={i} className="contents">
+                    <label className="text-meta block">
+                      Jeton {i + 3}
+                      <input
+                        className="input mt-1 w-full"
+                        value={leg.symbol}
+                        onChange={(e) => setExtraLeg(i, { symbol: e.target.value })}
+                        data-testid={`defi-lp-token${i + 3}-symbol`}
+                      />
+                    </label>
+                    <label className="text-meta block">
+                      Quantité jeton {i + 3}
+                      <input
+                        inputMode="decimal"
+                        className="input mt-1 w-full"
+                        value={leg.amount}
+                        onChange={(e) => setExtraLeg(i, { amount: e.target.value })}
+                        data-testid={`defi-lp-token${i + 3}-amount`}
+                      />
+                    </label>
+                    <label className="text-meta block">
+                      Prix d&apos;entrée jeton {i + 3} (€)
+                      <input
+                        inputMode="decimal"
+                        className="input mt-1 w-full"
+                        value={leg.entryPriceEur}
+                        onChange={(e) => setExtraLeg(i, { entryPriceEur: e.target.value })}
+                        data-testid={`defi-lp-token${i + 3}-entry`}
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
+
+              <label className="flex items-center gap-2 text-meta">
+                <input
+                  type="checkbox"
+                  checked={form.isConcentrated}
+                  onChange={(e) => set("isConcentrated", e.target.checked)}
+                  data-testid="defi-lp-concentrated"
+                />
+                Liquidité concentrée (plage de prix, type Uniswap V3 / Curve)
+              </label>
+
+              {form.isConcentrated && (
+                <div className="space-y-2 rounded-[var(--radius-md)] bg-[var(--muted)]/30 p-2.5">
+                  <p className="text-meta">
+                    La plage définit l&apos;intervalle où la position génère des frais.
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className="text-meta block">
+                      Prix min
+                      <input
+                        inputMode="decimal"
+                        className="input mt-1 w-full"
+                        placeholder="0.0001"
+                        value={form.priceRangeMin}
+                        onChange={(e) => set("priceRangeMin", e.target.value)}
+                        data-testid="defi-lp-range-min"
+                      />
+                    </label>
+                    <label className="text-meta block">
+                      Prix max
+                      <input
+                        inputMode="decimal"
+                        className="input mt-1 w-full"
+                        placeholder="2.5"
+                        value={form.priceRangeMax}
+                        onChange={(e) => set("priceRangeMax", e.target.value)}
+                        data-testid="defi-lp-range-max"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <label className="text-meta block">
+                      % jeton 1
+                      <input
+                        inputMode="decimal"
+                        className="input mt-1 w-full"
+                        value={form.token1AllocationPct}
+                        onChange={(e) => set("token1AllocationPct", e.target.value)}
+                        data-testid="defi-lp-alloc-1"
+                      />
+                    </label>
+                    <label className="text-meta block">
+                      % jeton 2
+                      <input
+                        inputMode="decimal"
+                        className="input mt-1 w-full"
+                        value={form.pairedAllocationPct}
+                        onChange={(e) => set("pairedAllocationPct", e.target.value)}
+                        data-testid="defi-lp-alloc-2"
+                      />
+                    </label>
+                    {activeExtraLegs.map((leg, i) => (
+                      <label key={i} className="text-meta block">
+                        % jeton {i + 3}
+                        <input
+                          inputMode="decimal"
+                          className="input mt-1 w-full"
+                          value={leg.allocationPct}
+                          onChange={(e) =>
+                            setExtraLeg(i, { allocationPct: e.target.value })
+                          }
+                          data-testid={`defi-lp-alloc-${i + 3}`}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <p className="text-meta">
+                    Laissez tout vide pour une répartition égale implicite, ou
+                    renseignez les {form.numberOfAssets} champs — la somme doit
+                    faire 100 %.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           <p className="text-meta mt-2">
             {isDebtForm
               ? "Un emprunt est saisi en montant positif : il se retranche automatiquement du net DeFi."
-              : "La valeur affichée viendra du journal, pas de cette saisie — le prix unitaire ne sert qu'à l'écriture d'entrée."}
+              : isLpForm
+                ? "La valeur affichée viendra du journal pour le premier jeton ; les suivants ne servent qu'au calcul de l'impermanent loss."
+                : "La valeur affichée viendra du journal, pas de cette saisie — le prix unitaire ne sert qu'à l'écriture d'entrée."}
           </p>
 
           <div className="mt-3 flex items-center gap-2">
@@ -439,6 +710,7 @@ export function DefiPanel({ className }: { className?: string }) {
                   <th className="py-1.5 pr-2">Actif</th>
                   <th className="py-1.5 pr-2 text-right">APY</th>
                   <th className="py-1.5 pr-2 text-right">Santé</th>
+                  <th className="py-1.5 pr-2 text-right">IL</th>
                   <th className="py-1.5 text-right">Valeur</th>
                 </tr>
               </thead>
@@ -487,6 +759,37 @@ export function DefiPanel({ className }: { className?: string }) {
                         </span>
                       ) : (
                         "—"
+                      )}
+                    </td>
+                    <td
+                      className="py-1.5 pr-2 text-right tabular-nums"
+                      data-testid="defi-row-il"
+                    >
+                      {p.positionType !== "LP" ? (
+                        "—"
+                      ) : p.impermanentLossPct != null ? (
+                        <span
+                          className={cn(
+                            "font-medium",
+                            Number(p.impermanentLossPct) < 0
+                              ? "text-[var(--danger)]"
+                              : "text-[var(--success)]"
+                          )}
+                          title={
+                            p.impermanentLossEur != null
+                              ? formatCurrency(p.impermanentLossEur, "EUR")
+                              : undefined
+                          }
+                        >
+                          {Number(p.impermanentLossPct).toLocaleString("fr-FR", {
+                            maximumFractionDigits: 2,
+                          })}{" "}
+                          %
+                        </span>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]" title="Prix courant indisponible pour au moins un jeton">
+                          indisponible
+                        </span>
                       )}
                     </td>
                     <td

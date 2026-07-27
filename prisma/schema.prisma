@@ -1010,7 +1010,37 @@ model DefiPositionDetail {
   /// l'Asset lui-même).
   pairedSymbol String?
   pairedAmount Decimal? @db.Decimal(38, 18)
+  /// Prix unitaire (EUR) du second actif au moment de l'engagement. Sans lui,
+  /// l'IL ne peut pas se calculer : c'est le prix courant du premier actif
+  /// (porté par Asset) qui donne l'autre moitié de la formule.
+  pairedEntryPriceEur Decimal? @db.Decimal(28, 12)
   poolAddress  String?
+
+  /// LP à 3, 4 ou 5 jetons (Curve, Balancer…) : jetons au-delà du second,
+  /// chacun `{ symbol, amount, entryPriceEur, allocationPct? }`.
+  ///
+  /// JSON plutôt que des colonnes `token3Symbol`..`token5Symbol` : le nombre
+  /// de jetons au-delà de 2 est rare et variable, des colonnes figées à 5
+  /// forceraient une nouvelle migration pour un pool à 6 jetons alors qu'un
+  /// tableau n'a pas de plafond arbitraire. Les deux premiers jetons restent
+  /// des colonnes dédiées : ce sont eux que lit `groupByProtocol`/l'API sans
+  /// désérialiser de JSON, et le cas 2-jetons (l'immense majorité des LP)
+  /// reste aussi simple qu'avant cette extension.
+  pairedLegs Json?
+
+  /// Liquidité concentrée façon Uniswap V3 / Curve : la position n'est
+  /// active que dans `[priceRangeMin, priceRangeMax]`. `false` = plage
+  /// complète (LP classique), seul cas où ces trois champs restent vides.
+  isConcentrated Boolean  @default(false)
+  priceRangeMin  Decimal? @db.Decimal(38, 18)
+  priceRangeMax  Decimal? @db.Decimal(38, 18)
+
+  /// Répartition de la valeur déposée entre le premier et le second jeton, en
+  /// %. Nulle sur une LP classique (répartition ≈ 50/50 implicite) ; posée
+  /// par l'utilisateur sur une position concentrée, où l'écart au range
+  /// pousse la répartition loin de 50/50.
+  token1AllocationPct  Decimal? @db.Decimal(6, 3)
+  pairedAllocationPct  Decimal? @db.Decimal(6, 3)
 
   /// Rendement annualisé affiché par le protocole, en %. Déclaratif : sert à
   /// comparer, jamais à valoriser.

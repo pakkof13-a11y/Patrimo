@@ -10,6 +10,14 @@ import { d } from "@/app/lib/money/decimal";
 import { prisma } from "@/app/lib/prisma";
 import { getAssetValues } from "@/app/lib/portfolio/asset-values";
 import {
+  resolveCoingeckoId,
+  fetchCoingeckoSimplePrices,
+} from "@/app/lib/market/providers/coingecko";
+import {
+  computeImpermanentLoss,
+  type ImpermanentLossLeg,
+} from "./impermanent-loss";
+import {
   groupByProtocol,
   groupByType,
   summarizeDefi,
@@ -22,7 +30,31 @@ export type DefiBundle = {
   byProtocol: ReturnType<typeof groupByProtocol>;
   byType: ReturnType<typeof groupByType>;
   summary: ReturnType<typeof summarizeDefi>;
+  /**
+   * IL par position LP, tenue à part de `positions` : c'est une métrique
+   * indicative (cf. `impermanent-loss.ts`), pas une valorisation — la
+   * mélanger aux champs financiers de `DefiPositionView` laisserait croire
+   * qu'elle est de même nature que `valueEur`.
+   */
+  impermanentLoss: Map<
+    string,
+    { pctOfHodl: string; amountEur: string; legsPriced: number; legsTotal: number }
+  >;
 };
+
+type StoredLpLeg = {
+  symbol?: unknown;
+  amount?: unknown;
+  entryPriceEur?: unknown;
+  allocationPct?: unknown;
+};
+
+function parsePairedLegs(json: unknown): StoredLpLeg[] {
+  if (!Array.isArray(json)) return [];
+  return json.filter(
+    (l): l is StoredLpLeg => typeof l === "object" && l !== null
+  );
+}
 
 /**
  * Charge les positions DeFi de l'utilisateur, valorisées par le journal.
@@ -46,6 +78,7 @@ export async function getDefiBundle(userId: string): Promise<DefiBundle> {
       byProtocol: groupByProtocol(empty),
       byType: groupByType(empty),
       summary: summarizeDefi(empty),
+      impermanentLoss: new Map(),
     };
   }
 
@@ -82,10 +115,145 @@ export async function getDefiBundle(userId: string): Promise<DefiBundle> {
     });
   }
 
+  const impermanentLoss = await computeLpImpermanentLoss(details, values);
+
   return {
     positions: inputs.map(toPositionView),
     byProtocol: groupByProtocol(inputs),
     byType: groupByType(inputs),
     summary: summarizeDefi(inputs),
+    impermanentLoss,
   };
+}
+
+/**
+ * IL de chaque position LP.
+ *
+ * Le premier jeton est valorisé par le journal (entrée = coût moyen, actuel =
+ * prix courant de l'Asset) — jamais recopié. Les jetons suivants n'ont pas
+ * d'Asset propre (ce n'est pas une position ouverte séparément) : leur prix
+ * d'entrée vient de la saisie, leur prix courant est résolu via CoinGecko,
+ * en un seul appel batché pour toute la liste — le budget d'appels du
+ * fournisseur est déjà partagé ailleurs dans l'app, pas la peine de le
+ * refaire ici par position.
+ */
+async function computeLpImpermanentLoss(
+  details: Awaited<ReturnType<typeof prisma.defiPositionDetail.findMany>>,
+  values: Awaited<ReturnType<typeof getAssetValues>>
+): Promise<DefiBundle["impermanentLoss"]> {
+  const out: DefiBundle["impermanentLoss"] = new Map();
+  const lpRows = details.filter(
+    (r) => r.positionType === "LP" && r.pairedSymbol && values.get(r.assetId)
+  );
+  if (lpRows.length === 0) return out;
+
+  // Un seul batch CoinGecko pour toutes les jambes non-primaires de toutes
+  // les positions LP de l'utilisateur.
+  const idsBySymbol = new Map<string, string>();
+  for (const row of lpRows) {
+    const symbols = [row.pairedSymbol!, ...parsePairedLegs(row.pairedLegs).map((l) => String(l.symbol ?? ""))];
+    for (const sym of symbols) {
+      const s = sym.trim().toUpperCase();
+      if (!s || idsBySymbol.has(s)) continue;
+      const cgId = resolveCoingeckoId(s);
+      if (cgId) idsBySymbol.set(s, cgId);
+    }
+  }
+
+  let cgPrices: Record<string, Record<string, number | undefined>> = {};
+  if (idsBySymbol.size > 0) {
+    try {
+      cgPrices = await fetchCoingeckoSimplePrices([...idsBySymbol.values()], ["eur"]);
+    } catch (e) {
+      // Prix indisponibles → IL non calculable pour les jambes concernées,
+      // pas une erreur qui doit faire échouer tout l'onglet DeFi.
+      console.error("[defi-service] CoinGecko simple/price", e);
+    }
+  }
+  const priceForSymbol = (sym: string): number | null => {
+    const cgId = idsBySymbol.get(sym.trim().toUpperCase());
+    if (!cgId) return null;
+    const p = cgPrices[cgId]?.eur;
+    return typeof p === "number" && Number.isFinite(p) ? p : null;
+  };
+
+  for (const row of lpRows) {
+    const primary = values.get(row.assetId)!;
+    const primaryEntry =
+      primary.quantity.gt(0) ? primary.costBasisEur.div(primary.quantity) : null;
+    if (!primaryEntry || primaryEntry.lte(0)) continue;
+
+    // `depositedEur` de chaque jambe = quantité × prix d'entrée : c'est la
+    // base en euros que `computeImpermanentLoss` convertit en montant
+    // absolu. Pour la première jambe elle est déjà calculée par le journal
+    // (`costBasisEur`) ; les suivantes n'ont pas d'Asset, donc pas de
+    // costBasis — recalculée ici à partir de la saisie.
+    const legs: ImpermanentLossLeg[] = [
+      {
+        symbol: "primary",
+        entryPriceEur: primaryEntry,
+        currentPriceEur: primary.priceEur,
+        weightPct: row.token1AllocationPct ? d(row.token1AllocationPct.toString()) : null,
+      },
+    ];
+    let depositedEur = primary.costBasisEur;
+    let legsPriced = primary.priceEur.gt(0) ? 1 : 0;
+    const legsTotal = { count: 1 };
+
+    const addLeg = (
+      symbol: string,
+      amountRaw: unknown,
+      entryPriceRaw: unknown,
+      weightRaw: unknown
+    ) => {
+      const sym = symbol.trim();
+      const amount = amountRaw != null ? d(String(amountRaw)) : d(0);
+      const entryPriceEur = entryPriceRaw != null ? d(String(entryPriceRaw)) : d(0);
+      if (!sym || amount.lte(0) || entryPriceEur.lte(0)) return;
+      legsTotal.count += 1;
+      depositedEur = depositedEur.plus(amount.times(entryPriceEur));
+      const current = priceForSymbol(sym);
+      if (current != null) legsPriced += 1;
+      legs.push({
+        symbol: sym,
+        entryPriceEur,
+        currentPriceEur: current != null ? d(current) : d(0),
+        weightPct: weightRaw != null ? d(String(weightRaw)) : null,
+      });
+    };
+
+    if (row.pairedSymbol) {
+      addLeg(
+        row.pairedSymbol,
+        row.pairedAmount?.toString(),
+        row.pairedEntryPriceEur?.toString(),
+        row.pairedAllocationPct?.toString()
+      );
+    }
+    for (const extra of parsePairedLegs(row.pairedLegs)) {
+      addLeg(
+        String(extra.symbol ?? ""),
+        extra.amount,
+        extra.entryPriceEur,
+        extra.allocationPct
+      );
+    }
+
+    // Une jambe au prix courant indisponible fausserait l'IL (elle serait
+    // vue comme ayant perdu 100 % de sa valeur) : ne pas calculer plutôt que
+    // d'afficher un chiffre qui ment.
+    if (legs.length < 2 || legsPriced < legsTotal.count) continue;
+
+    const il = computeImpermanentLoss(legs, depositedEur);
+    if (!il) continue;
+
+    out.set(row.id, {
+      pctOfHodl: il.pctOfHodl.times(100).toFixed(2),
+      amountEur: il.amountEur.toFixed(2),
+      legsPriced,
+      legsTotal: legsTotal.count,
+    });
+  }
+
+  return out;
 }

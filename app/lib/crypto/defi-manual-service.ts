@@ -23,6 +23,14 @@ export class DefiInputError extends Error {
   }
 }
 
+/** Jeton d'une LP au-delà du second (3ᵉ à 5ᵉ) — persisté dans `pairedLegs`. */
+export type ExtraLpLeg = {
+  symbol: string;
+  amount: string;
+  entryPriceEur: string;
+  allocationPct?: string | null;
+};
+
 export type CreateDefiInput = {
   platformId: string;
   /** Actif engagé — « ETH », « USDC »… */
@@ -48,7 +56,20 @@ export type CreateDefiInput = {
 
   pairedSymbol?: string | null;
   pairedAmount?: string | null;
+  /** Prix (EUR) du second jeton à l'engagement — requis pour l'IL. */
+  pairedEntryPriceEur?: string | null;
   poolAddress?: string | null;
+
+  /** 3ᵉ à 5ᵉ jeton d'une LP multi-actifs (Curve, Balancer…). */
+  extraLegs?: ExtraLpLeg[] | null;
+
+  /** Liquidité concentrée façon Uniswap V3 / Curve concentré. */
+  isConcentrated?: boolean;
+  priceRangeMin?: string | null;
+  priceRangeMax?: string | null;
+  token1AllocationPct?: string | null;
+  pairedAllocationPct?: string | null;
+
   notes?: string | null;
 };
 
@@ -62,6 +83,98 @@ function dec(v: string | null | undefined) {
   if (v == null || v === "") return null;
   const n = d(v);
   return n.isFinite() ? n.toString() : null;
+}
+
+const MAX_LP_TOKENS = 5;
+const ALLOCATION_SUM_TOLERANCE_PCT = 0.5;
+
+/**
+ * Valide une LP multi-actifs et, si concentrée, sa plage de prix et sa
+ * répartition. Isolée du corps principal parce que ces règles ne concernent
+ * qu'un `positionType === "LP"` — les mélanger aux checks génériques rendrait
+ * les erreurs des positions STAKING/LENDING/… illisibles.
+ */
+export function validateLpInput(
+  input: CreateDefiInput,
+  primarySymbol: string,
+  extraLegs: ExtraLpLeg[]
+): void {
+  const pairedSymbol = input.pairedSymbol?.trim().toUpperCase() || "";
+  if (!pairedSymbol) {
+    throw new DefiInputError(
+      "Une position LP requiert au moins un second jeton"
+    );
+  }
+  const pairedAmount = d(input.pairedAmount ?? "");
+  if (!pairedAmount.isFinite() || pairedAmount.lte(0)) {
+    throw new DefiInputError("La quantité du second jeton est requise");
+  }
+  const pairedEntry = d(input.pairedEntryPriceEur ?? "");
+  if (!pairedEntry.isFinite() || pairedEntry.lte(0)) {
+    throw new DefiInputError(
+      "Le prix d'entrée du second jeton est requis (nécessaire au calcul de l'IL)"
+    );
+  }
+
+  const symbols = [primarySymbol, pairedSymbol];
+  for (const leg of extraLegs) {
+    const sym = leg.symbol.trim().toUpperCase();
+    if (!sym) throw new DefiInputError("Chaque jeton supplémentaire doit être renseigné");
+    const amount = d(leg.amount);
+    if (!amount.isFinite() || amount.lte(0)) {
+      throw new DefiInputError(`Quantité invalide pour ${sym}`);
+    }
+    const entry = d(leg.entryPriceEur);
+    if (!entry.isFinite() || entry.lte(0)) {
+      throw new DefiInputError(
+        `Prix d'entrée requis pour ${sym} (nécessaire au calcul de l'IL)`
+      );
+    }
+    symbols.push(sym);
+  }
+
+  if (symbols.length > MAX_LP_TOKENS) {
+    throw new DefiInputError(`Une LP ne peut pas dépasser ${MAX_LP_TOKENS} jetons`);
+  }
+  if (new Set(symbols).size !== symbols.length) {
+    throw new DefiInputError("Les jetons d'une LP doivent être distincts");
+  }
+
+  if (input.isConcentrated) {
+    const min = d(input.priceRangeMin ?? "");
+    const max = d(input.priceRangeMax ?? "");
+    if (!min.isFinite() || !max.isFinite() || min.lte(0) || max.lte(0)) {
+      throw new DefiInputError(
+        "La plage de prix (min et max) est requise pour une position concentrée"
+      );
+    }
+    if (min.gte(max)) {
+      throw new DefiInputError("Le prix minimum doit être inférieur au prix maximum");
+    }
+
+    // Répartition : exigée dans son ensemble dès qu'un seul champ est posé,
+    // sinon un token1% renseigné sans le reste laisserait croire à une
+    // répartition à moitié saisie.
+    const allocations = [
+      input.token1AllocationPct,
+      input.pairedAllocationPct,
+      ...extraLegs.map((l) => l.allocationPct),
+    ];
+    const anyProvided = allocations.some((a) => a != null && a !== "");
+    if (anyProvided) {
+      if (allocations.some((a) => a == null || a === "")) {
+        throw new DefiInputError(
+          "Renseignez la répartition (%) de tous les jetons, ou aucun"
+        );
+      }
+      const sum = allocations.reduce((s, a) => s.plus(d(a as string)), d(0));
+      if (sum.minus(100).abs().gt(ALLOCATION_SUM_TOLERANCE_PCT)) {
+        throw new DefiInputError(
+          `La somme des répartitions doit être égale à 100 % (actuellement ${sum.toFixed(1)} %)`
+        );
+      }
+    }
+  }
 }
 
 export async function createDefiPosition(
@@ -104,6 +217,23 @@ export async function createDefiPosition(
   // liquidation ne peut se déclencher.
   const isDebt = isDebtPosition(input.positionType);
 
+  const isLp = input.positionType === "LP";
+  const extraLegs = isLp ? (input.extraLegs ?? []) : [];
+
+  if (isLp) {
+    validateLpInput(input, symbol, extraLegs);
+  }
+
+  const pairedLegsJson =
+    extraLegs.length > 0
+      ? extraLegs.map((leg) => ({
+          symbol: leg.symbol.trim().toUpperCase(),
+          amount: dec(leg.amount),
+          entryPriceEur: dec(leg.entryPriceEur),
+          allocationPct: dec(leg.allocationPct),
+        }))
+      : undefined;
+
   return prisma.$transaction(async (tx) => {
     const asset = await tx.asset.create({
       data: {
@@ -130,6 +260,13 @@ export async function createDefiPosition(
         positionType: input.positionType,
         pairedSymbol: input.pairedSymbol?.trim().toUpperCase() || null,
         pairedAmount: dec(input.pairedAmount),
+        pairedEntryPriceEur: dec(input.pairedEntryPriceEur),
+        pairedLegs: pairedLegsJson,
+        isConcentrated: isLp ? Boolean(input.isConcentrated) : false,
+        priceRangeMin: isLp && input.isConcentrated ? dec(input.priceRangeMin) : null,
+        priceRangeMax: isLp && input.isConcentrated ? dec(input.priceRangeMax) : null,
+        token1AllocationPct: isLp ? dec(input.token1AllocationPct) : null,
+        pairedAllocationPct: isLp ? dec(input.pairedAllocationPct) : null,
         poolAddress: input.poolAddress?.trim() || null,
         apyPct: dec(input.apyPct),
         rewardsSymbol: input.rewardsSymbol?.trim().toUpperCase() || null,

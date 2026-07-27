@@ -45,7 +45,28 @@ const createSchema = z.object({
 
   pairedSymbol: z.string().trim().max(24).optional().nullable(),
   pairedAmount: decimalString.optional().nullable(),
+  pairedEntryPriceEur: decimalString.optional().nullable(),
   poolAddress: z.string().trim().max(120).optional().nullable(),
+
+  extraLegs: z
+    .array(
+      z.object({
+        symbol: z.string().trim().min(1).max(24),
+        amount: decimalString,
+        entryPriceEur: decimalString,
+        allocationPct: decimalString.optional().nullable(),
+      })
+    )
+    .max(3) // 3ᵉ à 5ᵉ jeton — primaire + pairedSymbol couvrent les 2 premiers
+    .optional()
+    .nullable(),
+
+  isConcentrated: z.boolean().optional(),
+  priceRangeMin: decimalString.optional().nullable(),
+  priceRangeMax: decimalString.optional().nullable(),
+  token1AllocationPct: decimalString.optional().nullable(),
+  pairedAllocationPct: decimalString.optional().nullable(),
+
   notes: z.string().trim().max(2000).optional().nullable(),
 });
 

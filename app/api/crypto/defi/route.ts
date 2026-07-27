@@ -25,22 +25,29 @@ export async function GET() {
 
     return NextResponse.json(
       {
-        positions: bundle.positions.map((p) => ({
-          id: p.id,
-          protocol: p.protocol,
-          chain: p.chain,
-          positionType: p.positionType,
-          assetSymbol: p.assetSymbol,
-          valueEur: p.valueEur.toFixed(2),
-          netValueEur: p.netValueEur.toFixed(2),
-          isDebt: p.isDebt,
-          rewardsValueEur: p.rewardsValueEur?.toFixed(2) ?? null,
-          apyPct: p.apyPct?.toFixed(2) ?? null,
-          healthFactor: p.healthFactor,
-          ltvPct: p.ltvPct,
-          healthRisk: p.healthRisk,
-          ltvRisk: p.ltvRisk,
-        })),
+        positions: bundle.positions.map((p) => {
+          const il = bundle.impermanentLoss.get(p.id);
+          return {
+            id: p.id,
+            protocol: p.protocol,
+            chain: p.chain,
+            positionType: p.positionType,
+            assetSymbol: p.assetSymbol,
+            valueEur: p.valueEur.toFixed(2),
+            netValueEur: p.netValueEur.toFixed(2),
+            isDebt: p.isDebt,
+            rewardsValueEur: p.rewardsValueEur?.toFixed(2) ?? null,
+            apyPct: p.apyPct?.toFixed(2) ?? null,
+            healthFactor: p.healthFactor,
+            ltvPct: p.ltvPct,
+            healthRisk: p.healthRisk,
+            ltvRisk: p.ltvRisk,
+            // Indicatif (cf. impermanent-loss.ts) : absent si LP non
+            // renseignée avec prix d'entrée, ou si un prix courant manque.
+            impermanentLossPct: il?.pctOfHodl ?? null,
+            impermanentLossEur: il?.amountEur ?? null,
+          };
+        }),
         byProtocol: bundle.byProtocol.map((g) => ({
           protocol: g.protocol,
           chains: g.chains,
