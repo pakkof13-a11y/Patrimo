@@ -234,7 +234,13 @@ export async function getHoldings(
     loadLedgerForUser(userId),
     prisma.asset.findMany({
       where: { userId },
-      include: { platform: true, priceQuote: true },
+      include: {
+        platform: true,
+        priceQuote: true,
+        // Relation 1:1 : sert uniquement à empêcher la fusion d'une position
+        // DeFi avec le solde comptant de même ticker (cf. `mergeKey`).
+        defiPosition: { select: { id: true } },
+      },
     }),
     prisma.transaction.findMany({
       where: { userId },
@@ -391,10 +397,21 @@ export async function getHoldings(
     rows.push(leg);
   }
 
+  /** Actifs adossés à une position DeFi — exclus de la fusion par ticker. */
+  const defiAssetIds = new Set(
+    assets.filter((a) => a.defiPosition).map((a) => a.id)
+  );
+
   // Merge :
   // 1) même assetId multi-plateforme
   // 2) crypto même ticker + enveloppe → une ligne (ETH Base + ETH Revolut)
   function mergeKey(row: HoldingRow): string {
+    // Un ETH staké chez Lido n'est pas un ETH en portefeuille : il porte un
+    // risque de protocole, un rendement et parfois une durée de déblocage.
+    // Les fondre en une ligne rendrait aussi la lecture « comptant + DeFi »
+    // trompeuse — le même ETH apparaîtrait dans les deux vues.
+    if (defiAssetIds.has(row.assetId)) return `id:${row.assetId}`;
+
     const tick = (row.ticker || "").trim().toUpperCase();
     const env = (row.accountType || "CTO").toUpperCase();
     const isCrypto =

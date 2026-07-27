@@ -78,6 +78,10 @@ import { ImportCsvModal } from "@/components/modals/import-csv-modal";
 import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
 import { PropertyModal } from "@/components/modals/property-modal";
 import { RealEstateTab } from "@/components/real-estate/real-estate-tab";
+import {
+  CryptoTab,
+  type CryptoSubTab,
+} from "@/components/crypto/crypto-tab";
 import { REAL_ESTATE_PLATFORM_TYPE } from "@/app/lib/real-estate/platform-type";
 import { CommandPalette } from "@/components/layout/command-palette";
 import {
@@ -253,6 +257,7 @@ function PortfolioAppClient({
     () => new Set()
   );
   const [detailAssetId, setDetailAssetId] = useState<string | null>(null);
+  const [cryptoSub, setCryptoSub] = useState<CryptoSubTab>("SPOT");
   const [assetLabel, setAssetLabel] = useState("");
   const [platformComboLabel, setPlatformComboLabel] = useState("");
   const [txPlatformLabel, setTxPlatformLabel] = useState("");
@@ -720,7 +725,11 @@ function PortfolioAppClient({
   const txCount =
     txMetaQ.data?.totalAll ?? txMetaQ.data?.total ?? 0;
 
-  const positionsView = isPositionsTab(tab);
+  // Sous l'onglet Crypto, le tableau Positions rend la vue « Comptant ». La
+  // vue DeFi le remplace : afficher les deux montrerait deux fois le même
+  // patrimoine sous deux formes, sans dire laquelle fait foi.
+  const positionsView =
+    isPositionsTab(tab) && !(tab === "crypto" && cryptoSub === "DEFI");
   const isDashboard = tab === "dashboard";
 
   /** Maturité du compte → densité du dashboard + KPI strip */
@@ -1037,6 +1046,14 @@ function PortfolioAppClient({
             */}
             {tab === "immobilier" && (
               <RealEstateTab holdings={allHoldings} className="mb-3" />
+            )}
+
+            {tab === "crypto" && (
+              <CryptoTab
+                sub={cryptoSub}
+                onSubChange={setCryptoSub}
+                className="mb-3"
+              />
             )}
 
             <div data-slot="positions">
