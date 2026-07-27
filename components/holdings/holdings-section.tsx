@@ -52,6 +52,11 @@ import {
   type TriggerField,
 } from "@/components/holdings/holding-table-row";
 import { holdingsToCsv } from "@/app/lib/portfolio/holdings-csv";
+import {
+  matchesPnlFilter,
+  parsePnlFilter,
+  type PnlFilter,
+} from "@/app/lib/portfolio/pnl-filter";
 import { PageJump } from "@/components/ui/page-jump";
 import {
   ACCOUNT_TYPES,
@@ -173,6 +178,8 @@ export function HoldingsSection({
   const [searchInput, setSearchInput] = useState("");
   const debouncedSearch = useDebouncedValue(searchInput, 300);
   const [accountFilter, setAccountFilter] = useState("");
+  /** Filtre rapide P&L latent : tout / gagnants / perdants */
+  const [pnlFilter, setPnlFilter] = useState<PnlFilter>("all");
   /** Filtre plateforme (deep-link depuis Mes plateformes : ?platformId=) */
   const platformIdFromUrl = searchParams.get("platformId") || "";
   const platformFilterId = platformIdFromUrl.trim();
@@ -362,7 +369,7 @@ export function HoldingsSection({
   }, []);
 
   // Reset page quand tab/filtres/tri changent (adjust state while rendering)
-  const paginationResetKey = `${tab}:${envelopeKey}:${holdings.length}:${debouncedSearch}:${accountFilter}:${platformFilterId}:${groupBy}`;
+  const paginationResetKey = `${tab}:${envelopeKey}:${holdings.length}:${debouncedSearch}:${accountFilter}:${platformFilterId}:${groupBy}:${pnlFilter}`;
   const [prevPaginationResetKey, setPrevPaginationResetKey] = useState(
     paginationResetKey
   );
@@ -409,19 +416,24 @@ export function HoldingsSection({
       ]);
     });
 
-    // Sans filtre plateforme → vue agrégée inchangée
-    if (!platformFilterId) return visible;
+    // Reslice métriques (qty / MV / P&L) sur la jambe filtrée uniquement —
+    // le filtre P&L doit porter sur les valeurs affichées, donc après reslice.
+    const resliced = platformFilterId
+      ? recomputeAllocationsForFiltered(
+          visible.map((h) => applyPlatformFilterToHolding(h, platformFilterId))
+        )
+      : visible;
 
-    // Reslice métriques (qty / MV / P&L) sur la jambe filtrée uniquement
-    const sliced = visible.map((h) =>
-      applyPlatformFilterToHolding(h, platformFilterId)
+    if (pnlFilter === "all") return resliced;
+    return resliced.filter((h) =>
+      matchesPnlFilter(h.unrealizedPnlBase || h.unrealizedPnlEur, pnlFilter)
     );
-    return recomputeAllocationsForFiltered(sliced);
   }, [
     holdingsWithCategory,
     debouncedSearch,
     accountFilter,
     platformFilterId,
+    pnlFilter,
   ]);
 
   const platformFilterLabel = useMemo(() => {
@@ -1163,6 +1175,8 @@ export function HoldingsSection({
           onSearchChange={setSearchInput}
           accountFilter={accountFilter}
           onAccountFilterChange={setAccountFilter}
+          pnlFilter={pnlFilter}
+          onPnlFilterChange={setPnlFilter}
           platformFilterLabel={platformFilterLabel}
           onClearPlatformFilter={
             platformFilterId ? clearPlatformFilter : undefined
@@ -1183,6 +1197,7 @@ export function HoldingsSection({
               pageSize: pagination.pageSize,
               groupBy,
               sorting: sorting.map((s) => ({ id: s.id, desc: s.desc })),
+              pnlFilter,
               createdAt: new Date().toISOString(),
             };
             const next = [...savedViews, view];
@@ -1209,6 +1224,9 @@ export function HoldingsSection({
             }
             if (view.sorting) {
               setSorting(view.sorting);
+            }
+            if (view.pnlFilter !== undefined) {
+              setPnlFilter(parsePnlFilter(view.pnlFilter));
             }
             if (onEnvelopeFiltersChange && view.envelope) {
               const parts = view.envelope

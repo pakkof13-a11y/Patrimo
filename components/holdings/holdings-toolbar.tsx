@@ -14,6 +14,7 @@ import {
 } from "@/app/lib/assets/categories";
 import type { SavedHoldingsView } from "@/app/lib/ui-preferences";
 import type { VisibilityState } from "@tanstack/react-table";
+import type { PnlFilter } from "@/app/lib/portfolio/pnl-filter";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 export type HoldingsPageSize = (typeof PAGE_SIZE_OPTIONS)[number];
@@ -49,6 +50,9 @@ export type HoldingsToolbarProps = {
   onSearchChange: (v: string) => void;
   accountFilter: string;
   onAccountFilterChange: (v: string) => void;
+  /** Filtre rapide P&L latent : tout / gagnants / perdants */
+  pnlFilter: PnlFilter;
+  onPnlFilterChange: (v: PnlFilter) => void;
   /** Filtre plateforme actif (deep-link Mes plateformes) */
   platformFilterLabel?: string | null;
   onClearPlatformFilter?: () => void;
@@ -86,6 +90,8 @@ export function HoldingsToolbar({
   onSearchChange,
   accountFilter,
   onAccountFilterChange: _onAccountFilterChange,
+  pnlFilter,
+  onPnlFilterChange,
   platformFilterLabel,
   onClearPlatformFilter,
   pageSize,
@@ -366,6 +372,43 @@ export function HoldingsToolbar({
               </span>
             </div>
           )}
+          <div
+            className={cn(CTRL_LABEL, "w-full sm:w-auto")}
+            data-testid="holdings-pnl-filter"
+          >
+            <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
+              P&amp;L
+            </span>
+            <div
+              className="inline-flex rounded-md border border-[var(--border)] p-0.5"
+              role="group"
+              aria-label="Filtrer par P&L latent"
+            >
+              {(
+                [
+                  { key: "all", label: "Tous" },
+                  { key: "gain", label: "Gagnants" },
+                  { key: "loss", label: "Perdants" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  className={cn(
+                    "rounded px-2 py-1 text-[11px] font-medium transition",
+                    pnlFilter === opt.key
+                      ? "bg-teal-700 text-white"
+                      : "text-slate-500 hover:bg-[var(--muted)] hover:text-slate-800 dark:hover:text-slate-200"
+                  )}
+                  aria-pressed={pnlFilter === opt.key}
+                  data-testid={`pnl-filter-${opt.key}`}
+                  onClick={() => onPnlFilterChange(opt.key)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

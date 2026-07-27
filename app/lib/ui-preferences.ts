@@ -82,6 +82,8 @@ export type SavedHoldingsView = {
   groupBy?: string;
   /** Tri TanStack (id + direction) — absent = tri par défaut à l'application */
   sorting?: { id: string; desc: boolean }[];
+  /** Filtre rapide P&L (all | gain | loss) — absent = vues créées avant son ajout */
+  pnlFilter?: string;
   createdAt: string;
 };
 
