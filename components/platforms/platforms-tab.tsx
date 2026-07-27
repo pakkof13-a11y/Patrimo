@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Eye,
   GitMerge,
+  LayoutGrid,
   LayoutList,
   MoreHorizontal,
   Pencil,
@@ -39,6 +40,10 @@ import {
   type PlatformSortMode,
 } from "@/app/lib/platforms/sort";
 import { summarizePlatforms } from "@/app/lib/platforms/summary";
+import { loadUiPref, saveUiPref } from "@/app/lib/ui-preferences";
+
+type PlatformsViewMode = "cards" | "list";
+const VIEW_MODE_KEY = "platformsViewMode";
 
 /** Base58 Solana (aligné côté serveur) — pas d’appel API si EVM. */
 function looksLikeSolanaAddress(addr: string | null | undefined): boolean {
@@ -135,6 +140,16 @@ export function PlatformsTab({
 }) {
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [sortMode, setSortMode] = useState<PlatformSortMode>("value");
+  const [viewMode, setViewMode] = useState<PlatformsViewMode>("cards");
+  useEffect(() => {
+    setViewMode(
+      loadUiPref<PlatformsViewMode>(VIEW_MODE_KEY, "cards")
+    );
+  }, []);
+  function changeViewMode(next: PlatformsViewMode) {
+    setViewMode(next);
+    saveUiPref(VIEW_MODE_KEY, next);
+  }
   const [search, setSearch] = useState("");
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   /** Un conteneur par carte (indexé par id) — un clic rapide entre deux
@@ -976,6 +991,42 @@ export function PlatformsTab({
               <option value="type">Type</option>
             </select>
           </label>
+          <div
+            className="inline-flex shrink-0 rounded-md border border-[var(--border)] p-0.5"
+            role="group"
+            aria-label="Mode d'affichage"
+          >
+            <button
+              type="button"
+              className={cn(
+                "rounded px-2 py-1 text-[11px] font-medium transition",
+                viewMode === "cards"
+                  ? "bg-teal-700 text-white"
+                  : "text-slate-500 hover:bg-[var(--muted)] hover:text-slate-800 dark:hover:text-slate-200"
+              )}
+              aria-pressed={viewMode === "cards"}
+              data-testid="platforms-view-cards"
+              onClick={() => changeViewMode("cards")}
+              title="Vue cartes"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "rounded px-2 py-1 text-[11px] font-medium transition",
+                viewMode === "list"
+                  ? "bg-teal-700 text-white"
+                  : "text-slate-500 hover:bg-[var(--muted)] hover:text-slate-800 dark:hover:text-slate-200"
+              )}
+              aria-pressed={viewMode === "list"}
+              data-testid="platforms-view-list"
+              onClick={() => changeViewMode("list")}
+              title="Vue liste"
+            >
+              <LayoutList className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
         {onAddPlatform && (
           <Button
@@ -1016,6 +1067,93 @@ export function PlatformsTab({
               Ajouter une plateforme
             </Button>
           )}
+        </div>
+      ) : viewMode === "list" ? (
+        <div
+          className="overflow-x-auto rounded-lg border border-[var(--border)]"
+          data-testid="platforms-list-view"
+        >
+          <table className="w-full text-left text-sm">
+            <thead className="bg-[var(--muted)]/30 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
+              <tr>
+                <th className="px-3 py-2 font-medium">Nom</th>
+                <th className="px-3 py-2 font-medium">Type</th>
+                <th className="px-3 py-2 text-right font-medium">Positions</th>
+                <th className="px-3 py-2 text-right font-medium">Valeur</th>
+                <th className="px-3 py-2 font-medium">Dernière op.</th>
+                <th className="px-3 py-2 text-right font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((p) => {
+                const total = resolvePlatformValue(p);
+                const posCount = p.positionCount ?? 0;
+                return (
+                  <tr
+                    key={p.id}
+                    className="border-t border-[var(--border)] hover:bg-[var(--muted)]/20"
+                    data-testid={`platform-list-row-${p.id}`}
+                  >
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <PlatformLogo src={p.logoUrl} name={p.name} size={24} />
+                        <span className="truncate font-medium">{p.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-[12px] text-[var(--muted-foreground)]">
+                      {typeLabel(p.type)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {posCount}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums font-medium">
+                      {formatCurrency(total, baseCurrency)}
+                    </td>
+                    <td className="px-3 py-2 text-[12px] text-[var(--muted-foreground)]">
+                      {formatLastTx(p.lastTransactionAt)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-end gap-0.5">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="!h-7 !w-7 !px-0"
+                          title="Aperçu rapide"
+                          aria-label={`Aperçu rapide de ${p.name}`}
+                          onClick={() => openPreview(p)}
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="!h-7 !w-7 !px-0"
+                          title="Modifier"
+                          aria-label={`Modifier ${p.name}`}
+                          onClick={() => openEdit(p)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        {onDelete && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--danger)]"
+                            title="Supprimer"
+                            aria-label={`Supprimer ${p.name}`}
+                            disabled={deletePendingId === p.id}
+                            onClick={() => handleDelete(p)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
