@@ -25,7 +25,7 @@ import {
   type ColumnOrderState,
   type ColumnSizingState,
 } from "@tanstack/react-table";
-import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
 import { PlatformLogo } from "@/components/ui/platform-logo";
@@ -76,7 +76,9 @@ import {
   type SavedHoldingsView,
 } from "@/app/lib/ui-preferences";
 import {
+  assetCategoryLabel,
   groupPositionsByAssetCategory,
+  parseAssetCategory,
   parseHoldingsGroupBy,
   type HoldingsGroupBy,
 } from "@/app/lib/assets/categories";
@@ -464,11 +466,26 @@ export function HoldingsSection({
               <div className="truncate font-medium" title={row.original.name}>
                 {row.original.name}
               </div>
-              {row.original.isin && (
-                <div className="truncate font-mono text-[10px] text-slate-500">
-                  {row.original.isin}
-                </div>
-              )}
+              <div className="flex min-w-0 items-center gap-1.5">
+                {row.original.isin && (
+                  <span className="truncate font-mono text-[10px] text-slate-500">
+                    {row.original.isin}
+                  </span>
+                )}
+                {/* Sous-catégorie : jusqu'ici visible seulement en mode
+                    regroupement (en-tête de groupe), invisible ligne par
+                    ligne en tri normal — modifiable via le badge Catégorie
+                    du panneau déplié, mais sans rappel dans la cellule elle-même. */}
+                {parseAssetCategory(row.original.category) !== "UNCLASSIFIED" && (
+                  <span
+                    className="shrink-0 truncate rounded-full bg-[var(--muted)] px-1.5 py-px text-[9px] font-medium text-[var(--muted-foreground)]"
+                    title="Sous-catégorie (classification d'affichage)"
+                    data-testid="holding-category-badge"
+                  >
+                    {assetCategoryLabel(row.original.category)}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         ),
@@ -670,7 +687,7 @@ export function HoldingsSection({
       {
         accessorKey: "allocationPctOfClass",
         id: "allocationPctOfClass",
-        header: "Allocation (%)",
+        header: "Alloc. classe",
         cell: ({ row }) => (
           <div className="tabular-nums">
             <span className="font-medium">
@@ -790,6 +807,7 @@ export function HoldingsSection({
                 assetId={row.original.assetId}
                 field="stopLoss"
                 value={row.original.stopLoss}
+                currentPrice={row.original.currentPriceNative}
                 onCommit={onTriggerLevelChange}
               />
             ) : (
@@ -819,6 +837,7 @@ export function HoldingsSection({
               assetId={row.original.assetId}
               field="tp1"
               value={row.original.tp1}
+              currentPrice={row.original.currentPriceNative}
               onCommit={onTriggerLevelChange}
             />
           ) : (
@@ -838,6 +857,7 @@ export function HoldingsSection({
               assetId={row.original.assetId}
               field="tp2"
               value={row.original.tp2}
+              currentPrice={row.original.currentPriceNative}
               onCommit={onTriggerLevelChange}
             />
           ) : (
@@ -857,6 +877,7 @@ export function HoldingsSection({
               assetId={row.original.assetId}
               field="tp3"
               value={row.original.tp3}
+              currentPrice={row.original.currentPriceNative}
               onCommit={onTriggerLevelChange}
             />
           ) : (
@@ -876,6 +897,7 @@ export function HoldingsSection({
               assetId={row.original.assetId}
               field="tp4"
               value={row.original.tp4}
+              currentPrice={row.original.currentPriceNative}
               onCommit={onTriggerLevelChange}
             />
           ) : (
@@ -979,7 +1001,10 @@ export function HoldingsSection({
   const allEnvelopesCount = Object.keys(ACCOUNT_TYPES).length;
   const positionsTitle =
     envelopeFilters.length === 0
-      ? "Positions — aucune enveloppe"
+      // « Aucune enveloppe » en titre principal se lisait comme une absence de
+      // données plutôt qu'une invite à sélectionner un filtre — le sous-titre
+      // porte déjà l'explication ("Sélectionnez au moins une enveloppe…").
+      ? "Positions"
       : envelopeFilters.length === allEnvelopesCount
         ? "Positions (toutes les enveloppes)"
         : envelopeFilters.length === 1
@@ -1120,6 +1145,8 @@ export function HoldingsSection({
               search: searchInput,
               visibility: columnVisibility as Record<string, boolean>,
               pageSize: pagination.pageSize,
+              groupBy,
+              sorting: sorting.map((s) => ({ id: s.id, desc: s.desc })),
               createdAt: new Date().toISOString(),
             };
             const next = [...savedViews, view];
@@ -1138,6 +1165,14 @@ export function HoldingsSection({
             }
             if (view.visibility) {
               setColumnVisibility(view.visibility as VisibilityState);
+            }
+            // Absent sur les vues créées avant l'ajout de ce champ : ne pas
+            // écraser le regroupement/tri courant par un défaut arbitraire.
+            if (view.groupBy !== undefined) {
+              setGroupBy(parseHoldingsGroupBy(view.groupBy));
+            }
+            if (view.sorting) {
+              setSorting(view.sorting);
             }
             if (onEnvelopeFiltersChange && view.envelope) {
               const parts = view.envelope
@@ -1274,9 +1309,16 @@ export function HoldingsSection({
                             title={fullLabel}
                           >
                             {flexRender(h.column.columnDef.header, h.getContext())}
-                            {{ asc: " ↑", desc: " ↓" }[h.column.getIsSorted() as string] ??
-                              null}
                           </span>
+                          {/* Hors du span tronqué : sur les colonnes étroites (ticker,
+                              devise, qté), le glyphe texte précédent se faisait couper
+                              net par l'ellipse — une icône séparée, jamais tronquée. */}
+                          {h.column.getIsSorted() === "asc" && (
+                            <ArrowUp className="h-3 w-3 shrink-0" aria-hidden />
+                          )}
+                          {h.column.getIsSorted() === "desc" && (
+                            <ArrowDown className="h-3 w-3 shrink-0" aria-hidden />
+                          )}
                         </span>
                         {h.column.getCanResize() && (
                           <div

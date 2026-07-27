@@ -160,12 +160,13 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
     group: "optional",
     minWidth: 110,
   },
-  { id: "avgCostEur", label: "PRU", group: "mandatory", locked: true, minWidth: 100 },
   { id: "quantity", label: "Quantité", group: "mandatory", locked: true, minWidth: 96 },
-  { id: "ticker", label: "Ticker", group: "mandatory", locked: true, minWidth: 88 },
   {
     id: "accountType",
-    label: "Type de compte",
+    // Le libellé affiché dans l'en-tête du tableau est "Enveloppe" — harmonisé
+    // ici pour que le sélecteur de colonnes et l'infobulle d'en-tête ("Clic =
+    // trier…") ne parlent pas de deux noms différents pour la même colonne.
+    label: "Enveloppe",
     group: "mandatory",
     locked: true,
     minWidth: 120,
@@ -178,7 +179,9 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
     minWidth: 120,
   },
   // —— OPTIONAL (togglable, hidden by default) ——
-  { id: "allocationPctOfClass", label: "Allocation (%)", group: "optional", minWidth: 110 },
+  { id: "avgCostEur", label: "PRU", group: "optional", minWidth: 100 },
+  { id: "ticker", label: "Ticker", group: "optional", minWidth: 88 },
+  { id: "allocationPctOfClass", label: "Alloc. classe", group: "optional", minWidth: 110 },
   {
     id: "allocationPct",
     label: "Allocation portefeuille (%)",

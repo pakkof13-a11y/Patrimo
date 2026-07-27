@@ -2,12 +2,16 @@
 
 import { Fragment, useState } from "react";
 import { flexRender, type Row } from "@tanstack/react-table";
-import { ChevronRight } from "lucide-react";
+import { AlertTriangle, ChevronRight } from "lucide-react";
 import { HoldingRecentTxs } from "@/components/holdings/holding-recent-txs";
 import { cn } from "@/app/lib/utils";
 import { type Holding } from "@/app/lib/types/ui";
 import { parseAssetCategory } from "@/app/lib/assets/categories";
 import { columnMinWidth } from "@/app/lib/display-preferences";
+import {
+  computeTriggerLevelStatus,
+  triggerKindOf,
+} from "@/app/lib/portfolio/trigger-levels";
 import { formatDistanceToNow } from "date-fns";
 import { fr } from "date-fns/locale";
 
@@ -31,11 +35,14 @@ export function TriggerLevelInput({
   assetId,
   field,
   value,
+  currentPrice,
   onCommit,
 }: {
   assetId: string;
   field: TriggerField;
   value: string | null | undefined;
+  /** Cours actuel en devise native — pour la distance % et l'alerte de franchissement. */
+  currentPrice?: string | null;
   onCommit: (assetId: string, field: TriggerField, value: string | null) => void;
 }) {
   const [draft, setDraft] = useState(value ?? "");
@@ -46,36 +53,70 @@ export function TriggerLevelInput({
     setDraft(value ?? "");
   }
 
+  const status =
+    value && currentPrice
+      ? computeTriggerLevelStatus(
+          Number(currentPrice),
+          Number(value),
+          triggerKindOf(field)
+        )
+      : null;
+
   return (
-    <input
-      type="text"
-      inputMode="decimal"
-      className="input !w-full min-w-[4.5rem] !px-1.5 !py-1 text-right text-xs tabular-nums"
-      placeholder="—"
-      value={draft}
-      title="Seuil en devise native · vide = désactivé · exécution auto au refresh des prix"
-      onClick={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => e.stopPropagation()}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => {
-        const next = draft.trim().replace(",", ".");
-        const prev = (value ?? "").trim();
-        if (next === prev) return;
-        if (next === "" || next === "—") {
-          onCommit(assetId, field, null);
-          return;
-        }
-        const n = Number(next);
-        if (!Number.isFinite(n) || n < 0) {
-          setDraft(value ?? "");
-          return;
-        }
-        onCommit(assetId, field, next);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-      }}
-    />
+    <div className="flex flex-col items-end gap-0.5">
+      <input
+        type="text"
+        inputMode="decimal"
+        className="input !w-full min-w-[4.5rem] !px-1.5 !py-1 text-right text-xs tabular-nums"
+        placeholder="—"
+        value={draft}
+        title="Seuil en devise native · vide = désactivé · exécution auto au refresh des prix"
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          const next = draft.trim().replace(",", ".");
+          const prev = (value ?? "").trim();
+          if (next === prev) return;
+          if (next === "" || next === "—") {
+            onCommit(assetId, field, null);
+            return;
+          }
+          const n = Number(next);
+          if (!Number.isFinite(n) || n < 0) {
+            setDraft(value ?? "");
+            return;
+          }
+          onCommit(assetId, field, next);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        }}
+      />
+      {status && (
+        <span
+          className={cn(
+            "inline-flex items-center gap-0.5 text-[10px] font-medium tabular-nums",
+            status.triggered
+              ? "text-[var(--danger)]"
+              : "text-[var(--muted-foreground)]"
+          )}
+          title={
+            status.triggered
+              ? field === "stopLoss"
+                ? "Cours passé sous le Stop Loss"
+                : "Cours ayant atteint ce Take Profit"
+              : "Distance au cours actuel"
+          }
+          data-testid={`trigger-status-${field}`}
+        >
+          {status.triggered && <AlertTriangle className="h-2.5 w-2.5" aria-hidden />}
+          {status.distancePct > 0 ? "+" : ""}
+          {status.distancePct.toLocaleString("fr-FR", { maximumFractionDigits: 1 })}
+          %
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -104,6 +145,7 @@ export function renderHoldingRow(row: Row<Holding>, opts: HoldingRowRenderOpts) 
         onDoubleClick={() => opts.onRowDoubleClick(assetId)}
         data-expanded={expanded ? "true" : "false"}
         data-category={parseAssetCategory(holding.category)}
+        data-stale={holding.priceStatus === "STALE" ? "true" : "false"}
       >
         <td
           className="holdings-expand-col px-0 py-2 align-middle text-center"

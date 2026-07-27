@@ -971,6 +971,21 @@ body.col-resizing {
   background: var(--gold-muted);
 }
 
+/*
+ * Prix périmé : jusqu'ici seule une mention « · périmé » en amber-500
+ * text-[10px] dans la cellule Cours signalait l'état — trop discret pour
+ * une donnée qui affecte la fiabilité de toute la ligne (valeur, P&L). La
+ * teinte de fond couvre la ligne entière, pas seulement la cellule où le
+ * texte l'annonçait.
+ */
+.holdings-row[data-stale="true"] {
+  background: color-mix(in srgb, var(--warning, #d97706) 7%, transparent);
+}
+
+.holdings-row[data-stale="true"]:hover {
+  background: color-mix(in srgb, var(--warning, #d97706) 13%, transparent);
+}
+
 /* Nav produit — indicateur or sous l’onglet actif */
 .nav-item-active {
   position: relative;

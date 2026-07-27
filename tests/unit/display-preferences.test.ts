@@ -42,7 +42,13 @@ describe("mandatory / optional column defaults", () => {
       expect(vis[c.id]).toBe(c.group === "mandatory");
       if (c.group === "mandatory") expect(c.locked).toBe(true);
     }
-    expect(vis.ticker).toBe(true);
+    // Ticker et PRU sont désormais optionnels (accessibles en un clic) — le
+    // socle par défaut ne garde que ce qui est indispensable à la lecture
+    // d'une position (Actif, Enveloppe, Cours, Valeur, P&L, Quantité, Plateforme).
+    expect(vis.ticker).toBe(false);
+    expect(vis.avgCostEur).toBe(false);
+    expect(vis.quantity).toBe(true);
+    expect(vis.platformName).toBe(true);
     expect(vis.currency).toBe(false);
     expect(vis.stopLoss).toBe(false);
     expect(HOLDINGS_COLUMN_META.find((c) => c.id === "tp1")?.label).toBe("TP1");
@@ -60,10 +66,10 @@ describe("mandatory / optional column defaults", () => {
     expect(order.slice(mandatory.length).sort()).toEqual([...optional].sort());
     // first mandatory by fr label should be Actif
     expect(order[0]).toBe("name");
-    // ticker is mandatory and present
+    // ticker (désormais optionnel) reste listé, seulement plus loin dans l'ordre
     expect(order).toContain("ticker");
-    // stop loss after all mandatory
-    expect(order.indexOf("stopLoss")).toBeGreaterThan(order.indexOf("ticker"));
+    // stop loss (optionnel) après tout le socle obligatoire (quantity en fait partie)
+    expect(order.indexOf("stopLoss")).toBeGreaterThan(order.indexOf("quantity"));
   });
 
   it("resetHoldingsColumns restores mandatory visibility + default order", () => {

@@ -78,6 +78,10 @@ export type SavedHoldingsView = {
   /** colonnes visibles */
   visibility?: Record<string, boolean>;
   pageSize?: number;
+  /** Regroupement (none | assetCategory | blockchain) — absent = vues créées avant son ajout */
+  groupBy?: string;
+  /** Tri TanStack (id + direction) — absent = tri par défaut à l'application */
+  sorting?: { id: string; desc: boolean }[];
   createdAt: string;
 };
 
