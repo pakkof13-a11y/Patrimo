@@ -9,9 +9,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   formatOwnershipShare,
   grossRentalYieldPct,
+  hasCommitment,
   isDvfEstimable,
+  isFurnishedUsage,
   isRentalUsage,
   netRentalYieldPct,
+  regimesForUsage,
+  rentalRegimeLabel,
+  RENTAL_REGIMES,
+  TAX_SCHEMES,
+  taxSchemeLabel,
   propertyTypeLabel,
   propertyUsageLabel,
 } from "@/app/lib/real-estate/constants";
@@ -38,8 +45,42 @@ type PropertyRow = {
   monthlyChargesEur: string | null;
   annualPropertyTaxEur: string | null;
   occupancyRatePct: string | null;
+  rentalRegime: string | null;
+  taxScheme: string | null;
+  commitmentEndDate: string | null;
+  isClassifiedTourism: boolean;
+  schemeStartYear: number | null;
+  schemeCommitmentYears: number | null;
+  schemeBaseEur: string | null;
+  schemeRatePct: string | null;
   loans: Array<{ id: string; name: string; remainingAmountEur: string }>;
 };
+
+type FiscalForm = {
+  rentalRegime: string;
+  taxScheme: string;
+  commitmentEndDate: string;
+  isClassifiedTourism: boolean;
+  schemeStartYear: string;
+  schemeCommitmentYears: string;
+  schemeBaseEur: string;
+};
+
+function fiscalFormFrom(p: PropertyRow): FiscalForm {
+  return {
+    rentalRegime: p.rentalRegime ?? "",
+    taxScheme: p.taxScheme ?? "AUCUN",
+    commitmentEndDate: p.commitmentEndDate
+      ? p.commitmentEndDate.slice(0, 10)
+      : "",
+    isClassifiedTourism: p.isClassifiedTourism,
+    schemeStartYear: p.schemeStartYear ? String(p.schemeStartYear) : "",
+    schemeCommitmentYears: p.schemeCommitmentYears
+      ? String(p.schemeCommitmentYears)
+      : "",
+    schemeBaseEur: p.schemeBaseEur ?? "",
+  };
+}
 
 const CONFIDENCE_LABELS: Record<string, string> = {
   HIGH: "élevée",
@@ -74,6 +115,9 @@ export function PropertyPanel({
     null
   );
   const [saving, setSaving] = useState(false);
+  const [fiscalAssetId, setFiscalAssetId] = useState<string | null>(null);
+  const [fiscalForm, setFiscalForm] = useState<FiscalForm | null>(null);
+  const [fiscalSaving, setFiscalSaving] = useState(false);
 
   const propsQ = useQuery({
     queryKey: ["real-estate-properties"],
@@ -174,6 +218,39 @@ export function PropertyPanel({
       );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Estimation impossible");
+    }
+  }
+
+  async function saveFiscal(assetId: string, name: string) {
+    if (!fiscalForm) return;
+    setFiscalSaving(true);
+    try {
+      await fetchJson(`/api/real-estate/properties/${assetId}/fiscal`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rentalRegime: fiscalForm.rentalRegime || null,
+          taxScheme: fiscalForm.taxScheme,
+          commitmentEndDate: fiscalForm.commitmentEndDate || null,
+          isClassifiedTourism: fiscalForm.isClassifiedTourism,
+          schemeStartYear: fiscalForm.schemeStartYear
+            ? Number(fiscalForm.schemeStartYear)
+            : null,
+          schemeCommitmentYears: fiscalForm.schemeCommitmentYears
+            ? Number(fiscalForm.schemeCommitmentYears)
+            : null,
+          schemeBaseEur: fiscalForm.schemeBaseEur || null,
+        }),
+      });
+      toast.success(`Régime fiscal de ${name} mis à jour`);
+      setFiscalAssetId(null);
+      setFiscalForm(null);
+      void propsQ.refetch();
+      void qc.invalidateQueries({ queryKey: ["real-estate-tax"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Mise à jour impossible");
+    } finally {
+      setFiscalSaving(false);
     }
   }
 
@@ -374,8 +451,203 @@ export function PropertyPanel({
                       Estimer depuis les ventes réelles
                     </button>
                   )}
+                  {rental && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost text-[11px]"
+                      data-testid="property-fiscal-toggle"
+                      onClick={() =>
+                        setFiscalAssetId((cur) => {
+                          if (cur === p.assetId) {
+                            setFiscalForm(null);
+                            return null;
+                          }
+                          setFiscalForm(fiscalFormFrom(p));
+                          return p.assetId;
+                        })
+                      }
+                    >
+                      Régime &amp; dispositif fiscal
+                    </button>
+                  )}
                 </div>
               </div>
+
+              {rental && (p.rentalRegime || p.taxScheme) && fiscalAssetId !== p.assetId && (
+                <p className="text-meta mt-1">
+                  {p.rentalRegime ? rentalRegimeLabel(p.rentalRegime) : "Régime non renseigné"}
+                  {p.taxScheme && p.taxScheme !== "AUCUN"
+                    ? ` · ${taxSchemeLabel(p.taxScheme)}`
+                    : ""}
+                </p>
+              )}
+
+              {rental && fiscalAssetId === p.assetId && fiscalForm && (
+                <form
+                  className="mt-2 space-y-2 rounded-[var(--radius-md)] border border-[var(--border)] p-2.5"
+                  data-testid="property-fiscal-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void saveFiscal(p.assetId, p.name);
+                  }}
+                >
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">
+                        Régime d&apos;imposition
+                      </span>
+                      <select
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        data-testid="fiscal-rental-regime"
+                        value={fiscalForm.rentalRegime}
+                        onChange={(ev) =>
+                          setFiscalForm({ ...fiscalForm, rentalRegime: ev.target.value })
+                        }
+                      >
+                        <option value="">Non renseigné</option>
+                        {regimesForUsage(p.usage).map((k) => (
+                          <option key={k} value={k}>
+                            {RENTAL_REGIMES[k]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">Dispositif</span>
+                      <select
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        data-testid="fiscal-tax-scheme"
+                        value={fiscalForm.taxScheme}
+                        onChange={(ev) =>
+                          setFiscalForm({ ...fiscalForm, taxScheme: ev.target.value })
+                        }
+                      >
+                        {Object.entries(TAX_SCHEMES).map(([k, label]) => (
+                          <option key={k} value={k}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    {isFurnishedUsage(p.usage) && (
+                      <label className="flex items-end gap-1.5 text-[11px]">
+                        <input
+                          type="checkbox"
+                          data-testid="fiscal-classified-tourism"
+                          checked={fiscalForm.isClassifiedTourism}
+                          onChange={(ev) =>
+                            setFiscalForm({
+                              ...fiscalForm,
+                              isClassifiedTourism: ev.target.checked,
+                            })
+                          }
+                        />
+                        <span className="text-[var(--muted-foreground)]">
+                          Meublé de tourisme classé
+                        </span>
+                      </label>
+                    )}
+                  </div>
+
+                  {fiscalForm.taxScheme !== "AUCUN" && (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <label className="text-[11px]">
+                        <span className="text-[var(--muted-foreground)]">
+                          Année de départ
+                        </span>
+                        <input
+                          inputMode="numeric"
+                          className="input mt-0.5 h-8 w-full text-xs"
+                          data-testid="fiscal-scheme-start-year"
+                          value={fiscalForm.schemeStartYear}
+                          onChange={(ev) =>
+                            setFiscalForm({
+                              ...fiscalForm,
+                              schemeStartYear: ev.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      {hasCommitment(fiscalForm.taxScheme) && (
+                        <label className="text-[11px]">
+                          <span className="text-[var(--muted-foreground)]">
+                            Engagement (années)
+                          </span>
+                          <input
+                            inputMode="numeric"
+                            className="input mt-0.5 h-8 w-full text-xs"
+                            data-testid="fiscal-scheme-commitment-years"
+                            value={fiscalForm.schemeCommitmentYears}
+                            onChange={(ev) =>
+                              setFiscalForm({
+                                ...fiscalForm,
+                                schemeCommitmentYears: ev.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                      )}
+                      <label className="text-[11px]">
+                        <span className="text-[var(--muted-foreground)]">
+                          Base éligible (€)
+                        </span>
+                        <input
+                          inputMode="decimal"
+                          className="input mt-0.5 h-8 w-full text-xs"
+                          data-testid="fiscal-scheme-base"
+                          value={fiscalForm.schemeBaseEur}
+                          onChange={(ev) =>
+                            setFiscalForm({
+                              ...fiscalForm,
+                              schemeBaseEur: ev.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="text-[11px]">
+                        <span className="text-[var(--muted-foreground)]">
+                          Fin d&apos;engagement
+                        </span>
+                        <input
+                          type="date"
+                          className="input mt-0.5 h-8 w-full text-xs"
+                          data-testid="fiscal-commitment-end"
+                          value={fiscalForm.commitmentEndDate}
+                          onChange={(ev) =>
+                            setFiscalForm({
+                              ...fiscalForm,
+                              commitmentEndDate: ev.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="submit"
+                      className="btn btn-primary text-[11px]"
+                      disabled={fiscalSaving}
+                      data-testid="fiscal-save"
+                    >
+                      {fiscalSaving ? "Enregistrement…" : "Valider"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost text-[11px]"
+                      onClick={() => {
+                        setFiscalAssetId(null);
+                        setFiscalForm(null);
+                      }}
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </form>
+              )}
 
               {editing?.assetId === p.assetId && (
                 <form
