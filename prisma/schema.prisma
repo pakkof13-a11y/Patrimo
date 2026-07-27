@@ -204,6 +204,7 @@ model Asset {
   dailyCloses  AssetDailyClose[]
   realEstate   RealEstateDetail?
   indirectRealEstate IndirectRealEstateDetail?
+  defiPosition DefiPositionDetail?
   lifeSupport  LifeInsuranceSupport?
   liabilities  Liability[]
 
@@ -976,4 +977,61 @@ model IndirectRealEstateDetail {
   updatedAt DateTime @updatedAt
 
   asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+}
+
+/// Position DeFi — extension 1:1 d'un Asset, jamais une table de valorisation
+/// parallèle.
+///
+/// La valeur de la position vit dans le journal comme n'importe quelle autre
+/// position : `getHoldings()` la valorise une fois et une seule. Ce modèle ne
+/// porte que ce que le journal ne sait pas exprimer — le protocole, le
+/// rendement, la santé d'un prêt collatéralisé.
+///
+/// Un emprunt est stocké ici comme une position `BORROWING` : c'est
+/// `isDebtPosition()` qui lui donne son signe négatif dans les agrégats. Le
+/// signe n'est jamais inscrit en base, sans quoi deux endroits décideraient de
+/// la même chose.
+model DefiPositionDetail {
+  id      String @id @default(cuid())
+  assetId String @unique
+
+  /// Aave, Lido, Uniswap, Kamino…
+  protocol     String
+  protocolLogo String?
+  /// ethereum | arbitrum | base | solana…
+  chain        String?
+  /// STAKING | LIQUID_STAKING | LENDING | BORROWING | LP | YIELD_FARMING
+  /// | VAULT | RESTAKING | RWA | LOCKED | REWARDS | OTHER
+  positionType String
+
+  /// Second actif d'une position de liquidité (le premier est porté par
+  /// l'Asset lui-même).
+  pairedSymbol String?
+  pairedAmount Decimal? @db.Decimal(38, 18)
+  poolAddress  String?
+
+  /// Rendement annualisé affiché par le protocole, en %. Déclaratif : sert à
+  /// comparer, jamais à valoriser.
+  apyPct          Decimal? @db.Decimal(9, 4)
+  rewardsSymbol   String?
+  rewardsAmount   Decimal? @db.Decimal(38, 18)
+  rewardsValueEur Decimal? @db.Decimal(18, 2)
+
+  /// Santé d'un prêt collatéralisé. Sous 1, la position est liquidable.
+  healthFactor Decimal? @db.Decimal(12, 4)
+  ltvPct       Decimal? @db.Decimal(6, 3)
+  liqThresholdPct Decimal? @db.Decimal(6, 3)
+
+  /// ZERION | MANUAL — une ligne saisie à la main n'est jamais écrasée par
+  /// une synchronisation.
+  source        String    @default("MANUAL")
+  lastSyncedAt  DateTime?
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([protocol])
+  @@index([positionType])
 }
