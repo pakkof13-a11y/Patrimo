@@ -1193,6 +1193,10 @@ function PortfolioAppClient({
                 onViewPositions={(p) =>
                   viewPositionsForPlatform({ id: p.id, name: p.name })
                 }
+                onImportForPlatform={(p) => {
+                  setImportDefaultPlatform({ id: p.id, name: p.name });
+                  setShowImport(true);
+                }}
               />
             )}
 

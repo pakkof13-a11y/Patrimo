@@ -33,6 +33,11 @@ import {
   resolveChainSyncForPlatform,
 } from "@/app/lib/market/chain-wallet-sync";
 import { toast } from "sonner";
+import {
+  comparePlatforms,
+  parsePlatformSortMode,
+  type PlatformSortMode,
+} from "@/app/lib/platforms/sort";
 
 /** Base58 Solana (aligné côté serveur) — pas d’appel API si EVM. */
 function looksLikeSolanaAddress(addr: string | null | undefined): boolean {
@@ -110,6 +115,7 @@ export function PlatformsTab({
   onAddPlatform,
   onNewTransaction,
   onViewPositions,
+  onImportForPlatform,
 }: {
   platforms: PlatformRow[];
   baseCurrency: string;
@@ -123,8 +129,11 @@ export function PlatformsTab({
   onNewTransaction?: (platform: PlatformRow) => void;
   /** Ouvre Positions avec filtre plateforme. */
   onViewPositions?: (platform: PlatformRow) => void;
+  /** Ouvre l'import CSV avec cette plateforme préselectionnée. */
+  onImportForPlatform?: (platform: PlatformRow) => void;
 }) {
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
+  const [sortMode, setSortMode] = useState<PlatformSortMode>("value");
   const [search, setSearch] = useState("");
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   /** Un conteneur par carte (indexé par id) — un clic rapide entre deux
@@ -252,6 +261,39 @@ export function PlatformsTab({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpenId]);
 
+  // Focus trap clavier : sans ça, Tab quittait la carte entière sans jamais
+  // atteindre les items du menu déplié (uniquement navigable à la souris).
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const container = menuRefs.current.get(menuOpenId);
+    const items = container?.querySelectorAll<HTMLElement>('[role="menuitem"]');
+    items?.[0]?.focus();
+  }, [menuOpenId]);
+
+  function onMenuKeyDown(e: React.KeyboardEvent, id: string) {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      setMenuOpenId(null);
+      menuRefs.current.get(id)?.querySelector<HTMLElement>("button")?.focus();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const container = menuRefs.current.get(id);
+    const items = container
+      ? Array.from(container.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+      : [];
+    if (items.length === 0) return;
+    const first = items[0]!;
+    const last = items[items.length - 1]!;
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
   const typesPresent = useMemo(() => {
     const set = new Set(platforms.map((p) => p.type));
     return [...set].sort((a, b) => {
@@ -276,13 +318,8 @@ export function PlatformsTab({
         p.notes,
       ])
     );
-    return searched.sort((a, b) => {
-      const va = Number(resolvePlatformValue(b));
-      const vb = Number(resolvePlatformValue(a));
-      if (va !== vb) return va - vb;
-      return a.name.localeCompare(b.name, "fr", { sensitivity: "base" });
-    });
-  }, [platforms, typeFilter, debouncedSearch]);
+    return searched.sort((a, b) => comparePlatforms(a, b, sortMode));
+  }, [platforms, typeFilter, debouncedSearch, sortMode]);
 
   function openEdit(p: PlatformRow) {
     setMenuOpenId(null);
@@ -852,6 +889,26 @@ export function PlatformsTab({
               ))}
             </select>
           </label>
+          <label className="flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+            <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
+              Trier par
+            </span>
+            <select
+              className="input !w-full min-w-0 !py-1.5 text-sm sm:!w-auto sm:min-w-[10rem]"
+              value={sortMode}
+              onChange={(e) =>
+                setSortMode(parsePlatformSortMode(e.target.value))
+              }
+              data-testid="platforms-sort-mode"
+              aria-label="Trier les plateformes"
+            >
+              <option value="value">Valeur totale</option>
+              <option value="name">Nom</option>
+              <option value="activity">Activité récente</option>
+              <option value="positions">Nombre de positions</option>
+              <option value="type">Type</option>
+            </select>
+          </label>
         </div>
         {onAddPlatform && (
           <Button
@@ -975,6 +1032,7 @@ export function PlatformsTab({
                       <div
                         className="absolute right-0 top-full z-20 mt-1 min-w-[11rem] rounded-lg border border-[var(--border)] bg-[var(--card)] py-1 shadow-lg"
                         role="menu"
+                        onKeyDown={(e) => onMenuKeyDown(e, p.id)}
                       >
                         <button
                           type="button"
@@ -1059,6 +1117,26 @@ export function PlatformsTab({
                   </div>
                 </div>
 
+                {posCount === 0 && !p.lastTransactionAt && (
+                  <div
+                    className="mt-2 rounded-lg border border-dashed border-[var(--border)] px-2.5 py-2 text-center"
+                    data-testid={`platform-empty-cta-${p.id}`}
+                  >
+                    <p className="text-[10px] text-[var(--muted-foreground)]">
+                      Aucune activité pour l’instant
+                    </p>
+                    {onNewTransaction && (
+                      <button
+                        type="button"
+                        className="mt-1 text-[11px] font-medium text-[var(--primary)] hover:underline"
+                        onClick={() => onNewTransaction(p)}
+                      >
+                        Ajouter une transaction
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {p.walletAddress && (
                   <p
                     className="mt-2 truncate font-mono text-[10px] text-[var(--muted-foreground)]"
@@ -1129,14 +1207,28 @@ export function PlatformsTab({
                           : "Lire wallet + txs"}
                     </Button>
                     {historyTruncatedByPlatform[p.id] && (
-                      <p
-                        className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] leading-snug text-amber-950 dark:text-amber-100"
+                      <div
+                        className="space-y-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5"
                         data-testid={`history-truncated-notice-${p.id}`}
                       >
-                        Historique limité aux 800 dernières transactions. Pour
-                        un historique complet, importez un CSV depuis votre
-                        exchange.
-                      </p>
+                        <p className="text-[10px] leading-snug text-amber-950 dark:text-amber-100">
+                          Historique limité aux 800 dernières transactions.
+                          Pour un historique complet, importez un CSV depuis
+                          votre exchange.
+                        </p>
+                        {onImportForPlatform && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="!h-6 !px-2 !text-[10px]"
+                            data-testid={`history-truncated-import-${p.id}`}
+                            onClick={() => onImportForPlatform(p)}
+                          >
+                            Importer un CSV pour {p.name}
+                          </Button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
