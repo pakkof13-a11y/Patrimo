@@ -308,8 +308,16 @@ function PortfolioAppClient({
   const setTab = useCallback(
     (next: MainTab) => {
       let path = tabToPath(next);
-      // Positions : URL canonique /positions?envelope=…
-      if (isPositionsTab(next)) {
+      // Positions : URL canonique /positions?envelope=… — uniquement pour les
+      // enveloppes réellement sélectionnables depuis ce filtre. `crypto` et
+      // `immobilier` restent des `isPositionsTab` (leur sous-vue "Comptant" /
+      // "Parc" affiche encore le tableau filtré) mais ont leur propre onglet
+      // de premier niveau : les faire passer par `/positions?envelope=` les
+      // ramènerait sur la page générique au lieu de leur URL dédiée.
+      const isEnvelopeSelectorTab = ENVELOPE_SELECT_OPTIONS.some(
+        (o) => o.tab === next
+      );
+      if (isEnvelopeSelectorTab) {
         const param = tabToEnvelopeParam(next);
         path = param ? `/positions?envelope=${param}` : "/positions";
       }

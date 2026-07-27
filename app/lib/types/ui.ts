@@ -224,11 +224,15 @@ export const POSITIONS_TABS: readonly MainTab[] = [
   "cto",
   "pea",
   "av",
-  "crypto",
   // `immobilier` n'est plus un clone filtré de Positions : l'onglet dédié
   // rend sa propre vue. Le mapping vers l'enveloppe IMMOBILIER est conservé
   // dans TAB_TO_ACCOUNT_TYPE, encore utilisé pour filtrer les positions
   // affichées à l'intérieur de cet onglet.
+  //
+  // `crypto` reste ici (contrairement à `immobilier`) : son sous-onglet
+  // Comptant montre justement le tableau Positions filtré — c'est DeFi/NFT/
+  // Futures qui le masquent, via la condition posée dans portfolio-app.tsx.
+  "crypto",
   "cfd",
 ] as const;
 
@@ -249,6 +253,10 @@ export const PRIMARY_NAV: { id: MainTab; label: string }[] = [
   // dette. Le réduire à un filtre d'enveloppe du tableau Positions n'en
   // montrait que la valeur.
   { id: "immobilier", label: "Immobilier" },
+  // Même raisonnement : comptant, DeFi, NFT et futures sont quatre lectures
+  // différentes du même patrimoine, avec leur propre KPI strip et leurs
+  // propres flux de saisie — plus un simple filtre d'enveloppe.
+  { id: "crypto", label: "Crypto" },
   { id: "epargne-salariale", label: "Épargne Salariale" },
   { id: "alternatifs", label: "Actifs Alternatifs" },
   { id: "transactions", label: "Transactions" },
@@ -266,9 +274,8 @@ export const ENVELOPE_NAV: { id: MainTab; label: string; short: string }[] = [
   { id: "cto", label: "Compte-Titres", short: "CTO" },
   { id: "pea", label: "PEA", short: "PEA" },
   { id: "av", label: "Assurance-Vie", short: "AV" },
-  { id: "crypto", label: "Cryptomonnaies", short: "Crypto" },
-  // `immobilier` est passé en navigation primaire : le laisser aussi ici
-  // afficherait deux entrées pour la même vue.
+  // `immobilier` et `crypto` sont passés en navigation primaire : les laisser
+  // aussi ici afficherait deux entrées pour la même vue.
   { id: "cfd", label: "CFD", short: "CFD" },
 ];
 

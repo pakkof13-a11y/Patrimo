@@ -66,8 +66,11 @@ describe("envelope select options", () => {
   it("maps param ↔ tab", () => {
     expect(envelopeParamToTab("pea")).toBe("pea");
     expect(envelopeParamToTab("")).toBe("holdings");
-    expect(tabToEnvelopeParam("crypto")).toBe("crypto");
+    expect(tabToEnvelopeParam("pea")).toBe("pea");
     expect(tabToEnvelopeParam("holdings")).toBe("");
+    // `crypto`, comme `immobilier`, a son onglet de premier niveau : il n'a
+    // plus de paramètre d'enveloppe, la fonction retombe donc sur "".
+    expect(tabToEnvelopeParam("crypto")).toBe("");
   });
 
   it("lists all envelopes with Toutes", () => {

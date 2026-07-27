@@ -39,6 +39,14 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [{ id: "immobilier", label: "Immobilier", testId: "immobilier" }],
   },
   {
+    // Même raisonnement que l'immobilier : quatre sous-catégories (comptant,
+    // DeFi, NFT, futures), un KPI strip propre, des flux de saisie dédiés —
+    // ce n'est plus un simple filtre d'enveloppe sur le tableau Positions.
+    id: "crypto",
+    label: "Crypto",
+    items: [{ id: "crypto", label: "Crypto", testId: "crypto" }],
+  },
+  {
     id: "sources",
     label: "Sources",
     items: [
@@ -83,10 +91,9 @@ export const ENVELOPE_SELECT_OPTIONS: {
   { value: "CTO", label: "Compte-titres", tab: "cto", param: "cto" },
   { value: "PEA", label: "PEA", tab: "pea", param: "pea" },
   { value: "AV", label: "Assurance-vie", tab: "av", param: "av" },
-  { value: "CRYPTO", label: "Cryptomonnaies", tab: "crypto", param: "crypto" },
-  // Pas d'entrée IMMOBILIER : l'immobilier a son onglet de premier niveau.
-  // La laisser ici ferait quitter la page Positions depuis un sélecteur censé
-  // n'en filtrer que le tableau.
+  // Pas d'entrée IMMOBILIER ni CRYPTO : les deux ont leur onglet de premier
+  // niveau. Les laisser ici ferait quitter la page Positions depuis un
+  // sélecteur censé n'en filtrer que le tableau.
   { value: "CFD", label: "CFD", tab: "cfd", param: "cfd" },
 ];
 

@@ -19,7 +19,7 @@ export function tabToPath(tab: MainTab): string {
     case "av":
       return "/positions/av";
     case "crypto":
-      return "/positions/crypto";
+      return "/crypto";
     case "immobilier":
       return "/immobilier";
     case "cfd":
