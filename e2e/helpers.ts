@@ -160,12 +160,22 @@ const ENVELOPE_SELECT_VALUES: Record<string, string> = {
 const ENVELOPE_URL: Record<string, string> = {
   CTO: "/positions?envelope=cto",
   PEA: "/positions?envelope=pea",
-  CRYPTO: "/positions?envelope=crypto",
   AV: "/positions?envelope=av",
-  IMMOBILIER: "/positions?envelope=immobilier",
   CFD: "/positions?envelope=cfd",
   "": "/positions",
 };
+
+/**
+ * CRYPTO / IMMOBILIER ont leur propre onglet de premier niveau (app/lib/types/
+ * nav-groups.ts, ENVELOPE_SELECT_OPTIONS) : les sélectionner depuis le
+ * sélecteur d'enveloppe générique de Positions ne pousse *volontairement*
+ * aucune query `?envelope=` — l'app resterait sur /positions et ne filtrerait
+ * que le tableau. Un fallback `page.goto("/positions?envelope=crypto")`
+ * casserait ce filtre : `envelopeParamToTab` ne connaît pas ce paramètre et
+ * retombe sur "holdings" (toutes enveloppes) — d'où le sélecteur affichant
+ * « Toutes » au lieu de « Cryptomonnaies ». Pas de vérif/fallback URL ici.
+ */
+const NO_URL_ENVELOPES = new Set(["CRYPTO", "IMMOBILIER"]);
 
 /**
  * Sélecteur Enveloppe = <button> + listbox multi-cases (plus de <select>).
@@ -263,6 +273,9 @@ export async function clickNav(page: Page, label: string) {
     if (await sel.isVisible().catch(() => false)) {
       // Multi-select (button + listbox), pas de <select>
       await selectEnvelopeFilter(page, val);
+      // CRYPTO / IMMOBILIER : filtre client-side uniquement, jamais dans
+      // l'URL (voir NO_URL_ENVELOPES) — rien à vérifier/fallback ici.
+      if (NO_URL_ENVELOPES.has(val)) return;
       try {
         if (val) {
           await expect(page).toHaveURL(new RegExp(`envelope=${val}`, "i"), {
