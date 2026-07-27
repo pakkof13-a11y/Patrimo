@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, PieChart, Search } from "lucide-react";
+import { Building2, Layers, PieChart, Search } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import { cn } from "@/app/lib/utils";
 import { PropertyPanel } from "@/components/real-estate/property-panel";
@@ -10,12 +10,14 @@ import { RentSchedulePanel } from "@/components/real-estate/rent-schedule-panel"
 import { RealEstateTaxPanel } from "@/components/real-estate/tax-panel";
 import { CapitalGainSimulator } from "@/components/real-estate/capital-gain-simulator";
 import { AddressEstimatePanel } from "@/components/real-estate/address-estimate-panel";
+import { IndirectPanel } from "@/components/real-estate/indirect-panel";
 import type { Holding } from "@/app/lib/types/ui";
 
-type SubTab = "PARC" | "ESTIMATION" | "FISCALITE";
+type SubTab = "PARC" | "INDIRECT" | "ESTIMATION" | "FISCALITE";
 
 const SUB_NAV: { id: SubTab; label: string; icon: React.ReactNode }[] = [
   { id: "PARC", label: "Parc & exploitation", icon: <Building2 className="h-3.5 w-3.5" /> },
+  { id: "INDIRECT", label: "SCPI & sociétés", icon: <Layers className="h-3.5 w-3.5" /> },
   { id: "ESTIMATION", label: "Estimation", icon: <Search className="h-3.5 w-3.5" /> },
   { id: "FISCALITE", label: "Fiscalité", icon: <PieChart className="h-3.5 w-3.5" /> },
 ];
@@ -99,6 +101,8 @@ export function RealEstateTab({
           <RentSchedulePanel />
           <PropertyPanel holdings={holdings} />
         </>
+      ) : sub === "INDIRECT" ? (
+        <IndirectPanel />
       ) : sub === "ESTIMATION" ? (
         <AddressEstimatePanel />
       ) : (

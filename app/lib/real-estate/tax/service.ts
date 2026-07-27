@@ -19,6 +19,10 @@ import {
   isFurnishedUsage,
   isRentalUsage,
 } from "@/app/lib/real-estate/constants";
+import {
+  assessIndirectForIfi,
+  expectedAnnualIncomeEur,
+} from "@/app/lib/real-estate/indirect";
 import { computeIfi, type IfiAsset, type IfiResult } from "./ifi";
 import {
   compareRentalRegimes,
@@ -57,6 +61,27 @@ export type PropertyTaxRow = {
   isClassifiedTourism: boolean;
 };
 
+/** Véhicule indirect, tel qu'affiché et pris en compte dans l'IFI. */
+export type IndirectRow = {
+  assetId: string;
+  label: string;
+  vehicle: string;
+  manager: string | null;
+  /** Valeur de la position, issue du journal. */
+  marketValueEur: string;
+  quantity: string;
+  distributionRatePct: string | null;
+  debtRatioPct: string | null;
+  taxTransparency: string | null;
+  /** Revenu annuel attendu au taux de distribution affiché. */
+  expectedAnnualIncomeEur: string;
+  /** Fraction retenue dans l'assiette IFI, en %. */
+  ifiSharePct: string;
+  ifiTaxableValueEur: string;
+  ifiExcluded: boolean;
+  ifiExclusionReason: string | null;
+};
+
 /** Arbitrage de régime pour un mode de location donné. */
 export type RentalSection = {
   /** Nombre de biens concernés — 0 signifie « section sans objet ». */
@@ -68,6 +93,8 @@ export type RentalSection = {
 
 export type RealEstateTaxBundle = {
   properties: PropertyTaxRow[];
+  /** Véhicules indirects — entrent dans l'IFI, pas dans les revenus fonciers. */
+  indirect: IndirectRow[];
   ifi: IfiResult;
   /** Nu et meublé sont traités séparément — fiscalités non comparables. */
   rental: { bare: RentalSection; furnished: RentalSection };
@@ -136,6 +163,63 @@ export async function loadPropertyTaxRows(
       commitmentEndDate: detail.commitmentEndDate?.toISOString() ?? null,
       isFurnished: isFurnishedUsage(detail.usage),
       isClassifiedTourism: detail.isClassifiedTourism,
+    };
+  });
+}
+
+/**
+ * Charge les véhicules indirects avec leur valeur de marché du journal.
+ *
+ * Même principe que pour les biens directs : `getHoldings` fournit la valeur,
+ * la table de détail ne porte que les caractéristiques du véhicule.
+ */
+export async function loadIndirectRows(
+  userId: string,
+  holdings?: Awaited<ReturnType<typeof getHoldings>>
+): Promise<IndirectRow[]> {
+  const [details, rows] = await Promise.all([
+    prisma.indirectRealEstateDetail.findMany({
+      where: { asset: { is: { userId } } },
+      include: { asset: { select: { id: true, name: true } } },
+      orderBy: { createdAt: "desc" },
+    }),
+    holdings ? Promise.resolve(holdings) : getHoldings(userId),
+  ]);
+
+  const byAsset = new Map(rows.map((h) => [h.assetId, h]));
+
+  return details.map((detail) => {
+    const holding = byAsset.get(detail.assetId);
+    const marketValue = holding?.marketValueEur ?? "0";
+
+    const ifi = assessIndirectForIfi({
+      assetId: detail.assetId,
+      label: detail.asset.name,
+      vehicle: detail.vehicle,
+      marketValueEur: marketValue,
+      realEstateSharePct: detail.realEstateSharePct?.toString() ?? null,
+      ownershipStakePct: detail.ownershipStakePct?.toString() ?? null,
+      ifiExcluded: detail.ifiExcluded,
+    });
+
+    return {
+      assetId: detail.assetId,
+      label: detail.asset.name,
+      vehicle: detail.vehicle,
+      manager: detail.manager,
+      marketValueEur: marketValue,
+      quantity: holding?.quantity ?? "0",
+      distributionRatePct: detail.distributionRatePct?.toString() ?? null,
+      debtRatioPct: detail.debtRatioPct?.toString() ?? null,
+      taxTransparency: detail.taxTransparency,
+      expectedAnnualIncomeEur: expectedAnnualIncomeEur(
+        marketValue,
+        detail.distributionRatePct?.toString() ?? null
+      ).toFixed(2),
+      ifiSharePct: ifi.sharePct.toFixed(3),
+      ifiTaxableValueEur: ifi.taxableValueEur.toFixed(2),
+      ifiExcluded: ifi.excluded,
+      ifiExclusionReason: ifi.exclusionReason,
     };
   });
 }
@@ -216,8 +300,27 @@ export async function getRealEstateTaxBundle(
   userId: string,
   options: { marginalTaxRatePct?: number } = {}
 ): Promise<RealEstateTaxBundle> {
-  const properties = await loadPropertyTaxRows(userId);
-  const ifi = computeIfi(toIfiAssets(properties));
+  const [properties, indirect] = await Promise.all([
+    loadPropertyTaxRows(userId),
+    loadIndirectRows(userId),
+  ]);
+
+  // Les véhicules indirects entrent dans la même assiette que les biens
+  // directs : l'IFI porte sur le patrimoine immobilier, quel que soit le mode
+  // de détention. Les lignes exclues (foncière cotée < 5 %, exclusion
+  // manuelle) sont passées avec `excluded` pour rester visibles au tableau
+  // sans peser sur l'assiette.
+  const ifi = computeIfi([
+    ...toIfiAssets(properties),
+    ...indirect.map((v) => ({
+      id: v.assetId,
+      label: v.label,
+      grossValueEur: v.marketValueEur,
+      realEstateSharePct: v.ifiSharePct,
+      excluded: v.ifiExcluded,
+    })),
+  ]);
+
   const { bare, furnished } = aggregateRentalBase(properties);
   const tmi = options.marginalTaxRatePct ?? 30;
 
@@ -238,6 +341,7 @@ export async function getRealEstateTaxBundle(
 
   return {
     properties,
+    indirect,
     ifi,
     rental: {
       bare: section(bare, false),

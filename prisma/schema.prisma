@@ -203,6 +203,7 @@ model Asset {
   priceHistory PriceHistory[]
   dailyCloses  AssetDailyClose[]
   realEstate   RealEstateDetail?
+  indirectRealEstate IndirectRealEstateDetail?
   lifeSupport  LifeInsuranceSupport?
   liabilities  Liability[]
 
@@ -921,4 +922,47 @@ model EnvelopeCash {
 
   @@unique([userId, envelope])
   @@index([userId])
+}
+
+/// Véhicule immobilier détenu indirectement — SCPI, SCI, OPCI, foncière.
+///
+/// Extension 1:1 de `Asset`, sur le modèle de `RealEstateDetail` : la valeur
+/// et le prix de revient restent au journal (parts × prix de part), seules
+/// les caractéristiques du véhicule vivent ici. Aucune valorisation en
+/// parallèle, donc aucun risque de double comptage.
+model IndirectRealEstateDetail {
+  id      String @id @default(cuid())
+  assetId String @unique
+
+  /// SCPI | SCI_IR | SCI_IS | OPCI | SIIC | GFI | AUTRE
+  vehicle String
+  /// Société de gestion ou gérant.
+  manager String?
+
+  /// Taux de distribution annuel affiché par la société de gestion, en %.
+  /// Déclaratif : sert à comparer, pas à valoriser.
+  distributionRatePct Decimal? @db.Decimal(6, 3)
+  /// Ratio d'endettement du véhicule, en % — un levier élevé amplifie la
+  /// baisse comme la hausse de la valeur de part.
+  debtRatioPct        Decimal? @db.Decimal(6, 3)
+
+  /// Fraction de l'actif net représentative d'immobilier imposable à l'IFI,
+  /// en % (art. 965 2°). 100 pour une SCPI classique ; une part de fonds
+  /// diversifié n'est taxable qu'à hauteur de sa poche immobilière.
+  realEstateSharePct Decimal? @db.Decimal(6, 3)
+  /// Participation détenue dans le véhicule, en %. Sert l'exonération des
+  /// titres de foncières cotées détenus à moins de 5 % (art. 972 bis).
+  ownershipStakePct  Decimal? @db.Decimal(9, 6)
+  /// Exclusion manuelle de l'assiette IFI — laisse la main sur les cas
+  /// limites plutôt que de trancher une qualification à la place du porteur.
+  ifiExcluded        Boolean  @default(false)
+
+  /// IR | IS | EXONERE — transparence fiscale du véhicule.
+  taxTransparency String?
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 }
