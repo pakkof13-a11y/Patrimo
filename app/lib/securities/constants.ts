@@ -66,3 +66,25 @@ export function accountTypeForEnvelope(
 ): "PEA" | "CTO" {
   return envelopeType === "CTO" ? "CTO" : "PEA";
 }
+
+/**
+ * Comptes auxquels une ligne peut être rattachée, compte tenu de son enveloppe.
+ *
+ * Le service refuse déjà un rattachement incohérent — déplacer une ligne d'un
+ * CTO vers un PEA est un transfert de titres, pas une correction de saisie.
+ * Filtrer en amont évite de proposer un choix voué à l'échec : mieux vaut ne
+ * pas offrir l'option que de la refuser après coup.
+ *
+ * Une ligne PEA peut aller indifféremment sur un PEA ou un PEA-PME : les deux
+ * partagent la même famille fiscale, seul leur plafond diffère.
+ */
+export function eligibleAccounts<T extends { envelopeType: string }>(
+  positionAccountType: string,
+  accounts: readonly T[]
+): T[] {
+  return accounts.filter(
+    (a) =>
+      isSecuritiesEnvelopeType(a.envelopeType) &&
+      accountTypeForEnvelope(a.envelopeType) === positionAccountType
+  );
+}

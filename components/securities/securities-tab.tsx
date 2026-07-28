@@ -10,7 +10,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import { d } from "@/app/lib/money/decimal";
-import { SECURITIES_ENVELOPE_TYPES } from "@/app/lib/securities/constants";
+import {
+  eligibleAccounts,
+  SECURITIES_ENVELOPE_TYPES,
+} from "@/app/lib/securities/constants";
 import { peaWithdrawalTax } from "@/app/lib/securities/pea";
 
 type RoomRow = {
@@ -310,6 +313,59 @@ export function SecuritiesTab({ className }: { className?: string }) {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const attachPosition = useMutation({
+    mutationFn: async (vars: {
+      assetId: string;
+      securitiesAccountId: string | null;
+    }) => {
+      const res = await fetch("/api/securities/positions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(vars),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Rattachement impossible");
+      return json;
+    },
+    onSuccess: () => invalidate(),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  /**
+   * Rattachement groupé.
+   *
+   * Les requêtes sont enchaînées et non parallélisées : elles écrivent toutes
+   * sur `Asset`, et le gain de quelques centaines de millisecondes ne vaut pas
+   * un lot d'écritures concurrentes dont on ne saurait pas dire lesquelles ont
+   * abouti en cas d'échec partiel.
+   */
+  const attachAll = useMutation({
+    mutationFn: async (vars: { assetIds: string[]; accountId: string }) => {
+      let attached = 0;
+      for (const assetId of vars.assetIds) {
+        const res = await fetch("/api/securities/positions", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            assetId,
+            securitiesAccountId: vars.accountId,
+          }),
+        });
+        if (res.ok) attached += 1;
+      }
+      return { attached, total: vars.assetIds.length };
+    },
+    onSuccess: ({ attached, total }) => {
+      toast.success(
+        attached === total
+          ? `${attached} ligne(s) rattachée(s)`
+          : `${attached} ligne(s) sur ${total} rattachée(s)`
+      );
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const addContribution = useMutation({
     mutationFn: async (accountId: string) => {
       const res = await fetch(
@@ -336,11 +392,48 @@ export function SecuritiesTab({ className }: { className?: string }) {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const accounts = q.data?.accounts ?? [];
-  const positions = q.data?.positions ?? [];
+  // Mémoïsés : un `?? []` nu produirait un tableau neuf à chaque rendu, ce qui
+  // ferait recalculer les `useMemo` en aval sans qu'aucune donnée ait changé.
+  const accounts = useMemo(() => q.data?.accounts ?? [], [q.data]);
+  const positions = useMemo(() => q.data?.positions ?? [], [q.data]);
   const summary = q.data?.summary;
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  /**
+   * Lignes détenues mais rattachées à aucun compte.
+   *
+   * Ce n'est pas cosmétique : une ligne non rattachée ne compte pas dans la
+   * valeur liquidative du compte, donc pas non plus dans la simulation de
+   * retrait — dont le résultat serait alors sous-évalué sans que rien ne
+   * l'indique. D'où le bandeau, et la proposition de rattachement groupé
+   * lorsqu'un seul compte peut les recevoir.
+   */
+  const unattached = useMemo(
+    () => positions.filter((p) => !p.securitiesAccountId),
+    [positions]
+  );
+
+  const bulkTargets = useMemo(() => {
+    const groups = new Map<string, { accountId: string; assetIds: string[] }>();
+    for (const p of unattached) {
+      const options = eligibleAccounts(p.accountType, accounts);
+      // Uniquement quand la destination ne fait aucun doute : avec deux CTO,
+      // c'est à l'utilisateur de dire lequel détient quoi.
+      if (options.length !== 1) continue;
+      const target = options[0]!;
+      const entry = groups.get(target.id) ?? {
+        accountId: target.id,
+        assetIds: [],
+      };
+      entry.assetIds.push(p.assetId);
+      groups.set(target.id, entry);
+    }
+    return [...groups.values()].map((g) => ({
+      ...g,
+      account: accounts.find((a) => a.id === g.accountId)!,
+    }));
+  }, [unattached, accounts]);
 
   if (q.isPending) {
     return <Skeleton className={cn("h-64 w-full", className)} />;
@@ -659,6 +752,38 @@ export function SecuritiesTab({ className }: { className?: string }) {
             })}
           </div>
 
+          {unattached.length > 0 && (
+            <div
+              className="mt-3 flex flex-wrap items-start gap-2 rounded-[var(--radius-md)] border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-3 py-2 text-xs text-[var(--warning)]"
+              data-testid="securities-unattached-banner"
+            >
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 flex-1">
+                <strong>{unattached.length} ligne(s) non rattachée(s)</strong> à
+                un compte. Elles ne comptent ni dans la valeur liquidative, ni
+                dans la simulation de retrait — qui serait donc sous-évaluée.
+              </span>
+              {bulkTargets.map((t) => (
+                <Button
+                  key={t.accountId}
+                  type="button"
+                  variant="outline"
+                  disabled={attachAll.isPending}
+                  onClick={() =>
+                    attachAll.mutate({
+                      assetIds: t.assetIds,
+                      accountId: t.accountId,
+                    })
+                  }
+                  data-testid="securities-attach-all"
+                >
+                  Rattacher {t.assetIds.length} ligne(s) au{" "}
+                  {t.account.envelopeLabel}
+                </Button>
+              ))}
+            </div>
+          )}
+
           {positions.length > 0 && (
             <div className="mt-4 overflow-x-auto">
               <table className="w-full text-xs" data-testid="securities-table">
@@ -666,6 +791,7 @@ export function SecuritiesTab({ className }: { className?: string }) {
                   <tr className="border-b border-[var(--border)] text-left text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
                     <th className="py-1.5 pr-2">Titre</th>
                     <th className="py-1.5 pr-2">Enveloppe</th>
+                    <th className="py-1.5 pr-2">Compte</th>
                     <th className="py-1.5 pr-2 text-right">PRU</th>
                     <th className="py-1.5 pr-2 text-right">Cours</th>
                     <th className="py-1.5 pr-2 text-right">P&L latent</th>
@@ -689,6 +815,45 @@ export function SecuritiesTab({ className }: { className?: string }) {
                         <span className="rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)]">
                           {p.accountType}
                         </span>
+                      </td>
+                      <td className="py-1.5 pr-2">
+                        {(() => {
+                          // Seuls les comptes de la même famille fiscale sont
+                          // proposés : le service refuserait les autres, autant
+                          // ne pas offrir un choix voué à l'échec.
+                          const options = eligibleAccounts(
+                            p.accountType,
+                            accounts
+                          );
+                          if (options.length === 0) {
+                            return (
+                              <span className="text-meta">
+                                aucun compte {p.accountType}
+                              </span>
+                            );
+                          }
+                          return (
+                            <select
+                              className="input h-7 w-full min-w-[9rem] py-0 text-[11px]"
+                              value={p.securitiesAccountId ?? ""}
+                              disabled={attachPosition.isPending}
+                              onChange={(e) =>
+                                attachPosition.mutate({
+                                  assetId: p.assetId,
+                                  securitiesAccountId: e.target.value || null,
+                                })
+                              }
+                              data-testid="securities-row-account"
+                            >
+                              <option value="">— non rattachée —</option>
+                              {options.map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.envelopeLabel} · {a.platformName}
+                                </option>
+                              ))}
+                            </select>
+                          );
+                        })()}
                       </td>
                       <td className="py-1.5 pr-2 text-right tabular-nums">
                         {p.unitCostBasisEur

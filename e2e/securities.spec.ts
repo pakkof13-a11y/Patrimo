@@ -200,6 +200,100 @@ test.describe("PEA & CTO", () => {
     );
   });
 
+  test("rattacher les lignes fait entrer leur valeur dans le compte", async ({
+    page,
+  }) => {
+    const brokerId = await firstBrokerId(page.request);
+    const pea = await (
+      await page.request.post("/api/securities/accounts", {
+        data: {
+          envelopeType: "PEA",
+          platformId: brokerId,
+          openDate: "2019-03-01",
+        },
+      })
+    ).json();
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+
+    // Le bandeau existe parce que l'omission est coûteuse : une ligne non
+    // rattachée ne compte pas dans la valeur liquidative, donc la simulation
+    // de retrait porterait sur un montant sous-évalué sans le dire.
+    const banner = page.getByTestId("securities-unattached-banner");
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText(/non rattachée/i);
+
+    const before = await (await page.request.get("/api/securities")).json();
+    const valueBefore = Number(
+      before.accounts.find((a: { id: string }) => a.id === pea.id)
+        .liquidationValueEur
+    );
+
+    // Un seul PEA existe : la destination des lignes PEA ne fait aucun doute,
+    // le rattachement groupé est donc proposé.
+    await page
+      .getByTestId("securities-attach-all")
+      .filter({ hasText: "PEA" })
+      .click();
+    await expect(page.getByText(/ligne\(s\) rattachée\(s\)/i)).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const after = await (await page.request.get("/api/securities")).json();
+    const accountAfter = after.accounts.find(
+      (a: { id: string }) => a.id === pea.id
+    );
+    expect(Number(accountAfter.liquidationValueEur)).toBeGreaterThan(
+      valueBefore
+    );
+    expect(accountAfter.positionCount).toBeGreaterThan(0);
+  });
+
+  test("le sélecteur ne propose que des comptes de la même famille fiscale", async ({
+    page,
+  }) => {
+    const brokerId = await firstBrokerId(page.request);
+    await page.request.post("/api/securities/accounts", {
+      data: {
+        envelopeType: "PEA",
+        platformId: brokerId,
+        openDate: "2019-03-01",
+      },
+    });
+    await page.request.post("/api/securities/accounts", {
+      data: {
+        envelopeType: "CTO",
+        platformId: brokerId,
+        openDate: "2020-01-01",
+      },
+    });
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const rows = page.getByTestId("securities-row");
+    await expect(rows.first()).toBeVisible({ timeout: 20_000 });
+
+    // Chaque ligne ne doit voir que les comptes qui pourraient réellement la
+    // recevoir : déplacer un titre d'un CTO vers un PEA est un transfert, que
+    // le service refuse — l'option ne doit donc pas être offerte.
+    const count = await rows.count();
+    for (let i = 0; i < Math.min(count, 6); i += 1) {
+      const row = rows.nth(i);
+      const envelope = (await row.locator("td").nth(1).innerText()).trim();
+      const options = await row
+        .getByTestId("securities-row-account")
+        .locator("option")
+        .allTextContents();
+      const proposed = options.filter((o) => !/non rattachée/i.test(o));
+      for (const option of proposed) {
+        if (envelope === "PEA") {
+          expect(option).toMatch(/PEA/);
+        } else {
+          expect(option).toContain("Compte-titres");
+        }
+      }
+    }
+  });
+
   test("les anciennes URL d'enveloppe mènent à l'onglet dédié", async ({
     page,
   }) => {
