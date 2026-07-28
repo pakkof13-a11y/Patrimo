@@ -120,6 +120,17 @@ export type MainTab =
    * enregistrées.
    */
   | "assurance-vie"
+  /**
+   * Comptes titres — PEA, PEA-PME et compte-titres ordinaire.
+   *
+   * Onglet de premier niveau et non un filtre d'enveloppe, pour la même raison
+   * que l'immobilier et la crypto avant lui : un PEA porte une date
+   * d'ouverture, un plafond de versement et un régime d'imposition qui lui est
+   * propre — une vente interne n'y est pas un fait générateur, seul le retrait
+   * l'est. Le tableau Positions filtré ne montrait que la valeur, jamais rien
+   * de tout cela.
+   */
+  | "securities"
   | "fiscal";
 
 export type PlatformRow = {
@@ -270,6 +281,9 @@ export function isPositionsTab(tab: MainTab): boolean {
 export const PRIMARY_NAV: { id: MainTab; label: string }[] = [
   { id: "dashboard", label: "Tableau de bord" },
   { id: "holdings", label: "Positions" },
+  // Libellé volontairement explicite plutôt que « Titres » : les deux sigles
+  // parlent immédiatement, là où « Titres » demande un temps de traduction.
+  { id: "securities", label: "PEA & CTO" },
   { id: "banques", label: "Banques" },
   // Catégorie à part entière, au même rang que Banques ou Épargne salariale :
   // un bien porte un usage, un régime fiscal, un dispositif, un bail et une
@@ -295,10 +309,9 @@ export const PRIMARY_NAV: { id: MainTab; label: string }[] = [
  */
 export const ENVELOPE_NAV: { id: MainTab; label: string; short: string }[] = [
   { id: "holdings", label: "Toutes", short: "Tout" },
-  { id: "cto", label: "Compte-Titres", short: "CTO" },
-  { id: "pea", label: "PEA", short: "PEA" },
   { id: "av", label: "Assurance-Vie", short: "AV" },
-  // `immobilier` et `crypto` sont passés en navigation primaire : les laisser
+  // `immobilier`, `crypto` et désormais les comptes titres (`securities`, sous
+  // le libellé « PEA & CTO ») sont passés en navigation primaire : les laisser
   // aussi ici afficherait deux entrées pour la même vue.
   { id: "cfd", label: "CFD", short: "CFD" },
 ];
@@ -332,6 +345,7 @@ export const MAIN_TAB_IDS: readonly MainTab[] = [
   "epargne-salariale",
   "alternatifs",
   "trading",
+  "securities",
   "fiscal",
 ] as const;
 

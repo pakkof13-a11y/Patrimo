@@ -20,6 +20,8 @@ export function tabToPath(tab: MainTab): string {
       return "/positions/av";
     case "crypto":
       return "/cryptos";
+    case "securities":
+      return "/pea-cto";
     case "immobilier":
       return "/immobilier";
     case "cfd":
@@ -86,11 +88,19 @@ export function pathToTab(slug?: string[] | null): MainTab {
   if (head === "cryptos" || head === "crypto" || head === "cryptomonnaies") {
     return "crypto";
   }
+  // `/pea-cto` est l'URL canonique des comptes titres ; les autres formes
+  // restent acceptées pour les liens directs et les favoris.
+  if (head === "pea-cto" || head === "titres" || head === "securities") {
+    return "securities";
+  }
 
   if (head === "positions" || head === "holdings" || head === "portefeuille") {
     if (!sub || sub === "all" || sub === "tout") return "holdings";
-    if (sub === "cto" || sub === "compte-titres") return "cto";
-    if (sub === "pea") return "pea";
+    // Anciennes URL d'enveloppe : elles mènent désormais à l'onglet dédié,
+    // exactement comme `/positions/crypto` mène à l'onglet Cryptos. Une seule
+    // destination par sujet, et aucun lien existant ne casse.
+    if (sub === "cto" || sub === "compte-titres") return "securities";
+    if (sub === "pea") return "securities";
     if (sub === "av" || sub === "assurance-vie") return "av";
     if (sub === "crypto" || sub === "cryptomonnaies") return "crypto";
     if (sub === "immobilier" || sub === "immo") return "immobilier";

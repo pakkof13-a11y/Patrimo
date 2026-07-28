@@ -21,8 +21,13 @@ describe("tab-routes", () => {
     expect(pathToTab([])).toBe("dashboard");
     expect(pathToTab(["dashboard"])).toBe("dashboard");
     expect(pathToTab(["positions"])).toBe("holdings");
-    expect(pathToTab(["positions", "pea"])).toBe("pea");
-    expect(pathToTab(["positions", "cto"])).toBe("cto");
+    // Les anciennes URL d'enveloppe mènent désormais à l'onglet dédié
+    // « PEA & CTO », exactement comme `/positions/crypto` mène à Cryptos.
+    // Une seule destination par sujet, et aucun lien existant ne casse.
+    expect(pathToTab(["positions", "pea"])).toBe("securities");
+    expect(pathToTab(["positions", "cto"])).toBe("securities");
+    expect(pathToTab(["pea-cto"])).toBe("securities");
+    expect(pathToTab(["titres"])).toBe("securities");
     expect(pathToTab(["transactions"])).toBe("transactions");
     expect(pathToTab(["fiscalite"])).toBe("fiscal");
     expect(pathToTab(["plateformes"])).toBe("platforms");
@@ -35,7 +40,7 @@ describe("tab-routes", () => {
     for (const tab of [
       "dashboard",
       "holdings",
-      "pea",
+      "securities",
       "crypto",
       "transactions",
       "platforms",
@@ -50,6 +55,6 @@ describe("tab-routes", () => {
   });
 
   it("pathnameToTab ignores query/hash", () => {
-    expect(pathnameToTab("/positions/pea?x=1#y")).toBe("pea");
+    expect(pathnameToTab("/positions/pea?x=1#y")).toBe("securities");
   });
 });

@@ -31,6 +31,15 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [{ id: "holdings", label: "Positions", testId: "holdings" }],
   },
   {
+    // Même raisonnement que l'immobilier et la crypto : un PEA porte une date
+    // d'ouverture, un plafond de versement et un régime d'imposition propre —
+    // une vente interne n'y est pas un fait générateur, seul le retrait l'est.
+    // Le tableau Positions filtré n'en montrait que la valeur.
+    id: "securities",
+    label: "PEA & CTO",
+    items: [{ id: "securities", label: "PEA & CTO", testId: "securities" }],
+  },
+  {
     // Entrée directe et non un sous-menu de « Patrimoine étendu » : un bien
     // porte un usage, un régime, un dispositif, un bail et une dette. C'est
     // une catégorie à part entière, au même rang que Positions.
@@ -99,11 +108,9 @@ export const ENVELOPE_SELECT_OPTIONS: {
   param: string;
 }[] = [
   { value: "", label: "Toutes les enveloppes", tab: "holdings", param: "" },
-  { value: "CTO", label: "Compte-titres", tab: "cto", param: "cto" },
-  { value: "PEA", label: "PEA", tab: "pea", param: "pea" },
   { value: "AV", label: "Assurance-vie", tab: "av", param: "av" },
-  // Pas d'entrée IMMOBILIER ni CRYPTO : les deux ont leur onglet de premier
-  // niveau. Les laisser ici ferait quitter la page Positions depuis un
+  // Pas d'entrée IMMOBILIER, CRYPTO, CTO ni PEA : toutes ont leur onglet de
+  // premier niveau. Les laisser ici ferait quitter la page Positions depuis un
   // sélecteur censé n'en filtrer que le tableau.
   { value: "CFD", label: "CFD", tab: "cfd", param: "cfd" },
 ];

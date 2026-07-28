@@ -78,6 +78,7 @@ import { ImportCsvModal } from "@/components/modals/import-csv-modal";
 import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
 import { PropertyModal } from "@/components/modals/property-modal";
 import { RealEstateTab } from "@/components/real-estate/real-estate-tab";
+import { SecuritiesTab } from "@/components/securities/securities-tab";
 import {
   CryptosTab,
   type CryptoSubTab,
@@ -1083,6 +1084,8 @@ function PortfolioAppClient({
             {tab === "immobilier" && (
               <RealEstateTab holdings={allHoldings} className="mb-3" />
             )}
+
+            {tab === "securities" && <SecuritiesTab className="mb-3" />}
 
             {tab === "crypto" && (
               <CryptosTab

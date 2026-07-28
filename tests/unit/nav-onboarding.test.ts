@@ -64,21 +64,28 @@ describe("nav groups", () => {
 
 describe("envelope select options", () => {
   it("maps param ↔ tab", () => {
-    expect(envelopeParamToTab("pea")).toBe("pea");
+    expect(envelopeParamToTab("av")).toBe("av");
     expect(envelopeParamToTab("")).toBe("holdings");
-    expect(tabToEnvelopeParam("pea")).toBe("pea");
+    expect(tabToEnvelopeParam("av")).toBe("av");
     expect(tabToEnvelopeParam("holdings")).toBe("");
     // `crypto`, comme `immobilier`, a son onglet de premier niveau : il n'a
     // plus de paramètre d'enveloppe, la fonction retombe donc sur "".
     expect(tabToEnvelopeParam("crypto")).toBe("");
+    // Même chose pour le PEA et le compte-titres depuis l'onglet « PEA & CTO ».
+    expect(tabToEnvelopeParam("securities")).toBe("");
   });
 
-  it("lists all envelopes with Toutes", () => {
+  it("lists only envelopes that have no dedicated tab", () => {
     const labels = ENVELOPE_SELECT_OPTIONS.map((o) => o.label);
     expect(labels[0]).toMatch(/Toutes les enveloppes/i);
     expect(labels).toEqual(
-      expect.arrayContaining(["PEA", "CFD", "Compte-titres"])
+      expect.arrayContaining(["Assurance-vie", "CFD"])
     );
+    // PEA et compte-titres ont leur onglet de premier niveau : les laisser ici
+    // ferait quitter la page Positions depuis un sélecteur censé n'en filtrer
+    // que le tableau — même raison qu'immobilier et crypto avant eux.
+    expect(labels).not.toContain("PEA");
+    expect(labels).not.toContain("Compte-titres");
   });
 });
 
