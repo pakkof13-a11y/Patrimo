@@ -29,6 +29,8 @@ export type DefiPositionInput = {
   apyPct?: Decimal | null;
   healthFactor?: number | null;
   ltvPct?: number | null;
+  /** Stratégie de rattachement — absent/null si la position est autonome. */
+  strategyId?: string | null;
 };
 
 export type DefiPositionView = DefiPositionInput & {
@@ -213,3 +215,56 @@ export function groupByType(
     }))
     .sort((a, b) => b.totalEur.comparedTo(a.totalEur));
 }
+
+export type StrategyGroup = {
+  strategyId: string;
+  positions: DefiPositionView[];
+  depositedEur: Decimal;
+  borrowedEur: Decimal;
+  netEur: Decimal;
+};
+
+/**
+ * Regroupe par stratégie (`DefiStrategy`) — positions sans `strategyId`
+ * exclues du résultat, elles restent des lignes autonomes que l'appelant
+ * affiche hors regroupement. Le nom de la stratégie n'est pas porté ici :
+ * cette fonction est pure et ne connaît pas `DefiStrategy.name`, c'est à la
+ * couche service (qui a déjà chargé les stratégies) de l'attacher après coup.
+ */
+export function groupByStrategy(positions: DefiPositionInput[]): StrategyGroup[] {
+  const map = new Map<string, StrategyGroup>();
+
+  for (const raw of positions) {
+    if (!raw.strategyId) continue;
+    const view = toPositionView(raw);
+    let g = map.get(raw.strategyId);
+    if (!g) {
+      g = {
+        strategyId: raw.strategyId,
+        positions: [],
+        depositedEur: d(0),
+        borrowedEur: d(0),
+        netEur: d(0),
+      };
+      map.set(raw.strategyId, g);
+    }
+    g.positions.push(view);
+    if (view.isDebt) g.borrowedEur = g.borrowedEur.plus(raw.valueEur);
+    else g.depositedEur = g.depositedEur.plus(raw.valueEur);
+    g.netEur = g.depositedEur.minus(g.borrowedEur);
+  }
+
+  return [...map.values()].sort((a, b) =>
+    b.netEur.abs().comparedTo(a.netEur.abs())
+  );
+}
+
+/**
+ * P&L consolidé d'une stratégie — identique à `summarizeDefi`, appliqué au
+ * sous-ensemble des positions d'une même stratégie. Un alias plutôt qu'une
+ * nouvelle fonction : le calcul est rigoureusement le même, seul le
+ * sous-ensemble d'entrée change, et dupliquer la logique romprait la règle
+ * « un seul endroit décide de ce qui s'ajoute et de ce qui se retranche »
+ * énoncée en tête de ce fichier.
+ */
+export const summarizeStrategy = summarizeDefi;

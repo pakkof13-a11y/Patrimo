@@ -37,6 +37,8 @@ export async function GET() {
             netValueEur: p.netValueEur.toFixed(2),
             isDebt: p.isDebt,
             rewardsValueEur: p.rewardsValueEur?.toFixed(2) ?? null,
+            // Détail par jeton — absent si la position n'a aucun reward.
+            rewardLegs: bundle.rewardLegs.get(p.id) ?? null,
             apyPct: p.apyPct?.toFixed(2) ?? null,
             healthFactor: p.healthFactor,
             ltvPct: p.ltvPct,
@@ -46,6 +48,9 @@ export async function GET() {
             // renseignée avec prix d'entrée, ou si un prix courant manque.
             impermanentLossPct: il?.pctOfHodl ?? null,
             impermanentLossEur: il?.amountEur ?? null,
+            strategyId: p.strategyId ?? null,
+            // Absent si la position n'a aucune contrainte de déblocage.
+            lock: bundle.lockStatus.get(p.id) ?? null,
           };
         }),
         byProtocol: bundle.byProtocol.map((g) => ({
@@ -59,6 +64,14 @@ export async function GET() {
         byType: bundle.byType.map((g) => ({
           positionType: g.positionType,
           totalEur: g.totalEur.toFixed(2),
+          positionIds: g.positions.map((p) => p.id),
+        })),
+        byStrategy: bundle.byStrategy.map((g) => ({
+          strategyId: g.strategyId,
+          name: g.name,
+          depositedEur: g.depositedEur.toFixed(2),
+          borrowedEur: g.borrowedEur.toFixed(2),
+          netEur: g.netEur.toFixed(2),
           positionIds: g.positions.map((p) => p.id),
         })),
         summary: {

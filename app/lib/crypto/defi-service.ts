@@ -18,17 +18,28 @@ import {
   type ImpermanentLossLeg,
 } from "./impermanent-loss";
 import {
+  computeLockSummary,
+  type VestingTranche,
+} from "./vesting";
+import {
   groupByProtocol,
+  groupByStrategy,
   groupByType,
   summarizeDefi,
   toPositionView,
   type DefiPositionInput,
+  type StrategyGroup,
 } from "./defi";
 
 export type DefiBundle = {
   positions: ReturnType<typeof toPositionView>[];
   byProtocol: ReturnType<typeof groupByProtocol>;
   byType: ReturnType<typeof groupByType>;
+  /**
+   * `groupByStrategy` ignore le nom (fonction pure, pas d'accès Prisma) :
+   * on l'attache ici, seule couche qui a chargé les `DefiStrategy`.
+   */
+  byStrategy: Array<StrategyGroup & { name: string }>;
   summary: ReturnType<typeof summarizeDefi>;
   /**
    * IL par position LP, tenue à part de `positions` : c'est une métrique
@@ -40,6 +51,30 @@ export type DefiBundle = {
     string,
     { pctOfHodl: string; amountEur: string; legsPriced: number; legsTotal: number }
   >;
+  /**
+   * Détail par jeton des rewards d'une position, premier reward inclus —
+   * `DefiPositionInput.rewardsValueEur` n'en porte que le total, cette carte
+   * est la seule à connaître la répartition par token (affichage détaillé).
+   */
+  rewardLegs: Map<
+    string,
+    Array<{ symbol: string; amount: string; valueEur: string; source: string | null }>
+  >;
+  /**
+   * Présent uniquement pour les positions portant `unlockAt`, `cliffAt` ou
+   * `vestingSchedule` — l'immense majorité des positions n'a aucune
+   * contrainte de déblocage, les en absenter évite un flot d'entrées `null`.
+   */
+  lockStatus: Map<
+    string,
+    {
+      isLocked: boolean;
+      vestedPct: string | null;
+      nextUnlockAt: string | null;
+      totalAmount: string | null;
+      vestedAmount: string | null;
+    }
+  >;
 };
 
 type StoredLpLeg = {
@@ -49,10 +84,46 @@ type StoredLpLeg = {
   allocationPct?: unknown;
 };
 
+type StoredRewardLeg = {
+  symbol?: unknown;
+  amount?: unknown;
+  valueEur?: unknown;
+  source?: unknown;
+};
+
 function parsePairedLegs(json: unknown): StoredLpLeg[] {
   if (!Array.isArray(json)) return [];
   return json.filter(
     (l): l is StoredLpLeg => typeof l === "object" && l !== null
+  );
+}
+
+type StoredVestingTranche = {
+  cliffAt?: unknown;
+  endAt?: unknown;
+  amount?: unknown;
+};
+
+function parseVestingSchedule(json: unknown): VestingTranche[] {
+  if (!Array.isArray(json)) return [];
+  const out: VestingTranche[] = [];
+  for (const raw of json) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const t = raw as StoredVestingTranche;
+    if (!t.endAt || t.amount == null) continue;
+    out.push({
+      cliffAt: typeof t.cliffAt === "string" ? t.cliffAt : null,
+      endAt: String(t.endAt),
+      amount: String(t.amount),
+    });
+  }
+  return out;
+}
+
+function parseExtraRewardLegs(json: unknown): StoredRewardLeg[] {
+  if (!Array.isArray(json)) return [];
+  return json.filter(
+    (l): l is StoredRewardLeg => typeof l === "object" && l !== null
   );
 }
 
@@ -77,8 +148,11 @@ export async function getDefiBundle(userId: string): Promise<DefiBundle> {
       positions: [],
       byProtocol: groupByProtocol(empty),
       byType: groupByType(empty),
+      byStrategy: [],
       summary: summarizeDefi(empty),
       impermanentLoss: new Map(),
+      rewardLegs: new Map(),
+      lockStatus: new Map(),
     };
   }
 
@@ -92,12 +166,62 @@ export async function getDefiBundle(userId: string): Promise<DefiBundle> {
   );
 
   const inputs: DefiPositionInput[] = [];
+  const rewardLegs: DefiBundle["rewardLegs"] = new Map();
+  const lockStatus: DefiBundle["lockStatus"] = new Map();
   for (const row of details) {
     const value = values.get(row.assetId);
     // Pas de position au journal = position fermée.
     if (!value) continue;
     const valueEur = value.marketValueEur;
     if (valueEur.abs().lt("0.01")) continue;
+
+    // Total des rewards toutes tokens confondus : `rewardsValueEur` du
+    // `DefiPositionInput` reste un seul chiffre (c'est ce que `summarizeDefi`
+    // sait additionner) — la répartition par jeton vit à part, dans
+    // `rewardLegs`, pour l'affichage détaillé.
+    const primaryReward = row.rewardsValueEur ? d(row.rewardsValueEur.toString()) : null;
+    const extraLegsParsed = parseExtraRewardLegs(row.extraRewardLegs);
+    let totalRewards = primaryReward ?? d(0);
+    const legsForPosition: Array<{
+      symbol: string;
+      amount: string;
+      valueEur: string;
+      source: string | null;
+    }> = [];
+    if (row.rewardsSymbol) {
+      legsForPosition.push({
+        symbol: row.rewardsSymbol,
+        amount: row.rewardsAmount ? row.rewardsAmount.toString() : "0",
+        valueEur: (primaryReward ?? d(0)).toFixed(2),
+        source: null,
+      });
+    }
+    for (const leg of extraLegsParsed) {
+      const legValue = leg.valueEur != null ? d(String(leg.valueEur)) : d(0);
+      totalRewards = totalRewards.plus(legValue);
+      legsForPosition.push({
+        symbol: String(leg.symbol ?? ""),
+        amount: leg.amount != null ? String(leg.amount) : "0",
+        valueEur: legValue.toFixed(2),
+        source: leg.source != null ? String(leg.source) : null,
+      });
+    }
+    if (legsForPosition.length > 0) rewardLegs.set(row.id, legsForPosition);
+
+    if (row.unlockAt || row.cliffAt || row.vestingSchedule) {
+      const lock = computeLockSummary({
+        unlockAt: row.unlockAt,
+        cliffAt: row.cliffAt,
+        vestingSchedule: parseVestingSchedule(row.vestingSchedule),
+      });
+      lockStatus.set(row.id, {
+        isLocked: lock.isLocked,
+        vestedPct: lock.vestedPct?.toFixed(2) ?? null,
+        nextUnlockAt: lock.nextUnlockAt?.toISOString() ?? null,
+        totalAmount: lock.totalAmount?.toFixed(8) ?? null,
+        vestedAmount: lock.vestedAmount?.toFixed(8) ?? null,
+      });
+    }
 
     inputs.push({
       id: row.id,
@@ -108,21 +232,37 @@ export async function getDefiBundle(userId: string): Promise<DefiBundle> {
       // La valeur d'un emprunt est portée en positif : c'est
       // `isDebtPosition()` qui lui donne son signe, à un seul endroit.
       valueEur: valueEur.abs(),
-      rewardsValueEur: row.rewardsValueEur ? d(row.rewardsValueEur.toString()) : null,
+      rewardsValueEur: totalRewards.gt(0) ? totalRewards : null,
       apyPct: row.apyPct ? d(row.apyPct.toString()) : null,
       healthFactor: row.healthFactor ? Number(row.healthFactor) : null,
       ltvPct: row.ltvPct ? Number(row.ltvPct) : null,
+      strategyId: row.strategyId,
     });
   }
 
   const impermanentLoss = await computeLpImpermanentLoss(details, values);
 
+  const strategyIds = [...new Set(inputs.map((p) => p.strategyId).filter((id): id is string => !!id))];
+  const strategyNames = strategyIds.length
+    ? await prisma.defiStrategy.findMany({
+        where: { id: { in: strategyIds }, userId },
+        select: { id: true, name: true },
+      })
+    : [];
+  const nameById = new Map(strategyNames.map((s) => [s.id, s.name]));
+
   return {
     positions: inputs.map(toPositionView),
     byProtocol: groupByProtocol(inputs),
     byType: groupByType(inputs),
+    byStrategy: groupByStrategy(inputs).map((g) => ({
+      ...g,
+      name: nameById.get(g.strategyId) ?? g.strategyId,
+    })),
     summary: summarizeDefi(inputs),
     impermanentLoss,
+    rewardLegs,
+    lockStatus,
   };
 }
 

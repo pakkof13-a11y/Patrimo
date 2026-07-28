@@ -46,6 +46,7 @@ model User {
   crowdlendingPositions  CrowdlendingPosition[]
   tangibleAssets         TangibleAsset[]
   cryptoFuturesPositions CryptoFuturesPosition[]
+  defiStrategies         DefiStrategy[]
 
   @@index([role])
 }
@@ -1083,9 +1084,37 @@ model IndirectRealEstateDetail {
 /// `isDebtPosition()` qui lui donne son signe négatif dans les agrégats. Le
 /// signe n'est jamais inscrit en base, sans quoi deux endroits décideraient de
 /// la même chose.
+/// Regroupement optionnel de positions DeFi liées entre elles (ex. ETH →
+/// staké chez Lido → stETH déposé en collatéral chez Aave → USDC emprunté).
+///
+/// Ne porte aucune valeur propre : le P&L consolidé d'une stratégie est la
+/// somme de `netValueEur` de ses positions au moment de la lecture, jamais
+/// un champ stocké séparément — même principe que `DefiPositionDetail`
+/// lui-même vis-à-vis du journal. Une position sans `strategyId` reste une
+/// position autonome, exactement comme avant l'existence de ce modèle.
+model DefiStrategy {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  positions DefiPositionDetail[]
+
+  @@index([userId])
+}
+
 model DefiPositionDetail {
   id      String @id @default(cuid())
   assetId String @unique
+
+  /// Regroupement optionnel dans une stratégie multi-positions. `SetNull` :
+  /// supprimer une stratégie ne doit jamais supprimer les positions qui la
+  /// composent, seulement les en détacher.
+  strategyId String?
+  strategy   DefiStrategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
 
   /// Aave, Lido, Uniswap, Kamino…
   protocol     String
@@ -1135,9 +1164,31 @@ model DefiPositionDetail {
   /// Rendement annualisé affiché par le protocole, en %. Déclaratif : sert à
   /// comparer, jamais à valoriser.
   apyPct          Decimal? @db.Decimal(9, 4)
+  /// Premier reward (conservé tel quel pour compatibilité — la quasi-totalité
+  /// des positions n'en ont qu'un seul).
   rewardsSymbol   String?
   rewardsAmount   Decimal? @db.Decimal(38, 18)
   rewardsValueEur Decimal? @db.Decimal(18, 2)
+
+  /// Rewards additionnels au-delà du premier, ex. `[{ symbol, amount,
+  /// valueEur, source }]` — une LP Curve qui distribue à la fois CRV et son
+  /// propre gauge token. Même raisonnement que `pairedLegs` : JSON plutôt que
+  /// des colonnes `reward2Symbol`..`rewardNSymbol`, le nombre de rewards
+  /// au-delà du premier est rare et sans plafond naturel.
+  extraRewardLegs Json?
+
+  /// Déblocage / vesting — tous optionnels, absents = position librement
+  /// disponible (comportement actuel inchangé). `vestingSchedule` porte un
+  /// vesting linéaire ou multi-tranches : `{ cliffAt?, endAt, amount }[]`.
+  unlockAt        DateTime?
+  cliffAt         DateTime?
+  vestingSchedule Json?
+
+  /// Sac déclaratif pour ce qui n'a pas (encore) de champ dédié — campagne de
+  /// points, référence d'audit, etc. Jamais lu par un calcul, seulement
+  /// affiché : un champ qui influencerait une valorisation appartient à une
+  /// colonne nommée, pas ici.
+  metadata Json?
 
   /// Santé d'un prêt collatéralisé. Sous 1, la position est liquidable.
   healthFactor    Decimal? @db.Decimal(12, 4)
@@ -1156,6 +1207,7 @@ model DefiPositionDetail {
 
   @@index([protocol])
   @@index([positionType])
+  @@index([strategyId])
 }
 
 /// Position futures / perpétuelle sur un exchange crypto.

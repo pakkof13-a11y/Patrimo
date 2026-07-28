@@ -31,6 +31,27 @@ export type ExtraLpLeg = {
   allocationPct?: string | null;
 };
 
+/**
+ * Reward au-delà du premier — persisté dans `extraRewardLegs`. Le premier
+ * reward garde ses colonnes dédiées (`rewardsSymbol`/`rewardsAmount`/
+ * `rewardsValueEur`) pour compatibilité ; ceci ne couvre que les tokens
+ * additionnels d'une même position (ex. CRV + gauge token sur Curve).
+ */
+export type ExtraRewardLeg = {
+  symbol: string;
+  amount: string;
+  valueEur: string;
+  /** Origine déclarative — "trading fees", "emissions", campagne… */
+  source?: string | null;
+};
+
+/** Tranche de vesting saisie — cf. `vesting.ts` pour le calcul de progression. */
+export type VestingTrancheInput = {
+  cliffAt?: string | null;
+  endAt: string;
+  amount: string;
+};
+
 export type CreateDefiInput = {
   platformId: string;
   /** Actif engagé — « ETH », « USDC »… */
@@ -38,6 +59,14 @@ export type CreateDefiInput = {
   protocol: string;
   positionType: string;
   chain?: string | null;
+  /** Rattachement à une stratégie existante (`DefiStrategy`), optionnel. */
+  strategyId?: string | null;
+
+  /** Verrou binaire — absent = librement disponible. */
+  unlockAt?: string | null;
+  cliffAt?: string | null;
+  /** Vesting multi-tranches — prime sur `unlockAt`/`cliffAt` si renseigné. */
+  vestingSchedule?: VestingTrancheInput[] | null;
 
   /** Quantité engagée dans le protocole. */
   quantity: string;
@@ -49,6 +78,8 @@ export type CreateDefiInput = {
   rewardsSymbol?: string | null;
   rewardsAmount?: string | null;
   rewardsValueEur?: string | null;
+  /** Rewards additionnels au-delà du premier (rare, cf. `ExtraRewardLeg`). */
+  extraRewardLegs?: ExtraRewardLeg[] | null;
 
   healthFactor?: string | null;
   ltvPct?: string | null;
@@ -177,6 +208,72 @@ export function validateLpInput(
   }
 }
 
+const MAX_EXTRA_REWARD_LEGS = 5;
+
+/**
+ * Valide les rewards additionnels (au-delà du premier). Isolée pour la même
+ * raison que `validateLpInput` : ces règles ne concernent que le sac
+ * `extraRewardLegs`, pas les champs génériques de la position.
+ */
+export function validateRewardLegs(
+  primarySymbol: string | null | undefined,
+  extraLegs: ExtraRewardLeg[]
+): void {
+  if (extraLegs.length === 0) return;
+  if (extraLegs.length > MAX_EXTRA_REWARD_LEGS) {
+    throw new DefiInputError(
+      `Un maximum de ${MAX_EXTRA_REWARD_LEGS} rewards additionnels est accepté`
+    );
+  }
+
+  const symbols = primarySymbol ? [primarySymbol.trim().toUpperCase()] : [];
+  for (const leg of extraLegs) {
+    const sym = leg.symbol.trim().toUpperCase();
+    if (!sym) throw new DefiInputError("Chaque reward additionnel doit préciser son jeton");
+
+    const amount = d(leg.amount);
+    if (!amount.isFinite() || amount.lte(0)) {
+      throw new DefiInputError(`Quantité invalide pour le reward ${sym}`);
+    }
+    const valueEur = d(leg.valueEur);
+    if (!valueEur.isFinite() || valueEur.lt(0)) {
+      throw new DefiInputError(`Valeur en euros invalide pour le reward ${sym}`);
+    }
+    symbols.push(sym);
+  }
+
+  if (new Set(symbols).size !== symbols.length) {
+    throw new DefiInputError("Les rewards d'une même position doivent porter des jetons distincts");
+  }
+}
+
+/**
+ * Valide les tranches de vesting saisies. Purement syntaxique (dates valides,
+ * montants positifs) — la logique de progression (cliff, linéaire…) vit dans
+ * `vesting.ts`, un module pur qui n'a pas à connaître `DefiInputError`.
+ */
+export function validateVestingSchedule(schedule: VestingTrancheInput[]): void {
+  for (const tranche of schedule) {
+    const endAt = new Date(tranche.endAt);
+    if (Number.isNaN(endAt.getTime())) {
+      throw new DefiInputError("Échéance de vesting invalide");
+    }
+    if (tranche.cliffAt) {
+      const cliffAt = new Date(tranche.cliffAt);
+      if (Number.isNaN(cliffAt.getTime())) {
+        throw new DefiInputError("Date de cliff invalide");
+      }
+      if (cliffAt > endAt) {
+        throw new DefiInputError("Le cliff doit précéder l'échéance de la tranche");
+      }
+    }
+    const amount = d(tranche.amount);
+    if (!amount.isFinite() || amount.lte(0)) {
+      throw new DefiInputError("Quantité de vesting invalide");
+    }
+  }
+}
+
 export async function createDefiPosition(
   userId: string,
   input: CreateDefiInput
@@ -234,6 +331,45 @@ export async function createDefiPosition(
         }))
       : undefined;
 
+  const extraRewardLegs = input.extraRewardLegs ?? [];
+  validateRewardLegs(input.rewardsSymbol, extraRewardLegs);
+  const extraRewardLegsJson =
+    extraRewardLegs.length > 0
+      ? extraRewardLegs.map((leg) => ({
+          symbol: leg.symbol.trim().toUpperCase(),
+          amount: dec(leg.amount),
+          valueEur: dec(leg.valueEur),
+          source: leg.source?.trim() || null,
+        }))
+      : undefined;
+
+  const vestingSchedule = input.vestingSchedule ?? [];
+  validateVestingSchedule(vestingSchedule);
+  const vestingScheduleJson =
+    vestingSchedule.length > 0
+      ? vestingSchedule.map((t) => ({
+          cliffAt: t.cliffAt || null,
+          endAt: t.endAt,
+          amount: dec(t.amount),
+        }))
+      : undefined;
+  const unlockAt = input.unlockAt ? new Date(input.unlockAt) : null;
+  if (unlockAt && Number.isNaN(unlockAt.getTime())) {
+    throw new DefiInputError("Date de déblocage invalide");
+  }
+  const cliffAt = input.cliffAt ? new Date(input.cliffAt) : null;
+  if (cliffAt && Number.isNaN(cliffAt.getTime())) {
+    throw new DefiInputError("Date de cliff invalide");
+  }
+
+  if (input.strategyId) {
+    const strategy = await prisma.defiStrategy.findFirst({
+      where: { id: input.strategyId, userId },
+      select: { id: true },
+    });
+    if (!strategy) throw new DefiInputError("Stratégie introuvable");
+  }
+
   return prisma.$transaction(async (tx) => {
     const asset = await tx.asset.create({
       data: {
@@ -255,6 +391,7 @@ export async function createDefiPosition(
     const detail = await tx.defiPositionDetail.create({
       data: {
         assetId: asset.id,
+        strategyId: input.strategyId || null,
         protocol,
         chain: input.chain?.trim() || null,
         positionType: input.positionType,
@@ -272,6 +409,10 @@ export async function createDefiPosition(
         rewardsSymbol: input.rewardsSymbol?.trim().toUpperCase() || null,
         rewardsAmount: dec(input.rewardsAmount),
         rewardsValueEur: dec(input.rewardsValueEur),
+        extraRewardLegs: extraRewardLegsJson,
+        unlockAt,
+        cliffAt,
+        vestingSchedule: vestingScheduleJson,
         healthFactor: isDebt ? dec(input.healthFactor) : null,
         ltvPct: isDebt ? dec(input.ltvPct) : null,
         liqThresholdPct: isDebt ? dec(input.liqThresholdPct) : null,

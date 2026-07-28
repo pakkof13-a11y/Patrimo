@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ChevronDown, Layers, Lock } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,6 +34,28 @@ type PositionRow = {
   /** Indicatif, LP uniquement — cf. impermanent-loss.ts. Absent si non calculable. */
   impermanentLossPct: string | null;
   impermanentLossEur: string | null;
+  strategyId: string | null;
+  /** Absent si la position n'a aucune contrainte de déblocage. */
+  lock: {
+    isLocked: boolean;
+    vestedPct: string | null;
+    nextUnlockAt: string | null;
+  } | null;
+};
+
+type StrategyRow = {
+  id: string;
+  name: string;
+  notes: string | null;
+};
+
+type StrategyGroupRow = {
+  strategyId: string;
+  name: string;
+  depositedEur: string;
+  borrowedEur: string;
+  netEur: string;
+  positionIds: string[];
 };
 
 /** Jeton au-delà du second, saisi pour une LP à 3-5 actifs (Curve, Balancer…). */
@@ -61,6 +83,7 @@ type DefiResponse = {
   positions: PositionRow[];
   byProtocol: ProtocolRow[];
   byType: Array<{ positionType: string; totalEur: string; positionIds: string[] }>;
+  byStrategy: StrategyGroupRow[];
   summary: {
     depositedEur: string;
     borrowedEur: string;
@@ -86,6 +109,7 @@ const emptyForm = {
   protocol: "",
   positionType: "STAKING" as DefiPositionType,
   chain: "",
+  strategyId: "",
   quantity: "",
   unitPriceEur: "",
   openedAt: new Date().toISOString().slice(0, 10),
@@ -127,6 +151,8 @@ export function DefiPanel({ className }: { className?: string }) {
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [groupByStrategyView, setGroupByStrategyView] = useState(false);
+  const [newStrategyName, setNewStrategyName] = useState("");
 
   const q = useQuery({
     queryKey: ["crypto-defi"],
@@ -138,12 +164,37 @@ export function DefiPanel({ className }: { className?: string }) {
     queryFn: () => fetchJson<{ platforms: PlatformRow[] }>("/api/platforms"),
   });
 
+  const strategiesQ = useQuery({
+    queryKey: ["crypto-defi-strategies"],
+    queryFn: () =>
+      fetchJson<{ strategies: StrategyRow[] }>("/api/crypto/defi/strategies"),
+  });
+
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["crypto-defi"] });
     // La position pèse au patrimoine : la vue Positions doit suivre.
     void qc.invalidateQueries({ queryKey: ["holdings"] });
     void qc.invalidateQueries({ queryKey: ["portfolio"] });
   };
+
+  const createStrategy = useMutation({
+    mutationFn: async (name: string) => {
+      const res = await fetch("/api/crypto/defi/strategies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Création impossible");
+      return json as StrategyRow;
+    },
+    onSuccess: (strategy) => {
+      setForm((f) => ({ ...f, strategyId: strategy.id }));
+      setNewStrategyName("");
+      void qc.invalidateQueries({ queryKey: ["crypto-defi-strategies"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const create = useMutation({
     mutationFn: async () => {
@@ -160,6 +211,7 @@ export function DefiPanel({ className }: { className?: string }) {
           unitPriceEur: form.unitPriceEur,
           openedAt: form.openedAt,
           chain: form.chain || null,
+          strategyId: form.strategyId || null,
           apyPct: form.apyPct || null,
           rewardsValueEur: form.rewardsValueEur || null,
           healthFactor: form.healthFactor || null,
@@ -256,14 +308,39 @@ export function DefiPanel({ className }: { className?: string }) {
         title="Positions DeFi"
         subtitle="Staking, prêts, emprunts et liquidité — valeur issue du journal"
         actions={
-          <Button
-            type="button"
-            variant={showForm ? "outline" : "default"}
-            onClick={() => setShowForm((v) => !v)}
-            data-testid="defi-form-toggle"
-          >
-            {showForm ? "Annuler" : "Ajouter une position"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className={cn(
+                "inline-flex items-center gap-1 rounded-[var(--radius-md)] border border-[var(--border)] px-2 py-1 text-[11px] font-medium transition",
+                "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+                groupByStrategyView
+                  ? "border-[var(--primary)]/30 bg-[var(--primary-soft)] text-[var(--foreground)]"
+                  : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              )}
+              aria-expanded={groupByStrategyView}
+              data-testid="defi-strategy-view-toggle"
+              onClick={() => setGroupByStrategyView((v) => !v)}
+            >
+              <Layers className="h-3 w-3" aria-hidden />
+              Par stratégie
+              <ChevronDown
+                className={cn(
+                  "h-3 w-3 transition-transform",
+                  groupByStrategyView && "rotate-180"
+                )}
+                aria-hidden
+              />
+            </button>
+            <Button
+              type="button"
+              variant={showForm ? "outline" : "default"}
+              onClick={() => setShowForm((v) => !v)}
+              data-testid="defi-form-toggle"
+            >
+              {showForm ? "Annuler" : "Ajouter une position"}
+            </Button>
+          </div>
         }
       />
 
@@ -360,6 +437,41 @@ export function DefiPanel({ className }: { className?: string }) {
                 value={form.chain}
                 onChange={(e) => set("chain", e.target.value)}
               />
+            </label>
+
+            <label className="text-meta block">
+              Stratégie (optionnel)
+              <select
+                className="input mt-1 w-full"
+                value={form.strategyId}
+                onChange={(e) => set("strategyId", e.target.value)}
+                data-testid="defi-strategy-select"
+              >
+                <option value="">— autonome —</option>
+                {(strategiesQ.data?.strategies ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-1 flex gap-1.5">
+                <input
+                  className="input w-full"
+                  placeholder="Nouvelle stratégie…"
+                  value={newStrategyName}
+                  onChange={(e) => setNewStrategyName(e.target.value)}
+                  data-testid="defi-strategy-new-name"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!newStrategyName.trim() || createStrategy.isPending}
+                  onClick={() => createStrategy.mutate(newStrategyName.trim())}
+                  data-testid="defi-strategy-new-submit"
+                >
+                  +
+                </Button>
+              </div>
             </label>
 
             <label className="text-meta block">
@@ -711,11 +823,62 @@ export function DefiPanel({ className }: { className?: string }) {
                   <th className="py-1.5 pr-2 text-right">APY</th>
                   <th className="py-1.5 pr-2 text-right">Santé</th>
                   <th className="py-1.5 pr-2 text-right">IL</th>
+                  <th className="py-1.5 pr-2 text-right">Lock</th>
                   <th className="py-1.5 text-right">Valeur</th>
                 </tr>
               </thead>
               <tbody>
-                {positions.map((p) => (
+                {groupByStrategyView && (
+                  <>
+                    {(q.data?.byStrategy ?? []).map((g) => (
+                      <StrategyGroupRows
+                        key={g.strategyId}
+                        group={g}
+                        positions={positions}
+                      />
+                    ))}
+                    {(() => {
+                      const grouped = new Set(
+                        (q.data?.byStrategy ?? []).flatMap((g) => g.positionIds)
+                      );
+                      const rest = positions.filter((p) => !grouped.has(p.id));
+                      if (rest.length === 0) return null;
+                      return (
+                        <>
+                          <tr className="bg-[var(--muted)]/20">
+                            <td
+                              colSpan={8}
+                              className="py-1 pl-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]"
+                            >
+                              Sans stratégie
+                            </td>
+                          </tr>
+                          {rest.map((p) => (
+                            <PositionRowView key={p.id} p={p} />
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </>
+                )}
+                {!groupByStrategyView &&
+                  positions.map((p) => <PositionRowView key={p.id} p={p} />)}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-meta mt-3">
+            Un emprunt est compté en négatif : le net DeFi est ce que les
+            positions pèsent réellement, dettes déduites.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function PositionRowView({ p }: { p: PositionRow }) {
+  return (
                   <tr
                     key={p.id}
                     className="border-b border-[var(--border)]/50"
@@ -792,6 +955,32 @@ export function DefiPanel({ className }: { className?: string }) {
                         </span>
                       )}
                     </td>
+                    <td className="py-1.5 pr-2 text-right" data-testid="defi-row-lock">
+                      {p.lock ? (
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px]",
+                            p.lock.isLocked
+                              ? "border-[var(--warning)]/40 text-[var(--warning)]"
+                              : "border-[var(--border)] text-[var(--muted-foreground)]"
+                          )}
+                          title={
+                            p.lock.nextUnlockAt
+                              ? `Déblocage : ${new Date(p.lock.nextUnlockAt).toLocaleDateString("fr-FR")}`
+                              : undefined
+                          }
+                        >
+                          <Lock className="h-3 w-3" aria-hidden />
+                          {p.lock.vestedPct != null
+                            ? `${Number(p.lock.vestedPct).toLocaleString("fr-FR", { maximumFractionDigits: 0 })} %`
+                            : p.lock.isLocked
+                              ? "verrouillé"
+                              : "débloqué"}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td
                       className={cn(
                         "py-1.5 text-right font-medium tabular-nums",
@@ -801,17 +990,34 @@ export function DefiPanel({ className }: { className?: string }) {
                       {formatCurrency(p.netValueEur, "EUR")}
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+  );
+}
 
-          <p className="text-meta mt-3">
-            Un emprunt est compté en négatif : le net DeFi est ce que les
-            positions pèsent réellement, dettes déduites.
-          </p>
-        </>
-      )}
-    </section>
+function StrategyGroupRows({
+  group,
+  positions,
+}: {
+  group: StrategyGroupRow;
+  positions: PositionRow[];
+}) {
+  const rows = positions.filter((p) => group.positionIds.includes(p.id));
+  if (rows.length === 0) return null;
+  return (
+    <>
+      <tr className="bg-[var(--muted)]/20" data-testid="defi-strategy-group-header">
+        <td
+          colSpan={8}
+          className="py-1 pl-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]"
+        >
+          {group.name}
+          <span className="ml-2 font-normal normal-case tabular-nums">
+            net {formatCurrency(group.netEur, "EUR")}
+          </span>
+        </td>
+      </tr>
+      {rows.map((p) => (
+        <PositionRowView key={p.id} p={p} />
+      ))}
+    </>
   );
 }

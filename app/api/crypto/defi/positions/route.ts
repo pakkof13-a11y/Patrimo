@@ -10,6 +10,7 @@ import {
   createDefiPosition,
   DefiInputError,
 } from "@/app/lib/crypto/defi-manual-service";
+import { setPositionStrategy } from "@/app/lib/crypto/defi-strategy-service";
 import { AccountingError } from "@/app/lib/accounting";
 import { DEFI_POSITION_TYPES } from "@/app/lib/crypto/constants";
 
@@ -29,6 +30,21 @@ const createSchema = z.object({
     Object.keys(DEFI_POSITION_TYPES) as [string, ...string[]]
   ),
   chain: z.string().trim().max(40).optional().nullable(),
+  strategyId: z.string().min(1).optional().nullable(),
+
+  unlockAt: z.string().optional().nullable(),
+  cliffAt: z.string().optional().nullable(),
+  vestingSchedule: z
+    .array(
+      z.object({
+        cliffAt: z.string().optional().nullable(),
+        endAt: z.string().min(1),
+        amount: decimalString,
+      })
+    )
+    .max(24) // vesting mensuel sur 2 ans, plafond large mais pas illimité
+    .optional()
+    .nullable(),
 
   quantity: decimalString,
   unitPriceEur: decimalString,
@@ -58,6 +74,19 @@ const createSchema = z.object({
       })
     )
     .max(3) // 3ᵉ à 5ᵉ jeton — primaire + pairedSymbol couvrent les 2 premiers
+    .optional()
+    .nullable(),
+
+  extraRewardLegs: z
+    .array(
+      z.object({
+        symbol: z.string().trim().min(1).max(24),
+        amount: decimalString,
+        valueEur: decimalString,
+        source: z.string().trim().max(80).optional().nullable(),
+      })
+    )
+    .max(5)
     .optional()
     .nullable(),
 
@@ -160,6 +189,53 @@ export async function DELETE(req: Request) {
     console.error("[crypto/defi/positions DELETE]", e);
     return NextResponse.json(
       { error: clientErrorMessage(e, "Dénouement impossible") },
+      { status: clientErrorStatus(e) }
+    );
+  }
+}
+
+const strategySchema = z.object({
+  positionId: z.string().min(1),
+  /** `null` détache la position de toute stratégie. */
+  strategyId: z.string().min(1).nullable(),
+});
+
+/** PATCH — rattache ou détache une position d'une stratégie (`DefiStrategy`). */
+export async function PATCH(req: Request) {
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "JSON invalide" }, { status: 400 });
+  }
+
+  const parsed = strategySchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "Requête invalide" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    await setPositionStrategy(
+      userId,
+      parsed.data.positionId,
+      parsed.data.strategyId
+    );
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    if (e instanceof DefiInputError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    console.error("[crypto/defi/positions PATCH]", e);
+    return NextResponse.json(
+      { error: clientErrorMessage(e, "Rattachement impossible") },
       { status: clientErrorStatus(e) }
     );
   }

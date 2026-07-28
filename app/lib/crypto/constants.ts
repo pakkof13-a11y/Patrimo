@@ -19,12 +19,26 @@ export const DEFI_POSITION_TYPES = {
   LIQUID_STAKING: "Staking liquide",
   LENDING: "Prêt (dépôt)",
   BORROWING: "Emprunt",
+  // Collatéral verrouillé pour un prêt sur-collatéralisé (Maker, Liquity).
+  // La dette correspondante reste une ligne BORROWING séparée — un CDP
+  // n'introduit pas un second sens à `isDebtPosition`, il ne fait que
+  // distinguer visuellement ce collatéral d'un simple staking verrouillé.
+  CDP: "Collatéral CDP",
   LP: "Liquidité (LP / AMM)",
   YIELD_FARMING: "Yield farming",
   VAULT: "Vault / stratégie",
   RESTAKING: "Restaking",
   RWA: "Actif réel tokenisé",
+  // Rendement fixe à échéance — obligations on-chain, Pendle PT/YT.
+  FIXED_YIELD: "Rendement fixe",
   LOCKED: "Verrouillé / vesting",
+  // Jetons bloqués en amont d'un TGE (ICO/IDO/IEO) — se combine naturellement
+  // avec `unlockAt`/`vestingSchedule` sur `DefiPositionDetail`.
+  LAUNCHPAD: "Launchpad (pré-TGE)",
+  // Programme de points sans valeur de marché directe (EigenLayer,
+  // Symbiotic…) — la valeur réelle reste celle de l'actif engagé ; les
+  // points eux-mêmes se notent dans `metadata`, jamais dans un calcul.
+  POINTS: "Programme de points",
   REWARDS: "Récompenses à réclamer",
   OTHER: "Autre",
 } as const;
