@@ -1089,6 +1089,37 @@ model TangibleAsset {
   insuranceValue  Decimal? @db.Decimal(28, 12)
   storageLocation String?
 
+  // ── Assurance ──────────────────────────────────────────────────────────────
+  /// Prime annuelle payée — distincte du capital assuré (`insuranceValue`),
+  /// que l'on confond souvent : l'une est un coût, l'autre une couverture.
+  insurancePremiumAnnual Decimal? @db.Decimal(28, 12)
+  insuranceProvider      String?
+  insurancePolicyRef     String?
+
+  // ── Garde / conservation ───────────────────────────────────────────────────
+  /// HOME | BANK_VAULT | PRO_VAULT | THIRD_PARTY
+  ///
+  /// Détermine l'exposition réelle : un objet de valeur conservé au domicile
+  /// sans assurance est le cas que l'écran doit signaler.
+  storageType        String?
+  /// Loyer annuel du coffre, de la cave ou du dépositaire
+  storageCostAnnual  Decimal? @db.Decimal(28, 12)
+  /// Coffreo, banque, caviste, garde-meuble…
+  storageProvider    String?
+  storageContractRef String?
+  /// Échéance du contrat de garde — un renouvellement manqué laisse l'objet
+  /// sans dépositaire déclaré.
+  storageRenewalDate DateTime?
+
+  // ── Transmission ───────────────────────────────────────────────────────────
+  /// Inclus dans l'assiette successorale.
+  ///
+  /// Aucun barème n'est calculé ici : les droits de succession relèvent d'un
+  /// chantier à part. Ce champ ne sert qu'à distinguer ce qui a déjà été donné
+  /// de ce qui reste à transmettre.
+  includeInEstate Boolean @default(true)
+  estateNote      String?
+
   /// Objet de collection au sens fiscal.
   ///
   /// Décisif pour les véhicules et le mobilier : exonérés par nature

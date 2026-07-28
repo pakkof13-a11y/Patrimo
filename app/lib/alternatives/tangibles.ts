@@ -31,9 +31,16 @@ import {
   type TangibleCategory,
 } from "@/app/lib/tangibles/constants";
 import { computeMovableSaleTax } from "@/app/lib/tax/movable-assets";
+import {
+  annualCostOfOwnership,
+  netCarryYield,
+  ownershipAlerts,
+  STORAGE_TYPES,
+} from "@/app/lib/tangibles/ownership";
 import type {
   TangibleAssetDto,
   TangibleAssetsSummary,
+  TangibleOwnership,
   TangibleTaxPreview,
 } from "./types";
 
@@ -74,6 +81,11 @@ function parseDate(value: string | Date | null | undefined): Date | null {
   if (!value) return null;
   const parsed = value instanceof Date ? value : new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function normalizeStorageType(raw: string | undefined | null): string | null {
+  const value = String(raw ?? "").toUpperCase();
+  return (STORAGE_TYPES as readonly string[]).includes(value) ? value : null;
 }
 
 function normalizeCategory(raw: string | undefined | null): TangibleCategory {
@@ -121,11 +133,52 @@ function taxPreview(row: Row): TangibleTaxPreview {
   };
 }
 
+/**
+ * Coût de détention de la ligne.
+ *
+ * Ce bloc ne touche jamais à `taxPreview` : les frais de garde et les primes
+ * d'assurance ne sont pas déductibles de la plus-value imposable au titre de
+ * l'article 150 VI. Les additionner donnerait un impôt sous-évalué.
+ */
+function ownershipView(row: Row, holdingYears: number | null): TangibleOwnership {
+  const annualCost = annualCostOfOwnership({
+    insurancePremiumAnnual: row.insurancePremiumAnnual?.toString() ?? null,
+    storageCostAnnual: row.storageCostAnnual?.toString() ?? null,
+  });
+
+  const carry = netCarryYield({
+    estimatedValue: row.estimatedValue.toString(),
+    purchasePrice: row.purchasePrice.toString(),
+    holdingYears,
+    annualCost,
+  });
+
+  return {
+    annualCostEur: annualCost.toFixed(2),
+    totalCarryCostEur: carry.totalCarryCostEur,
+    netPnlEur: carry.netPnlEur,
+    netPnlPct: carry.netPnlPct,
+    carryDragPct: carry.carryDragPct,
+    alerts: ownershipAlerts({
+      estimatedValue: row.estimatedValue.toString(),
+      storageCostAnnual: row.storageCostAnnual?.toString() ?? null,
+      insurancePremiumAnnual: row.insurancePremiumAnnual?.toString() ?? null,
+      storageType: row.storageType,
+      storageRenewalDate: row.storageRenewalDate,
+      totalCarryCostEur: carry.totalCarryCostEur,
+      grossPnlEur: carry.grossPnlEur,
+    }),
+  };
+}
+
 function mapRow(row: Row): TangibleAssetDto {
   const cost = d(row.purchasePrice.toString());
   const value = d(row.estimatedValue.toString());
   const pnl = value.minus(cost);
   const pct = cost.gt(0) ? pnl.div(cost).times(100) : d(0);
+  // La durée de détention vient du calcul fiscal : une seule source pour deux
+  // usages, sinon les deux blocs pourraient annoncer des durées différentes.
+  const tax = taxPreview(row);
 
   return {
     id: row.id,
@@ -176,7 +229,20 @@ function mapRow(row: Row): TangibleAssetDto {
     autoInspectionOk: row.autoInspectionOk,
     autoPreviousOwners: row.autoPreviousOwners,
 
-    tax: taxPreview(row),
+    insurancePremiumAnnual: row.insurancePremiumAnnual?.toString() ?? null,
+    insuranceProvider: row.insuranceProvider,
+    insurancePolicyRef: row.insurancePolicyRef,
+    storageType: row.storageType,
+    storageCostAnnual: row.storageCostAnnual?.toString() ?? null,
+    storageProvider: row.storageProvider,
+    storageContractRef: row.storageContractRef,
+    storageRenewalDate: row.storageRenewalDate?.toISOString() ?? null,
+
+    includeInEstate: row.includeInEstate,
+    estateNote: row.estateNote,
+
+    tax,
+    ownership: ownershipView(row, tax.holdingYears),
   };
 }
 
@@ -191,6 +257,11 @@ export function summarizeTangibles(
   let withCertificateCount = 0;
   let withAppraisalCount = 0;
   let undatedCount = 0;
+  let custodyCost = d(0);
+  let ownershipCost = d(0);
+  let highCustodyCostCount = 0;
+  let ownershipAlertCount = 0;
+  let excludedFromEstate = d(0);
   const byCategory = new Map<string, Decimal>();
 
   for (const line of lines) {
@@ -202,6 +273,15 @@ export function summarizeTangibles(
     if (line.hasCertificate) withCertificateCount += 1;
     if (line.appraisalValue !== null) withAppraisalCount += 1;
     if (!line.purchaseDate) undatedCount += 1;
+    custodyCost = custodyCost.plus(line.storageCostAnnual ?? 0);
+    ownershipCost = ownershipCost.plus(line.ownership.annualCostEur);
+    ownershipAlertCount += line.ownership.alerts.length;
+    if (line.ownership.alerts.some((a) => a.code === "HIGH_CUSTODY_COST")) {
+      highCustodyCostCount += 1;
+    }
+    if (!line.includeInEstate) {
+      excludedFromEstate = excludedFromEstate.plus(line.estimatedValue);
+    }
     byCategory.set(
       line.category,
       (byCategory.get(line.category) ?? d(0)).plus(line.estimatedValue)
@@ -229,6 +309,11 @@ export function summarizeTangibles(
     withCertificateCount,
     withAppraisalCount,
     undatedCount,
+    totalAnnualCustodyCost: custodyCost.toFixed(2),
+    totalAnnualOwnershipCost: ownershipCost.toFixed(2),
+    highCustodyCostCount,
+    ownershipAlertCount,
+    excludedFromEstateEur: excludedFromEstate.toFixed(2),
   };
 }
 
@@ -262,6 +347,18 @@ export type TangibleInput = {
   insuranceValue?: string | number | null;
   storageLocation?: string | null;
   isCollectible?: boolean;
+
+  insurancePremiumAnnual?: string | number | null;
+  insuranceProvider?: string | null;
+  insurancePolicyRef?: string | null;
+  storageType?: string | null;
+  storageCostAnnual?: string | number | null;
+  storageProvider?: string | null;
+  storageContractRef?: string | null;
+  storageRenewalDate?: string | null;
+
+  includeInEstate?: boolean;
+  estateNote?: string | null;
 
   gemType?: string | null;
   caratWeight?: string | number | null;
@@ -310,6 +407,20 @@ function normalize(input: TangibleInput) {
     insuranceValue: optDec(input.insuranceValue),
     storageLocation: optText(input.storageLocation),
     isCollectible: Boolean(input.isCollectible),
+
+    insurancePremiumAnnual: optDec(input.insurancePremiumAnnual),
+    insuranceProvider: optText(input.insuranceProvider),
+    insurancePolicyRef: optText(input.insurancePolicyRef),
+    storageType: normalizeStorageType(input.storageType),
+    storageCostAnnual: optDec(input.storageCostAnnual),
+    storageProvider: optText(input.storageProvider),
+    storageContractRef: optText(input.storageContractRef),
+    storageRenewalDate: parseDate(input.storageRenewalDate),
+
+    // Par défaut inclus dans l'assiette : c'est le cas général, et l'exclusion
+    // est une décision explicite (donation déjà réalisée, bien démembré…).
+    includeInEstate: input.includeInEstate ?? true,
+    estateNote: optText(input.estateNote),
 
     gemType: optText(input.gemType),
     caratWeight: optDec(input.caratWeight),
@@ -388,6 +499,27 @@ export async function updateTangible(
     insuranceValue: keep("insuranceValue", existing.insuranceValue?.toString() ?? null),
     storageLocation: keep("storageLocation", existing.storageLocation),
     isCollectible: keep("isCollectible", existing.isCollectible),
+
+    insurancePremiumAnnual: keep(
+      "insurancePremiumAnnual",
+      existing.insurancePremiumAnnual?.toString() ?? null
+    ),
+    insuranceProvider: keep("insuranceProvider", existing.insuranceProvider),
+    insurancePolicyRef: keep("insurancePolicyRef", existing.insurancePolicyRef),
+    storageType: keep("storageType", existing.storageType),
+    storageCostAnnual: keep(
+      "storageCostAnnual",
+      existing.storageCostAnnual?.toString() ?? null
+    ),
+    storageProvider: keep("storageProvider", existing.storageProvider),
+    storageContractRef: keep("storageContractRef", existing.storageContractRef),
+    storageRenewalDate: keep(
+      "storageRenewalDate",
+      existing.storageRenewalDate?.toISOString() ?? null
+    ),
+
+    includeInEstate: keep("includeInEstate", existing.includeInEstate),
+    estateNote: keep("estateNote", existing.estateNote),
 
     gemType: keep("gemType", existing.gemType),
     caratWeight: keep("caratWeight", existing.caratWeight?.toString() ?? null),

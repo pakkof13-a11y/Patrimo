@@ -532,6 +532,25 @@ export const tangibleAssetSchema = z.object({
   /** Qualification d'objet de collection — décisive pour AUTO et FURNITURE. */
   isCollectible: z.boolean().default(false),
 
+  // Assurance — la prime est un coût, le capital assuré une couverture
+  insurancePremiumAnnual: optionalDecimalString,
+  insuranceProvider: z.string().max(160).optional().nullable(),
+  insurancePolicyRef: z.string().max(120).optional().nullable(),
+
+  // Garde / conservation
+  storageType: z
+    .enum(["HOME", "BANK_VAULT", "PRO_VAULT", "THIRD_PARTY"])
+    .optional()
+    .nullable(),
+  storageCostAnnual: optionalDecimalString,
+  storageProvider: z.string().max(160).optional().nullable(),
+  storageContractRef: z.string().max(120).optional().nullable(),
+  storageRenewalDate: z.string().optional().nullable(),
+
+  // Transmission — marqueur seul, aucun barème de droits n'est calculé
+  includeInEstate: z.boolean().default(true),
+  estateNote: z.string().max(2000).optional().nullable(),
+
   // Pierres
   gemType: z
     .enum(["DIAMOND", "RUBY", "EMERALD", "SAPPHIRE", "PEARL", "OTHER"])

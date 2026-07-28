@@ -159,8 +159,44 @@ export type TangibleAssetDto = {
   autoInspectionOk: boolean | null;
   autoPreviousOwners: number | null;
 
+  // Assurance & garde
+  insurancePremiumAnnual: string | null;
+  insuranceProvider: string | null;
+  insurancePolicyRef: string | null;
+  storageType: string | null;
+  storageCostAnnual: string | null;
+  storageProvider: string | null;
+  storageContractRef: string | null;
+  storageRenewalDate: string | null;
+
+  // Transmission — marqueur seul, aucun droit de succession n'est calculé
+  includeInEstate: boolean;
+  estateNote: string | null;
+
   /** Fiscalité simulée sur une cession à la valeur estimée. */
   tax: TangibleTaxPreview;
+  /** Coût de détention — informatif, jamais déductible de l'impôt. */
+  ownership: TangibleOwnership;
+};
+
+/**
+ * Coût de possession d'une ligne.
+ *
+ * Distinct de `tax` à dessein : les frais de garde et les primes ne sont pas
+ * déductibles de la plus-value imposable de l'article 150 VI. Les deux blocs
+ * ne doivent jamais être additionnés.
+ */
+export type TangibleOwnership = {
+  /** Prime + garde, pour une année. */
+  annualCostEur: string;
+  /** Cumul depuis l'acquisition — `null` sans date d'achat. */
+  totalCarryCostEur: string | null;
+  /** Plus-value diminuée du portage — `null` si le cumul est inconnu. */
+  netPnlEur: string | null;
+  netPnlPct: string | null;
+  /** Part du gain brut absorbée par les frais, en %. */
+  carryDragPct: string | null;
+  alerts: { code: string; message: string }[];
 };
 
 /**
@@ -206,6 +242,16 @@ export type TangibleAssetsSummary = {
   withAppraisalCount: number;
   /** Lignes sans date d'achat : option fiscale fermée à la revente. */
   undatedCount: number;
+  /** Somme des frais de garde annuels déclarés. */
+  totalAnnualCustodyCost: string;
+  /** Coût de possession annuel : primes d'assurance + garde. */
+  totalAnnualOwnershipCost: string;
+  /** Lignes dont la garde dépasse 1 % de la valeur par an. */
+  highCustodyCostCount: number;
+  /** Nombre total d'alertes de possession, tous objets confondus. */
+  ownershipAlertCount: number;
+  /** Valeur des objets exclus de l'assiette successorale. */
+  excludedFromEstateEur: string;
 };
 
 /** Agrégat des 4 poches alternatives (valeurs en EUR) */

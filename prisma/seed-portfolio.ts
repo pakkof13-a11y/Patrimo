@@ -1402,6 +1402,13 @@ export async function seedUserPortfolio(
         watchBoxPapers: true,
         storageLocation: "Coffre domicile",
         insuranceValue: D("14000"),
+        // Garde externalisée et assurée : le cas sain, qui sert de témoin.
+        storageType: "BANK_VAULT",
+        storageCostAnnual: D("180"),
+        storageProvider: "Coffre BNP",
+        storageRenewalDate: new Date("2026-09-15"),
+        insurancePremiumAnnual: D("120"),
+        insuranceProvider: "AXA Objets de valeur",
         notes: note("Montre"),
       },
       {
@@ -1437,6 +1444,9 @@ export async function seedUserPortfolio(
         purchaseDate: new Date("2021-03-18"),
         appraisalValue: D("2500"),
         appraisalDate: new Date("2025-09-10"),
+        // Conservée au domicile sans prime : l'alerte ne se déclenche pas,
+        // la valeur restant sous le seuil de 5 000 €.
+        storageType: "HOME",
         notes: note("Toile"),
       },
       {
@@ -1466,6 +1476,13 @@ export async function seedUserPortfolio(
         gemTreatment: "NONE",
         insuranceValue: D("11000"),
         storageLocation: "Coffre banque",
+        // Garde chère au regard de la valeur : 1,6 %/an déclenche l'alerte.
+        storageType: "PRO_VAULT",
+        storageCostAnnual: D("150"),
+        storageProvider: "Brink's",
+        storageContractRef: "BR-2012-4471",
+        storageRenewalDate: new Date("2026-08-10"),
+        insurancePremiumAnnual: D("95"),
         notes: note("Bijou"),
       },
       {
@@ -1485,6 +1502,12 @@ export async function seedUserPortfolio(
         autoMileageKm: 96000,
         autoInspectionOk: true,
         autoPreviousOwners: 3,
+        // Objet de forte valeur au domicile sans assurance déclarée : c'est
+        // l'alerte la plus utile du module.
+        storageType: "HOME",
+        // Déjà donné en nue-propriété : hors assiette successorale.
+        includeInEstate: false,
+        estateNote: "Donation en nue-propriété consentie en 2023",
         notes: note("Véhicule de collection"),
       },
       {

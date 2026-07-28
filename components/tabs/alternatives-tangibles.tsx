@@ -3,7 +3,14 @@
 import { fetchJson } from "@/app/lib/api-client";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ChevronDown, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  Pencil,
+  Plus,
+  Trash2,
+  Vault,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn, formatCurrency, getChangeColor } from "@/app/lib/utils";
@@ -41,6 +48,12 @@ import {
   computeMovableSaleTax,
   SMALL_SALE_EXEMPTION_EUR,
 } from "@/app/lib/tax/movable-assets";
+import { completedYearsBetween } from "@/app/lib/tax/movable-assets";
+import {
+  STORAGE_TYPE_LABELS,
+  STORAGE_TYPES,
+  type StorageType,
+} from "@/app/lib/tangibles/ownership";
 import {
   AltEmptyState,
   AltField,
@@ -86,6 +99,18 @@ type FormState = {
   insuranceValue: string;
   storageLocation: string;
   isCollectible: boolean;
+
+  insurancePremiumAnnual: string;
+  insuranceProvider: string;
+  insurancePolicyRef: string;
+  storageType: string;
+  storageCostAnnual: string;
+  storageProvider: string;
+  storageContractRef: string;
+  storageRenewalDate: string;
+
+  includeInEstate: boolean;
+  estateNote: string;
 
   gemType: string;
   caratWeight: string;
@@ -133,6 +158,18 @@ const empty = (): FormState => ({
   insuranceValue: "",
   storageLocation: "",
   isCollectible: false,
+
+  insurancePremiumAnnual: "",
+  insuranceProvider: "",
+  insurancePolicyRef: "",
+  storageType: "",
+  storageCostAnnual: "",
+  storageProvider: "",
+  storageContractRef: "",
+  storageRenewalDate: "",
+
+  includeInEstate: true,
+  estateNote: "",
 
   gemType: "",
   caratWeight: "",
@@ -182,6 +219,20 @@ function toForm(l: TangibleAssetDto): FormState {
     insuranceValue: l.insuranceValue ?? "",
     storageLocation: l.storageLocation ?? "",
     isCollectible: l.isCollectible,
+
+    insurancePremiumAnnual: l.insurancePremiumAnnual ?? "",
+    insuranceProvider: l.insuranceProvider ?? "",
+    insurancePolicyRef: l.insurancePolicyRef ?? "",
+    storageType: l.storageType ?? "",
+    storageCostAnnual: l.storageCostAnnual ?? "",
+    storageProvider: l.storageProvider ?? "",
+    storageContractRef: l.storageContractRef ?? "",
+    storageRenewalDate: l.storageRenewalDate
+      ? l.storageRenewalDate.slice(0, 10)
+      : "",
+
+    includeInEstate: l.includeInEstate,
+    estateNote: l.estateNote ?? "",
 
     gemType: l.gemType ?? "",
     caratWeight: l.caratWeight ?? "",
@@ -250,6 +301,23 @@ export function AlternativesTangibles({
   );
 
   const pnlPreview = num(form.estimatedValue) - num(form.purchasePrice);
+  const annualOwnershipCost =
+    num(form.insurancePremiumAnnual) + num(form.storageCostAnnual);
+
+  /**
+   * Portage cumulé depuis l'achat.
+   *
+   * `null` sans date d'achat : afficher 0 laisserait croire que la détention
+   * n'a rien coûté, alors qu'on ignore simplement depuis quand elle dure.
+   */
+  const carryPreview = useMemo(() => {
+    if (!form.purchaseDate || annualOwnershipCost <= 0) return null;
+    const bought = new Date(form.purchaseDate);
+    if (Number.isNaN(bought.getTime())) return null;
+    const years = completedYearsBetween(bought, new Date());
+    const total = annualOwnershipCost * years;
+    return { years, total, net: pnlPreview - total };
+  }, [form.purchaseDate, annualOwnershipCost, pnlPreview]);
 
   /**
    * Simulation fiscale de la dernière étape, calculée dans le navigateur.
@@ -321,6 +389,18 @@ export function AlternativesTangibles({
         insuranceValue: orNull(form.insuranceValue),
         storageLocation: orNull(form.storageLocation),
         isCollectible: form.isCollectible,
+
+        insurancePremiumAnnual: orNull(form.insurancePremiumAnnual),
+        insuranceProvider: orNull(form.insuranceProvider),
+        insurancePolicyRef: orNull(form.insurancePolicyRef),
+        storageType: orNull(form.storageType),
+        storageCostAnnual: orNull(form.storageCostAnnual),
+        storageProvider: orNull(form.storageProvider),
+        storageContractRef: orNull(form.storageContractRef),
+        storageRenewalDate: orNull(form.storageRenewalDate),
+
+        includeInEstate: form.includeInEstate,
+        estateNote: orNull(form.estateNote),
 
         gemType: orNull(form.gemType),
         caratWeight: orNull(form.caratWeight),
@@ -431,9 +511,12 @@ export function AlternativesTangibles({
             hint={`Projection — ${summary?.exemptCount ?? 0} objet(s) exonéré(s)`}
           />
           <AltMiniKpi
-            label="Valeur assurée"
-            value={formatCurrency(summary?.totalInsuredValue ?? "0", baseCurrency)}
-            hint={`${summary?.withAppraisalCount ?? 0} expertise(s) · ${summary?.withCertificateCount ?? 0} certificat(s)`}
+            label="Coût de possession / an"
+            value={formatCurrency(
+              summary?.totalAnnualOwnershipCost ?? "0",
+              baseCurrency
+            )}
+            hint={`Primes + garde · dont ${formatCurrency(summary?.totalAnnualCustodyCost ?? "0", baseCurrency)} de garde`}
           />
         </>
       }
@@ -929,14 +1012,6 @@ export function AlternativesTangibles({
                     onChange={(e) => set("appraisalDate", e.target.value)}
                   />
                 </AltField>
-                <AltField label="Valeur assurée">
-                  <input
-                    className="input"
-                    inputMode="decimal"
-                    value={form.insuranceValue}
-                    onChange={(e) => set("insuranceValue", e.target.value)}
-                  />
-                </AltField>
                 <AltField label="Lieu de conservation" hint="Coffre, domicile, cave…">
                   <input
                     className="input"
@@ -944,6 +1019,133 @@ export function AlternativesTangibles({
                     onChange={(e) => set("storageLocation", e.target.value)}
                   />
                 </AltField>
+
+                {/* Assurance et garde côte à côte : ce sont les deux moitiés
+                    du même coût annuel, et les séparer inviterait à n'en
+                    renseigner qu'une. */}
+                <fieldset className="sm:col-span-2 rounded-md border border-[var(--border)] p-3">
+                  <legend className="px-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    Assurance
+                  </legend>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <AltField
+                      label="Capital assuré"
+                      hint="Ce que verse l'assureur en cas de sinistre."
+                    >
+                      <input
+                        className="input"
+                        inputMode="decimal"
+                        value={form.insuranceValue}
+                        onChange={(e) => set("insuranceValue", e.target.value)}
+                        data-testid="tangible-insurance-value"
+                      />
+                    </AltField>
+                    <AltField
+                      label="Prime annuelle"
+                      hint="Ce que vous payez chaque année — à ne pas confondre avec le capital."
+                    >
+                      <input
+                        className="input"
+                        inputMode="decimal"
+                        value={form.insurancePremiumAnnual}
+                        onChange={(e) =>
+                          set("insurancePremiumAnnual", e.target.value)
+                        }
+                        data-testid="tangible-insurance-premium"
+                      />
+                    </AltField>
+                    <AltField label="Assureur">
+                      <input
+                        className="input"
+                        value={form.insuranceProvider}
+                        onChange={(e) => set("insuranceProvider", e.target.value)}
+                      />
+                    </AltField>
+                    <AltField label="N° de police" className="sm:col-span-3">
+                      <input
+                        className="input"
+                        value={form.insurancePolicyRef}
+                        onChange={(e) => set("insurancePolicyRef", e.target.value)}
+                      />
+                    </AltField>
+                  </div>
+                </fieldset>
+
+                <fieldset className="sm:col-span-2 rounded-md border border-[var(--border)] p-3">
+                  <legend className="px-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    Garde
+                  </legend>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <AltField
+                      label="Mode de garde"
+                      hint="Un objet de valeur gardé au domicile sans assurance est signalé."
+                    >
+                      <select
+                        className="input"
+                        value={form.storageType}
+                        onChange={(e) => set("storageType", e.target.value)}
+                        data-testid="tangible-storage-type"
+                      >
+                        <option value="">—</option>
+                        {STORAGE_TYPES.map((t) => (
+                          <option key={t} value={t}>
+                            {STORAGE_TYPE_LABELS[t]}
+                          </option>
+                        ))}
+                      </select>
+                    </AltField>
+                    <AltField label="Coût annuel de garde">
+                      <input
+                        className="input"
+                        inputMode="decimal"
+                        value={form.storageCostAnnual}
+                        onChange={(e) => set("storageCostAnnual", e.target.value)}
+                        data-testid="tangible-storage-cost"
+                      />
+                    </AltField>
+                    <AltField label="Prestataire" hint="Banque, caviste, dépositaire…">
+                      <input
+                        className="input"
+                        value={form.storageProvider}
+                        onChange={(e) => set("storageProvider", e.target.value)}
+                      />
+                    </AltField>
+                    <AltField label="Référence du contrat">
+                      <input
+                        className="input"
+                        value={form.storageContractRef}
+                        onChange={(e) => set("storageContractRef", e.target.value)}
+                      />
+                    </AltField>
+                    <AltField
+                      label="Échéance du contrat"
+                      hint="Rappel automatique 60 jours avant."
+                    >
+                      <input
+                        type="date"
+                        className="input"
+                        value={form.storageRenewalDate}
+                        onChange={(e) => set("storageRenewalDate", e.target.value)}
+                        data-testid="tangible-storage-renewal"
+                      />
+                    </AltField>
+                    {annualOwnershipCost > 0 && (
+                      <div className="self-end rounded-md bg-[var(--muted)]/40 px-2.5 py-2 text-[11px]">
+                        <div className="text-slate-500">Coût de possession</div>
+                        <div
+                          className="text-sm font-semibold tabular-nums"
+                          data-testid="tangible-ownership-cost"
+                        >
+                          {formatCurrency(
+                            String(annualOwnershipCost),
+                            form.currency
+                          )}{" "}
+                          / an
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </fieldset>
               </div>
             )}
 
@@ -1003,6 +1205,65 @@ export function AlternativesTangibles({
                   ))}
                 </dl>
 
+                <div className="rounded-md border border-[var(--border)] px-3 py-2.5">
+                  <label className="flex items-start gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={form.includeInEstate}
+                      onChange={(e) => set("includeInEstate", e.target.checked)}
+                      data-testid="tangible-include-in-estate"
+                    />
+                    <span>
+                      <strong>Inclure dans la transmission</strong> — décochez si
+                      le bien a déjà été donné ou démembré. Aucun droit de
+                      succession n&apos;est calculé ici : abattements et barèmes
+                      relèvent d&apos;un module dédié.
+                    </span>
+                  </label>
+                  {!form.includeInEstate && (
+                    <input
+                      className="input mt-2"
+                      placeholder="Consigne notaire, donation déjà faite…"
+                      value={form.estateNote}
+                      onChange={(e) => set("estateNote", e.target.value)}
+                      data-testid="tangible-estate-note"
+                    />
+                  )}
+                </div>
+
+                {annualOwnershipCost > 0 && carryPreview !== null && (
+                  <div
+                    className="rounded-md border border-[var(--border)] px-3 py-2.5"
+                    data-testid="tangible-carry-preview"
+                  >
+                    <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                      Plus-value nette des frais de détention
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-baseline gap-x-3">
+                      <span
+                        className={cn(
+                          "text-lg font-semibold tabular-nums",
+                          getChangeColor(String(carryPreview.net))
+                        )}
+                      >
+                        {formatCurrency(String(carryPreview.net), form.currency)}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        contre {formatCurrency(String(pnlPreview), form.currency)}{" "}
+                        brut — {formatCurrency(String(carryPreview.total), form.currency)}{" "}
+                        de garde et d&apos;assurance sur {carryPreview.years} an(s)
+                      </span>
+                    </div>
+                    {/* Le rappel importe : ces frais ne réduisent pas l'assiette
+                        imposable de l'article 150 VI. */}
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      Indicatif : les frais de garde et les primes ne sont pas
+                      déductibles de la plus-value imposable.
+                    </p>
+                  </div>
+                )}
+
                 {simulation ? (
                   <div
                     className="rounded-md border border-[var(--border)] px-3 py-2.5"
@@ -1061,6 +1322,20 @@ export function AlternativesTangibles({
             <strong>{summary.undatedCount}</strong> objet(s) sans date d’achat :
             à la revente, l’abattement pour durée de détention leur sera refusé
             et l’option pour le régime des plus-values fermée.
+          </span>
+        </div>
+      )}
+
+      {summary && summary.ownershipAlertCount > 0 && (
+        <div
+          className="mb-3 flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+          data-testid="tangibles-ownership-warning"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>
+            <strong>{summary.ownershipAlertCount}</strong> alerte(s) de
+            possession — échéance de contrat, garde coûteuse ou objet de valeur
+            non assuré. Le détail est sous chaque ligne dépliée.
           </span>
         </div>
       )}
@@ -1212,7 +1487,21 @@ function TangibleRow({
           )}
         </td>
         <td className="px-3 py-2 text-center text-xs text-slate-500">
-          {line.hasCertificate ? "Oui" : "—"}
+          <span className="inline-flex items-center gap-1">
+            {line.hasCertificate ? "Oui" : "—"}
+            {Number(line.ownership.annualCostEur) > 0 && (
+              <Vault
+                className="h-3 w-3 text-slate-400"
+                aria-label={`Coût de possession : ${line.ownership.annualCostEur} € par an`}
+              />
+            )}
+            {line.ownership.alerts.length > 0 && (
+              <AlertTriangle
+                className="h-3 w-3 text-amber-500"
+                aria-label="Alerte de possession"
+              />
+            )}
+          </span>
         </td>
         <td className="px-3 py-2">
           <TaxBadge line={line} />
@@ -1260,6 +1549,47 @@ function TangibleRow({
                 Aucun détail spécifique renseigné pour cet objet.
               </p>
             )}
+            {line.ownership.alerts.length > 0 && (
+              <ul
+                className="mt-2 space-y-0.5"
+                data-testid="tangible-ownership-alerts"
+              >
+                {line.ownership.alerts.map((a) => (
+                  <li
+                    key={a.code}
+                    className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400"
+                  >
+                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
+                    {a.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {line.ownership.netPnlEur !== null &&
+              Number(line.ownership.annualCostEur) > 0 && (
+                <p
+                  className="mt-2 text-[11px] text-slate-500"
+                  data-testid="tangible-net-carry"
+                >
+                  Après {formatCurrency(line.ownership.totalCarryCostEur ?? "0", line.currency)}{" "}
+                  de frais de détention, la plus-value réelle est de{" "}
+                  <strong className={cn(getChangeColor(line.ownership.netPnlEur))}>
+                    {formatCurrency(line.ownership.netPnlEur, line.currency)}
+                  </strong>
+                  {line.ownership.carryDragPct !== null && (
+                    <>
+                      {" "}— soit{" "}
+                      {Number(line.ownership.carryDragPct).toLocaleString("fr-FR", {
+                        maximumFractionDigits: 1,
+                      })}{" "}
+                      % du gain brut absorbés. Ce montant reste sans effet sur
+                      l&apos;impôt : ces frais ne sont pas déductibles.
+                    </>
+                  )}
+                </p>
+              )}
+
             <p className="mt-2 text-[11px] text-slate-500">{line.tax.rationale}</p>
             {line.notes && (
               <p className="mt-1 text-[11px] text-slate-400">{line.notes}</p>
@@ -1371,6 +1701,44 @@ function detailRows(line: TangibleAssetDto): [string, string][] {
     ? formatCurrency(line.insuranceValue, line.currency)
     : null);
   push("Conservation", line.storageLocation);
+  push(
+    "Mode de garde",
+    line.storageType
+      ? STORAGE_TYPE_LABELS[line.storageType as StorageType]
+      : null
+  );
+  push(
+    "Coût de garde",
+    line.storageCostAnnual
+      ? `${formatCurrency(line.storageCostAnnual, line.currency)} / an`
+      : null
+  );
+  push("Dépositaire", line.storageProvider);
+  push("Contrat de garde", line.storageContractRef);
+  push(
+    "Échéance de garde",
+    line.storageRenewalDate
+      ? new Date(line.storageRenewalDate).toLocaleDateString("fr-FR")
+      : null
+  );
+  push(
+    "Prime d'assurance",
+    line.insurancePremiumAnnual
+      ? `${formatCurrency(line.insurancePremiumAnnual, line.currency)} / an`
+      : null
+  );
+  push("Assureur", line.insuranceProvider);
+  push("N° de police", line.insurancePolicyRef);
+  push(
+    "Coût de possession",
+    Number(line.ownership.annualCostEur) > 0
+      ? `${formatCurrency(line.ownership.annualCostEur, line.currency)} / an`
+      : null
+  );
+  push(
+    "Transmission",
+    line.includeInEstate ? null : `Hors succession${line.estateNote ? ` — ${line.estateNote}` : ""}`
+  );
   push(
     "Objet de collection",
     COLLECTIBLE_TOGGLE_CATEGORIES.includes(line.category)
