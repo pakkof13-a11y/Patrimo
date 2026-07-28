@@ -47,6 +47,7 @@ model User {
   tangibleAssets         TangibleAsset[]
   cryptoFuturesPositions CryptoFuturesPosition[]
   defiStrategies         DefiStrategy[]
+  securitiesAccounts     SecuritiesAccount[]
 
   @@index([role])
 }
@@ -109,11 +110,12 @@ model Platform {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assets           Asset[]
-  transactionsFrom Transaction[]         @relation("TxPlatform")
-  transactionsTo   Transaction[]         @relation("TxToPlatform")
-  onchainTxs       BlockchainOnchainTx[]
+  user               User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assets             Asset[]
+  transactionsFrom   Transaction[]         @relation("TxPlatform")
+  transactionsTo     Transaction[]         @relation("TxToPlatform")
+  onchainTxs         BlockchainOnchainTx[]
+  securitiesAccounts SecuritiesAccount[]
 
   @@unique([userId, name])
   @@index([userId])
@@ -167,37 +169,44 @@ enum AssetCategory {
 }
 
 model Asset {
-  id                 String        @id @default(cuid())
-  userId             String
-  platformId         String
-  name               String
-  ticker             String?
+  id                  String        @id @default(cuid())
+  userId              String
+  platformId          String
+  name                String
+  ticker              String?
   /// Code ISIN (actions / ETF) — recherche & affichage
-  isin               String?
-  assetClass         String
+  isin                String?
+  assetClass          String
   /// Sous-catégorie UI (regroupement Positions) — n’affecte pas les calculs
-  category           AssetCategory @default(UNCLASSIFIED)
-  currency           String        @default("EUR")
+  category            AssetCategory @default(UNCLASSIFIED)
+  currency            String        @default("EUR")
   /// ISO 3166-1 alpha-2 (US, DE, FR…) — WHT dividendes
-  countryCode        String?
+  countryCode         String?
   /// Override taux prélèvement à la source 0–1 (null = table pays)
-  withholdingTaxRate Decimal?      @db.Decimal(8, 6)
+  withholdingTaxRate  Decimal?      @db.Decimal(8, 6)
   /// Fiscal / storage envelope: CTO | PEA | AV | CRYPTO | IMMOBILIER
-  accountType        String        @default("CTO")
-  priceProvider      String        @default("FINNHUB")
-  providerSymbol     String?
-  logoUrl            String?
-  notes              String?
-  manualPrice        Decimal?      @db.Decimal(28, 12)
+  accountType         String        @default("CTO")
+  /// Compte titres de rattachement (PEA / PEA-PME / CTO). Nullable : les
+  /// actifs antérieurs à l'onglet « PEA & CTO » restent rattachés à leur
+  /// seule `platform`, et `accountType` continue de porter l'enveloppe
+  /// fiscale — ce champ ne fait que désigner *lequel* des comptes de cette
+  /// enveloppe détient la ligne, ce qu'une chaîne ne pouvait pas exprimer
+  /// dès lors qu'un utilisateur détient plusieurs CTO.
+  securitiesAccountId String?
+  priceProvider       String        @default("FINNHUB")
+  providerSymbol      String?
+  logoUrl             String?
+  notes               String?
+  manualPrice         Decimal?      @db.Decimal(28, 12)
   /// Exit levels in asset native currency (long): auto-sell on price refresh
-  stopLoss           Decimal?      @db.Decimal(28, 12)
-  tp1                Decimal?      @db.Decimal(28, 12)
-  tp2                Decimal?      @db.Decimal(28, 12)
-  tp3                Decimal?      @db.Decimal(28, 12)
-  tp4                Decimal?      @db.Decimal(28, 12)
-  acquisitionDate    DateTime?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  stopLoss            Decimal?      @db.Decimal(28, 12)
+  tp1                 Decimal?      @db.Decimal(28, 12)
+  tp2                 Decimal?      @db.Decimal(28, 12)
+  tp3                 Decimal?      @db.Decimal(28, 12)
+  tp4                 Decimal?      @db.Decimal(28, 12)
+  acquisitionDate     DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   user               User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
   platform           Platform                  @relation(fields: [platformId], references: [id], onDelete: Restrict)
@@ -211,6 +220,7 @@ model Asset {
   nftItem            NftItemDetail?
   lifeSupport        LifeInsuranceSupport?
   liabilities        Liability[]
+  securitiesAccount  SecuritiesAccount?        @relation(fields: [securitiesAccountId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([platformId])
@@ -218,6 +228,7 @@ model Asset {
   @@index([userId, accountType])
   @@index([userId, category])
   @@index([isin])
+  @@index([securitiesAccountId])
 }
 
 model Transaction {
@@ -1027,6 +1038,54 @@ model EnvelopeCash {
 
   @@unique([userId, envelope])
   @@index([userId])
+}
+
+/// Compte titres détenu chez un courtier — PEA, PEA-PME ou compte-titres
+/// ordinaire.
+///
+/// Ce que ce modèle apporte et que `Asset.accountType` ne pouvait pas porter :
+/// une **date d'ouverture**. Sans elle, la règle des 5 ans du PEA — qui décide
+/// à elle seule si une plus-value est imposée à l'impôt sur le revenu — est
+/// incalculable. Le reste (courtier, IBAN) n'est que du contexte ; c'est
+/// `openDate` qui justifie l'existence de la table.
+///
+/// L'enveloppe fiscale reste par ailleurs portée par `Asset.accountType` :
+/// ce modèle ne la remplace pas, il désigne *quel compte* de cette enveloppe
+/// détient la ligne — distinction qui n'a de sens que depuis qu'on admet
+/// plusieurs CTO chez plusieurs courtiers.
+///
+/// La cardinalité n'est volontairement pas la même selon l'enveloppe : le CTO
+/// est libre, tandis que PEA et PEA-PME sont limités à un par personne par la
+/// loi. Cette asymétrie est garantie en base par un index unique **partiel**
+/// (voir la migration) plutôt que par un `@@unique` complet, qui interdirait
+/// aussi le second CTO.
+model SecuritiesAccount {
+  id     String @id @default(cuid())
+  userId String
+
+  /// PEA | PEA_PME | CTO
+  envelopeType String
+  /// Courtier teneur de compte — réutilise `Platform`, qui porte déjà nom et
+  /// logo. Restrict : supprimer un courtier encore rattaché à un compte doit
+  /// échouer plutôt que d'orpheliner le compte.
+  platformId   String
+
+  /// Date d'ouverture — point de départ des 5 ans du PEA.
+  openDate DateTime
+  /// IBAN du compte espèces associé, purement documentaire.
+  iban     String?
+  notes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform Platform @relation(fields: [platformId], references: [id], onDelete: Restrict)
+  assets   Asset[]
+
+  @@index([userId])
+  @@index([userId, envelopeType])
+  @@index([platformId])
 }
 
 /// Véhicule immobilier détenu indirectement — SCPI, SCI, OPCI, foncière.
