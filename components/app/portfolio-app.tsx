@@ -394,13 +394,32 @@ function PortfolioAppClient({
           setTab(opt.tab);
           return;
         }
+        /**
+         * Enveloppe sans entrée dans le sélecteur — CTO, PEA, crypto et
+         * immobilier, qui ont tous leur onglet de premier niveau.
+         *
+         * On reste sur Positions, mais l'URL doit continuer à porter le filtre :
+         * sans elle, isoler le PEA dans la vue transverse ne survivrait ni au
+         * rafraîchissement ni au partage, alors que c'est précisément la
+         * propriété que ce filtre garantit ailleurs. `/positions?envelope=…`
+         * est le mécanisme déjà prévu pour ce cas et relu plus haut.
+         */
+        skipEnvelopeResetRef.current = true;
+        const param = next[0]!.toLowerCase();
+        const path = `/positions?envelope=${param}`;
+        const current =
+          typeof window !== "undefined"
+            ? window.location.pathname + window.location.search
+            : "";
+        if (path !== current) router.push(path, { scroll: false });
+        return;
       }
       if (next.length === 0 || next.length > 1) {
         skipEnvelopeResetRef.current = true;
         setTab("holdings");
       }
     },
-    [setTab]
+    [setTab, router]
   );
 
   // ─── Data ───────────────────────────────────────────────────────────────────
