@@ -8,6 +8,12 @@ import { gotoDashboard } from "./helpers";
  * jetons concentrée) et vérifient que STAKING, inchangé, n'affiche aucun des
  * nouveaux champs.
  */
+// Suffixe unique par run : le formulaire ne propose pas de suppression de
+// position DeFi (seul un dénouement par vente existe), donc des runs répétés
+// sur un serveur réutilisé accumulent des lignes de même protocole — un nom
+// de protocole unique évite qu'un `filter({ hasText })` en résolve plusieurs.
+const runId = Date.now();
+
 test.describe("DeFi — positions LP multi-token", () => {
   test.beforeEach(async ({ page }) => {
     await gotoDashboard(page);
@@ -23,7 +29,7 @@ test.describe("DeFi — positions LP multi-token", () => {
   test("LP 2 jetons full range (Uniswap V2)", async ({ page }) => {
     await page.getByTestId("defi-platform").selectOption({ index: 1 });
     await page.getByTestId("defi-type").selectOption("LP");
-    await page.getByTestId("defi-protocol").fill("Uniswap V2");
+    await page.getByTestId("defi-protocol").fill(`Uniswap V2 ${runId}`);
     await page.getByTestId("defi-symbol").fill("ETH");
     await page.getByTestId("defi-quantity").fill("1");
     await page.getByTestId("defi-unit-price").fill("1000");
@@ -46,7 +52,9 @@ test.describe("DeFi — positions LP multi-token", () => {
       timeout: 15_000,
     });
 
-    const row = page.getByTestId("defi-row").filter({ hasText: "Uniswap V2" });
+    const row = page
+      .getByTestId("defi-row")
+      .filter({ hasText: `Uniswap V2 ${runId}` });
     await expect(row).toBeVisible();
     await expect(row).toContainText("ETH");
   });
@@ -54,7 +62,7 @@ test.describe("DeFi — positions LP multi-token", () => {
   test("LP 3 jetons concentrée (Curve stables)", async ({ page }) => {
     await page.getByTestId("defi-platform").selectOption({ index: 1 });
     await page.getByTestId("defi-type").selectOption("LP");
-    await page.getByTestId("defi-protocol").fill("Curve 3pool");
+    await page.getByTestId("defi-protocol").fill(`Curve 3pool ${runId}`);
     await page.getByTestId("defi-symbol").fill("USDC");
     await page.getByTestId("defi-quantity").fill("1000");
     await page.getByTestId("defi-unit-price").fill("1");
@@ -81,7 +89,9 @@ test.describe("DeFi — positions LP multi-token", () => {
       timeout: 15_000,
     });
 
-    const row = page.getByTestId("defi-row").filter({ hasText: "Curve 3pool" });
+    const row = page
+      .getByTestId("defi-row")
+      .filter({ hasText: `Curve 3pool ${runId}` });
     await expect(row).toBeVisible();
     // 3 jetons, IL affichée (chiffre ou "indisponible" si le prix n'a pas pu
     // être résolu côté fournisseur) plutôt qu'absente.
@@ -93,7 +103,7 @@ test.describe("DeFi — positions LP multi-token", () => {
     await expect(page.getByTestId("defi-lp-section")).toHaveCount(0);
 
     await page.getByTestId("defi-platform").selectOption({ index: 1 });
-    await page.getByTestId("defi-protocol").fill("Lido");
+    await page.getByTestId("defi-protocol").fill(`Lido ${runId}`);
     await page.getByTestId("defi-symbol").fill("ETH");
     await page.getByTestId("defi-quantity").fill("2");
     await page.getByTestId("defi-unit-price").fill("2000");
@@ -103,7 +113,7 @@ test.describe("DeFi — positions LP multi-token", () => {
       timeout: 15_000,
     });
 
-    const row = page.getByTestId("defi-row").filter({ hasText: "Lido" });
+    const row = page.getByTestId("defi-row").filter({ hasText: `Lido ${runId}` });
     await expect(row).toBeVisible();
     // Une position non-LP affiche « — » dans la colonne IL, jamais un chiffre.
     await expect(row.getByTestId("defi-row-il")).toHaveText("—");
