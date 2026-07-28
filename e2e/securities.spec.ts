@@ -17,11 +17,19 @@ import { gotoDashboard } from "./helpers";
  * nettoyage de fixture, pas le comportement testé.
  */
 async function resetAccounts(request: import("@playwright/test").APIRequestContext) {
-  const res = await request.get("/api/securities");
-  if (!res.ok()) return;
-  const body = await res.json();
-  for (const account of body.accounts ?? []) {
-    await request.delete(`/api/securities/accounts/${account.id}`);
+  // Le nettoyage n'est pas le comportement testé : sur une suite longue, une
+  // requête peut être coupée sans que rien ne soit cassé pour autant. Laisser
+  // l'échec remonter ferait tomber un test d'affichage fiscal pour une raison
+  // qui n'a rien à voir avec lui — ce qui s'est produit deux fois.
+  try {
+    const res = await request.get("/api/securities");
+    if (!res.ok()) return;
+    const body = await res.json();
+    for (const account of body.accounts ?? []) {
+      await request.delete(`/api/securities/accounts/${account.id}`);
+    }
+  } catch {
+    // L'état résiduel éventuel est repris par le nettoyage du test suivant.
   }
 }
 
