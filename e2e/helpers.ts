@@ -244,6 +244,7 @@ export async function clickNav(page: Page, label: string) {
     "Tableau de bord": "nav-dashboard",
     Positions: "nav-holdings",
     Transactions: "nav-transactions",
+    "Opérations": "nav-transactions",
     Fiscalité: "nav-fiscal",
     "Mes plateformes": "nav-platforms",
     "Mes comptes": "nav-platforms",

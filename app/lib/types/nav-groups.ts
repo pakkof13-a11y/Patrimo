@@ -58,8 +58,11 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [{ id: "crypto", label: "Cryptos", testId: "crypto" }],
   },
   {
+    // « Sources » ne disait pas de quoi : ni un débutant ni un initié n'y
+    // devinait des banques et des contrats. Le libellé nomme désormais ce que
+    // le groupe contient réellement — des comptes et des contrats.
     id: "sources",
-    label: "Sources",
+    label: "Comptes & contrats",
     items: [
       { id: "banques", label: "Banques", testId: "banques" },
       {
@@ -85,8 +88,11 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [{ id: "trading", label: "Trading", testId: "trading" }],
   },
   {
+    // « Patrimoine étendu » rangeait les dettes parmi les avoirs, ce qui est
+    // faux : un passif se soustrait du patrimoine net. Le libellé assume les
+    // deux natures au lieu de les confondre.
     id: "extended",
-    label: "Patrimoine étendu",
+    label: "Autres avoirs & dettes",
     items: [
       { id: "epargne-salariale", label: "Épargne salariale", testId: "epargne-salariale" },
       { id: "alternatifs", label: "Actifs alternatifs", testId: "alternatifs" },

@@ -297,7 +297,7 @@ export const PRIMARY_NAV: { id: MainTab; label: string }[] = [
   { id: "epargne-salariale", label: "Épargne Salariale" },
   { id: "alternatifs", label: "Actifs Alternatifs" },
   { id: "trading", label: "Trading" },
-  { id: "transactions", label: "Transactions" },
+  { id: "transactions", label: "Opérations" },
   { id: "fiscal", label: "Fiscalité" },
   { id: "liabilities", label: "Passifs" },
   { id: "platforms", label: "Mes plateformes" },

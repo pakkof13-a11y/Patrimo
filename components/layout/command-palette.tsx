@@ -157,7 +157,7 @@ export function CommandPalette({
       },
       {
         id: "nav-tx",
-        label: "Aller aux Transactions",
+        label: "Aller aux Opérations",
         section: "Navigation",
         icon: <List className="h-3.5 w-3.5" />,
         run: () => onNavigate("transactions"),
