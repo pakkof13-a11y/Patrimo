@@ -190,7 +190,8 @@ describe("CUMP multi-plateforme", () => {
     expect(pea.realizedPnlEur).toBeCloseTo(300, 5); // 10*(130-100)
     expect(cto.realizedPnlEur).toBeCloseTo(300, 5); // 10*(80-50)
     // PFU only on CTO positive gains
-    expect(report.totals.estimatedPfuEur).toBeCloseTo(300 * 0.3, 5);
+    // PFU à 31,4 % depuis 2026 (12,8 % IR + 18,6 % PS).
+    expect(report.totals.estimatedPfuEur).toBeCloseTo(300 * 0.314, 5);
   });
 
   it("moves cost on TRANSFERT_TITRE without realizing P&L", () => {

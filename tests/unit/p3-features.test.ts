@@ -347,6 +347,6 @@ describe("fiscal year", () => {
     const cto = report.byEnvelope.find((b) => b.accountType === "CTO")!;
     expect(cto.realizedPnlEur).toBeCloseTo(80, 5); // 4*(120-100)
     expect(cto.dividendsNetEur).toBeCloseTo(42.5, 5);
-    expect(report.totals.estimatedPfuEur).toBeCloseTo((80 + 42.5) * 0.3, 5);
+    expect(report.totals.estimatedPfuEur).toBeCloseTo((80 + 42.5) * 0.314, 5);
   });
 });

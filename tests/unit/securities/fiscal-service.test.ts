@@ -224,7 +224,7 @@ describe("getSecuritiesFiscalBundle — maturité", () => {
     accountFindMany.mockResolvedValue([account()]);
     const [s] = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.maturity!.isMatured).toBe(true);
-    expect(s!.taxStatusLabel).toMatch(/17,2/);
+    expect(s!.taxStatusLabel).toMatch(/18,6/);
   });
 
   it("un PEA récent ne l'est pas", async () => {

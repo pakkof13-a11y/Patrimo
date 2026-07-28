@@ -26,17 +26,20 @@
  *    jamais plan par plan isolément.
  *
  * 2. **« Après 5 ans, c'est exonéré »** — seulement de l'impôt sur le revenu.
- *    Les prélèvements sociaux de 17,2 % restent dus sur la totalité du gain,
- *    avant comme après 5 ans. Afficher « exonéré » sous-estimerait la note de
- *    17,2 % de la plus-value.
+ *    Les prélèvements sociaux restent dus sur la totalité du gain, avant comme
+ *    après 5 ans. Afficher « exonéré » sous-estimerait la note de tout le taux
+ *    des prélèvements sociaux.
  *
  * ## Simplifications assumées
  *
- * - Les prélèvements sociaux sont appliqués au taux courant de 17,2 % sur tout
- *   le gain. Les gains acquis avant 2018 relèvent en principe des « taux
- *   historiques », règle dont l'application demanderait un historique de
- *   versements année par année que le journal ne porte pas. Même parti pris
- *   documenté que dans `life-insurance/redemption-tax.ts`.
+ * - Les prélèvements sociaux sont appliqués au taux courant (18,6 % depuis le
+ *   1ᵉʳ janvier 2026) sur tout le gain. Deux découpages historiques existent
+ *   pourtant : les gains constatés avant 2026 relèvent de 17,2 %, et ceux
+ *   acquis avant 2018 des « taux historiques ». Les appliquer demanderait un
+ *   historique de valorisation année par année que le journal ne porte pas.
+ *   L'approximation est **majorante**, donc prudente : elle ne fait jamais
+ *   sous-estimer l'impôt. Même parti pris documenté que dans
+ *   `life-insurance/redemption-tax.ts`.
  * - Un retrait avant 5 ans est présumé clôturer le plan. Des cas de sortie
  *   anticipée sans clôture existent (licenciement, invalidité, retraite
  *   anticipée, création d'entreprise) : ils relèvent de la situation
@@ -49,6 +52,11 @@
 
 import Decimal from "decimal.js";
 import { d } from "@/app/lib/money/decimal";
+import {
+  PFU_INCOME_TAX_RATE,
+  ratePct,
+  SOCIAL_CHARGES_RATE,
+} from "@/app/lib/tax/rates";
 import type { SecuritiesEnvelopeType } from "./constants";
 
 /** Durée au terme de laquelle le gain cesse d'être soumis à l'impôt sur le revenu. */
@@ -64,10 +72,16 @@ export const PEA_PME_CAP_EUR = "225000";
  */
 export const PEA_COMBINED_CAP_EUR = "225000";
 
-/** Part « impôt sur le revenu » du prélèvement forfaitaire unique. */
-export const PEA_INCOME_TAX_RATE = "0.128";
+/**
+ * Taux du PEA — repris de `tax/rates.ts`, source unique du dépôt.
+ *
+ * Ré-exportés sous un nom local plutôt que dupliqués : le PEA suit exactement
+ * les taux du capital, y compris la hausse des prélèvements sociaux de 2026
+ * (contrairement à l'assurance-vie, restée à 17,2 %).
+ */
+export const PEA_INCOME_TAX_RATE = PFU_INCOME_TAX_RATE;
 /** Prélèvements sociaux — dus quelle que soit l'antériorité du plan. */
-export const PEA_SOCIAL_CHARGES_RATE = "0.172";
+export const PEA_SOCIAL_CHARGES_RATE = SOCIAL_CHARGES_RATE;
 
 // ─── Antériorité ──────────────────────────────────────────────────────────────
 
@@ -272,10 +286,15 @@ export function peaWithdrawalTax(input: {
  * Libellé du régime applicable.
  *
  * Volontairement explicite sur les prélèvements sociaux : « exonéré » tout
- * court est le raccourci qui fait sous-estimer l'imposition de 17,2 %.
+ * court est le raccourci qui fait sous-estimer l'imposition de tout leur taux.
+ *
+ * Les taux sont interpolés depuis les constantes plutôt qu'écrits dans la
+ * phrase : une révision législative ne doit pas laisser un libellé annoncer un
+ * taux que le calcul n'applique plus.
  */
 export function peaTaxStatusLabel(isMatured: boolean): string {
+  const ps = ratePct(PEA_SOCIAL_CHARGES_RATE);
   return isMatured
-    ? "IR exonéré · prélèvements sociaux 17,2 % dus"
-    : "Retrait imposable · 12,8 % IR + 17,2 % PS";
+    ? `IR exonéré · prélèvements sociaux ${ps} dus`
+    : `Retrait imposable · ${ratePct(PEA_INCOME_TAX_RATE)} IR + ${ps} PS`;
 }

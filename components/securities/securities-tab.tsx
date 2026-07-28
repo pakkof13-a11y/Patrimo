@@ -14,7 +14,12 @@ import {
   eligibleAccounts,
   SECURITIES_ENVELOPE_TYPES,
 } from "@/app/lib/securities/constants";
-import { peaWithdrawalTax } from "@/app/lib/securities/pea";
+import {
+  PEA_INCOME_TAX_RATE,
+  PEA_SOCIAL_CHARGES_RATE,
+  peaWithdrawalTax,
+} from "@/app/lib/securities/pea";
+import { ratePct } from "@/app/lib/tax/rates";
 
 type RoomRow = {
   ownCapEur: string;
@@ -217,7 +222,7 @@ function WithdrawalSimulator({ account }: { account: AccountRow }) {
           </div>
           <div className="flex justify-between">
             <span className="text-[var(--muted-foreground)]">
-              Impôt sur le revenu (12,8 %)
+              Impôt sur le revenu ({ratePct(PEA_INCOME_TAX_RATE)})
             </span>
             <span className="tabular-nums">
               {formatCurrency(result.incomeTaxEur.toFixed(2), "EUR")}
@@ -225,7 +230,7 @@ function WithdrawalSimulator({ account }: { account: AccountRow }) {
           </div>
           <div className="flex justify-between">
             <span className="text-[var(--muted-foreground)]">
-              Prélèvements sociaux (17,2 %)
+              Prélèvements sociaux ({ratePct(PEA_SOCIAL_CHARGES_RATE)})
             </span>
             <span className="tabular-nums">
               {formatCurrency(result.socialChargesEur.toFixed(2), "EUR")}

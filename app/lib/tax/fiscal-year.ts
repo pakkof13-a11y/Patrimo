@@ -10,6 +10,8 @@
  * (régimes spéciaux — disclaimer UI).
  */
 
+import { PFU_TOTAL_RATE } from "./rates";
+
 export type FiscalEnvelope = string; // CTO | PEA | AV | …
 
 export type FiscalEnvelopeBucket = {
@@ -39,7 +41,7 @@ export type FiscalYearReport = {
     dividendsNetEur: number;
     dividendsGrossEur: number;
     withholdingTaxEur: number;
-    /** Estimation PFU 30 % sur (réalisé CTO + div nets hors PEA/AV) — indicative */
+    /** Estimation PFU (31,4 % depuis 2026) sur réalisé + dividendes nets hors PEA/AV — indicative */
     estimatedPfuEur: number;
     /**
      * Total des ventes sans prix de revient connu, toutes enveloppes.
@@ -223,7 +225,9 @@ export function buildFiscalYearReport(
       dividendsNetEur,
       dividendsGrossEur,
       withholdingTaxEur,
-      estimatedPfuEur: pfuBase * 0.3,
+      // Taux lu depuis `tax/rates.ts` : écrit en dur, il serait resté à 30 %
+      // après la hausse des prélèvements sociaux de 2026.
+      estimatedPfuEur: pfuBase * Number(PFU_TOTAL_RATE),
       unresolvedSellCount,
     },
   };

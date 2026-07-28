@@ -52,7 +52,7 @@ const TIPS: Record<string, string> = {
   "WHT fiscal":
     "Withholding Tax : impôt prélevé à la source à l’étranger sur certains revenus. Peut ouvrir droit à crédit d’impôt selon conventions — non automatisé ici.",
   "PFU estimé":
-    "Prélèvement forfaitaire unique ~30 % (12,8 % IR + 17,2 % PS) appliqué de façon indicative aux gains positifs CTO / crypto / CFD uniquement. Ce n’est pas votre impôt dû.",
+    "Prélèvement forfaitaire unique ~31,4 % (12,8 % IR + 18,6 % PS depuis 2026) appliqué de façon indicative aux gains positifs CTO / crypto / CFD uniquement. Ce n’est pas votre impôt dû.",
   PEA:
     "Plan d’épargne en actions : fiscalité avantageuse sous conditions de durée — le PFU estimé de cette page ne s’y applique pas automatiquement.",
   "Assurance-vie":

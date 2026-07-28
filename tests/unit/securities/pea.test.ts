@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { d } from "@/app/lib/money/decimal";
+import { ratePct } from "@/app/lib/tax/rates";
 import {
   PEA_CAP_EUR,
   PEA_COMBINED_CAP_EUR,
+  PEA_INCOME_TAX_RATE,
   PEA_PME_CAP_EUR,
+  PEA_SOCIAL_CHARGES_RATE,
   peaContributionRoom,
   peaMaturityStatus,
   peaTaxStatusLabel,
@@ -194,10 +197,10 @@ describe("peaWithdrawalTax — plan mûr (plus de 5 ans)", () => {
 
   it("mais les prélèvements sociaux restent dus — l'exonération n'est pas totale", () => {
     const r = peaWithdrawalTax(matured)!;
-    // 25 000 × 40 % = 10 000 € de gain retiré, à 17,2 %.
+    // 25 000 × 40 % = 10 000 € de gain retiré, à 18,6 % depuis 2026.
     expect(r.taxableGainEur.toNumber()).toBe(10_000);
-    expect(r.socialChargesEur.toNumber()).toBeCloseTo(1_720, 6);
-    expect(r.totalTaxEur.toNumber()).toBeCloseTo(1_720, 6);
+    expect(r.socialChargesEur.toNumber()).toBeCloseTo(1_860, 6);
+    expect(r.totalTaxEur.toNumber()).toBeCloseTo(1_860, 6);
   });
 
   it("le retrait ne clôture pas le plan", () => {
@@ -206,8 +209,8 @@ describe("peaWithdrawalTax — plan mûr (plus de 5 ans)", () => {
 
   it("le net et le taux effectif sont cohérents", () => {
     const r = peaWithdrawalTax(matured)!;
-    expect(r.netWithdrawalEur.toNumber()).toBeCloseTo(23_280, 6);
-    expect(r.effectiveRatePct.toNumber()).toBeCloseTo(6.88, 6);
+    expect(r.netWithdrawalEur.toNumber()).toBeCloseTo(23_140, 6);
+    expect(r.effectiveRatePct.toNumber()).toBeCloseTo(7.44, 6);
   });
 });
 
@@ -219,12 +222,12 @@ describe("peaWithdrawalTax — plan de moins de 5 ans", () => {
     isMatured: false,
   };
 
-  it("IR et prélèvements sociaux s'appliquent, soit 30 % au total", () => {
+  it("IR et prélèvements sociaux s'appliquent, soit 31,4 % au total depuis 2026", () => {
     const r = peaWithdrawalTax(young)!;
     expect(r.taxableGainEur.toNumber()).toBe(10_000);
     expect(r.incomeTaxEur.toNumber()).toBeCloseTo(1_280, 6);
-    expect(r.socialChargesEur.toNumber()).toBeCloseTo(1_720, 6);
-    expect(r.totalTaxEur.toNumber()).toBeCloseTo(3_000, 6);
+    expect(r.socialChargesEur.toNumber()).toBeCloseTo(1_860, 6);
+    expect(r.totalTaxEur.toNumber()).toBeCloseTo(3_140, 6);
   });
 
   it("le retrait est présumé clôturer le plan", () => {
@@ -301,12 +304,20 @@ describe("peaWithdrawalTax — moins-value", () => {
 describe("peaTaxStatusLabel", () => {
   it("ne dit jamais « exonéré » sans mentionner les prélèvements sociaux", () => {
     const matured = peaTaxStatusLabel(true);
-    expect(matured).toMatch(/17,2/);
+    expect(matured).toMatch(/18,6/);
     expect(matured).toMatch(/IR exonéré/);
   });
 
   it("annonce les deux composantes avant 5 ans", () => {
     expect(peaTaxStatusLabel(false)).toMatch(/12,8/);
-    expect(peaTaxStatusLabel(false)).toMatch(/17,2/);
+    expect(peaTaxStatusLabel(false)).toMatch(/18,6/);
+  });
+
+  it("le libellé suit les constantes, il ne fige pas un taux dans la phrase", () => {
+    // Une révision législative ne doit pas laisser l'écran annoncer un taux
+    // que le calcul n'applique plus — c'est exactement ce qui s'était produit
+    // avec les 17,2 % restés en dur après la hausse de 2026.
+    expect(peaTaxStatusLabel(true)).toContain(ratePct(PEA_SOCIAL_CHARGES_RATE));
+    expect(peaTaxStatusLabel(false)).toContain(ratePct(PEA_INCOME_TAX_RATE));
   });
 });
