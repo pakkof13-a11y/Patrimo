@@ -4,9 +4,9 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { clientErrorMessage } from "@/app/lib/api/error-response";
 import {
   createTradingAccount,
-  TRADING_ACCOUNT_TYPES,
   TradingInputError,
 } from "@/app/lib/trading/account-service";
+import { TRADING_ACCOUNT_TYPES } from "@/app/lib/trading/constants";
 
 export const dynamic = "force-dynamic";
 

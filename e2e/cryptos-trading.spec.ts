@@ -13,7 +13,7 @@ test.describe("Cryptos & Trading", () => {
     await gotoDashboard(page);
   });
 
-  test("/cryptos : vue d’ensemble par défaut, sans futures ni tableau Positions", async ({
+  test("/cryptos : vue d’ensemble par défaut, futures en renvoi, sans tableau Positions", async ({
     page,
   }) => {
     await page.goto("/cryptos", { waitUntil: "domcontentloaded" });
@@ -24,8 +24,14 @@ test.describe("Cryptos & Trading", () => {
     // Vue d'ensemble = sous-onglet par défaut (aligné Actifs alternatifs)
     await expect(page.getByTestId("crypto-dashboard")).toBeVisible();
 
-    // Les futures sont partis dans Trading
-    await expect(page.getByTestId("crypto-subtab-FUTURES")).toHaveCount(0);
+    // L'entrée Futures est de retour, mais comme **renvoi** : c'est ici qu'on
+    // va les chercher, et un renvoi explicite vaut mieux qu'une absence qui
+    // laisse croire à une perte de données. Le suivi lui-même reste dans
+    // Trading, ce que vérifie l'absence de panneau de saisie.
+    await expect(page.getByTestId("crypto-subtab-FUTURES")).toHaveCount(1);
+    await page.getByTestId("crypto-subtab-FUTURES").click();
+    await expect(page.getByTestId("crypto-futures-redirect")).toBeVisible();
+    await expect(page.getByTestId("crypto-futures-panel")).toHaveCount(0);
 
     // Le tableau Positions ne doit pas doubler la vue comptant
     await expect(page.getByTestId("holdings-table")).toHaveCount(0);

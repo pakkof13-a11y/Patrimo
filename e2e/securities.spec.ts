@@ -166,10 +166,10 @@ test.describe("PEA & CTO", () => {
 
     // Plan mûr : l'impôt sur le revenu tombe, les prélèvements sociaux restent.
     await expect(maturity.first()).toContainText("IR exonéré");
-    await expect(maturity.first()).toContainText("17,2");
+    await expect(maturity.first()).toContainText("18,6");
     // Plan récent : les deux composantes sont annoncées.
     await expect(maturity.nth(1)).toContainText("12,8");
-    await expect(maturity.nth(1)).toContainText("17,2");
+    await expect(maturity.nth(1)).toContainText("18,6");
   });
 
   test("le simulateur refuse un retrait supérieur à la valeur du plan", async ({

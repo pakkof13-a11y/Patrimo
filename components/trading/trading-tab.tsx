@@ -3,15 +3,22 @@
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { LayoutDashboard, TrendingUp } from "lucide-react";
+import { BookOpen, LayoutDashboard, Landmark, TrendingUp } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import { FuturesPanel } from "@/components/trading/futures-panel";
+import { TradingAccountsPanel } from "@/components/trading/trading-accounts-panel";
+import { TradingJournalPanel } from "@/components/trading/trading-journal-panel";
 import { AltDashKpi } from "@/components/tabs/alternatives-shell";
 
-export type TradingSubTab = "dashboard" | "futures";
+export type TradingSubTab = "dashboard" | "cfd" | "futures" | "journal";
 
-const TRADING_SUBS = new Set<string>(["dashboard", "futures"]);
+const TRADING_SUBS = new Set<string>([
+  "dashboard",
+  "cfd",
+  "futures",
+  "journal",
+]);
 
 const SUB_NAV: {
   id: TradingSubTab;
@@ -26,10 +33,22 @@ const SUB_NAV: {
     icon: <LayoutDashboard className="h-3.5 w-3.5" />,
   },
   {
+    id: "cfd",
+    label: "Comptes & CFD",
+    short: "CFD",
+    icon: <Landmark className="h-3.5 w-3.5" />,
+  },
+  {
     id: "futures",
     label: "Futures crypto",
     short: "Futures",
     icon: <TrendingUp className="h-3.5 w-3.5" />,
+  },
+  {
+    id: "journal",
+    label: "Journal",
+    short: "Journal",
+    icon: <BookOpen className="h-3.5 w-3.5" />,
   },
 ];
 
@@ -208,7 +227,9 @@ export function TradingTab({
         </section>
       )}
 
+      {sub === "cfd" && <TradingAccountsPanel />}
       {sub === "futures" && <FuturesPanel />}
+      {sub === "journal" && <TradingJournalPanel />}
     </div>
   );
 }

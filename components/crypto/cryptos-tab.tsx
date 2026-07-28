@@ -3,12 +3,15 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowUpRight,
   Coins,
   Image as ImageIcon,
   Layers,
   LayoutDashboard,
   PieChart as PieChartIcon,
+  TrendingUp,
 } from "lucide-react";
+import Link from "next/link";
 import {
   Cell,
   Legend,
@@ -33,7 +36,7 @@ import type { CoinCardHolding } from "@/app/lib/crypto/coin-cards";
  * vit désormais dans l'onglet Trading. `DASHBOARD` est le nouveau défaut,
  * aligné sur l'onglet Actifs alternatifs.
  */
-export type CryptoSubTab = "DASHBOARD" | "SPOT" | "DEFI" | "NFT";
+export type CryptoSubTab = "DASHBOARD" | "SPOT" | "DEFI" | "NFT" | "FUTURES";
 
 const SUB_NAV: {
   id: CryptoSubTab;
@@ -65,6 +68,16 @@ const SUB_NAV: {
     short: "NFT",
     icon: <ImageIcon className="h-3.5 w-3.5" />,
   },
+  // Sous-onglet de redirection : les futures ont été déplacés dans Trading,
+  // parce qu'une position à levier n'est pas un actif détenu. L'entrée reste
+  // ici parce que c'est là qu'on les cherche — mieux vaut un renvoi explicite
+  // qu'une absence qui laisse croire à une perte de données.
+  {
+    id: "FUTURES",
+    label: "Futures",
+    short: "Futures",
+    icon: <TrendingUp className="h-3.5 w-3.5" />,
+  },
 ];
 
 type CryptoKpisResponse = {
@@ -77,8 +90,15 @@ type CryptoKpisResponse = {
   walletCount: number;
 };
 
+/**
+ * Fiches de démarrage des sous-modules réellement gérés ici.
+ *
+ * `FUTURES` en est exclu à dessein : ce n'est pas un module à renseigner mais
+ * un renvoi vers l'onglet Trading. L'y faire figurer proposerait de « démarrer
+ * le suivi » d'une chose qui se saisit ailleurs.
+ */
 const MODULE_GUIDES: Record<
-  Exclude<CryptoSubTab, "DASHBOARD">,
+  Exclude<CryptoSubTab, "DASHBOARD" | "FUTURES">,
   { title: string; blurb: string }
 > = {
   SPOT: {
@@ -399,6 +419,51 @@ export function CryptosTab({
       )}
       {sub === "DEFI" && <DefiPanel />}
       {sub === "NFT" && <NftPanel />}
+      {sub === "FUTURES" && <FuturesRedirect />}
     </div>
+  );
+}
+
+/**
+ * Renvoi vers l'onglet Trading.
+ *
+ * Les futures crypto y ont été déplacés : une position à levier ne se valorise
+ * pas comme un actif détenu, elle pèse par sa marge et son P&L latent, pas par
+ * son notionnel. Mais c'est bien dans les Cryptos qu'on va les chercher — d'où
+ * cette entrée, qui explique le déplacement au lieu de laisser un vide.
+ *
+ * Le lien porte le sous-onglet dans l'URL : il ouvre directement les futures,
+ * pas la vue d'ensemble du Trading. Un clic, la bonne page.
+ */
+function FuturesRedirect() {
+  return (
+    <section className="card p-6 text-center" data-testid="crypto-futures-redirect">
+      <TrendingUp
+        className="mx-auto h-6 w-6 text-[var(--muted-foreground)]"
+        aria-hidden
+      />
+      <h2 className="mt-2 text-sm font-semibold">
+        Retrouvez toutes vos positions futures cryptos dans l&apos;onglet
+        Trading
+      </h2>
+      <p className="text-meta mx-auto mt-1.5 max-w-md">
+        Une position à levier n&apos;est pas un actif détenu : elle ne pèse au
+        patrimoine ni par sa taille ni par son notionnel, mais par la marge
+        engagée et le P&amp;L latent. Elle a donc son propre onglet, aux côtés
+        des CFD.
+      </p>
+      <Link
+        href="/trading?sub=futures"
+        className={cn(
+          "mt-4 inline-flex items-center gap-1.5 rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium transition",
+          "bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90",
+          "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+        )}
+        data-testid="crypto-futures-goto-trading"
+      >
+        Ouvrir l&apos;onglet Trading
+        <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
+      </Link>
+    </section>
   );
 }

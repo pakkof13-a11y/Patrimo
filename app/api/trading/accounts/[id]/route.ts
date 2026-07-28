@@ -4,10 +4,10 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { clientErrorMessage } from "@/app/lib/api/error-response";
 import {
   deleteTradingAccount,
-  TRADING_ACCOUNT_TYPES,
   TradingInputError,
   updateTradingAccount,
 } from "@/app/lib/trading/account-service";
+import { TRADING_ACCOUNT_TYPES } from "@/app/lib/trading/constants";
 
 export const dynamic = "force-dynamic";
 

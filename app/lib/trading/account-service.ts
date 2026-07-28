@@ -9,25 +9,11 @@
 
 import { prisma } from "../prisma";
 import { owned, wroteOne } from "../db/tenant-scope";
-
-export const TRADING_ACCOUNT_TYPES = {
-  CFD: "CFD",
-  FUTURES: "Futures",
-  SPREAD_BETTING: "Spread betting",
-  MIXED: "Mixte",
-} as const;
-
-export type TradingAccountType = keyof typeof TRADING_ACCOUNT_TYPES;
-
-export function tradingAccountTypeLabel(value: string): string {
-  return TRADING_ACCOUNT_TYPES[value as TradingAccountType] ?? value;
-}
-
-export function isTradingAccountType(
-  value: string
-): value is TradingAccountType {
-  return value in TRADING_ACCOUNT_TYPES;
-}
+import {
+  isTradingAccountType,
+  tradingAccountTypeLabel,
+  type TradingAccountType,
+} from "./constants";
 
 export class TradingInputError extends Error {
   readonly code = "TRADING_INPUT";
