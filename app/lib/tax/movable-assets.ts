@@ -344,6 +344,47 @@ function explain(ctx: {
     : "La plus-value est trop élevée par rapport au prix de vente : la taxe forfaitaire coûte moins cher que les 37,6 %.";
 }
 
+/**
+ * Année de détention à partir de laquelle le régime réel devient moins cher
+ * que la taxe forfaitaire, à prix de cession et prix de revient donnés.
+ *
+ * L'abattement ne progresse que par paliers annuels : plutôt que d'inverser
+ * l'équation et d'arrondir, on parcourt les 22 années possibles et on retient
+ * la première qui bascule. Vingt-deux itérations sur des entiers, c'est exact
+ * et cela reste lisible.
+ *
+ * Renvoie `null` quand la bascule n'arrive jamais — cession exonérée, ou
+ * moins-value où le régime réel est déjà le moins cher dès la première année.
+ */
+export function breakEvenYear(input: {
+  nature: MovableNature;
+  salePriceEur: DecimalInput;
+  costBasisEur?: DecimalInput;
+  saleFeesEur?: DecimalInput;
+}): number | null {
+  const salePrice = d(input.salePriceEur);
+  if (
+    input.nature === "EXEMPT_BY_NATURE" ||
+    (hasSmallSaleThreshold(input.nature) && salePrice.lte(SMALL_SALE_EXEMPTION_EUR))
+  ) {
+    return null;
+  }
+
+  const gain = salePrice
+    .minus(d(input.saleFeesEur ?? 0))
+    .minus(d(input.costBasisEur ?? 0));
+  if (gain.lte(0)) return null;
+
+  const flatTax = salePrice.times(FLAT_TAX_RATE_BY_NATURE[input.nature]);
+  for (let year = 0; year <= FULL_EXEMPTION_YEARS; year += 1) {
+    const taxable = gain.times(d(1).minus(holdingAllowanceRate(year)));
+    if (taxable.times(MOVABLE_CAPITAL_GAIN_TOTAL_RATE).lt(flatTax)) {
+      return year;
+    }
+  }
+  return null;
+}
+
 /** Détail du régime réel, pour l'afficher sans le réinventer côté UI. */
 export const CAPITAL_GAIN_BREAKDOWN = [
   { label: "Impôt sur le revenu", rate: MOVABLE_CAPITAL_GAIN_INCOME_TAX_RATE },

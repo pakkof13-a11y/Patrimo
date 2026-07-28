@@ -1396,6 +1396,8 @@ export async function seedUserPortfolio(
         certificateIssuer: "Rolex",
         purchaseDate: new Date("2019-06-14"),
         purchaseSource: "Concessionnaire agréé",
+        hasPurchaseProof: true,
+        acquisitionFees: D("150"),
         watchMovement: "AUTOMATIC",
         watchDiameterMm: D("41"),
         watchReference: "126610LN",
@@ -1442,6 +1444,8 @@ export async function seedUserPortfolio(
         hasCertificate: true,
         certificateIssuer: "Galerie",
         purchaseDate: new Date("2021-03-18"),
+        hasPurchaseProof: true,
+        acquisitionFees: D("120"),
         appraisalValue: D("2500"),
         appraisalDate: new Date("2025-09-10"),
         // Conservée au domicile sans prime : l'alerte ne se déclenche pas,
@@ -1464,6 +1468,9 @@ export async function seedUserPortfolio(
         certificateRef: "GIA-2185463201",
         certificateIssuer: "GIA",
         purchaseDate: new Date("2012-12-20"),
+        // Certifiée mais sans facture : le certificat atteste la pierre, pas
+        // son prix. L'option pour le régime réel lui reste fermée.
+        hasPurchaseProof: false,
         jewelryType: "RING",
         metalBase: "PLATINUM_950",
         metalWeightG: D("4.2"),

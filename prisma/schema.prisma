@@ -1080,6 +1080,16 @@ model TangibleAsset {
   certificateRef    String?
   /// Organisme certificateur (GIA, IGI, LFG, manufacture…)
   certificateIssuer String?
+  /// Justificatifs d'achat conservés — facture, acte de vente, bordereau
+  /// d'adjudication.
+  ///
+  /// À ne pas confondre avec `hasCertificate` : un certificat d'authenticité
+  /// atteste ce qu'est l'objet, pas ce qu'il a coûté ni quand il a été acquis.
+  /// Seul le justificatif d'achat ouvre l'option pour le régime réel.
+  hasPurchaseProof  Boolean @default(false)
+  /// Frais d'acquisition — commissaire-priseur, expertise, transport. Ils
+  /// entrent dans le prix de revient et réduisent donc la plus-value taxable.
+  acquisitionFees   Decimal? @db.Decimal(28, 12)
 
   // ── Valorisation & conservation ────────────────────────────────────────────
   /// Valeur d'expertise (notaire, assureur) — distincte de la valeur de marché

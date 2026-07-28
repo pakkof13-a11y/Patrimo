@@ -523,6 +523,9 @@ export const tangibleAssetSchema = z.object({
   purchaseSource: z.string().max(200).optional().nullable(),
   certificateRef: z.string().max(120).optional().nullable(),
   certificateIssuer: z.string().max(120).optional().nullable(),
+  /** Facture d'achat — distincte du certificat d'authenticité. */
+  hasPurchaseProof: z.boolean().default(false),
+  acquisitionFees: optionalDecimalString,
 
   // Valorisation & conservation
   appraisalValue: optionalDecimalString,

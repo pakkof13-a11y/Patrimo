@@ -126,6 +126,10 @@ export type TangibleAssetDto = {
   purchaseSource: string | null;
   certificateRef: string | null;
   certificateIssuer: string | null;
+  /** Facture ou bordereau d'adjudication — seule preuve ouvrant l'option. */
+  hasPurchaseProof: boolean;
+  /** Commissaire-priseur, expertise, transport — entrent dans le revient. */
+  acquisitionFees: string | null;
 
   // Valorisation & conservation
   appraisalValue: string | null;
@@ -209,6 +213,13 @@ export type TangibleOwnership = {
 export type TangibleTaxPreview = {
   /** Années révolues depuis l'achat, `null` sans date d'acquisition. */
   holdingYears: number | null;
+  /** Prix d'achat majoré des frais d'acquisition. */
+  costBasisEur: string;
+  /**
+   * Année de détention où le régime réel devient moins cher que le forfait.
+   * `null` quand la bascule n'arrive jamais — cession exonérée ou à perte.
+   */
+  breakEvenYear: number | null;
   /** Aucun impôt dû sur cette cession simulée. */
   exempt: boolean;
   /** NATURE | SMALL_SALE | HOLDING_PERIOD, ou `null` si un impôt reste dû. */
@@ -242,6 +253,10 @@ export type TangibleAssetsSummary = {
   withAppraisalCount: number;
   /** Lignes sans date d'achat : option fiscale fermée à la revente. */
   undatedCount: number;
+  /** Lignes dont le justificatif d'achat est conservé. */
+  withPurchaseProofCount: number;
+  /** Lignes exonérées par la seule durée de détention (22 ans). */
+  fullyExemptCount: number;
   /** Somme des frais de garde annuels déclarés. */
   totalAnnualCustodyCost: string;
   /** Coût de possession annuel : primes d'assurance + garde. */

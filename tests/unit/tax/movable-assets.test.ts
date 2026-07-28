@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  breakEvenYear,
   computeMovableSaleTax,
   flatTaxBreakdown,
   hasSmallSaleThreshold,
@@ -152,5 +153,82 @@ describe("interaction du seuil avec les autres règles", () => {
 
     expect(r.capitalGain.available).toBe(true);
     expect(r.capitalGain.unavailableReason).toBeNull();
+  });
+});
+
+describe("année de bascule entre les deux régimes", () => {
+  it("désigne la première année où le régime réel devient moins cher", () => {
+    // Vente 15 000 €, revient 10 000 € : forfait 975 €. Le régime réel part
+    // de 1 880 € et décroît de 5 %/an d'abattement — il passe sous le forfait
+    // une fois l'abattement suffisant.
+    const year = breakEvenYear({
+      nature: "COLLECTIBLE",
+      salePriceEur: "15000",
+      costBasisEur: "10000",
+    });
+
+    expect(year).not.toBeNull();
+    const before = computeMovableSaleTax({
+      nature: "COLLECTIBLE",
+      salePriceEur: "15000",
+      costBasisEur: "10000",
+      hasInvoice: true,
+      acquiredAt: new Date(Date.UTC(2026 - (year! - 1), 0, 1)).toISOString(),
+      soldAt: "2026-01-01",
+    });
+    const at = computeMovableSaleTax({
+      nature: "COLLECTIBLE",
+      salePriceEur: "15000",
+      costBasisEur: "10000",
+      hasInvoice: true,
+      acquiredAt: new Date(Date.UTC(2026 - year!, 0, 1)).toISOString(),
+      soldAt: "2026-01-01",
+    });
+
+    // L'année précédente le forfait gagne encore ; à l'année charnière, non.
+    expect(before.recommended).toBe("FORFAIT");
+    expect(at.recommended).toBe("PLUS_VALUE");
+  });
+
+  it("bascule dès la première année quand la plus-value est faible", () => {
+    // Le régime réel n'a presque rien à taxer : il gagne sans attendre.
+    expect(
+      breakEvenYear({
+        nature: "COLLECTIBLE",
+        salePriceEur: "20000",
+        costBasisEur: "19000",
+      })
+    ).toBe(0);
+  });
+
+  it("ne promet aucune bascule là où rien n'est dû", () => {
+    // Sous le seuil, exonéré par nature, ou à perte : les deux régimes sont
+    // à zéro, parler de bascule n'aurait pas de sens.
+    expect(
+      breakEvenYear({ nature: "COLLECTIBLE", salePriceEur: "3000", costBasisEur: "1000" })
+    ).toBeNull();
+    expect(
+      breakEvenYear({ nature: "EXEMPT_BY_NATURE", salePriceEur: "60000", costBasisEur: "1000" })
+    ).toBeNull();
+    expect(
+      breakEvenYear({ nature: "COLLECTIBLE", salePriceEur: "8000", costBasisEur: "10000" })
+    ).toBeNull();
+  });
+
+  it("tient compte des frais de vente, qui réduisent la plus-value", () => {
+    const withoutFees = breakEvenYear({
+      nature: "COLLECTIBLE",
+      salePriceEur: "15000",
+      costBasisEur: "10000",
+    });
+    const withFees = breakEvenYear({
+      nature: "COLLECTIBLE",
+      salePriceEur: "15000",
+      costBasisEur: "10000",
+      saleFeesEur: "2000",
+    });
+
+    expect(withFees).not.toBeNull();
+    expect(withFees!).toBeLessThan(withoutFees!);
   });
 });

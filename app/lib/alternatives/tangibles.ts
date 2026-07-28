@@ -30,7 +30,10 @@ import {
   TANGIBLE_CATEGORY_LABELS,
   type TangibleCategory,
 } from "@/app/lib/tangibles/constants";
-import { computeMovableSaleTax } from "@/app/lib/tax/movable-assets";
+import {
+  breakEvenYear,
+  computeMovableSaleTax,
+} from "@/app/lib/tax/movable-assets";
 import {
   annualCostOfOwnership,
   netCarryYield,
@@ -104,16 +107,22 @@ type Row = Prisma.TangibleAssetGetPayload<Record<string, never>>;
  */
 function taxPreview(row: Row): TangibleTaxPreview {
   const nature = fiscalNature(row.category, row.isCollectible);
+  // Les frais d'acquisition entrent dans le prix de revient : commissaire-
+  // priseur, expertise, transport. Les omettre gonflerait la plus-value
+  // taxable au régime réel.
+  const costBasis = d(row.purchasePrice.toString()).plus(
+    row.acquisitionFees?.toString() ?? 0
+  );
   const computed = computeMovableSaleTax({
     nature,
     salePriceEur: row.estimatedValue.toString(),
-    costBasisEur: row.purchasePrice.toString(),
+    costBasisEur: costBasis,
     acquiredAt: row.purchaseDate,
     soldAt: new Date(),
-    // Le certificat n'est pas une facture d'achat, mais c'est le seul
-    // justificatif que le module capture ; combiné à la date d'achat, il vaut
-    // preuve raisonnable de l'antériorité et du prix.
-    hasInvoice: row.purchaseDate !== null && row.hasCertificate,
+    // Le justificatif d'achat, et lui seul : un certificat d'authenticité
+    // atteste ce qu'est l'objet, pas ce qu'il a coûté ni quand il a été
+    // acquis — les deux éléments qu'exige l'option de l'article 150 VL.
+    hasInvoice: row.purchaseDate !== null && row.hasPurchaseProof,
   });
 
   const chosen =
@@ -121,6 +130,12 @@ function taxPreview(row: Row): TangibleTaxPreview {
 
   return {
     holdingYears: row.purchaseDate ? computed.holdingYears : null,
+    costBasisEur: costBasis.toFixed(2),
+    breakEvenYear: breakEvenYear({
+      nature,
+      salePriceEur: row.estimatedValue.toString(),
+      costBasisEur: costBasis,
+    }),
     exempt: computed.exempt,
     exemptionReason: computed.exemptionReason,
     flatTaxEur: computed.flat.taxEur,
@@ -198,6 +213,8 @@ function mapRow(row: Row): TangibleAssetDto {
     purchaseSource: row.purchaseSource,
     certificateRef: row.certificateRef,
     certificateIssuer: row.certificateIssuer,
+    hasPurchaseProof: row.hasPurchaseProof,
+    acquisitionFees: row.acquisitionFees?.toString() ?? null,
 
     appraisalValue: row.appraisalValue?.toString() ?? null,
     appraisalDate: row.appraisalDate?.toISOString() ?? null,
@@ -257,6 +274,8 @@ export function summarizeTangibles(
   let withCertificateCount = 0;
   let withAppraisalCount = 0;
   let undatedCount = 0;
+  let withPurchaseProofCount = 0;
+  let fullyExemptCount = 0;
   let custodyCost = d(0);
   let ownershipCost = d(0);
   let highCustodyCostCount = 0;
@@ -273,6 +292,10 @@ export function summarizeTangibles(
     if (line.hasCertificate) withCertificateCount += 1;
     if (line.appraisalValue !== null) withAppraisalCount += 1;
     if (!line.purchaseDate) undatedCount += 1;
+    if (line.hasPurchaseProof) withPurchaseProofCount += 1;
+    // « Pleinement exonéré » au sens de la durée : 22 ans révolus. Distinct
+    // de `exemptCount`, qui inclut le seuil des 5 000 € et les véhicules.
+    if (line.tax.exemptionReason === "HOLDING_PERIOD") fullyExemptCount += 1;
     custodyCost = custodyCost.plus(line.storageCostAnnual ?? 0);
     ownershipCost = ownershipCost.plus(line.ownership.annualCostEur);
     ownershipAlertCount += line.ownership.alerts.length;
@@ -309,6 +332,8 @@ export function summarizeTangibles(
     withCertificateCount,
     withAppraisalCount,
     undatedCount,
+    withPurchaseProofCount,
+    fullyExemptCount,
     totalAnnualCustodyCost: custodyCost.toFixed(2),
     totalAnnualOwnershipCost: ownershipCost.toFixed(2),
     highCustodyCostCount,
@@ -341,6 +366,8 @@ export type TangibleInput = {
   purchaseSource?: string | null;
   certificateRef?: string | null;
   certificateIssuer?: string | null;
+  hasPurchaseProof?: boolean;
+  acquisitionFees?: string | number | null;
 
   appraisalValue?: string | number | null;
   appraisalDate?: string | null;
@@ -401,6 +428,8 @@ function normalize(input: TangibleInput) {
     purchaseSource: optText(input.purchaseSource),
     certificateRef: optText(input.certificateRef),
     certificateIssuer: optText(input.certificateIssuer),
+    hasPurchaseProof: Boolean(input.hasPurchaseProof),
+    acquisitionFees: optDec(input.acquisitionFees),
 
     appraisalValue: optDec(input.appraisalValue),
     appraisalDate: parseDate(input.appraisalDate),
@@ -493,6 +522,11 @@ export async function updateTangible(
     purchaseSource: keep("purchaseSource", existing.purchaseSource),
     certificateRef: keep("certificateRef", existing.certificateRef),
     certificateIssuer: keep("certificateIssuer", existing.certificateIssuer),
+    hasPurchaseProof: keep("hasPurchaseProof", existing.hasPurchaseProof),
+    acquisitionFees: keep(
+      "acquisitionFees",
+      existing.acquisitionFees?.toString() ?? null
+    ),
 
     appraisalValue: keep("appraisalValue", existing.appraisalValue?.toString() ?? null),
     appraisalDate: keep("appraisalDate", existing.appraisalDate?.toISOString() ?? null),

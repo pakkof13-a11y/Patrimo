@@ -45,7 +45,10 @@ import {
   type TangibleCategory,
 } from "@/app/lib/tangibles/constants";
 import {
+  breakEvenYear,
   computeMovableSaleTax,
+  FULL_EXEMPTION_YEARS,
+  HOLDING_ALLOWANCE_FREE_YEARS,
   SMALL_SALE_EXEMPTION_EUR,
 } from "@/app/lib/tax/movable-assets";
 import { completedYearsBetween } from "@/app/lib/tax/movable-assets";
@@ -93,6 +96,8 @@ type FormState = {
   purchaseSource: string;
   certificateRef: string;
   certificateIssuer: string;
+  hasPurchaseProof: boolean;
+  acquisitionFees: string;
 
   appraisalValue: string;
   appraisalDate: string;
@@ -152,6 +157,8 @@ const empty = (): FormState => ({
   purchaseSource: "",
   certificateRef: "",
   certificateIssuer: "",
+  hasPurchaseProof: false,
+  acquisitionFees: "",
 
   appraisalValue: "",
   appraisalDate: "",
@@ -213,6 +220,8 @@ function toForm(l: TangibleAssetDto): FormState {
     purchaseSource: l.purchaseSource ?? "",
     certificateRef: l.certificateRef ?? "",
     certificateIssuer: l.certificateIssuer ?? "",
+    hasPurchaseProof: l.hasPurchaseProof,
+    acquisitionFees: l.acquisitionFees ?? "",
 
     appraisalValue: l.appraisalValue ?? "",
     appraisalDate: l.appraisalDate ? l.appraisalDate.slice(0, 10) : "",
@@ -325,25 +334,50 @@ export function AlternativesTangibles({
    * Le moteur est une fonction pure sans dépendance serveur : le récapitulatif
    * suit la saisie et donne exactement ce que le service recalculera.
    */
+  /**
+   * Prix de cession simulé.
+   *
+   * Vide, il suit la valeur estimée ; saisi, il la remplace. Le vendeur teste
+   * ainsi « et si je le cédais à tel prix ? » sans toucher à l'estimation
+   * enregistrée, qui n'a pas à bouger pour une hypothèse.
+   */
+  const [simulatedPrice, setSimulatedPrice] = useState("");
+  const effectiveSalePrice =
+    simulatedPrice.trim() === ""
+      ? num(form.estimatedValue)
+      : num(simulatedPrice);
+
+  const costBasisPreview =
+    num(form.purchasePrice) + num(form.acquisitionFees);
+
   const simulation = useMemo(() => {
-    const value = num(form.estimatedValue);
-    if (value <= 0) return null;
+    if (effectiveSalePrice <= 0) return null;
     return computeMovableSaleTax({
       nature: fiscalNature(form.category, form.isCollectible),
-      salePriceEur: String(value),
-      costBasisEur: String(num(form.purchasePrice)),
+      salePriceEur: String(effectiveSalePrice),
+      costBasisEur: String(costBasisPreview),
       acquiredAt: form.purchaseDate || null,
       soldAt: new Date(),
-      hasInvoice: Boolean(form.purchaseDate) && form.hasCertificate,
+      hasInvoice: Boolean(form.purchaseDate) && form.hasPurchaseProof,
     });
   }, [
-    form.estimatedValue,
-    form.purchasePrice,
+    effectiveSalePrice,
+    costBasisPreview,
     form.category,
     form.isCollectible,
     form.purchaseDate,
-    form.hasCertificate,
+    form.hasPurchaseProof,
   ]);
+
+  /** Année où le régime réel devient moins cher, au prix simulé. */
+  const switchYear = useMemo(() => {
+    if (effectiveSalePrice <= 0) return null;
+    return breakEvenYear({
+      nature: fiscalNature(form.category, form.isCollectible),
+      salePriceEur: String(effectiveSalePrice),
+      costBasisEur: String(costBasisPreview),
+    });
+  }, [effectiveSalePrice, costBasisPreview, form.category, form.isCollectible]);
 
   async function invalidate() {
     await Promise.all([
@@ -383,6 +417,8 @@ export function AlternativesTangibles({
         purchaseSource: orNull(form.purchaseSource),
         certificateRef: orNull(form.certificateRef),
         certificateIssuer: orNull(form.certificateIssuer),
+        hasPurchaseProof: form.hasPurchaseProof,
+        acquisitionFees: orNull(form.acquisitionFees),
 
         appraisalValue: orNull(form.appraisalValue),
         appraisalDate: orNull(form.appraisalDate),
@@ -937,15 +973,55 @@ export function AlternativesTangibles({
                     onChange={(e) => set("currency", e.target.value.toUpperCase())}
                   />
                 </AltField>
-                <label className="flex items-center gap-2 text-xs font-medium sm:col-span-2">
+                <AltField
+                  label="Frais d’acquisition"
+                  hint="Commissaire-priseur, expertise, transport — ils réduisent la plus-value taxable."
+                >
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    value={form.acquisitionFees}
+                    onChange={(e) => set("acquisitionFees", e.target.value)}
+                    data-testid="tangible-acquisition-fees"
+                  />
+                </AltField>
+
+                {/* Deux justificatifs distincts, et un seul compte fiscalement.
+                    Les fusionner ouvrirait l'option du régime réel à des
+                    objets certifiés mais sans facture — impôt sous-évalué. */}
+                <label className="flex items-start gap-2 text-xs font-medium sm:col-span-2">
                   <input
                     type="checkbox"
-                    className="accent-teal-700"
+                    className="mt-0.5 accent-teal-700"
+                    checked={form.hasPurchaseProof}
+                    onChange={(e) => set("hasPurchaseProof", e.target.checked)}
+                    data-testid="tangible-has-purchase-proof"
+                  />
+                  <span>
+                    J’ai les justificatifs d’achat (facture, acte, bordereau
+                    d’adjudication)
+                    <span className="block font-normal text-slate-500">
+                      Seule pièce qui prouve le prix et la date — condition de
+                      l’option pour le régime des plus-values.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="flex items-start gap-2 text-xs font-medium sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 accent-teal-700"
                     checked={form.hasCertificate}
                     onChange={(e) => set("hasCertificate", e.target.checked)}
                     data-testid="tangible-has-certificate"
                   />
-                  Certificat d’authenticité conservé
+                  <span>
+                    Certificat d’authenticité conservé
+                    <span className="block font-normal text-slate-500">
+                      Atteste ce qu’est l’objet, pas ce qu’il a coûté : sans
+                      effet fiscal.
+                    </span>
+                  </span>
                 </label>
                 {form.hasCertificate && (
                   <>
@@ -1264,6 +1340,24 @@ export function AlternativesTangibles({
                   </div>
                 )}
 
+                <AltField
+                  label="Prix de cession simulé"
+                  hint={
+                    simulatedPrice.trim() === ""
+                      ? "Vide : la valeur estimée est utilisée."
+                      : "Hypothèse — la valeur estimée enregistrée reste inchangée."
+                  }
+                >
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    placeholder={form.estimatedValue || "0"}
+                    value={simulatedPrice}
+                    onChange={(e) => setSimulatedPrice(e.target.value)}
+                    data-testid="tangible-simulated-price"
+                  />
+                </AltField>
+
                 {simulation ? (
                   <div
                     className="rounded-md border border-[var(--border)] px-3 py-2.5"
@@ -1294,8 +1388,115 @@ export function AlternativesTangibles({
                         </span>
                       )}
                     </div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <div
+                        className={cn(
+                          "rounded border px-2.5 py-2",
+                          simulation.recommended === "FORFAIT"
+                            ? "border-emerald-400/70 bg-emerald-50/40 dark:bg-emerald-950/20"
+                            : "border-[var(--border)]"
+                        )}
+                        data-testid="tangible-card-forfait"
+                      >
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                          Taxe forfaitaire 6,5 %
+                        </div>
+                        <div className="text-sm font-semibold tabular-nums">
+                          {formatCurrency(simulation.flat.taxEur, form.currency)}
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          sur le prix de vente · {simulation.flat.form}
+                        </div>
+                      </div>
+                      <div
+                        className={cn(
+                          "rounded border px-2.5 py-2",
+                          simulation.recommended === "PLUS_VALUE"
+                            ? "border-emerald-400/70 bg-emerald-50/40 dark:bg-emerald-950/20"
+                            : "border-[var(--border)]",
+                          !simulation.capitalGain.available && "opacity-60"
+                        )}
+                        data-testid="tangible-card-pv"
+                      >
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                          Plus-value 37,6 % abattue
+                        </div>
+                        <div className="text-sm font-semibold tabular-nums">
+                          {formatCurrency(
+                            simulation.capitalGain.taxEur,
+                            form.currency
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          abattement{" "}
+                          {(Number(simulation.allowanceRate) * 100).toLocaleString(
+                            "fr-FR",
+                            { maximumFractionDigits: 0 }
+                          )}{" "}
+                          % · {simulation.capitalGain.form}
+                        </div>
+                      </div>
+                    </div>
+
+                    {Number(simulation.savingsEur) > 0 && (
+                      <p
+                        className="mt-1.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400"
+                        data-testid="tangible-tax-savings"
+                      >
+                        {formatCurrency(simulation.savingsEur, form.currency)}{" "}
+                        d&apos;économie sur le régime retenu.
+                      </p>
+                    )}
+
                     <p className="mt-1.5 text-[11px] text-slate-500">
                       {simulation.rationale}
+                    </p>
+
+                    {switchYear !== null &&
+                      simulation.holdingYears < switchYear && (
+                        <p
+                          className="mt-1 text-[11px] text-slate-500"
+                          data-testid="tangible-break-even"
+                        >
+                          Le régime des plus-values devient moins cher à partir de{" "}
+                          <strong>{switchYear} ans</strong> de détention.
+                        </p>
+                      )}
+
+                    {/* Jalons : les trois paliers qui structurent la durée —
+                        début de l'abattement, moitié du chemin, exonération. */}
+                    <ol
+                      className="mt-2 flex flex-wrap gap-1.5"
+                      data-testid="tangible-milestones"
+                    >
+                      {[HOLDING_ALLOWANCE_FREE_YEARS, 12, FULL_EXEMPTION_YEARS].map(
+                        (milestone) => {
+                          const reached = simulation.holdingYears >= milestone;
+                          return (
+                            <li
+                              key={milestone}
+                              className={cn(
+                                "rounded px-1.5 py-0.5 text-[10px] ring-1",
+                                reached
+                                  ? "text-emerald-700 ring-emerald-400/50 dark:text-emerald-400"
+                                  : "text-slate-400 ring-[var(--border)]"
+                              )}
+                            >
+                              {milestone} ans ·{" "}
+                              {milestone === HOLDING_ALLOWANCE_FREE_YEARS
+                                ? "début de l’abattement"
+                                : milestone === FULL_EXEMPTION_YEARS
+                                  ? "exonération totale"
+                                  : "50 % d’abattement"}
+                            </li>
+                          );
+                        }
+                      )}
+                    </ol>
+
+                    <p className="mt-2 text-[10px] italic text-slate-400">
+                      Simulation indicative, non opposable à l&apos;administration
+                      fiscale.
                     </p>
                   </div>
                 ) : (
@@ -1624,6 +1825,13 @@ function TaxBadge({ line }: { line: TangibleAssetDto }) {
       title={line.tax.rationale}
     >
       {line.tax.recommendedRegime === "FORFAIT" ? "Forfait 6,5 %" : "Plus-value"}
+      {line.tax.breakEvenYear !== null &&
+        line.tax.holdingYears !== null &&
+        line.tax.holdingYears < line.tax.breakEvenYear && (
+          <span className="ml-1 font-normal text-slate-400">
+            → PV à {line.tax.breakEvenYear} ans
+          </span>
+        )}
     </span>
   );
 }
@@ -1691,6 +1899,22 @@ function detailRows(line: TangibleAssetDto): [string, string][] {
     ? new Date(line.purchaseDate).toLocaleDateString("fr-FR")
     : null);
   push("Source", line.purchaseSource);
+  push(
+    "Frais d'acquisition",
+    line.acquisitionFees
+      ? formatCurrency(line.acquisitionFees, line.currency)
+      : null
+  );
+  push(
+    "Prix de revient",
+    Number(line.tax.costBasisEur) > 0
+      ? formatCurrency(line.tax.costBasisEur, line.currency)
+      : null
+  );
+  push(
+    "Justificatif d'achat",
+    line.hasPurchaseProof ? "Conservé" : "Absent — option fiscale fermée"
+  );
   push("Certificat", line.certificateIssuer
     ? `${line.certificateIssuer}${line.certificateRef ? ` — ${line.certificateRef}` : ""}`
     : line.certificateRef);
