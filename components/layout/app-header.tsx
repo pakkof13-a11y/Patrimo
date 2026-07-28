@@ -72,7 +72,11 @@ export function AppHeader({
   onOpenImport?: () => void;
   onOpenCommandPalette?: () => void;
 }) {
-  const positionsFamily = isPositionsTab(tab);
+  // `crypto` reste dans `isPositionsTab` (son sous-onglet Comptant réutilise
+  // le tableau Positions filtré), mais il a sa propre entrée de navigation
+  // primaire : sans l'exclure ici, l'onglet Positions resterait surligné en
+  // même temps que Cryptos.
+  const positionsFamily = isPositionsTab(tab) && tab !== "crypto";
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [groupCoords, setGroupCoords] = useState<MenuCoords | null>(null);
   const [txMenuOpen, setTxMenuOpen] = useState(false);
