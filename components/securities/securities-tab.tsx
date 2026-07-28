@@ -3,7 +3,14 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, CalendarClock, Lock, Plus, Unlock } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarClock,
+  Lock,
+  Plus,
+  Trash2,
+  Unlock,
+} from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -164,6 +171,107 @@ function ContributionGauge({ room }: { room: RoomRow }) {
         )}
       </p>
     </div>
+  );
+}
+
+type ContributionRow = {
+  id: string;
+  type: "DEPOSIT" | "WITHDRAWAL";
+  amountEur: string;
+  occurredAt: string;
+  notes: string | null;
+};
+
+/**
+ * Historique des versements déclarés, avec suppression.
+ *
+ * Le plafond du PEA se calcule à partir de ce journal : un montant saisi par
+ * erreur consomme la place de façon définitive, et un plan affiché « plein »
+ * empêche le porteur de verser alors qu'il en a le droit. Le service exposait
+ * déjà la suppression ; c'est l'écran qui ne l'offrait pas.
+ */
+function ContributionHistory({ accountId }: { accountId: string }) {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["securities-contributions", accountId],
+    queryFn: () =>
+      fetchJson<{ contributions: ContributionRow[] }>(
+        `/api/securities/accounts/${accountId}/contributions`
+      ),
+  });
+
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/securities/contributions/${id}`, {
+        method: "DELETE",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error ?? "Suppression impossible");
+      return json;
+    },
+    onSuccess: () => {
+      toast.success("Versement supprimé");
+      void qc.invalidateQueries({ queryKey: ["securities-contributions"] });
+      void qc.invalidateQueries({ queryKey: ["securities"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const rows = q.data?.contributions ?? [];
+  if (q.isLoading) {
+    return <Skeleton className="mt-2 h-10 w-full" />;
+  }
+  if (rows.length === 0) {
+    return (
+      <p className="text-meta mt-2" data-testid="securities-contributions-empty">
+        Aucun versement déclaré. Le plafond se calcule à partir de ce journal.
+      </p>
+    );
+  }
+
+  return (
+    <ul
+      className="mt-2 divide-y divide-[var(--border)] rounded-md border border-[var(--border)]"
+      data-testid="securities-contributions-list"
+    >
+      {rows.map((c) => (
+        <li
+          key={c.id}
+          className="flex items-center justify-between gap-2 px-2 py-1.5 text-[11px]"
+          data-testid="securities-contribution-row"
+        >
+          <span className="tabular-nums">
+            {new Date(c.occurredAt).toLocaleDateString("fr-FR")}
+          </span>
+          <span className="flex-1 text-slate-500">
+            {c.type === "DEPOSIT" ? "Versement" : "Retrait"}
+          </span>
+          <span className="font-medium tabular-nums">
+            {formatCurrency(c.amountEur, "EUR")}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="!h-6 !w-6 !px-0 text-slate-400 hover:text-red-600"
+            disabled={remove.isPending}
+            onClick={() => {
+              if (
+                confirm(
+                  `Supprimer ce mouvement de ${formatCurrency(c.amountEur, "EUR")} ? Le plafond de versement sera recalculé.`
+                )
+              ) {
+                remove.mutate(c.id);
+              }
+            }}
+            aria-label="Supprimer le versement"
+            data-testid="securities-contribution-delete"
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -392,6 +500,7 @@ export function SecuritiesTab({ className }: { className?: string }) {
     onSuccess: () => {
       toast.success("Versement enregistré");
       setContribAmount("");
+      void qc.invalidateQueries({ queryKey: ["securities-contributions"] });
       invalidate();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -746,6 +855,8 @@ export function SecuritiesTab({ className }: { className?: string }) {
                               <Plus className="h-3.5 w-3.5" />
                             </Button>
                           </div>
+
+                          <ContributionHistory accountId={a.id} />
 
                           <WithdrawalSimulator account={a} />
                         </>
