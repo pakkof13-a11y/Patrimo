@@ -56,6 +56,25 @@ export const SOCIAL_CHARGES_RATE_CHANGE_DATE = "2026-01-01";
 /** PFU complet : 12,8 % + 18,6 %. */
 export const PFU_TOTAL_RATE = "0.314";
 
+/**
+ * Part « impôt sur le revenu » du régime des plus-values sur biens meubles
+ * (art. 150 UA CGI) — l'option ouverte au vendeur de métaux précieux.
+ *
+ * C'est 19 %, et non les 12,8 % du PFU : ce régime n'est pas le prélèvement
+ * forfaitaire unique, malgré la confusion fréquente entre les deux.
+ */
+export const MOVABLE_CAPITAL_GAIN_INCOME_TAX_RATE = "0.19";
+
+/**
+ * Régime des plus-values sur biens meubles, taux global depuis le
+ * 1ᵉʳ janvier 2026 : 19 % + 18,6 % = **37,6 %** (36,2 % auparavant).
+ *
+ * La hausse de CSG s'applique bien ici, contrairement à l'assurance-vie et à
+ * l'immobilier — d'où l'import de `SOCIAL_CHARGES_RATE` et non de sa variante
+ * historique.
+ */
+export const MOVABLE_CAPITAL_GAIN_TOTAL_RATE = "0.376";
+
 /** Rendu court pour l'affichage — « 18,6 % ». */
 export function ratePct(rate: string): string {
   return `${(Number(rate) * 100).toLocaleString("fr-FR", {

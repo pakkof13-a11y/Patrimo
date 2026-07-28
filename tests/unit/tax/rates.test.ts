@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  MOVABLE_CAPITAL_GAIN_INCOME_TAX_RATE,
+  MOVABLE_CAPITAL_GAIN_TOTAL_RATE,
   PFU_INCOME_TAX_RATE,
   PFU_TOTAL_RATE,
   ratePct,
@@ -56,6 +58,22 @@ describe("produits restés à 17,2 %", () => {
 
   it("les revenus fonciers non plus", () => {
     expect(RENTAL_SOCIAL_RATE.toNumber()).toBe(0.172);
+  });
+});
+
+describe("plus-values sur biens meubles", () => {
+  it("suit bien la hausse : 19 % + 18,6 % = 37,6 %", () => {
+    // Contrairement à l'assurance-vie et à l'immobilier, ce régime encaisse la
+    // hausse de CSG. Le test fige l'addition pour qu'une future révision des
+    // prélèvements sociaux ne laisse pas le total à l'ancienne valeur.
+    expect(
+      Number(MOVABLE_CAPITAL_GAIN_INCOME_TAX_RATE) + Number(SOCIAL_CHARGES_RATE)
+    ).toBeCloseTo(Number(MOVABLE_CAPITAL_GAIN_TOTAL_RATE), 10);
+    expect(MOVABLE_CAPITAL_GAIN_TOTAL_RATE).toBe("0.376");
+  });
+
+  it("n'est pas le PFU, malgré la confusion courante", () => {
+    expect(MOVABLE_CAPITAL_GAIN_INCOME_TAX_RATE).not.toBe(PFU_INCOME_TAX_RATE);
   });
 });
 

@@ -42,6 +42,7 @@ model User {
   envelopeCash           EnvelopeCash[]
   employeeSavingsLines   EmployeeSavingsLine[]
   preciousMetalPositions PreciousMetalPosition[]
+  preciousMetalSales     PreciousMetalSale[]
   privateEquityPositions PrivateEquityPosition[]
   crowdlendingPositions  CrowdlendingPosition[]
   tangibleAssets         TangibleAsset[]
@@ -900,25 +901,40 @@ model EmployeeSavingsLine {
 
 // ─── Actifs alternatifs — Métaux précieux ─────────────────────────────────────
 
-/// Position or / argent / etc. (physique ou papier), hors ledger titres
+/// Lot de métal précieux (physique ou papier), hors ledger titres.
+///
+/// Un lot = une acquisition homogène : même produit, même date, même prix.
+/// Ce grain est imposé par la fiscalité — l'abattement pour durée de détention
+/// de l'article 150 VI CGI se compte lot par lot, une moyenne le fausserait.
 model PreciousMetalPosition {
   id     String @id @default(cuid())
   userId String
 
-  /// METAL | OTHER
-  assetKind         String   @default("METAL")
+  /// GOLD | SILVER | PLATINUM | PALLADIUM | OTHER
+  metal             String   @default("GOLD")
   /// PHYSICAL | PAPER
   format            String   @default("PHYSICAL")
+  /// COIN | BAR | JEWELRY | ETC | MINING | OTHER
+  productType       String   @default("COIN")
   /// Ex. Napoléon 20F, Lingot 1 kg, Krugerrand
   denomination      String
+  /// Titre du métal en millièmes (900 pour un Napoléon, 999,9 pour un lingot)
+  fineness          Decimal  @default(999) @db.Decimal(6, 2)
   /// Nombre de pièces / barres / unités
   quantity          Decimal  @default(0) @db.Decimal(28, 12)
-  /// Poids unitaire en grammes (convertir Oz → g côté app)
+  /// Poids unitaire brut en grammes (convertir Oz → g côté app)
   unitWeightG       Decimal  @default(0) @db.Decimal(28, 12)
   /// GRAM | OZ — unité saisie pour le poids unitaire
   weightUnit        String   @default("GRAM")
-  /// Prix de revient unitaire (PRU)
+  /// Prix de revient unitaire (PRU), frais d'acquisition exclus
   purchasePriceUnit Decimal  @default(0) @db.Decimal(28, 12)
+  /// Frais d'acquisition du lot (commission, port, assurance)
+  acquisitionFees   Decimal  @default(0) @db.Decimal(28, 12)
+  /// Date d'acquisition — sans elle, l'abattement pour durée de détention
+  /// est incalculable et l'option pour le régime réel est fermée.
+  acquiredAt        DateTime?
+  /// Facture nominative et datée conservée : condition de l'option 2092-SD
+  hasInvoice        Boolean  @default(false)
   /// Valeur actuelle totale de la ligne (saisie manuelle pour l'instant)
   currentValue      Decimal  @default(0) @db.Decimal(28, 12)
   currency          String   @default("EUR")
@@ -928,11 +944,49 @@ model PreciousMetalPosition {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sales PreciousMetalSale[]
 
   @@index([userId])
-  @@index([userId, assetKind])
+  @@index([userId, metal])
   @@index([userId, format])
+}
+
+/// Cession d'un lot de métal précieux — le fait générateur de l'impôt.
+///
+/// La ligne détenue ne dit rien de la fiscalité : seule la vente déclenche,
+/// au choix du cédant, la taxe forfaitaire (2091-SD) ou le régime des
+/// plus-values sur biens meubles (option 2092-SD).
+model PreciousMetalSale {
+  id         String  @id @default(cuid())
+  userId     String
+  positionId String?
+
+  /// Libellé figé au moment de la vente : le lot peut disparaître ensuite
+  denomination  String
+  /// Quantité cédée (unités du lot)
+  quantity      Decimal  @default(0) @db.Decimal(28, 12)
+  /// Prix de cession brut — assiette de la taxe forfaitaire
+  salePriceEur  Decimal  @default(0) @db.Decimal(28, 12)
+  /// Frais de vente, déductibles du seul régime réel
+  saleFeesEur   Decimal  @default(0) @db.Decimal(28, 12)
+  /// Prix d'acquisition retenu pour la quantité cédée (frais inclus)
+  costBasisEur  Decimal  @default(0) @db.Decimal(28, 12)
+  soldAt        DateTime
+  acquiredAt    DateTime?
+  /// FORFAIT | PLUS_VALUE — régime effectivement déclaré
+  regime        String   @default("FORFAIT")
+  hasInvoice    Boolean  @default(false)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user     User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position PreciousMetalPosition? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([userId, soldAt])
+  @@index([positionId])
 }
 
 /// Private equity / non-coté (PME, startups, crowdequity…)
