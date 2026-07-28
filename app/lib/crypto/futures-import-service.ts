@@ -84,19 +84,19 @@ export async function applyFuturesImport(
           isClosed && closedAt && !Number.isNaN(closedAt.getTime()) ? closedAt : null,
       };
 
-      const existing = await prisma.cryptoFuturesPosition.findUnique({
+      const existing = await prisma.tradingPosition.findUnique({
         where: { userId_exchangeTradeId: { userId, exchangeTradeId: row.exchangeTradeId } },
         select: { id: true },
       });
 
       if (existing) {
-        await prisma.cryptoFuturesPosition.update({
+        await prisma.tradingPosition.update({
           where: { id: existing.id },
           data,
         });
         updated += 1;
       } else {
-        await prisma.cryptoFuturesPosition.create({
+        await prisma.tradingPosition.create({
           data: { ...data, userId, exchangeTradeId: row.exchangeTradeId },
         });
         created += 1;

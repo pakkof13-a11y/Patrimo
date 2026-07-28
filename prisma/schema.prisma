@@ -45,9 +45,10 @@ model User {
   privateEquityPositions PrivateEquityPosition[]
   crowdlendingPositions  CrowdlendingPosition[]
   tangibleAssets         TangibleAsset[]
-  cryptoFuturesPositions CryptoFuturesPosition[]
+  tradingPositions       TradingPosition[]
   defiStrategies         DefiStrategy[]
   securitiesAccounts     SecuritiesAccount[]
+  tradingAccounts        TradingAccount[]
 
   @@index([role])
 }
@@ -1303,7 +1304,42 @@ model DefiPositionDetail {
   @@index([strategyId])
 }
 
-/// Position futures / perpétuelle sur un exchange crypto.
+/// Compte de trading à levier — CFD, futures, spread betting.
+///
+/// `brokerName` est une chaîne et non une relation vers `Platform`, à rebours
+/// de `SecuritiesAccount` : une position de trading n'est pas un `Asset`, elle
+/// n'a donc jamais eu besoin d'une plateforme, et le modèle de position porte
+/// déjà son courtier sous forme de chaîne (`exchange`). Forcer la création
+/// d'une `Platform` pour déclarer un compte IG ou XTB ajouterait une étape
+/// sans rien apporter au calcul.
+model TradingAccount {
+  id     String @id @default(cuid())
+  userId String
+
+  /// IG, XTB, Saxo, Interactive Brokers, Binance…
+  brokerName  String
+  /// CFD | FUTURES | SPREAD_BETTING | MIXED
+  accountType String @default("MIXED")
+
+  currency        String   @default("EUR")
+  /// Solde du compte, déclaratif — le P&L des positions se calcule à part.
+  balance         Decimal  @default(0) @db.Decimal(28, 12)
+  /// Marge encore disponible, telle qu'affichée par le courtier.
+  marginAvailable Decimal? @db.Decimal(28, 12)
+
+  openDate  DateTime?
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  positions TradingPosition[]
+
+  @@index([userId])
+  @@index([userId, accountType])
+}
+
+/// Position à levier — CFD, future ou perpétuel, quel que soit le sous-jacent.
 ///
 /// Rattachée directement à l'utilisateur, pas à un `Asset` : contrairement à
 /// un solde ou une position DeFi, un contrat à terme n'est pas un actif
@@ -1312,23 +1348,60 @@ model DefiPositionDetail {
 /// latent, un calcul qui n'a pas de sens dans le modèle quantité × prix du
 /// journal. L'étendre en extension d'Asset comme RealEstateDetail aurait
 /// forcé cette sémantique où elle ne s'applique pas.
-model CryptoFuturesPosition {
+///
+/// ## Pourquoi ce modèle a été généralisé plutôt que dupliqué
+///
+/// Il ne portait à l'origine que des futures crypto. Créer un
+/// `TradingPosition` parallèle pour les CFD aurait produit deux tables de
+/// positions à levier, deux calculs de P&L, deux imports et deux jeux
+/// d'analytics — en laissant les futures crypto existants dans l'ancien.
+/// `underlyingType` suffit à couvrir les deux mondes, `fundingPaid` étant déjà
+/// l'exact équivalent crypto des frais de financement overnight d'un CFD.
+///
+/// La table conserve son nom d'origine (`@@map`) : le renommage ne concerne
+/// que le modèle Prisma, aucune donnée n'est déplacée.
+model TradingPosition {
   id     String @id @default(cuid())
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  /// BINANCE | BYBIT | OKX | HYPERLIQUID | DYDX | OTHER
+  /// Compte de rattachement. Nullable : les positions antérieures à
+  /// `TradingAccount` restent lisibles sans compte déclaré.
+  tradingAccountId String?
+  tradingAccount   TradingAccount? @relation(fields: [tradingAccountId], references: [id], onDelete: SetNull)
+
+  /// CRYPTO | INDEX | FOREX | COMMODITY | STOCK | BOND
+  ///
+  /// `CRYPTO` par défaut : c'est ce que contenait la table avant l'ouverture
+  /// aux CFD, et le défaut préserve donc le sens des lignes existantes.
+  underlyingType String @default("CRYPTO")
+
+  /// BINANCE | BYBIT | OKX | HYPERLIQUID | DYDX | IG | XTB | SAXO | OTHER
   exchange        String
   subAccountLabel String?
 
-  /// « BTC/USDT-PERP », « ETH/USD-0927 »…
+  /// Identifiant de l'instrument, quel que soit le sous-jacent :
+  /// « BTC/USDT-PERP », « ETH/USD-0927 », « CAC 40 », « EUR/USD »…
+  ///
+  /// Le nom reste `pair` — hérité des futures crypto — plutôt que renommé en
+  /// `instrument` : le renommer ne changerait rien au calcul et toucherait le
+  /// service, l'import CSV, l'écran et les tests.
   pair          String
-  /// PERPETUAL | QUARTERLY | MONTHLY
-  contractType  String @default("PERPETUAL")
-  /// USDT_M | COIN_M
-  marginType    String
+  /// PERPETUAL | QUARTERLY | MONTHLY | CFD
+  ///
+  /// `CFD` couvre les contrats sans échéance : c'est ce qui les distingue d'un
+  /// perpétuel crypto, dont le coût de portage passe par le funding.
+  contractType  String  @default("PERPETUAL")
+  /// USDT_M | COIN_M — propre aux futures crypto, donc absent sur un CFD.
+  marginType    String?
   baseCurrency  String
   quoteCurrency String
+
+  /// Échéance du contrat. Nulle sur un perpétuel et sur un CFD, qui n'en ont
+  /// pas — c'est justement ce qui les sépare d'un future daté.
+  expiryDate DateTime?
+  /// Valeur d'un point de cotation, pour le calcul du risque par tick.
+  tickValue  Decimal?  @db.Decimal(20, 8)
 
   /// LONG | SHORT
   direction        String
@@ -1366,6 +1439,12 @@ model CryptoFuturesPosition {
   @@index([userId, isOpen])
   @@index([userId, exchange])
   @@index([userId, closedAt])
+  @@index([userId, underlyingType])
+  @@index([tradingAccountId])
+  /// La table garde son nom d'origine : le modèle est renommé, pas les
+  /// données. Aucune migration de contenu, donc aucun risque pour les
+  /// positions futures déjà enregistrées.
+  @@map("CryptoFuturesPosition")
 }
 
 /// NFT — extension 1:1 d'un Asset, comme RealEstateDetail et DefiPositionDetail.

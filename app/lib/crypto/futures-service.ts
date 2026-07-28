@@ -91,7 +91,7 @@ export async function createFuturesPosition(
   const entry = d(input.entryPrice);
   const notional = size.times(entry);
 
-  return prisma.cryptoFuturesPosition.create({
+  return prisma.tradingPosition.create({
     data: {
       userId,
       exchange: input.exchange,
@@ -131,13 +131,13 @@ export async function updateFuturesPosition(
   id: string,
   input: UpdateFuturesInput
 ) {
-  const existing = await prisma.cryptoFuturesPosition.findFirst({
+  const existing = await prisma.tradingPosition.findFirst({
     where: { id, userId },
     select: { id: true },
   });
   if (!existing) throw new FuturesInputError("Position introuvable");
 
-  return prisma.cryptoFuturesPosition.update({
+  return prisma.tradingPosition.update({
     where: { id },
     data: {
       ...(input.markPrice !== undefined && { markPrice: dec(input.markPrice) }),
@@ -161,7 +161,7 @@ export async function closeFuturesPosition(
   id: string,
   exitPrice?: string | null
 ) {
-  const existing = await prisma.cryptoFuturesPosition.findFirst({
+  const existing = await prisma.tradingPosition.findFirst({
     where: { id, userId },
   });
   if (!existing) throw new FuturesInputError("Position introuvable");
@@ -175,7 +175,7 @@ export async function closeFuturesPosition(
       ? size.times(exit.minus(entry))
       : size.times(entry.minus(exit));
 
-  return prisma.cryptoFuturesPosition.update({
+  return prisma.tradingPosition.update({
     where: { id },
     data: {
       isOpen: false,
@@ -187,16 +187,16 @@ export async function closeFuturesPosition(
 }
 
 export async function deleteFuturesPosition(userId: string, id: string) {
-  const existing = await prisma.cryptoFuturesPosition.findFirst({
+  const existing = await prisma.tradingPosition.findFirst({
     where: { id, userId },
     select: { id: true },
   });
   if (!existing) throw new FuturesInputError("Position introuvable");
-  await prisma.cryptoFuturesPosition.delete({ where: { id } });
+  await prisma.tradingPosition.delete({ where: { id } });
 }
 
 export async function listFuturesPositions(userId: string, opts?: { isOpen?: boolean }) {
-  return prisma.cryptoFuturesPosition.findMany({
+  return prisma.tradingPosition.findMany({
     where: {
       userId,
       ...(opts?.isOpen !== undefined ? { isOpen: opts.isOpen } : {}),
