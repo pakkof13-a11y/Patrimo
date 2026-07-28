@@ -1381,6 +1381,8 @@ export async function seedUserPortfolio(
   await prisma.tangibleAsset.createMany({
     data: [
       {
+        // Au-dessus du seuil de 5 000 €, daté et certifié : l'option pour le
+        // régime réel lui est ouverte.
         userId,
         category: "WATCHES",
         brandOrArtist: "Rolex",
@@ -1390,9 +1392,21 @@ export async function seedUserPortfolio(
         estimatedValue: D("12800"),
         currency: "EUR",
         hasCertificate: true,
+        certificateRef: "126610LN-2019",
+        certificateIssuer: "Rolex",
+        purchaseDate: new Date("2019-06-14"),
+        purchaseSource: "Concessionnaire agréé",
+        watchMovement: "AUTOMATIC",
+        watchDiameterMm: D("41"),
+        watchReference: "126610LN",
+        watchBoxPapers: true,
+        storageLocation: "Coffre domicile",
+        insuranceValue: D("14000"),
         notes: note("Montre"),
       },
       {
+        // Sous le seuil de 5 000 € : aucune imposition à la revente, quel que
+        // soit le gain — le cas le plus fréquent d'une collection.
         userId,
         category: "WINE",
         brandOrArtist: "Château Margaux",
@@ -1402,6 +1416,11 @@ export async function seedUserPortfolio(
         estimatedValue: D("3100"),
         currency: "EUR",
         hasCertificate: false,
+        purchaseDate: new Date("2018-11-02"),
+        wineAppellation: "Margaux",
+        wineBottleCount: 6,
+        wineBottleFormat: "BOTTLE_75",
+        wineStorageType: "CAVE_PERSO",
         notes: note("Cave 6 bouteilles"),
       },
       {
@@ -1414,9 +1433,44 @@ export async function seedUserPortfolio(
         estimatedValue: D("2200"),
         currency: "EUR",
         hasCertificate: true,
+        certificateIssuer: "Galerie",
+        purchaseDate: new Date("2021-03-18"),
+        appraisalValue: D("2500"),
+        appraisalDate: new Date("2025-09-10"),
         notes: note("Toile"),
       },
       {
+        // Bijou serti : deux jeux de champs cohabitent, ceux du bijou et ceux
+        // de la pierre principale.
+        userId,
+        category: "JEWELRY",
+        brandOrArtist: "Cartier",
+        modelName: "Solitaire 1895",
+        yearOrVintage: "2012",
+        purchasePrice: D("7800"),
+        estimatedValue: D("9200"),
+        currency: "EUR",
+        hasCertificate: true,
+        certificateRef: "GIA-2185463201",
+        certificateIssuer: "GIA",
+        purchaseDate: new Date("2012-12-20"),
+        jewelryType: "RING",
+        metalBase: "PLATINUM_950",
+        metalWeightG: D("4.2"),
+        hasPunchmarks: true,
+        gemType: "DIAMOND",
+        caratWeight: D("1.05"),
+        gemClarity: "VS1",
+        gemColor: "F",
+        gemCut: "ROUND",
+        gemTreatment: "NONE",
+        insuranceValue: D("11000"),
+        storageLocation: "Coffre banque",
+        notes: note("Bijou"),
+      },
+      {
+        // Véhicule de collection : l'exonération par nature de l'article
+        // 150 UA II 1° tombe, la cession redevient imposable.
         userId,
         category: "AUTO",
         brandOrArtist: "Porsche",
@@ -1426,7 +1480,31 @@ export async function seedUserPortfolio(
         estimatedValue: D("55000"),
         currency: "EUR",
         hasCertificate: false,
+        purchaseDate: new Date("2015-05-30"),
+        isCollectible: true,
+        autoMileageKm: 96000,
+        autoInspectionOk: true,
+        autoPreviousOwners: 3,
         notes: note("Véhicule de collection"),
+      },
+      {
+        // Le témoin : même catégorie, sans qualification de collection. Aucun
+        // impôt n'est dû malgré une plus-value de 3 000 €.
+        userId,
+        category: "AUTO",
+        brandOrArtist: "Volkswagen",
+        modelName: "Golf GTI",
+        yearOrVintage: "2020",
+        purchasePrice: D("28000"),
+        estimatedValue: D("31000"),
+        currency: "EUR",
+        hasCertificate: false,
+        purchaseDate: new Date("2020-09-01"),
+        isCollectible: false,
+        autoMileageKm: 42000,
+        autoInspectionOk: true,
+        autoPreviousOwners: 1,
+        notes: note("Véhicule d'usage"),
       },
     ],
   });

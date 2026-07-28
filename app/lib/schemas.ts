@@ -479,8 +479,36 @@ export const crowdlendingSchema = z.object({
 
 export type CrowdlendingForm = z.infer<typeof crowdlendingSchema>;
 
+/** Decimal optionnel : une chaîne vide vaut « non renseigné », pas zéro. */
+const optionalDecimalString = z
+  .union([decimalString, z.literal("")])
+  .optional()
+  .nullable()
+  .transform((v) => (v === "" ? null : v));
+
+const optionalInt = z
+  .union([z.coerce.number().int().min(0), z.literal("")])
+  .optional()
+  .nullable()
+  .transform((v) => (v === "" ? null : v));
+
 export const tangibleAssetSchema = z.object({
-  category: z.enum(["WATCHES", "WINE", "ART", "AUTO", "OTHER"]).default("OTHER"),
+  category: z
+    .enum([
+      "WATCHES",
+      "JEWELRY",
+      "GEMSTONE",
+      "ART",
+      "WINE",
+      "HANDBAG",
+      "INSTRUMENT",
+      "NUMISMATICS",
+      "PHILATELY",
+      "FURNITURE",
+      "AUTO",
+      "OTHER",
+    ])
+    .default("OTHER"),
   brandOrArtist: z.string().min(1, "Marque / artiste requis"),
   modelName: z.string().min(1, "Modèle / nom requis"),
   yearOrVintage: z.string().optional().nullable(),
@@ -489,6 +517,88 @@ export const tangibleAssetSchema = z.object({
   currency: z.string().min(3).max(3).default("EUR"),
   hasCertificate: z.boolean().default(false),
   notes: z.string().optional().nullable(),
+
+  // Acquisition
+  purchaseDate: z.string().optional().nullable(),
+  purchaseSource: z.string().max(200).optional().nullable(),
+  certificateRef: z.string().max(120).optional().nullable(),
+  certificateIssuer: z.string().max(120).optional().nullable(),
+
+  // Valorisation & conservation
+  appraisalValue: optionalDecimalString,
+  appraisalDate: z.string().optional().nullable(),
+  insuranceValue: optionalDecimalString,
+  storageLocation: z.string().max(200).optional().nullable(),
+  /** Qualification d'objet de collection — décisive pour AUTO et FURNITURE. */
+  isCollectible: z.boolean().default(false),
+
+  // Pierres
+  gemType: z
+    .enum(["DIAMOND", "RUBY", "EMERALD", "SAPPHIRE", "PEARL", "OTHER"])
+    .optional()
+    .nullable(),
+  caratWeight: optionalDecimalString,
+  gemClarity: z
+    .enum(["FL", "IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2"])
+    .optional()
+    .nullable(),
+  gemColor: z.string().max(60).optional().nullable(),
+  gemCut: z
+    .enum([
+      "ROUND",
+      "PRINCESS",
+      "OVAL",
+      "PEAR",
+      "CUSHION",
+      "EMERALD_CUT",
+      "OTHER",
+    ])
+    .optional()
+    .nullable(),
+  gemTreatment: z
+    .enum(["NONE", "HEATED", "FRACTURE_FILLED", "SYNTHETIC"])
+    .optional()
+    .nullable(),
+  gemOrigin: z.string().max(120).optional().nullable(),
+
+  // Bijoux
+  jewelryType: z
+    .enum(["RING", "NECKLACE", "BRACELET", "EARRINGS", "BROOCH", "OTHER"])
+    .optional()
+    .nullable(),
+  metalBase: z
+    .enum(["GOLD_750", "GOLD_585", "SILVER_925", "PLATINUM_950"])
+    .optional()
+    .nullable(),
+  metalWeightG: optionalDecimalString,
+  hasPunchmarks: z.boolean().optional().nullable(),
+
+  // Horlogerie
+  watchMovement: z
+    .enum(["AUTOMATIC", "MANUAL", "QUARTZ", "SOLAR"])
+    .optional()
+    .nullable(),
+  watchDiameterMm: optionalDecimalString,
+  watchReference: z.string().max(120).optional().nullable(),
+  watchBoxPapers: z.boolean().optional().nullable(),
+
+  // Vins
+  wineAppellation: z.string().max(160).optional().nullable(),
+  wineBottleCount: optionalInt,
+  wineBottleFormat: z
+    .enum(["BOTTLE_75", "MAGNUM", "JEROBOAM", "OTHER"])
+    .optional()
+    .nullable(),
+  wineStorageType: z
+    .enum(["CAVE_PERSO", "CAVE_LOUEE", "COURTIER"])
+    .optional()
+    .nullable(),
+
+  // Automobiles
+  autoMileageKm: optionalInt,
+  autoRegistration: z.string().max(32).optional().nullable(),
+  autoInspectionOk: z.boolean().optional().nullable(),
+  autoPreviousOwners: optionalInt,
 });
 
 export type TangibleAssetForm = z.infer<typeof tangibleAssetSchema>;

@@ -92,22 +92,20 @@ export type AlternativesSubTab =
 
 // ─── Actifs tangibles / collection ────────────────────────────────────────────
 
-export const TANGIBLE_CATEGORIES = [
-  "WATCHES",
-  "WINE",
-  "ART",
-  "AUTO",
-  "OTHER",
-] as const;
-export type TangibleCategory = (typeof TANGIBLE_CATEGORIES)[number];
+/**
+ * Le vocabulaire des tangibles vit dans `tangibles/constants.ts` — fichier
+ * sans dépendance à Prisma, donc importable par les formulaires.
+ */
+export {
+  TANGIBLE_CATEGORIES,
+  TANGIBLE_CATEGORY_ICONS,
+  TANGIBLE_CATEGORY_LABELS,
+  fiscalNature,
+  type TangibleCategory,
+} from "@/app/lib/tangibles/constants";
 
-export const TANGIBLE_CATEGORY_LABELS: Record<TangibleCategory, string> = {
-  WATCHES: "Montres",
-  WINE: "Vins",
-  ART: "Art",
-  AUTO: "Auto",
-  OTHER: "Autre",
-};
+import type { TangibleCategory } from "@/app/lib/tangibles/constants";
+import type { MovableTaxRegime } from "@/app/lib/tax/movable-assets";
 
 export type TangibleAssetDto = {
   id: string;
@@ -122,6 +120,73 @@ export type TangibleAssetDto = {
   notes: string | null;
   unrealizedPnl: string;
   unrealizedPnlPct: string;
+
+  // Acquisition
+  purchaseDate: string | null;
+  purchaseSource: string | null;
+  certificateRef: string | null;
+  certificateIssuer: string | null;
+
+  // Valorisation & conservation
+  appraisalValue: string | null;
+  appraisalDate: string | null;
+  insuranceValue: string | null;
+  storageLocation: string | null;
+  isCollectible: boolean;
+
+  // Détails par catégorie — tous nullables, seuls les pertinents sont saisis
+  gemType: string | null;
+  caratWeight: string | null;
+  gemClarity: string | null;
+  gemColor: string | null;
+  gemCut: string | null;
+  gemTreatment: string | null;
+  gemOrigin: string | null;
+  jewelryType: string | null;
+  metalBase: string | null;
+  metalWeightG: string | null;
+  hasPunchmarks: boolean | null;
+  watchMovement: string | null;
+  watchDiameterMm: string | null;
+  watchReference: string | null;
+  watchBoxPapers: boolean | null;
+  wineAppellation: string | null;
+  wineBottleCount: number | null;
+  wineBottleFormat: string | null;
+  wineStorageType: string | null;
+  autoMileageKm: number | null;
+  autoRegistration: string | null;
+  autoInspectionOk: boolean | null;
+  autoPreviousOwners: number | null;
+
+  /** Fiscalité simulée sur une cession à la valeur estimée. */
+  tax: TangibleTaxPreview;
+};
+
+/**
+ * Aperçu fiscal d'une ligne, calculé sur une revente **à la valeur estimée**.
+ *
+ * C'est une projection, pas une dette : rien n'est dû tant que le bien n'est
+ * pas vendu. Elle répond à la seule question utile avant de vendre — combien
+ * il resterait, et sous quel régime.
+ */
+export type TangibleTaxPreview = {
+  /** Années révolues depuis l'achat, `null` sans date d'acquisition. */
+  holdingYears: number | null;
+  /** Aucun impôt dû sur cette cession simulée. */
+  exempt: boolean;
+  /** NATURE | SMALL_SALE | HOLDING_PERIOD, ou `null` si un impôt reste dû. */
+  exemptionReason: string | null;
+  flatTaxEur: string;
+  capitalGainTaxEur: string;
+  /** Régime le moins coûteux parmi ceux ouverts. */
+  recommendedRegime: MovableTaxRegime;
+  /** Impôt effectivement retenu — celui du régime recommandé. */
+  taxDueEur: string;
+  /** Produit net de la cession simulée. */
+  netProceedsEur: string;
+  optionAvailable: boolean;
+  rationale: string;
 };
 
 export type TangibleAssetsSummary = {
@@ -131,6 +196,16 @@ export type TangibleAssetsSummary = {
   totalPnlPct: number;
   lineCount: number;
   byCategory: { name: string; value: number }[];
+  /** Valeur assurée déclarée, à comparer à l'estimation de marché. */
+  totalInsuredValue: string;
+  /** Somme des impôts simulés — projection, jamais une dette exigible. */
+  estimatedTaxBurden: string;
+  /** Lignes exonérées : sous le seuil de 5 000 €, ou exonérées par nature. */
+  exemptCount: number;
+  withCertificateCount: number;
+  withAppraisalCount: number;
+  /** Lignes sans date d'achat : option fiscale fermée à la revente. */
+  undatedCount: number;
 };
 
 /** Agrégat des 4 poches alternatives (valeurs en EUR) */
