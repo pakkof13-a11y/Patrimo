@@ -402,13 +402,23 @@ export const employeeSavingsLineSchema = z.object({
 export type EmployeeSavingsLineForm = z.infer<typeof employeeSavingsLineSchema>;
 
 export const preciousMetalSchema = z.object({
-  assetKind: z.enum(["METAL", "OTHER"]).default("METAL"),
+  metal: z
+    .enum(["GOLD", "SILVER", "PLATINUM", "PALLADIUM", "OTHER"])
+    .default("GOLD"),
   format: z.enum(["PHYSICAL", "PAPER"]).default("PHYSICAL"),
+  productType: z
+    .enum(["COIN", "BAR", "JEWELRY", "ETC", "MINING", "OTHER"])
+    .default("COIN"),
   denomination: z.string().min(1, "Dénomination requise"),
+  /** Millièmes : 900 pour un Napoléon, 999,9 pour un lingot. */
+  fineness: decimalString.default("999"),
   quantity: decimalString.default("0"),
   unitWeight: decimalString.default("0"),
   weightUnit: z.enum(["GRAM", "OZ"]).default("GRAM"),
   purchasePriceUnit: decimalString.default("0"),
+  acquisitionFees: decimalString.default("0"),
+  acquiredAt: z.string().optional().nullable(),
+  hasInvoice: z.boolean().default(false),
   currentValue: decimalString.default("0"),
   currency: z.string().min(3).max(3).default("EUR"),
   storageLocation: z.string().optional().nullable(),
@@ -416,6 +426,25 @@ export const preciousMetalSchema = z.object({
 });
 
 export type PreciousMetalForm = z.infer<typeof preciousMetalSchema>;
+
+/**
+ * Cession d'un lot.
+ *
+ * Ni le prix de revient ni la date d'acquisition ne sont acceptés en entrée :
+ * ils viennent du lot cédé, faute de quoi la plus-value serait déclarative.
+ */
+export const preciousMetalSaleSchema = z.object({
+  positionId: z.string().min(1).optional().nullable(),
+  denomination: z.string().optional().nullable(),
+  quantity: decimalString,
+  salePriceEur: decimalString,
+  saleFeesEur: decimalString.default("0"),
+  soldAt: z.string().min(1, "Date de cession requise"),
+  regime: z.enum(["FORFAIT", "PLUS_VALUE"]).default("FORFAIT"),
+  notes: z.string().optional().nullable(),
+});
+
+export type PreciousMetalSaleForm = z.infer<typeof preciousMetalSaleSchema>;
 
 export const privateEquitySchema = z.object({
   companyName: z.string().min(1, "Nom de la société requis"),

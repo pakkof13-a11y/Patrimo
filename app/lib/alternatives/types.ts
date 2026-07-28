@@ -1,53 +1,65 @@
-export const PRECIOUS_ASSET_KINDS = ["METAL", "OTHER"] as const;
-export type PreciousAssetKind = (typeof PRECIOUS_ASSET_KINDS)[number];
+/**
+ * Le vocabulaire des métaux précieux vit dans `precious-metals/constants.ts` —
+ * fichier sans dépendance à Prisma, donc importable par les formulaires. On le
+ * réexporte ici pour ne pas casser les imports existants.
+ */
+export {
+  FORMAT_LABELS,
+  GRAMS_PER_TROY_OZ,
+  METAL_LABELS,
+  PRECIOUS_FORMATS,
+  PRECIOUS_METALS,
+  PRODUCT_TYPES,
+  PRODUCT_TYPE_LABELS,
+  WEIGHT_UNITS,
+  WEIGHT_UNIT_LABELS,
+  type PreciousFormat,
+  type PreciousMetal,
+  type PreciousProductType,
+  type WeightUnit,
+} from "@/app/lib/precious-metals/constants";
 
-export const PRECIOUS_FORMATS = ["PHYSICAL", "PAPER"] as const;
-export type PreciousFormat = (typeof PRECIOUS_FORMATS)[number];
-
-export const WEIGHT_UNITS = ["GRAM", "OZ"] as const;
-export type WeightUnit = (typeof WEIGHT_UNITS)[number];
-
-export const ASSET_KIND_LABELS: Record<PreciousAssetKind, string> = {
-  METAL: "Métal précieux",
-  OTHER: "Autre",
-};
-
-export const FORMAT_LABELS: Record<PreciousFormat, string> = {
-  PHYSICAL: "Physique",
-  PAPER: "Papier",
-};
-
-export const WEIGHT_UNIT_LABELS: Record<WeightUnit, string> = {
-  GRAM: "Grammes (g)",
-  OZ: "Onces troy (oz)",
-};
-
-/** 1 troy ounce = 31.1034768 g */
-export const GRAMS_PER_TROY_OZ = 31.1034768;
+import type {
+  PreciousFormat,
+  PreciousMetal,
+  PreciousProductType,
+  WeightUnit,
+} from "@/app/lib/precious-metals/constants";
 
 export type PreciousMetalDto = {
   id: string;
-  assetKind: PreciousAssetKind;
+  metal: PreciousMetal;
   format: PreciousFormat;
+  productType: PreciousProductType;
   denomination: string;
+  /** Titre en millièmes — 900 pour un Napoléon, 999,9 pour un lingot. */
+  fineness: string;
   quantity: string;
   unitWeightG: string;
   weightUnit: WeightUnit;
   /** Poids unitaire affiché dans l’unité saisie */
   unitWeightDisplay: string;
   purchasePriceUnit: string;
+  acquisitionFees: string;
+  /** ISO — sans elle, pas d'abattement pour durée de détention. */
+  acquiredAt: string | null;
+  /** Facture nominative datée : condition de l'option 2092-SD. */
+  hasInvoice: boolean;
   currentValue: string;
   currency: string;
   storageLocation: string | null;
   notes: string | null;
-  /** quantity × PRU */
+  /** quantity × PRU + frais d'acquisition */
   costBasis: string;
   /** currentValue − costBasis */
   unrealizedPnl: string;
   /** % vs cost basis */
   unrealizedPnlPct: string;
-  /** quantity × unitWeightG */
+  /** quantity × unitWeightG — poids brut */
   totalWeightG: string;
+  /** Poids brut × titre : le seul comparable d'un métal à l'autre. */
+  fineWeightG: string;
+  unitValueEur: string;
 };
 
 export type PreciousMetalsSummary = {
@@ -56,9 +68,19 @@ export type PreciousMetalsSummary = {
   totalPnl: string;
   totalPnlPct: number;
   totalWeightG: string;
+  totalFineWeightG: string;
   lineCount: number;
+  /** Lots sans date d'acquisition — option fiscale fermée. */
+  undatedCount: number;
+  /** Lots physiques sans justificatif — option fiscale fermée. */
+  noInvoiceCount: number;
   byFormat: { name: string; value: number }[];
-  byKind: { name: string; value: number }[];
+  byMetal: {
+    metal: string;
+    name: string;
+    value: number;
+    fineWeightG: string;
+  }[];
 };
 
 export type AlternativesSubTab =
