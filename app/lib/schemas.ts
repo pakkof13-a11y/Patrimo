@@ -278,19 +278,39 @@ export const liabilitySchema = z.object({
 
 export type LiabilityForm = z.infer<typeof liabilitySchema>;
 
+/** Part détenue sur un compte joint, 0–100. Vide/null = compte individuel. */
+const ownershipPctField = z.preprocess(
+  (v) => (v === "" || v == null ? null : Number(v)),
+  z.number().min(0).max(100).nullable().optional()
+);
+
 export const bankAccountSchema = z.object({
   bankName: z.string().min(1, "Banque requise"),
   balance: decimalString.default("0"),
   currency: z.string().min(3).max(3).default("EUR"),
+  isPro: z.boolean().default(false),
+  ownershipPct: ownershipPctField,
   notes: z.string().optional().nullable(),
 });
 
 export type BankAccountForm = z.infer<typeof bankAccountSchema>;
 
+export const regulatedProductTypes = [
+  "LIVRET_A",
+  "LDDS",
+  "LEP",
+  "PEL",
+  "CEL",
+  "AUTRE",
+] as const;
+
 export const savingsAccountSchema = z.object({
   name: z.string().min(1, "Nom du livret requis"),
   /** Banque de détention (optionnel mais recommandé) */
   bankName: z.string().min(1).optional().nullable(),
+  productType: z.enum(regulatedProductTypes).default("AUTRE"),
+  /** Plafond de versement — pré-rempli côté UI depuis `productType`, jamais imposé serveur. */
+  ceilingAmount: decimalString.optional().nullable(),
   balance: decimalString.default("0"),
   /** Taux annuel en % (APR ou APY selon rateType) */
   apyPercent: decimalString.default("0"),
@@ -310,10 +330,31 @@ export const savingsAccountSchema = z.object({
     z.number().int().min(1).max(12).nullable().optional()
   ),
   currency: z.string().min(3).max(3).default("EUR"),
+  isPro: z.boolean().default(false),
+  ownershipPct: ownershipPctField,
   notes: z.string().optional().nullable(),
 });
 
 export type SavingsAccountForm = z.infer<typeof savingsAccountSchema>;
+
+export const termDepositSchema = z.object({
+  bankName: z.string().optional().nullable(),
+  principal: decimalString,
+  ratePercent: decimalString,
+  currency: z.string().min(3).max(3).default("EUR"),
+  openedAt: z.string().min(1, "Date d'ouverture requise"),
+  maturityDate: z.string().min(1, "Date d'échéance requise"),
+  earlyWithdrawalPenaltyPct: decimalString.optional().nullable(),
+  isPro: z.boolean().default(false),
+  ownershipPct: ownershipPctField,
+  notes: z.string().optional().nullable(),
+});
+
+export type TermDepositForm = z.infer<typeof termDepositSchema>;
+
+export const termDepositUpdateSchema = termDepositSchema.partial();
+
+export type TermDepositUpdateForm = z.infer<typeof termDepositUpdateSchema>;
 
 export const taxHouseholds = ["SINGLE", "COUPLE"] as const;
 
@@ -540,6 +581,8 @@ export const bankAccountUpdateSchema = z.object({
   bankName: z.string().min(1, "Banque requise").optional(),
   balance: decimalString.optional(),
   currency: currencyCode.optional(),
+  isPro: z.boolean().optional(),
+  ownershipPct: ownershipPctField,
   notes: z.string().optional().nullable(),
 });
 
@@ -549,6 +592,8 @@ export type BankAccountUpdateForm = z.infer<typeof bankAccountUpdateSchema>;
 export const savingsAccountUpdateSchema = z.object({
   name: z.string().min(1, "Nom du livret requis").optional(),
   bankName: z.string().min(1).optional().nullable(),
+  productType: z.enum(regulatedProductTypes).optional(),
+  ceilingAmount: decimalString.optional().nullable(),
   balance: decimalString.optional(),
   apyPercent: decimalString.optional(),
   rateType: z.enum(["APR", "APY"]).optional(),
@@ -557,6 +602,8 @@ export const savingsAccountUpdateSchema = z.object({
   payoutDayOfMonth: optionalClearableInt(1, 31).optional(),
   payoutMonth: optionalClearableInt(1, 12).optional(),
   currency: currencyCode.optional(),
+  isPro: z.boolean().optional(),
+  ownershipPct: ownershipPctField,
   notes: z.string().optional().nullable(),
 });
 

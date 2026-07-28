@@ -8,6 +8,7 @@ import { owned } from "@/app/lib/db/tenant-scope";
 const savingsFindFirst = vi.fn();
 const savingsUpdateMany = vi.fn();
 const savingsFindMany = vi.fn();
+const savingsAccountEventCreate = vi.fn();
 
 const liabilityFindFirst = vi.fn();
 const liabilityUpdateMany = vi.fn();
@@ -40,6 +41,16 @@ vi.mock("@/app/lib/prisma", () => ({
         liability: {
           updateMany: (...a: unknown[]) => txLiabilityUpdateMany(...a),
           findFirst: (...a: unknown[]) => txLiabilityFindFirst(...a),
+        },
+        // applyDueInterestForSavings ouvre désormais sa propre transaction
+        // (write + événement INTEREST atomiques) — mêmes doubles ici que
+        // hors transaction, les tests n'observent que `savingsUpdateMany`.
+        savingsAccount: {
+          updateMany: (...a: unknown[]) => savingsUpdateMany(...a),
+          findFirst: (...a: unknown[]) => savingsFindFirst(...a),
+        },
+        savingsAccountEvent: {
+          create: (...a: unknown[]) => savingsAccountEventCreate(...a),
         },
       };
       return fn(tx);

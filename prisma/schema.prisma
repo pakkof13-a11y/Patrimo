@@ -29,22 +29,23 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts           Account[]
-  sessions           Session[]
-  platforms          Platform[]
-  assets             Asset[]
-  snapshots          PortfolioSnapshot[]
-  liabilities        Liability[]
-  bankAccounts            BankAccount[]
-  savingsAccounts         SavingsAccount[]
-  lifeInsurances          LifeInsurance[]
-  envelopeCash            EnvelopeCash[]
-  employeeSavingsLines    EmployeeSavingsLine[]
-  preciousMetalPositions  PreciousMetalPosition[]
-  privateEquityPositions  PrivateEquityPosition[]
-  crowdlendingPositions   CrowdlendingPosition[]
-  tangibleAssets          TangibleAsset[]
-  cryptoFuturesPositions  CryptoFuturesPosition[]
+  accounts               Account[]
+  sessions               Session[]
+  platforms              Platform[]
+  assets                 Asset[]
+  snapshots              PortfolioSnapshot[]
+  liabilities            Liability[]
+  bankAccounts           BankAccount[]
+  savingsAccounts        SavingsAccount[]
+  termDeposits           TermDeposit[]
+  lifeInsurances         LifeInsurance[]
+  envelopeCash           EnvelopeCash[]
+  employeeSavingsLines   EmployeeSavingsLine[]
+  preciousMetalPositions PreciousMetalPosition[]
+  privateEquityPositions PrivateEquityPosition[]
+  crowdlendingPositions  CrowdlendingPosition[]
+  tangibleAssets         TangibleAsset[]
+  cryptoFuturesPositions CryptoFuturesPosition[]
 
   @@index([role])
 }
@@ -87,35 +88,35 @@ model VerificationToken {
 // ─── Domain ───────────────────────────────────────────────────────────────────
 
 model Platform {
-  id            String   @id @default(cuid())
-  userId        String
-  name          String
+  id                 String    @id @default(cuid())
+  userId             String
+  name               String
   /// COURTIER | EXCHANGE_CRYPTO | BANQUE | BLOCKCHAIN | …
-  type          String   @default("COURTIER")
+  type               String    @default("COURTIER")
   /// Optional nuance, e.g. "Layer 1" | "Layer 2 / EVM" for blockchains
-  subtype       String?
-  logoKey       String?
-  logoUrl       String?
-  walletAddress String?
+  subtype            String?
+  logoKey            String?
+  logoUrl            String?
+  walletAddress      String?
   /// Clé API GoldRush (Covalent) optionnelle par plateforme — défaut serveur sinon
-  walletApiKey  String?
-  notes         String?
+  walletApiKey       String?
+  notes              String?
   /// Curseur sync Solana RPC : dernière signature connue (plus récente)
   lastKnownSignature String?
   /// Dernière synchro on-chain réussie (soldes et/ou txs)
   lastSyncedAt       DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   assets           Asset[]
-  transactionsFrom Transaction[] @relation("TxPlatform")
-  transactionsTo   Transaction[] @relation("TxToPlatform")
+  transactionsFrom Transaction[]         @relation("TxPlatform")
+  transactionsTo   Transaction[]         @relation("TxToPlatform")
   onchainTxs       BlockchainOnchainTx[]
 
+  @@unique([userId, name])
   @@index([userId])
   @@index([userId, type])
-  @@unique([userId, name])
 }
 
 /// Transactions on-chain Solana (RPC natif) — distinctes du journal ledger Aurea.
@@ -165,50 +166,50 @@ enum AssetCategory {
 }
 
 model Asset {
-  id              String    @id @default(cuid())
-  userId          String
-  platformId      String
-  name            String
-  ticker          String?
+  id                 String        @id @default(cuid())
+  userId             String
+  platformId         String
+  name               String
+  ticker             String?
   /// Code ISIN (actions / ETF) — recherche & affichage
-  isin            String?
-  assetClass      String
+  isin               String?
+  assetClass         String
   /// Sous-catégorie UI (regroupement Positions) — n’affecte pas les calculs
-  category        AssetCategory @default(UNCLASSIFIED)
-  currency        String    @default("EUR")
+  category           AssetCategory @default(UNCLASSIFIED)
+  currency           String        @default("EUR")
   /// ISO 3166-1 alpha-2 (US, DE, FR…) — WHT dividendes
-  countryCode     String?
+  countryCode        String?
   /// Override taux prélèvement à la source 0–1 (null = table pays)
-  withholdingTaxRate Decimal? @db.Decimal(8, 6)
+  withholdingTaxRate Decimal?      @db.Decimal(8, 6)
   /// Fiscal / storage envelope: CTO | PEA | AV | CRYPTO | IMMOBILIER
-  accountType     String    @default("CTO")
-  priceProvider   String    @default("FINNHUB")
-  providerSymbol  String?
-  logoUrl         String?
-  notes           String?
-  manualPrice     Decimal?  @db.Decimal(28, 12)
+  accountType        String        @default("CTO")
+  priceProvider      String        @default("FINNHUB")
+  providerSymbol     String?
+  logoUrl            String?
+  notes              String?
+  manualPrice        Decimal?      @db.Decimal(28, 12)
   /// Exit levels in asset native currency (long): auto-sell on price refresh
-  stopLoss        Decimal?  @db.Decimal(28, 12)
-  tp1             Decimal?  @db.Decimal(28, 12)
-  tp2             Decimal?  @db.Decimal(28, 12)
-  tp3             Decimal?  @db.Decimal(28, 12)
-  tp4             Decimal?  @db.Decimal(28, 12)
-  acquisitionDate DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  stopLoss           Decimal?      @db.Decimal(28, 12)
+  tp1                Decimal?      @db.Decimal(28, 12)
+  tp2                Decimal?      @db.Decimal(28, 12)
+  tp3                Decimal?      @db.Decimal(28, 12)
+  tp4                Decimal?      @db.Decimal(28, 12)
+  acquisitionDate    DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
-  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  platform     Platform       @relation(fields: [platformId], references: [id], onDelete: Restrict)
-  transactions Transaction[]
-  priceQuote   PriceQuote?
-  priceHistory PriceHistory[]
-  dailyCloses  AssetDailyClose[]
-  realEstate   RealEstateDetail?
+  user               User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform           Platform                  @relation(fields: [platformId], references: [id], onDelete: Restrict)
+  transactions       Transaction[]
+  priceQuote         PriceQuote?
+  priceHistory       PriceHistory[]
+  dailyCloses        AssetDailyClose[]
+  realEstate         RealEstateDetail?
   indirectRealEstate IndirectRealEstateDetail?
-  defiPosition DefiPositionDetail?
-  nftItem NftItemDetail?
-  lifeSupport  LifeInsuranceSupport?
-  liabilities  Liability[]
+  defiPosition       DefiPositionDetail?
+  nftItem            NftItemDetail?
+  lifeSupport        LifeInsuranceSupport?
+  liabilities        Liability[]
 
   @@index([userId])
   @@index([platformId])
@@ -235,17 +236,17 @@ model Transaction {
   currency    String  @default("EUR")
   fxRateToEur Decimal @default(1) @db.Decimal(20, 10)
 
-  grossAmountEur   Decimal @db.Decimal(28, 12)
-  feesEur          Decimal @default(0) @db.Decimal(28, 12)
-  netCashImpactEur Decimal @db.Decimal(28, 12)
+  grossAmountEur     Decimal   @db.Decimal(28, 12)
+  feesEur            Decimal   @default(0) @db.Decimal(28, 12)
+  netCashImpactEur   Decimal   @db.Decimal(28, 12)
   /// Prélèvement à la source (WHT) en EUR — snapshot à la création
-  withholdingTaxEur  Decimal @default(0) @db.Decimal(28, 12)
+  withholdingTaxEur  Decimal   @default(0) @db.Decimal(28, 12)
   /// Taux WHT appliqué (0–1), snapshot
-  withholdingTaxRate Decimal? @db.Decimal(8, 6)
+  withholdingTaxRate Decimal?  @db.Decimal(8, 6)
   /// Date de détachement (cours) — optionnel
-  exDate       DateTime?
+  exDate             DateTime?
   /// Date de paiement cash (défaut = occurredAt)
-  paymentDate  DateTime?
+  paymentDate        DateTime?
 
   occurredAt DateTime
   notes      String?
@@ -298,12 +299,12 @@ model PriceHistory {
 /// Ce n'est qu'un cache : il peut être vidé et reconstruit sans perte, la
 /// source de vérité restant les transactions.
 model AssetDailyClose {
-  id       String   @id @default(cuid())
-  assetId  String
+  id        String   @id @default(cuid())
+  assetId   String
   /// Jour civil Europe/Paris, format YYYY-MM-DD (tri lexicographique = chronologique)
-  day      String
-  closeEur Decimal  @db.Decimal(28, 12)
-  source   String
+  day       String
+  closeEur  Decimal  @db.Decimal(28, 12)
+  source    String
   fetchedAt DateTime @default(now())
 
   asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
@@ -364,26 +365,26 @@ model RealEstateDetail {
   /// MICRO_FONCIER | REEL_FONCIER | MICRO_BIC | REEL_BIC | LMP
   /// Null tant que le bien n'est pas loué. Le mode de location (nu / meublé)
   /// découle de `usage` et n'est pas dupliqué ici.
-  rentalRegime String?
+  rentalRegime          String?
   /// PINEL | DENORMANDIE | MALRAUX | … — orthogonal au régime : un Pinel reste
   /// un locatif nu déclaré au foncier, assorti d'une réduction d'impôt.
-  taxScheme    String?
+  taxScheme             String?
   /// Fin de l'engagement de location (Pinel 6/9/12 ans, Denormandie…).
   /// Conservée parce qu'une sortie anticipée fait reprendre la réduction.
-  commitmentEndDate DateTime?
+  commitmentEndDate     DateTime?
   /// Meublé de tourisme classé — ouvre l'abattement micro-BIC majoré (71 %).
-  isClassifiedTourism Boolean @default(false)
+  isClassifiedTourism   Boolean   @default(false)
   /// Année de l'investissement — détermine le barème du dispositif, qui a été
   /// raboté en 2023 puis en 2024 pour le Pinel.
-  schemeStartYear     Int?
+  schemeStartYear       Int?
   /// Durée d'engagement en années (6, 9 ou 12 en Pinel).
   schemeCommitmentYears Int?
   /// Base du dispositif : prix de revient du logement, ou montant des travaux
   /// pour Malraux. Distincte du prix d'acquisition au journal, qui inclut les
   /// frais et ne correspond pas à l'assiette légale.
-  schemeBaseEur       Decimal? @db.Decimal(14, 2)
+  schemeBaseEur         Decimal?  @db.Decimal(14, 2)
   /// Taux Malraux retenu : 30 % (PSMV) ou 22 % (PVAP).
-  schemeRatePct       Decimal? @db.Decimal(6, 3)
+  schemeRatePct         Decimal?  @db.Decimal(6, 3)
 
   // ── Exploitation ──
   monthlyRentEur       Decimal? @db.Decimal(12, 2)
@@ -396,15 +397,15 @@ model RealEstateDetail {
   /// Jour du mois d'encaissement du loyer (1–31), null = pas d'automatisation.
   /// Le mécanisme reprend celui de `Liability.paymentDay` : même calcul
   /// d'échéances, même curseur, plutôt qu'un second planificateur.
-  rentDay             Int?
+  rentDay              Int?
   /// Dernière échéance de loyer déjà générée — curseur de reprise.
-  lastRentAppliedAt   DateTime?
+  lastRentAppliedAt    DateTime?
   /// Dernière échéance de charges déjà générée.
   lastChargesAppliedAt DateTime?
   /// Début de la période locative (première échéance possible).
-  rentalStartDate     DateTime?
+  rentalStartDate      DateTime?
   /// Fin du bail — au-delà, plus aucune échéance n'est générée.
-  rentalEndDate       DateTime?
+  rentalEndDate        DateTime?
 
   // ── Descriptif ──
   constructionYear Int?
@@ -517,23 +518,23 @@ model PortfolioSnapshot {
 
 /// Debts / crédits — amortissement dynamique + événements de vie
 model Liability {
-  id              String    @id @default(cuid())
-  userId          String
-  name            String
-  initialAmount   Decimal   @db.Decimal(28, 12)
-  remainingAmount Decimal   @db.Decimal(28, 12)
-  currency        String    @default("EUR")
-  interestRate    Decimal?  @db.Decimal(10, 6)
-  monthlyPayment  Decimal?  @db.Decimal(28, 12)
-  startDate       DateTime?
-  endDate         DateTime?
+  id                   String    @id @default(cuid())
+  userId               String
+  name                 String
+  initialAmount        Decimal   @db.Decimal(28, 12)
+  remainingAmount      Decimal   @db.Decimal(28, 12)
+  currency             String    @default("EUR")
+  interestRate         Decimal?  @db.Decimal(10, 6)
+  monthlyPayment       Decimal?  @db.Decimal(28, 12)
+  startDate            DateTime?
+  endDate              DateTime?
   /// Day of month for automatic debit (1–31). Clamped to last day of short months.
-  paymentDay      Int?
+  paymentDay           Int?
   /// Last payment-day date for which a monthly debit was applied
   lastPaymentAppliedAt DateTime?
   /// Free-text bank / lender name
-  bankName        String?
-  notes           String?
+  bankName             String?
+  notes                String?
   /// Bien financé par ce prêt (optionnel).
   ///
   /// Sert à **l'attribution**, pas au calcul du patrimoine net : celui-ci
@@ -543,9 +544,9 @@ model Liability {
   /// `remainingAmount` reste le montant réellement dû, jamais pondéré par la
   /// quote-part de propriété : on peut détenir la moitié d'un bien tout en
   /// étant solidaire de la totalité de l'emprunt.
-  assetId         String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  assetId              String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   asset  Asset?           @relation(fields: [assetId], references: [id], onDelete: SetNull)
@@ -557,16 +558,16 @@ model Liability {
 
 /// Lifecycle events: monthly debit, early repayment, payment amendment
 model LiabilityEvent {
-  id          String   @id @default(cuid())
-  liabilityId String
+  id             String   @id @default(cuid())
+  liabilityId    String
   /// MONTHLY_DEBIT | EARLY_REPAYMENT_PARTIAL | EARLY_REPAYMENT_TOTAL | PAYMENT_CHANGE
-  type        String
-  amount      Decimal? @db.Decimal(28, 12)
+  type           String
+  amount         Decimal? @db.Decimal(28, 12)
   /// Remaining capital after this event
   remainingAfter Decimal? @db.Decimal(28, 12)
-  eventDate   DateTime
-  notes       String?
-  createdAt   DateTime @default(now())
+  eventDate      DateTime
+  notes          String?
+  createdAt      DateTime @default(now())
 
   liability Liability @relation(fields: [liabilityId], references: [id], onDelete: Cascade)
 
@@ -577,50 +578,139 @@ model LiabilityEvent {
 
 /// Compte courant — balance defaults 0, only counts in net worth if > 0
 model BankAccount {
-  id        String   @id @default(cuid())
-  userId    String
+  id           String   @id @default(cuid())
+  userId       String
   /// Bank label (dropdown list or free text stored as string)
-  bankName  String
-  balance   Decimal  @default(0) @db.Decimal(28, 12)
-  currency  String   @default("EUR")
-  notes     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  bankName     String
+  balance      Decimal  @default(0) @db.Decimal(28, 12)
+  currency     String   @default("EUR")
+  /// Exclu du patrimoine personnel : un compte pro ne s'additionne pas au
+  /// patrimoine net comme un compte perso, même s'il figure dans la liste.
+  isPro        Boolean  @default(false)
+  /// Part détenue sur un compte joint, 0–100. Null = compte individuel
+  /// (100 % implicite) — ne pas stocker 100 par défaut évite de confondre
+  /// « non renseigné » et « joint à parts égales ».
+  ownershipPct Decimal? @db.Decimal(6, 3)
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events BankAccountEvent[]
 
   @@index([userId])
 }
 
+/// Historique des mouvements d'un compte courant — sur le modèle de
+/// `LiabilityEvent`. Généré à chaque changement de solde, jamais saisi à la
+/// main : c'est ce qui permet une courbe d'évolution fiable, contrairement à
+/// un journal que l'utilisateur devrait renseigner lui-même en plus du solde.
+model BankAccountEvent {
+  id            String   @id @default(cuid())
+  bankAccountId String
+  /// OPENING | DEPOSIT | WITHDRAWAL
+  type          String
+  /// Delta signé — positif pour un dépôt, négatif pour un retrait.
+  amount        Decimal  @db.Decimal(28, 12)
+  balanceAfter  Decimal  @db.Decimal(28, 12)
+  occurredAt    DateTime @default(now())
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  @@index([bankAccountId, occurredAt])
+}
+
 /// Livret d'épargne — intérêts planifiés (APR/APY × périodicité)
 model SavingsAccount {
-  id            String   @id @default(cuid())
-  userId        String
-  name          String
+  id               String    @id @default(cuid())
+  userId           String
+  name             String
   /// Banque de détention (aligné comptes courants / plateformes)
-  bankName      String?
+  bankName         String?
+  /// LIVRET_A | LDDS | LEP | PEL | CEL | AUTRE — détermine le plafond légal
+  /// suggéré (voir `regulated-products.ts`) ; un livret bancaire non
+  /// réglementé (AUTRE) n'a pas de plafond imposé.
+  productType      String    @default("AUTRE")
+  /// Plafond de versement (hors intérêts capitalisés). Saisi par
+  /// l'utilisateur ou pré-rempli depuis `productType` — jamais recalculé en
+  /// silence : un plafond légal change par décret, pas par notre code.
+  ceilingAmount    Decimal?  @db.Decimal(28, 12)
   /// Principal / last booked balance (crédité aux dates de versement)
-  balance       Decimal  @default(0) @db.Decimal(28, 12)
+  balance          Decimal   @default(0) @db.Decimal(28, 12)
   /// Taux annuel saisi en % (ex. 3.0 = 3%) — interprété selon rateType
-  apyPercent    Decimal  @default(0) @db.Decimal(10, 6)
+  apyPercent       Decimal   @default(0) @db.Decimal(10, 6)
   /// APR (linéaire) | APY (composé rétro-calculé)
-  rateType      String   @default("APY")
+  rateType         String    @default("APY")
   /// DAILY | WEEKLY | MONTHLY | YEARLY
-  payoutFrequency String @default("DAILY")
+  payoutFrequency  String    @default("DAILY")
   /// ISO weekday 1=Lundi … 7=Dimanche (WEEKLY)
-  payoutDayOfWeek Int?
+  payoutDayOfWeek  Int?
   /// Jour du mois 1–31 (MONTHLY / YEARLY)
   payoutDayOfMonth Int?
   /// Mois 1–12 (YEARLY)
-  payoutMonth   Int?
+  payoutMonth      Int?
   /// Dernier versement d'intérêts crédité au solde
-  lastPayoutAt  DateTime?
+  lastPayoutAt     DateTime?
   /// Horloge d'affichage (intérêts courus non encore versés)
-  lastAccruedAt DateTime @default(now())
-  currency      String   @default("EUR")
-  notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  lastAccruedAt    DateTime  @default(now())
+  currency         String    @default("EUR")
+  /// Cf. BankAccount.isPro
+  isPro            Boolean   @default(false)
+  /// Cf. BankAccount.ownershipPct
+  ownershipPct     Decimal?  @db.Decimal(6, 3)
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user   User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events SavingsAccountEvent[]
+
+  @@index([userId])
+}
+
+/// Historique d'un livret — mêmes principes que `BankAccountEvent`, plus le
+/// type `INTEREST` : un versement d'intérêts n'est ni un dépôt ni un retrait
+/// de l'utilisateur, le confondre avec l'un des deux fausserait la lecture
+/// « qu'est-ce que j'ai épargné moi-même vs. ce que le taux m'a rapporté ».
+model SavingsAccountEvent {
+  id               String   @id @default(cuid())
+  savingsAccountId String
+  /// OPENING | DEPOSIT | WITHDRAWAL | INTEREST
+  type             String
+  amount           Decimal  @db.Decimal(28, 12)
+  balanceAfter     Decimal  @db.Decimal(28, 12)
+  occurredAt       DateTime @default(now())
+  notes            String?
+  createdAt        DateTime @default(now())
+
+  savingsAccount SavingsAccount @relation(fields: [savingsAccountId], references: [id], onDelete: Cascade)
+
+  @@index([savingsAccountId, occurredAt])
+}
+
+/// Dépôt à terme (CAT) — durée fixe, taux figé à l'ouverture, pénalité en cas
+/// de retrait anticipé. Modèle distinct d'un livret : un CAT n'a ni
+/// versement libre ni capitalisation périodique, sa mécanique (échéance +
+/// pénalité) n'a presque aucun champ en commun avec `SavingsAccount`.
+model TermDeposit {
+  id                        String   @id @default(cuid())
+  userId                    String
+  bankName                  String?
+  principal                 Decimal  @db.Decimal(28, 12)
+  /// Taux annuel fixé à l'ouverture, en % — ne varie pas sur la durée du CAT.
+  ratePercent               Decimal  @db.Decimal(10, 6)
+  currency                  String   @default("EUR")
+  openedAt                  DateTime
+  maturityDate              DateTime
+  /// % du taux perdu en cas de retrait avant échéance — null = non renseigné.
+  earlyWithdrawalPenaltyPct Decimal? @db.Decimal(6, 3)
+  isPro                     Boolean  @default(false)
+  ownershipPct              Decimal? @db.Decimal(6, 3)
+  notes                     String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -630,22 +720,22 @@ model SavingsAccount {
 // ─── Assurance-Vie ────────────────────────────────────────────────────────────
 
 model LifeInsurance {
-  id        String    @id @default(cuid())
-  userId    String
-  insurer   String
-  openDate  DateTime?
+  id                    String    @id @default(cuid())
+  userId                String
+  insurer               String
+  openDate              DateTime?
   /// Cash / fonds euro
-  cashEuro  Decimal   @default(0) @db.Decimal(28, 12)
-  currency  String    @default("EUR")
-  notes     String?
+  cashEuro              Decimal   @default(0) @db.Decimal(28, 12)
+  currency              String    @default("EUR")
+  notes                 String?
   /// Cumul des versements effectués avant le 27/09/2017 (seuil fiscal PFU).
-  premiumsBefore2017Eur Decimal @default(0) @db.Decimal(28, 12)
+  premiumsBefore2017Eur Decimal   @default(0) @db.Decimal(28, 12)
   /// Cumul des versements effectués à compter du 27/09/2017.
-  premiumsAfter2017Eur  Decimal @default(0) @db.Decimal(28, 12)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  premiumsAfter2017Eur  Decimal   @default(0) @db.Decimal(28, 12)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  user     User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   products LifeInsuranceProduct[]
   supports LifeInsuranceSupport[]
 
@@ -676,8 +766,8 @@ model LifeInsurance {
 /// fonds euro ou une UC classique n'a ni barrière ni date de constatation ;
 /// exiger ces champs pour tous aurait obligé à inventer des valeurs.
 model LifeInsuranceSupport {
-  id      String @id @default(cuid())
-  assetId String @unique
+  id              String  @id @default(cuid())
+  assetId         String  @unique
   /// Contrat de rattachement — null si le support n'a pas encore été rattaché
   lifeInsuranceId String?
 
@@ -685,43 +775,43 @@ model LifeInsuranceSupport {
   kind String @default("UC")
 
   // ── Identification (tous supports) ────────────────────────────────────────
-  isin String?
+  isin   String?
   /// Société de gestion (UC) ou émetteur (structuré)
   issuer String?
 
   // ── Produit structuré uniquement ──────────────────────────────────────────
   /// Sous-jacent : indice, action ou panier (« Euro Stoxx 50 »)
-  underlying String?
+  underlying  String?
   /// Nominal souscrit, en euros
-  nominalEur Decimal? @db.Decimal(28, 12)
+  nominalEur  Decimal? @db.Decimal(28, 12)
   /// Niveau initial de constatation du sous-jacent (strike)
   strikeLevel Decimal? @db.Decimal(28, 12)
 
   /// Coupon annuel, en %
-  couponRatePct Decimal? @db.Decimal(10, 6)
+  couponRatePct    Decimal? @db.Decimal(10, 6)
   /// MONTHLY | QUARTERLY | SEMIANNUAL | ANNUAL | MATURITY
-  couponFrequency String @default("ANNUAL")
+  couponFrequency  String   @default("ANNUAL")
   /// Barrière de versement du coupon, en % du niveau initial
   couponBarrierPct Decimal? @db.Decimal(10, 6)
   /// Coupon à mémoire : les coupons non versés se rattrapent
-  couponMemory Boolean @default(false)
+  couponMemory     Boolean  @default(false)
 
   /// Barrière de rappel anticipé (autocall), en % du niveau initial
-  autocallBarrierPct Decimal? @db.Decimal(10, 6)
+  autocallBarrierPct   Decimal? @db.Decimal(10, 6)
   /// Barrière de protection du capital à l'échéance, en % du niveau initial
   capitalProtectionPct Decimal? @db.Decimal(10, 6)
 
   /// Date de constatation initiale
-  strikeDate DateTime?
+  strikeDate          DateTime?
   /// Échéance finale
-  maturityDate DateTime?
+  maturityDate        DateTime?
   /// Prochaine date de constatation (coupon / rappel)
   nextObservationDate DateTime?
   /// Dernière constatation confirmée — curseur, comme les loyers
   lastCouponAppliedAt DateTime?
 
   /// Frais d'entrée sur le support, en %
-  entryFeePct Decimal? @db.Decimal(10, 6)
+  entryFeePct      Decimal? @db.Decimal(10, 6)
   /// Frais de gestion annuels sur encours, en %
   managementFeePct Decimal? @db.Decimal(10, 6)
 
@@ -738,14 +828,14 @@ model LifeInsuranceSupport {
 }
 
 model LifeInsuranceProduct {
-  id               String   @id @default(cuid())
-  lifeInsuranceId  String
-  name             String
-  currentValue     Decimal  @default(0) @db.Decimal(28, 12)
-  currency         String   @default("EUR")
-  notes            String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id              String   @id @default(cuid())
+  lifeInsuranceId String
+  name            String
+  currentValue    Decimal  @default(0) @db.Decimal(28, 12)
+  currency        String   @default("EUR")
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   lifeInsurance LifeInsurance @relation(fields: [lifeInsuranceId], references: [id], onDelete: Cascade)
 
@@ -781,7 +871,7 @@ model EmployeeSavingsLine {
   /// Date de déblocage théorique (null si mode RETIREMENT)
   unlockDate       DateTime?
   /// DATE | RETIREMENT
-  unlockMode       String @default("DATE")
+  unlockMode       String    @default("DATE")
 
   notes     String?
   createdAt DateTime @default(now())
@@ -803,27 +893,27 @@ model PreciousMetalPosition {
   userId String
 
   /// METAL | OTHER
-  assetKind String @default("METAL")
+  assetKind         String   @default("METAL")
   /// PHYSICAL | PAPER
-  format    String @default("PHYSICAL")
+  format            String   @default("PHYSICAL")
   /// Ex. Napoléon 20F, Lingot 1 kg, Krugerrand
-  denomination String
+  denomination      String
   /// Nombre de pièces / barres / unités
-  quantity     Decimal @default(0) @db.Decimal(28, 12)
+  quantity          Decimal  @default(0) @db.Decimal(28, 12)
   /// Poids unitaire en grammes (convertir Oz → g côté app)
-  unitWeightG  Decimal @default(0) @db.Decimal(28, 12)
+  unitWeightG       Decimal  @default(0) @db.Decimal(28, 12)
   /// GRAM | OZ — unité saisie pour le poids unitaire
-  weightUnit   String  @default("GRAM")
+  weightUnit        String   @default("GRAM")
   /// Prix de revient unitaire (PRU)
-  purchasePriceUnit Decimal @default(0) @db.Decimal(28, 12)
+  purchasePriceUnit Decimal  @default(0) @db.Decimal(28, 12)
   /// Valeur actuelle totale de la ligne (saisie manuelle pour l'instant)
-  currentValue      Decimal @default(0) @db.Decimal(28, 12)
-  currency          String  @default("EUR")
+  currentValue      Decimal  @default(0) @db.Decimal(28, 12)
+  currency          String   @default("EUR")
   /// Lieu de stockage (coffre, domicile, banque…)
   storageLocation   String?
   notes             String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -838,20 +928,20 @@ model PrivateEquityPosition {
   userId String
 
   /// Nom de la société
-  companyName String
-  sector      String?
+  companyName              String
+  sector                   String?
   /// CROWDEQUITY | CLUB_DEAL | DIRECT | HOLDING
-  peType      String  @default("DIRECT")
-  shares      Decimal @default(0) @db.Decimal(28, 12)
+  peType                   String    @default("DIRECT")
+  shares                   Decimal   @default(0) @db.Decimal(28, 12)
   /// Prix d'acquisition par part
-  acquisitionPricePerShare Decimal @default(0) @db.Decimal(28, 12)
-  investmentDate DateTime?
+  acquisitionPricePerShare Decimal   @default(0) @db.Decimal(28, 12)
+  investmentDate           DateTime?
   /// Valorisation actuelle totale de la ligne (NAV manuelle)
-  currentNav     Decimal  @default(0) @db.Decimal(28, 12)
-  currency       String   @default("EUR")
-  notes          String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  currentNav               Decimal   @default(0) @db.Decimal(28, 12)
+  currency                 String    @default("EUR")
+  notes                    String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -864,25 +954,25 @@ model CrowdlendingPosition {
   id     String @id @default(cuid())
   userId String
 
-  projectName String
-  platform    String?
+  projectName        String
+  platform           String?
   /// Capital investi
-  capitalInvested Decimal @default(0) @db.Decimal(28, 12)
+  capitalInvested    Decimal   @default(0) @db.Decimal(28, 12)
   /// Taux d'intérêt annuel en %
-  annualYieldPercent Decimal @default(0) @db.Decimal(10, 6)
+  annualYieldPercent Decimal   @default(0) @db.Decimal(10, 6)
   /// Durée en mois
-  durationMonths Int @default(12)
+  durationMonths     Int       @default(12)
   /// IN_FINE | AMORTIZING
-  repaymentType String @default("IN_FINE")
-  startDate     DateTime?
+  repaymentType      String    @default("IN_FINE")
+  startDate          DateTime?
   /// Date d'échéance théorique
-  maturityDate  DateTime?
+  maturityDate       DateTime?
   /// ACTIVE | LATE | REPAID | DEFAULT
-  status   String  @default("ACTIVE")
-  currency String  @default("EUR")
-  notes    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  status             String    @default("ACTIVE")
+  currency           String    @default("EUR")
+  notes              String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -896,21 +986,21 @@ model TangibleAsset {
   userId String
 
   /// WATCHES | WINE | ART | AUTO | OTHER
-  category   String  @default("OTHER")
+  category       String   @default("OTHER")
   /// Marque ou artiste
-  brandOrArtist String
+  brandOrArtist  String
   /// Modèle / nom de l'œuvre
-  modelName  String
+  modelName      String
   /// Année ou millésime (texte libre)
-  yearOrVintage String?
-  purchasePrice Decimal @default(0) @db.Decimal(28, 12)
+  yearOrVintage  String?
+  purchasePrice  Decimal  @default(0) @db.Decimal(28, 12)
   /// Valeur estimée actuelle (saisie manuelle)
-  estimatedValue Decimal @default(0) @db.Decimal(28, 12)
-  currency String @default("EUR")
-  hasCertificate Boolean @default(false)
-  notes    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  estimatedValue Decimal  @default(0) @db.Decimal(28, 12)
+  currency       String   @default("EUR")
+  hasCertificate Boolean  @default(false)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1008,13 +1098,13 @@ model DefiPositionDetail {
 
   /// Second actif d'une position de liquidité (le premier est porté par
   /// l'Asset lui-même).
-  pairedSymbol String?
-  pairedAmount Decimal? @db.Decimal(38, 18)
+  pairedSymbol        String?
+  pairedAmount        Decimal? @db.Decimal(38, 18)
   /// Prix unitaire (EUR) du second actif au moment de l'engagement. Sans lui,
   /// l'IL ne peut pas se calculer : c'est le prix courant du premier actif
   /// (porté par Asset) qui donne l'autre moitié de la formule.
   pairedEntryPriceEur Decimal? @db.Decimal(28, 12)
-  poolAddress  String?
+  poolAddress         String?
 
   /// LP à 3, 4 ou 5 jetons (Curve, Balancer…) : jetons au-delà du second,
   /// chacun `{ symbol, amount, entryPriceEur, allocationPct? }`.
@@ -1039,8 +1129,8 @@ model DefiPositionDetail {
   /// %. Nulle sur une LP classique (répartition ≈ 50/50 implicite) ; posée
   /// par l'utilisateur sur une position concentrée, où l'écart au range
   /// pousse la répartition loin de 50/50.
-  token1AllocationPct  Decimal? @db.Decimal(6, 3)
-  pairedAllocationPct  Decimal? @db.Decimal(6, 3)
+  token1AllocationPct Decimal? @db.Decimal(6, 3)
+  pairedAllocationPct Decimal? @db.Decimal(6, 3)
 
   /// Rendement annualisé affiché par le protocole, en %. Déclaratif : sert à
   /// comparer, jamais à valoriser.
@@ -1050,17 +1140,17 @@ model DefiPositionDetail {
   rewardsValueEur Decimal? @db.Decimal(18, 2)
 
   /// Santé d'un prêt collatéralisé. Sous 1, la position est liquidable.
-  healthFactor Decimal? @db.Decimal(12, 4)
-  ltvPct       Decimal? @db.Decimal(6, 3)
+  healthFactor    Decimal? @db.Decimal(12, 4)
+  ltvPct          Decimal? @db.Decimal(6, 3)
   liqThresholdPct Decimal? @db.Decimal(6, 3)
 
   /// ZERION | MANUAL — une ligne saisie à la main n'est jamais écrasée par
   /// une synchronisation.
-  source        String    @default("MANUAL")
-  lastSyncedAt  DateTime?
-  notes         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  source       String    @default("MANUAL")
+  lastSyncedAt DateTime?
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
@@ -1083,15 +1173,15 @@ model CryptoFuturesPosition {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   /// BINANCE | BYBIT | OKX | HYPERLIQUID | DYDX | OTHER
-  exchange       String
+  exchange        String
   subAccountLabel String?
 
   /// « BTC/USDT-PERP », « ETH/USD-0927 »…
-  pair         String
+  pair          String
   /// PERPETUAL | QUARTERLY | MONTHLY
-  contractType String @default("PERPETUAL")
+  contractType  String @default("PERPETUAL")
   /// USDT_M | COIN_M
-  marginType   String
+  marginType    String
   baseCurrency  String
   quoteCurrency String
 
@@ -1127,10 +1217,10 @@ model CryptoFuturesPosition {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  @@unique([userId, exchangeTradeId])
   @@index([userId, isOpen])
   @@index([userId, exchange])
   @@index([userId, closedAt])
-  @@unique([userId, exchangeTradeId])
 }
 
 /// NFT — extension 1:1 d'un Asset, comme RealEstateDetail et DefiPositionDetail.
@@ -1146,10 +1236,10 @@ model NftItemDetail {
   id      String @id @default(cuid())
   assetId String @unique
 
-  tokenId      String
-  contractAddr String?
+  tokenId        String
+  contractAddr   String?
   /// ethereum | base | polygon | arbitrum | optimism | solana
-  chain        String
+  chain          String
   collectionName String?
   collectionSlug String?
   imageUrl       String?
@@ -1159,11 +1249,11 @@ model NftItemDetail {
 
   /// DVF_AUTO-like : MANUAL tant que l'utilisateur fixe la valeur, FLOOR_AUTO
   /// une fois un rafraîchissement de floor price appliqué.
-  valuationMode String    @default("MANUAL")
-  lastValuedAt  DateTime?
-  floorPriceNative Decimal? @db.Decimal(24, 10)
+  valuationMode      String    @default("MANUAL")
+  lastValuedAt       DateTime?
+  floorPriceNative   Decimal?  @db.Decimal(24, 10)
   floorPriceCurrency String?
-  floorPriceEur      Decimal? @db.Decimal(18, 2)
+  floorPriceEur      Decimal?  @db.Decimal(18, 2)
   /// OPENSEA | BLUR | MAGIC_EDEN | TENSOR | RESERVOIR | MANUAL
   estimateSource     String?
   estimateDate       DateTime?

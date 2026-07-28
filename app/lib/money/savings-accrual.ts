@@ -2,6 +2,7 @@ import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "../prisma";
 import { owned } from "../db/tenant-scope";
 import { d } from "./decimal";
+import { recordSavingsAccountInterest } from "../cash/account-events";
 import {
   creditDueInterest,
   type PayoutFrequency,
@@ -57,18 +58,25 @@ export async function applyDueInterestForSavings(
     return { account: row, periodsCredited: 0, totalInterest: "0" };
   }
 
-  const write = await prisma.savingsAccount.updateMany({
-    where: owned(savingsId, userId),
-    data: {
-      balance: new Prisma.Decimal(result.balance),
-      lastPayoutAt: result.lastPayoutAt,
-      lastAccruedAt: result.lastPayoutAt || row.lastAccruedAt,
-    },
-  });
-  if (write.count === 0) return null;
-
-  const updated = await prisma.savingsAccount.findFirst({
-    where: owned(savingsId, userId),
+  const updated = await prisma.$transaction(async (tx) => {
+    const write = await tx.savingsAccount.updateMany({
+      where: owned(savingsId, userId),
+      data: {
+        balance: new Prisma.Decimal(result.balance),
+        lastPayoutAt: result.lastPayoutAt,
+        lastAccruedAt: result.lastPayoutAt || row.lastAccruedAt,
+      },
+    });
+    if (write.count === 0) return null;
+    await recordSavingsAccountInterest(
+      tx,
+      savingsId,
+      result.totalInterest,
+      result.balance,
+      result.periodsCredited,
+      result.lastPayoutAt ?? now
+    );
+    return tx.savingsAccount.findFirst({ where: owned(savingsId, userId) });
   });
   if (!updated) return null;
 
@@ -117,6 +125,10 @@ export function mapSavingsRowForApi(
     currency: string;
     notes?: string | null;
     createdAt: Date;
+    productType?: string | null;
+    ceilingAmount?: { toString(): string } | null;
+    isPro?: boolean;
+    ownershipPct?: { toString(): string } | null;
   },
   now: Date = new Date()
 ) {
@@ -161,5 +173,9 @@ export function mapSavingsRowForApi(
     notes: s.notes ?? null,
     lastAccruedAt: s.lastAccruedAt.toISOString(),
     lastPayoutAt: s.lastPayoutAt?.toISOString() ?? null,
+    productType: s.productType ?? "AUTRE",
+    ceilingAmount: s.ceilingAmount?.toString() ?? null,
+    isPro: s.isPro ?? false,
+    ownershipPct: s.ownershipPct?.toString() ?? null,
   };
 }

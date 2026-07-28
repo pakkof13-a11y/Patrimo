@@ -12,6 +12,19 @@ import { listSavingsAccounts } from "@/app/lib/cash/pockets";
 import { applyDueInterestForUser } from "@/app/lib/money/savings-accrual";
 import { findOrCreatePlatform } from "@/app/lib/platforms/upsert";
 import { findPreset, primaryType } from "@/app/lib/platforms/presets";
+import {
+  recordSavingsAccountBalanceChange,
+  recordSavingsAccountOpening,
+} from "@/app/lib/cash/account-events";
+import {
+  REGULATED_PRODUCT_INFO,
+  type RegulatedProductType,
+} from "@/app/lib/cash/regulated-products";
+
+/** Plafond suggéré pour un produit réglementé — undefined si non pré-rempli (CEL, AUTRE). */
+function suggestedCeiling(productType: string): string | undefined {
+  return REGULATED_PRODUCT_INFO[productType as RegulatedProductType]?.ceilingAmount;
+}
 
 async function ensureBankPlatform(userId: string, bankName: string | null | undefined) {
   const name = (bankName || "").trim();
@@ -47,23 +60,33 @@ export async function POST(req: Request) {
   const d = parsed.data;
   const now = new Date();
   const bankName = d.bankName?.trim() || null;
-  const account = await prisma.savingsAccount.create({
-    data: {
-      userId,
-      name: d.name,
-      bankName,
-      balance: new Prisma.Decimal(d.balance || "0"),
-      apyPercent: new Prisma.Decimal(d.apyPercent || "0"),
-      rateType: d.rateType || "APY",
-      payoutFrequency: d.payoutFrequency || "DAILY",
-      payoutDayOfWeek: d.payoutDayOfWeek ?? null,
-      payoutDayOfMonth: d.payoutDayOfMonth ?? null,
-      payoutMonth: d.payoutMonth ?? null,
-      lastPayoutAt: now,
-      lastAccruedAt: now,
-      currency: (d.currency || "EUR").toUpperCase(),
-      notes: d.notes || null,
-    },
+  const productType = d.productType || "AUTRE";
+  const ceilingAmount = d.ceilingAmount ?? suggestedCeiling(productType) ?? null;
+  const account = await prisma.$transaction(async (tx) => {
+    const created = await tx.savingsAccount.create({
+      data: {
+        userId,
+        name: d.name,
+        bankName,
+        productType,
+        ceilingAmount,
+        balance: new Prisma.Decimal(d.balance || "0"),
+        apyPercent: new Prisma.Decimal(d.apyPercent || "0"),
+        rateType: d.rateType || "APY",
+        payoutFrequency: d.payoutFrequency || "DAILY",
+        payoutDayOfWeek: d.payoutDayOfWeek ?? null,
+        payoutDayOfMonth: d.payoutDayOfMonth ?? null,
+        payoutMonth: d.payoutMonth ?? null,
+        lastPayoutAt: now,
+        lastAccruedAt: now,
+        currency: (d.currency || "EUR").toUpperCase(),
+        isPro: d.isPro,
+        ownershipPct: d.ownershipPct ?? null,
+        notes: d.notes || null,
+      },
+    });
+    await recordSavingsAccountOpening(tx, created.id, created.balance.toString());
+    return created;
   });
   await ensureBankPlatform(userId, bankName);
   return NextResponse.json({ account }, { status: 201 });
@@ -110,16 +133,39 @@ export async function PUT(req: Request) {
   if (f.payoutDayOfMonth !== undefined) data.payoutDayOfMonth = f.payoutDayOfMonth;
   if (f.payoutMonth !== undefined) data.payoutMonth = f.payoutMonth;
   if (f.currency !== undefined) data.currency = f.currency;
+  if (f.isPro !== undefined) data.isPro = f.isPro;
+  if (f.ownershipPct !== undefined) data.ownershipPct = f.ownershipPct ?? null;
+  if (f.productType !== undefined) {
+    data.productType = f.productType;
+    // Ceiling suggéré seulement si l'utilisateur n'en a jamais renseigné un
+    // et n'en fournit pas non plus dans cette requête — ne jamais écraser
+    // une valeur déjà saisie à la main.
+    if (f.ceilingAmount === undefined && existing.ceilingAmount == null) {
+      const suggestion = suggestedCeiling(f.productType);
+      if (suggestion) data.ceilingAmount = suggestion;
+    }
+  }
+  if (f.ceilingAmount !== undefined) {
+    data.ceilingAmount = f.ceilingAmount || null;
+  }
   if (f.notes !== undefined) data.notes = f.notes || null;
 
-  const write = await prisma.savingsAccount.updateMany({
-    where: { id, userId },
-    data,
+  const account = await prisma.$transaction(async (tx) => {
+    const write = await tx.savingsAccount.updateMany({ where: { id, userId }, data });
+    if (write.count === 0) return null;
+    if (f.balance !== undefined) {
+      await recordSavingsAccountBalanceChange(
+        tx,
+        id,
+        existing.balance.toString(),
+        f.balance || "0"
+      );
+    }
+    return tx.savingsAccount.findFirst({ where: { id, userId } });
   });
-  if (write.count === 0) {
+  if (!account) {
     return NextResponse.json({ error: "Introuvable" }, { status: 404 });
   }
-  const account = await prisma.savingsAccount.findFirst({ where: { id, userId } });
   return NextResponse.json({ account });
 }
 

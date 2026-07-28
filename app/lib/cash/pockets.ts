@@ -137,6 +137,8 @@ export async function listBankAccounts(userId: string, base = "EUR") {
       balance: bal,
       currency: b.currency,
       notes: b.notes,
+      isPro: b.isPro,
+      ownershipPct: b.ownershipPct?.toString() ?? null,
       countsInNetWorth: counts,
       balanceBase: counts
         ? convertFromEurSync(convertToEurSync(bal, b.currency, rates), base, rates)
