@@ -1079,13 +1079,47 @@ model SecuritiesAccount {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  platform Platform @relation(fields: [platformId], references: [id], onDelete: Restrict)
-  assets   Asset[]
+  user          User                            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform      Platform                        @relation(fields: [platformId], references: [id], onDelete: Restrict)
+  assets        Asset[]
+  contributions SecuritiesAccountContribution[]
 
   @@index([userId])
   @@index([userId, envelopeType])
   @@index([platformId])
+}
+
+/// Versements et retraits déclarés sur un compte titres.
+///
+/// Table séparée plutôt qu'un simple total sur le compte, et surtout plutôt
+/// qu'un calcul depuis le journal : un `APPORT` du journal est un dépôt de
+/// **liquidité bancaire** rattaché à une plateforme, sans notion d'enveloppe
+/// (cf. `accounting/ledger.ts`). Or un même courtier héberge couramment un PEA
+/// et un CTO, et le prix de revient des positions ne dit rien des versements
+/// dès lors qu'un arbitrage gagnant a été réinvesti. Aucune de ces deux
+/// sources ne permet donc de reconstituer un plafond de versement juste.
+///
+/// Le montant cumulé conditionne le plafond légal du PEA — un chiffre qui doit
+/// rester auditable : un total modifiable en place ne permettrait pas
+/// d'expliquer un dépassement. Même raisonnement que `BankAccountEvent`.
+model SecuritiesAccountContribution {
+  id                  String @id @default(cuid())
+  securitiesAccountId String
+
+  /// DEPOSIT | WITHDRAWAL
+  type      String
+  /// Montant en euros, toujours positif — c'est `type` qui porte le sens.
+  amountEur Decimal @db.Decimal(28, 12)
+
+  occurredAt DateTime
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  /// Cascade : l'historique de versement n'a aucun sens sans son compte,
+  /// contrairement aux titres, qui conservent leur propre journal.
+  account SecuritiesAccount @relation(fields: [securitiesAccountId], references: [id], onDelete: Cascade)
+
+  @@index([securitiesAccountId, occurredAt])
 }
 
 /// Véhicule immobilier détenu indirectement — SCPI, SCI, OPCI, foncière.
