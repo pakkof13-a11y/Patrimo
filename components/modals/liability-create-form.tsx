@@ -16,7 +16,11 @@ import {
   type WizardStep,
 } from "@/components/ui/form-wizard";
 import { liabilitySchema, type LiabilityForm } from "@/app/lib/schemas";
-import { LIABILITY_LENDER_OPTIONS } from "@/app/lib/constants";
+import {
+  LIABILITY_CATEGORIES,
+  LIABILITY_CATEGORY_LABELS,
+  LIABILITY_LENDER_OPTIONS,
+} from "@/app/lib/constants";
 import { currencyLabel } from "@/app/lib/money/currencies";
 import {
   estimateRemainingInterest,
@@ -50,36 +54,17 @@ const WIZARD_STEPS: WizardStep[] = [
   },
 ];
 
-/** Types UX uniquement — guident placeholders, non stockés en API. */
-const LIABILITY_KINDS = [
-  {
-    id: "MORTGAGE",
-    label: "Immobilier",
-    namePh: "ex. Crédit immo résidence principale",
-  },
-  {
-    id: "AUTO",
-    label: "Auto",
-    namePh: "ex. Crédit auto 2024",
-  },
-  {
-    id: "CONSUMER",
-    label: "Conso",
-    namePh: "ex. Crédit conso travaux",
-  },
-  {
-    id: "PRIVATE",
-    label: "Dette privée",
-    namePh: "ex. Prêt familial",
-  },
-  {
-    id: "OTHER",
-    label: "Autre",
-    namePh: "ex. Prêt personnel, découvert…",
-  },
-] as const;
+type LiabilityCategory = (typeof LIABILITY_CATEGORIES)[number];
 
-type LiabilityKind = (typeof LIABILITY_KINDS)[number]["id"];
+/** Placeholder d'intitulé par catégorie — UI uniquement. */
+const LIABILITY_CATEGORY_PLACEHOLDERS: Record<LiabilityCategory, string> = {
+  IMMOBILIER: "ex. Crédit immo résidence principale",
+  AUTO: "ex. Crédit auto 2024",
+  CONSOMMATION: "ex. Crédit conso travaux",
+  DETTE_PRIVEE: "ex. Prêt familial",
+  PROFESSIONNEL: "ex. Prêt professionnel, crédit-bail…",
+  AUTRE: "ex. Prêt personnel, découvert…",
+};
 
 function LenderCombobox({
   value,
@@ -218,6 +203,7 @@ const emptyDefaults = (): LiabilityForm => ({
   startDate: new Date().toISOString().slice(0, 10),
   endDate: "",
   paymentDay: 5,
+  category: "AUTRE",
   notes: "",
 });
 
@@ -231,7 +217,6 @@ export function LiabilityCreateForm({
   onSubmit: (values: LiabilityForm) => void;
 }) {
   const [step, setStep] = useState(0);
-  const [kind, setKind] = useState<LiabilityKind>("MORTGAGE");
   /** true = capital restant = montant initial (crédit neuf) */
   const [remainingLocked, setRemainingLocked] = useState(true);
   const [endDateManual, setEndDateManual] = useState(false);
@@ -246,13 +231,11 @@ export function LiabilityCreateForm({
   useEffect(() => {
     const draft = loadWizardDraft<{
       values?: LiabilityForm;
-      kind?: LiabilityKind;
       remainingLocked?: boolean;
       step?: number;
     }>(DRAFT_KEY);
     if (!draft?.values) return;
     form.reset({ ...emptyDefaults(), ...draft.values });
-    if (draft.kind) setKind(draft.kind);
     if (typeof draft.remainingLocked === "boolean")
       setRemainingLocked(draft.remainingLocked);
     if (typeof draft.step === "number")
@@ -270,8 +253,7 @@ export function LiabilityCreateForm({
   const interestRate = form.watch("interestRate") || "";
   const currency = form.watch("currency") || "EUR";
   const name = form.watch("name") || "";
-
-  const kindMeta = LIABILITY_KINDS.find((k) => k.id === kind)!;
+  const category = form.watch("category") || "AUTRE";
 
   // Mirror initial → remaining when locked
   useEffect(() => {
@@ -384,7 +366,6 @@ export function LiabilityCreateForm({
   function saveDraft() {
     saveWizardDraft(DRAFT_KEY, {
       values: form.getValues(),
-      kind,
       remainingLocked,
       step,
     });
@@ -444,13 +425,15 @@ export function LiabilityCreateForm({
                 role="group"
                 aria-label="Type de passif"
               >
-                {LIABILITY_KINDS.map((k) => {
-                  const active = kind === k.id;
+                {LIABILITY_CATEGORIES.map((c) => {
+                  const active = category === c;
                   return (
                     <button
-                      key={k.id}
+                      key={c}
                       type="button"
-                      onClick={() => setKind(k.id)}
+                      onClick={() =>
+                        form.setValue("category", c, { shouldDirty: true })
+                      }
                       className={cn(
                         "rounded-md px-2.5 py-1 text-[11px] font-medium transition",
                         "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
@@ -458,8 +441,9 @@ export function LiabilityCreateForm({
                           ? "bg-teal-700 text-white dark:bg-teal-500 dark:text-teal-950"
                           : "bg-transparent text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 dark:text-slate-300 dark:ring-slate-700 dark:hover:bg-slate-800/60"
                       )}
+                      data-testid={`liability-category-${c}`}
                     >
-                      {k.label}
+                      {LIABILITY_CATEGORY_LABELS[c]}
                     </button>
                   );
                 })}
@@ -471,7 +455,7 @@ export function LiabilityCreateForm({
                   id="liability-name"
                   className="input"
                   {...form.register("name")}
-                  placeholder={kindMeta.namePh}
+                  placeholder={LIABILITY_CATEGORY_PLACEHOLDERS[category]}
                   data-testid="liability-name"
                   autoComplete="off"
                 />
@@ -672,7 +656,7 @@ export function LiabilityCreateForm({
             <dl className="grid gap-2 text-[12px] sm:grid-cols-2">
               {(
                 [
-                  ["Type", kindMeta.label],
+                  ["Type", LIABILITY_CATEGORY_LABELS[category]],
                   ["Intitulé", name || "—"],
                   ["Prêteur", bankName || "—"],
                   [

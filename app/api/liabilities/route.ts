@@ -113,6 +113,7 @@ export async function POST(req: Request) {
       endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
       paymentDay,
       bankName: parsed.data.bankName || null,
+      category: parsed.data.category,
       notes: parsed.data.notes || null,
     },
   });
@@ -149,6 +150,7 @@ export async function PUT(req: Request) {
     data.monthlyPayment =
       f.monthlyPayment != null ? new Prisma.Decimal(f.monthlyPayment) : null;
   if (f.bankName !== undefined) data.bankName = f.bankName || null;
+  if (f.category !== undefined) data.category = f.category;
   if (f.notes !== undefined) data.notes = f.notes || null;
   if (f.startDate !== undefined) data.startDate = f.startDate ? new Date(f.startDate) : null;
   if (f.endDate !== undefined) data.endDate = f.endDate ? new Date(f.endDate) : null;

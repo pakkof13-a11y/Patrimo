@@ -199,6 +199,28 @@ export const LIABILITY_LENDER_OPTIONS = [
   "Autre",
 ] as const;
 
+/** Catégorie de passif — regroupement d'affichage, indépendant du calcul. */
+export const LIABILITY_CATEGORIES = [
+  "IMMOBILIER",
+  "AUTO",
+  "CONSOMMATION",
+  "DETTE_PRIVEE",
+  "PROFESSIONNEL",
+  "AUTRE",
+] as const;
+
+export const LIABILITY_CATEGORY_LABELS: Record<
+  (typeof LIABILITY_CATEGORIES)[number],
+  string
+> = {
+  IMMOBILIER: "Immobilier",
+  AUTO: "Auto",
+  CONSOMMATION: "Consommation",
+  DETTE_PRIVEE: "Dette privée",
+  PROFESSIONNEL: "Professionnel",
+  AUTRE: "Autre",
+};
+
 export const BUSINESS_TIMEZONE = "Europe/Paris";
 
 /**

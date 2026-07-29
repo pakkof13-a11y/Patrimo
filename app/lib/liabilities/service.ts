@@ -171,6 +171,7 @@ export async function listLiabilities(userId: string) {
       paymentDay: l.paymentDay,
       lastPaymentAppliedAt: l.lastPaymentAppliedAt?.toISOString() ?? null,
       bankName: l.bankName,
+      category: l.category,
       notes: l.notes,
       remainingEur: eur,
       monthsRemaining: monthsLeft,

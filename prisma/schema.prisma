@@ -548,6 +548,8 @@ model Liability {
   lastPaymentAppliedAt DateTime?
   /// Free-text bank / lender name
   bankName             String?
+  /// IMMOBILIER | AUTO | CONSOMMATION | DETTE_PRIVEE | PROFESSIONNEL | AUTRE
+  category             String    @default("AUTRE")
   notes                String?
   /// Bien financé par ce prêt (optionnel).
   ///

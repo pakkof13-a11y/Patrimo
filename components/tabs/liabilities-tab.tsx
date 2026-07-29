@@ -21,7 +21,11 @@ import { DateInput } from "@/components/ui/date-input";
 import { FinanceTip } from "@/components/ui/finance-tooltip";
 import { LiabilityCreateForm } from "@/components/modals/liability-create-form";
 import type { LiabilityForm } from "@/app/lib/schemas";
-import { LIABILITY_LENDER_OPTIONS } from "@/app/lib/constants";
+import {
+  LIABILITY_CATEGORIES,
+  LIABILITY_CATEGORY_LABELS,
+  LIABILITY_LENDER_OPTIONS,
+} from "@/app/lib/constants";
 import { formatCurrency, formatDate, cn } from "@/app/lib/utils";
 import {
   buildAmortizationSchedule,
@@ -54,6 +58,7 @@ type LiabilityRow = {
   paymentDay: number | null;
   lastPaymentAppliedAt: string | null;
   bankName: string | null;
+  category: string;
   notes: string | null;
   monthsRemaining: number | null;
   estimatedInterestRemaining: string;
@@ -74,6 +79,38 @@ const EVENT_LABELS: Record<string, string> = {
   PAYMENT_CHANGE: "Avenant mensualité",
   RATE_CHANGE: "Avenant taux d'intérêt",
 };
+
+type LiabilityCategory = (typeof LIABILITY_CATEGORIES)[number];
+
+const CATEGORY_BADGE_STYLES: Record<LiabilityCategory, string> = {
+  IMMOBILIER:
+    "bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200/80 dark:bg-teal-950/40 dark:text-teal-200 dark:ring-teal-800/50",
+  AUTO: "bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200/80 dark:bg-sky-950/40 dark:text-sky-200 dark:ring-sky-800/50",
+  CONSOMMATION:
+    "bg-amber-50 text-amber-900 ring-1 ring-inset ring-amber-200/80 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-800/50",
+  DETTE_PRIVEE:
+    "bg-purple-50 text-purple-800 ring-1 ring-inset ring-purple-200/80 dark:bg-purple-950/40 dark:text-purple-200 dark:ring-purple-800/50",
+  PROFESSIONNEL:
+    "bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200/80 dark:bg-indigo-950/40 dark:text-indigo-200 dark:ring-indigo-800/50",
+  AUTRE:
+    "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200/80 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700",
+};
+
+function CategoryBadge({ category }: { category: string }) {
+  const known = (LIABILITY_CATEGORIES as readonly string[]).includes(category)
+    ? (category as LiabilityCategory)
+    : "AUTRE";
+  return (
+    <span
+      className={cn(
+        "inline-flex rounded-md px-1.5 py-0.5 text-[10px] font-semibold",
+        CATEGORY_BADGE_STYLES[known]
+      )}
+    >
+      {LIABILITY_CATEGORY_LABELS[known]}
+    </span>
+  );
+}
 
 export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   const qc = useQueryClient();
@@ -97,6 +134,9 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   );
   const [showHelp, setShowHelp] = useState(false);
   const [settledOpen, setSettledOpen] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<
+    "ALL" | LiabilityCategory
+  >("ALL");
   const [deleteTarget, setDeleteTarget] = useState<LiabilityRow | null>(null);
   const [deleteConfirmChecked, setDeleteConfirmChecked] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -126,6 +166,21 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   const settledRows = useMemo(
     () => rows.filter((l) => Number(l.remainingAmount) <= 0),
     [rows]
+  );
+
+  const visibleActiveRows = useMemo(
+    () =>
+      categoryFilter === "ALL"
+        ? activeRows
+        : activeRows.filter((l) => l.category === categoryFilter),
+    [activeRows, categoryFilter]
+  );
+  const visibleSettledRows = useMemo(
+    () =>
+      categoryFilter === "ALL"
+        ? settledRows
+        : settledRows.filter((l) => l.category === categoryFilter),
+    [settledRows, categoryFilter]
   );
 
   const monthlyOutflow = useMemo(() => {
@@ -292,8 +347,11 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                 <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
               )}
               <span>
-                <span className="font-medium text-[var(--foreground)]">
-                  {l.name}
+                <span className="flex items-center gap-1.5">
+                  <span className="font-medium text-[var(--foreground)]">
+                    {l.name}
+                  </span>
+                  <CategoryBadge category={l.category} />
                 </span>
                 <span className="mt-0.5 block text-[11px] text-[var(--muted-foreground)]">
                   {l.bankName || "Prêteur non renseigné"}
@@ -480,6 +538,9 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                       bankName: v || null,
                     });
                 }}
+                onEditCategory={(v) => {
+                  if (v !== l.category) patchMut.mutate({ id: l.id, category: v });
+                }}
                 onRepay={() => {
                   setEarlyId(l.id);
                   setEarlyKind("PARTIAL");
@@ -613,6 +674,31 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
         <ModuleCardHeader
           title="Crédits en cours"
           subtitle="Progression, prochaine échéance, amortissement prévisionnel et remboursements"
+          actions={
+            rows.length > 0 ? (
+              <label className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--muted-foreground)]">
+                Type
+                <select
+                  className="input !h-7 !py-0 text-[11px]"
+                  value={categoryFilter}
+                  onChange={(e) =>
+                    setCategoryFilter(
+                      e.target.value as "ALL" | LiabilityCategory
+                    )
+                  }
+                  data-testid="liability-filter-category"
+                >
+                  <option value="ALL">Tous ({rows.length})</option>
+                  {LIABILITY_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {LIABILITY_CATEGORY_LABELS[c]} (
+                      {rows.filter((l) => l.category === c).length})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : undefined
+          }
         />
 
         {listQ.isLoading ? (
@@ -663,7 +749,19 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                 </tr>
               </thead>
               <tbody>
-                {activeRows.map((l) => renderLiabilityRow(l, false))}
+                {visibleActiveRows.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-4 py-10 text-center text-sm text-[var(--muted-foreground)]"
+                      data-testid="liability-no-match"
+                    >
+                      Aucun crédit ne correspond au filtre.
+                    </td>
+                  </tr>
+                ) : (
+                  visibleActiveRows.map((l) => renderLiabilityRow(l, false))
+                )}
               </tbody>
             </table>
           </div>
@@ -712,7 +810,18 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {settledRows.map((l) => renderLiabilityRow(l, true))}
+                  {visibleSettledRows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-4 py-10 text-center text-sm text-[var(--muted-foreground)]"
+                      >
+                        Aucun crédit soldé ne correspond au filtre.
+                      </td>
+                    </tr>
+                  ) : (
+                    visibleSettledRows.map((l) => renderLiabilityRow(l, true))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1010,6 +1119,7 @@ function LiabilityDetailPanel({
   onEditRemaining,
   onEditPaymentDay,
   onEditBank,
+  onEditCategory,
   onRepay,
 }: {
   liability: LiabilityRow;
@@ -1017,6 +1127,7 @@ function LiabilityDetailPanel({
   onEditRemaining: (v: string) => void;
   onEditPaymentDay: (v: string) => void;
   onEditBank: (v: string) => void;
+  onEditCategory: (v: string) => void;
   onRepay: () => void;
 }) {
   const [rateInvalid, setRateInvalid] = useState(false);
@@ -1202,6 +1313,21 @@ function LiabilityDetailPanel({
               if (raw !== (l.bankName || "")) onEditBank(raw);
             }}
           />
+        </label>
+        <label className="text-[11px]">
+          <span className="text-[var(--muted-foreground)]">Catégorie</span>
+          <select
+            className="input mt-0.5 !py-1 text-xs"
+            value={l.category}
+            onChange={(e) => onEditCategory(e.target.value)}
+            data-testid={`liability-category-select-${l.id}`}
+          >
+            {LIABILITY_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {LIABILITY_CATEGORY_LABELS[c]}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
 

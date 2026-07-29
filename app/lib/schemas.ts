@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TX_TYPES } from "./accounting/types";
+import { LIABILITY_CATEGORIES } from "./constants";
 
 export const assetClasses = [
   "ACTIONS",
@@ -273,6 +274,7 @@ export const liabilitySchema = z.object({
       return Math.max(1, Math.min(31, n));
     }),
   bankName: z.string().optional().nullable(),
+  category: z.enum(LIABILITY_CATEGORIES).default("AUTRE"),
   notes: z.string().optional().nullable(),
 });
 
@@ -757,6 +759,7 @@ export const liabilityUpdateSchema = z.object({
   endDate: optionalDateString.optional(),
   paymentDay: optionalClearableInt(1, 31).optional(),
   bankName: z.string().optional().nullable(),
+  category: z.enum(LIABILITY_CATEGORIES).optional(),
   notes: z.string().optional().nullable(),
 });
 
