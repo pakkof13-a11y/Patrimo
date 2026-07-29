@@ -188,7 +188,7 @@ export function TransactionsTab({
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const [draggingCol, setDraggingCol] = useState<string | null>(null);
   const skipSortRef = useRef(false);
-  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<TxRow | null>(null);
 
   // Reset page quand filtres / tri / pageSize changent
   const filterKey = `${debouncedSearch}|${accountType}|${pageSize}|${typeFilter}|${platformFilter}|${dateFrom}|${dateTo}|${sorting[0]?.id}|${sorting[0]?.desc}`;
@@ -453,9 +453,10 @@ export function TransactionsTab({
               variant="ghost"
               size="sm"
               className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--danger)]"
-              onClick={() => setDeleteTargetId(row.original.id)}
+              onClick={() => setDeleteTarget(row.original)}
               title="Supprimer"
               aria-label="Supprimer la transaction"
+              data-testid={`tx-delete-${row.original.id}`}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
@@ -1045,13 +1046,17 @@ export function TransactionsTab({
       )}
 
       <ConfirmDialog
-        open={deleteTargetId != null}
+        open={deleteTarget != null}
         title="Supprimer la transaction"
-        message="Cette opération sera définitivement supprimée du journal. Cette action est irréversible."
-        onCancel={() => setDeleteTargetId(null)}
+        message={
+          deleteTarget
+            ? `${TRANSACTION_TYPES[deleteTarget.type as keyof typeof TRANSACTION_TYPES] || deleteTarget.type} · ${deleteTarget.asset?.name ?? deleteTarget.platform?.name ?? "—"} · ${formatDate(deleteTarget.occurredAt)}. Cette opération sera définitivement supprimée du journal. Cette action est irréversible.`
+            : ""
+        }
+        onCancel={() => setDeleteTarget(null)}
         onConfirm={() => {
-          if (deleteTargetId) onDelete(deleteTargetId);
-          setDeleteTargetId(null);
+          if (deleteTarget) onDelete(deleteTarget.id);
+          setDeleteTarget(null);
         }}
         testId="tx-delete-confirm"
       />
