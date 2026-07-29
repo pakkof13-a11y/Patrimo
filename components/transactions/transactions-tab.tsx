@@ -11,10 +11,12 @@ import {
   type VisibilityState,
 } from "@tanstack/react-table";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   GripVertical,
   Pencil,
+  SlidersHorizontal,
   Trash2,
   RefreshCw,
   Upload,
@@ -172,6 +174,9 @@ export function TransactionsTab({
   const [platformFilter, setPlatformFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  // Repliés par défaut sur mobile pour ne pas saturer la toolbar — toujours
+  // visibles en ligne dès sm: (voir wrapper "sm:contents" plus bas).
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const debouncedSearch = useDebouncedValue(search, 300);
   const [pageSize, setPageSize] = useState<PageSize>(50);
   const [pageIndex, setPageIndex] = useState(0);
@@ -252,6 +257,10 @@ export function TransactionsTab({
     Boolean(platformFilter) ||
     Boolean(dateFrom) ||
     Boolean(dateTo);
+  // Badge du panneau replié mobile — plateforme + période (Enveloppe/recherche
+  // restent visibles hors panneau, pas de double comptage).
+  const mobileFilterCount =
+    (platformFilter ? 1 : 0) + (dateFrom || dateTo ? 1 : 0);
 
   const columns = useMemo<ColumnDef<TxRow>[]>(
     () => [
@@ -604,68 +613,105 @@ export function TransactionsTab({
             placeholder="Nom, ticker, ISIN, plateforme…"
           />
 
-          {platforms && platforms.length > 0 && (
-            <label className="flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
-              <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
-                Plateforme
-              </span>
-              <select
-                className="input !w-auto min-w-0 max-w-full !py-1.5 text-sm"
-                value={platformFilter}
-                onChange={(e) => setPlatformFilter(e.target.value)}
-                data-testid="tx-platform-filter"
-                aria-label="Filtrer par plateforme"
-              >
-                <option value="">Toutes</option>
-                {platforms.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+          {/* Repli mobile : plateforme + période sont peu consultées au
+              quotidien — un panneau replié évite d'empiler 2 rangées de
+              plus sous la recherche sur petit écran. Dès sm:, "sm:contents"
+              neutralise ce wrapper et les deux filtres reprennent leur
+              place normale dans la rangée flex du parent. */}
+          <button
+            type="button"
+            className="inline-flex w-full items-center justify-between gap-2 rounded-md border border-[var(--border)] px-2.5 py-1.5 text-xs font-medium text-[var(--muted-foreground)] sm:hidden"
+            onClick={() => setShowMobileFilters((v) => !v)}
+            aria-expanded={showMobileFilters}
+            data-testid="tx-mobile-filters-toggle"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Filtres
+              {mobileFilterCount > 0 && (
+                <span className="tabular-nums text-[10px] text-[var(--primary)]">
+                  ({mobileFilterCount})
+                </span>
+              )}
+            </span>
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 transition-transform",
+                showMobileFilters && "rotate-180"
+              )}
+            />
+          </button>
 
-          <div className="flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
-            <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
-              Du
-            </span>
-            <input
-              type="date"
-              className="input !w-auto !py-1.5 text-sm"
-              value={dateFrom}
-              max={dateTo || undefined}
-              onChange={(e) => setDateFrom(e.target.value)}
-              data-testid="tx-date-from"
-              aria-label="Date de début"
-            />
-            <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
-              Au
-            </span>
-            <input
-              type="date"
-              className="input !w-auto !py-1.5 text-sm"
-              value={dateTo}
-              min={dateFrom || undefined}
-              onChange={(e) => setDateTo(e.target.value)}
-              data-testid="tx-date-to"
-              aria-label="Date de fin"
-            />
-            {(dateFrom || dateTo) && (
-              <button
-                type="button"
-                className="shrink-0 rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"
-                onClick={() => {
-                  setDateFrom("");
-                  setDateTo("");
-                }}
-                aria-label="Effacer la période"
-                title="Effacer la période"
-                data-testid="tx-date-clear"
-              >
-                ×
-              </button>
+          <div
+            className={cn(
+              "w-full min-w-0 flex-col gap-2",
+              showMobileFilters ? "flex" : "hidden",
+              "sm:contents"
             )}
+          >
+            {platforms && platforms.length > 0 && (
+              <label className="flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+                <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
+                  Plateforme
+                </span>
+                <select
+                  className="input !w-auto min-w-0 max-w-full !py-1.5 text-sm"
+                  value={platformFilter}
+                  onChange={(e) => setPlatformFilter(e.target.value)}
+                  data-testid="tx-filter-platform"
+                  aria-label="Filtrer par plateforme"
+                >
+                  <option value="">Toutes</option>
+                  {platforms.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            <div className="flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+              <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
+                Du
+              </span>
+              <input
+                type="date"
+                className="input !w-auto !py-1.5 text-sm"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => setDateFrom(e.target.value)}
+                data-testid="tx-filter-from"
+                aria-label="Date de début"
+              />
+              <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
+                Au
+              </span>
+              <input
+                type="date"
+                className="input !w-auto !py-1.5 text-sm"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => setDateTo(e.target.value)}
+                data-testid="tx-filter-to"
+                aria-label="Date de fin"
+              />
+              {(dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                  }}
+                  aria-label="Effacer la période"
+                  title="Effacer la période"
+                  data-testid="tx-date-clear"
+                >
+                  ×
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:shrink-0">
