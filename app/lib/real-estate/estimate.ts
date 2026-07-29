@@ -10,35 +10,39 @@
  * La recherche procède en deux temps (cf. `geo.ts`) : boîte englobante servie
  * par l'index, puis distance réelle sur le résidu.
  *
- * ## Orchestration à quatre paliers
+ * ## Orchestration à deux paliers
  *
  * `estimateProperty` essaie, dans l'ordre, jusqu'au premier succès :
  *
  * 1. **DVF local** (`STRICT_RADIUS_STEPS_M`, ≤ 2 km) — le marché immédiat.
  * 2. **DVF élargi** (`WIDE_RADIUS_STEPS_M`, jusqu'à 10 km) — même méthode,
  *    rayon plus large, seulement si le local n'a pas atteint `MIN_COMPARABLES`.
- * 3. **Médiane ADEME commune × DPE** (`ademe-reference.ts`) — repli plus
- *    grossier, seulement si même le rayon le plus large échoue.
- * 4. **Indisponible** — `estimateEur: null`, `insufficientData: true`. Jamais
- *    un chiffre de complaisance : mieux vaut le dire que l'inventer.
+ *
+ * Sous `MIN_COMPARABLES` au rayon le plus large, aucun montant n'est renvoyé
+ * (`estimateEur: null`, `source: "INDISPONIBLE"`) : jamais un chiffre de
+ * complaisance, mieux vaut le dire que l'inventer. Il n'y a plus de repli
+ * au-delà de DVF (l'ancien repli par médiane ADEME a été retiré — décision
+ * produit : DVF seul, plus simple à expliquer et à auditer).
  *
  * `source` (`EstimateSource`) indique lequel a produit le résultat — c'est ce
- * que l'UI affiche (« DVF local » / « DVF élargi » / « ADEME » / « indisponible »).
+ * que l'UI affiche (« DVF local » / « DVF élargi » / « indisponible »).
+ *
+ * ## Ajustement DPE
+ *
+ * Une fois l'estimation DVF obtenue, un coefficient simple selon la classe
+ * DPE du bien (`dpePriceCoefficient`) donne `adjustedEstimateEur` — une
+ * « valeur verte » approximative, pas une nouvelle source de données : le
+ * prix brut (`estimateEur`) reste la médiane DVF, l'ajustement est appliqué
+ * à côté et exposé séparément (`dpeClass`, `dpeCoefficient`).
  *
  * ## Limites connues
  *
  * - **Alsace-Moselle et Mayotte** : DVF n'y couvre rien (livre foncier, régime
- *   de publicité foncière distinct — voir `isDvfCoveredDepartment` plus bas,
- *   vérifié par l'appelant *avant* d'appeler ce module). Le palier ADEME, lui,
- *   n'est pas concerné par cette limite : une médiane communale reste
- *   disponible si la table en contient une pour ces communes.
- * - **Secteurs ruraux** : c'est le cas d'usage principal du palier ADEME —
- *   une commune à faible activité notariale n'atteint jamais `MIN_COMPARABLES`,
- *   même à 10 km, sans que le marché y soit pour autant illisible.
- * - **Le palier ADEME dépend d'un import non fourni ici** : `AdemeCommuneDpeMedian`
- *   est créée vide par sa migration. Tant qu'elle n'est pas peuplée, ce palier
- *   échoue systématiquement et le résultat retombe sur `INDISPONIBLE` — c'est
- *   le comportement correct, pas une régression.
+ *   de publicité foncière distinct — voir `isDvfCoveredDepartment` plus bas).
+ *   Sans repli, l'estimation y est simplement indisponible.
+ * - **Secteurs ruraux** : une commune à faible activité notariale peut ne
+ *   jamais atteindre `MIN_COMPARABLES`, même à 10 km — l'estimation est alors
+ *   indisponible plutôt qu'approximée.
  */
 
 import { Prisma } from "../prisma-client/client";
@@ -62,12 +66,33 @@ import {
   type AdjustmentResult,
   type AdjustmentSubject,
 } from "./valuation-adjustments";
-import {
-  findAdemeReference,
-  estimateFromAdemeReference,
-  type AdemeEstimate,
-} from "./ademe-reference";
 import type { PropertyType } from "./dvf-aggregate";
+
+/**
+ * Coefficient de décote/surcote DPE — « valeur verte » simplifiée.
+ *
+ * Barème volontairement grossier et assumé comme tel : une seule table, un
+ * facteur unique par classe, appliqué au prix DVF déjà estimé. Remplace le
+ * repli ADEME (retiré) — ce n'est pas une source de comparables
+ * supplémentaire, seulement une correction de lecture sur le chiffre DVF.
+ */
+export const DPE_PRICE_COEFFICIENTS: Record<string, number> = {
+  A: 1.1,
+  B: 1.06,
+  C: 1.02,
+  D: 1.0,
+  E: 0.93,
+  F: 0.85,
+  G: 0.78,
+};
+
+/** 1.00 (aucun ajustement) pour une classe DPE absente ou non reconnue. */
+export function dpePriceCoefficient(
+  dpeClass: string | null | undefined
+): number {
+  if (!dpeClass) return 1;
+  return DPE_PRICE_COEFFICIENTS[dpeClass.trim().toUpperCase()] ?? 1;
+}
 
 /**
  * Paliers d'élargissement DVF, en mètres — deux groupes.
@@ -91,15 +116,11 @@ const MAX_STRICT_RADIUS_M =
   STRICT_RADIUS_STEPS_M[STRICT_RADIUS_STEPS_M.length - 1];
 
 /**
- * Palier ayant produit l'estimation — orchestration à quatre niveaux :
- * DVF strict → DVF élargi → médiane ADEME commune × DPE → indisponible.
- * Chaque niveau n'est tenté que si le précédent a échoué.
+ * Palier ayant produit l'estimation — orchestration à deux niveaux :
+ * DVF strict → DVF élargi → indisponible. Le second n'est tenté que si le
+ * premier a échoué.
  */
-export type EstimateSource =
-  | "DVF_LOCAL"
-  | "DVF_ELARGI"
-  | "ADEME_COMMUNE_DPE"
-  | "INDISPONIBLE";
+export type EstimateSource = "DVF_LOCAL" | "DVF_ELARGI" | "INDISPONIBLE";
 
 /** Classe un rayon DVF retenu en palier « local » ou « élargi ». */
 export function classifyRadiusSource(
@@ -220,12 +241,12 @@ export type EstimateResult = {
   refinement: EstimateRefinement | null;
   /** Palier ayant produit `estimateEur` — voir `EstimateSource`. */
   source: EstimateSource;
-  /**
-   * Détail du repli commune × DPE, seulement quand `source` vaut
-   * `ADEME_COMMUNE_DPE`. Distinct de `refinement` : l'affinage par score ne
-   * s'applique pas à ce palier (voir la note dans `estimateProperty`).
-   */
-  ademeReference: AdemeEstimate | null;
+  /** Classe DPE utilisée pour l'ajustement — celle du bien, ou `null`. */
+  dpeClass: string | null;
+  /** Coefficient appliqué (voir `DPE_PRICE_COEFFICIENTS`) — 1 si `dpeClass` est `null`. */
+  dpeCoefficient: number;
+  /** `estimateEur × dpeCoefficient` — `null` quand `estimateEur` l'est aussi. */
+  adjustedEstimateEur: string | null;
 };
 
 type ComparableRow = {
@@ -402,13 +423,12 @@ export function windowStart(months: number, now = new Date()): Date {
 export class EstimateInputError extends Error {}
 
 /**
- * Estime un bien — DVF d'abord, repli ADEME ensuite. Voir l'orchestration à
- * quatre paliers documentée en tête de fichier.
+ * Estime un bien par comparaison DVF. Voir l'orchestration à deux paliers
+ * documentée en tête de fichier.
  *
- * Sous `MIN_COMPARABLES` au plus large rayon, DVF seul ne renvoie aucun
- * montant : une médiane sur trois ventes serait un chiffre habillé en
- * estimation, sans que l'utilisateur puisse savoir qu'il ne vaut rien. Le
- * palier ADEME est tenté avant de renoncer complètement.
+ * Sous `MIN_COMPARABLES` au plus large rayon, aucun montant n'est renvoyé :
+ * une médiane sur trois ventes serait un chiffre habillé en estimation, et
+ * l'utilisateur n'aurait aucun moyen de savoir qu'il ne vaut rien.
  */
 export async function estimateProperty(
   input: EstimateInput,
@@ -453,42 +473,15 @@ export async function estimateProperty(
   );
   const samples = rows.slice(0, 10).map(toComparable);
 
+  // Le coefficient DPE s'applique quel que soit le résultat DVF : la classe
+  // du bien est connue indépendamment de la recherche de comparables. Sans
+  // classe, le coefficient vaut 1 (aucun ajustement) plutôt que d'être omis.
+  const dpeClass = input.subject?.energyRating?.trim().toUpperCase() || null;
+  const dpeCoefficient = dpePriceCoefficient(dpeClass);
+
   if (!distribution || rows.length < MIN_COMPARABLES) {
     // Pas d'affinage sur un jeu déjà jugé insuffisant : mieux noter trois
-    // ventes n'en fait pas une estimation.
-    //
-    // Dernier palier avant `INDISPONIBLE` : une médiane commune × DPE, plus
-    // grossière qu'une comparaison de ventes mais moins arbitraire qu'un
-    // chiffre laissé à zéro. Ne nécessite ni la commune (`inseeCode`) ni le
-    // DPE (`subject.energyRating`) — sans l'un ou l'autre, `findAdemeReference`
-    // rend `null` et ce palier échoue silencieusement à son tour.
-    //
-    // Aucun affinage par score ici (`refinement: null`) : la classe DPE est
-    // déjà le critère de segmentation de la médiane elle-même — y réappliquer
-    // l'ajustement DPE de `valuation-adjustments.ts` compterait le même effet
-    // deux fois.
-    const ademeRef = await findAdemeReference(
-      input.inseeCode,
-      input.subject?.energyRating ?? null
-    );
-    const ademeEstimate = estimateFromAdemeReference(input.surfaceM2, ademeRef);
-
-    if (ademeEstimate) {
-      return {
-        estimateEur: ademeEstimate.estimateEur,
-        distribution,
-        comparableCount: rows.length,
-        radiusUsedM,
-        monthsUsed,
-        confidence: "LOW",
-        insufficientData: false,
-        samples,
-        refinement: null,
-        source: "ADEME_COMMUNE_DPE",
-        ademeReference: ademeEstimate,
-      };
-    }
-
+    // ventes n'en fait pas une estimation. Aucun repli au-delà de DVF.
     return {
       estimateEur: null,
       distribution,
@@ -500,7 +493,9 @@ export async function estimateProperty(
       samples,
       refinement: null,
       source: "INDISPONIBLE",
-      ademeReference: null,
+      dpeClass,
+      dpeCoefficient,
+      adjustedEstimateEur: null,
     };
   }
 
@@ -508,6 +503,7 @@ export async function estimateProperty(
     d(distribution.median).times(input.surfaceM2),
     2
   );
+  const adjustedEstimateEur = toFixed(d(estimateEur).times(dpeCoefficient), 2);
 
   return {
     estimateEur,
@@ -525,7 +521,9 @@ export async function estimateProperty(
     samples,
     refinement: buildRefinement(input, rows, distribution, { now: opts?.now }),
     source: classifyRadiusSource(radiusUsedM),
-    ademeReference: null,
+    dpeClass,
+    dpeCoefficient,
+    adjustedEstimateEur,
   };
 }
 

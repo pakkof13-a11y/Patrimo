@@ -55,7 +55,7 @@ type PropertyRow = {
   dvfEstimateEur: string | null;
   dvfConfidence: string | null;
   dvfComparables: number | null;
-  /** DVF_LOCAL | DVF_ELARGI | ADEME_COMMUNE_DPE — palier ayant produit `dvfEstimateEur`. */
+  /** DVF_LOCAL | DVF_ELARGI — palier ayant produit `dvfEstimateEur`. */
   dvfSource: string | null;
   monthlyRentEur: string | null;
   monthlyChargesEur: string | null;
@@ -205,8 +205,33 @@ const CONFIDENCE_LABELS: Record<string, string> = {
 const ESTIMATE_SOURCE_LABELS: Record<string, string> = {
   DVF_LOCAL: "DVF local",
   DVF_ELARGI: "DVF élargi",
-  ADEME_COMMUNE_DPE: "ADEME (repli commune)",
 };
+
+/**
+ * Coefficient DPE (« valeur verte » simplifiée) — même barème que
+ * `DPE_PRICE_COEFFICIENTS` dans `estimate.ts`, dupliqué ici pour l'affichage
+ * client sans importer un module serveur (Prisma) dans le bundle navigateur.
+ */
+const DPE_PRICE_COEFFICIENTS: Record<string, number> = {
+  A: 1.1,
+  B: 1.06,
+  C: 1.02,
+  D: 1.0,
+  E: 0.93,
+  F: 0.85,
+  G: 0.78,
+};
+
+function dpePriceCoefficient(dpeClass: string | null | undefined): number {
+  if (!dpeClass) return 1;
+  return DPE_PRICE_COEFFICIENTS[dpeClass.trim().toUpperCase()] ?? 1;
+}
+
+function formatDpeAdjustmentPct(dpeClass: string | null | undefined): string {
+  const pct = (dpePriceCoefficient(dpeClass) - 1) * 100;
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toLocaleString("fr-FR", { maximumFractionDigits: 0 })} %`;
+}
 
 function num(v: string | null | undefined): number {
   const n = Number(v ?? 0);
@@ -340,14 +365,12 @@ export function PropertyPanel({
         return;
       }
       if (out.kind === "insufficient-data") {
-        // Le repli ADEME (commune × DPE) a déjà été tenté à ce stade — s'il
-        // avait réussi, `out.kind` vaudrait `updated`. `departmentUncovered`
-        // permet de préciser pourquoi DVF seul ne pouvait de toute façon rien
-        // trouver, sans faire croire que rien n'a été essayé.
+        // `departmentUncovered` précise pourquoi DVF ne pouvait de toute
+        // façon rien trouver — aucun repli au-delà de DVF n'est tenté.
         toast.warning(
           out.departmentUncovered
-            ? `${name} : département non couvert par DVF (Alsace-Moselle, Mayotte), et aucune référence ADEME disponible pour cette commune.`
-            : `Pas assez de ventes comparables autour de ${name}, et aucune référence ADEME disponible pour cette commune — aucune estimation produite.`
+            ? `${name} : département non couvert par DVF (Alsace-Moselle, Mayotte) — aucune estimation possible.`
+            : `Pas assez de ventes comparables autour de ${name} — aucune estimation produite.`
         );
         return;
       }
@@ -630,24 +653,42 @@ export function PropertyPanel({
               </dl>
 
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-meta" data-testid="property-estimate-source">
-                  {p.valuationMode === "DVF_AUTO"
-                    ? "Estimation DVF automatique"
-                    : "Valeur saisie — non écrasée par l'estimation"}
-                  {p.dvfSource && ESTIMATE_SOURCE_LABELS[p.dvfSource]
-                    ? ` · source : ${ESTIMATE_SOURCE_LABELS[p.dvfSource]}`
-                    : ""}
-                  {p.dvfSource !== "ADEME_COMMUNE_DPE" && p.dvfComparables
-                    ? ` · ${p.dvfComparables} comparables${
-                        p.dvfConfidence
-                          ? `, confiance ${CONFIDENCE_LABELS[p.dvfConfidence] ?? p.dvfConfidence.toLowerCase()}`
-                          : ""
-                      }`
-                    : ""}
-                  {p.lastValuedAt
-                    ? ` · au ${new Date(p.lastValuedAt).toLocaleDateString("fr-FR")}`
-                    : ""}
-                </p>
+                <div>
+                  <p className="text-meta" data-testid="property-estimate-source">
+                    {p.valuationMode === "DVF_AUTO"
+                      ? "Estimation DVF automatique"
+                      : "Valeur saisie — non écrasée par l'estimation"}
+                    {p.dvfSource && ESTIMATE_SOURCE_LABELS[p.dvfSource]
+                      ? ` · source : ${ESTIMATE_SOURCE_LABELS[p.dvfSource]}`
+                      : ""}
+                    {p.dvfComparables
+                      ? ` · ${p.dvfComparables} comparables${
+                          p.dvfConfidence
+                            ? `, confiance ${CONFIDENCE_LABELS[p.dvfConfidence] ?? p.dvfConfidence.toLowerCase()}`
+                            : ""
+                        }`
+                      : ""}
+                    {p.lastValuedAt
+                      ? ` · au ${new Date(p.lastValuedAt).toLocaleDateString("fr-FR")}`
+                      : ""}
+                  </p>
+                  {/* Ajustement DPE : appliqué au prix DVF brut, affiché à
+                      côté sans jamais être stocké silencieusement. Absent
+                      sans DPE renseigné — pas d'ajustement de complaisance. */}
+                  {p.dvfEstimateEur && p.energyRating ? (
+                    <p className="text-meta" data-testid="property-dpe-adjustment">
+                      Ajustement DPE {p.energyRating.toUpperCase()} :{" "}
+                      {formatDpeAdjustmentPct(p.energyRating)} →{" "}
+                      {formatCurrency(
+                        String(
+                          num(p.dvfEstimateEur) *
+                            dpePriceCoefficient(p.energyRating)
+                        ),
+                        "EUR"
+                      )}
+                    </p>
+                  ) : null}
+                </div>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"

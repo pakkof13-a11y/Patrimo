@@ -49,8 +49,14 @@ export type ValuationOutcome =
       rawEstimateEur?: string;
       /** Détail du scoring et des ajustements — consultatif, toujours renvoyé. */
       refinement?: EstimateRefinement | null;
-      /** Palier ayant produit l'estimation — DVF local/élargi ou repli ADEME. */
+      /** Palier ayant produit l'estimation — DVF local ou élargi. */
       estimateSource: EstimateSource;
+      /** Classe DPE utilisée pour l'ajustement — celle du bien, ou `null`. */
+      dpeClass: string | null;
+      /** Coefficient appliqué au prix DVF brut selon la classe DPE — 1 si `dpeClass` est `null`. */
+      dpeCoefficient: number;
+      /** `rawEstimateEur × dpeCoefficient`. */
+      adjustedEstimateEur?: string;
     }
   | { kind: "unchanged"; reason: "fresh" | "manual-mode" | "same-value" }
   | { kind: "skipped"; reason: "not-estimable" | "not-geocoded" }
@@ -322,10 +328,9 @@ export async function revalueFromDvf(
   }
 
   // Alsace-Moselle et Mayotte relèvent d'un autre régime de publicité
-  // foncière : DVF n'y trouvera jamais rien. On ne l'écarte plus avant coup
-  // pour autant — le repli ADEME (commune × DPE) n'est pas concerné par cette
-  // limite, et mérite d'être tenté. `departmentUncovered` n'affecte que le
-  // message rendu si tout échoue.
+  // foncière : DVF n'y trouvera jamais rien, et il n'y a plus de repli
+  // au-delà de DVF. `departmentUncovered` sert uniquement à préciser le
+  // message rendu à l'utilisateur si l'estimation échoue.
   const department = departmentFromCode(detail.inseeCode);
   const departmentUncovered = department
     ? !isDvfCoveredDepartment(department)
@@ -357,14 +362,16 @@ export async function revalueFromDvf(
   /**
    * Valeur retenue.
    *
-   * L'affinage n'est appliqué que sur demande explicite (`adjust`). Le rendre
-   * automatique ferait bouger, au prochain rafraîchissement, le patrimoine de
-   * tous les biens déjà valorisés — sans action de l'utilisateur, et sans qu'il
-   * ait vu le détail des ajustements. Le chiffre affiné est donc calculé et
-   * renvoyé systématiquement, mais stocké seulement s'il a été demandé.
+   * L'ajustement DPE n'est appliqué que sur demande explicite (`adjust`). Le
+   * rendre automatique ferait bouger, au prochain rafraîchissement, le
+   * patrimoine de tous les biens déjà valorisés — sans action de
+   * l'utilisateur. Le chiffre ajusté est donc calculé et renvoyé
+   * systématiquement, mais stocké seulement s'il a été demandé.
    */
-  const refined = estimate.refinement?.estimateEur ?? null;
-  const retained = opts?.adjust && refined ? refined : estimate.estimateEur;
+  const retained =
+    opts?.adjust && estimate.adjustedEstimateEur
+      ? estimate.adjustedEstimateEur
+      : estimate.estimateEur;
 
   // `apply: false` sert le parcours « proposer sans imposer » du formulaire.
   if (opts?.apply === false) {
@@ -376,6 +383,9 @@ export async function revalueFromDvf(
       rawEstimateEur: estimate.estimateEur,
       refinement: estimate.refinement,
       estimateSource: estimate.source,
+      dpeClass: estimate.dpeClass,
+      dpeCoefficient: estimate.dpeCoefficient,
+      adjustedEstimateEur: estimate.adjustedEstimateEur ?? undefined,
     };
   }
 
@@ -407,6 +417,9 @@ export async function revalueFromDvf(
     rawEstimateEur: estimate.estimateEur,
     refinement: estimate.refinement,
     estimateSource: estimate.source,
+    dpeClass: estimate.dpeClass,
+    dpeCoefficient: estimate.dpeCoefficient,
+    adjustedEstimateEur: estimate.adjustedEstimateEur ?? undefined,
   };
 }
 

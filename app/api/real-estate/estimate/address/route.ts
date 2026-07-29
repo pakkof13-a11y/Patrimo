@@ -6,7 +6,7 @@ import {
   estimateProperty,
   isDvfCoveredDepartment,
 } from "@/app/lib/real-estate/estimate";
-import { isDvfEstimable } from "@/app/lib/real-estate/constants";
+import { ENERGY_RATINGS, isDvfEstimable } from "@/app/lib/real-estate/constants";
 import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +20,8 @@ const bodySchema = z.object({
   rooms: z.coerce.number().int().min(1).max(50).optional().nullable(),
   radiusM: z.coerce.number().int().min(100).max(50_000).optional().nullable(),
   monthsBack: z.coerce.number().int().min(1).max(120).optional().nullable(),
+  /** Facultative : sans elle, l'estimation reste le prix DVF pur (coefficient 1). */
+  dpeClass: z.enum(ENERGY_RATINGS).optional().nullable(),
 });
 
 /**
@@ -97,10 +99,9 @@ export async function POST(req: Request) {
     const department = place.postalCode
       ? departmentFromCode(place.postalCode)
       : null;
-    // Alsace-Moselle et Mayotte : DVF n'y trouvera jamais rien (livre foncier,
-    // régime distinct), mais le repli ADEME (commune × DPE) n'est pas concerné
-    // par cette limite — on laisse `estimateProperty` tenter les deux plutôt
-    // que d'écarter la demande avant même d'essayer.
+    // Alsace-Moselle et Mayotte : DVF n'y trouvera jamais rien (livre
+    // foncier, régime distinct). `departmentUncovered` sert uniquement à
+    // préciser le message si l'estimation échoue.
     const departmentUncovered = department
       ? !isDvfCoveredDepartment(department)
       : false;
@@ -114,6 +115,7 @@ export async function POST(req: Request) {
       radiusM: input.radiusM ?? null,
       monthsBack: input.monthsBack ?? null,
       inseeCode: place.inseeCode,
+      subject: input.dpeClass ? { energyRating: input.dpeClass } : null,
     });
 
     return NextResponse.json({
