@@ -10,6 +10,7 @@ import {
   CalendarClock,
   ChevronDown,
   ChevronRight,
+  Download,
   Home,
   MoreHorizontal,
   PencilLine,
@@ -1443,6 +1444,65 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   );
 }
 
+function slugifyFilename(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, "")
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function generateAmortizationCsv(
+  schedule: ReturnType<typeof buildAmortizationSchedule>
+): string {
+  const rows = [
+    "﻿", // UTF-8 BOM
+  ];
+
+  const headers = ["#", "Échéance", "Capital remboursé", "Intérêts", "Assurance", "Mensualité", "Capital restant"];
+  rows.push(headers.join(";"));
+
+  for (const row of schedule) {
+    const csvRow = [
+      row.index.toString(),
+      row.dueDate ? formatDate(row.dueDate) : "",
+      row.principalPaid.replace(".", ","),
+      row.interest.replace(".", ","),
+      row.insurance.replace(".", ","),
+      row.payment.replace(".", ","),
+      row.remainingAfter.replace(".", ","),
+    ];
+    rows.push(csvRow.join(";"));
+  }
+
+  return rows.join("\n");
+}
+
+function downloadCsv(
+  schedule: ReturnType<typeof buildAmortizationSchedule>,
+  liabilityName: string
+): void {
+  const slug = slugifyFilename(liabilityName);
+  const today = new Date();
+  const dateStr = today
+    .toISOString()
+    .slice(0, 10)
+    .replace(/-/g, "");
+  const filename = `amortissement-${slug}-${dateStr}.csv`;
+
+  const csv = generateAmortizationCsv(schedule);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 /** Panneau détail : amortissement prévisionnel + historique + réglages rapides. */
 function LiabilityDetailPanel({
   liability: l,
@@ -1814,14 +1874,27 @@ function LiabilityDetailPanel({
         )
       ) : (
         <div>
-          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
-            Tableau d’amortissement
-            {schedule.length > 36 && windowRows.length > 0
-              ? ` · échéances ${windowRows[0].i + 1}–${windowRows[windowRows.length - 1].i + 1} / ${schedule.length}`
-              : schedule.length > 0
-                ? ` · ${schedule.length} échéances`
-                : ""}
-          </p>
+          <div className="mb-1.5 flex items-center justify-between">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+              Tableau d’amortissement
+              {schedule.length > 36 && windowRows.length > 0
+                ? ` · échéances ${windowRows[0].i + 1}–${windowRows[windowRows.length - 1].i + 1} / ${schedule.length}`
+                : schedule.length > 0
+                  ? ` · ${schedule.length} échéances`
+                  : ""}
+            </p>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-[11px]"
+              onClick={() => downloadCsv(schedule, l.name)}
+              data-testid="liability-export-schedule"
+              title="Exporter le tableau d’amortissement en CSV"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Exporter CSV
+            </Button>
+          </div>
           <div className="max-h-72 overflow-auto rounded-lg border border-[var(--border)]">
             <table className="w-full text-left text-[11px]">
               <thead className="sticky top-0 bg-[var(--table-head)] text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
