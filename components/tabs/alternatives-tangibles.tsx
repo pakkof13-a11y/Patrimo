@@ -8,11 +8,13 @@ import {
   ChevronDown,
   Pencil,
   Plus,
+  ShieldAlert,
   Trash2,
   Vault,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn, formatCurrency, getChangeColor } from "@/app/lib/utils";
 import type {
   TangibleAssetDto,
@@ -53,8 +55,14 @@ import {
 } from "@/app/lib/tax/movable-assets";
 import { completedYearsBetween } from "@/app/lib/tax/movable-assets";
 import {
+  coverageRatio,
+  INSURANCE_STATUS_LABELS,
+  INSURANCE_TYPE_LABELS,
+  INSURANCE_TYPES,
+  insuranceStatus,
   STORAGE_TYPE_LABELS,
   STORAGE_TYPES,
+  type InsuranceStatus,
   type StorageType,
 } from "@/app/lib/tangibles/ownership";
 import {
@@ -101,6 +109,7 @@ type FormState = {
 
   appraisalValue: string;
   appraisalDate: string;
+  appraisalProvider: string;
   insuranceValue: string;
   storageLocation: string;
   isCollectible: boolean;
@@ -108,6 +117,8 @@ type FormState = {
   insurancePremiumAnnual: string;
   insuranceProvider: string;
   insurancePolicyRef: string;
+  insuranceExpiryDate: string;
+  insuranceType: string;
   storageType: string;
   storageCostAnnual: string;
   storageProvider: string;
@@ -162,6 +173,7 @@ const empty = (): FormState => ({
 
   appraisalValue: "",
   appraisalDate: "",
+  appraisalProvider: "",
   insuranceValue: "",
   storageLocation: "",
   isCollectible: false,
@@ -169,6 +181,8 @@ const empty = (): FormState => ({
   insurancePremiumAnnual: "",
   insuranceProvider: "",
   insurancePolicyRef: "",
+  insuranceExpiryDate: "",
+  insuranceType: "",
   storageType: "",
   storageCostAnnual: "",
   storageProvider: "",
@@ -225,6 +239,7 @@ function toForm(l: TangibleAssetDto): FormState {
 
     appraisalValue: l.appraisalValue ?? "",
     appraisalDate: l.appraisalDate ? l.appraisalDate.slice(0, 10) : "",
+    appraisalProvider: l.appraisalProvider ?? "",
     insuranceValue: l.insuranceValue ?? "",
     storageLocation: l.storageLocation ?? "",
     isCollectible: l.isCollectible,
@@ -232,6 +247,10 @@ function toForm(l: TangibleAssetDto): FormState {
     insurancePremiumAnnual: l.insurancePremiumAnnual ?? "",
     insuranceProvider: l.insuranceProvider ?? "",
     insurancePolicyRef: l.insurancePolicyRef ?? "",
+    insuranceExpiryDate: l.insuranceExpiryDate
+      ? l.insuranceExpiryDate.slice(0, 10)
+      : "",
+    insuranceType: l.insuranceType ?? "",
     storageType: l.storageType ?? "",
     storageCostAnnual: l.storageCostAnnual ?? "",
     storageProvider: l.storageProvider ?? "",
@@ -270,6 +289,8 @@ function toForm(l: TangibleAssetDto): FormState {
   };
 }
 
+const COVERAGE_LABEL = INSURANCE_STATUS_LABELS;
+
 function num(value: string): number {
   const parsed = Number(String(value).replace(",", "."));
   return Number.isFinite(parsed) ? parsed : 0;
@@ -299,6 +320,16 @@ export function AlternativesTangibles({
   const [form, setForm] = useState<FormState>(empty());
   const [wizStep, setWizStep] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  /**
+   * Ligne dont la suppression attend confirmation.
+   *
+   * La modale partagée remplace `window.confirm()` : même surface visuelle que
+   * les autres modules du dépôt, et testable — une boîte native n'est pas
+   * pilotable depuis un test de bout en bout.
+   */
+  const [pendingDelete, setPendingDelete] = useState<TangibleAssetDto | null>(
+    null
+  );
 
   const lines = useMemo(() => q.data?.lines ?? [], [q.data]);
   const summary = q.data?.summary;
@@ -312,6 +343,28 @@ export function AlternativesTangibles({
   const pnlPreview = num(form.estimatedValue) - num(form.purchasePrice);
   const annualOwnershipCost =
     num(form.insurancePremiumAnnual) + num(form.storageCostAnnual);
+
+  /** Couverture affichée en direct pendant la saisie. */
+  const coverage = useMemo(() => {
+    const ratio = coverageRatio(
+      String(num(form.estimatedValue)),
+      form.insuranceValue.trim() === "" ? null : String(num(form.insuranceValue))
+    );
+    return ratio ? ratio.toNumber() : null;
+  }, [form.estimatedValue, form.insuranceValue]);
+
+  const coverageStatus: InsuranceStatus = useMemo(
+    () =>
+      insuranceStatus({
+        estimatedValue: String(num(form.estimatedValue)),
+        insuranceValue:
+          form.insuranceValue.trim() === ""
+            ? null
+            : String(num(form.insuranceValue)),
+        insuranceExpiryDate: form.insuranceExpiryDate || null,
+      }),
+    [form.estimatedValue, form.insuranceValue, form.insuranceExpiryDate]
+  );
 
   /**
    * Portage cumulé depuis l'achat.
@@ -422,6 +475,7 @@ export function AlternativesTangibles({
 
         appraisalValue: orNull(form.appraisalValue),
         appraisalDate: orNull(form.appraisalDate),
+        appraisalProvider: orNull(form.appraisalProvider),
         insuranceValue: orNull(form.insuranceValue),
         storageLocation: orNull(form.storageLocation),
         isCollectible: form.isCollectible,
@@ -429,6 +483,8 @@ export function AlternativesTangibles({
         insurancePremiumAnnual: orNull(form.insurancePremiumAnnual),
         insuranceProvider: orNull(form.insuranceProvider),
         insurancePolicyRef: orNull(form.insurancePolicyRef),
+        insuranceExpiryDate: orNull(form.insuranceExpiryDate),
+        insuranceType: orNull(form.insuranceType),
         storageType: orNull(form.storageType),
         storageCostAnnual: orNull(form.storageCostAnnual),
         storageProvider: orNull(form.storageProvider),
@@ -553,6 +609,17 @@ export function AlternativesTangibles({
               baseCurrency
             )}
             hint={`Primes + garde · dont ${formatCurrency(summary?.totalAnnualCustodyCost ?? "0", baseCurrency)} de garde`}
+          />
+          <AltMiniKpi
+            label="Capital assuré"
+            value={formatCurrency(summary?.totalInsuredValue ?? "0", baseCurrency)}
+            hint={
+              (summary?.underInsuredCount ?? 0) +
+                (summary?.uninsuredHighValueCount ?? 0) >
+              0
+                ? `${summary?.underInsuredCount ?? 0} sous-assuré(s) · ${summary?.uninsuredHighValueCount ?? 0} non assuré(s)`
+                : "Couverture déclarée"
+            }
           />
         </>
       }
@@ -853,7 +920,10 @@ export function AlternativesTangibles({
                         ))}
                       </select>
                     </AltField>
-                    <AltField label="Conservation">
+                    <AltField
+                      label="Type de cave"
+                      hint="Précision œnologique. Le mode de garde qui pilote les alertes se saisit à l’étape suivante."
+                    >
                       <select
                         className="input"
                         value={form.wineStorageType}
@@ -1078,6 +1148,7 @@ export function AlternativesTangibles({
                     inputMode="decimal"
                     value={form.appraisalValue}
                     onChange={(e) => set("appraisalValue", e.target.value)}
+                    data-testid="tangible-appraisal-value"
                   />
                 </AltField>
                 <AltField label="Date d’expertise">
@@ -1086,6 +1157,16 @@ export function AlternativesTangibles({
                     className="input"
                     value={form.appraisalDate}
                     onChange={(e) => set("appraisalDate", e.target.value)}
+                  />
+                </AltField>
+                <AltField
+                  label="Expert"
+                  hint="Notaire, assureur, expert indépendant, maison de vente."
+                >
+                  <input
+                    className="input"
+                    value={form.appraisalProvider}
+                    onChange={(e) => set("appraisalProvider", e.target.value)}
                   />
                 </AltField>
                 <AltField label="Lieu de conservation" hint="Coffre, domicile, cave…">
@@ -1137,13 +1218,91 @@ export function AlternativesTangibles({
                         onChange={(e) => set("insuranceProvider", e.target.value)}
                       />
                     </AltField>
-                    <AltField label="N° de police" className="sm:col-span-3">
+                    <AltField label="N° de police">
                       <input
                         className="input"
                         value={form.insurancePolicyRef}
                         onChange={(e) => set("insurancePolicyRef", e.target.value)}
                       />
                     </AltField>
+                    <AltField
+                      label="Type de contrat"
+                      hint="Une multirisque habitation plafonne les objets de valeur."
+                    >
+                      <select
+                        className="input"
+                        value={form.insuranceType}
+                        onChange={(e) => set("insuranceType", e.target.value)}
+                        data-testid="tangible-insurance-type"
+                      >
+                        <option value="">—</option>
+                        {INSURANCE_TYPES.map((t) => (
+                          <option key={t} value={t}>
+                            {INSURANCE_TYPE_LABELS[t]}
+                          </option>
+                        ))}
+                      </select>
+                    </AltField>
+                    <AltField
+                      label="Échéance de la police"
+                      hint="Rappel automatique 30 jours avant."
+                    >
+                      <input
+                        type="date"
+                        className="input"
+                        value={form.insuranceExpiryDate}
+                        onChange={(e) => set("insuranceExpiryDate", e.target.value)}
+                        data-testid="tangible-insurance-expiry"
+                      />
+                    </AltField>
+
+                    {coverage !== null && (
+                      <div
+                        className="sm:col-span-3"
+                        data-testid="tangible-coverage-bar"
+                      >
+                        <div className="flex items-baseline justify-between text-[11px]">
+                          <span className="text-slate-500">
+                            Couverture — {COVERAGE_LABEL[coverageStatus]}
+                          </span>
+                          <span className="font-medium tabular-nums">
+                            {(coverage * 100).toLocaleString("fr-FR", {
+                              maximumFractionDigits: 0,
+                            })}{" "}
+                            %
+                          </span>
+                        </div>
+                        {/* Barre bornée à 100 % pour ne pas déborder, mais le
+                            pourcentage réel reste lisible au-dessus. */}
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[var(--muted)]">
+                          <div
+                            className={cn(
+                              "h-full rounded-full transition-all",
+                              coverageStatus === "OK"
+                                ? "bg-emerald-500"
+                                : coverageStatus === "OVER"
+                                  ? "bg-sky-500"
+                                  : "bg-[var(--danger)]"
+                            )}
+                            style={{ width: `${Math.min(100, coverage * 100)}%` }}
+                          />
+                        </div>
+                        {num(form.appraisalValue) > 0 &&
+                          num(form.appraisalValue) !== num(form.insuranceValue) && (
+                            <button
+                              type="button"
+                              className="mt-1 text-[11px] font-medium text-[var(--primary)]"
+                              onClick={() =>
+                                set("insuranceValue", form.appraisalValue)
+                              }
+                              data-testid="tangible-align-insurance"
+                            >
+                              Aligner sur l’expertise (
+                              {formatCurrency(form.appraisalValue, form.currency)})
+                            </button>
+                          )}
+                      </div>
+                    )}
                   </div>
                 </fieldset>
 
@@ -1527,6 +1686,39 @@ export function AlternativesTangibles({
         </div>
       )}
 
+      {summary &&
+        summary.underInsuredCount +
+          summary.uninsuredHighValueCount +
+          summary.expiringPolicyCount >
+          0 && (
+          <div
+            className="mb-3 flex items-start gap-2 rounded-md border border-red-300/60 bg-red-50/50 px-3 py-2 text-xs text-red-900 dark:bg-red-950/25 dark:text-red-200"
+            data-testid="tangibles-insurance-warning"
+          >
+            <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>
+              {summary.uninsuredHighValueCount > 0 && (
+                <>
+                  <strong>{summary.uninsuredHighValueCount}</strong> objet(s) de
+                  plus de 5 000 € sans assurance.{" "}
+                </>
+              )}
+              {summary.underInsuredCount > 0 && (
+                <>
+                  <strong>{summary.underInsuredCount}</strong> couvert(s) à moins
+                  de 80 % de leur valeur.{" "}
+                </>
+              )}
+              {summary.expiringPolicyCount > 0 && (
+                <>
+                  <strong>{summary.expiringPolicyCount}</strong> police(s) échue(s)
+                  ou expirant sous 30 jours.
+                </>
+              )}
+            </span>
+          </div>
+        )}
+
       {summary && summary.ownershipAlertCount > 0 && (
         <div
           className="mb-3 flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
@@ -1594,17 +1786,28 @@ export function AlternativesTangibles({
                     setWizStep(0);
                     setShowForm(true);
                   }}
-                  onDelete={() => {
-                    if (confirm(`Supprimer « ${l.brandOrArtist} ${l.modelName} » ?`)) {
-                      delMut.mutate(l.id);
-                    }
-                  }}
+                  onDelete={() => setPendingDelete(l)}
                 />
               ))}
             </tbody>
           </table>
         </div>
       )}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Supprimer cet objet ?"
+        message={
+          pendingDelete
+            ? `« ${pendingDelete.brandOrArtist} ${pendingDelete.modelName} » sera retiré de l'inventaire. Son historique fiscal et ses frais de détention seront perdus.`
+            : ""
+        }
+        onConfirm={() => {
+          if (pendingDelete) delMut.mutate(pendingDelete.id);
+          setPendingDelete(null);
+        }}
+        onCancel={() => setPendingDelete(null)}
+        testId="tangible-delete-confirm"
+      />
     </AltModuleShell>
   );
 }
@@ -1696,6 +1899,7 @@ function TangibleRow({
                 aria-label={`Coût de possession : ${line.ownership.annualCostEur} € par an`}
               />
             )}
+            <InsuranceBadge line={line} />
             {line.ownership.alerts.length > 0 && (
               <AlertTriangle
                 className="h-3 w-3 text-amber-500"
@@ -1802,6 +2006,45 @@ function TangibleRow({
   );
 }
 
+/**
+ * Pastille de couverture.
+ *
+ * Trois couleurs seulement : ce qui va, ce qui coûterait cher en cas de
+ * sinistre, et ce qui coûte cher tout de suite. Le détail chiffré est dans
+ * l'infobulle et dans la ligne dépliée.
+ */
+function InsuranceBadge({ line }: { line: TangibleAssetDto }) {
+  const status = line.ownership.insuranceStatus as InsuranceStatus;
+  if (status === "NONE") return null;
+
+  const tone =
+    status === "OK"
+      ? "bg-emerald-500"
+      : status === "OVER"
+        ? "bg-sky-500"
+        : status === "EXPIRING"
+          ? "bg-amber-500"
+          : "bg-[var(--danger)]";
+
+  const ratio = line.ownership.coverageRatio;
+  return (
+    <span
+      data-testid="tangible-insurance-badge"
+      data-status={status}
+      className={cn("inline-block h-2 w-2 rounded-full", tone)}
+      title={`${INSURANCE_STATUS_LABELS[status]}${
+        ratio !== null
+          ? ` — ${(ratio * 100).toLocaleString("fr-FR", { maximumFractionDigits: 0 })} % de la valeur`
+          : ""
+      }${
+        line.insuranceExpiryDate
+          ? ` · échéance ${new Date(line.insuranceExpiryDate).toLocaleDateString("fr-FR")}`
+          : ""
+      }`}
+    />
+  );
+}
+
 function TaxBadge({ line }: { line: TangibleAssetDto }) {
   if (line.tax.exempt) {
     return (
@@ -1883,7 +2126,7 @@ function detailRows(line: TangibleAssetDto): [string, string][] {
   push("Format", line.wineBottleFormat ? WINE_BOTTLE_FORMAT_LABELS[
     line.wineBottleFormat as keyof typeof WINE_BOTTLE_FORMAT_LABELS
   ] : null);
-  push("Conservation", line.wineStorageType ? WINE_STORAGE_TYPE_LABELS[
+  push("Type de cave", line.wineStorageType ? WINE_STORAGE_TYPE_LABELS[
     line.wineStorageType as keyof typeof WINE_STORAGE_TYPE_LABELS
   ] : null);
 
@@ -1953,6 +2196,27 @@ function detailRows(line: TangibleAssetDto): [string, string][] {
   );
   push("Assureur", line.insuranceProvider);
   push("N° de police", line.insurancePolicyRef);
+  push(
+    "Type de contrat",
+    line.insuranceType
+      ? INSURANCE_TYPE_LABELS[line.insuranceType as keyof typeof INSURANCE_TYPE_LABELS]
+      : null
+  );
+  push(
+    "Échéance de police",
+    line.insuranceExpiryDate
+      ? new Date(line.insuranceExpiryDate).toLocaleDateString("fr-FR")
+      : null
+  );
+  push(
+    "Couverture",
+    line.ownership.coverageRatio !== null
+      ? `${(line.ownership.coverageRatio * 100).toLocaleString("fr-FR", {
+          maximumFractionDigits: 0,
+        })} % — ${INSURANCE_STATUS_LABELS[line.ownership.insuranceStatus as InsuranceStatus]}`
+      : null
+  );
+  push("Expert", line.appraisalProvider);
   push(
     "Coût de possession",
     Number(line.ownership.annualCostEur) > 0

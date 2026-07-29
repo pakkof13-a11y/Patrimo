@@ -6,6 +6,7 @@ import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchJson } from "@/app/lib/api-client";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn, formatCurrency, getChangeColor } from "@/app/lib/utils";
 import {
   AltEmptyState,
@@ -165,6 +166,12 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [showSaleForm, setShowSaleForm] = useState(false);
+  // Suppressions en attente de confirmation — modale partagée plutôt que
+  // `window.confirm()`, pour la cohérence visuelle et la testabilité.
+  const [pendingLotDelete, setPendingLotDelete] = useState<PreciousMetalDto | null>(
+    null
+  );
+  const [pendingSaleDelete, setPendingSaleDelete] = useState<SaleDto | null>(null);
   const [saleForm, setSaleForm] = useState<SaleFormState>(emptySaleForm);
 
   const q = useQuery({
@@ -931,11 +938,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                             size="sm"
                             variant="ghost"
                             className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
-                            onClick={() => {
-                              if (confirm(`Supprimer « ${l.denomination} » ?`)) {
-                                delMut.mutate(l.id);
-                              }
-                            }}
+                            onClick={() => setPendingLotDelete(l)}
                             aria-label="Supprimer"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -963,10 +966,41 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
           simulation={simulation}
           pending={saleMut.isPending}
           onSubmit={() => saleMut.mutate()}
-          onDelete={(id) => delSaleMut.mutate(id)}
+          onDelete={(sale) => setPendingSaleDelete(sale)}
           onCreateLot={startCreate}
         />
       )}
+      <ConfirmDialog
+        open={pendingLotDelete !== null}
+        title="Supprimer ce lot ?"
+        message={
+          pendingLotDelete
+            ? `« ${pendingLotDelete.denomination} » sera retiré. Les cessions déjà enregistrées sur ce lot sont conservées : l'historique fiscal reste complet.`
+            : ""
+        }
+        onConfirm={() => {
+          if (pendingLotDelete) delMut.mutate(pendingLotDelete.id);
+          setPendingLotDelete(null);
+        }}
+        onCancel={() => setPendingLotDelete(null)}
+        testId="metals-delete-confirm"
+      />
+
+      <ConfirmDialog
+        open={pendingSaleDelete !== null}
+        title="Supprimer cette cession ?"
+        message={
+          pendingSaleDelete
+            ? `La vente de « ${pendingSaleDelete.denomination} » sortira du récapitulatif fiscal de l'année. Le stock du lot n'est pas rétabli pour autant.`
+            : ""
+        }
+        onConfirm={() => {
+          if (pendingSaleDelete) delSaleMut.mutate(pendingSaleDelete.id);
+          setPendingSaleDelete(null);
+        }}
+        onCancel={() => setPendingSaleDelete(null)}
+        testId="metals-sale-delete-confirm"
+      />
     </AltModuleShell>
   );
 }
@@ -999,7 +1033,7 @@ function MetalsSalesView({
   simulation: SaleTax | null;
   pending: boolean;
   onSubmit: () => void;
-  onDelete: (id: string) => void;
+  onDelete: (sale: SaleDto) => void;
   onCreateLot: () => void;
 }) {
   if (allLots.length === 0 && sales.length === 0) {
@@ -1242,11 +1276,7 @@ function MetalsSalesView({
                         size="sm"
                         variant="ghost"
                         className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
-                        onClick={() => {
-                          if (confirm(`Supprimer la cession « ${s.denomination} » ?`)) {
-                            onDelete(s.id);
-                          }
-                        }}
+                        onClick={() => onDelete(s)}
                         aria-label="Supprimer"
                       >
                         <Trash2 className="h-3.5 w-3.5" />

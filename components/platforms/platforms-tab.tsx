@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   Eye,
   GitMerge,
@@ -40,7 +46,12 @@ import {
   type PlatformSortMode,
 } from "@/app/lib/platforms/sort";
 import { summarizePlatforms } from "@/app/lib/platforms/summary";
-import { loadUiPref, saveUiPref } from "@/app/lib/ui-preferences";
+import {
+  loadUiPref,
+  notifyUiPrefsChanged,
+  saveUiPref,
+  subscribeUiPrefs,
+} from "@/app/lib/ui-preferences";
 
 type PlatformsViewMode = "cards" | "list";
 const VIEW_MODE_KEY = "platformsViewMode";
@@ -140,15 +151,22 @@ export function PlatformsTab({
 }) {
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [sortMode, setSortMode] = useState<PlatformSortMode>("value");
-  const [viewMode, setViewMode] = useState<PlatformsViewMode>("cards");
-  useEffect(() => {
-    setViewMode(
-      loadUiPref<PlatformsViewMode>(VIEW_MODE_KEY, "cards")
-    );
-  }, []);
+  /**
+   * Mode d'affichage, lu depuis les préférences locales.
+   *
+   * `useSyncExternalStore` plutôt qu'un `setState` dans un effet : le
+   * localStorage est une source externe, et l'écrire dans l'état après le
+   * premier rendu déclenchait un second rendu en cascade. Le snapshot serveur
+   * renvoie la valeur par défaut, ce qui garde l'hydratation cohérente.
+   */
+  const viewMode = useSyncExternalStore(
+    subscribeUiPrefs,
+    () => loadUiPref<PlatformsViewMode>(VIEW_MODE_KEY, "cards"),
+    () => "cards" as PlatformsViewMode
+  );
   function changeViewMode(next: PlatformsViewMode) {
-    setViewMode(next);
     saveUiPref(VIEW_MODE_KEY, next);
+    notifyUiPrefsChanged();
   }
   const [search, setSearch] = useState("");
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);

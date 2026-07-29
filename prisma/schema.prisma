@@ -1095,6 +1095,8 @@ model TangibleAsset {
   /// Valeur d'expertise (notaire, assureur) — distincte de la valeur de marché
   appraisalValue  Decimal? @db.Decimal(28, 12)
   appraisalDate   DateTime?
+  /// Notaire, assureur, expert indépendant, maison de vente
+  appraisalProvider String?
   /// Valeur assurée, souvent supérieure à l'estimation de revente
   insuranceValue  Decimal? @db.Decimal(28, 12)
   storageLocation String?
@@ -1105,6 +1107,14 @@ model TangibleAsset {
   insurancePremiumAnnual Decimal? @db.Decimal(28, 12)
   insuranceProvider      String?
   insurancePolicyRef     String?
+  /// Échéance de la police — distincte de l'échéance du contrat de garde.
+  insuranceExpiryDate    DateTime?
+  /// MULTI_RISK | FINE_ART | JEWELRY | WATCH | OTHER
+  ///
+  /// La multirisque habitation plafonne généralement les objets de valeur à
+  /// quelques milliers d'euros : le type retenu dit si la couverture affichée
+  /// est réellement acquise.
+  insuranceType          String?
 
   // ── Garde / conservation ───────────────────────────────────────────────────
   /// HOME | BANK_VAULT | PRO_VAULT | THIRD_PARTY

@@ -1408,9 +1408,14 @@ export async function seedUserPortfolio(
         storageType: "BANK_VAULT",
         storageCostAnnual: D("180"),
         storageProvider: "Coffre BNP",
-        storageRenewalDate: new Date("2026-09-15"),
+        // Dates relatives : une date fixe change de sens en vieillissant, et
+        // le seed cesserait d'illustrer le cas qu'il est censé montrer.
+        storageRenewalDate: daysAgo(-300),
         insurancePremiumAnnual: D("120"),
         insuranceProvider: "AXA Objets de valeur",
+        insurancePolicyRef: "AXA-OV-2019-8841",
+        insuranceType: "WATCH",
+        insuranceExpiryDate: daysAgo(-20),
         notes: note("Montre"),
       },
       {
@@ -1448,6 +1453,7 @@ export async function seedUserPortfolio(
         acquisitionFees: D("120"),
         appraisalValue: D("2500"),
         appraisalDate: new Date("2025-09-10"),
+        appraisalProvider: "Galerie",
         // Conservée au domicile sans prime : l'alerte ne se déclenche pas,
         // la valeur restant sous le seuil de 5 000 €.
         storageType: "HOME",
@@ -1481,15 +1487,21 @@ export async function seedUserPortfolio(
         gemColor: "F",
         gemCut: "ROUND",
         gemTreatment: "NONE",
-        insuranceValue: D("11000"),
         storageLocation: "Coffre banque",
         // Garde chère au regard de la valeur : 1,6 %/an déclenche l'alerte.
         storageType: "PRO_VAULT",
         storageCostAnnual: D("150"),
         storageProvider: "Brink's",
         storageContractRef: "BR-2012-4471",
-        storageRenewalDate: new Date("2026-08-10"),
+        storageRenewalDate: daysAgo(-45),
+        // Assuré 6 000 € pour 9 200 € de valeur : sous-assurance de 35 %.
         insurancePremiumAnnual: D("95"),
+        insuranceValue: D("6000"),
+        insuranceType: "JEWELRY",
+        insuranceExpiryDate: daysAgo(-500),
+        appraisalValue: D("9000"),
+        appraisalDate: new Date("2018-05-12"),
+        appraisalProvider: "Expert indépendant",
         notes: note("Bijou"),
       },
       {

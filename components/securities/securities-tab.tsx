@@ -15,6 +15,7 @@ import { fetchJson } from "@/app/lib/api-client";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import { d } from "@/app/lib/money/decimal";
 import {
@@ -192,6 +193,9 @@ type ContributionRow = {
  */
 function ContributionHistory({ accountId }: { accountId: string }) {
   const qc = useQueryClient();
+  // Modale partagée plutôt que `window.confirm()` : même surface que le reste
+  // du dépôt, et pilotable depuis un test.
+  const [pending, setPending] = useState<ContributionRow | null>(null);
   const q = useQuery({
     queryKey: ["securities-contributions", accountId],
     queryFn: () =>
@@ -230,10 +234,11 @@ function ContributionHistory({ accountId }: { accountId: string }) {
   }
 
   return (
-    <ul
-      className="mt-2 divide-y divide-[var(--border)] rounded-md border border-[var(--border)]"
-      data-testid="securities-contributions-list"
-    >
+    <>
+      <ul
+        className="mt-2 divide-y divide-[var(--border)] rounded-md border border-[var(--border)]"
+        data-testid="securities-contributions-list"
+      >
       {rows.map((c) => (
         <li
           key={c.id}
@@ -255,15 +260,7 @@ function ContributionHistory({ accountId }: { accountId: string }) {
             variant="ghost"
             className="!h-6 !w-6 !px-0 text-slate-400 hover:text-red-600"
             disabled={remove.isPending}
-            onClick={() => {
-              if (
-                confirm(
-                  `Supprimer ce mouvement de ${formatCurrency(c.amountEur, "EUR")} ? Le plafond de versement sera recalculé.`
-                )
-              ) {
-                remove.mutate(c.id);
-              }
-            }}
+            onClick={() => setPending(c)}
             aria-label="Supprimer le versement"
             data-testid="securities-contribution-delete"
           >
@@ -271,7 +268,23 @@ function ContributionHistory({ accountId }: { accountId: string }) {
           </Button>
         </li>
       ))}
-    </ul>
+      </ul>
+      <ConfirmDialog
+        open={pending !== null}
+        title="Supprimer ce mouvement ?"
+        message={
+          pending
+            ? `Le versement de ${formatCurrency(pending.amountEur, "EUR")} du ${new Date(pending.occurredAt).toLocaleDateString("fr-FR")} sera retiré, et le plafond recalculé.`
+            : ""
+        }
+        onConfirm={() => {
+          if (pending) remove.mutate(pending.id);
+          setPending(null);
+        }}
+        onCancel={() => setPending(null)}
+        testId="securities-contribution-delete-confirm"
+      />
+    </>
   );
 }
 

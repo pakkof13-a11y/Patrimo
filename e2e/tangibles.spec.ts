@@ -106,6 +106,80 @@ test.describe("Tangibles & collection", () => {
     await expect(sim).toContainText("1 950,00");
   });
 
+  test("classe la couverture d'assurance et chiffre le reste à charge", async ({
+    page,
+    request,
+  }) => {
+    const body = await (await request.get("/api/tangibles")).json();
+    const under = (body.lines ?? []).find(
+      (l: { ownership: { insuranceStatus: string } }) =>
+        l.ownership.insuranceStatus === "UNDER"
+    );
+    test.skip(!under, "Pas d'objet sous-assuré dans le seed");
+
+    // Le seed couvre le solitaire à 6 000 € pour 9 200 € de valeur.
+    expect(under.ownership.coverageRatio).toBeLessThan(0.8);
+    const alert = under.ownership.alerts.find(
+      (a: { code: string }) => a.code === "UNDER_INSURED"
+    );
+    expect(alert).toBeDefined();
+
+    await expect(page.getByTestId("tangibles-insurance-warning")).toBeVisible();
+
+    // La pastille porte le statut, lisible sans déplier la ligne.
+    const badges = page.getByTestId("tangible-insurance-badge");
+    await expect(badges.first()).toBeVisible();
+  });
+
+  test("l'assurance non déclarée n'est pas comptée comme une sous-assurance", async ({
+    request,
+  }) => {
+    const body = await (await request.get("/api/tangibles")).json();
+    const uninsured = (body.lines ?? []).filter(
+      (l: { ownership: { insuranceStatus: string } }) =>
+        l.ownership.insuranceStatus === "NONE"
+    );
+    test.skip(uninsured.length === 0, "Pas d'objet non assuré dans le seed");
+
+    // Un ratio nul se lirait « sous-assuré » : le statut doit rester NONE et
+    // le ratio absent plutôt que zéro.
+    for (const line of uninsured) {
+      expect(line.ownership.coverageRatio).toBeNull();
+      expect(
+        line.ownership.alerts.some(
+          (a: { code: string }) => a.code === "UNDER_INSURED"
+        )
+      ).toBe(false);
+    }
+  });
+
+  test("aligne le capital assuré sur l'expertise depuis le formulaire", async ({
+    page,
+  }) => {
+    await page.getByTestId("tangible-add").click();
+    await page.getByTestId("tangible-category").selectOption("ART");
+    await page.getByTestId("tangible-brand").fill("Probe couverture");
+    await page.getByTestId("tangible-model").fill("Probe");
+    for (let i = 0; i < 3; i += 1) {
+      await page.getByRole("button", { name: /suivant/i }).click();
+    }
+    await page.getByTestId("tangible-estimated-value").fill("20000");
+    await page.getByTestId("tangible-appraisal-value").fill("19000");
+    await page.getByTestId("tangible-insurance-value").fill("10000");
+
+    // Sous-assuré : la barre le dit avant même d'enregistrer.
+    const bar = page.getByTestId("tangible-coverage-bar");
+    await expect(bar).toBeVisible();
+    await expect(bar).toContainText("50");
+    await expect(bar).toContainText(/sous-assuré/i);
+
+    // L'expertise sert de proposition : un clic aligne le capital et la
+    // couverture repasse au vert sans ressaisie.
+    await page.getByTestId("tangible-align-insurance").click();
+    await expect(page.getByTestId("tangible-insurance-value")).toHaveValue("19000");
+    await expect(bar).toContainText(/couverture adéquate/i);
+  });
+
   test("crée un objet et déplie ses détails spécifiques", async ({ page }) => {
     await page.getByTestId("tangible-add").click();
     await page.getByTestId("tangible-category").selectOption("GEMSTONE");

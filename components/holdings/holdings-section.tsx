@@ -1327,10 +1327,14 @@ export function HoldingsSection({
                       aria-label="Tout sélectionner"
                       data-testid="holdings-select-all"
                       onChange={() => {
-                        setSelectedIds((prev) => {
-                          if (allFilteredSelected) return new Set();
-                          return new Set(filteredHoldings.map((h) => h.assetId));
-                        });
+                        // La nouvelle sélection ne dépend pas de l'ancienne :
+                        // tout cocher ou tout décocher se décide sur l'état
+                        // courant du filtre, pas sur la sélection précédente.
+                        setSelectedIds(
+                          allFilteredSelected
+                            ? new Set()
+                            : new Set(filteredHoldings.map((h) => h.assetId))
+                        );
                       }}
                     />
                   </th>

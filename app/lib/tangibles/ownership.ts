@@ -135,10 +135,128 @@ export function netCarryYield(input: CarryYieldInput): CarryYield {
   };
 }
 
+// ─── Couverture d'assurance ─────────────────────────────────────────────────
+
+export const INSURANCE_TYPES = [
+  "MULTI_RISK",
+  "FINE_ART",
+  "JEWELRY",
+  "WATCH",
+  "OTHER",
+] as const;
+export type InsuranceType = (typeof INSURANCE_TYPES)[number];
+
+export const INSURANCE_TYPE_LABELS: Record<InsuranceType, string> = {
+  MULTI_RISK: "Multirisque habitation",
+  FINE_ART: "Objets d'art",
+  JEWELRY: "Bijoux & pierres",
+  WATCH: "Horlogerie",
+  OTHER: "Autre",
+};
+
+/**
+ * Contrats qui ne couvrent pas spécifiquement les objets de valeur.
+ *
+ * Une multirisque habitation plafonne le poste « objets précieux » à quelques
+ * milliers d'euros, souvent 5 à 10 % du mobilier assuré : déclarer 30 000 € de
+ * capital sur une MRH ne garantit pas 30 000 €. Le module ne connaît pas le
+ * plafond du contrat, mais il peut au moins signaler la situation.
+ */
+export const NON_SPECIFIC_INSURANCE_TYPES: readonly InsuranceType[] = ["MULTI_RISK"];
+
+/** En dessous, la couverture est jugée insuffisante. */
+export const UNDER_INSURED_RATIO = "0.8";
+/** Au-dessus, on paie une prime pour une valeur qu'on ne récupérera pas. */
+export const OVER_INSURED_RATIO = "1.2";
+/** Préavis d'échéance de police. */
+export const POLICY_NOTICE_DAYS = 30;
+/** Au-delà, une expertise ne reflète plus le marché. */
+export const STALE_APPRAISAL_YEARS = 5;
+
+export const INSURANCE_STATUSES = [
+  "NONE",
+  "EXPIRED",
+  "EXPIRING",
+  "UNDER",
+  "OVER",
+  "OK",
+] as const;
+export type InsuranceStatus = (typeof INSURANCE_STATUSES)[number];
+
+export const INSURANCE_STATUS_LABELS: Record<InsuranceStatus, string> = {
+  NONE: "Non assuré",
+  EXPIRED: "Police échue",
+  EXPIRING: "Police à renouveler",
+  UNDER: "Sous-assuré",
+  OVER: "Sur-assuré",
+  OK: "Couverture adéquate",
+};
+
+/**
+ * Rapport entre capital assuré et valeur estimée.
+ *
+ * `null` quand l'un des deux manque : un ratio calculé sur une valeur absente
+ * vaudrait zéro et se lirait « sous-assuré », alors qu'on ne sait rien.
+ */
+export function coverageRatio(
+  estimatedValue: DecimalInput,
+  insuranceValue: DecimalInput | null | undefined
+): Decimal | null {
+  if (insuranceValue === null || insuranceValue === undefined) return null;
+  const value = d(estimatedValue);
+  if (value.lte(0)) return null;
+  return d(insuranceValue).div(value);
+}
+
+export function isUnderInsured(ratio: Decimal): boolean {
+  return ratio.lt(UNDER_INSURED_RATIO);
+}
+
+export function isOverInsured(ratio: Decimal): boolean {
+  return ratio.gt(OVER_INSURED_RATIO);
+}
+
+export type InsuranceStatusInput = {
+  estimatedValue: DecimalInput;
+  insuranceValue?: DecimalInput | null;
+  insuranceExpiryDate?: Date | string | null;
+  now?: Date;
+};
+
+/**
+ * Statut de couverture, du plus grave au plus anodin.
+ *
+ * L'ordre compte : une police échue ne couvre rien, quel que soit son capital.
+ * Annoncer « sous-assuré » sur un contrat expiré laisserait croire qu'il suffit
+ * d'augmenter le capital.
+ */
+export function insuranceStatus(input: InsuranceStatusInput): InsuranceStatus {
+  const ratio = coverageRatio(input.estimatedValue, input.insuranceValue);
+  if (ratio === null || d(input.insuranceValue ?? 0).lte(0)) return "NONE";
+
+  const now = input.now ?? new Date();
+  const expiry = toDate(input.insuranceExpiryDate);
+  if (expiry) {
+    const days = daysUntil(expiry, now);
+    if (days < 0) return "EXPIRED";
+    if (days <= POLICY_NOTICE_DAYS) return "EXPIRING";
+  }
+
+  if (isUnderInsured(ratio)) return "UNDER";
+  if (isOverInsured(ratio)) return "OVER";
+  return "OK";
+}
+
 export const OWNERSHIP_ALERTS = [
+  "POLICY_EXPIRED",
+  "UNDER_INSURED",
+  "UNINSURED_AT_HOME",
+  "POLICY_EXPIRING",
   "HIGH_CUSTODY_COST",
   "RENEWAL_DUE",
-  "UNINSURED_AT_HOME",
+  "NON_SPECIFIC_COVER",
+  "STALE_APPRAISAL",
+  "OVER_INSURED",
   "CARRY_EXCEEDS_GAIN",
 ] as const;
 export type OwnershipAlertCode = (typeof OWNERSHIP_ALERTS)[number];
@@ -152,6 +270,10 @@ export type AlertInput = {
   estimatedValue: DecimalInput;
   storageCostAnnual?: DecimalInput | null;
   insurancePremiumAnnual?: DecimalInput | null;
+  insuranceValue?: DecimalInput | null;
+  insuranceExpiryDate?: Date | string | null;
+  insuranceType?: string | null;
+  appraisalDate?: Date | string | null;
   storageType?: string | null;
   storageRenewalDate?: Date | string | null;
   /** Cumul du portage, tel que renvoyé par `netCarryYield`. */
@@ -197,6 +319,74 @@ export function ownershipAlerts(input: AlertInput): OwnershipAlert[] {
   const value = d(input.estimatedValue);
   const storage = d(input.storageCostAnnual ?? 0);
   const premium = d(input.insurancePremiumAnnual ?? 0);
+
+  const insured = d(input.insuranceValue ?? 0);
+  const ratio = coverageRatio(input.estimatedValue, input.insuranceValue);
+
+  // Police d'abord : échue, elle ne couvre rien, et signaler autre chose
+  // laisserait croire qu'ajuster le capital suffirait.
+  const policyExpiry = toDate(input.insuranceExpiryDate);
+  if (policyExpiry && insured.gt(0)) {
+    const days = daysUntil(policyExpiry, now);
+    if (days < 0) {
+      alerts.push({
+        code: "POLICY_EXPIRED",
+        message: `Police d'assurance échue depuis ${Math.abs(days)} jour(s) : l'objet n'est plus couvert.`,
+      });
+    } else if (days <= POLICY_NOTICE_DAYS) {
+      alerts.push({
+        code: "POLICY_EXPIRING",
+        message: `Police d'assurance à renouveler dans ${days} jour(s).`,
+      });
+    }
+  }
+
+  if (ratio !== null && insured.gt(0) && isUnderInsured(ratio)) {
+    alerts.push({
+      code: "UNDER_INSURED",
+      message: `Couverture à ${ratio.times(100).toFixed(0)} % de la valeur : ${eur(
+        d(input.estimatedValue).minus(insured)
+      )} resteraient à votre charge.`,
+    });
+  }
+
+  if (ratio !== null && isOverInsured(ratio)) {
+    // L'indemnisation ne dépasse pas la valeur réelle du bien : la fraction
+    // au-delà est une prime payée pour rien.
+    alerts.push({
+      code: "OVER_INSURED",
+      message: `Capital assuré à ${ratio.times(100).toFixed(0)} % de la valeur : prime payée sur ${eur(
+        insured.minus(d(input.estimatedValue))
+      )} non indemnisables.`,
+    });
+  }
+
+  if (
+    insured.gt(0) &&
+    input.insuranceType !== null &&
+    input.insuranceType !== undefined &&
+    (NON_SPECIFIC_INSURANCE_TYPES as readonly string[]).includes(input.insuranceType) &&
+    d(input.estimatedValue).gte(HIGH_VALUE_UNINSURED_EUR)
+  ) {
+    alerts.push({
+      code: "NON_SPECIFIC_COVER",
+      message:
+        "Couvert par une multirisque habitation : le poste « objets de valeur » y est plafonné, vérifiez que le capital est réellement garanti.",
+    });
+  }
+
+  // Une expertise ancienne ne dit plus rien du marché, et c'est sur elle que
+  // repose le capital assuré.
+  const appraisal = toDate(input.appraisalDate);
+  if (appraisal) {
+    const age = now.getUTCFullYear() - appraisal.getUTCFullYear();
+    if (age >= STALE_APPRAISAL_YEARS) {
+      alerts.push({
+        code: "STALE_APPRAISAL",
+        message: `Dernière expertise il y a ${age} ans : à renouveler pour ajuster la couverture.`,
+      });
+    }
+  }
 
   const renewal = toDate(input.storageRenewalDate);
   if (renewal) {
@@ -250,5 +440,12 @@ export function ownershipAlerts(input: AlertInput): OwnershipAlert[] {
     }
   }
 
-  return alerts;
+  // Ordre de gravité plutôt qu'ordre de calcul : la première alerte lue doit
+  // être celle qui coûte le plus cher si on l'ignore.
+  const severity = new Map<OwnershipAlertCode, number>(
+    OWNERSHIP_ALERTS.map((code, index) => [code, index])
+  );
+  return alerts.sort(
+    (a, b) => (severity.get(a.code) ?? 99) - (severity.get(b.code) ?? 99)
+  );
 }

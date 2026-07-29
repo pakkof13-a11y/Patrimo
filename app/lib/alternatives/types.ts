@@ -134,6 +134,7 @@ export type TangibleAssetDto = {
   // Valorisation & conservation
   appraisalValue: string | null;
   appraisalDate: string | null;
+  appraisalProvider: string | null;
   insuranceValue: string | null;
   storageLocation: string | null;
   isCollectible: boolean;
@@ -167,6 +168,8 @@ export type TangibleAssetDto = {
   insurancePremiumAnnual: string | null;
   insuranceProvider: string | null;
   insurancePolicyRef: string | null;
+  insuranceExpiryDate: string | null;
+  insuranceType: string | null;
   storageType: string | null;
   storageCostAnnual: string | null;
   storageProvider: string | null;
@@ -200,6 +203,11 @@ export type TangibleOwnership = {
   netPnlPct: string | null;
   /** Part du gain brut absorbée par les frais, en %. */
   carryDragPct: string | null;
+  /** Capital assuré ÷ valeur estimée — `null` sans assurance déclarée. */
+  coverageRatio: number | null;
+  /** NONE | EXPIRED | EXPIRING | UNDER | OVER | OK */
+  insuranceStatus: string;
+  /** Alertes triées par gravité décroissante. */
   alerts: { code: string; message: string }[];
 };
 
@@ -243,7 +251,7 @@ export type TangibleAssetsSummary = {
   totalPnlPct: number;
   lineCount: number;
   byCategory: { name: string; value: number }[];
-  /** Valeur assurée déclarée, à comparer à l'estimation de marché. */
+  /** Somme des capitaux assurés déclarés, à comparer à la valeur estimée. */
   totalInsuredValue: string;
   /** Somme des impôts simulés — projection, jamais une dette exigible. */
   estimatedTaxBurden: string;
@@ -257,6 +265,12 @@ export type TangibleAssetsSummary = {
   withPurchaseProofCount: number;
   /** Lignes exonérées par la seule durée de détention (22 ans). */
   fullyExemptCount: number;
+  /** Objets couverts à moins de 80 % de leur valeur. */
+  underInsuredCount: number;
+  /** Objets de plus de 5 000 € sans aucune assurance. */
+  uninsuredHighValueCount: number;
+  /** Polices échues ou expirant sous 30 jours. */
+  expiringPolicyCount: number;
   /** Somme des frais de garde annuels déclarés. */
   totalAnnualCustodyCost: string;
   /** Coût de possession annuel : primes d'assurance + garde. */

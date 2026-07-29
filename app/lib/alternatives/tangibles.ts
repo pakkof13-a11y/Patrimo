@@ -36,6 +36,10 @@ import {
 } from "@/app/lib/tax/movable-assets";
 import {
   annualCostOfOwnership,
+  coverageRatio,
+  HIGH_VALUE_UNINSURED_EUR,
+  insuranceStatus,
+  INSURANCE_TYPES,
   netCarryYield,
   ownershipAlerts,
   STORAGE_TYPES,
@@ -84,6 +88,11 @@ function parseDate(value: string | Date | null | undefined): Date | null {
   if (!value) return null;
   const parsed = value instanceof Date ? value : new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function normalizeInsuranceType(raw: string | undefined | null): string | null {
+  const value = String(raw ?? "").toUpperCase();
+  return (INSURANCE_TYPES as readonly string[]).includes(value) ? value : null;
 }
 
 function normalizeStorageType(raw: string | undefined | null): string | null {
@@ -168,16 +177,31 @@ function ownershipView(row: Row, holdingYears: number | null): TangibleOwnership
     annualCost,
   });
 
+  const ratio = coverageRatio(
+    row.estimatedValue.toString(),
+    row.insuranceValue?.toString() ?? null
+  );
+
   return {
     annualCostEur: annualCost.toFixed(2),
     totalCarryCostEur: carry.totalCarryCostEur,
     netPnlEur: carry.netPnlEur,
     netPnlPct: carry.netPnlPct,
     carryDragPct: carry.carryDragPct,
+    coverageRatio: ratio ? Number(ratio.toFixed(4)) : null,
+    insuranceStatus: insuranceStatus({
+      estimatedValue: row.estimatedValue.toString(),
+      insuranceValue: row.insuranceValue?.toString() ?? null,
+      insuranceExpiryDate: row.insuranceExpiryDate,
+    }),
     alerts: ownershipAlerts({
       estimatedValue: row.estimatedValue.toString(),
       storageCostAnnual: row.storageCostAnnual?.toString() ?? null,
       insurancePremiumAnnual: row.insurancePremiumAnnual?.toString() ?? null,
+      insuranceValue: row.insuranceValue?.toString() ?? null,
+      insuranceExpiryDate: row.insuranceExpiryDate,
+      insuranceType: row.insuranceType,
+      appraisalDate: row.appraisalDate,
       storageType: row.storageType,
       storageRenewalDate: row.storageRenewalDate,
       totalCarryCostEur: carry.totalCarryCostEur,
@@ -218,6 +242,7 @@ function mapRow(row: Row): TangibleAssetDto {
 
     appraisalValue: row.appraisalValue?.toString() ?? null,
     appraisalDate: row.appraisalDate?.toISOString() ?? null,
+    appraisalProvider: row.appraisalProvider,
     insuranceValue: row.insuranceValue?.toString() ?? null,
     storageLocation: row.storageLocation,
     isCollectible: row.isCollectible,
@@ -249,6 +274,8 @@ function mapRow(row: Row): TangibleAssetDto {
     insurancePremiumAnnual: row.insurancePremiumAnnual?.toString() ?? null,
     insuranceProvider: row.insuranceProvider,
     insurancePolicyRef: row.insurancePolicyRef,
+    insuranceExpiryDate: row.insuranceExpiryDate?.toISOString() ?? null,
+    insuranceType: row.insuranceType,
     storageType: row.storageType,
     storageCostAnnual: row.storageCostAnnual?.toString() ?? null,
     storageProvider: row.storageProvider,
@@ -275,6 +302,9 @@ export function summarizeTangibles(
   let withAppraisalCount = 0;
   let undatedCount = 0;
   let withPurchaseProofCount = 0;
+  let underInsuredCount = 0;
+  let uninsuredHighValueCount = 0;
+  let expiringPolicyCount = 0;
   let fullyExemptCount = 0;
   let custodyCost = d(0);
   let ownershipCost = d(0);
@@ -293,6 +323,20 @@ export function summarizeTangibles(
     if (line.appraisalValue !== null) withAppraisalCount += 1;
     if (!line.purchaseDate) undatedCount += 1;
     if (line.hasPurchaseProof) withPurchaseProofCount += 1;
+    if (line.ownership.insuranceStatus === "UNDER") underInsuredCount += 1;
+    if (
+      line.ownership.insuranceStatus === "EXPIRED" ||
+      line.ownership.insuranceStatus === "EXPIRING"
+    ) {
+      expiringPolicyCount += 1;
+    }
+    // Non assuré **et** au-dessus du seuil qui rend l'omission coûteuse.
+    if (
+      line.ownership.insuranceStatus === "NONE" &&
+      d(line.estimatedValue).gte(HIGH_VALUE_UNINSURED_EUR)
+    ) {
+      uninsuredHighValueCount += 1;
+    }
     // « Pleinement exonéré » au sens de la durée : 22 ans révolus. Distinct
     // de `exemptCount`, qui inclut le seuil des 5 000 € et les véhicules.
     if (line.tax.exemptionReason === "HOLDING_PERIOD") fullyExemptCount += 1;
@@ -334,6 +378,9 @@ export function summarizeTangibles(
     undatedCount,
     withPurchaseProofCount,
     fullyExemptCount,
+    underInsuredCount,
+    uninsuredHighValueCount,
+    expiringPolicyCount,
     totalAnnualCustodyCost: custodyCost.toFixed(2),
     totalAnnualOwnershipCost: ownershipCost.toFixed(2),
     highCustodyCostCount,
@@ -371,6 +418,7 @@ export type TangibleInput = {
 
   appraisalValue?: string | number | null;
   appraisalDate?: string | null;
+  appraisalProvider?: string | null;
   insuranceValue?: string | number | null;
   storageLocation?: string | null;
   isCollectible?: boolean;
@@ -378,6 +426,8 @@ export type TangibleInput = {
   insurancePremiumAnnual?: string | number | null;
   insuranceProvider?: string | null;
   insurancePolicyRef?: string | null;
+  insuranceExpiryDate?: string | null;
+  insuranceType?: string | null;
   storageType?: string | null;
   storageCostAnnual?: string | number | null;
   storageProvider?: string | null;
@@ -433,6 +483,7 @@ function normalize(input: TangibleInput) {
 
     appraisalValue: optDec(input.appraisalValue),
     appraisalDate: parseDate(input.appraisalDate),
+    appraisalProvider: optText(input.appraisalProvider),
     insuranceValue: optDec(input.insuranceValue),
     storageLocation: optText(input.storageLocation),
     isCollectible: Boolean(input.isCollectible),
@@ -440,6 +491,8 @@ function normalize(input: TangibleInput) {
     insurancePremiumAnnual: optDec(input.insurancePremiumAnnual),
     insuranceProvider: optText(input.insuranceProvider),
     insurancePolicyRef: optText(input.insurancePolicyRef),
+    insuranceExpiryDate: parseDate(input.insuranceExpiryDate),
+    insuranceType: normalizeInsuranceType(input.insuranceType),
     storageType: normalizeStorageType(input.storageType),
     storageCostAnnual: optDec(input.storageCostAnnual),
     storageProvider: optText(input.storageProvider),
@@ -530,6 +583,7 @@ export async function updateTangible(
 
     appraisalValue: keep("appraisalValue", existing.appraisalValue?.toString() ?? null),
     appraisalDate: keep("appraisalDate", existing.appraisalDate?.toISOString() ?? null),
+    appraisalProvider: keep("appraisalProvider", existing.appraisalProvider),
     insuranceValue: keep("insuranceValue", existing.insuranceValue?.toString() ?? null),
     storageLocation: keep("storageLocation", existing.storageLocation),
     isCollectible: keep("isCollectible", existing.isCollectible),
@@ -540,6 +594,11 @@ export async function updateTangible(
     ),
     insuranceProvider: keep("insuranceProvider", existing.insuranceProvider),
     insurancePolicyRef: keep("insurancePolicyRef", existing.insurancePolicyRef),
+    insuranceExpiryDate: keep(
+      "insuranceExpiryDate",
+      existing.insuranceExpiryDate?.toISOString() ?? null
+    ),
+    insuranceType: keep("insuranceType", existing.insuranceType),
     storageType: keep("storageType", existing.storageType),
     storageCostAnnual: keep(
       "storageCostAnnual",

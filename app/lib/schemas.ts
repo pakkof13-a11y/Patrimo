@@ -530,6 +530,7 @@ export const tangibleAssetSchema = z.object({
   // Valorisation & conservation
   appraisalValue: optionalDecimalString,
   appraisalDate: z.string().optional().nullable(),
+  appraisalProvider: z.string().max(160).optional().nullable(),
   insuranceValue: optionalDecimalString,
   storageLocation: z.string().max(200).optional().nullable(),
   /** Qualification d'objet de collection — décisive pour AUTO et FURNITURE. */
@@ -539,6 +540,11 @@ export const tangibleAssetSchema = z.object({
   insurancePremiumAnnual: optionalDecimalString,
   insuranceProvider: z.string().max(160).optional().nullable(),
   insurancePolicyRef: z.string().max(120).optional().nullable(),
+  insuranceExpiryDate: z.string().optional().nullable(),
+  insuranceType: z
+    .enum(["MULTI_RISK", "FINE_ART", "JEWELRY", "WATCH", "OTHER"])
+    .optional()
+    .nullable(),
 
   // Garde / conservation
   storageType: z
