@@ -20,7 +20,8 @@ function n(v: string | number | undefined | null): number {
   return Number.isFinite(x) ? x : 0;
 }
 
-function signedTone(value: number): "up" | "down" | "neutral" {
+function signedTone(value: number | null): "up" | "down" | "neutral" {
+  if (value == null) return "neutral";
   if (value > 0.005) return "up";
   if (value < -0.005) return "down";
   return "neutral";
@@ -36,8 +37,8 @@ function formatSignedCurrency(value: number, currency: string): string {
   return formatCurrency("0", currency);
 }
 
-function formatPct(value: number, signed = true): string {
-  if (!Number.isFinite(value)) return "—";
+function formatPct(value: number | null, signed = true): string {
+  if (value == null || !Number.isFinite(value)) return "—";
   const s = value.toLocaleString("fr-FR", {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
@@ -84,13 +85,11 @@ export function PortfolioSummaryPanel({
         summary?.totalCostBasisEur ??
         summary?.totalCostBase
     );
-    // Coût de référence pour % : cost basis cotés, sinon actif brut
-    const costRef =
-      cost > 0
-        ? cost
-        : n(summary?.totalGrossAssetsBase ?? summary?.totalGrossAssetsEur);
-    const returnPct = costRef > 0 ? (totalReturn / costRef) * 100 : 0;
-    const latentPct = costRef > 0 ? (unrealized / costRef) * 100 : 0;
+    // Dénominateur = cost basis des cotés uniquement (pas d'actif brut en
+    // repli : mélanger immo/cash au coût des positions fausse le %, surtout
+    // si l'immo pèse lourd dans le brut). Pas de cost → pas de % affichable.
+    const returnPct = cost > 0 ? (totalReturn / cost) * 100 : null;
+    const latentPct = cost > 0 ? (unrealized / cost) * 100 : null;
 
     return {
       netWorth,
@@ -194,7 +193,7 @@ export function PortfolioSummaryPanel({
           />
           <Stat
             compact
-            label="Performance"
+            label="Perf. portefeuille coté"
             value={formatPct(metrics.returnPct)}
             tone={signedTone(metrics.returnPct)}
           />
