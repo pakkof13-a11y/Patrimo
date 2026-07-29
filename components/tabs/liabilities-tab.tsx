@@ -4,6 +4,8 @@ import { fetchJson } from "@/app/lib/api-client";
 import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowDown,
+  ArrowUp,
   Banknote,
   CalendarClock,
   ChevronDown,
@@ -11,6 +13,7 @@ import {
   PencilLine,
   Percent,
   Plus,
+  Search,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -26,6 +29,7 @@ import {
   LIABILITY_CATEGORY_LABELS,
   LIABILITY_LENDER_OPTIONS,
 } from "@/app/lib/constants";
+import { loadSessionPref, saveSessionPref } from "@/app/lib/ui-preferences";
 import { formatCurrency, formatDate, cn } from "@/app/lib/utils";
 import {
   buildAmortizationSchedule,
@@ -112,6 +116,34 @@ function CategoryBadge({ category }: { category: string }) {
   );
 }
 
+type LiabilitySortKey = "remaining" | "monthly" | "endDate" | "name";
+type LiabilitySort = { key: LiabilitySortKey; dir: "asc" | "desc" };
+
+const LIABILITY_SORT_SESSION_KEY = "liabilitiesActiveSort";
+const DEFAULT_LIABILITY_SORT: LiabilitySort = {
+  key: "remaining",
+  dir: "desc",
+};
+
+const LIABILITY_SORT_OPTIONS: { key: LiabilitySortKey; label: string }[] = [
+  { key: "remaining", label: "Capital restant" },
+  { key: "monthly", label: "Mensualité" },
+  { key: "endDate", label: "Date de fin" },
+  { key: "name", label: "Nom" },
+];
+
+/** null-safe : les valeurs manquantes vont toujours en fin de liste, quel que soit le sens. */
+function compareNullableNumbers(
+  a: number | null,
+  b: number | null,
+  dirMul: number
+): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return (a - b) * dirMul;
+}
+
 export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
@@ -137,6 +169,10 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   const [categoryFilter, setCategoryFilter] = useState<
     "ALL" | LiabilityCategory
   >("ALL");
+  const [sort, setSort] = useState<LiabilitySort>(() =>
+    loadSessionPref(LIABILITY_SORT_SESSION_KEY, DEFAULT_LIABILITY_SORT)
+  );
+  const [search, setSearch] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<LiabilityRow | null>(null);
   const [deleteConfirmChecked, setDeleteConfirmChecked] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -144,6 +180,17 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   const canForceDelete =
     deleteConfirmChecked &&
     deleteConfirmText.trim().toUpperCase() === DELETE_CONFIRM_WORD;
+
+  function toggleSort(key: LiabilitySortKey) {
+    setSort((prev) => {
+      const next: LiabilitySort =
+        prev.key === key
+          ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+          : { key, dir: key === "name" ? "asc" : "desc" };
+      saveSessionPref(LIABILITY_SORT_SESSION_KEY, next);
+      return next;
+    });
+  }
 
   const listQ = useQuery({
     queryKey: ["liabilities"],
@@ -168,13 +215,50 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
     [rows]
   );
 
-  const visibleActiveRows = useMemo(
-    () =>
+  const searchedActiveRows = useMemo(() => {
+    const base =
       categoryFilter === "ALL"
         ? activeRows
-        : activeRows.filter((l) => l.category === categoryFilter),
-    [activeRows, categoryFilter]
-  );
+        : activeRows.filter((l) => l.category === categoryFilter);
+    const q = search.trim().toLowerCase();
+    if (!q) return base;
+    return base.filter(
+      (l) =>
+        l.name.toLowerCase().includes(q) ||
+        (l.bankName || "").toLowerCase().includes(q)
+    );
+  }, [activeRows, categoryFilter, search]);
+
+  const visibleActiveRows = useMemo(() => {
+    const dirMul = sort.dir === "asc" ? 1 : -1;
+    return [...searchedActiveRows].sort((a, b) => {
+      switch (sort.key) {
+        case "monthly":
+          return compareNullableNumbers(
+            a.monthlyPayment ? Number(a.monthlyPayment) : null,
+            b.monthlyPayment ? Number(b.monthlyPayment) : null,
+            dirMul
+          );
+        case "endDate":
+          return compareNullableNumbers(
+            a.endDate ? new Date(a.endDate).getTime() : null,
+            b.endDate ? new Date(b.endDate).getTime() : null,
+            dirMul
+          );
+        case "name":
+          return (
+            a.name.localeCompare(b.name, "fr", { sensitivity: "base" }) *
+            dirMul
+          );
+        case "remaining":
+        default:
+          return (
+            (Number(a.remainingAmount) - Number(b.remainingAmount)) * dirMul
+          );
+      }
+    });
+  }, [searchedActiveRows, sort]);
+
   const visibleSettledRows = useMemo(
     () =>
       categoryFilter === "ALL"
@@ -700,6 +784,60 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
             ) : undefined
           }
         />
+
+        {activeRows.length > 0 && (
+          <div
+            className="flex flex-wrap items-center gap-3 border-b border-[var(--border)] px-4 py-2.5 sm:px-5"
+            data-testid="liability-toolbar"
+          >
+            <label className="relative flex items-center">
+              <Search className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-slate-400" />
+              <input
+                type="text"
+                className="input !h-7 !py-0 pl-7 text-[11px]"
+                placeholder="Rechercher (nom, prêteur)…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                data-testid="liability-search"
+                aria-label="Rechercher un crédit par nom ou prêteur"
+              />
+            </label>
+            <div
+              className="flex flex-wrap items-center gap-1"
+              role="group"
+              aria-label="Trier les crédits actifs"
+              data-testid="liability-sort"
+            >
+              {LIABILITY_SORT_OPTIONS.map((opt) => {
+                const active = sort.key === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => toggleSort(opt.key)}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition",
+                      "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+                      active
+                        ? "bg-teal-700 text-white dark:bg-teal-500 dark:text-teal-950"
+                        : "bg-transparent text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 dark:text-slate-300 dark:ring-slate-700 dark:hover:bg-slate-800/60"
+                    )}
+                    data-testid={`liability-sort-${opt.key}`}
+                    aria-pressed={active}
+                  >
+                    {opt.label}
+                    {active &&
+                      (sort.dir === "asc" ? (
+                        <ArrowUp className="h-3 w-3" />
+                      ) : (
+                        <ArrowDown className="h-3 w-3" />
+                      ))}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {listQ.isLoading ? (
           <div
