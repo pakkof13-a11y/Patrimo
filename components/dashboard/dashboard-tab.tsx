@@ -226,14 +226,14 @@ export function DashboardTab({
           </div>
 
           {/*
-            Desktop : 50/50 — évolution alignée en hauteur sur la colonne
+            Desktop : ~70/30 — évolution (large) alignée en hauteur sur la colonne
             Allocation + Plateforme (même système de cartes).
           */}
           <div
             className={cn(
               "grid min-w-0 gap-4",
               blocks.showEvolutionChart && blocks.showAllocations
-                ? "lg:grid-cols-2 lg:items-stretch"
+                ? "lg:grid-cols-[2fr_1fr] lg:items-stretch"
                 : blocks.showAllocations
                   ? "sm:grid-cols-2"
                   : ""
