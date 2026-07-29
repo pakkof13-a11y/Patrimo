@@ -40,6 +40,7 @@ import {
   nextPaymentDueDate,
   repaymentProgressPct,
   simulateEarlyRepayment,
+  startOfUtcDay,
 } from "@/app/lib/liabilities/amortization";
 import {
   ModuleCallout,
@@ -172,6 +173,35 @@ function compareNullableNumbers(
   return (a - b) * dirMul;
 }
 
+/** Seuil d’alerte échéance : J-0 (rouge) < J-3 (ambre) < J-7 (muted/teal) < rien. */
+const DUE_SOON_DAYS = 7;
+const DUE_URGENT_DAYS = 3;
+
+function dueBadgeInfo(days: number): { label: string; className: string } | null {
+  if (days === 0) {
+    return {
+      label: "Aujourd’hui",
+      className:
+        "bg-red-100 text-red-700 ring-1 ring-inset ring-red-200 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-800/50",
+    };
+  }
+  if (days > 0 && days <= DUE_URGENT_DAYS) {
+    return {
+      label: `Dans ${days} j`,
+      className:
+        "bg-amber-100 text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-800/50",
+    };
+  }
+  if (days > DUE_URGENT_DAYS && days <= DUE_SOON_DAYS) {
+    return {
+      label: `Dans ${days} j`,
+      className:
+        "bg-teal-50 text-teal-700 ring-1 ring-inset ring-teal-200/70 dark:bg-teal-950/30 dark:text-teal-300 dark:ring-teal-800/40",
+    };
+  }
+  return null;
+}
+
 export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
@@ -197,6 +227,7 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   const [categoryFilter, setCategoryFilter] = useState<
     "ALL" | LiabilityCategory
   >("ALL");
+  const [dueSoonOnly, setDueSoonOnly] = useState(false);
   const [actionsMenuId, setActionsMenuId] = useState<string | null>(null);
   const actionsMenuRefs = useRef(new Map<string, HTMLDivElement>());
   const [sort, setSort] = useState<LiabilitySort>(() =>
@@ -267,11 +298,61 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
     [rows]
   );
 
+  // Échéance à venir : calculée une seule fois pour tous les crédits actifs
+  // (pas de fausse alerte sur les crédits soldés — jamais dans activeRows).
+  // Diff en jours calendaires UTC, cohérent avec nextPaymentDueDate /
+  // startOfUtcDay déjà utilisés par le module d'amortissement.
+  const dueInfo = useMemo(() => {
+    const today = startOfUtcDay(new Date());
+    const map = new Map<
+      string,
+      { nextDue: Date | null; daysUntilNext: number | null }
+    >();
+    for (const l of activeRows) {
+      const nextDue = nextPaymentDueDate({
+        paymentDay: l.paymentDay,
+        startDate: l.startDate ? new Date(l.startDate) : null,
+        endDate: l.endDate ? new Date(l.endDate) : null,
+        lastPaymentAppliedAt: l.lastPaymentAppliedAt
+          ? new Date(l.lastPaymentAppliedAt)
+          : null,
+      });
+      const daysUntilNext = nextDue
+        ? Math.round((nextDue.getTime() - today.getTime()) / 86400000)
+        : null;
+      map.set(l.id, { nextDue, daysUntilNext });
+    }
+    return map;
+  }, [activeRows]);
+
+  const dueSoon7Ids = useMemo(() => {
+    const ids = new Set<string>();
+    dueInfo.forEach((v, id) => {
+      if (v.daysUntilNext != null && v.daysUntilNext >= 0 && v.daysUntilNext <= DUE_SOON_DAYS)
+        ids.add(id);
+    });
+    return ids;
+  }, [dueInfo]);
+
+  const dueUrgentCount = useMemo(() => {
+    let n = 0;
+    dueInfo.forEach((v) => {
+      if (v.daysUntilNext != null && v.daysUntilNext >= 0 && v.daysUntilNext <= DUE_URGENT_DAYS)
+        n++;
+    });
+    return n;
+  }, [dueInfo]);
+
+  // Le bouton de filtre disparaît si plus aucune échéance n'est proche —
+  // le filtre redevient alors un no-op (pas de liste vide silencieuse).
+  const dueSoonFilterActive = dueSoonOnly && dueSoon7Ids.size > 0;
+
   const searchedActiveRows = useMemo(() => {
-    const base =
+    let base =
       categoryFilter === "ALL"
         ? activeRows
         : activeRows.filter((l) => l.category === categoryFilter);
+    if (dueSoonFilterActive) base = base.filter((l) => dueSoon7Ids.has(l.id));
     const q = search.trim().toLowerCase();
     if (!q) return base;
     return base.filter(
@@ -279,7 +360,7 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
         l.name.toLowerCase().includes(q) ||
         (l.bankName || "").toLowerCase().includes(q)
     );
-  }, [activeRows, categoryFilter, search]);
+  }, [activeRows, categoryFilter, dueSoonFilterActive, dueSoon7Ids, search]);
 
   const visibleActiveRows = useMemo(() => {
     const dirMul = sort.dir === "asc" ? 1 : -1;
@@ -446,16 +527,10 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   const renderLiabilityRow = (l: LiabilityRow, settled: boolean) => {
     const expanded = expandedId === l.id;
     const pct = repaymentProgressPct(l.initialAmount, l.remainingAmount);
-    const nextDue = !settled
-      ? nextPaymentDueDate({
-          paymentDay: l.paymentDay,
-          startDate: l.startDate ? new Date(l.startDate) : null,
-          endDate: l.endDate ? new Date(l.endDate) : null,
-          lastPaymentAppliedAt: l.lastPaymentAppliedAt
-            ? new Date(l.lastPaymentAppliedAt)
-            : null,
-        })
-      : null;
+    // dueInfo n'est peuplé que pour activeRows — jamais de badge sur un crédit soldé.
+    const due = !settled ? dueInfo.get(l.id) : undefined;
+    const nextDue = due?.nextDue ?? null;
+    const dueBadge = due?.daysUntilNext != null ? dueBadgeInfo(due.daysUntilNext) : null;
     const nextAmount =
       !settled && l.monthlyPayment && Number(l.remainingAmount) > 0
         ? l.monthlyPayment
@@ -538,8 +613,21 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
           <td className="px-3 py-2.5">
             {nextDue ? (
               <div>
-                <div className="font-medium tabular-nums text-[var(--foreground)]">
-                  {formatDate(nextDue.toISOString())}
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium tabular-nums text-[var(--foreground)]">
+                    {formatDate(nextDue.toISOString())}
+                  </span>
+                  {dueBadge && (
+                    <span
+                      className={cn(
+                        "inline-flex shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold",
+                        dueBadge.className
+                      )}
+                      data-testid={`liability-due-badge-${l.id}`}
+                    >
+                      {dueBadge.label}
+                    </span>
+                  )}
                 </div>
                 <div className="text-[11px] tabular-nums text-teal-600 dark:text-teal-300">
                   {nextAmount ? formatCurrency(nextAmount, l.currency) : "—"}
@@ -914,6 +1002,18 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
         </div>
       </section>
 
+      {dueUrgentCount > 0 && (
+        <ModuleCallout tone="warn" testId="liability-due-callout">
+          <div className="flex items-center gap-2">
+            <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              <strong>{dueUrgentCount}</strong> prélèvement
+              {dueUrgentCount > 1 ? "s" : ""} dans les 3 prochains jours.
+            </span>
+          </div>
+        </ModuleCallout>
+      )}
+
       <div className="mt-4 flex items-center justify-between">
         <button
           type="button"
@@ -997,6 +1097,24 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                 aria-label="Rechercher un crédit par nom ou prêteur"
               />
             </label>
+            {dueSoon7Ids.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setDueSoonOnly((v) => !v)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition",
+                  "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+                  dueSoonOnly
+                    ? "bg-amber-500 text-white dark:bg-amber-500 dark:text-amber-950"
+                    : "bg-transparent text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 dark:text-slate-300 dark:ring-slate-700 dark:hover:bg-slate-800/60"
+                )}
+                data-testid="liability-due-filter"
+                aria-pressed={dueSoonOnly}
+              >
+                <CalendarClock className="h-3 w-3" />
+                Échéance ≤ 7 j ({dueSoon7Ids.size})
+              </button>
+            )}
             <div
               className="flex flex-wrap items-center gap-1"
               role="group"
