@@ -963,18 +963,29 @@ function LiabilityDetailPanel({
   onEditBank: (v: string) => void;
   onRepay: () => void;
 }) {
-  const schedule = useMemo(() => {
-    if (!l.monthlyPayment || Number(l.monthlyPayment) <= 0) return [];
-    if (!l.initialAmount || Number(l.initialAmount) <= 0) return [];
-    return buildAmortizationSchedule({
-      principal: l.initialAmount,
-      annualPercent: l.interestRate || "0",
-      monthlyPayment: l.monthlyPayment,
-      startDate: l.startDate ? new Date(l.startDate) : new Date(),
-      paymentDay: l.paymentDay ?? 1,
-      maxMonths: 480,
-    });
+  const scheduleResult = useMemo(() => {
+    if (!l.monthlyPayment || Number(l.monthlyPayment) <= 0) {
+      return { rows: [] as ReturnType<typeof buildAmortizationSchedule>, error: false };
+    }
+    if (!l.initialAmount || Number(l.initialAmount) <= 0) {
+      return { rows: [] as ReturnType<typeof buildAmortizationSchedule>, error: false };
+    }
+    try {
+      const rows = buildAmortizationSchedule({
+        principal: l.initialAmount,
+        annualPercent: l.interestRate || "0",
+        monthlyPayment: l.monthlyPayment,
+        startDate: l.startDate ? new Date(l.startDate) : new Date(),
+        paymentDay: l.paymentDay ?? 1,
+        maxMonths: 480,
+      });
+      return { rows, error: false };
+    } catch {
+      return { rows: [] as ReturnType<typeof buildAmortizationSchedule>, error: true };
+    }
   }, [l]);
+  const schedule = scheduleResult.rows;
+  const scheduleError = scheduleResult.error;
 
   const currentIdx = useMemo(
     () => currentScheduleIndex(schedule, l.remainingAmount),
@@ -1069,18 +1080,28 @@ function LiabilityDetailPanel({
       </div>
 
       {/* Tableau d’amortissement */}
+      {scheduleError && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
+          Impossible de construire le tableau d&rsquo;amortissement (vérifiez
+          mensualité et taux).
+        </div>
+      )}
       {schedule.length === 0 ? (
-        <p className="text-xs text-[var(--muted-foreground)]">
-          Renseignez une mensualité et un capital pour générer le tableau
-          d’amortissement.
-        </p>
+        !scheduleError && (
+          <p className="text-xs text-[var(--muted-foreground)]">
+            Renseignez une mensualité et un capital pour générer le tableau
+            d’amortissement.
+          </p>
+        )
       ) : (
         <div>
           <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
             Tableau d’amortissement
-            {schedule.length > 36
-              ? ` · échéances ${windowRows[0]!.i + 1}–${windowRows[windowRows.length - 1]!.i + 1} / ${schedule.length}`
-              : ` · ${schedule.length} échéances`}
+            {schedule.length > 36 && windowRows.length > 0
+              ? ` · échéances ${windowRows[0].i + 1}–${windowRows[windowRows.length - 1].i + 1} / ${schedule.length}`
+              : schedule.length > 0
+                ? ` · ${schedule.length} échéances`
+                : ""}
           </p>
           <div className="max-h-72 overflow-auto rounded-lg border border-[var(--border)]">
             <table className="w-full text-left text-[11px]">
