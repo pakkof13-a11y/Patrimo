@@ -28,6 +28,7 @@ import {
   type AlternativesDashboardPayload,
   type AlternativesPortfolioSlice,
   type AlternativesSubTab,
+  crowdlendingAlertCounts,
 } from "@/app/lib/alternatives/types";
 import { CHART_COLORS } from "@/app/lib/types/ui";
 import { AlternativesMetals } from "@/components/tabs/alternatives-metals";
@@ -180,13 +181,14 @@ export function AlternativesTab({
    * summary agrégé (aucun fetch ni champ supplémentaire). Le repérage des
    * échéances « à ≤ 3 mois » et la fraîcheur de la NAV PE demanderaient des
    * données par ligne (monthsRemaining, navDate) absentes de ce payload
-   * agrégé — hors scope ici (nouveau champ métier).
+   * agrégé — hors scope ici (nouveau champ métier). Logique testée dans
+   * crowdlendingAlertCounts (tests/unit/alternatives-cl-alerts.test.ts).
    */
-  const clLateCount =
-    clSummary?.byStatus?.find((s) => s.status === "LATE")?.count ?? 0;
-  const clDefaultCount =
-    clSummary?.byStatus?.find((s) => s.status === "DEFAULT")?.count ?? 0;
-  const hasAlerts = clLateCount > 0 || clDefaultCount > 0;
+  const {
+    lateCount: clLateCount,
+    defaultCount: clDefaultCount,
+    hasAlerts,
+  } = crowdlendingAlertCounts(clSummary?.byStatus);
 
   function goModule(id: AlternativesSubTab) {
     setSub(id);

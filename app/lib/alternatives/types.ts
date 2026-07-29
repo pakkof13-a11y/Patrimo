@@ -488,3 +488,23 @@ export type CrowdlendingSummary = {
   /** Somme des intérêts déjà perçus sur l'ensemble des lignes */
   interestReceivedTotal: string;
 };
+
+/**
+ * Alertes crowdlending pour le dashboard Alternatifs — dérivées du
+ * `byStatus` déjà présent dans le summary agrégé (aucun fetch ni champ
+ * supplémentaire). `byStatus` n'accumule une entrée que pour les statuts
+ * réellement présents parmi les lignes : si tous les prêts sont
+ * ACTIVE/REPAID (aucun LATE/DEFAULT), les deux compteurs retombent à 0 et
+ * `hasAlerts` est `false` — le bandeau d'alerte doit alors disparaître.
+ */
+export function crowdlendingAlertCounts(
+  byStatus: CrowdlendingSummary["byStatus"] | undefined
+): { lateCount: number; defaultCount: number; hasAlerts: boolean } {
+  const lateCount = byStatus?.find((s) => s.status === "LATE")?.count ?? 0;
+  const defaultCount = byStatus?.find((s) => s.status === "DEFAULT")?.count ?? 0;
+  return {
+    lateCount,
+    defaultCount,
+    hasAlerts: lateCount > 0 || defaultCount > 0,
+  };
+}
