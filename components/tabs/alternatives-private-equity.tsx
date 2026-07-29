@@ -13,6 +13,7 @@ import { cn, formatCurrency, getChangeColor } from "@/app/lib/utils";
 import {
   PE_TYPES,
   PE_TYPE_LABELS,
+  type AlternativesDashboardPayload,
   type PeType,
   type PrivateEquityDto,
   type PrivateEquitySummary,
@@ -149,6 +150,13 @@ export function AlternativesPrivateEquity({
       ),
   });
 
+  const altSummaryQ = useQuery({
+    queryKey: ["alternatives-summary", "dashboard"],
+    queryFn: () =>
+      fetchJson<AlternativesDashboardPayload>("/api/alternatives/summary"),
+    staleTime: 60_000,
+  });
+
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expert, setExpert] = useState(false);
@@ -162,6 +170,12 @@ export function AlternativesPrivateEquity({
   const lines = useMemo(() => q.data?.lines ?? [], [q.data?.lines]);
   const summary = q.data?.summary;
   const hasLines = lines.length > 0;
+
+  const totalAlt = Number(altSummaryQ.data?.summary.totalEur ?? 0);
+  const peShareOfAlt =
+    totalAlt > 0 && summary
+      ? (Number(summary.totalCalledCapital) / totalAlt) * 100
+      : null;
 
   const visible = useMemo(
     () =>
@@ -332,7 +346,11 @@ export function AlternativesPrivateEquity({
               summary?.totalCalledCapital || "0",
               baseCurrency
             )}
-            hint={`Sur ${formatCurrency(summary?.totalInvested || "0", baseCurrency)} investis`}
+            hint={
+              peShareOfAlt != null
+                ? `Sur ${formatCurrency(summary?.totalInvested || "0", baseCurrency)} investis · ${peShareOfAlt.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} % de la poche alt.`
+                : `Sur ${formatCurrency(summary?.totalInvested || "0", baseCurrency)} investis`
+            }
           />
           <AltMiniKpi
             label="NAV totale"
