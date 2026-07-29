@@ -500,6 +500,11 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
 
   return (
     <div className="section-stack" data-testid="liabilities-tab">
+      <datalist id="liability-lenders-datalist">
+        {LIABILITY_LENDER_OPTIONS.map((b) => (
+          <option key={b} value={b} />
+        ))}
+      </datalist>
       <ModulePageHeader
         title="Passifs / Crédits"
         subtitle={
@@ -1186,23 +1191,17 @@ function LiabilityDetailPanel({
         </label>
         <label className="text-[11px]">
           <span className="text-[var(--muted-foreground)]">Prêteur</span>
-          <select
+          <input
+            type="text"
+            list="liability-lenders-datalist"
             className="input mt-0.5 !py-1 text-xs"
             defaultValue={l.bankName || ""}
             key={`${l.id}-bank-${l.bankName}`}
-            onChange={(e) => onEditBank(e.target.value)}
-          >
-            <option value="">—</option>
-            {l.bankName &&
-              !(LIABILITY_LENDER_OPTIONS as readonly string[]).includes(
-                l.bankName
-              ) && <option value={l.bankName}>{l.bankName}</option>}
-            {LIABILITY_LENDER_OPTIONS.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
+            onBlur={(e) => {
+              const raw = e.target.value.trim();
+              if (raw !== (l.bankName || "")) onEditBank(raw);
+            }}
+          />
         </label>
       </div>
 
