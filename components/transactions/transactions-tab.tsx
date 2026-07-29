@@ -199,14 +199,6 @@ export function TransactionsTab({
   const skipSortRef = useRef(false);
   const [deleteTarget, setDeleteTarget] = useState<TxRow | null>(null);
 
-  // Reset page quand filtres / tri / pageSize changent
-  const filterKey = `${debouncedSearch}|${accountType}|${pageSize}|${typeFilter}|${platformFilter}|${dateFrom}|${dateTo}|${sorting[0]?.id}|${sorting[0]?.desc}`;
-  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
-  if (filterKey !== prevFilterKey) {
-    setPrevFilterKey(filterKey);
-    if (pageIndex !== 0) setPageIndex(0);
-  }
-
   useEffect(() => {
     saveColumnOrder(TX_TABLE_KEY, columnOrder);
   }, [columnOrder]);
@@ -214,6 +206,11 @@ export function TransactionsTab({
   useEffect(() => {
     saveTxColumnVisibility(columnVisibility);
   }, [columnVisibility]);
+
+  // Reset page quand filtres / tri / pageSize changent
+  useEffect(() => {
+    setPageIndex(0);
+  }, [debouncedSearch, accountType, pageSize, typeFilter, platformFilter, dateFrom, dateTo, sorting]);
 
   const sortBy = sorting[0]?.id || "date";
   const sortDir = sorting[0]?.desc ? "desc" : "asc";
@@ -239,10 +236,12 @@ export function TransactionsTab({
   const kpis = listQ.data?.kpis;
 
   // Clamp pageIndex si hors bornes (données chargées)
-  const safePageIndex = Math.min(pageIndex, Math.max(0, pageCount - 1));
-  if (safePageIndex !== pageIndex && listQ.data) {
-    setPageIndex(safePageIndex);
-  }
+  useEffect(() => {
+    const safePageIndex = Math.min(pageIndex, Math.max(0, pageCount - 1));
+    if (safePageIndex !== pageIndex) {
+      setPageIndex(safePageIndex);
+    }
+  }, [pageIndex, pageCount]);
 
   const loading = listQ.isPending || listQ.isFetching;
   const hasLoadedOnce = Boolean(listQ.data) || listQ.isFetched;
