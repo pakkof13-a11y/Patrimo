@@ -963,6 +963,10 @@ function LiabilityDetailPanel({
   onEditBank: (v: string) => void;
   onRepay: () => void;
 }) {
+  const [rateInvalid, setRateInvalid] = useState(false);
+  const [remainingInvalid, setRemainingInvalid] = useState(false);
+  const [dayInvalid, setDayInvalid] = useState(false);
+
   const scheduleResult = useMemo(() => {
     if (!l.monthlyPayment || Number(l.monthlyPayment) <= 0) {
       return { rows: [] as ReturnType<typeof buildAmortizationSchedule>, error: false };
@@ -1023,39 +1027,111 @@ function LiabilityDetailPanel({
         <label className="text-[11px]">
           <span className="text-[var(--muted-foreground)]">Taux annuel %</span>
           <input
-            className="input mt-0.5 !py-1 text-right text-xs"
+            className={cn(
+              "input mt-0.5 !py-1 text-right text-xs",
+              rateInvalid && "ring-2 ring-red-500 !border-red-500"
+            )}
+            type="number"
+            min={0}
+            max={30}
+            step={0.001}
             defaultValue={l.interestRate ?? ""}
             key={`${l.id}-rate-${l.interestRate}`}
+            onFocus={() => setRateInvalid(false)}
             onBlur={(e) => {
-              const v = e.target.value.trim();
-              if (v !== (l.interestRate ?? "")) onEditRate(v);
+              const raw = e.target.value.trim();
+              if (raw === "") {
+                setRateInvalid(false);
+                if ((l.interestRate ?? "") !== "") onEditRate("");
+                return;
+              }
+              const num = Number(raw.replace(",", "."));
+              if (!Number.isFinite(num) || num < 0 || num > 30) {
+                setRateInvalid(true);
+                e.target.value = l.interestRate ?? "";
+                return;
+              }
+              setRateInvalid(false);
+              if (raw !== (l.interestRate ?? "")) onEditRate(raw);
             }}
           />
+          {rateInvalid && (
+            <span className="mt-0.5 block text-[10px] text-red-600">
+              Taux invalide (0–30 %)
+            </span>
+          )}
         </label>
         <label className="text-[11px]">
           <span className="text-[var(--muted-foreground)]">
             Capital restant dû
           </span>
           <input
-            className="input mt-0.5 !py-1 text-right text-xs font-semibold"
+            className={cn(
+              "input mt-0.5 !py-1 text-right text-xs font-semibold",
+              remainingInvalid && "ring-2 ring-red-500 !border-red-500"
+            )}
+            inputMode="decimal"
+            min={0}
             defaultValue={l.remainingAmount}
             key={`${l.id}-rem-${l.remainingAmount}`}
-            onBlur={(e) => onEditRemaining(e.target.value)}
+            onFocus={() => setRemainingInvalid(false)}
+            onBlur={(e) => {
+              const raw = e.target.value.trim();
+              const num = Number(raw.replace(",", "."));
+              if (!Number.isFinite(num) || num < 0) {
+                setRemainingInvalid(true);
+                e.target.value = l.remainingAmount;
+                return;
+              }
+              setRemainingInvalid(false);
+              if (raw !== l.remainingAmount) onEditRemaining(raw);
+            }}
           />
+          {remainingInvalid && (
+            <span className="mt-0.5 block text-[10px] text-red-600">
+              Montant invalide (≥ 0)
+            </span>
+          )}
         </label>
         <label className="text-[11px]">
           <span className="text-[var(--muted-foreground)]">
             Jour de prélèvement
           </span>
           <input
-            className="input mt-0.5 !py-1 text-center text-xs"
+            className={cn(
+              "input mt-0.5 !py-1 text-center text-xs",
+              dayInvalid && "ring-2 ring-red-500 !border-red-500"
+            )}
             type="number"
             min={1}
             max={31}
+            step={1}
             defaultValue={l.paymentDay ?? ""}
             key={`${l.id}-day-${l.paymentDay}`}
-            onBlur={(e) => onEditPaymentDay(e.target.value)}
+            onFocus={() => setDayInvalid(false)}
+            onBlur={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === "") {
+                setDayInvalid(false);
+                if ((l.paymentDay ?? "") !== "") onEditPaymentDay("");
+                return;
+              }
+              const num = Number(raw);
+              if (!Number.isInteger(num) || num < 1 || num > 31) {
+                setDayInvalid(true);
+                e.target.value = l.paymentDay != null ? String(l.paymentDay) : "";
+                return;
+              }
+              setDayInvalid(false);
+              if (String(num) !== String(l.paymentDay ?? ""))
+                onEditPaymentDay(String(num));
+            }}
           />
+          {dayInvalid && (
+            <span className="mt-0.5 block text-[10px] text-red-600">
+              Jour invalide (1–31)
+            </span>
+          )}
         </label>
         <label className="text-[11px]">
           <span className="text-[var(--muted-foreground)]">Prêteur</span>
