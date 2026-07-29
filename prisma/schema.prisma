@@ -1038,6 +1038,16 @@ model CrowdlendingPosition {
   status             String    @default("ACTIVE")
   currency           String    @default("EUR")
   notes              String?
+  /// Capital restant dû — distinct de capitalInvested une fois les
+  /// remboursements amortis pris en compte.
+  remainingCapital       Decimal   @default(0) @db.Decimal(28, 12)
+  /// Cumul des intérêts déjà perçus sur cette ligne
+  interestReceivedToDate Decimal   @default(0) @db.Decimal(28, 12)
+  /// MONTHLY | QUARTERLY | ANNUAL | IN_FINE
+  paymentFrequency       String    @default("MONTHLY")
+  nextPaymentDate        DateTime?
+  /// Notation de risque plateforme — "A" | "B" | "C" ou libre
+  riskGrade              String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
