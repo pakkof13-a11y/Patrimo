@@ -96,6 +96,7 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
     new Date().toISOString().slice(0, 10)
   );
   const [showHelp, setShowHelp] = useState(false);
+  const [settledOpen, setSettledOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<LiabilityRow | null>(null);
   const [deleteConfirmChecked, setDeleteConfirmChecked] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -118,26 +119,31 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   );
   const totalRemaining = listQ.data?.totalRemainingEur || "0";
 
+  const activeRows = useMemo(
+    () => rows.filter((l) => Number(l.remainingAmount) > 0),
+    [rows]
+  );
+  const settledRows = useMemo(
+    () => rows.filter((l) => Number(l.remainingAmount) <= 0),
+    [rows]
+  );
+
   const monthlyOutflow = useMemo(() => {
-    return rows.reduce((acc, l) => {
+    return activeRows.reduce((acc, l) => {
       if (!l.monthlyPayment) return acc;
       const n = Number(l.monthlyPayment);
       return acc + (Number.isFinite(n) ? n : 0);
     }, 0);
-  }, [rows]);
+  }, [activeRows]);
 
-  const activeCount = useMemo(
-    () => rows.filter((l) => Number(l.remainingAmount) > 0).length,
-    [rows]
-  );
+  const activeCount = activeRows.length;
 
   const totalInterestRemaining = useMemo(() => {
-    return rows.reduce((acc, l) => {
-      if (Number(l.remainingAmount) <= 0) return acc;
+    return activeRows.reduce((acc, l) => {
       const n = Number(l.estimatedInterestRemaining);
       return acc + (Number.isFinite(n) ? n : 0);
     }, 0);
-  }, [rows]);
+  }, [activeRows]);
 
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["liabilities"] });
@@ -245,6 +251,252 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const renderLiabilityRow = (l: LiabilityRow, settled: boolean) => {
+    const expanded = expandedId === l.id;
+    const pct = repaymentProgressPct(l.initialAmount, l.remainingAmount);
+    const nextDue = !settled
+      ? nextPaymentDueDate({
+          paymentDay: l.paymentDay,
+          startDate: l.startDate ? new Date(l.startDate) : null,
+          endDate: l.endDate ? new Date(l.endDate) : null,
+          lastPaymentAppliedAt: l.lastPaymentAppliedAt
+            ? new Date(l.lastPaymentAppliedAt)
+            : null,
+        })
+      : null;
+    const nextAmount =
+      !settled && l.monthlyPayment && Number(l.remainingAmount) > 0
+        ? l.monthlyPayment
+        : null;
+
+    return (
+      <Fragment key={l.id}>
+        <tr
+          className={cn(moduleTableRowClass, settled && "opacity-60")}
+          data-testid={`liability-row-${l.id}`}
+        >
+          <td className="px-3 py-2.5">
+            <button
+              type="button"
+              className="flex items-start gap-1.5 text-left"
+              onClick={() =>
+                setExpandedId((id) => (id === l.id ? null : l.id))
+              }
+              aria-expanded={expanded}
+              data-testid={`liability-expand-${l.id}`}
+            >
+              {expanded ? (
+                <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
+              ) : (
+                <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
+              )}
+              <span>
+                <span className="font-medium text-[var(--foreground)]">
+                  {l.name}
+                </span>
+                <span className="mt-0.5 block text-[11px] text-[var(--muted-foreground)]">
+                  {l.bankName || "Prêteur non renseigné"}
+                  {!settled && l.monthsRemaining != null
+                    ? ` · ${l.monthsRemaining} mois restants`
+                    : ""}
+                  {settled ? " · soldé" : ""}
+                </span>
+              </span>
+            </button>
+          </td>
+          <td className="px-3 py-2.5 text-right">
+            <div
+              className={cn(
+                "tabular-nums font-semibold",
+                settled
+                  ? "text-[var(--muted-foreground)]"
+                  : "text-[var(--danger)]"
+              )}
+            >
+              {formatCurrency(l.remainingAmount, l.currency)}
+            </div>
+            <div className="text-[10px] tabular-nums text-[var(--muted-foreground)]">
+              initial {formatCurrency(l.initialAmount, l.currency)}
+            </div>
+          </td>
+          <td className="px-3 py-2.5 text-right">
+            <div className="tabular-nums text-[var(--foreground)]">
+              {l.interestRate != null && l.interestRate !== ""
+                ? `${Number(l.interestRate).toLocaleString("fr-FR", { maximumFractionDigits: 3 })} %`
+                : "—"}
+            </div>
+            <div className="text-[10px] text-[var(--muted-foreground)]">
+              effectif / an
+            </div>
+          </td>
+          <td className="px-3 py-2.5">
+            {nextDue ? (
+              <div>
+                <div className="font-medium tabular-nums text-[var(--foreground)]">
+                  {formatDate(nextDue.toISOString())}
+                </div>
+                <div className="text-[11px] tabular-nums text-teal-600 dark:text-teal-300">
+                  {nextAmount ? formatCurrency(nextAmount, l.currency) : "—"}
+                </div>
+              </div>
+            ) : (
+              <span className="text-[var(--muted-foreground)]">—</span>
+            )}
+          </td>
+          <td className="px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <div
+                className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--muted)]"
+                role="progressbar"
+                aria-valuenow={Math.round(pct)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={`Remboursé à ${Math.round(pct)} %`}
+              >
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-teal-600 to-teal-400 transition-[width]"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-[var(--muted-foreground)]">
+                {Math.round(pct)} %
+              </span>
+            </div>
+          </td>
+          <td className="px-2 py-2 text-right">
+            <div className="inline-flex flex-wrap items-center justify-end gap-1">
+              {!settled && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="!h-8 text-[11px]"
+                  data-testid={`liability-repay-${l.id}`}
+                  title="Enregistrer un remboursement (prérempli avec la prochaine mensualité)"
+                  onClick={() => {
+                    setEarlyId(l.id);
+                    setEarlyKind("PARTIAL");
+                    setEarlyAmount(
+                      l.monthlyPayment && Number(l.monthlyPayment) > 0
+                        ? String(l.monthlyPayment)
+                        : ""
+                    );
+                    setEarlyDate(new Date().toISOString().slice(0, 10));
+                  }}
+                >
+                  <Banknote className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Remboursement</span>
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="!h-8 text-[11px]"
+                data-testid={`liability-detail-${l.id}`}
+                onClick={() =>
+                  setExpandedId((id) => (id === l.id ? null : l.id))
+                }
+              >
+                {expanded ? "Masquer" : "Détail"}
+              </Button>
+              {!settled && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="!h-7 !w-7 !px-0 text-slate-400 hover:text-slate-800"
+                  title="Avenant mensualité"
+                  aria-label="Avenant mensualité"
+                  onClick={() => {
+                    setAmendId(l.id);
+                    setAmendPayment(l.monthlyPayment || "");
+                    setAmendDate(new Date().toISOString().slice(0, 10));
+                  }}
+                >
+                  <PencilLine className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              {!settled && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="!h-7 !w-7 !px-0 text-slate-400 hover:text-slate-800"
+                  title="Avenant taux d'intérêt"
+                  aria-label="Avenant taux d'intérêt"
+                  data-testid={`liability-rate-open-${l.id}`}
+                  onClick={() => {
+                    setRateId(l.id);
+                    setRateValue(l.interestRate || "");
+                    setRateDate(new Date().toISOString().slice(0, 10));
+                  }}
+                >
+                  <Percent className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
+                aria-label="Supprimer le crédit"
+                onClick={() => setDeleteTarget(l)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </td>
+        </tr>
+        {expanded && (
+          <tr className="border-t border-[var(--border)] bg-[var(--muted)]/20">
+            <td colSpan={6} className="px-4 py-4">
+              <LiabilityDetailPanel
+                liability={l}
+                onEditRate={(v) => {
+                  // Ouvre la modale d'avenant plutôt que d'appeler
+                  // l'API en direct : préremplie avec la valeur
+                  // saisie, elle impose une date d'effet
+                  // explicite et passe par rateMut (traçabilité).
+                  setRateId(l.id);
+                  setRateValue(v || "0");
+                  setRateDate(new Date().toISOString().slice(0, 10));
+                }}
+                onEditRemaining={(v) => {
+                  if (v !== l.remainingAmount)
+                    patchMut.mutate({
+                      id: l.id,
+                      remainingAmount: v,
+                    });
+                }}
+                onEditPaymentDay={(v) => {
+                  const cur = l.paymentDay != null ? String(l.paymentDay) : "";
+                  if (v !== cur)
+                    patchMut.mutate({
+                      id: l.id,
+                      paymentDay: v === "" ? null : v,
+                    });
+                }}
+                onEditBank={(v) => {
+                  if (v !== (l.bankName || ""))
+                    patchMut.mutate({
+                      id: l.id,
+                      bankName: v || null,
+                    });
+                }}
+                onRepay={() => {
+                  setEarlyId(l.id);
+                  setEarlyKind("PARTIAL");
+                  setEarlyAmount(
+                    l.monthlyPayment && Number(l.monthlyPayment) > 0
+                      ? String(l.monthlyPayment)
+                      : ""
+                  );
+                  setEarlyDate(new Date().toISOString().slice(0, 10));
+                }}
+              />
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
+  };
 
   return (
     <div className="section-stack" data-testid="liabilities-tab">
@@ -371,7 +623,7 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
               />
             ))}
           </div>
-        ) : rows.length === 0 ? (
+        ) : activeRows.length === 0 ? (
           <ModuleGuidedEmpty
             title="Aucun crédit pour l’instant"
             description="Enregistrez un crédit immobilier, auto, consommation ou une dette privée pour suivre le capital restant, la charge mensuelle et le calendrier."
@@ -406,275 +658,62 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((l) => {
-                  const expanded = expandedId === l.id;
-                  const pct = repaymentProgressPct(
-                    l.initialAmount,
-                    l.remainingAmount
-                  );
-                  const nextDue = nextPaymentDueDate({
-                    paymentDay: l.paymentDay,
-                    startDate: l.startDate ? new Date(l.startDate) : null,
-                    endDate: l.endDate ? new Date(l.endDate) : null,
-                    lastPaymentAppliedAt: l.lastPaymentAppliedAt
-                      ? new Date(l.lastPaymentAppliedAt)
-                      : null,
-                  });
-                  const nextAmount =
-                    l.monthlyPayment && Number(l.remainingAmount) > 0
-                      ? l.monthlyPayment
-                      : null;
-                  const isActive = Number(l.remainingAmount) > 0;
-
-                  return (
-                    <Fragment key={l.id}>
-                      <tr
-                        className={cn(
-                          moduleTableRowClass,
-                          !isActive && "opacity-60"
-                        )}
-                        data-testid={`liability-row-${l.id}`}
-                      >
-                        <td className="px-3 py-2.5">
-                          <button
-                            type="button"
-                            className="flex items-start gap-1.5 text-left"
-                            onClick={() =>
-                              setExpandedId((id) =>
-                                id === l.id ? null : l.id
-                              )
-                            }
-                            aria-expanded={expanded}
-                            data-testid={`liability-expand-${l.id}`}
-                          >
-                            {expanded ? (
-                              <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
-                            ) : (
-                              <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
-                            )}
-                            <span>
-                              <span className="font-medium text-[var(--foreground)]">
-                                {l.name}
-                              </span>
-                              <span className="mt-0.5 block text-[11px] text-[var(--muted-foreground)]">
-                                {l.bankName || "Prêteur non renseigné"}
-                                {l.monthsRemaining != null
-                                  ? ` · ${l.monthsRemaining} mois restants`
-                                  : ""}
-                                {!isActive ? " · soldé" : ""}
-                              </span>
-                            </span>
-                          </button>
-                        </td>
-                        <td className="px-3 py-2.5 text-right">
-                          <div className="tabular-nums font-semibold text-[var(--danger)]">
-                            {formatCurrency(l.remainingAmount, l.currency)}
-                          </div>
-                          <div className="text-[10px] tabular-nums text-[var(--muted-foreground)]">
-                            initial{" "}
-                            {formatCurrency(l.initialAmount, l.currency)}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5 text-right">
-                          <div className="tabular-nums text-[var(--foreground)]">
-                            {l.interestRate != null && l.interestRate !== ""
-                              ? `${Number(l.interestRate).toLocaleString("fr-FR", { maximumFractionDigits: 3 })} %`
-                              : "—"}
-                          </div>
-                          <div className="text-[10px] text-[var(--muted-foreground)]">
-                            effectif / an
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5">
-                          {isActive && nextDue ? (
-                            <div>
-                              <div className="font-medium tabular-nums text-[var(--foreground)]">
-                                {formatDate(nextDue.toISOString())}
-                              </div>
-                              <div className="text-[11px] tabular-nums text-teal-600 dark:text-teal-300">
-                                {nextAmount
-                                  ? formatCurrency(nextAmount, l.currency)
-                                  : "—"}
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-[var(--muted-foreground)]">
-                              —
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <div className="flex items-center gap-2">
-                            <div
-                              className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--muted)]"
-                              role="progressbar"
-                              aria-valuenow={Math.round(pct)}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                              aria-label={`Remboursé à ${Math.round(pct)} %`}
-                            >
-                              <div
-                                className="h-full rounded-full bg-gradient-to-r from-teal-600 to-teal-400 transition-[width]"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                            <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-[var(--muted-foreground)]">
-                              {Math.round(pct)} %
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-2 py-2 text-right">
-                          <div className="inline-flex flex-wrap items-center justify-end gap-1">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="!h-8 text-[11px]"
-                              disabled={!isActive}
-                              data-testid={`liability-repay-${l.id}`}
-                              title="Enregistrer un remboursement (prérempli avec la prochaine mensualité)"
-                              onClick={() => {
-                                setEarlyId(l.id);
-                                setEarlyKind("PARTIAL");
-                                setEarlyAmount(
-                                  l.monthlyPayment &&
-                                    Number(l.monthlyPayment) > 0
-                                    ? String(l.monthlyPayment)
-                                    : ""
-                                );
-                                setEarlyDate(
-                                  new Date().toISOString().slice(0, 10)
-                                );
-                              }}
-                            >
-                              <Banknote className="h-3.5 w-3.5" />
-                              <span className="hidden sm:inline">
-                                Remboursement
-                              </span>
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="!h-8 text-[11px]"
-                              data-testid={`liability-detail-${l.id}`}
-                              onClick={() =>
-                                setExpandedId((id) =>
-                                  id === l.id ? null : l.id
-                                )
-                              }
-                            >
-                              {expanded ? "Masquer" : "Détail"}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="!h-7 !w-7 !px-0 text-slate-400 hover:text-slate-800"
-                              title="Avenant mensualité"
-                              aria-label="Avenant mensualité"
-                              onClick={() => {
-                                setAmendId(l.id);
-                                setAmendPayment(l.monthlyPayment || "");
-                                setAmendDate(
-                                  new Date().toISOString().slice(0, 10)
-                                );
-                              }}
-                            >
-                              <PencilLine className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="!h-7 !w-7 !px-0 text-slate-400 hover:text-slate-800"
-                              title="Avenant taux d'intérêt"
-                              aria-label="Avenant taux d'intérêt"
-                              data-testid={`liability-rate-open-${l.id}`}
-                              onClick={() => {
-                                setRateId(l.id);
-                                setRateValue(l.interestRate || "");
-                                setRateDate(
-                                  new Date().toISOString().slice(0, 10)
-                                );
-                              }}
-                            >
-                              <Percent className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
-                              aria-label="Supprimer le crédit"
-                              onClick={() => setDeleteTarget(l)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                      {expanded && (
-                        <tr className="border-t border-[var(--border)] bg-[var(--muted)]/20">
-                          <td colSpan={6} className="px-4 py-4">
-                            <LiabilityDetailPanel
-                              liability={l}
-                              onEditRate={(v) => {
-                                // Ouvre la modale d'avenant plutôt que d'appeler
-                                // l'API en direct : préremplie avec la valeur
-                                // saisie, elle impose une date d'effet
-                                // explicite et passe par rateMut (traçabilité).
-                                setRateId(l.id);
-                                setRateValue(v || "0");
-                                setRateDate(
-                                  new Date().toISOString().slice(0, 10)
-                                );
-                              }}
-                              onEditRemaining={(v) => {
-                                if (v !== l.remainingAmount)
-                                  patchMut.mutate({
-                                    id: l.id,
-                                    remainingAmount: v,
-                                  });
-                              }}
-                              onEditPaymentDay={(v) => {
-                                const cur =
-                                  l.paymentDay != null
-                                    ? String(l.paymentDay)
-                                    : "";
-                                if (v !== cur)
-                                  patchMut.mutate({
-                                    id: l.id,
-                                    paymentDay: v === "" ? null : v,
-                                  });
-                              }}
-                              onEditBank={(v) => {
-                                if (v !== (l.bankName || ""))
-                                  patchMut.mutate({
-                                    id: l.id,
-                                    bankName: v || null,
-                                  });
-                              }}
-                              onRepay={() => {
-                                setEarlyId(l.id);
-                                setEarlyKind("PARTIAL");
-                                setEarlyAmount(
-                                  l.monthlyPayment &&
-                                    Number(l.monthlyPayment) > 0
-                                    ? String(l.monthlyPayment)
-                                    : ""
-                                );
-                                setEarlyDate(
-                                  new Date().toISOString().slice(0, 10)
-                                );
-                              }}
-                            />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
+                {activeRows.map((l) => renderLiabilityRow(l, false))}
               </tbody>
             </table>
           </div>
         )}
       </ModuleCard>
+
+      {settledRows.length > 0 && (
+        <ModuleCard testId="liability-settled-section">
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-4 py-3.5 text-left sm:px-5"
+            onClick={() => setSettledOpen((v) => !v)}
+            aria-expanded={settledOpen}
+            data-testid="liability-settled-toggle"
+          >
+            {settledOpen ? (
+              <ChevronDown className="h-4 w-4 shrink-0 text-[var(--muted-foreground)]" />
+            ) : (
+              <ChevronRight className="h-4 w-4 shrink-0 text-[var(--muted-foreground)]" />
+            )}
+            <span className="text-title">
+              Crédits soldés ({settledRows.length})
+            </span>
+          </button>
+
+          {settledOpen && (
+            <div className="table-container-responsive table-fluid-wrap border-t border-[var(--border)]">
+              <table
+                className="table-fluid text-sm"
+                data-testid="liabilities-settled-table"
+              >
+                <thead className={moduleTableHeadClass}>
+                  <tr>
+                    <th className="px-3 py-2.5 text-left">Crédit</th>
+                    <th className="px-3 py-2.5 text-right">Capital</th>
+                    <th className="px-3 py-2.5 text-right">Taux</th>
+                    <th className="px-3 py-2.5 text-left">
+                      Prochaine échéance
+                    </th>
+                    <th className="min-w-[8rem] px-3 py-2.5 text-left">
+                      Progression
+                    </th>
+                    <th className="px-3 py-2.5 text-right">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {settledRows.map((l) => renderLiabilityRow(l, true))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </ModuleCard>
+      )}
 
       {showCreate && (
         <Modal
