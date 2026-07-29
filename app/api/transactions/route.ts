@@ -255,9 +255,12 @@ export async function PUT(req: Request) {
       ...parsed.data,
       userId,
       id,
+      // Édition : n'écrase autoFundCash que si le champ est explicitement
+      // présent dans le body (pattern presentFields) — absent du body ne
+      // doit jamais couper silencieusement l'auto-funding.
       autoFundCash:
         bodyObj.autoFundCash === undefined
-          ? true
+          ? undefined
           : Boolean(bodyObj.autoFundCash),
       allowNegativeCash: Boolean(bodyObj.allowNegativeCash),
     });
