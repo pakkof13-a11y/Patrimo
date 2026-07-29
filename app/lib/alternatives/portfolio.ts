@@ -9,9 +9,10 @@
 import { prisma } from "@/app/lib/prisma";
 import { d, zero } from "@/app/lib/money/decimal";
 import { convertToEurSync, getEurRates } from "@/app/lib/market/fx";
-import type {
-  AlternativesDashboardPayload,
-  AlternativesPortfolioSlice,
+import {
+  buildAlternativesShortAlerts,
+  type AlternativesDashboardPayload,
+  type AlternativesPortfolioSlice,
 } from "./types";
 import { listPreciousMetals } from "./precious-metals";
 import { listPrivateEquity } from "./private-equity";
@@ -203,5 +204,6 @@ export async function getAlternativesDashboardBundle(
     privateEquity: pe.summary,
     crowdlending: cl.summary,
     tangibles: tangibles.summary,
+    shortAlerts: buildAlternativesShortAlerts(cl.summary, pe.summary),
   };
 }

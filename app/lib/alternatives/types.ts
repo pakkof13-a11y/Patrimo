@@ -303,6 +303,11 @@ export type AlternativesDashboardPayload = {
   privateEquity: PrivateEquitySummary;
   crowdlending: CrowdlendingSummary;
   tangibles: TangibleAssetsSummary;
+  /** Vue unifiée des alertes CL/PE — additive, construite à partir des
+   * champs ci-dessus (voir `buildAlternativesShortAlerts`). Ajoutée pour
+   * simplifier un futur consommateur front ; le widget actuel du dashboard
+   * lit directement `byStatus`/`soonCount`/`staleNavCount`. */
+  shortAlerts: AlternativesShortAlert[];
 };
 
 // ─── Private equity ───────────────────────────────────────────────────────────
@@ -371,6 +376,11 @@ export type PrivateEquityDto = {
   expectedExitDate: string | null;
   vehicleName: string | null;
   round: string | null;
+  /** Dérivé de `updatedAt` (Prisma) — proxy de la date de dernière NAV en
+   * l'absence d'un champ dédié : toute modification de la ligne (pas
+   * seulement `currentNav`) le rafraîchit. Champ lecture seule, jamais dans
+   * le formulaire ; sert uniquement à `staleNavCount` ci-dessous. */
+  navUpdatedAt: string | null;
 };
 
 export type PrivateEquitySummary = {
@@ -393,6 +403,9 @@ export type PrivateEquitySummary = {
   /** TVPI du portefeuille = (totalNav + totalDistributions) /
    * totalCalledCapital — `null` si aucun capital appelé. */
   avgTvpi: number | null;
+  /** Nombre de positions dont `navUpdatedAt` date de plus de 6 mois (ou est
+   * absent) — alerte « NAV non mise à jour » sur le dashboard. */
+  staleNavCount: number;
 };
 
 // ─── Crowdlending ─────────────────────────────────────────────────────────────
@@ -487,6 +500,9 @@ export type CrowdlendingSummary = {
   remainingCapitalTotal: string;
   /** Somme des intérêts déjà perçus sur l'ensemble des lignes */
   interestReceivedTotal: string;
+  /** Nombre de prêts ACTIVE dont l'échéance est à ≤ 3 mois (et non déjà
+   * dépassée) — même règle que `rowFlags.soon` côté UI crowdlending. */
+  soonCount: number;
 };
 
 /**
@@ -507,4 +523,61 @@ export function crowdlendingAlertCounts(
     defaultCount,
     hasAlerts: lateCount > 0 || defaultCount > 0,
   };
+}
+
+/** Alerte courte pour le dashboard Alternatifs — voir `buildAlternativesShortAlerts`. */
+export type AlternativesShortAlert = {
+  type: "cl-late" | "cl-default" | "cl-soon" | "pe-stale-nav";
+  label: string;
+  count: number;
+  sub: AlternativesSubTab;
+};
+
+/**
+ * Vue unifiée des alertes CL/PE, construite à partir des summaries déjà
+ * calculés (aucun fetch, aucun champ de saisie supplémentaire). Additive :
+ * n'affecte pas `crowdlendingAlertCounts` ni les compteurs bruts, qui
+ * restent la source de vérité consommée par le widget actuel du dashboard.
+ */
+export function buildAlternativesShortAlerts(
+  crowdlending: Pick<CrowdlendingSummary, "byStatus" | "soonCount">,
+  privateEquity: Pick<PrivateEquitySummary, "staleNavCount">
+): AlternativesShortAlert[] {
+  const { lateCount, defaultCount } = crowdlendingAlertCounts(
+    crowdlending.byStatus
+  );
+  const alerts: AlternativesShortAlert[] = [];
+  if (lateCount > 0) {
+    alerts.push({
+      type: "cl-late",
+      label: "Prêt(s) en retard",
+      count: lateCount,
+      sub: "crowdlending",
+    });
+  }
+  if (defaultCount > 0) {
+    alerts.push({
+      type: "cl-default",
+      label: "Prêt(s) en défaut",
+      count: defaultCount,
+      sub: "crowdlending",
+    });
+  }
+  if (crowdlending.soonCount > 0) {
+    alerts.push({
+      type: "cl-soon",
+      label: "Prêt(s) à échéance ≤ 3 mois",
+      count: crowdlending.soonCount,
+      sub: "crowdlending",
+    });
+  }
+  if (privateEquity.staleNavCount > 0) {
+    alerts.push({
+      type: "pe-stale-nav",
+      label: "Position(s) PE — NAV non mise à jour depuis > 6 mois",
+      count: privateEquity.staleNavCount,
+      sub: "private-equity",
+    });
+  }
+  return alerts;
 }

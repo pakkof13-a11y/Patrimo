@@ -177,18 +177,23 @@ export function AlternativesTab({
     0;
 
   /**
-   * Alertes crowdlending — dérivées du `byStatus` déjà présent dans le
-   * summary agrégé (aucun fetch ni champ supplémentaire). Le repérage des
-   * échéances « à ≤ 3 mois » et la fraîcheur de la NAV PE demanderaient des
-   * données par ligne (monthsRemaining, navDate) absentes de ce payload
-   * agrégé — hors scope ici (nouveau champ métier). Logique testée dans
-   * crowdlendingAlertCounts (tests/unit/alternatives-cl-alerts.test.ts).
+   * Alertes CL/PE — dérivées des summaries déjà présents dans le payload
+   * agrégé (aucun fetch ni champ de saisie supplémentaire) : `byStatus`
+   * pour late/défaut, `soonCount` (prêts ACTIVE à échéance ≤ 3 mois) et
+   * `staleNavCount` (positions PE dont la NAV n'a pas été mise à jour
+   * depuis > 6 mois, cf. app/lib/alternatives/private-equity.ts::isNavStale).
+   * Logique testée dans crowdlendingAlertCounts (tests/unit/alternatives-cl-alerts.test.ts)
+   * et dans tests/unit/alternatives.test.ts (soonCount, staleNavCount).
    */
   const {
     lateCount: clLateCount,
     defaultCount: clDefaultCount,
-    hasAlerts,
+    hasAlerts: hasClLateOrDefaultAlerts,
   } = crowdlendingAlertCounts(clSummary?.byStatus);
+  const clSoonCount = clSummary?.soonCount ?? 0;
+  const peStaleNavCount = peSummary?.staleNavCount ?? 0;
+  const hasAlerts =
+    hasClLateOrDefaultAlerts || clSoonCount > 0 || peStaleNavCount > 0;
 
   function goModule(id: AlternativesSubTab) {
     setSub(id);
@@ -323,30 +328,79 @@ export function AlternativesTab({
           )}
 
           {hasAlerts && (
-            <button
-              type="button"
-              onClick={() => goModule("crowdlending")}
-              className="flex w-full items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-left text-xs text-amber-900 transition hover:bg-amber-100/60 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-950/50"
+            <div
+              className="space-y-1 rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
               data-testid="alt-dashboard-alerts"
             >
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-              <span>
-                {clLateCount > 0 && (
-                  <>
-                    <strong>{clLateCount}</strong> prêt{clLateCount > 1 ? "s" : ""}{" "}
-                    en retard
-                  </>
-                )}
-                {clLateCount > 0 && clDefaultCount > 0 && " · "}
-                {clDefaultCount > 0 && (
-                  <>
-                    <strong>{clDefaultCount}</strong> prêt
-                    {clDefaultCount > 1 ? "s" : ""} en défaut
-                  </>
-                )}
-                {" — "}Crowdlending
-              </span>
-            </button>
+              {(clLateCount > 0 || clDefaultCount > 0) && (
+                <button
+                  type="button"
+                  onClick={() => goModule("crowdlending")}
+                  className="flex w-full items-start gap-2 text-left transition hover:text-amber-950 dark:hover:text-amber-100"
+                  data-testid="alt-alert-cl-late-default"
+                >
+                  <AlertTriangle
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                    aria-hidden
+                  />
+                  <span>
+                    {clLateCount > 0 && (
+                      <>
+                        <strong>{clLateCount}</strong> prêt
+                        {clLateCount > 1 ? "s" : ""} en retard
+                      </>
+                    )}
+                    {clLateCount > 0 && clDefaultCount > 0 && " · "}
+                    {clDefaultCount > 0 && (
+                      <>
+                        <strong>{clDefaultCount}</strong> prêt
+                        {clDefaultCount > 1 ? "s" : ""} en défaut
+                      </>
+                    )}
+                    {" — "}Crowdlending
+                  </span>
+                </button>
+              )}
+
+              {clSoonCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => goModule("crowdlending")}
+                  className="flex w-full items-start gap-2 text-left transition hover:text-amber-950 dark:hover:text-amber-100"
+                  data-testid="alt-alert-cl-soon"
+                >
+                  <AlertTriangle
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                    aria-hidden
+                  />
+                  <span>
+                    <strong>{clSoonCount}</strong> prêt
+                    {clSoonCount > 1 ? "s" : ""} à échéance ≤ 3 mois
+                    {" — "}Crowdlending
+                  </span>
+                </button>
+              )}
+
+              {peStaleNavCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => goModule("private-equity")}
+                  className="flex w-full items-start gap-2 text-left transition hover:text-amber-950 dark:hover:text-amber-100"
+                  data-testid="alt-alert-pe-stale-nav"
+                >
+                  <AlertTriangle
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                    aria-hidden
+                  />
+                  <span>
+                    <strong>{peStaleNavCount}</strong> position
+                    {peStaleNavCount > 1 ? "s" : ""} PE avec NAV non mise à
+                    jour depuis {"> 6 mois"}
+                    {" — "}Private Equity
+                  </span>
+                </button>
+              )}
+            </div>
           )}
 
           <div className="grid gap-4 lg:grid-cols-2">

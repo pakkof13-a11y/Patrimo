@@ -183,6 +183,20 @@ function mapRow(row: Row): CrowdlendingDto {
   };
 }
 
+/**
+ * Prêt à échéance imminente : ACTIVE, échéance connue, ni déjà dépassée ni
+ * au-delà de 3 mois. Règle identique à `rowFlags.soon` dans
+ * alternatives-crowdlending.tsx — à garder synchronisée si l'une évolue.
+ */
+function isSoon(l: CrowdlendingDto): boolean {
+  return (
+    l.status === "ACTIVE" &&
+    l.monthsRemaining != null &&
+    l.monthsRemaining >= 0 &&
+    l.monthsRemaining <= 3
+  );
+}
+
 export function summarizeCrowdlending(lines: CrowdlendingDto[]): CrowdlendingSummary {
   let totalCapital = 0;
   let activeCapital = 0;
@@ -193,6 +207,7 @@ export function summarizeCrowdlending(lines: CrowdlendingDto[]): CrowdlendingSum
   let activeWeightedYieldSum = 0;
   let activeWeight = 0;
   let projectedAnnualIncome = 0;
+  let soonCount = 0;
   const byStatus = new Map<string, { count: number; capital: number }>();
 
   for (const l of lines) {
@@ -213,6 +228,8 @@ export function summarizeCrowdlending(lines: CrowdlendingDto[]): CrowdlendingSum
       activeWeight += remaining;
       projectedAnnualIncome += (remaining * yieldPct) / 100;
     }
+
+    if (isSoon(l)) soonCount += 1;
 
     const cur = byStatus.get(l.status) || { count: 0, capital: 0 };
     cur.count += 1;
@@ -237,6 +254,7 @@ export function summarizeCrowdlending(lines: CrowdlendingDto[]): CrowdlendingSum
     projectedAnnualIncome: projectedAnnualIncome.toFixed(2),
     remainingCapitalTotal: remainingCapitalTotal.toFixed(2),
     interestReceivedTotal: interestReceivedTotal.toFixed(2),
+    soonCount,
   };
 }
 

@@ -25,6 +25,32 @@ function toIsoDate(d: Date | null | undefined): string | null {
   return d.toISOString().slice(0, 10);
 }
 
+/** Mois pleins écoulés entre `from` et `now` (>= 0, jamais négatif). */
+function monthsSince(from: Date, now = new Date()): number {
+  const y = now.getFullYear() - from.getFullYear();
+  const m = now.getMonth() - from.getMonth();
+  let months = y * 12 + m;
+  if (now.getDate() < from.getDate()) months -= 1;
+  return Math.max(0, months);
+}
+
+/**
+ * NAV périmée : pas de `navUpdatedAt` (jamais renseigné, cas défensif —
+ * `updatedAt` Prisma est en pratique toujours présent) ou datant de plus de
+ * 6 mois. `navUpdatedAt` est un proxy de la date de dernière NAV (dérivé de
+ * `updatedAt`, faute de champ dédié) : toute modification de la ligne le
+ * rafraîchit, pas seulement `currentNav`.
+ */
+export function isNavStale(
+  navUpdatedAt: string | null,
+  now = new Date()
+): boolean {
+  if (!navUpdatedAt) return true;
+  const updated = new Date(navUpdatedAt);
+  if (Number.isNaN(updated.getTime())) return true;
+  return monthsSince(updated, now) > 6;
+}
+
 function parseDate(v: string | null | undefined): Date | null {
   if (!v || !String(v).trim()) return null;
   const d = new Date(String(v));
@@ -111,14 +137,19 @@ export function mapRow(row: Row): PrivateEquityDto {
     expectedExitDate: toIsoDate(row.expectedExitDate),
     vehicleName: row.vehicleName,
     round: row.round,
+    navUpdatedAt: toIsoDate(row.updatedAt),
   };
 }
 
-export function summarizePrivateEquity(lines: PrivateEquityDto[]): PrivateEquitySummary {
+export function summarizePrivateEquity(
+  lines: PrivateEquityDto[],
+  now = new Date()
+): PrivateEquitySummary {
   let totalInvested = 0;
   let totalNav = 0;
   let totalCalledCapital = 0;
   let totalDistributions = 0;
+  let staleNavCount = 0;
   for (const l of lines) {
     totalInvested += n(l.investedTotal);
     totalNav += n(l.currentNav);
@@ -127,6 +158,7 @@ export function summarizePrivateEquity(lines: PrivateEquityDto[]): PrivateEquity
     // sert de valeur effective — évite de recalculer le repli ici.
     totalCalledCapital += l.calledCapitalIsDerived ? n(l.investedTotal) : n(l.calledCapital);
     totalDistributions += n(l.distributionsReceived);
+    if (isNavStale(l.navUpdatedAt, now)) staleNavCount += 1;
   }
   const avgMoic = totalInvested > 0 ? Math.round((totalNav / totalInvested) * 100) / 100 : 0;
   // Agrégation dollar-pondérée : somme des numérateurs / somme des
@@ -155,6 +187,7 @@ export function summarizePrivateEquity(lines: PrivateEquityDto[]): PrivateEquity
     avgDpi,
     avgRvpi,
     avgTvpi,
+    staleNavCount,
   };
 }
 

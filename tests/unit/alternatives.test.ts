@@ -6,12 +6,14 @@ import {
   summarizeCrowdlending,
 } from "../../app/lib/alternatives/crowdlending";
 import {
+  isNavStale,
   mapRow,
   summarizePrivateEquity,
 } from "../../app/lib/alternatives/private-equity";
-import type {
-  CrowdlendingDto,
-  PrivateEquityDto,
+import {
+  buildAlternativesShortAlerts,
+  type CrowdlendingDto,
+  type PrivateEquityDto,
 } from "../../app/lib/alternatives/types";
 import { PLATFORM_PRESETS } from "../../app/lib/platforms/presets";
 
@@ -119,6 +121,27 @@ describe("summarizeCrowdlending", () => {
     const s = summarizeCrowdlending(lines);
     expect(s.weightedAverageYield).toBeNull();
     expect(s.projectedAnnualIncome).toBe("0.00");
+  });
+
+  it("soonCount ne compte que les prêts ACTIVE à échéance entre 0 et 3 mois", () => {
+    const lines = [
+      clLine({ id: "1", status: "ACTIVE", monthsRemaining: 2 }), // soon
+      clLine({ id: "2", status: "ACTIVE", monthsRemaining: 3 }), // soon (borne incluse)
+      clLine({ id: "3", status: "ACTIVE", monthsRemaining: 4 }), // trop loin
+      clLine({ id: "4", status: "ACTIVE", monthsRemaining: -1 }), // déjà dépassé
+      clLine({ id: "5", status: "LATE", monthsRemaining: 1 }), // pas ACTIVE
+      clLine({ id: "6", status: "ACTIVE", monthsRemaining: null }), // pas d'échéance connue
+    ];
+    const s = summarizeCrowdlending(lines);
+    expect(s.soonCount).toBe(2);
+  });
+
+  it("soonCount à 0 quand aucun prêt n'est proche de l'échéance", () => {
+    const lines = [
+      clLine({ id: "1", status: "ACTIVE", monthsRemaining: 12 }),
+      clLine({ id: "2", status: "REPAID", monthsRemaining: 0 }),
+    ];
+    expect(summarizeCrowdlending(lines).soonCount).toBe(0);
   });
 });
 
@@ -240,6 +263,7 @@ function peLine(overrides: Partial<PrivateEquityDto> = {}): PrivateEquityDto {
     expectedExitDate: null,
     vehicleName: null,
     round: null,
+    navUpdatedAt: null,
     ...overrides,
   };
 }
@@ -324,6 +348,108 @@ describe("private equity summary", () => {
     expect(s.avgDpi).toBeNull();
     expect(s.avgRvpi).toBeNull();
     expect(s.avgTvpi).toBeNull();
+  });
+});
+
+describe("isNavStale", () => {
+  const now = new Date("2025-06-15");
+
+  it("stale quand navUpdatedAt est absent (null)", () => {
+    expect(isNavStale(null, now)).toBe(true);
+  });
+
+  it("stale quand navUpdatedAt est une date invalide", () => {
+    expect(isNavStale("not-a-date", now)).toBe(true);
+  });
+
+  it("pas stale à exactement 6 mois", () => {
+    expect(isNavStale("2024-12-15", now)).toBe(false);
+  });
+
+  it("stale au-delà de 6 mois", () => {
+    expect(isNavStale("2024-11-01", now)).toBe(true);
+  });
+
+  it("pas stale pour une mise à jour récente", () => {
+    expect(isNavStale("2025-06-01", now)).toBe(false);
+  });
+});
+
+describe("summarizePrivateEquity — staleNavCount", () => {
+  const now = new Date("2025-06-15");
+
+  it("compte les positions dont la NAV n'a pas été mise à jour depuis > 6 mois, ou jamais", () => {
+    // Les dates de navUpdatedAt sont dérivées côté mapRow de `updatedAt` ; on
+    // les fournit directement ici pour tester summarizePrivateEquity en isolation.
+    const lines: PrivateEquityDto[] = [
+      peLine({ id: "1", navUpdatedAt: "2025-06-01" }), // récent
+      peLine({ id: "2", navUpdatedAt: "2024-10-01" }), // > 6 mois
+      peLine({ id: "3", navUpdatedAt: null }), // jamais mis à jour
+    ];
+    expect(summarizePrivateEquity(lines, now).staleNavCount).toBe(2);
+  });
+
+  it("staleNavCount à 0 quand toutes les NAV sont récentes", () => {
+    const lines: PrivateEquityDto[] = [
+      peLine({ id: "1", navUpdatedAt: "2025-06-10" }),
+      peLine({ id: "2", navUpdatedAt: "2025-01-01" }),
+    ];
+    expect(summarizePrivateEquity(lines, now).staleNavCount).toBe(0);
+  });
+});
+
+describe("buildAlternativesShortAlerts", () => {
+  const clSummaryBase = { byStatus: [], soonCount: 0 };
+  const peSummaryBase = { staleNavCount: 0 };
+
+  it("tableau vide quand aucune alerte", () => {
+    expect(
+      buildAlternativesShortAlerts(clSummaryBase, peSummaryBase)
+    ).toEqual([]);
+  });
+
+  it("inclut cl-late / cl-default / cl-soon / pe-stale-nav quand présents", () => {
+    const alerts = buildAlternativesShortAlerts(
+      {
+        byStatus: [
+          { status: "LATE", label: "En retard", count: 2, capital: 100 },
+          { status: "DEFAULT", label: "Défaut", count: 1, capital: 50 },
+        ],
+        soonCount: 3,
+      },
+      { staleNavCount: 4 }
+    );
+    expect(alerts).toEqual([
+      { type: "cl-late", label: "Prêt(s) en retard", count: 2, sub: "crowdlending" },
+      { type: "cl-default", label: "Prêt(s) en défaut", count: 1, sub: "crowdlending" },
+      {
+        type: "cl-soon",
+        label: "Prêt(s) à échéance ≤ 3 mois",
+        count: 3,
+        sub: "crowdlending",
+      },
+      {
+        type: "pe-stale-nav",
+        label: "Position(s) PE — NAV non mise à jour depuis > 6 mois",
+        count: 4,
+        sub: "private-equity",
+      },
+    ]);
+  });
+
+  it("ne renvoie que les types réellement en alerte", () => {
+    const alerts = buildAlternativesShortAlerts(
+      { byStatus: [], soonCount: 1 },
+      { staleNavCount: 0 }
+    );
+    expect(alerts).toEqual([
+      {
+        type: "cl-soon",
+        label: "Prêt(s) à échéance ≤ 3 mois",
+        count: 1,
+        sub: "crowdlending",
+      },
+    ]);
   });
 });
 
