@@ -32,6 +32,7 @@ export type PlatformPresetType =
   | "PORTEFEUILLE_HARDWARE"
   | "NOTAIRE_IMMOBILIER"
   | "BROKER_CFD"
+  | "CGP_CABINETS"
   | "AUTRE";
 
 /** Sous-catégories assurance-vie (ordre d’affichage dans le combobox) */
@@ -640,6 +641,55 @@ const NOTAIRES: PlatformPreset[] = [
   }),
 ].sort(sortByName);
 
+/** Cabinets en Gestion de Patrimoine (CGP) — indépendants et réseaux structurés. */
+const CGP_CABINETS: PlatformPreset[] = [
+  p("CGP_AGORA_FINANCE", "Agora Finance", ["CGP_CABINETS"], "agorafinance.fr", {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p(
+    "CGP_BANQUES_PRIVEES",
+    "Banques Privées / Gestion Privée",
+    ["CGP_CABINETS"],
+    null,
+    {
+      category: "Cabinets en Gestion de Patrimoine",
+      subtype: "Banques privées",
+    }
+  ),
+  p("CGP_CRYSTAL", "Crystal", ["CGP_CABINETS"], "crystalgestion.com", {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p("CGP_CYRUS_HEREZ", "Cyrus-Herez", ["CGP_CABINETS"], "cyrusherez.fr", {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p("CGP_EURIZON_PATRIMOINE", "Eurizon Patrimoine", ["CGP_CABINETS"], null, {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p("CGP_GENERIQUE", "Cabinet en Gestion de Patrimoine", ["CGP_CABINETS"], null, {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p("CGP_INDEPENDANT", "CGP Indépendant", ["CGP_CABINETS"], null, {
+    category: "Cabinets en Gestion de Patrimoine",
+    subtype: "CGP indépendant",
+  }),
+  p("CGP_PRIMONIAL", "Primonial", ["CGP_CABINETS"], "primonial.fr", {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p("CGP_PROSPER_CONSEIL", "Prosper Conseil", ["CGP_CABINETS"], "prosperconseil.com", {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p(
+    "CGP_RESEAU_STRUCTURE",
+    "Réseau structuré de CGP",
+    ["CGP_CABINETS"],
+    null,
+    {
+      category: "Cabinets en Gestion de Patrimoine",
+      subtype: "Réseau structuré",
+    }
+  ),
+].sort(sortByName);
+
 const CHAINS_L1: PlatformPreset[] = [
   chain("ALGORAND", "Algorand (ALGO)", "algorand.com", "Layer 1"),
   chain("AVALANCHE", "Avalanche (AVAX)", "avax.network", "Layer 1"),
@@ -700,6 +750,7 @@ export const PLATFORM_PRESETS: PlatformPreset[] = [
   ...FINTECHS,
   ...HARDWARE,
   ...NOTAIRES,
+  ...CGP_CABINETS,
   ...CHAINS_L1,
   ...CHAINS_L2,
 ];
