@@ -171,9 +171,92 @@ export const DETENTION_STRUCTURES = {
 
 export type DetentionStructure = keyof typeof DETENTION_STRUCTURES;
 
-/** Diagnostic de performance énergétique. */
+/** Diagnostic de performance énergétique (DPE, `energyRating` en base). */
 export const ENERGY_RATINGS = ["A", "B", "C", "D", "E", "F", "G"] as const;
 export type EnergyRating = (typeof ENERGY_RATINGS)[number];
+
+/** Étiquette gaz à effet de serre du DPE — même échelle, colonne distincte. */
+export const GES_RATINGS = ["A", "B", "C", "D", "E", "F", "G"] as const;
+export type GesRating = (typeof GES_RATINGS)[number];
+
+/** Orientation principale du bien (points cardinaux). */
+export const ORIENTATIONS = {
+  N: "Nord",
+  S: "Sud",
+  E: "Est",
+  O: "Ouest",
+  NE: "Nord-Est",
+  NO: "Nord-Ouest",
+  SE: "Sud-Est",
+  SO: "Sud-Ouest",
+} as const;
+
+export type Orientation = keyof typeof ORIENTATIONS;
+
+export function orientationLabel(value: string): string {
+  return ORIENTATIONS[value as Orientation] ?? value;
+}
+
+/** Nature de la vue dégagée depuis le bien. */
+export const VIEW_TYPES = {
+  AUCUNE: "Aucune vue particulière",
+  DEGAGEE: "Vue dégagée",
+  VIS_A_VIS: "Vis-à-vis",
+  RUE: "Sur rue",
+  PARC_JARDIN: "Sur parc ou jardin",
+  MER: "Vue mer",
+  MONTAGNE: "Vue montagne",
+} as const;
+
+export type ViewType = keyof typeof VIEW_TYPES;
+
+export function viewTypeLabel(value: string): string {
+  return VIEW_TYPES[value as ViewType] ?? value;
+}
+
+/** Mode de chauffage principal. */
+export const HEATING_TYPES = {
+  INDIVIDUEL_GAZ: "Individuel gaz",
+  INDIVIDUEL_ELECTRIQUE: "Individuel électrique",
+  COLLECTIF_GAZ: "Collectif gaz",
+  COLLECTIF_ELECTRIQUE: "Collectif électrique",
+  POMPE_A_CHALEUR: "Pompe à chaleur",
+  RESEAU_URBAIN: "Réseau de chaleur urbain",
+  FIOUL: "Fioul",
+  BOIS_GRANULES: "Bois / granulés",
+  AUTRE: "Autre",
+} as const;
+
+export type HeatingType = keyof typeof HEATING_TYPES;
+
+export function heatingTypeLabel(value: string): string {
+  return HEATING_TYPES[value as HeatingType] ?? value;
+}
+
+/** Qualité du vitrage. */
+export const WINDOW_QUALITIES = {
+  SIMPLE_VITRAGE: "Simple vitrage",
+  DOUBLE_VITRAGE: "Double vitrage",
+  TRIPLE_VITRAGE: "Triple vitrage",
+} as const;
+
+export type WindowQuality = keyof typeof WINDOW_QUALITIES;
+
+export function windowQualityLabel(value: string): string {
+  return WINDOW_QUALITIES[value as WindowQuality] ?? value;
+}
+
+/**
+ * Résidence secondaire : dérivé de `usage`, jamais stocké à part.
+ *
+ * Un second champ booléen désynchronisable de `usage` reproduirait l'exact
+ * problème qu'évite `calledCapitalIsDerived` ailleurs dans le code — deux
+ * sources de vérité pour un seul fait. La taxe d'habitation (encore due sur
+ * les résidences secondaires) se pilote donc sur ce dérivé.
+ */
+export function isSecondaryResidenceUsage(usage: string): boolean {
+  return usage === "RESIDENCE_SECONDAIRE";
+}
 
 /** Mode de valorisation d'un bien. */
 export const VALUATION_MODES = {

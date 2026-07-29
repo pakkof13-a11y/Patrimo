@@ -2,17 +2,25 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { fetchJson } from "@/app/lib/api-client";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  ENERGY_RATINGS,
+  GES_RATINGS,
+  HEATING_TYPES,
+  ORIENTATIONS,
+  VIEW_TYPES,
+  WINDOW_QUALITIES,
   formatOwnershipShare,
   grossRentalYieldPct,
   hasCommitment,
   isDvfEstimable,
   isFurnishedUsage,
   isRentalUsage,
+  isSecondaryResidenceUsage,
   netRentalYieldPct,
   regimesForUsage,
   rentalRegimeLabel,
@@ -53,6 +61,31 @@ type PropertyRow = {
   schemeCommitmentYears: number | null;
   schemeBaseEur: string | null;
   schemeRatePct: string | null;
+  // ── Physique ──
+  constructionYear: number | null;
+  energyRating: string | null;
+  parkingSpots: number | null;
+  floor: number | null;
+  hasElevator: boolean | null;
+  totalFloors: number | null;
+  orientation: string | null;
+  viewType: string | null;
+  hasBalcony: boolean | null;
+  balconyAreaM2: number | null;
+  hasGarden: boolean | null;
+  gardenAreaM2: number | null;
+  hasCellar: boolean | null;
+  // ── État et performance énergétique ──
+  dpeKwhM2Year: number | null;
+  gesRating: string | null;
+  heatingType: string | null;
+  windowQuality: string | null;
+  // ── Copropriété ──
+  isCopropriete: boolean | null;
+  annualCoproChargesEur: string | null;
+  annualCoproProvisions: string | null;
+  // ── Fiscalité locale ──
+  annualHabitationTaxEur: string | null;
   loans: Array<{ id: string; name: string; remainingAmountEur: string }>;
 };
 
@@ -79,6 +112,56 @@ function fiscalFormFrom(p: PropertyRow): FiscalForm {
       ? String(p.schemeCommitmentYears)
       : "",
     schemeBaseEur: p.schemeBaseEur ?? "",
+  };
+}
+
+type CharacteristicsForm = {
+  constructionYear: string;
+  floor: string;
+  totalFloors: string;
+  hasElevator: boolean;
+  orientation: string;
+  viewType: string;
+  hasBalcony: boolean;
+  balconyAreaM2: string;
+  hasGarden: boolean;
+  gardenAreaM2: string;
+  hasCellar: boolean;
+  parkingSpots: string;
+  energyRating: string;
+  dpeKwhM2Year: string;
+  gesRating: string;
+  heatingType: string;
+  windowQuality: string;
+  isCopropriete: boolean;
+  annualCoproChargesEur: string;
+  annualCoproProvisions: string;
+  annualHabitationTaxEur: string;
+};
+
+function characteristicsFormFrom(p: PropertyRow): CharacteristicsForm {
+  return {
+    constructionYear: p.constructionYear ? String(p.constructionYear) : "",
+    floor: p.floor != null ? String(p.floor) : "",
+    totalFloors: p.totalFloors != null ? String(p.totalFloors) : "",
+    hasElevator: p.hasElevator ?? false,
+    orientation: p.orientation ?? "",
+    viewType: p.viewType ?? "",
+    hasBalcony: p.hasBalcony ?? false,
+    balconyAreaM2: p.balconyAreaM2 != null ? String(p.balconyAreaM2) : "",
+    hasGarden: p.hasGarden ?? false,
+    gardenAreaM2: p.gardenAreaM2 != null ? String(p.gardenAreaM2) : "",
+    hasCellar: p.hasCellar ?? false,
+    parkingSpots: p.parkingSpots != null ? String(p.parkingSpots) : "",
+    energyRating: p.energyRating ?? "",
+    dpeKwhM2Year: p.dpeKwhM2Year != null ? String(p.dpeKwhM2Year) : "",
+    gesRating: p.gesRating ?? "",
+    heatingType: p.heatingType ?? "",
+    windowQuality: p.windowQuality ?? "",
+    isCopropriete: p.isCopropriete ?? false,
+    annualCoproChargesEur: p.annualCoproChargesEur ?? "",
+    annualCoproProvisions: p.annualCoproProvisions ?? "",
+    annualHabitationTaxEur: p.annualHabitationTaxEur ?? "",
   };
 }
 
@@ -118,6 +201,12 @@ export function PropertyPanel({
   const [fiscalAssetId, setFiscalAssetId] = useState<string | null>(null);
   const [fiscalForm, setFiscalForm] = useState<FiscalForm | null>(null);
   const [fiscalSaving, setFiscalSaving] = useState(false);
+  const [charAssetId, setCharAssetId] = useState<string | null>(null);
+  const [charForm, setCharForm] = useState<CharacteristicsForm | null>(null);
+  const [charSaving, setCharSaving] = useState(false);
+  const [charOpenSections, setCharOpenSections] = useState<Set<string>>(
+    new Set(["physique"])
+  );
 
   const propsQ = useQuery({
     queryKey: ["real-estate-properties"],
@@ -251,6 +340,65 @@ export function PropertyPanel({
       toast.error(e instanceof Error ? e.message : "Mise à jour impossible");
     } finally {
       setFiscalSaving(false);
+    }
+  }
+
+  function toggleCharSection(id: string) {
+    setCharOpenSections((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function saveCharacteristics(assetId: string, name: string) {
+    if (!charForm) return;
+    setCharSaving(true);
+    try {
+      await fetchJson(`/api/real-estate/properties/${assetId}/characteristics`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          constructionYear: charForm.constructionYear
+            ? Number(charForm.constructionYear)
+            : null,
+          floor: charForm.floor ? Number(charForm.floor) : null,
+          totalFloors: charForm.totalFloors ? Number(charForm.totalFloors) : null,
+          hasElevator: charForm.hasElevator,
+          orientation: charForm.orientation || null,
+          viewType: charForm.viewType || null,
+          hasBalcony: charForm.hasBalcony,
+          balconyAreaM2: charForm.balconyAreaM2 ? Number(charForm.balconyAreaM2) : null,
+          hasGarden: charForm.hasGarden,
+          gardenAreaM2: charForm.gardenAreaM2 ? Number(charForm.gardenAreaM2) : null,
+          hasCellar: charForm.hasCellar,
+          parkingSpots: charForm.parkingSpots ? Number(charForm.parkingSpots) : null,
+          energyRating: charForm.energyRating || null,
+          dpeKwhM2Year: charForm.dpeKwhM2Year ? Number(charForm.dpeKwhM2Year) : null,
+          gesRating: charForm.gesRating || null,
+          heatingType: charForm.heatingType || null,
+          windowQuality: charForm.windowQuality || null,
+          isCopropriete: charForm.isCopropriete,
+          annualCoproChargesEur: charForm.annualCoproChargesEur
+            ? charForm.annualCoproChargesEur.replace(",", ".")
+            : null,
+          annualCoproProvisions: charForm.annualCoproProvisions
+            ? charForm.annualCoproProvisions.replace(",", ".")
+            : null,
+          annualHabitationTaxEur: charForm.annualHabitationTaxEur
+            ? charForm.annualHabitationTaxEur.replace(",", ".")
+            : null,
+        }),
+      });
+      toast.success(`Caractéristiques de ${name} mises à jour`);
+      setCharAssetId(null);
+      setCharForm(null);
+      void propsQ.refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Mise à jour impossible");
+    } finally {
+      setCharSaving(false);
     }
   }
 
@@ -470,6 +618,23 @@ export function PropertyPanel({
                       Régime &amp; dispositif fiscal
                     </button>
                   )}
+                  <button
+                    type="button"
+                    className="btn btn-ghost text-[11px]"
+                    data-testid="property-characteristics-toggle"
+                    onClick={() =>
+                      setCharAssetId((cur) => {
+                        if (cur === p.assetId) {
+                          setCharForm(null);
+                          return null;
+                        }
+                        setCharForm(characteristicsFormFrom(p));
+                        return p.assetId;
+                      })
+                    }
+                  >
+                    Caractéristiques du bien
+                  </button>
                 </div>
               </div>
 
@@ -649,6 +814,377 @@ export function PropertyPanel({
                 </form>
               )}
 
+              {charAssetId === p.assetId && charForm && (
+                <form
+                  className="mt-2 space-y-2"
+                  data-testid="property-characteristics-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void saveCharacteristics(p.assetId, p.name);
+                  }}
+                >
+                  <CharSection
+                    id="physique"
+                    title="Physique"
+                    open={charOpenSections.has("physique")}
+                    onToggle={() => toggleCharSection("physique")}
+                  >
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">
+                        Année de construction
+                      </span>
+                      <input
+                        inputMode="numeric"
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.constructionYear}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, constructionYear: ev.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">Étage</span>
+                      <input
+                        inputMode="numeric"
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.floor}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, floor: ev.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">
+                        Étages de l&apos;immeuble
+                      </span>
+                      <input
+                        inputMode="numeric"
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.totalFloors}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, totalFloors: ev.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">Orientation</span>
+                      <select
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.orientation}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, orientation: ev.target.value })
+                        }
+                      >
+                        <option value="">Non renseignée</option>
+                        {Object.entries(ORIENTATIONS).map(([k, label]) => (
+                          <option key={k} value={k}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">Vue</span>
+                      <select
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.viewType}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, viewType: ev.target.value })
+                        }
+                      >
+                        <option value="">Non renseignée</option>
+                        {Object.entries(VIEW_TYPES).map(([k, label]) => (
+                          <option key={k} value={k}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">
+                        Places de parking
+                      </span>
+                      <input
+                        inputMode="numeric"
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.parkingSpots}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, parkingSpots: ev.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="flex items-end gap-1.5 text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={charForm.hasElevator}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, hasElevator: ev.target.checked })
+                        }
+                      />
+                      <span className="text-[var(--muted-foreground)]">Ascenseur</span>
+                    </label>
+                    <label className="flex items-end gap-1.5 text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={charForm.hasCellar}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, hasCellar: ev.target.checked })
+                        }
+                      />
+                      <span className="text-[var(--muted-foreground)]">Cave</span>
+                    </label>
+                    <div />
+                    <label className="flex items-end gap-1.5 text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={charForm.hasBalcony}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, hasBalcony: ev.target.checked })
+                        }
+                      />
+                      <span className="text-[var(--muted-foreground)]">Balcon</span>
+                    </label>
+                    {charForm.hasBalcony && (
+                      <label className="text-[11px] sm:col-span-2">
+                        <span className="text-[var(--muted-foreground)]">
+                          Surface du balcon (m²)
+                        </span>
+                        <input
+                          inputMode="numeric"
+                          className="input mt-0.5 h-8 w-full text-xs"
+                          value={charForm.balconyAreaM2}
+                          onChange={(ev) =>
+                            setCharForm({ ...charForm, balconyAreaM2: ev.target.value })
+                          }
+                        />
+                      </label>
+                    )}
+                    <label className="flex items-end gap-1.5 text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={charForm.hasGarden}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, hasGarden: ev.target.checked })
+                        }
+                      />
+                      <span className="text-[var(--muted-foreground)]">Jardin</span>
+                    </label>
+                    {charForm.hasGarden && (
+                      <label className="text-[11px] sm:col-span-2">
+                        <span className="text-[var(--muted-foreground)]">
+                          Surface du jardin (m²)
+                        </span>
+                        <input
+                          inputMode="numeric"
+                          className="input mt-0.5 h-8 w-full text-xs"
+                          value={charForm.gardenAreaM2}
+                          onChange={(ev) =>
+                            setCharForm({ ...charForm, gardenAreaM2: ev.target.value })
+                          }
+                        />
+                      </label>
+                    )}
+                  </CharSection>
+
+                  <CharSection
+                    id="etat"
+                    title="État"
+                    hint="Performance énergétique"
+                    open={charOpenSections.has("etat")}
+                    onToggle={() => toggleCharSection("etat")}
+                  >
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">DPE</span>
+                      <select
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.energyRating}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, energyRating: ev.target.value })
+                        }
+                      >
+                        <option value="">Non renseigné</option>
+                        {ENERGY_RATINGS.map((r) => (
+                          <option key={r} value={r}>
+                            {r}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">
+                        Consommation (kWh/m²/an)
+                      </span>
+                      <input
+                        inputMode="numeric"
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.dpeKwhM2Year}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, dpeKwhM2Year: ev.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">GES</span>
+                      <select
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.gesRating}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, gesRating: ev.target.value })
+                        }
+                      >
+                        <option value="">Non renseigné</option>
+                        {GES_RATINGS.map((r) => (
+                          <option key={r} value={r}>
+                            {r}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">Chauffage</span>
+                      <select
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.heatingType}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, heatingType: ev.target.value })
+                        }
+                      >
+                        <option value="">Non renseigné</option>
+                        {Object.entries(HEATING_TYPES).map(([k, label]) => (
+                          <option key={k} value={k}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">Vitrage</span>
+                      <select
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.windowQuality}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, windowQuality: ev.target.value })
+                        }
+                      >
+                        <option value="">Non renseigné</option>
+                        {Object.entries(WINDOW_QUALITIES).map(([k, label]) => (
+                          <option key={k} value={k}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </CharSection>
+
+                  <CharSection
+                    id="copro"
+                    title="Copropriété"
+                    open={charOpenSections.has("copro")}
+                    onToggle={() => toggleCharSection("copro")}
+                  >
+                    <label className="flex items-end gap-1.5 text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={charForm.isCopropriete}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, isCopropriete: ev.target.checked })
+                        }
+                      />
+                      <span className="text-[var(--muted-foreground)]">
+                        Bien en copropriété
+                      </span>
+                    </label>
+                    {charForm.isCopropriete && (
+                      <>
+                        <label className="text-[11px]">
+                          <span className="text-[var(--muted-foreground)]">
+                            Charges de copropriété annuelles (€)
+                          </span>
+                          <input
+                            inputMode="decimal"
+                            className="input mt-0.5 h-8 w-full text-xs"
+                            value={charForm.annualCoproChargesEur}
+                            onChange={(ev) =>
+                              setCharForm({
+                                ...charForm,
+                                annualCoproChargesEur: ev.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                        <label className="text-[11px]">
+                          <span className="text-[var(--muted-foreground)]">
+                            Provisions travaux annuelles (€)
+                          </span>
+                          <input
+                            inputMode="decimal"
+                            className="input mt-0.5 h-8 w-full text-xs"
+                            value={charForm.annualCoproProvisions}
+                            onChange={(ev) =>
+                              setCharForm({
+                                ...charForm,
+                                annualCoproProvisions: ev.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                      </>
+                    )}
+                  </CharSection>
+
+                  <CharSection
+                    id="fiscalite"
+                    title="Fiscalité locale"
+                    hint="Taxe d'habitation"
+                    open={charOpenSections.has("fiscalite")}
+                    onToggle={() => toggleCharSection("fiscalite")}
+                  >
+                    <label className="text-[11px] sm:col-span-2">
+                      <span className="text-[var(--muted-foreground)]">
+                        Taxe d&apos;habitation annuelle (€)
+                      </span>
+                      <input
+                        inputMode="decimal"
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.annualHabitationTaxEur}
+                        onChange={(ev) =>
+                          setCharForm({
+                            ...charForm,
+                            annualHabitationTaxEur: ev.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <p className="text-meta sm:col-span-3">
+                      {isSecondaryResidenceUsage(p.usage)
+                        ? "Résidence secondaire — la taxe d'habitation reste due."
+                        : "Supprimée depuis 2023 pour les résidences principales — ne concerne en pratique que les résidences secondaires."}
+                    </p>
+                  </CharSection>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="submit"
+                      className="btn btn-primary text-[11px]"
+                      disabled={charSaving}
+                      data-testid="characteristics-save"
+                    >
+                      {charSaving ? "Enregistrement…" : "Valider"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost text-[11px]"
+                      onClick={() => {
+                        setCharAssetId(null);
+                        setCharForm(null);
+                      }}
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </form>
+              )}
+
               {editing?.assetId === p.assetId && (
                 <form
                   className="mt-2 flex flex-wrap items-center gap-2"
@@ -705,6 +1241,61 @@ export function PropertyPanel({
         Le capital restant dû est celui que vous devez réellement : il n&apos;est
         pas réduit à votre quote-part de propriété.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Section repliable du formulaire « Caractéristiques du bien ».
+ *
+ * Un accordéon par groupe (Physique / État / Copro / Fiscalité) plutôt qu'un
+ * formulaire mur : la plupart des champs sont facultatifs et rarement tous
+ * renseignés à la fois, autant ne montrer que ce que l'on ouvre.
+ */
+function CharSection({
+  id,
+  title,
+  hint,
+  open,
+  onToggle,
+  children,
+}: {
+  id: string;
+  title: string;
+  hint?: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-[var(--radius-md)] border border-[var(--border)]">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left text-[11px] font-medium"
+        aria-expanded={open}
+        onClick={onToggle}
+        data-testid={`char-section-${id}`}
+      >
+        <span>
+          {title}
+          {hint && (
+            <span className="ml-1.5 font-normal text-[var(--muted-foreground)]">
+              {hint}
+            </span>
+          )}
+        </span>
+        <ChevronDown
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 transition-transform",
+            open && "rotate-180"
+          )}
+        />
+      </button>
+      {open && (
+        <div className="grid gap-2 border-t border-[var(--border)] p-2.5 sm:grid-cols-3">
+          {children}
+        </div>
+      )}
     </div>
   );
 }

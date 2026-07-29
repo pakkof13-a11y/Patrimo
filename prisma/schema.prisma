@@ -421,13 +421,44 @@ model RealEstateDetail {
   /// Fin du bail — au-delà, plus aucune échéance n'est générée.
   rentalEndDate        DateTime?
 
-  // ── Descriptif ──
+  // ── Descriptif : physique ──
   constructionYear Int?
   /// DPE : A à G
   energyRating     String?
+  /// Nombre de places de parking/box — `> 0` vaut présence, pas de booléen
+  /// séparé à garder synchronisé.
   parkingSpots     Int?
   floor            Int?
+  /// Nombre d'étages de l'immeuble — distinct de `floor`, l'étage du lot.
+  totalFloors      Int?
   hasElevator      Boolean?
+  orientation      String?
+  viewType         String?
+  hasBalcony       Boolean?
+  balconyAreaM2    Int?
+  hasGarden        Boolean?
+  gardenAreaM2     Int?
+  hasCellar        Boolean?
+
+  // ── Descriptif : état et performance énergétique ──
+  /// GES : A à G, même échelle que `energyRating` (DPE), colonne distincte.
+  gesRating      String?
+  /// Consommation énergétique en kWh/m²/an, telle qu'affichée sur le DPE.
+  dpeKwhM2Year   Int?
+  heatingType    String?
+  windowQuality  String?
+
+  // ── Copropriété ──
+  isCopropriete          Boolean?
+  annualCoproChargesEur  Decimal? @db.Decimal(12, 2)
+  /// Provisions pour travaux (fonds travaux / ALUR), distinctes des charges
+  /// courantes.
+  annualCoproProvisions  Decimal? @db.Decimal(12, 2)
+
+  // ── Fiscalité locale ──
+  /// Toujours due sur les résidences secondaires (`usage`), supprimée pour
+  /// les résidences principales depuis 2023.
+  annualHabitationTaxEur Decimal? @db.Decimal(12, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
