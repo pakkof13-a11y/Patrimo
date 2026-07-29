@@ -1003,17 +1003,62 @@ model PrivateEquityPosition {
   /// Prix d'acquisition par part
   acquisitionPricePerShare Decimal   @default(0) @db.Decimal(28, 12)
   investmentDate           DateTime?
-  /// Valorisation actuelle totale de la ligne (NAV manuelle)
+  /// Valorisation actuelle totale de la ligne (NAV manuelle) — dernier
+  /// point connu, dupliqué dans PrivateEquityValuation dès qu'un
+  /// historique existe.
   currentNav               Decimal   @default(0) @db.Decimal(28, 12)
   currency                 String    @default("EUR")
   notes                    String?
+  /// Capital engagé (commitment) — peut excéder ce qui a été effectivement
+  /// appelé, notamment en capital-risque à appels échelonnés.
+  committedCapital         Decimal   @default(0) @db.Decimal(28, 12)
+  /// Capital effectivement appelé et versé à ce jour. Pour les lignes
+  /// existantes avant cette migration, à défaut de saisie, se déduit de
+  /// shares × acquisitionPricePerShare (non recalculé automatiquement —
+  /// voir commentaire de la migration).
+  calledCapital            Decimal   @default(0) @db.Decimal(28, 12)
+  /// Cumul des distributions perçues (dividendes, cessions partielles,
+  /// retour de capital) — sert au calcul du multiple réalisé (DPI).
+  distributionsReceived    Decimal   @default(0) @db.Decimal(28, 12)
+  /// Quote-part détenue au capital de la société, en %
+  ownershipPercent         Decimal?  @db.Decimal(10, 6)
+  /// Date de sortie anticipée (fenêtre de liquidité, maturité du fonds…)
+  expectedExitDate         DateTime?
+  /// Nom du véhicule d'investissement quand distinct de la société cible
+  /// (fonds, SPV, holding de reprise…)
+  vehicleName              String?
+  /// Tour de table à l'entrée — Seed, Series A, LBO…
+  round                    String?
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  valuations PrivateEquityValuation[]
 
   @@index([userId])
   @@index([userId, peType])
+}
+
+/// Historique de valorisation d'une ligne de private equity (NAV successives).
+///
+/// `currentNav` sur PrivateEquityPosition reste le dernier point connu pour
+/// un accès direct sans jointure ; cette table porte la série complète, dont
+/// le multiple non réalisé (RVPI) et la courbe de valorisation se déduisent.
+model PrivateEquityValuation {
+  id                      String @id @default(cuid())
+  privateEquityPositionId String
+
+  /// Valorisation totale de la ligne à cette date
+  nav       Decimal  @db.Decimal(28, 12)
+  /// Source ou contexte de la valorisation (rapport du fonds, estimation…)
+  note      String?
+  valuedAt  DateTime
+  createdAt DateTime @default(now())
+
+  /// Cascade : un historique de valorisation n'a aucun sens sans sa ligne.
+  position PrivateEquityPosition @relation(fields: [privateEquityPositionId], references: [id], onDelete: Cascade)
+
+  @@index([privateEquityPositionId, valuedAt])
 }
 
 /// Crowdlending / dette privée (prêts participatifs)

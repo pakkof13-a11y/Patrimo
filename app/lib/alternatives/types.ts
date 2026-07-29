@@ -330,10 +330,47 @@ export type PrivateEquityDto = {
   notes: string | null;
   /** shares × PRU */
   investedTotal: string;
-  /** MOIC = currentNav / investedTotal */
+  /** Alias historique de `tvpi` (même valeur, même formule). Le champ
+   * `moic` désignait auparavant currentNav / investedTotal (avant
+   * l'existence de `distributionsReceived`) ; il porte maintenant le vrai
+   * multiple total pour rester la métrique de référence affichée par les
+   * consommateurs existants (UI, dashboard), sans les forcer à migrer vers
+   * `tvpi`. Contrairement à `tvpi`, reste toujours une string non nulle —
+   * `"0.00"` quand calledCapital (après repli) est nul — afin de ne pas
+   * introduire de `null` sur un champ qui n'en portait pas jusqu'ici. */
   moic: string;
   unrealizedPnl: string;
   unrealizedPnlPct: string;
+  /** Capital total engagé (commitment), distinct du capital effectivement
+   * appelé. Valeur brute, aucun repli. */
+  committedCapital: string;
+  /** Capital appelé — valeur brute stockée, sans repli appliqué (voir
+   * `calledCapitalIsDerived`). */
+  calledCapital: string;
+  /** `true` quand aucun appel de capital n'a été saisi : les calculs qui en
+   * dépendent (TVPI, DPI, RVPI) utilisent alors shares × PRU comme valeur
+   * de repli, pas un montant réellement saisi. */
+  calledCapitalIsDerived: boolean;
+  /** Cumul des distributions perçues (dividendes, cessions partielles,
+   * retour de capital) */
+  distributionsReceived: string;
+  /** DPI (Distributions to Paid-In) = distributionsReceived /
+   * calledCapital(après repli) — `null` si aucun capital appelé, faute de
+   * base pour un ratio. */
+  dpi: string | null;
+  /** RVPI (Residual Value to Paid-In) = currentNav / calledCapital(après
+   * repli) — `null` si aucun capital appelé. */
+  rvpi: string | null;
+  /** TVPI (Total Value to Paid-In) = (currentNav + distributionsReceived) /
+   * calledCapital(après repli) — `null` si aucun capital appelé. Valeur de
+   * référence ; `moic` en est l'alias rétrocompatible (voir plus haut). */
+  tvpi: string | null;
+  /** Quote-part détenue, en % — saisie optionnelle, `null` si non
+   * renseignée. */
+  ownershipPercent: string | null;
+  expectedExitDate: string | null;
+  vehicleName: string | null;
+  round: string | null;
 };
 
 export type PrivateEquitySummary = {
@@ -342,6 +379,20 @@ export type PrivateEquitySummary = {
   totalPnl: string;
   avgMoic: number;
   lineCount: number;
+  /** Somme du capital appelé, repli appliqué ligne à ligne (voir
+   * `calledCapitalIsDerived`). */
+  totalCalledCapital: string;
+  /** Somme des distributions perçues sur l'ensemble des lignes. */
+  totalDistributions: string;
+  /** DPI du portefeuille = totalDistributions / totalCalledCapital —
+   * `null` si aucun capital appelé sur l'ensemble des lignes. */
+  avgDpi: number | null;
+  /** RVPI du portefeuille = totalNav / totalCalledCapital — `null` si
+   * aucun capital appelé. */
+  avgRvpi: number | null;
+  /** TVPI du portefeuille = (totalNav + totalDistributions) /
+   * totalCalledCapital — `null` si aucun capital appelé. */
+  avgTvpi: number | null;
 };
 
 // ─── Crowdlending ─────────────────────────────────────────────────────────────
@@ -352,6 +403,22 @@ export type ClRepaymentType = (typeof CL_REPAYMENT_TYPES)[number];
 export const CL_REPAYMENT_LABELS: Record<ClRepaymentType, string> = {
   IN_FINE: "In fine",
   AMORTIZING: "Amortissable",
+};
+
+/** Fréquence de versement des intérêts — distincte de repaymentType, qui porte sur le capital. */
+export const CL_PAYMENT_FREQUENCIES = [
+  "MONTHLY",
+  "QUARTERLY",
+  "ANNUAL",
+  "IN_FINE",
+] as const;
+export type ClPaymentFrequency = (typeof CL_PAYMENT_FREQUENCIES)[number];
+
+export const CL_PAYMENT_FREQUENCY_LABELS: Record<ClPaymentFrequency, string> = {
+  MONTHLY: "Mensuelle",
+  QUARTERLY: "Trimestrielle",
+  ANNUAL: "Annuelle",
+  IN_FINE: "In fine (paiement unique à l'échéance)",
 };
 
 export const CL_STATUSES = ["ACTIVE", "LATE", "REPAID", "DEFAULT"] as const;
@@ -381,6 +448,29 @@ export type CrowdlendingDto = {
   monthsRemaining: number | null;
   /** 0–100 progression du prêt (temps) */
   progressPct: number | null;
+  /** Capital restant dû — valeur brute stockée, sans repli appliqué.
+   * Destinée au formulaire d'édition : la ressaisir telle quelle ne
+   * persiste jamais un chiffre déduit. Pour l'affichage et les calculs,
+   * utiliser `effectiveRemainingCapital`. */
+  remainingCapital: string;
+  /** Capital restant dû après repli — capital initial tant qu'aucun
+   * remboursement partiel n'a été saisi, 0 sur un prêt soldé. C'est la
+   * valeur qui alimente les agrégats et l'affichage. */
+  effectiveRemainingCapital: string;
+  /** `true` quand `effectiveRemainingCapital` a été déduit du capital
+   * initial faute de saisie, et non renseigné par l'utilisateur. Permet à
+   * l'UI de distinguer les deux sans dupliquer la règle de repli. */
+  remainingCapitalIsDerived: boolean;
+  /** Cumul des intérêts déjà perçus sur cette ligne */
+  interestReceivedToDate: string;
+  paymentFrequency: ClPaymentFrequency;
+  nextPaymentDate: string | null;
+  /** Notation de risque plateforme — "A" | "B" | "C" ou libre */
+  riskGrade: string | null;
+  /** Estimation simple des intérêts totaux sur la durée du prêt (in fine :
+   * capital plein sur toute la durée ; amortissable : approximation par
+   * amortissement linéaire, capital moyen = moitié du capital initial). */
+  expectedTotalInterest: string;
 };
 
 export type CrowdlendingSummary = {
@@ -388,4 +478,13 @@ export type CrowdlendingSummary = {
   activeCapital: string;
   lineCount: number;
   byStatus: { status: string; label: string; count: number; capital: number }[];
+  /** Rendement moyen pondéré par le capital actif restant dû, en % —
+   * `null` si aucun capital actif (rien à pondérer). */
+  weightedAverageYield: number | null;
+  /** Revenu annuel projeté sur le capital actif, au taux nominal de chaque ligne */
+  projectedAnnualIncome: string;
+  /** Somme du capital restant dû (repli appliqué) sur l'ensemble des lignes */
+  remainingCapitalTotal: string;
+  /** Somme des intérêts déjà perçus sur l'ensemble des lignes */
+  interestReceivedTotal: string;
 };

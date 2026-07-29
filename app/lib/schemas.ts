@@ -456,6 +456,20 @@ export const privateEquitySchema = z.object({
   currentNav: decimalString.default("0"),
   currency: z.string().min(3).max(3).default("EUR"),
   notes: z.string().optional().nullable(),
+  committedCapital: decimalString.default("0"),
+  /**
+   * Pas de `.default()`, contrairement aux autres champs monétaires :
+   * private-equity.ts#normalize() distingue "absent" (dérive shares × PRU
+   * à la création) de "fourni, y compris 0" (stocke tel quel). Un défaut
+   * Zod appliquerait "0" même quand le champ est omis et empêcherait cette
+   * dérivation côté création via l'API.
+   */
+  calledCapital: decimalString.optional(),
+  distributionsReceived: decimalString.default("0"),
+  ownershipPercent: decimalString.optional().nullable(),
+  expectedExitDate: z.string().optional().nullable(),
+  vehicleName: z.string().optional().nullable(),
+  round: z.string().optional().nullable(),
 });
 
 export type PrivateEquityForm = z.infer<typeof privateEquitySchema>;
@@ -475,6 +489,11 @@ export const crowdlendingSchema = z.object({
   status: z.enum(["ACTIVE", "LATE", "REPAID", "DEFAULT"]).default("ACTIVE"),
   currency: z.string().min(3).max(3).default("EUR"),
   notes: z.string().optional().nullable(),
+  remainingCapital: decimalString.default("0"),
+  interestReceivedToDate: decimalString.default("0"),
+  paymentFrequency: z.enum(["MONTHLY", "QUARTERLY", "ANNUAL", "IN_FINE"]).default("MONTHLY"),
+  nextPaymentDate: z.string().optional().nullable(),
+  riskGrade: z.string().optional().nullable(),
 });
 
 export type CrowdlendingForm = z.infer<typeof crowdlendingSchema>;

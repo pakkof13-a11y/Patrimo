@@ -81,6 +81,16 @@ const ALT_SUBS = new Set<string>([
   "tangibles",
 ]);
 
+function fmtMultipleShort(v: number | null | undefined): string {
+  if (v == null) return "—";
+  return `${v.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
+}
+
+function fmtPctShort(v: number | null | undefined): string {
+  if (v == null) return "—";
+  return `${v.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} %`;
+}
+
 const MODULE_GUIDES: Record<
   Exclude<AlternativesSubTab, "dashboard">,
   { title: string; blurb: string; cta: string }
@@ -234,11 +244,14 @@ export function AlternativesTab({
               onClick={() => goModule("metals")}
             />
             <AltDashKpi
-              label="Private Equity (NAV)"
-              value={formatCurrency(peSummary?.totalNav || "0", baseCurrency)}
+              label="Private Equity (appelé)"
+              value={formatCurrency(
+                peSummary?.totalCalledCapital || "0",
+                baseCurrency
+              )}
               hint={
                 (peSummary?.lineCount ?? 0) > 0
-                  ? `${peSummary?.lineCount} pos. · MOIC moy. ${peSummary?.avgMoic ?? 0}×`
+                  ? `${peSummary?.lineCount} pos. · TVPI moy. ${fmtMultipleShort(peSummary?.avgTvpi)} · Distrib. ${formatCurrency(peSummary?.totalDistributions || "0", baseCurrency)}`
                   : "Participations non cotées — non renseigné"
               }
               tone={Number(peSummary?.totalPnl || 0)}
@@ -252,7 +265,7 @@ export function AlternativesTab({
               )}
               hint={
                 (clSummary?.lineCount ?? 0) > 0
-                  ? `${clSummary?.lineCount} prêt(s)`
+                  ? `${clSummary?.lineCount} prêt(s) · Rendement moy. ${fmtPctShort(clSummary?.weightedAverageYield)} · Revenu ${formatCurrency(clSummary?.projectedAnnualIncome || "0", baseCurrency)}`
                   : "Prêts participatifs — non renseigné"
               }
               onClick={() => goModule("crowdlending")}
