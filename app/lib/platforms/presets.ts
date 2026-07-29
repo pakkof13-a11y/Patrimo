@@ -303,6 +303,18 @@ const COURTIERS: PlatformPreset[] = [
   p("YOMONI", "Yomoni", ["COURTIER", "ASSURANCE_VIE"], "yomoni.fr", {
     category: "Courtiers en bourse",
   }),
+  p("MILLEIS", "Milleis Banque", ["COURTIER", "BANQUE", "ASSURANCE_VIE"], "milleis.fr", {
+    category: "Banques privées",
+  }),
+  p("ODDO_BHF", "Oddo BHF", ["COURTIER", "BANQUE", "ASSURANCE_VIE"], "oddo-bhf.fr", {
+    category: "Banques privées",
+  }),
+  p("PALATINE", "Palatine", ["COURTIER", "BANQUE", "ASSURANCE_VIE"], null, {
+    category: "Banques privées",
+  }),
+  p("ROTHSCHILD_CO", "Rothschild & Co", ["COURTIER", "BANQUE", "ASSURANCE_VIE"], "rothschildandco.com", {
+    category: "Banques privées",
+  }),
 ].sort(sortByName);
 
 /**
@@ -390,6 +402,26 @@ const ASSURANCE_VIE: PlatformPreset[] = [
     category: "Courtiers en assurance vie",
     subtype: "Assureurs traditionnels",
   }),
+  p("AV_CARDIF", "Cardif", ["ASSURANCE_VIE"], "cardif.fr", {
+    category: "Courtiers en assurance vie",
+    subtype: "Assureurs traditionnels",
+  }),
+  p("AV_CORUM_LIFE", "Corum Life", ["ASSURANCE_VIE"], null, {
+    category: "Courtiers en assurance vie",
+    subtype: "Assureurs traditionnels",
+  }),
+  p("AV_MUTAVIE", "Mutavie", ["ASSURANCE_VIE"], "mutavie.fr", {
+    category: "Courtiers en assurance vie",
+    subtype: "Mutuelles d'épargne",
+  }),
+  p("AV_SPIRICA", "Spirica", ["ASSURANCE_VIE"], "spirica.fr", {
+    category: "Courtiers en assurance vie",
+    subtype: "Mutuelles d'épargne",
+  }),
+  p("AV_SURAVENIR", "Suravenir", ["ASSURANCE_VIE"], "suravenir.com", {
+    category: "Courtiers en assurance vie",
+    subtype: "Assureurs traditionnels",
+  }),
 ].sort(sortByName);
 
 /** CFD pure — marques déjà multi-types (eToro, IG, XTB…) absentes ici. */
@@ -449,6 +481,10 @@ const EXCHANGES: PlatformPreset[] = [
     category: "Exchange crypto",
     subtype: "CEX",
   }),
+  p("BITRUE", "Bitrue", ["EXCHANGE_CRYPTO"], "bitrue.com", {
+    category: "Exchange crypto",
+    subtype: "CEX",
+  }),
   p("BITSTAMP", "Bitstamp", ["EXCHANGE_CRYPTO"], "bitstamp.net", {
     category: "Exchange crypto",
     subtype: "CEX",
@@ -478,6 +514,10 @@ const EXCHANGES: PlatformPreset[] = [
     subtype: "CEX",
   }),
   p("GEMINI", "Gemini", ["EXCHANGE_CRYPTO"], "gemini.com", {
+    category: "Exchange crypto",
+    subtype: "CEX",
+  }),
+  p("HTX", "HTX", ["EXCHANGE_CRYPTO"], "htx.com", {
     category: "Exchange crypto",
     subtype: "CEX",
   }),
@@ -568,6 +608,10 @@ const EXCHANGES: PlatformPreset[] = [
     subtype: "Perps / futures",
   }),
   p("PARADEX", "Paradex", ["EXCHANGE_CRYPTO"], "paradex.trade", {
+    category: "DEX crypto",
+    subtype: "Perps / futures",
+  }),
+  p("PHEMEX", "Phemex", ["EXCHANGE_CRYPTO"], "phemex.com", {
     category: "DEX crypto",
     subtype: "Perps / futures",
   }),
