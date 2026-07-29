@@ -9,6 +9,7 @@ import {
   nextPaymentDueDate,
   paymentDateForMonth,
   repaymentProgressPct,
+  simulateEarlyRepayment,
 } from "@/app/lib/liabilities/amortization";
 
 describe("liability amortization", () => {
@@ -116,5 +117,93 @@ describe("liability amortization", () => {
       now: new Date(Date.UTC(2026, 2, 15)),
     });
     expect(next?.toISOString().slice(0, 10)).toBe("2026-04-10");
+  });
+});
+
+describe("simulateEarlyRepayment", () => {
+  it("is a no-op when extraAmount is 0 (or negative)", () => {
+    const sim = simulateEarlyRepayment({
+      remaining: "100000",
+      monthlyPayment: "1000",
+      annualPercent: "3.5",
+      extraAmount: "0",
+    });
+    expect(sim.newRemaining).toBe("100000.00000000");
+    expect(sim.monthsAfter).toBe(sim.monthsBefore);
+    expect(sim.interestAfter).toBe(sim.interestBefore);
+    expect(sim.interestSaved).toBe("0");
+    expect(sim.isFullRepayment).toBe(false);
+
+    const negative = simulateEarlyRepayment({
+      remaining: "100000",
+      monthlyPayment: "1000",
+      annualPercent: "3.5",
+      extraAmount: "-500",
+    });
+    expect(negative.interestSaved).toBe("0");
+    expect(negative.isFullRepayment).toBe(false);
+  });
+
+  it("reduces remaining, months and interest on a partial early repayment", () => {
+    const sim = simulateEarlyRepayment({
+      remaining: "100000",
+      monthlyPayment: "1000",
+      annualPercent: "3.5",
+      extraAmount: "20000",
+    });
+    expect(sim.newRemaining).toBe("80000.00000000");
+    expect(sim.isFullRepayment).toBe(false);
+    expect(sim.monthsAfter).not.toBeNull();
+    expect(sim.monthsBefore).not.toBeNull();
+    expect(sim.monthsAfter!).toBeLessThan(sim.monthsBefore!);
+    expect(Number(sim.interestAfter)).toBeLessThan(Number(sim.interestBefore));
+    expect(Number(sim.interestSaved)).toBeGreaterThan(0);
+    // interestSaved cohérent avec la différence avant/après
+    expect(Number(sim.interestSaved)).toBeCloseTo(
+      Number(sim.interestBefore) - Number(sim.interestAfter),
+      6
+    );
+  });
+
+  it("treats extraAmount >= remaining as a full repayment (solde total)", () => {
+    const exact = simulateEarlyRepayment({
+      remaining: "100000",
+      monthlyPayment: "1000",
+      annualPercent: "3.5",
+      extraAmount: "100000",
+    });
+    expect(exact.newRemaining).toBe("0");
+    expect(exact.monthsAfter).toBe(0);
+    expect(exact.interestAfter).toBe("0");
+    expect(exact.isFullRepayment).toBe(true);
+    expect(Number(exact.interestSaved)).toBeCloseTo(Number(exact.interestBefore), 6);
+
+    const over = simulateEarlyRepayment({
+      remaining: "100000",
+      monthlyPayment: "1000",
+      annualPercent: "3.5",
+      extraAmount: "150000",
+    });
+    expect(over.newRemaining).toBe("0");
+    expect(over.isFullRepayment).toBe(true);
+  });
+
+  it("handles monthlyPayment lower than interest (infinite horizon) gracefully", () => {
+    // 100000 à 12%/an → intérêt mensuel = 1000, mensualité 500 ne couvre pas
+    const sim = simulateEarlyRepayment({
+      remaining: "100000",
+      monthlyPayment: "500",
+      annualPercent: "12",
+      extraAmount: "5000",
+    });
+    expect(sim.monthsBefore).toBeNull();
+    expect(sim.newRemaining).toBe("95000.00000000");
+    // Toujours pas de mensualité suffisante après un petit remboursement
+    expect(sim.monthsAfter).toBeNull();
+    // Horizon infini des deux côtés (estimation capée à 1 mois), mais le
+    // capital réduit fait quand même baisser l'intérêt du 1er mois estimé.
+    expect(sim.interestBefore).toBe("1000.00000000");
+    expect(sim.interestAfter).toBe("950.00000000");
+    expect(sim.interestSaved).toBe("50.00000000");
   });
 });

@@ -39,6 +39,7 @@ import {
   currentScheduleIndex,
   nextPaymentDueDate,
   repaymentProgressPct,
+  simulateEarlyRepayment,
 } from "@/app/lib/liabilities/amortization";
 import {
   ModuleCallout,
@@ -818,13 +819,14 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                     });
                 }}
                 linkableAssets={realEstateAssets}
-                onRepay={() => {
+                onRepay={(amount) => {
                   setEarlyId(l.id);
                   setEarlyKind("PARTIAL");
                   setEarlyAmount(
-                    l.monthlyPayment && Number(l.monthlyPayment) > 0
-                      ? String(l.monthlyPayment)
-                      : ""
+                    amount ??
+                      (l.monthlyPayment && Number(l.monthlyPayment) > 0
+                        ? String(l.monthlyPayment)
+                        : "")
                   );
                   setEarlyDate(new Date().toISOString().slice(0, 10));
                 }}
@@ -1525,12 +1527,13 @@ function LiabilityDetailPanel({
   onEditInsurance: (v: string) => void;
   onEditAsset: (v: string) => void;
   linkableAssets: LinkableAsset[];
-  onRepay: () => void;
+  onRepay: (amount?: string) => void;
 }) {
   const [rateInvalid, setRateInvalid] = useState(false);
   const [remainingInvalid, setRemainingInvalid] = useState(false);
   const [insuranceInvalid, setInsuranceInvalid] = useState(false);
   const [dayInvalid, setDayInvalid] = useState(false);
+  const [simAmount, setSimAmount] = useState("");
 
   const scheduleResult = useMemo(() => {
     if (!l.monthlyPayment || Number(l.monthlyPayment) <= 0) {
@@ -1595,6 +1598,26 @@ function LiabilityDetailPanel({
           ? "text-amber-600 dark:text-amber-400"
           : "text-red-600 dark:text-red-400";
 
+  // Simulateur de remboursement anticipé — projection pure, aucune écriture.
+  // Actif uniquement sur un crédit en cours (mensualité + capital restant > 0).
+  const canSimulate =
+    !!l.monthlyPayment &&
+    Number(l.monthlyPayment) > 0 &&
+    Number(l.remainingAmount) > 0;
+  const simExtra = simAmount.trim().replace(",", ".");
+  const simExtraNum = Number(simExtra);
+  const simulation = useMemo(() => {
+    if (!canSimulate) return null;
+    if (simExtra === "" || !Number.isFinite(simExtraNum) || simExtraNum <= 0)
+      return null;
+    return simulateEarlyRepayment({
+      remaining: l.remainingAmount,
+      monthlyPayment: l.monthlyPayment || "0",
+      annualPercent: l.interestRate || "0",
+      extraAmount: simExtra,
+    });
+  }, [canSimulate, simExtra, simExtraNum, l.remainingAmount, l.monthlyPayment, l.interestRate]);
+
   // Afficher une fenêtre autour de l’échéance courante (perf grands tableaux)
   const windowRows = useMemo(() => {
     if (schedule.length <= 36) return schedule.map((r, i) => ({ r, i }));
@@ -1615,7 +1638,7 @@ function LiabilityDetailPanel({
         <Button
           size="sm"
           className="text-[11px]"
-          onClick={onRepay}
+          onClick={() => onRepay()}
           data-testid={`liability-detail-repay-${l.id}`}
         >
           <Banknote className="h-3.5 w-3.5" />
@@ -1856,6 +1879,97 @@ function LiabilityDetailPanel({
           ({insuranceMonthsRemaining} ×{" "}
           {formatCurrency(l.insuranceMonthly || "0", l.currency)})
         </p>
+      )}
+
+      {/* Simulateur de remboursement anticipé — projection pure, aucune écriture */}
+      {canSimulate && (
+        <div
+          className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/20 p-3"
+          data-testid={`liability-simulate-${l.id}`}
+        >
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+            Simulateur — remboursement anticipé
+          </p>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-[11px]">
+              <span className="text-[var(--muted-foreground)]">
+                Montant anticipé
+              </span>
+              <input
+                className="input mt-0.5 !py-1 text-right text-xs"
+                inputMode="decimal"
+                placeholder="0"
+                value={simAmount}
+                onChange={(e) => setSimAmount(e.target.value)}
+                data-testid={`liability-simulate-input-${l.id}`}
+              />
+            </label>
+            {simulation && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="text-[11px]"
+                onClick={() => onRepay(simExtra)}
+                data-testid={`liability-simulate-save-${l.id}`}
+              >
+                <Banknote className="h-3.5 w-3.5" />
+                Enregistrer ce remboursement
+              </Button>
+            )}
+          </div>
+
+          {simulation ? (
+            <div
+              className="mt-2.5 grid gap-1.5 text-[11px] sm:grid-cols-2"
+              data-testid={`liability-simulate-summary-${l.id}`}
+            >
+              <p>
+                Capital restant après :{" "}
+                <strong className="text-[var(--foreground)]">
+                  {formatCurrency(simulation.newRemaining, l.currency)}
+                </strong>
+              </p>
+              <p>
+                Durée :{" "}
+                <span className="tabular-nums">
+                  {simulation.monthsBefore != null
+                    ? `${simulation.monthsBefore} mois`
+                    : "indéterminée"}
+                  {" → "}
+                  {simulation.isFullRepayment
+                    ? "soldé"
+                    : simulation.monthsAfter != null
+                      ? `${simulation.monthsAfter} mois`
+                      : "indéterminée"}
+                </span>
+              </p>
+              <p>
+                Intérêts restants :{" "}
+                <span className="tabular-nums">
+                  {formatCurrency(simulation.interestBefore, l.currency)}
+                  {" → "}
+                  {formatCurrency(simulation.interestAfter, l.currency)}
+                </span>
+              </p>
+              <p className="font-semibold text-teal-600 dark:text-teal-400">
+                Économie d&rsquo;intérêts estimée ≈{" "}
+                {formatCurrency(simulation.interestSaved, l.currency)}
+              </p>
+              {simulation.isFullRepayment && (
+                <p className="text-amber-600 dark:text-amber-400 sm:col-span-2">
+                  Ce montant solde le crédit en totalité.
+                </p>
+              )}
+            </div>
+          ) : (
+            simAmount.trim() !== "" && (
+              <p className="mt-2 text-[11px] text-red-600">
+                Montant invalide (&gt; 0)
+              </p>
+            )
+          )}
+        </div>
       )}
 
       {/* Tableau d’amortissement */}

@@ -385,6 +385,72 @@ export function buildAmortizationSchedule(opts: {
   return rows;
 }
 
+export type EarlyRepaymentSimulation = {
+  newRemaining: string;
+  monthsBefore: number | null;
+  monthsAfter: number | null;
+  interestBefore: string;
+  interestAfter: string;
+  interestSaved: string;
+  isFullRepayment: boolean;
+};
+
+/**
+ * Simulation pure (aucune écriture) : effet d’un remboursement anticipé de
+ * `extraAmount` sur la durée et les intérêts restants, à mensualité et taux
+ * inchangés. Réutilise applyEarlyRepayment / estimateRemainingMonths /
+ * estimateRemainingInterest — pas de recalcul de maths ici.
+ */
+export function simulateEarlyRepayment(opts: {
+  remaining: DecimalInput;
+  monthlyPayment: DecimalInput;
+  annualPercent?: DecimalInput;
+  extraAmount: DecimalInput;
+}): EarlyRepaymentSimulation {
+  const remaining = d(opts.remaining);
+  const monthlyPayment = opts.monthlyPayment;
+  const annualPercent = opts.annualPercent ?? 0;
+  const extra = d(opts.extraAmount);
+
+  const monthsBefore = estimateRemainingMonths(remaining, monthlyPayment, annualPercent);
+  const interestBefore = estimateRemainingInterest(remaining, monthlyPayment, annualPercent);
+
+  if (remaining.lte(0) || extra.lte(0)) {
+    return {
+      newRemaining: toFixed(remaining.gt(0) ? remaining : d(0), 8),
+      monthsBefore,
+      monthsAfter: monthsBefore,
+      interestBefore,
+      interestAfter: interestBefore,
+      interestSaved: "0",
+      isFullRepayment: remaining.lte(0),
+    };
+  }
+
+  const isFullRepayment = extra.gte(remaining);
+  const { remaining: newRemaining } = applyEarlyRepayment(remaining, extra, isFullRepayment);
+
+  const monthsAfter = isFullRepayment
+    ? 0
+    : estimateRemainingMonths(newRemaining, monthlyPayment, annualPercent);
+  const interestAfter = isFullRepayment
+    ? "0"
+    : estimateRemainingInterest(newRemaining, monthlyPayment, annualPercent);
+
+  const saved = d(interestBefore).minus(d(interestAfter));
+  const interestSaved = toFixed(saved.gt(0) ? saved : d(0), 8);
+
+  return {
+    newRemaining,
+    monthsBefore,
+    monthsAfter,
+    interestBefore,
+    interestAfter,
+    interestSaved,
+    isFullRepayment,
+  };
+}
+
 /** Index (0-based) de l’échéance courante / prochaine dans le tableau. */
 export function currentScheduleIndex(
   schedule: AmortizationRow[],
