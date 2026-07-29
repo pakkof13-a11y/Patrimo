@@ -16,6 +16,7 @@ import {
   ChevronRight,
   GripVertical,
   Pencil,
+  Plus,
   SlidersHorizontal,
   Trash2,
   RefreshCw,
@@ -160,11 +161,14 @@ export function TransactionsTab({
   onEdit,
   onDelete,
   onImport,
+  onCreate,
   platforms,
 }: {
   onEdit: (t: TxRow) => void;
   onDelete: (id: string) => void;
   onImport?: () => void;
+  /** Ouvre le flux de création existant (openNewTransaction côté parent) — pas de flux dupliqué ici. */
+  onCreate?: () => void;
   /** Pour le filtre plateforme (courtier / exchange) */
   platforms?: Array<{ id: string; name: string }>;
 }) {
@@ -715,6 +719,17 @@ export function TransactionsTab({
           </div>
 
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:shrink-0">
+            {onCreate && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={onCreate}
+                data-testid="tx-add"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Nouvelle opération
+              </Button>
+            )}
             <Button
               type="button"
               variant="outline"

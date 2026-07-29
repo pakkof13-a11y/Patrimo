@@ -275,7 +275,9 @@ export type TxKpis = {
   sellsEur: number;
   /** Σ feesEur, tous types confondus */
   feesEur: number;
-  /** Σ netCashImpactEur des revenus (dividende, coupon, loyer, intérêt) */
+  /** Σ netCashImpactEur des revenus cash (dividende, coupon, loyer, intérêt)
+   *  + Σ grossAmountEur (FMV) des REWARD (staking…), qui n'ont pas d'impact
+   *  cash mais restent un revenu au sens patrimonial. */
   incomeEur: number;
 };
 
@@ -302,6 +304,12 @@ function sumOf(v: TxGroupSums["_sum"][keyof TxGroupSums["_sum"]]): number {
  * ACHAT/VENTE : `netCashImpactEur` est stocké à 0 pour les trades (le cash
  * est suivi par ailleurs, voir `computeNetCashImpactEur`) — on utilise donc
  * `grossAmountEur`, comme `txNetPriceEur` côté affichage ligne par ligne.
+ *
+ * REWARD : même chose — `netCashImpactEur` vaut toujours 0 (réception
+ * gratuite, aucun mouvement de cash), donc on utilise `grossAmountEur`
+ * (FMV qty × prix unitaire si renseigné, sinon 0) pour le compter dans les
+ * revenus. AIRDROP reste hors "Revenus" (voir TX_TYPE_GROUPS : distinct de
+ * reward, traité comme une entrée patrimoniale gratuite plutôt qu'un revenu).
  */
 export function computeTxKpis(rows: TxGroupSums[]): TxKpis {
   let buysEur = 0;
@@ -315,6 +323,8 @@ export function computeTxKpis(rows: TxGroupSums[]): TxKpis {
     else if (r.type === "VENTE") sellsEur += sumOf(r._sum.grossAmountEur);
     else if (["DIVIDENDE", "COUPON", "LOYER", "INTERET"].includes(r.type)) {
       incomeEur += sumOf(r._sum.netCashImpactEur);
+    } else if (r.type === "REWARD") {
+      incomeEur += sumOf(r._sum.grossAmountEur);
     }
   }
 

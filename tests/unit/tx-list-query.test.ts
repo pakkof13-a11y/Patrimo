@@ -172,6 +172,25 @@ describe("computeTxKpis", () => {
     expect(kpis.incomeEur).toBe(55); // 45 + 10 (DIVIDENDE + COUPON net)
   });
 
+  it("compte les REWARD dans les revenus via grossAmountEur (FMV), pas netCashImpactEur (toujours 0)", () => {
+    const kpis = computeTxKpis([
+      {
+        type: "DIVIDENDE",
+        _sum: { grossAmountEur: 50, feesEur: 0, netCashImpactEur: 45 },
+      },
+      {
+        type: "REWARD",
+        _sum: { grossAmountEur: 30, feesEur: 0, netCashImpactEur: 0 },
+      },
+      {
+        // AIRDROP reste hors "Revenus" — distinct de reward.
+        type: "AIRDROP",
+        _sum: { grossAmountEur: 20, feesEur: 0, netCashImpactEur: 0 },
+      },
+    ]);
+    expect(kpis.incomeEur).toBe(75); // 45 (DIVIDENDE net) + 30 (REWARD FMV)
+  });
+
   it("gère les _sum null (aucune ligne pour ce type) sans planter", () => {
     const kpis = computeTxKpis([
       {
