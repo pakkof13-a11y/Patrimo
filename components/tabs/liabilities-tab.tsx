@@ -131,6 +131,14 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
     [rows]
   );
 
+  const totalInterestRemaining = useMemo(() => {
+    return rows.reduce((acc, l) => {
+      if (Number(l.remainingAmount) <= 0) return acc;
+      const n = Number(l.estimatedInterestRemaining);
+      return acc + (Number.isFinite(n) ? n : 0);
+    }, 0);
+  }, [rows]);
+
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["liabilities"] });
     await qc.invalidateQueries({ queryKey: ["holdings"] });
@@ -299,22 +307,26 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
           value={formatCurrency(String(monthlyOutflow), "EUR")}
           hint="Somme des mensualités renseignées"
         />
-        <div className="card p-3.5 sm:p-4">
-          <div className="text-label">Suivi automatique</div>
-          <p className="text-meta mt-2 leading-relaxed">
-            À chaque passage du jour de prélèvement, le capital restant diminue
-            de la mensualité (sans double comptage).
-          </p>
-          <button
-            type="button"
-            className="mt-2 text-[11px] font-medium text-[var(--primary)] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-            onClick={() => setShowHelp((v) => !v)}
-            aria-expanded={showHelp}
-          >
-            {showHelp ? "Masquer l’aide" : "Comprendre le module"}
-          </button>
+        <div data-testid="liability-kpi-interest-remaining">
+          <ModuleKpi
+            label="Intérêts encore à payer"
+            value={formatCurrency(String(totalInterestRemaining), "EUR")}
+            valueClassName="text-[var(--muted-foreground)]"
+            hint="Estimation sur la durée résiduelle · crédits actifs"
+          />
         </div>
       </section>
+
+      <div className="mt-4 flex items-center justify-between">
+        <button
+          type="button"
+          className="text-[11px] font-medium text-[var(--primary)] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+          onClick={() => setShowHelp((v) => !v)}
+          aria-expanded={showHelp}
+        >
+          {showHelp ? "Masquer l’aide" : "Comprendre le module"}
+        </button>
+      </div>
 
       {showHelp && (
         <ModuleCallout tone="info">
