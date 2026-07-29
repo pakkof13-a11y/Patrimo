@@ -205,17 +205,23 @@ const emptyDefaults = (): LiabilityForm => ({
   endDate: "",
   paymentDay: 5,
   category: "AUTRE",
+  assetId: null,
   notes: "",
 });
+
+/** Sous-ensemble d'Asset pour le sélecteur « Bien lié » — passé par le parent. */
+type LinkableAssetOption = { id: string; name: string };
 
 export function LiabilityCreateForm({
   pending,
   onCancel,
   onSubmit,
+  linkableAssets,
 }: {
   pending: boolean;
   onCancel: () => void;
   onSubmit: (values: LiabilityForm) => void;
+  linkableAssets: LinkableAssetOption[];
 }) {
   const [step, setStep] = useState(0);
   /** true = capital restant = montant initial (crédit neuf) */
@@ -256,6 +262,7 @@ export function LiabilityCreateForm({
   const currency = form.watch("currency") || "EUR";
   const name = form.watch("name") || "";
   const category = form.watch("category") || "AUTRE";
+  const assetId = form.watch("assetId") || "";
 
   // Mirror initial → remaining when locked
   useEffect(() => {
@@ -477,6 +484,31 @@ export function LiabilityCreateForm({
                 />
               </Field>
             </div>
+            <Field label="Bien immobilier lié (optionnel)">
+              <select
+                className="input"
+                value={assetId}
+                onChange={(e) =>
+                  form.setValue("assetId", e.target.value || null, {
+                    shouldDirty: true,
+                  })
+                }
+                data-testid="liability-linked-asset"
+              >
+                <option value="">— Aucun —</option>
+                {linkableAssets.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+              {linkableAssets.length === 0 && (
+                <span className="mt-1 block text-[10px] text-slate-400">
+                  Aucun bien immobilier détecté (catégorie « Immobilier
+                  direct » ou enveloppe IMMOBILIER).
+                </span>
+              )}
+            </Field>
           </div>
         )}
 
@@ -678,6 +710,10 @@ export function LiabilityCreateForm({
                   ["Type", LIABILITY_CATEGORY_LABELS[category]],
                   ["Intitulé", name || "—"],
                   ["Prêteur", bankName || "—"],
+                  [
+                    "Bien lié",
+                    linkableAssets.find((a) => a.id === assetId)?.name || "—",
+                  ],
                   [
                     "Capital initial",
                     initialAmount

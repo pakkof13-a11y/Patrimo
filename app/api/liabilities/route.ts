@@ -91,6 +91,16 @@ export async function POST(req: Request) {
     return validationErrorResponse(parsed.error);
   }
 
+  if (parsed.data.assetId) {
+    const asset = await prisma.asset.findFirst({
+      where: { id: parsed.data.assetId, userId },
+      select: { id: true },
+    });
+    if (!asset) {
+      return NextResponse.json({ error: "Bien introuvable" }, { status: 400 });
+    }
+  }
+
   const paymentDay =
     parsed.data.paymentDay != null
       ? Math.max(1, Math.min(31, Math.floor(Number(parsed.data.paymentDay))))
@@ -117,6 +127,7 @@ export async function POST(req: Request) {
       paymentDay,
       bankName: parsed.data.bankName || null,
       category: parsed.data.category,
+      assetId: parsed.data.assetId || null,
       notes: parsed.data.notes || null,
     },
   });
@@ -139,6 +150,17 @@ export async function PUT(req: Request) {
   if (!parsed.success) return validationErrorResponse(parsed.error);
 
   const f = presentFields(body, parsed.data as Record<string, unknown>) as typeof parsed.data;
+
+  if (f.assetId) {
+    const asset = await prisma.asset.findFirst({
+      where: { id: f.assetId, userId },
+      select: { id: true },
+    });
+    if (!asset) {
+      return NextResponse.json({ error: "Bien introuvable" }, { status: 400 });
+    }
+  }
+
   const data: Prisma.LiabilityUpdateInput = {};
 
   if (f.name !== undefined) data.name = f.name;
@@ -157,6 +179,9 @@ export async function PUT(req: Request) {
       f.insuranceMonthly != null ? new Prisma.Decimal(f.insuranceMonthly) : null;
   if (f.bankName !== undefined) data.bankName = f.bankName || null;
   if (f.category !== undefined) data.category = f.category;
+  if (f.assetId !== undefined) {
+    data.asset = f.assetId ? { connect: { id: f.assetId } } : { disconnect: true };
+  }
   if (f.notes !== undefined) data.notes = f.notes || null;
   if (f.startDate !== undefined) data.startDate = f.startDate ? new Date(f.startDate) : null;
   if (f.endDate !== undefined) data.endDate = f.endDate ? new Date(f.endDate) : null;

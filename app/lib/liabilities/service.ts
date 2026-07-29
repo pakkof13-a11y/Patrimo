@@ -144,6 +144,15 @@ export async function listLiabilities(userId: string) {
         orderBy: { eventDate: "desc" },
         take: 50,
       },
+      asset: {
+        select: {
+          id: true,
+          name: true,
+          category: true,
+          accountType: true,
+          manualPrice: true,
+        },
+      },
     },
   });
 
@@ -173,6 +182,20 @@ export async function listLiabilities(userId: string) {
       lastPaymentAppliedAt: l.lastPaymentAppliedAt?.toISOString() ?? null,
       bankName: l.bankName,
       category: l.category,
+      // assetId brut (nom de colonne Prisma) + linkedAssetId/linkedAsset :
+      // alias de vocabulaire côté API/UI, même relation — voir décision
+      // étape 11 (pas de 2ᵉ FK, réutilisation de Liability.assetId).
+      assetId: l.assetId,
+      linkedAssetId: l.assetId,
+      linkedAsset: l.asset
+        ? {
+            id: l.asset.id,
+            name: l.asset.name,
+            category: l.asset.category,
+            accountType: l.asset.accountType,
+            manualPrice: l.asset.manualPrice?.toString() ?? null,
+          }
+        : null,
       notes: l.notes,
       remainingEur: eur,
       monthsRemaining: monthsLeft,

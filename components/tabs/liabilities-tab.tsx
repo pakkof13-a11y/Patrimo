@@ -10,6 +10,7 @@ import {
   CalendarClock,
   ChevronDown,
   ChevronRight,
+  Home,
   MoreHorizontal,
   PencilLine,
   Percent,
@@ -65,6 +66,16 @@ type LiabilityRow = {
   lastPaymentAppliedAt: string | null;
   bankName: string | null;
   category: string;
+  /** assetId brut (colonne Prisma) — voir linkedAssetId pour l'alias API/UI. */
+  assetId: string | null;
+  linkedAssetId: string | null;
+  linkedAsset: {
+    id: string;
+    name: string;
+    category: string;
+    accountType: string;
+    manualPrice: string | null;
+  } | null;
   notes: string | null;
   monthsRemaining: number | null;
   estimatedInterestRemaining: string;
@@ -77,6 +88,19 @@ type LiabilityRow = {
     notes: string | null;
   }>;
 };
+
+/** Sous-ensemble d'Asset utilisé pour le sélecteur « Bien lié » — GET /api/assets réutilisé. */
+type LinkableAsset = {
+  id: string;
+  name: string;
+  ticker: string | null;
+  category: string;
+  accountType: string;
+};
+
+function isRealEstateAsset(a: LinkableAsset): boolean {
+  return a.category === "REAL_ESTATE_DIRECT" || a.accountType === "IMMOBILIER";
+}
 
 const EVENT_LABELS: Record<string, string> = {
   MONTHLY_DEBIT: "Prélèvement mensuel",
@@ -214,6 +238,17 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
         "/api/liabilities"
       ),
   });
+
+  // Réutilise la liste d'actifs déjà exposée par /api/assets (pas de route
+  // dédiée) pour peupler le sélecteur de bien immobilier lié.
+  const assetsQ = useQuery({
+    queryKey: ["assets"],
+    queryFn: () => fetchJson<{ assets: LinkableAsset[] }>("/api/assets"),
+  });
+  const realEstateAssets = useMemo(
+    () => (assetsQ.data?.assets ?? []).filter(isRealEstateAsset),
+    [assetsQ.data?.assets]
+  );
 
   const rows = useMemo(
     () => listQ.data?.liabilities ?? [],
@@ -451,6 +486,17 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                     {l.name}
                   </span>
                   <CategoryBadge category={l.category} />
+                  {l.linkedAssetId && (
+                    <span
+                      className="inline-flex text-teal-600 dark:text-teal-400"
+                      role="img"
+                      aria-label={`Bien lié : ${l.linkedAsset?.name ?? "bien immobilier"}`}
+                      title={`Bien lié : ${l.linkedAsset?.name ?? "bien immobilier"}`}
+                      data-testid={`liability-linked-badge-${l.id}`}
+                    >
+                      <Home className="h-3 w-3 shrink-0" />
+                    </span>
+                  )}
                 </span>
                 <span className="mt-0.5 block text-[11px] text-[var(--muted-foreground)]">
                   {l.bankName || "Prêteur non renseigné"}
@@ -763,6 +809,14 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                       insuranceMonthly: v === "" ? null : v,
                     });
                 }}
+                onEditAsset={(v) => {
+                  if (v !== (l.linkedAssetId ?? ""))
+                    patchMut.mutate({
+                      id: l.id,
+                      assetId: v === "" ? null : v,
+                    });
+                }}
+                linkableAssets={realEstateAssets}
                 onRepay={() => {
                   setEarlyId(l.id);
                   setEarlyKind("PARTIAL");
@@ -1115,6 +1169,7 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
             pending={createMut.isPending}
             onCancel={() => setShowCreate(false)}
             onSubmit={(values) => createMut.mutate(values)}
+            linkableAssets={realEstateAssets}
           />
         </Modal>
       )}
@@ -1397,6 +1452,8 @@ function LiabilityDetailPanel({
   onEditBank,
   onEditCategory,
   onEditInsurance,
+  onEditAsset,
+  linkableAssets,
   onRepay,
 }: {
   liability: LiabilityRow;
@@ -1406,6 +1463,8 @@ function LiabilityDetailPanel({
   onEditBank: (v: string) => void;
   onEditCategory: (v: string) => void;
   onEditInsurance: (v: string) => void;
+  onEditAsset: (v: string) => void;
+  linkableAssets: LinkableAsset[];
   onRepay: () => void;
 }) {
   const [rateInvalid, setRateInvalid] = useState(false);
@@ -1454,6 +1513,27 @@ function LiabilityDetailPanel({
     insuranceMonthlyNum > 0 && insuranceMonthsRemaining > 0
       ? insuranceMonthlyNum * insuranceMonthsRemaining
       : null;
+
+  // LTV = capital restant dû / valeur du bien lié. Valeur = Asset.manualPrice
+  // (source de vérité pour l'immobilier, voir app/lib/real-estate/valuation.ts) ;
+  // pas de pondération par quote-part, comme remainingAmount lui-même.
+  const linkedAssetValue = l.linkedAsset?.manualPrice
+    ? Number(l.linkedAsset.manualPrice)
+    : null;
+  const ltvPct =
+    linkedAssetValue != null &&
+    linkedAssetValue > 0 &&
+    Number(l.remainingAmount) > 0
+      ? (Number(l.remainingAmount) / linkedAssetValue) * 100
+      : null;
+  const ltvTone =
+    ltvPct == null
+      ? null
+      : ltvPct < 50
+        ? "text-teal-600 dark:text-teal-400"
+        : ltvPct <= 80
+          ? "text-amber-600 dark:text-amber-400"
+          : "text-red-600 dark:text-red-400";
 
   // Afficher une fenêtre autour de l’échéance courante (perf grands tableaux)
   const windowRows = useMemo(() => {
@@ -1661,7 +1741,48 @@ function LiabilityDetailPanel({
             </span>
           )}
         </label>
+        <label className="text-[11px]">
+          <span className="text-[var(--muted-foreground)]">
+            Bien immobilier lié (optionnel)
+          </span>
+          <select
+            className="input mt-0.5 !py-1 text-xs"
+            value={l.linkedAssetId ?? ""}
+            onChange={(e) => onEditAsset(e.target.value)}
+            data-testid={`liability-asset-select-${l.id}`}
+          >
+            <option value="">— Aucun —</option>
+            {l.linkedAsset &&
+              !linkableAssets.some((a) => a.id === l.linkedAsset!.id) && (
+                <option value={l.linkedAsset.id}>{l.linkedAsset.name}</option>
+              )}
+            {linkableAssets.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
+
+      {l.linkedAssetId && (
+        <p
+          className="text-[11px] text-[var(--muted-foreground)]"
+          data-testid={`liability-ltv-${l.id}`}
+        >
+          Bien lié : <strong className="text-[var(--foreground)]">
+            {l.linkedAsset?.name ?? "—"}
+          </strong>
+          {" · "}
+          {ltvPct != null ? (
+            <span className={cn("font-semibold", ltvTone)}>
+              LTV ≈ {ltvPct.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %
+            </span>
+          ) : (
+            <span>LTV indisponible — renseigner la valeur du bien</span>
+          )}
+        </p>
+      )}
 
       {estimatedInsuranceRemaining != null && (
         <p

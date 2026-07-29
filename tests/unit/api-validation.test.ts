@@ -84,6 +84,16 @@ describe("update schemas", () => {
       expect(untouched.data.insuranceMonthly).toBeUndefined();
   });
 
+  it("liabilityUpdateSchema accepts assetId (link) and null (dissociate)", () => {
+    const linked = liabilityUpdateSchema.safeParse({ assetId: "asset-123" });
+    expect(linked.success).toBe(true);
+    if (linked.success) expect(linked.data.assetId).toBe("asset-123");
+
+    const unlinked = liabilityUpdateSchema.safeParse({ assetId: null });
+    expect(unlinked.success).toBe(true);
+    if (unlinked.success) expect(unlinked.data.assetId).toBeNull();
+  });
+
   it("envelopeCashUpdateSchema requires envelope enum", () => {
     expect(envelopeCashUpdateSchema.safeParse({ balance: "10" }).success).toBe(
       false

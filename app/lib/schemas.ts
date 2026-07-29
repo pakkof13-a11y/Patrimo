@@ -277,6 +277,8 @@ export const liabilitySchema = z.object({
     }),
   bankName: z.string().optional().nullable(),
   category: z.enum(LIABILITY_CATEGORIES).default("AUTRE"),
+  /** Bien (Asset) financé par ce prêt — appartenance vérifiée côté service. */
+  assetId: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 
@@ -763,6 +765,7 @@ export const liabilityUpdateSchema = z.object({
   paymentDay: optionalClearableInt(1, 31).optional(),
   bankName: z.string().optional().nullable(),
   category: z.enum(LIABILITY_CATEGORIES).optional(),
+  assetId: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 
