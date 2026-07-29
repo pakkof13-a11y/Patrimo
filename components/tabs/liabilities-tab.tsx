@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronRight,
   PencilLine,
+  Percent,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -89,7 +90,19 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   const [amendDate, setAmendDate] = useState(() =>
     new Date().toISOString().slice(0, 10)
   );
+  const [rateId, setRateId] = useState<string | null>(null);
+  const [rateValue, setRateValue] = useState("");
+  const [rateDate, setRateDate] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  );
   const [showHelp, setShowHelp] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<LiabilityRow | null>(null);
+  const [deleteConfirmChecked, setDeleteConfirmChecked] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const DELETE_CONFIRM_WORD = "SUPPRIMER";
+  const canForceDelete =
+    deleteConfirmChecked &&
+    deleteConfirmText.trim().toUpperCase() === DELETE_CONFIRM_WORD;
 
   const listQ = useQuery({
     queryKey: ["liabilities"],
@@ -200,6 +213,26 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
       toast.success("Avenant mensualité — durée et intérêts réestimés");
       setAmendId(null);
       setAmendPayment("");
+      await refresh();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const rateMut = useMutation({
+    mutationFn: () =>
+      fetchJson("/api/liabilities", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "rate_change",
+          liabilityId: rateId,
+          interestRate: rateValue,
+          eventDate: rateDate,
+        }),
+      }),
+    onSuccess: async () => {
+      toast.success("Taux mis à jour — projections recalculées");
+      setRateId(null);
+      setRateValue("");
       await refresh();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -538,17 +571,26 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                             <Button
                               variant="ghost"
                               size="sm"
+                              className="!h-7 !w-7 !px-0 text-slate-400 hover:text-slate-800"
+                              title="Avenant taux d'intérêt"
+                              aria-label="Avenant taux d'intérêt"
+                              data-testid={`liability-rate-open-${l.id}`}
+                              onClick={() => {
+                                setRateId(l.id);
+                                setRateValue(l.interestRate || "");
+                                setRateDate(
+                                  new Date().toISOString().slice(0, 10)
+                                );
+                              }}
+                            >
+                              <Percent className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
                               aria-label="Supprimer le crédit"
-                              onClick={() => {
-                                if (
-                                  confirm(
-                                    `Supprimer le crédit « ${l.name} » ?`
-                                  )
-                                ) {
-                                  deleteMut.mutate(l.id);
-                                }
-                              }}
+                              onClick={() => setDeleteTarget(l)}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
@@ -561,23 +603,15 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                             <LiabilityDetailPanel
                               liability={l}
                               onEditRate={(v) => {
-                                fetchJson("/api/liabilities", {
-                                  method: "POST",
-                                  body: JSON.stringify({
-                                    action: "rate_change",
-                                    liabilityId: l.id,
-                                    interestRate: v || "0",
-                                  }),
-                                })
-                                  .then(() => {
-                                    toast.success(
-                                      "Taux mis à jour — projections recalculées"
-                                    );
-                                    return refresh();
-                                  })
-                                  .catch((err: Error) =>
-                                    toast.error(err.message)
-                                  );
+                                // Ouvre la modale d'avenant plutôt que d'appeler
+                                // l'API en direct : préremplie avec la valeur
+                                // saisie, elle impose une date d'effet
+                                // explicite et passe par rateMut (traçabilité).
+                                setRateId(l.id);
+                                setRateValue(v || "0");
+                                setRateDate(
+                                  new Date().toISOString().slice(0, 10)
+                                );
                               }}
                               onEditRemaining={(v) => {
                                 if (v !== l.remainingAmount)
@@ -766,6 +800,146 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                 Appliquer l’avenant
               </Button>
             </FormActions>
+          </div>
+        </Modal>
+      )}
+
+      {rateId && (
+        <Modal
+          title="Avenant — nouveau taux"
+          onClose={() => setRateId(null)}
+        >
+          <div className="space-y-3" data-testid="liability-rate-modal">
+            <p className="text-[11px] leading-snug text-slate-500">
+              Nouveau taux annuel à effet donné. La durée résiduelle et les
+              intérêts restants estimés sont recalculés sur le capital restant
+              dû.
+            </p>
+            <Field label="Nouveau taux annuel (%)">
+              <input
+                className="input"
+                value={rateValue}
+                onChange={(e) => setRateValue(e.target.value)}
+                inputMode="decimal"
+                data-testid="liability-rate-value"
+              />
+            </Field>
+            <Field label="Date d’effet">
+              <DateInput
+                value={rateDate}
+                onChange={(e) => setRateDate(e.target.value)}
+                data-testid="liability-rate-date"
+              />
+            </Field>
+            <FormActions>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setRateId(null)}
+              >
+                Annuler
+              </Button>
+              <Button
+                onClick={() => rateMut.mutate()}
+                disabled={rateMut.isPending || !rateValue}
+                data-testid="liability-rate-submit"
+              >
+                Appliquer l’avenant
+              </Button>
+            </FormActions>
+          </div>
+        </Modal>
+      )}
+
+      {deleteTarget && (
+        <Modal
+          title={`Supprimer « ${deleteTarget.name} »`}
+          onClose={() => {
+            setDeleteTarget(null);
+            setDeleteConfirmChecked(false);
+            setDeleteConfirmText("");
+          }}
+          panelClassName="max-w-md"
+        >
+          <div className="space-y-3" data-testid="liability-delete-modal">
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-[12px] leading-relaxed text-red-950 dark:border-red-900 dark:bg-red-950/40 dark:text-red-50">
+              <p className="font-semibold">Action irréversible</p>
+              <p className="mt-1">
+                Cette action supprimera définitivement le crédit{" "}
+                <strong>{deleteTarget.name}</strong>, son{" "}
+                <strong>historique d’événements</strong> (prélèvements,
+                avenants, remboursements) et les{" "}
+                <strong>projections associées</strong>. Aucune récupération
+                possible.
+              </p>
+            </div>
+
+            <label className="flex cursor-pointer items-start gap-2 text-[12px] text-[var(--foreground)]">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={deleteConfirmChecked}
+                onChange={(e) => setDeleteConfirmChecked(e.target.checked)}
+                data-testid="liability-delete-confirm-check"
+              />
+              <span>
+                Je comprends que cette action est définitive et que
+                l’historique de ce crédit sera effacé.
+              </span>
+            </label>
+
+            <label className="block text-[11px] text-red-900/90 dark:text-red-100/85">
+              <span className="mb-1 block font-medium">
+                Pour confirmer, saisissez{" "}
+                <kbd className="rounded bg-red-100 px-1 font-mono text-[10px] dark:bg-red-950">
+                  {DELETE_CONFIRM_WORD}
+                </kbd>
+              </span>
+              <input
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                className="input !border-red-200 !bg-white !py-1.5 text-sm dark:!border-red-900/50 dark:!bg-[var(--input-bg)]"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder={DELETE_CONFIRM_WORD}
+                data-testid="liability-delete-confirm-input"
+                aria-label={`Saisir ${DELETE_CONFIRM_WORD} pour confirmer`}
+              />
+            </label>
+
+            <div className="flex flex-col gap-1.5 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setDeleteTarget(null);
+                  setDeleteConfirmChecked(false);
+                  setDeleteConfirmText("");
+                }}
+                data-testid="liability-delete-cancel"
+              >
+                Annuler
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                disabled={!canForceDelete || deleteMut.isPending}
+                data-testid="liability-delete-confirm"
+                onClick={() => {
+                  if (!canForceDelete) return;
+                  deleteMut.mutate(deleteTarget.id);
+                  setDeleteTarget(null);
+                  setDeleteConfirmChecked(false);
+                  setDeleteConfirmText("");
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {deleteMut.isPending ? "Suppression…" : "SUPPRIMER"}
+              </Button>
+            </div>
           </div>
         </Modal>
       )}
