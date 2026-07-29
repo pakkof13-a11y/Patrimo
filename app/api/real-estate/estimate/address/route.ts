@@ -97,15 +97,13 @@ export async function POST(req: Request) {
     const department = place.postalCode
       ? departmentFromCode(place.postalCode)
       : null;
-    if (department && !isDvfCoveredDepartment(department)) {
-      return NextResponse.json(
-        {
-          error: `Le département ${department} n'est pas couvert par les fichiers DVF (Alsace-Moselle et Mayotte relèvent d'un autre registre foncier).`,
-          geocode: place,
-        },
-        { status: 422 }
-      );
-    }
+    // Alsace-Moselle et Mayotte : DVF n'y trouvera jamais rien (livre foncier,
+    // régime distinct), mais le repli ADEME (commune × DPE) n'est pas concerné
+    // par cette limite — on laisse `estimateProperty` tenter les deux plutôt
+    // que d'écarter la demande avant même d'essayer.
+    const departmentUncovered = department
+      ? !isDvfCoveredDepartment(department)
+      : false;
 
     const estimate = await estimateProperty({
       propertyType: input.propertyType,
@@ -115,11 +113,13 @@ export async function POST(req: Request) {
       longitude: place.longitude,
       radiusM: input.radiusM ?? null,
       monthsBack: input.monthsBack ?? null,
+      inseeCode: place.inseeCode,
     });
 
     return NextResponse.json({
       geocode: place,
       lowConfidenceAddress,
+      departmentUncovered,
       estimate,
     });
   } catch (e) {

@@ -9,6 +9,36 @@
  *
  * La recherche procède en deux temps (cf. `geo.ts`) : boîte englobante servie
  * par l'index, puis distance réelle sur le résidu.
+ *
+ * ## Orchestration à quatre paliers
+ *
+ * `estimateProperty` essaie, dans l'ordre, jusqu'au premier succès :
+ *
+ * 1. **DVF local** (`STRICT_RADIUS_STEPS_M`, ≤ 2 km) — le marché immédiat.
+ * 2. **DVF élargi** (`WIDE_RADIUS_STEPS_M`, jusqu'à 10 km) — même méthode,
+ *    rayon plus large, seulement si le local n'a pas atteint `MIN_COMPARABLES`.
+ * 3. **Médiane ADEME commune × DPE** (`ademe-reference.ts`) — repli plus
+ *    grossier, seulement si même le rayon le plus large échoue.
+ * 4. **Indisponible** — `estimateEur: null`, `insufficientData: true`. Jamais
+ *    un chiffre de complaisance : mieux vaut le dire que l'inventer.
+ *
+ * `source` (`EstimateSource`) indique lequel a produit le résultat — c'est ce
+ * que l'UI affiche (« DVF local » / « DVF élargi » / « ADEME » / « indisponible »).
+ *
+ * ## Limites connues
+ *
+ * - **Alsace-Moselle et Mayotte** : DVF n'y couvre rien (livre foncier, régime
+ *   de publicité foncière distinct — voir `isDvfCoveredDepartment` plus bas,
+ *   vérifié par l'appelant *avant* d'appeler ce module). Le palier ADEME, lui,
+ *   n'est pas concerné par cette limite : une médiane communale reste
+ *   disponible si la table en contient une pour ces communes.
+ * - **Secteurs ruraux** : c'est le cas d'usage principal du palier ADEME —
+ *   une commune à faible activité notariale n'atteint jamais `MIN_COMPARABLES`,
+ *   même à 10 km, sans que le marché y soit pour autant illisible.
+ * - **Le palier ADEME dépend d'un import non fourni ici** : `AdemeCommuneDpeMedian`
+ *   est créée vide par sa migration. Tant qu'elle n'est pas peuplée, ce palier
+ *   échoue systématiquement et le résultat retombe sur `INDISPONIBLE` — c'est
+ *   le comportement correct, pas une régression.
  */
 
 import { Prisma } from "../prisma-client/client";
@@ -32,17 +62,51 @@ import {
   type AdjustmentResult,
   type AdjustmentSubject,
 } from "./valuation-adjustments";
+import {
+  findAdemeReference,
+  estimateFromAdemeReference,
+  type AdemeEstimate,
+} from "./ademe-reference";
 import type { PropertyType } from "./dvf-aggregate";
 
 /**
- * Paliers d'élargissement, en mètres.
+ * Paliers d'élargissement DVF, en mètres — deux groupes.
  *
  * On commence serré pour rester dans le même marché, et on n'élargit que par
- * nécessité. Le rayon finalement retenu est renvoyé : c'est une information de
- * fiabilité pour l'utilisateur, pas un détail d'implémentation. Une estimation
- * trouvée à 10 km ne se lit pas comme une estimation trouvée à 500 m.
+ * nécessité. `STRICT` reste dans le quartier ; `WIDE` sort du quartier mais
+ * reste dans un bassin cohérent. Le rayon finalement retenu est renvoyé :
+ * c'est une information de fiabilité pour l'utilisateur, pas un détail
+ * d'implémentation. Une estimation trouvée à 10 km ne se lit pas comme une
+ * estimation trouvée à 500 m — d'où `classifyRadiusSource`, qui traduit le
+ * rayon retenu en étiquette affichable (« DVF local » / « DVF élargi »).
  */
-export const RADIUS_STEPS_M = [1000, 2000, 5000, 10000] as const;
+export const STRICT_RADIUS_STEPS_M = [1000, 2000] as const;
+export const WIDE_RADIUS_STEPS_M = [5000, 10000] as const;
+export const RADIUS_STEPS_M = [
+  ...STRICT_RADIUS_STEPS_M,
+  ...WIDE_RADIUS_STEPS_M,
+] as const;
+
+const MAX_STRICT_RADIUS_M =
+  STRICT_RADIUS_STEPS_M[STRICT_RADIUS_STEPS_M.length - 1];
+
+/**
+ * Palier ayant produit l'estimation — orchestration à quatre niveaux :
+ * DVF strict → DVF élargi → médiane ADEME commune × DPE → indisponible.
+ * Chaque niveau n'est tenté que si le précédent a échoué.
+ */
+export type EstimateSource =
+  | "DVF_LOCAL"
+  | "DVF_ELARGI"
+  | "ADEME_COMMUNE_DPE"
+  | "INDISPONIBLE";
+
+/** Classe un rayon DVF retenu en palier « local » ou « élargi ». */
+export function classifyRadiusSource(
+  radiusM: number
+): Extract<EstimateSource, "DVF_LOCAL" | "DVF_ELARGI"> {
+  return radiusM <= MAX_STRICT_RADIUS_M ? "DVF_LOCAL" : "DVF_ELARGI";
+}
 
 /** En dessous, la médiane n'est pas assez stable pour être affichée. */
 export const MIN_COMPARABLES = 15;
@@ -154,6 +218,14 @@ export type EstimateResult = {
   samples: Comparable[];
   /** null quand l'effectif ne permet même pas une estimation brute. */
   refinement: EstimateRefinement | null;
+  /** Palier ayant produit `estimateEur` — voir `EstimateSource`. */
+  source: EstimateSource;
+  /**
+   * Détail du repli commune × DPE, seulement quand `source` vaut
+   * `ADEME_COMMUNE_DPE`. Distinct de `refinement` : l'affinage par score ne
+   * s'applique pas à ce palier (voir la note dans `estimateProperty`).
+   */
+  ademeReference: AdemeEstimate | null;
 };
 
 type ComparableRow = {
@@ -330,11 +402,13 @@ export function windowStart(months: number, now = new Date()): Date {
 export class EstimateInputError extends Error {}
 
 /**
- * Estime un bien par comparaison avec les ventes DVF alentour.
+ * Estime un bien — DVF d'abord, repli ADEME ensuite. Voir l'orchestration à
+ * quatre paliers documentée en tête de fichier.
  *
- * Sous `MIN_COMPARABLES` au plus large rayon, aucun montant n'est renvoyé :
- * une médiane sur trois ventes serait un chiffre habillé en estimation, et
- * l'utilisateur n'aurait aucun moyen de savoir qu'il ne vaut rien.
+ * Sous `MIN_COMPARABLES` au plus large rayon, DVF seul ne renvoie aucun
+ * montant : une médiane sur trois ventes serait un chiffre habillé en
+ * estimation, sans que l'utilisateur puisse savoir qu'il ne vaut rien. Le
+ * palier ADEME est tenté avant de renoncer complètement.
  */
 export async function estimateProperty(
   input: EstimateInput,
@@ -382,6 +456,39 @@ export async function estimateProperty(
   if (!distribution || rows.length < MIN_COMPARABLES) {
     // Pas d'affinage sur un jeu déjà jugé insuffisant : mieux noter trois
     // ventes n'en fait pas une estimation.
+    //
+    // Dernier palier avant `INDISPONIBLE` : une médiane commune × DPE, plus
+    // grossière qu'une comparaison de ventes mais moins arbitraire qu'un
+    // chiffre laissé à zéro. Ne nécessite ni la commune (`inseeCode`) ni le
+    // DPE (`subject.energyRating`) — sans l'un ou l'autre, `findAdemeReference`
+    // rend `null` et ce palier échoue silencieusement à son tour.
+    //
+    // Aucun affinage par score ici (`refinement: null`) : la classe DPE est
+    // déjà le critère de segmentation de la médiane elle-même — y réappliquer
+    // l'ajustement DPE de `valuation-adjustments.ts` compterait le même effet
+    // deux fois.
+    const ademeRef = await findAdemeReference(
+      input.inseeCode,
+      input.subject?.energyRating ?? null
+    );
+    const ademeEstimate = estimateFromAdemeReference(input.surfaceM2, ademeRef);
+
+    if (ademeEstimate) {
+      return {
+        estimateEur: ademeEstimate.estimateEur,
+        distribution,
+        comparableCount: rows.length,
+        radiusUsedM,
+        monthsUsed,
+        confidence: "LOW",
+        insufficientData: false,
+        samples,
+        refinement: null,
+        source: "ADEME_COMMUNE_DPE",
+        ademeReference: ademeEstimate,
+      };
+    }
+
     return {
       estimateEur: null,
       distribution,
@@ -392,6 +499,8 @@ export async function estimateProperty(
       insufficientData: true,
       samples,
       refinement: null,
+      source: "INDISPONIBLE",
+      ademeReference: null,
     };
   }
 
@@ -415,6 +524,8 @@ export async function estimateProperty(
     insufficientData: false,
     samples,
     refinement: buildRefinement(input, rows, distribution, { now: opts?.now }),
+    source: classifyRadiusSource(radiusUsedM),
+    ademeReference: null,
   };
 }
 

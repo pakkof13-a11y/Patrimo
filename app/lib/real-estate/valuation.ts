@@ -23,6 +23,7 @@ import {
   estimateProperty,
   isDvfCoveredDepartment,
   type EstimateRefinement,
+  type EstimateSource,
 } from "./estimate";
 import { departmentFromCode, geocodeAddress } from "./geocode";
 import { isDvfEstimable } from "./constants";
@@ -48,10 +49,18 @@ export type ValuationOutcome =
       rawEstimateEur?: string;
       /** Détail du scoring et des ajustements — consultatif, toujours renvoyé. */
       refinement?: EstimateRefinement | null;
+      /** Palier ayant produit l'estimation — DVF local/élargi ou repli ADEME. */
+      estimateSource: EstimateSource;
     }
   | { kind: "unchanged"; reason: "fresh" | "manual-mode" | "same-value" }
-  | { kind: "skipped"; reason: "not-estimable" | "not-geocoded" | "department-uncovered" }
-  | { kind: "insufficient-data"; radiusM: number; comparables: number };
+  | { kind: "skipped"; reason: "not-estimable" | "not-geocoded" }
+  | {
+      kind: "insufficient-data";
+      radiusM: number;
+      comparables: number;
+      /** true si le département n'est de toute façon pas couvert par DVF. */
+      departmentUncovered: boolean;
+    };
 
 /** Champs de `RealEstateDetail` lus pour estimer et ajuster. */
 const VALUATION_DETAIL_SELECT = {
@@ -153,7 +162,17 @@ export async function recordValuation(
   assetId: string,
   valueEur: string,
   source: string,
-  opts?: { now?: Date; mode?: "DVF_AUTO" | "MANUAL"; dvf?: { estimate: string; confidence: string; comparables: number } }
+  opts?: {
+    now?: Date;
+    mode?: "DVF_AUTO" | "MANUAL";
+    dvf?: {
+      estimate: string;
+      confidence: string;
+      comparables: number;
+      /** Palier ayant produit l'estimation — persisté dans `dvfSource`. */
+      source?: EstimateSource;
+    };
+  }
 ): Promise<void> {
   const now = opts?.now ?? new Date();
   const value = new Prisma.Decimal(d(valueEur).toFixed(12));
@@ -176,6 +195,7 @@ export async function recordValuation(
               dvfEstimateEur: new Prisma.Decimal(opts.dvf.estimate),
               dvfConfidence: opts.dvf.confidence,
               dvfComparables: opts.dvf.comparables,
+              ...(opts.dvf.source ? { dvfSource: opts.dvf.source } : {}),
             }
           : {}),
       },
@@ -301,13 +321,15 @@ export async function revalueFromDvf(
     return { kind: "skipped", reason: "not-geocoded" };
   }
 
+  // Alsace-Moselle et Mayotte relèvent d'un autre régime de publicité
+  // foncière : DVF n'y trouvera jamais rien. On ne l'écarte plus avant coup
+  // pour autant — le repli ADEME (commune × DPE) n'est pas concerné par cette
+  // limite, et mérite d'être tenté. `departmentUncovered` n'affecte que le
+  // message rendu si tout échoue.
   const department = departmentFromCode(detail.inseeCode);
-  if (department && !isDvfCoveredDepartment(department)) {
-    // Alsace-Moselle et Mayotte relèvent d'un autre régime de publicité
-    // foncière : aucune vente n'y sera jamais trouvée. Le dire vaut mieux que
-    // laisser croire à un secteur sans transactions.
-    return { kind: "skipped", reason: "department-uncovered" };
-  }
+  const departmentUncovered = department
+    ? !isDvfCoveredDepartment(department)
+    : false;
 
   const estimate = await estimateProperty(
     {
@@ -328,6 +350,7 @@ export async function revalueFromDvf(
       kind: "insufficient-data",
       radiusM: estimate.radiusUsedM,
       comparables: estimate.comparableCount,
+      departmentUncovered,
     };
   }
 
@@ -352,6 +375,7 @@ export async function revalueFromDvf(
       comparables: estimate.comparableCount,
       rawEstimateEur: estimate.estimateEur,
       refinement: estimate.refinement,
+      estimateSource: estimate.source,
     };
   }
 
@@ -371,6 +395,7 @@ export async function revalueFromDvf(
       estimate: estimate.estimateEur,
       confidence: estimate.confidence,
       comparables: estimate.comparableCount,
+      source: estimate.source,
     },
   });
 
@@ -381,6 +406,7 @@ export async function revalueFromDvf(
     comparables: estimate.comparableCount,
     rawEstimateEur: estimate.estimateEur,
     refinement: estimate.refinement,
+    estimateSource: estimate.source,
   };
 }
 

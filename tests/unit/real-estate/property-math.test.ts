@@ -7,6 +7,7 @@ import {
   netRentalYieldPct,
   propertyTypeLabel,
   propertyUsageLabel,
+  totalAnnualFiscalBurden,
 } from "@/app/lib/real-estate/constants";
 
 describe("formatOwnershipShare", () => {
@@ -136,13 +137,13 @@ describe("grossRentalYieldPct", () => {
 });
 
 describe("netRentalYieldPct", () => {
-  it("déduit charges et taxe foncière, sur le coût de revient", () => {
-    // Loyer 12 000 − charges 1 200 − TF 1 000 = 9 800 sur 250 000 → 3,92 %
+  it("déduit charges et charge fiscale totale, sur le coût de revient", () => {
+    // Loyer 12 000 − charges 1 200 − charge fiscale 1 000 = 9 800 sur 250 000 → 3,92 %
     expect(
       netRentalYieldPct({
         monthlyRentEur: 1000,
         monthlyChargesEur: 100,
-        annualPropertyTaxEur: 1000,
+        totalAnnualFiscalBurdenEur: 1000,
         costBasisEur: 250_000,
       })
     ).toBeCloseTo(3.92, 6);
@@ -161,7 +162,7 @@ describe("netRentalYieldPct", () => {
     const out = netRentalYieldPct({
       monthlyRentEur: 400,
       monthlyChargesEur: 300,
-      annualPropertyTaxEur: 3000,
+      totalAnnualFiscalBurdenEur: 3000,
       costBasisEur: 100_000,
     });
     expect(out).toBeLessThan(0);
@@ -177,5 +178,85 @@ describe("netRentalYieldPct", () => {
     expect(
       netRentalYieldPct({ monthlyRentEur: 1000, costBasisEur: 300_000 })
     ).toBeCloseTo(4, 6);
+  });
+});
+
+describe("totalAnnualFiscalBurden", () => {
+  it("compte toujours la taxe foncière", () => {
+    expect(
+      totalAnnualFiscalBurden({
+        usage: "LOCATIF_NU",
+        annualPropertyTaxEur: 1200,
+      })
+    ).toBe(1200);
+  });
+
+  it("ajoute la taxe d'habitation sur une résidence secondaire", () => {
+    expect(
+      totalAnnualFiscalBurden({
+        usage: "RESIDENCE_SECONDAIRE",
+        annualPropertyTaxEur: 1200,
+        annualHabitationTaxEur: 800,
+      })
+    ).toBe(2000);
+  });
+
+  it("n'ajoute pas la taxe d'habitation sur un bien loué", () => {
+    // Supprimée pour les résidences principales depuis 2023, et jamais due
+    // par le propriétaire d'un bien loué — même si le champ est renseigné par
+    // erreur, elle ne doit pas peser sur le rendement.
+    expect(
+      totalAnnualFiscalBurden({
+        usage: "LOCATIF_MEUBLE",
+        annualPropertyTaxEur: 1200,
+        annualHabitationTaxEur: 800,
+      })
+    ).toBe(1200);
+  });
+
+  it("n'ajoute pas la taxe d'habitation sur une résidence principale", () => {
+    expect(
+      totalAnnualFiscalBurden({
+        usage: "RESIDENCE_PRINCIPALE",
+        annualPropertyTaxEur: 1200,
+        annualHabitationTaxEur: 800,
+      })
+    ).toBe(1200);
+  });
+
+  it("ajoute les charges de copropriété seulement si le bien est en copropriété", () => {
+    expect(
+      totalAnnualFiscalBurden({
+        usage: "LOCATIF_NU",
+        annualPropertyTaxEur: 1200,
+        isCopropriete: true,
+        annualCoproChargesEur: 2400,
+      })
+    ).toBe(3600);
+
+    expect(
+      totalAnnualFiscalBurden({
+        usage: "LOCATIF_NU",
+        annualPropertyTaxEur: 1200,
+        isCopropriete: false,
+        annualCoproChargesEur: 2400,
+      })
+    ).toBe(1200);
+  });
+
+  it("cumule les trois composantes sur une résidence secondaire en copropriété", () => {
+    expect(
+      totalAnnualFiscalBurden({
+        usage: "RESIDENCE_SECONDAIRE",
+        annualPropertyTaxEur: 1200,
+        annualHabitationTaxEur: 800,
+        isCopropriete: true,
+        annualCoproChargesEur: 2400,
+      })
+    ).toBe(4400);
+  });
+
+  it("rend 0 sans aucune donnée, jamais NaN", () => {
+    expect(totalAnnualFiscalBurden({ usage: "LOCATIF_NU" })).toBe(0);
   });
 });

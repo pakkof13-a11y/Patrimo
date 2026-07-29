@@ -123,6 +123,7 @@ export async function GET() {
         dvfEstimateEur: r.dvfEstimateEur?.toString() ?? null,
         dvfConfidence: r.dvfConfidence,
         dvfComparables: r.dvfComparables,
+        dvfSource: r.dvfSource,
         monthlyRentEur: r.monthlyRentEur?.toString() ?? null,
         monthlyChargesEur: r.monthlyChargesEur?.toString() ?? null,
         annualPropertyTaxEur: r.annualPropertyTaxEur?.toString() ?? null,

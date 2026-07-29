@@ -374,6 +374,9 @@ model RealEstateDetail {
   dvfEstimateEur Decimal?  @db.Decimal(14, 2)
   dvfConfidence  String?
   dvfComparables Int?
+  /// DVF_LOCAL | DVF_ELARGI | ADEME_COMMUNE_DPE — palier ayant produit
+  /// `dvfEstimateEur`. Voir `estimate.ts` pour l'orchestration des paliers.
+  dvfSource      String?
 
   // ── Régime fiscal et dispositif ──
   /// MICRO_FONCIER | REEL_FONCIER | MICRO_BIC | REEL_BIC | LMP
@@ -560,6 +563,40 @@ model DvfImport {
   sales DvfSale[]
 
   @@unique([department, year])
+}
+
+/**
+ * Repli grossier d'estimation quand DVF ne trouve pas assez de comparables
+ * même au rayon le plus large (secteur rural, faible activité notariale) :
+ * une médiane de prix au m² par commune, ventilée par classe DPE.
+ *
+ * Table publique, sans `userId`, au même titre que `DvfSale` — même
+ * référentiel partagé, reconstructible depuis la source.
+ *
+ * **Ne contient aucune donnée à ce stade.** Aucun import n'est fourni avec ce
+ * chantier : sans lignes, le repli rend systématiquement « indisponible »,
+ * ce qui est le comportement correct — mieux vaut une estimation manquante
+ * qu'une estimation inventée (voir `ademe-reference.ts`). Elle attend un
+ * script d'import du même type que `scripts/import-dvf-stream.mjs`.
+ */
+model AdemeCommuneDpeMedian {
+  id     String @id @default(cuid())
+  /// Code INSEE de la commune.
+  inseeCode String
+  /// A à G, ou ALL — médiane toutes classes confondues, repli plus grossier
+  /// encore quand la classe précise du bien n'a pas de ligne dédiée. Une
+  /// vraie valeur plutôt que `null` : Postgres traite deux `NULL` comme
+  /// distincts dans un index unique composite, ce qui n'empêcherait pas les
+  /// doublons sur ce repli.
+  energyRating     String
+  medianPricePerM2 Decimal  @db.Decimal(12, 2)
+  /// Nombre de diagnostics DPE ayant formé la médiane — trace de fiabilité.
+  sampleSize       Int
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([inseeCode, energyRating])
+  @@index([inseeCode])
 }
 
 model PortfolioSnapshot {

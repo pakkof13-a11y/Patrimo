@@ -24,6 +24,7 @@ import {
   isRentalUsage,
   isSecondaryResidenceUsage,
   netRentalYieldPct,
+  totalAnnualFiscalBurden,
   regimesForUsage,
   rentalRegimeLabel,
   riskLevelLabel,
@@ -54,6 +55,8 @@ type PropertyRow = {
   dvfEstimateEur: string | null;
   dvfConfidence: string | null;
   dvfComparables: number | null;
+  /** DVF_LOCAL | DVF_ELARGI | ADEME_COMMUNE_DPE — palier ayant produit `dvfEstimateEur`. */
+  dvfSource: string | null;
   monthlyRentEur: string | null;
   monthlyChargesEur: string | null;
   annualPropertyTaxEur: string | null;
@@ -198,6 +201,13 @@ const CONFIDENCE_LABELS: Record<string, string> = {
   LOW: "faible",
 };
 
+/** Palier ayant produit l'estimation — voir `EstimateSource` dans estimate.ts. */
+const ESTIMATE_SOURCE_LABELS: Record<string, string> = {
+  DVF_LOCAL: "DVF local",
+  DVF_ELARGI: "DVF élargi",
+  ADEME_COMMUNE_DPE: "ADEME (repli commune)",
+};
+
 function num(v: string | null | undefined): number {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
@@ -304,33 +314,47 @@ export function PropertyPanel({
 
   async function estimate(assetId: string, name: string) {
     try {
-      const out = await fetchJson<{ kind: string; valueEur?: string; reason?: string; comparables?: number }>(
-        `/api/real-estate/properties/${assetId}/valuation`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "dvf", force: true, apply: true }),
-        }
-      );
+      const out = await fetchJson<{
+        kind: string;
+        valueEur?: string;
+        reason?: string;
+        comparables?: number;
+        estimateSource?: string;
+        departmentUncovered?: boolean;
+      }>(`/api/real-estate/properties/${assetId}/valuation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "dvf", force: true, apply: true }),
+      });
       if (out.kind === "updated") {
+        const sourceLabel = out.estimateSource
+          ? (ESTIMATE_SOURCE_LABELS[out.estimateSource] ?? out.estimateSource)
+          : null;
         toast.success(
-          `${name} réévalué à ${formatCurrency(out.valueEur ?? "0", "EUR")} · ${out.comparables} ventes comparables`
+          `${name} réévalué à ${formatCurrency(out.valueEur ?? "0", "EUR")}` +
+            (sourceLabel
+              ? ` · source : ${sourceLabel}`
+              : ` · ${out.comparables} ventes comparables`)
         );
         refreshAfterValuation();
         return;
       }
       if (out.kind === "insufficient-data") {
+        // Le repli ADEME (commune × DPE) a déjà été tenté à ce stade — s'il
+        // avait réussi, `out.kind` vaudrait `updated`. `departmentUncovered`
+        // permet de préciser pourquoi DVF seul ne pouvait de toute façon rien
+        // trouver, sans faire croire que rien n'a été essayé.
         toast.warning(
-          `Pas assez de ventes comparables autour de ${name} — aucune estimation produite.`
+          out.departmentUncovered
+            ? `${name} : département non couvert par DVF (Alsace-Moselle, Mayotte), et aucune référence ADEME disponible pour cette commune.`
+            : `Pas assez de ventes comparables autour de ${name}, et aucune référence ADEME disponible pour cette commune — aucune estimation produite.`
         );
         return;
       }
       toast.info(
         out.reason === "not-geocoded"
           ? `Adresse de ${name} non localisée — complétez-la pour permettre l'estimation.`
-          : out.reason === "department-uncovered"
-            ? `Département non couvert par DVF (Alsace-Moselle, Mayotte).`
-            : `Aucune réévaluation pour ${name}.`
+          : `Aucune réévaluation pour ${name}.`
       );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Estimation impossible");
@@ -512,10 +536,17 @@ export function PropertyPanel({
               : null,
             propertyValueEur: wholeValue || null,
           });
+          const fiscalBurden = totalAnnualFiscalBurden({
+            usage: p.usage,
+            annualPropertyTaxEur: num(p.annualPropertyTaxEur) || null,
+            annualHabitationTaxEur: num(p.annualHabitationTaxEur) || null,
+            isCopropriete: p.isCopropriete,
+            annualCoproChargesEur: num(p.annualCoproChargesEur) || null,
+          });
           const net = netRentalYieldPct({
             monthlyRentEur: num(p.monthlyRentEur) || null,
             monthlyChargesEur: num(p.monthlyChargesEur) || null,
-            annualPropertyTaxEur: num(p.annualPropertyTaxEur) || null,
+            totalAnnualFiscalBurdenEur: fiscalBurden,
             occupancyRatePct: p.occupancyRatePct
               ? num(p.occupancyRatePct)
               : null,
@@ -599,11 +630,14 @@ export function PropertyPanel({
               </dl>
 
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-meta">
+                <p className="text-meta" data-testid="property-estimate-source">
                   {p.valuationMode === "DVF_AUTO"
                     ? "Estimation DVF automatique"
                     : "Valeur saisie — non écrasée par l'estimation"}
-                  {p.dvfComparables
+                  {p.dvfSource && ESTIMATE_SOURCE_LABELS[p.dvfSource]
+                    ? ` · source : ${ESTIMATE_SOURCE_LABELS[p.dvfSource]}`
+                    : ""}
+                  {p.dvfSource !== "ADEME_COMMUNE_DPE" && p.dvfComparables
                     ? ` · ${p.dvfComparables} comparables${
                         p.dvfConfidence
                           ? `, confiance ${CONFIDENCE_LABELS[p.dvfConfidence] ?? p.dvfConfidence.toLowerCase()}`

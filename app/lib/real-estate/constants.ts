@@ -334,8 +334,40 @@ export function grossRentalYieldPct(input: {
 }
 
 /**
- * Rendement locatif net de charges et de taxe foncière, rapporté au **coût de
- * revient** (prix payé + frais d'acquisition) et non à la valeur actuelle.
+ * Charge fiscale et de charges annuelle totale d'un bien.
+ *
+ * Trois composantes, chacune conditionnée à un fait distinct :
+ * - la taxe foncière est toujours due, quel que soit l'usage ;
+ * - la taxe d'habitation ne l'est plus que sur les résidences secondaires
+ *   (`usage`, via `isSecondaryResidenceUsage`) depuis sa suppression pour les
+ *   résidences principales en 2023 — et un bien loué n'y a jamais été soumis,
+ *   c'était au locataire présent au 1ᵉʳ janvier de l'acquitter ;
+ * - les charges de copropriété ne s'appliquent qu'aux biens effectivement en
+ *   copropriété (`isCopropriete`) — un bien individuel n'en a pas.
+ *
+ * Isolée de `netRentalYieldPct` pour que la règle « qui doit quoi » vive à un
+ * seul endroit, testable indépendamment du calcul de rendement lui-même.
+ */
+export function totalAnnualFiscalBurden(input: {
+  usage: string;
+  annualPropertyTaxEur?: number | null;
+  annualHabitationTaxEur?: number | null;
+  isCopropriete?: boolean | null;
+  annualCoproChargesEur?: number | null;
+}): number {
+  let total = Number(input.annualPropertyTaxEur ?? 0);
+  if (isSecondaryResidenceUsage(input.usage)) {
+    total += Number(input.annualHabitationTaxEur ?? 0);
+  }
+  if (input.isCopropriete) {
+    total += Number(input.annualCoproChargesEur ?? 0);
+  }
+  return total;
+}
+
+/**
+ * Rendement locatif net de charges et de charge fiscale, rapporté au **coût
+ * de revient** (prix payé + frais d'acquisition) et non à la valeur actuelle.
  *
  * C'est le taux qui répond à « que me rapporte l'argent que j'ai engagé ». Le
  * rapporter à la valeur de marché mesurerait autre chose : la rentabilité qu'un
@@ -344,7 +376,8 @@ export function grossRentalYieldPct(input: {
 export function netRentalYieldPct(input: {
   monthlyRentEur: number | null | undefined;
   monthlyChargesEur?: number | null;
-  annualPropertyTaxEur?: number | null;
+  /** Somme rendue par `totalAnnualFiscalBurden` — foncier, TH, charges copro. */
+  totalAnnualFiscalBurdenEur?: number | null;
   occupancyRatePct?: number | null;
   costBasisEur: number | null | undefined;
 }): number | null {
@@ -361,8 +394,8 @@ export function netRentalYieldPct(input: {
 
   const annualRent = rent * 12 * (effective / 100);
   const annualCharges = Number(input.monthlyChargesEur ?? 0) * 12;
-  const propertyTax = Number(input.annualPropertyTaxEur ?? 0);
-  const net = annualRent - annualCharges - propertyTax;
+  const fiscalBurden = Number(input.totalAnnualFiscalBurdenEur ?? 0);
+  const net = annualRent - annualCharges - fiscalBurden;
   return (net / cost) * 100;
 }
 

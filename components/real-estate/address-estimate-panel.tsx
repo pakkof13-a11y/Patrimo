@@ -28,6 +28,19 @@ type Distribution = {
   count: number;
 };
 
+type EstimateSource =
+  | "DVF_LOCAL"
+  | "DVF_ELARGI"
+  | "ADEME_COMMUNE_DPE"
+  | "INDISPONIBLE";
+
+type AdemeReference = {
+  estimateEur: string;
+  medianPricePerM2: string;
+  sampleSize: number;
+  scope: "COMMUNE_DPE" | "COMMUNE";
+};
+
 type EstimateResponse = {
   geocode: {
     latitude: number;
@@ -38,6 +51,8 @@ type EstimateResponse = {
     score: number;
   };
   lowConfidenceAddress: boolean;
+  /** true si le département n'est de toute façon pas couvert par DVF. */
+  departmentUncovered: boolean;
   estimate: {
     estimateEur: string | null;
     distribution: Distribution | null;
@@ -47,6 +62,8 @@ type EstimateResponse = {
     confidence: "LOW" | "MEDIUM" | "HIGH";
     insufficientData: boolean;
     samples: Comparable[];
+    source: EstimateSource;
+    ademeReference: AdemeReference | null;
   };
 };
 
@@ -55,6 +72,13 @@ const CONFIDENCE = {
   MEDIUM: { label: "moyenne", tone: "text-amber-700 dark:text-amber-300" },
   LOW: { label: "faible", tone: "text-red-700 dark:text-red-400" },
 } as const;
+
+const SOURCE_LABELS: Record<EstimateSource, string> = {
+  DVF_LOCAL: "DVF local",
+  DVF_ELARGI: "DVF élargi",
+  ADEME_COMMUNE_DPE: "ADEME (repli commune)",
+  INDISPONIBLE: "Indisponible",
+};
 
 function num(v: string | null | undefined): number {
   const n = Number(v ?? 0);
@@ -229,17 +253,26 @@ export function AddressEstimatePanel({ className }: { className?: string }) {
             <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] leading-snug text-amber-900 dark:text-amber-200">
               <p className="font-semibold">Estimation non concluante</p>
               <p className="mt-0.5">
-                {est?.comparableCount ?? 0} vente
-                {(est?.comparableCount ?? 0) > 1 ? "s" : ""} comparable
-                {(est?.comparableCount ?? 0) > 1 ? "s" : ""} trouvée
-                {(est?.comparableCount ?? 0) > 1 ? "s" : ""} dans un rayon de{" "}
-                {formatDistance(est?.radiusUsedM ?? 0)} — trop peu pour produire
-                un chiffre défendable. Aucune estimation de complaisance n&apos;est
-                affichée.
+                {data.departmentUncovered
+                  ? "Ce département n'est pas couvert par DVF (Alsace-Moselle, Mayotte relèvent d'un autre registre foncier), "
+                  : `${est?.comparableCount ?? 0} vente${(est?.comparableCount ?? 0) > 1 ? "s" : ""} comparable${(est?.comparableCount ?? 0) > 1 ? "s" : ""} trouvée${(est?.comparableCount ?? 0) > 1 ? "s" : ""} dans un rayon de ${formatDistance(est?.radiusUsedM ?? 0)}, `}
+                et aucune référence ADEME (commune × DPE) disponible pour cette
+                commune — trop peu pour produire un chiffre défendable. Aucune
+                estimation de complaisance n&apos;est affichée.
               </p>
             </div>
           ) : (
             <>
+              <p
+                className="text-meta mt-2 inline-flex items-center gap-1.5"
+                data-testid="re-est-source"
+              >
+                Source :
+                <span className="rounded bg-[var(--muted)] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[var(--foreground)]">
+                  {SOURCE_LABELS[est.source]}
+                </span>
+              </p>
+
               <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/40 px-2.5 py-2">
                   <p className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
@@ -254,7 +287,11 @@ export function AddressEstimatePanel({ className }: { className?: string }) {
                     Prix médian au m²
                   </p>
                   <p className="mt-0.5 text-sm font-semibold tabular-nums">
-                    {formatCurrency(num(dist?.median))}
+                    {formatCurrency(
+                      est.source === "ADEME_COMMUNE_DPE"
+                        ? num(est.ademeReference?.medianPricePerM2)
+                        : num(dist?.median)
+                    )}
                   </p>
                 </div>
                 <div className="rounded-[var(--radius-md)] border border-[var(--border)] px-2.5 py-2">
@@ -262,7 +299,9 @@ export function AddressEstimatePanel({ className }: { className?: string }) {
                     Fourchette (Q1–Q3)
                   </p>
                   <p className="mt-0.5 text-sm font-semibold tabular-nums">
-                    {formatCurrency(num(dist?.q1))} – {formatCurrency(num(dist?.q3))}
+                    {est.source === "ADEME_COMMUNE_DPE"
+                      ? "—"
+                      : `${formatCurrency(num(dist?.q1))} – ${formatCurrency(num(dist?.q3))}`}
                   </p>
                 </div>
                 <div className="rounded-[var(--radius-md)] border border-[var(--border)] px-2.5 py-2">
@@ -281,10 +320,9 @@ export function AddressEstimatePanel({ className }: { className?: string }) {
               </div>
 
               <p className="text-meta mt-2">
-                Fondée sur {est.comparableCount} vente
-                {est.comparableCount > 1 ? "s" : ""} dans un rayon de{" "}
-                {formatDistance(est.radiusUsedM)}, sur les {est.monthsUsed}{" "}
-                derniers mois.
+                {est.source === "ADEME_COMMUNE_DPE" && est.ademeReference
+                  ? `Fondée sur la médiane ADEME de ${est.ademeReference.sampleSize} diagnostic${est.ademeReference.sampleSize > 1 ? "s" : ""} DPE (${est.ademeReference.scope === "COMMUNE_DPE" ? "classe DPE ciblée" : "toutes classes confondues"}) — repli faute d'assez de ventes DVF.`
+                  : `Fondée sur ${est.comparableCount} vente${est.comparableCount > 1 ? "s" : ""} dans un rayon de ${formatDistance(est.radiusUsedM)}, sur les ${est.monthsUsed} derniers mois.`}
               </p>
 
               {est.samples.length > 0 ? (
