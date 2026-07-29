@@ -1,7 +1,7 @@
 "use client";
 
 import { fetchJson } from "@/app/lib/api-client";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
@@ -10,6 +10,7 @@ import {
   CalendarClock,
   ChevronDown,
   ChevronRight,
+  MoreHorizontal,
   PencilLine,
   Percent,
   Plus,
@@ -169,6 +170,8 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   const [categoryFilter, setCategoryFilter] = useState<
     "ALL" | LiabilityCategory
   >("ALL");
+  const [actionsMenuId, setActionsMenuId] = useState<string | null>(null);
+  const actionsMenuRefs = useRef(new Map<string, HTMLDivElement>());
   const [sort, setSort] = useState<LiabilitySort>(() =>
     loadSessionPref(LIABILITY_SORT_SESSION_KEY, DEFAULT_LIABILITY_SORT)
   );
@@ -191,6 +194,17 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
       return next;
     });
   }
+
+  // Menu d'actions mobile (⋯) : ferme au clic extérieur ou à l'échap.
+  useEffect(() => {
+    if (!actionsMenuId) return;
+    function onDoc(e: MouseEvent) {
+      const el = actionsMenuRefs.current.get(actionsMenuId!);
+      if (!el?.contains(e.target as Node)) setActionsMenuId(null);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [actionsMenuId]);
 
   const listQ = useQuery({
     queryKey: ["liabilities"],
@@ -507,7 +521,8 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
             </div>
           </td>
           <td className="px-2 py-2 text-right">
-            <div className="inline-flex flex-wrap items-center justify-end gap-1">
+            {/* Desktop (sm+) : boutons complets */}
+            <div className="hidden flex-wrap items-center justify-end gap-1 sm:inline-flex">
               {!settled && (
                 <Button
                   size="sm"
@@ -527,7 +542,7 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                   }}
                 >
                   <Banknote className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Remboursement</span>
+                  Remboursement
                 </Button>
               )}
               <Button
@@ -583,6 +598,121 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
+            </div>
+
+            {/* Mobile (< sm) : consolidé dans un menu ⋯ (chevron déjà seul contrôle d'expansion) */}
+            <div className="inline-block sm:hidden">
+              {!settled ? (
+                <div
+                  className="relative inline-block"
+                  ref={(el) => {
+                    if (el) actionsMenuRefs.current.set(l.id, el);
+                    else actionsMenuRefs.current.delete(l.id);
+                  }}
+                >
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="!h-8 !w-8 !px-0 text-slate-400 hover:text-slate-800"
+                    aria-label={`Actions pour ${l.name}`}
+                    aria-haspopup="menu"
+                    aria-expanded={actionsMenuId === l.id}
+                    data-testid={`liability-actions-${l.id}`}
+                    onClick={() =>
+                      setActionsMenuId((id) => (id === l.id ? null : l.id))
+                    }
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                  {actionsMenuId === l.id && (
+                    <div
+                      className="absolute right-0 top-full z-20 mt-1 min-w-[11rem] rounded-lg border border-[var(--border)] bg-[var(--card)] py-1 shadow-lg"
+                      role="menu"
+                      aria-label={`Actions pour ${l.name}`}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          e.stopPropagation();
+                          setActionsMenuId(null);
+                        }
+                      }}
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[var(--muted)]"
+                        data-testid={`liability-menu-repay-${l.id}`}
+                        onClick={() => {
+                          setActionsMenuId(null);
+                          setEarlyId(l.id);
+                          setEarlyKind("PARTIAL");
+                          setEarlyAmount(
+                            l.monthlyPayment && Number(l.monthlyPayment) > 0
+                              ? String(l.monthlyPayment)
+                              : ""
+                          );
+                          setEarlyDate(new Date().toISOString().slice(0, 10));
+                        }}
+                      >
+                        <Banknote className="h-3.5 w-3.5" />
+                        Remboursement
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[var(--muted)]"
+                        data-testid={`liability-menu-amend-${l.id}`}
+                        onClick={() => {
+                          setActionsMenuId(null);
+                          setAmendId(l.id);
+                          setAmendPayment(l.monthlyPayment || "");
+                          setAmendDate(new Date().toISOString().slice(0, 10));
+                        }}
+                      >
+                        <PencilLine className="h-3.5 w-3.5" />
+                        Avenant mensualité
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[var(--muted)]"
+                        data-testid={`liability-menu-rate-${l.id}`}
+                        onClick={() => {
+                          setActionsMenuId(null);
+                          setRateId(l.id);
+                          setRateValue(l.interestRate || "");
+                          setRateDate(new Date().toISOString().slice(0, 10));
+                        }}
+                      >
+                        <Percent className="h-3.5 w-3.5" />
+                        Avenant taux
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-red-600 hover:bg-[var(--muted)]"
+                        data-testid={`liability-menu-delete-${l.id}`}
+                        onClick={() => {
+                          setActionsMenuId(null);
+                          setDeleteTarget(l);
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Supprimer
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
+                  aria-label="Supprimer le crédit"
+                  onClick={() => setDeleteTarget(l)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
             </div>
           </td>
         </tr>
@@ -1313,8 +1443,10 @@ function LiabilityDetailPanel({
     <div className="space-y-4" data-testid={`liability-detail-${l.id}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs font-semibold text-[var(--foreground)]">
-          <CalendarClock className="h-3.5 w-3.5 text-teal-500" />
-          Détail & amortissement prévisionnel
+          <CalendarClock className="h-3.5 w-3.5 shrink-0 text-teal-500" />
+          <span className="truncate">
+            {l.name} — amortissement prévisionnel
+          </span>
         </div>
         <Button
           size="sm"
