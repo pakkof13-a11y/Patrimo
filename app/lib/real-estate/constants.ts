@@ -365,3 +365,45 @@ export function netRentalYieldPct(input: {
   const net = annualRent - annualCharges - propertyTax;
   return (net / cost) * 100;
 }
+
+/**
+ * Échelle unifiée de risque — commune aux quatre risques Géorisques
+ * (inondation, sismique, radon, argiles).
+ *
+ * Les nomenclatures officielles diffèrent d'un risque à l'autre (zonage
+ * sismique en 5 zones numérotées, potentiel radon en 3 catégories, aléa
+ * argiles en qualificatifs texte…) : les ramener à une échelle commune évite
+ * quatre légendes de badges différentes pour un seul et même usage — donner
+ * une idée d'exposition en un coup d'œil. Le détail précis reste dans
+ * `georisques.ts`, au niveau du mapping depuis chaque nomenclature d'origine.
+ */
+export const RISK_LEVELS = {
+  AUCUN: "Aucun risque identifié",
+  FAIBLE: "Risque faible",
+  MOYEN: "Risque moyen",
+  FORT: "Risque fort",
+} as const;
+
+export type RiskLevel = keyof typeof RISK_LEVELS;
+
+export function riskLevelLabel(value: string): string {
+  return RISK_LEVELS[value as RiskLevel] ?? value;
+}
+
+/** Rang de sévérité — sert à trier et à colorer les badges. */
+export const RISK_LEVEL_SEVERITY: Record<RiskLevel, number> = {
+  AUCUN: 0,
+  FAIBLE: 1,
+  MOYEN: 2,
+  FORT: 3,
+};
+
+/** Les quatre risques exposés par le rapport Géorisques, et leur libellé court. */
+export const RISK_TYPES = {
+  flood: "Inondation",
+  seismic: "Sismique",
+  radon: "Radon",
+  claySoil: "Argiles",
+} as const;
+
+export type RiskTypeKey = keyof typeof RISK_TYPES;

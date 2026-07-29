@@ -61,7 +61,20 @@ const patchSchema = z.object({
 
   // ── Fiscalité locale ──
   annualHabitationTaxEur: decimalString.nullable().optional(),
+
+  // ── Équipements complémentaires ──
+  hasPool: z.boolean().nullable().optional(),
+  bathroomCount: z.coerce.number().int().min(0).max(50).nullable().optional(),
+  hasAirConditioning: z.boolean().nullable().optional(),
+  hasFireplace: z.boolean().nullable().optional(),
+  hasAlarm: z.boolean().nullable().optional(),
 });
+
+// Les risques (riskFlood, riskSeismic, riskRadon, riskClaySoil,
+// georisquesFetched) sont volontairement absents de ce schéma : ce sont des
+// champs renseignés par `refreshGeorisquesRisks`, jamais par une saisie
+// utilisateur — un PATCH qui les accepterait permettrait d'écraser une donnée
+// de source officielle par une valeur inventée.
 
 /**
  * PATCH /api/real-estate/properties/[id]/characteristics
@@ -133,6 +146,11 @@ export async function PATCH(
         ...set("annualCoproChargesEur"),
         ...set("annualCoproProvisions"),
         ...set("annualHabitationTaxEur"),
+        ...set("hasPool"),
+        ...set("bathroomCount"),
+        ...set("hasAirConditioning"),
+        ...set("hasFireplace"),
+        ...set("hasAlarm"),
       },
       select: {
         assetId: true,
@@ -157,6 +175,11 @@ export async function PATCH(
         annualCoproChargesEur: true,
         annualCoproProvisions: true,
         annualHabitationTaxEur: true,
+        hasPool: true,
+        bathroomCount: true,
+        hasAirConditioning: true,
+        hasFireplace: true,
+        hasAlarm: true,
       },
     });
 

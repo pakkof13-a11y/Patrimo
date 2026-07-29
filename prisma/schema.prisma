@@ -460,6 +460,25 @@ model RealEstateDetail {
   /// les résidences principales depuis 2023.
   annualHabitationTaxEur Decimal? @db.Decimal(12, 2)
 
+  // ── Équipements complémentaires ──
+  hasPool            Boolean?
+  bathroomCount      Int?
+  hasAirConditioning Boolean?
+  hasFireplace       Boolean?
+  hasAlarm           Boolean?
+
+  // ── Risques (Géorisques) ──
+  /// AUCUN | FAIBLE | MOYEN | FORT — échelle unifiée dérivée des nomenclatures
+  /// officielles (zonage sismique, potentiel radon…), voir georisques.ts.
+  riskFlood    String?
+  riskSeismic  String?
+  riskRadon    String?
+  riskClaySoil String?
+  /// Distingue « jamais interrogé » (false) de « interrogé, rien à signaler »
+  /// (true avec les quatre risques à `AUCUN` ou `null` si la réponse ne les
+  /// couvrait pas toutes) — un simple `null` sur les risques ne le permettrait pas.
+  georisquesFetched Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

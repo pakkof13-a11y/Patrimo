@@ -12,6 +12,8 @@ import {
   GES_RATINGS,
   HEATING_TYPES,
   ORIENTATIONS,
+  RISK_LEVEL_SEVERITY,
+  RISK_TYPES,
   VIEW_TYPES,
   WINDOW_QUALITIES,
   formatOwnershipShare,
@@ -24,11 +26,14 @@ import {
   netRentalYieldPct,
   regimesForUsage,
   rentalRegimeLabel,
+  riskLevelLabel,
   RENTAL_REGIMES,
   TAX_SCHEMES,
   taxSchemeLabel,
   propertyTypeLabel,
   propertyUsageLabel,
+  type RiskLevel,
+  type RiskTypeKey,
 } from "@/app/lib/real-estate/constants";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import type { Holding } from "@/app/lib/types/ui";
@@ -86,6 +91,18 @@ type PropertyRow = {
   annualCoproProvisions: string | null;
   // ── Fiscalité locale ──
   annualHabitationTaxEur: string | null;
+  // ── Équipements complémentaires ──
+  hasPool: boolean | null;
+  bathroomCount: number | null;
+  hasAirConditioning: boolean | null;
+  hasFireplace: boolean | null;
+  hasAlarm: boolean | null;
+  // ── Risques (Géorisques) — lecture seule, jamais saisis ──
+  riskFlood: string | null;
+  riskSeismic: string | null;
+  riskRadon: string | null;
+  riskClaySoil: string | null;
+  georisquesFetched: boolean;
   loans: Array<{ id: string; name: string; remainingAmountEur: string }>;
 };
 
@@ -137,6 +154,11 @@ type CharacteristicsForm = {
   annualCoproChargesEur: string;
   annualCoproProvisions: string;
   annualHabitationTaxEur: string;
+  hasPool: boolean;
+  bathroomCount: string;
+  hasAirConditioning: boolean;
+  hasFireplace: boolean;
+  hasAlarm: boolean;
 };
 
 function characteristicsFormFrom(p: PropertyRow): CharacteristicsForm {
@@ -162,6 +184,11 @@ function characteristicsFormFrom(p: PropertyRow): CharacteristicsForm {
     annualCoproChargesEur: p.annualCoproChargesEur ?? "",
     annualCoproProvisions: p.annualCoproProvisions ?? "",
     annualHabitationTaxEur: p.annualHabitationTaxEur ?? "",
+    hasPool: p.hasPool ?? false,
+    bathroomCount: p.bathroomCount != null ? String(p.bathroomCount) : "",
+    hasAirConditioning: p.hasAirConditioning ?? false,
+    hasFireplace: p.hasFireplace ?? false,
+    hasAlarm: p.hasAlarm ?? false,
   };
 }
 
@@ -389,6 +416,11 @@ export function PropertyPanel({
           annualHabitationTaxEur: charForm.annualHabitationTaxEur
             ? charForm.annualHabitationTaxEur.replace(",", ".")
             : null,
+          hasPool: charForm.hasPool,
+          bathroomCount: charForm.bathroomCount ? Number(charForm.bathroomCount) : null,
+          hasAirConditioning: charForm.hasAirConditioning,
+          hasFireplace: charForm.hasFireplace,
+          hasAlarm: charForm.hasAlarm,
         }),
       });
       toast.success(`Caractéristiques de ${name} mises à jour`);
@@ -515,6 +547,17 @@ export function PropertyPanel({
                   <span className="text-meta ml-1 font-normal">net</span>
                 </p>
               </div>
+
+              {p.georisquesFetched && (
+                <RiskBadgeRow
+                  risks={{
+                    flood: p.riskFlood,
+                    seismic: p.riskSeismic,
+                    radon: p.riskRadon,
+                    claySoil: p.riskClaySoil,
+                  }}
+                />
+              )}
 
               <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4">
                 <div>
@@ -1133,6 +1176,73 @@ export function PropertyPanel({
                   </CharSection>
 
                   <CharSection
+                    id="equipements"
+                    title="Équipements"
+                    hint="Piscine, climatisation, sécurité…"
+                    open={charOpenSections.has("equipements")}
+                    onToggle={() => toggleCharSection("equipements")}
+                  >
+                    <label className="text-[11px]">
+                      <span className="text-[var(--muted-foreground)]">
+                        Salles de bain / d&apos;eau
+                      </span>
+                      <input
+                        inputMode="numeric"
+                        className="input mt-0.5 h-8 w-full text-xs"
+                        value={charForm.bathroomCount}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, bathroomCount: ev.target.value })
+                        }
+                      />
+                    </label>
+                    <div />
+                    <div />
+                    <label className="flex items-end gap-1.5 text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={charForm.hasPool}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, hasPool: ev.target.checked })
+                        }
+                      />
+                      <span className="text-[var(--muted-foreground)]">Piscine</span>
+                    </label>
+                    <label className="flex items-end gap-1.5 text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={charForm.hasAirConditioning}
+                        onChange={(ev) =>
+                          setCharForm({
+                            ...charForm,
+                            hasAirConditioning: ev.target.checked,
+                          })
+                        }
+                      />
+                      <span className="text-[var(--muted-foreground)]">Climatisation</span>
+                    </label>
+                    <label className="flex items-end gap-1.5 text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={charForm.hasFireplace}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, hasFireplace: ev.target.checked })
+                        }
+                      />
+                      <span className="text-[var(--muted-foreground)]">Cheminée</span>
+                    </label>
+                    <label className="flex items-end gap-1.5 text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={charForm.hasAlarm}
+                        onChange={(ev) =>
+                          setCharForm({ ...charForm, hasAlarm: ev.target.checked })
+                        }
+                      />
+                      <span className="text-[var(--muted-foreground)]">Alarme</span>
+                    </label>
+                  </CharSection>
+
+                  <CharSection
                     id="fiscalite"
                     title="Fiscalité locale"
                     hint="Taxe d'habitation"
@@ -1241,6 +1351,59 @@ export function PropertyPanel({
         Le capital restant dû est celui que vous devez réellement : il n&apos;est
         pas réduit à votre quote-part de propriété.
       </p>
+    </div>
+  );
+}
+
+/** Classes de couleur par niveau de risque — même échelle que `RISK_LEVEL_SEVERITY`. */
+const RISK_BADGE_CLASSES: Record<RiskLevel, string> = {
+  AUCUN:
+    "text-emerald-700 ring-emerald-300 dark:text-emerald-300 dark:ring-emerald-700",
+  FAIBLE:
+    "text-amber-700 ring-amber-300 dark:text-amber-400 dark:ring-amber-700",
+  MOYEN:
+    "text-orange-700 ring-orange-300 dark:text-orange-400 dark:ring-orange-700",
+  FORT: "text-red-700 ring-red-300 dark:text-red-400 dark:ring-red-700",
+};
+
+/**
+ * Badges de risques Géorisques (inondation, sismique, radon, argiles).
+ *
+ * N'affiche que les risques effectivement renvoyés par l'API — un risque
+ * absent de la réponse (nomenclature non reconnue, catégorie hors des cas
+ * couverts) ne produit aucun badge plutôt qu'un badge « inconnu » qui
+ * n'apporterait rien. Trié du plus au moins sévère : c'est ce qu'on veut voir
+ * en premier sur une fiche bien.
+ */
+function RiskBadgeRow({
+  risks,
+}: {
+  risks: Record<RiskTypeKey, string | null>;
+}) {
+  const entries = (Object.keys(RISK_TYPES) as RiskTypeKey[])
+    .map((key) => ({ key, level: risks[key] as RiskLevel | null }))
+    .filter(
+      (r): r is { key: RiskTypeKey; level: RiskLevel } =>
+        r.level != null && r.level in RISK_LEVEL_SEVERITY
+    )
+    .sort((a, b) => RISK_LEVEL_SEVERITY[b.level] - RISK_LEVEL_SEVERITY[a.level]);
+
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1" data-testid="property-risk-badges">
+      {entries.map(({ key, level }) => (
+        <span
+          key={key}
+          className={cn(
+            "inline-flex rounded px-1 py-0.5 text-[9px] font-semibold uppercase ring-1 ring-inset",
+            RISK_BADGE_CLASSES[level]
+          )}
+          title={`${RISK_TYPES[key]} — ${riskLevelLabel(level)}`}
+        >
+          {RISK_TYPES[key]}
+        </span>
+      ))}
     </div>
   );
 }

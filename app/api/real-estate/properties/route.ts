@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { z } from "zod";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import {
@@ -9,6 +9,7 @@ import {
   createProperty,
   RealEstateInputError,
 } from "@/app/lib/real-estate/property-service";
+import { refreshGeorisquesRisks } from "@/app/lib/real-estate/georisques";
 import { AccountingError } from "@/app/lib/accounting";
 import { prisma } from "@/app/lib/prisma";
 import {
@@ -147,6 +148,16 @@ export async function GET() {
         annualCoproChargesEur: r.annualCoproChargesEur?.toString() ?? null,
         annualCoproProvisions: r.annualCoproProvisions?.toString() ?? null,
         annualHabitationTaxEur: r.annualHabitationTaxEur?.toString() ?? null,
+        hasPool: r.hasPool,
+        bathroomCount: r.bathroomCount,
+        hasAirConditioning: r.hasAirConditioning,
+        hasFireplace: r.hasFireplace,
+        hasAlarm: r.hasAlarm,
+        riskFlood: r.riskFlood,
+        riskSeismic: r.riskSeismic,
+        riskRadon: r.riskRadon,
+        riskClaySoil: r.riskClaySoil,
+        georisquesFetched: r.georisquesFetched,
         rentalRegime: r.rentalRegime,
         taxScheme: r.taxScheme,
         commitmentEndDate: r.commitmentEndDate?.toISOString() ?? null,
@@ -206,6 +217,15 @@ export async function POST(req: Request) {
       // Pourcentage saisi → fraction stockée en quantité de position.
       ownershipShare: String(ownershipSharePct / 100),
     });
+
+    // Tâche de fond : exécutée après l'envoi de la réponse, ne retarde jamais
+    // la création. Un échec Géorisques (API tierce indisponible) ne doit en
+    // aucun cas faire échouer la sauvegarde du bien — déjà actée ci-dessus.
+    if (rest.latitude != null && rest.longitude != null) {
+      const point = { latitude: rest.latitude, longitude: rest.longitude };
+      after(() => refreshGeorisquesRisks(result.assetId, point));
+    }
+
     return NextResponse.json(result, { status: 201 });
   } catch (e) {
     if (e instanceof RealEstateInputError || e instanceof AccountingError) {
