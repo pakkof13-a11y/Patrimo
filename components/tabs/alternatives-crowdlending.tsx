@@ -6,10 +6,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DateInput } from "@/components/ui/date-input";
 import { FinanceTip } from "@/components/ui/finance-tooltip";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import {
+  type AlternativesDashboardPayload,
   CL_PAYMENT_FREQUENCIES,
   CL_PAYMENT_FREQUENCY_LABELS,
   CL_REPAYMENT_LABELS,
@@ -189,16 +191,36 @@ export function AlternativesCrowdlending({
         "/api/crowdlending"
       ),
   });
+  /**
+   * Même queryKey que le dashboard Alternatifs — cache partagé (staleTime
+   * 60s) : coût réseau nul si le dashboard a déjà été visité récemment.
+   * Sert uniquement au KPI « Rôle dans la poche » ci-dessous.
+   */
+  const altSummaryQ = useQuery({
+    queryKey: ["alternatives-summary", "dashboard"],
+    queryFn: () =>
+      fetchJson<AlternativesDashboardPayload>("/api/alternatives/summary"),
+    staleTime: 60_000,
+  });
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expert, setExpert] = useState(false);
   const [form, setForm] = useState<FormState>(empty());
   const [filter, setFilter] = useState<FilterKey>("ALL");
+  const [deleteTarget, setDeleteTarget] = useState<CrowdlendingDto | null>(
+    null
+  );
 
   const lines = useMemo(() => q.data?.lines ?? [], [q.data?.lines]);
   const summary = q.data?.summary;
   const hasLines = lines.length > 0;
+
+  const totalAlt = Number(altSummaryQ.data?.summary.totalEur ?? 0);
+  const clShareOfAlt =
+    totalAlt > 0 && summary
+      ? (Number(summary.totalCapital) / totalAlt) * 100
+      : null;
 
   const counts = useMemo(() => {
     const out = { ALL: lines.length, ACTIVE: 0, LATE: 0, SOON: 0 };
@@ -325,7 +347,11 @@ export function AlternativesCrowdlending({
           <AltMiniKpi
             label="Capital en cours"
             value={formatCurrency(summary?.activeCapital || "0", baseCurrency)}
-            hint={`Sur ${formatCurrency(summary?.totalCapital || "0", baseCurrency)} engagés`}
+            hint={
+              clShareOfAlt != null
+                ? `Sur ${formatCurrency(summary?.totalCapital || "0", baseCurrency)} engagés · ${clShareOfAlt.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} % de la poche alt.`
+                : `Sur ${formatCurrency(summary?.totalCapital || "0", baseCurrency)} engagés`
+            }
             tip={<FinanceTip term="Capital en cours" />}
           />
           <AltMiniKpi
@@ -847,11 +873,7 @@ export function AlternativesCrowdlending({
                             size="sm"
                             variant="ghost"
                             className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
-                            onClick={() => {
-                              if (confirm(`Supprimer « ${l.projectName} » ?`)) {
-                                delMut.mutate(l.id);
-                              }
-                            }}
+                            onClick={() => setDeleteTarget(l)}
                             aria-label="Supprimer"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -872,6 +894,22 @@ export function AlternativesCrowdlending({
           )}
         </>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget != null}
+        title="Supprimer le prêt"
+        message={
+          deleteTarget
+            ? `« ${deleteTarget.projectName} » sera définitivement supprimé. Cette action est irréversible.`
+            : ""
+        }
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) delMut.mutate(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+        testId="cl-delete-confirm"
+      />
     </AltModuleShell>
   );
 }

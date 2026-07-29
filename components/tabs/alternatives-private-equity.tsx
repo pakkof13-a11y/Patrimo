@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DateInput } from "@/components/ui/date-input";
 import { FinanceTip } from "@/components/ui/finance-tooltip";
 import { cn, formatCurrency, getChangeColor } from "@/app/lib/utils";
@@ -154,6 +155,9 @@ export function AlternativesPrivateEquity({
   const [form, setForm] = useState<FormState>(empty());
   const [typeFilter, setTypeFilter] = useState<"ALL" | PeType>("ALL");
   const [perfFilter, setPerfFilter] = useState<PerfFilter>("ALL");
+  const [deleteTarget, setDeleteTarget] = useState<PrivateEquityDto | null>(
+    null
+  );
 
   const lines = useMemo(() => q.data?.lines ?? [], [q.data?.lines]);
   const summary = q.data?.summary;
@@ -911,11 +915,7 @@ export function AlternativesPrivateEquity({
                           size="sm"
                           variant="ghost"
                           className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
-                          onClick={() => {
-                            if (confirm(`Supprimer « ${l.companyName} » ?`)) {
-                              delMut.mutate(l.id);
-                            }
-                          }}
+                          onClick={() => setDeleteTarget(l)}
                           aria-label="Supprimer"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -929,6 +929,22 @@ export function AlternativesPrivateEquity({
           </div>
         </>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget != null}
+        title="Supprimer la position"
+        message={
+          deleteTarget
+            ? `« ${deleteTarget.companyName} » sera définitivement supprimée. Cette action est irréversible.`
+            : ""
+        }
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) delMut.mutate(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+        testId="pe-delete-confirm"
+      />
     </AltModuleShell>
   );
 }

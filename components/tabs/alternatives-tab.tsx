@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   Building2,
   Gem,
   Handshake,
@@ -21,7 +22,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
-import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import {
   type AlternativesDashboardPayload,
@@ -129,8 +130,12 @@ export function AlternativesTab({
     return ALT_SUBS.has(q) ? (q as AlternativesSubTab) : "dashboard";
   });
 
-  // Sync depuis l'URL quand elle change ensuite — adjust state while rendering ;
-  // sub reste par ailleurs togglable manuellement
+  // Sync depuis l'URL quand elle change (deep-link) — même motif que
+  // l'onglet Trading : ajustement d'état pendant le render (pattern React
+  // recommandé pour dériver un state d'un prop qui change), pas un
+  // useEffect + setState qui déclencherait des rendus en cascade
+  // (règle ESLint react-hooks/set-state-in-effect). `sub` reste par
+  // ailleurs togglable manuellement.
   const subParamKey = searchParams.toString();
   const [prevSubParamKey, setPrevSubParamKey] = useState(subParamKey);
   if (subParamKey !== prevSubParamKey) {
@@ -169,6 +174,19 @@ export function AlternativesTab({
       (clSummary?.lineCount ?? 0) +
       (tangSummary?.lineCount ?? 0) >
     0;
+
+  /**
+   * Alertes crowdlending — dérivées du `byStatus` déjà présent dans le
+   * summary agrégé (aucun fetch ni champ supplémentaire). Le repérage des
+   * échéances « à ≤ 3 mois » et la fraîcheur de la NAV PE demanderaient des
+   * données par ligne (monthsRemaining, navDate) absentes de ce payload
+   * agrégé — hors scope ici (nouveau champ métier).
+   */
+  const clLateCount =
+    clSummary?.byStatus?.find((s) => s.status === "LATE")?.count ?? 0;
+  const clDefaultCount =
+    clSummary?.byStatus?.find((s) => s.status === "DEFAULT")?.count ?? 0;
+  const hasAlerts = clLateCount > 0 || clDefaultCount > 0;
 
   function goModule(id: AlternativesSubTab) {
     setSub(id);
@@ -231,60 +249,103 @@ export function AlternativesTab({
       {/* ── Dashboard ── */}
       {sub === "dashboard" && (
         <section className="space-y-4" data-testid="alt-dashboard">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <AltDashKpi
-              label="Métaux précieux"
-              value={formatCurrency(summary?.totalValue || "0", baseCurrency)}
-              hint={
-                (summary?.lineCount ?? 0) > 0
-                  ? `${summary?.lineCount} pos. · P&L ${formatCurrency(summary?.totalPnl || "0", baseCurrency)}`
-                  : "Lingots, pièces, papier — non renseigné"
-              }
-              tone={Number(summary?.totalPnl || 0)}
-              onClick={() => goModule("metals")}
-            />
-            <AltDashKpi
-              label="Private Equity (appelé)"
-              value={formatCurrency(
-                peSummary?.totalCalledCapital || "0",
-                baseCurrency
-              )}
-              hint={
-                (peSummary?.lineCount ?? 0) > 0
-                  ? `${peSummary?.lineCount} pos. · TVPI moy. ${fmtMultipleShort(peSummary?.avgTvpi)} · Distrib. ${formatCurrency(peSummary?.totalDistributions || "0", baseCurrency)}`
-                  : "Participations non cotées — non renseigné"
-              }
-              tone={Number(peSummary?.totalPnl || 0)}
-              onClick={() => goModule("private-equity")}
-            />
-            <AltDashKpi
-              label="Crowdlending (en cours)"
-              value={formatCurrency(
-                clSummary?.activeCapital || "0",
-                baseCurrency
-              )}
-              hint={
-                (clSummary?.lineCount ?? 0) > 0
-                  ? `${clSummary?.lineCount} prêt(s) · Rendement moy. ${fmtPctShort(clSummary?.weightedAverageYield)} · Revenu ${formatCurrency(clSummary?.projectedAnnualIncome || "0", baseCurrency)}`
-                  : "Prêts participatifs — non renseigné"
-              }
+          {dashQ.isPending ? (
+            <div
+              className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+              data-testid="alt-dash-kpi-skeleton"
+              aria-busy="true"
+            >
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="card p-4">
+                  <Skeleton className="h-2.5 w-24" />
+                  <Skeleton className="mt-2 h-6 w-28" />
+                  <Skeleton className="mt-1.5 h-2 w-36" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <AltDashKpi
+                label="Métaux précieux"
+                value={formatCurrency(summary?.totalValue || "0", baseCurrency)}
+                hint={
+                  (summary?.lineCount ?? 0) > 0
+                    ? `${summary?.lineCount} pos. · P&L ${formatCurrency(summary?.totalPnl || "0", baseCurrency)}`
+                    : "Lingots, pièces, papier — non renseigné"
+                }
+                tone={Number(summary?.totalPnl || 0)}
+                onClick={() => goModule("metals")}
+              />
+              <AltDashKpi
+                label="Private Equity (appelé)"
+                value={formatCurrency(
+                  peSummary?.totalCalledCapital || "0",
+                  baseCurrency
+                )}
+                hint={
+                  (peSummary?.lineCount ?? 0) > 0
+                    ? `${peSummary?.lineCount} pos. · TVPI moy. ${fmtMultipleShort(peSummary?.avgTvpi)} · Distrib. ${formatCurrency(peSummary?.totalDistributions || "0", baseCurrency)}`
+                    : "Participations non cotées — non renseigné"
+                }
+                tone={Number(peSummary?.totalPnl || 0)}
+                onClick={() => goModule("private-equity")}
+              />
+              <AltDashKpi
+                label="Crowdlending (en cours)"
+                value={formatCurrency(
+                  clSummary?.activeCapital || "0",
+                  baseCurrency
+                )}
+                hint={
+                  (clSummary?.lineCount ?? 0) > 0
+                    ? `${clSummary?.lineCount} prêt(s) · Rendement moy. ${fmtPctShort(clSummary?.weightedAverageYield)} · Revenu ${formatCurrency(clSummary?.projectedAnnualIncome || "0", baseCurrency)}`
+                    : "Prêts participatifs — non renseigné"
+                }
+                onClick={() => goModule("crowdlending")}
+              />
+              <AltDashKpi
+                label="Tangibles & collection"
+                value={formatCurrency(
+                  tangSummary?.totalValue || "0",
+                  baseCurrency
+                )}
+                hint={
+                  (tangSummary?.lineCount ?? 0) > 0
+                    ? `${tangSummary?.lineCount} objet(s) · P&L ${formatCurrency(tangSummary?.totalPnl || "0", baseCurrency)}`
+                    : "Collection — non renseigné"
+                }
+                tone={Number(tangSummary?.totalPnl || 0)}
+                onClick={() => goModule("tangibles")}
+              />
+            </div>
+          )}
+
+          {hasAlerts && (
+            <button
+              type="button"
               onClick={() => goModule("crowdlending")}
-            />
-            <AltDashKpi
-              label="Tangibles & collection"
-              value={formatCurrency(
-                tangSummary?.totalValue || "0",
-                baseCurrency
-              )}
-              hint={
-                (tangSummary?.lineCount ?? 0) > 0
-                  ? `${tangSummary?.lineCount} objet(s) · P&L ${formatCurrency(tangSummary?.totalPnl || "0", baseCurrency)}`
-                  : "Collection — non renseigné"
-              }
-              tone={Number(tangSummary?.totalPnl || 0)}
-              onClick={() => goModule("tangibles")}
-            />
-          </div>
+              className="flex w-full items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-left text-xs text-amber-900 transition hover:bg-amber-100/60 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-950/50"
+              data-testid="alt-dashboard-alerts"
+            >
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                {clLateCount > 0 && (
+                  <>
+                    <strong>{clLateCount}</strong> prêt{clLateCount > 1 ? "s" : ""}{" "}
+                    en retard
+                  </>
+                )}
+                {clLateCount > 0 && clDefaultCount > 0 && " · "}
+                {clDefaultCount > 0 && (
+                  <>
+                    <strong>{clDefaultCount}</strong> prêt
+                    {clDefaultCount > 1 ? "s" : ""} en défaut
+                  </>
+                )}
+                {" — "}Crowdlending
+              </span>
+            </button>
+          )}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="card overflow-hidden p-4">
@@ -408,43 +469,6 @@ export function AlternativesTab({
                       </button>
                     );
                   })}
-                </div>
-              )}
-
-              {hasAnyAlt && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => goModule("metals")}
-                  >
-                    Métaux
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => goModule("private-equity")}
-                  >
-                    Private Equity
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => goModule("crowdlending")}
-                  >
-                    Crowdlending
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => goModule("tangibles")}
-                  >
-                    Tangibles
-                  </Button>
                 </div>
               )}
             </div>
