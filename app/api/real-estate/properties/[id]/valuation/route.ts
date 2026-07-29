@@ -52,6 +52,13 @@ const bodySchema = z.union([
     apply: z.boolean().optional().default(true),
     /** Force l'estimation même en mode manuel ou hors fenêtre de fraîcheur. */
     force: z.boolean().optional().default(false),
+    /**
+     * Retenir la valeur ajustée aux caractéristiques du bien (DPE, étage, vue…)
+     * plutôt que la médiane DVF brute. `false` par défaut : le détail des
+     * ajustements est renvoyé dans tous les cas, mais changer la valeur stockée
+     * reste une décision explicite.
+     */
+    adjust: z.boolean().optional().default(false),
   }),
 ]);
 
@@ -105,6 +112,7 @@ export async function POST(
     const outcome = await revalueFromDvf(userId, id, {
       force: parsed.data.force,
       apply: parsed.data.apply,
+      adjust: parsed.data.adjust,
     });
     return NextResponse.json(outcome);
   } catch (e) {

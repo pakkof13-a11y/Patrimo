@@ -19,10 +19,15 @@
 import { Prisma } from "../prisma-client/client";
 import { prisma } from "../prisma";
 import { d } from "../money/decimal";
-import { estimateProperty, isDvfCoveredDepartment } from "./estimate";
+import {
+  estimateProperty,
+  isDvfCoveredDepartment,
+  type EstimateRefinement,
+} from "./estimate";
 import { departmentFromCode, geocodeAddress } from "./geocode";
 import { isDvfEstimable } from "./constants";
 import type { PropertyType } from "./constants";
+import type { AdjustmentSubject } from "./valuation-adjustments";
 
 /** Au-delà, l'estimation DVF est considérée périmée et peut être refaite. */
 export const VALUATION_REFRESH_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
@@ -34,25 +39,107 @@ export const VALUATION_SOURCES = {
 } as const;
 
 export type ValuationOutcome =
-  | { kind: "updated"; valueEur: string; source: string; comparables: number }
+  | {
+      kind: "updated";
+      valueEur: string;
+      source: string;
+      comparables: number;
+      /** Estimation brute DVF, présente même quand la valeur retenue est ajustée. */
+      rawEstimateEur?: string;
+      /** Détail du scoring et des ajustements — consultatif, toujours renvoyé. */
+      refinement?: EstimateRefinement | null;
+    }
   | { kind: "unchanged"; reason: "fresh" | "manual-mode" | "same-value" }
   | { kind: "skipped"; reason: "not-estimable" | "not-geocoded" | "department-uncovered" }
   | { kind: "insufficient-data"; radiusM: number; comparables: number };
 
+/** Champs de `RealEstateDetail` lus pour estimer et ajuster. */
+const VALUATION_DETAIL_SELECT = {
+  propertyType: true,
+  livingAreaM2: true,
+  landAreaM2: true,
+  rooms: true,
+  latitude: true,
+  longitude: true,
+  inseeCode: true,
+  valuationMode: true,
+  lastValuedAt: true,
+  // Caractéristiques servant aux ajustements — toutes nullables en base.
+  energyRating: true,
+  gesRating: true,
+  orientation: true,
+  viewType: true,
+  windowQuality: true,
+  floor: true,
+  totalFloors: true,
+  hasElevator: true,
+  hasBalcony: true,
+  balconyAreaM2: true,
+  hasGarden: true,
+  gardenAreaM2: true,
+  hasCellar: true,
+  parkingSpots: true,
+  isCopropriete: true,
+  annualCoproChargesEur: true,
+} as const;
+
+type ValuationDetail = {
+  propertyType: string;
+  livingAreaM2: number | null;
+  landAreaM2: number | null;
+  rooms: number | null;
+  latitude: number | null;
+  longitude: number | null;
+  inseeCode: string | null;
+  valuationMode: string;
+  lastValuedAt: Date | null;
+  energyRating: string | null;
+  gesRating: string | null;
+  orientation: string | null;
+  viewType: string | null;
+  windowQuality: string | null;
+  floor: number | null;
+  totalFloors: number | null;
+  hasElevator: boolean | null;
+  hasBalcony: boolean | null;
+  balconyAreaM2: number | null;
+  hasGarden: boolean | null;
+  gardenAreaM2: number | null;
+  hasCellar: boolean | null;
+  parkingSpots: number | null;
+  isCopropriete: boolean | null;
+  annualCoproChargesEur: Prisma.Decimal | null;
+};
+
 type PropertyRow = {
   id: string;
   manualPrice: Prisma.Decimal | null;
-  realEstate: {
-    propertyType: string;
-    livingAreaM2: number | null;
-    rooms: number | null;
-    latitude: number | null;
-    longitude: number | null;
-    inseeCode: string | null;
-    valuationMode: string;
-    lastValuedAt: Date | null;
-  } | null;
+  realEstate: ValuationDetail | null;
 };
+
+/** Projette la ligne de base sur ce qu'attend le moteur d'ajustement. */
+function toAdjustmentSubject(detail: ValuationDetail): AdjustmentSubject {
+  return {
+    propertyType: detail.propertyType,
+    livingAreaM2: detail.livingAreaM2,
+    energyRating: detail.energyRating,
+    gesRating: detail.gesRating,
+    orientation: detail.orientation,
+    viewType: detail.viewType,
+    windowQuality: detail.windowQuality,
+    floor: detail.floor,
+    totalFloors: detail.totalFloors,
+    hasElevator: detail.hasElevator,
+    hasBalcony: detail.hasBalcony,
+    balconyAreaM2: detail.balconyAreaM2,
+    hasGarden: detail.hasGarden,
+    gardenAreaM2: detail.gardenAreaM2,
+    hasCellar: detail.hasCellar,
+    parkingSpots: detail.parkingSpots,
+    isCopropriete: detail.isCopropriete,
+    annualCoproChargesEur: detail.annualCoproChargesEur?.toString() ?? null,
+  };
+}
 
 /**
  * Enregistre une valeur et l'historise.
@@ -174,7 +261,7 @@ export async function ensureGeocoded(
 export async function revalueFromDvf(
   userId: string,
   assetId: string,
-  opts?: { force?: boolean; now?: Date; apply?: boolean }
+  opts?: { force?: boolean; now?: Date; apply?: boolean; adjust?: boolean }
 ): Promise<ValuationOutcome> {
   const now = opts?.now ?? new Date();
   const asset = (await prisma.asset.findFirst({
@@ -182,18 +269,7 @@ export async function revalueFromDvf(
     select: {
       id: true,
       manualPrice: true,
-      realEstate: {
-        select: {
-          propertyType: true,
-          livingAreaM2: true,
-          rooms: true,
-          latitude: true,
-          longitude: true,
-          inseeCode: true,
-          valuationMode: true,
-          lastValuedAt: true,
-        },
-      },
+      realEstate: { select: VALUATION_DETAIL_SELECT },
     },
   })) as PropertyRow | null;
 
@@ -233,13 +309,19 @@ export async function revalueFromDvf(
     return { kind: "skipped", reason: "department-uncovered" };
   }
 
-  const estimate = await estimateProperty({
-    propertyType: detail.propertyType as Extract<PropertyType, "MAISON" | "APPARTEMENT">,
-    surfaceM2: detail.livingAreaM2,
-    rooms: detail.rooms,
-    latitude: coords.latitude,
-    longitude: coords.longitude,
-  });
+  const estimate = await estimateProperty(
+    {
+      propertyType: detail.propertyType as Extract<PropertyType, "MAISON" | "APPARTEMENT">,
+      surfaceM2: detail.livingAreaM2,
+      rooms: detail.rooms,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      inseeCode: detail.inseeCode,
+      landAreaM2: detail.landAreaM2,
+      subject: toAdjustmentSubject(detail),
+    },
+    { now }
+  );
 
   if (estimate.insufficientData || !estimate.estimateEur) {
     return {
@@ -249,26 +331,43 @@ export async function revalueFromDvf(
     };
   }
 
+  /**
+   * Valeur retenue.
+   *
+   * L'affinage n'est appliqué que sur demande explicite (`adjust`). Le rendre
+   * automatique ferait bouger, au prochain rafraîchissement, le patrimoine de
+   * tous les biens déjà valorisés — sans action de l'utilisateur, et sans qu'il
+   * ait vu le détail des ajustements. Le chiffre affiné est donc calculé et
+   * renvoyé systématiquement, mais stocké seulement s'il a été demandé.
+   */
+  const refined = estimate.refinement?.estimateEur ?? null;
+  const retained = opts?.adjust && refined ? refined : estimate.estimateEur;
+
   // `apply: false` sert le parcours « proposer sans imposer » du formulaire.
   if (opts?.apply === false) {
     return {
       kind: "updated",
-      valueEur: estimate.estimateEur,
+      valueEur: retained,
       source: VALUATION_SOURCES.DVF,
       comparables: estimate.comparableCount,
+      rawEstimateEur: estimate.estimateEur,
+      refinement: estimate.refinement,
     };
   }
 
   const previous = asset.manualPrice ? d(asset.manualPrice.toString()) : null;
-  if (previous && previous.minus(d(estimate.estimateEur)).abs().lt(1)) {
+  if (previous && previous.minus(d(retained)).abs().lt(1)) {
     // Écart inférieur à l'euro : historiser produirait une courbe bruitée de
     // points identiques sans rien apprendre.
     return { kind: "unchanged", reason: "same-value" };
   }
 
-  await recordValuation(assetId, estimate.estimateEur, VALUATION_SOURCES.DVF, {
+  await recordValuation(assetId, retained, VALUATION_SOURCES.DVF, {
     now,
     dvf: {
+      // `dvfEstimateEur` garde l'estimation brute même quand la valeur retenue
+      // est ajustée : c'est le repère de marché, il doit rester comparable
+      // d'un bien à l'autre.
       estimate: estimate.estimateEur,
       confidence: estimate.confidence,
       comparables: estimate.comparableCount,
@@ -277,9 +376,11 @@ export async function revalueFromDvf(
 
   return {
     kind: "updated",
-    valueEur: estimate.estimateEur,
+    valueEur: retained,
     source: VALUATION_SOURCES.DVF,
     comparables: estimate.comparableCount,
+    rawEstimateEur: estimate.estimateEur,
+    refinement: estimate.refinement,
   };
 }
 
