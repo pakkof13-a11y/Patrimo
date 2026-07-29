@@ -9,6 +9,8 @@ import {
   Scale,
   Gem,
   PiggyBank,
+  Building2,
+  ShieldCheck,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -38,10 +40,10 @@ import type { HistoryPoint } from "@/app/lib/types/ui";
  * seconde ligne aux quatre cinquièmes vide. Un déséquilibre bien visible sur le
  * bandeau le plus regardé de l'application.
  *
- * Les paliers divisent exactement les 8 tuiles du cas nominal (4 × 2 ou 8 × 1).
- * `smartFilter` peut en masquer jusqu'à trois ; la dernière ligne est alors
- * partiellement remplie, ce qui reste lisible — l'important est qu'on ne se
- * retrouve plus avec une ligne quasi vide alors que la place ne manque pas.
+ * 10 tuiles au cas nominal (4 × 2 + 2, ou 8 × 1 + 2) : `smartFilter` ne
+ * masque plus les tuiles à ~0 (alt / ES / passifs / immo / AV) — il les
+ * garde montées et les efface visuellement (`muted`), pour ne pas faire
+ * varier le nombre de tuiles au fil des chargements.
  */
 const KPI_GRID_CLASS =
   "grid w-full min-w-0 gap-2.5 sm:gap-3 " +
@@ -121,9 +123,21 @@ export function KpiStrip({
   const liab = num(
     summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur
   );
-  const showAlt = !smartFilter || Math.abs(alt) > 1e-6;
-  const showEs = !smartFilter || Math.abs(es) > 1e-6;
-  const showLiab = !smartFilter || Math.abs(liab) > 1e-6;
+  const realEstate = num(
+    summary?.totalRealEstateBase ?? summary?.totalRealEstateEur
+  );
+  const lifeInsurance = num(
+    summary?.totalLifeInsuranceBase ?? summary?.totalLifeInsuranceEur
+  );
+  // smartFilter n'unmount plus les tuiles à ~0 (évite le va-et-vient de la
+  // grille au fil des chargements) — elles restent visibles, effacées via
+  // `muted` sur la tuile (voir Kpi).
+  const mutedAlt = smartFilter && Math.abs(alt) <= 1e-6;
+  const mutedEs = smartFilter && Math.abs(es) <= 1e-6;
+  const mutedLiab = smartFilter && Math.abs(liab) <= 1e-6;
+  const mutedRealEstate = smartFilter && Math.abs(realEstate) <= 1e-6;
+  const mutedLifeInsurance = smartFilter && Math.abs(lifeInsurance) <= 1e-6;
+  const zeroValue = "— €";
 
   return (
     <div
@@ -208,29 +222,49 @@ export function KpiStrip({
             )}
             testId="kpi-cash"
           />
-          {showAlt && (
-            <Kpi
-              icon={<Gem className="h-4 w-4" />}
-              label="Alternatifs"
-              value={formatCurrency(String(alt), baseCurrency)}
-              testId="kpi-alternatives"
-            />
-          )}
-          {showEs && (
-            <Kpi
-              icon={<PiggyBank className="h-4 w-4" />}
-              label="Épargne salariale"
-              value={formatCurrency(String(es), baseCurrency)}
-              testId="kpi-employee-savings"
-            />
-          )}
-          {showLiab && (
-            <Kpi
-              icon={<Scale className="h-4 w-4" />}
-              label="Passifs"
-              value={formatCurrency(String(liab), baseCurrency)}
-            />
-          )}
+          <Kpi
+            icon={<Gem className="h-4 w-4" />}
+            label="Alternatifs"
+            value={mutedAlt ? zeroValue : formatCurrency(String(alt), baseCurrency)}
+            muted={mutedAlt}
+            testId="kpi-alternatives"
+          />
+          <Kpi
+            icon={<PiggyBank className="h-4 w-4" />}
+            label="Épargne salariale"
+            value={mutedEs ? zeroValue : formatCurrency(String(es), baseCurrency)}
+            muted={mutedEs}
+            testId="kpi-employee-savings"
+          />
+          <Kpi
+            icon={<Building2 className="h-4 w-4" />}
+            label="Immobilier"
+            value={
+              mutedRealEstate
+                ? zeroValue
+                : formatCurrency(String(realEstate), baseCurrency)
+            }
+            muted={mutedRealEstate}
+            testId="kpi-real-estate"
+          />
+          <Kpi
+            icon={<ShieldCheck className="h-4 w-4" />}
+            label="Assurance-vie"
+            value={
+              mutedLifeInsurance
+                ? zeroValue
+                : formatCurrency(String(lifeInsurance), baseCurrency)
+            }
+            muted={mutedLifeInsurance}
+            testId="kpi-life-insurance"
+          />
+          <Kpi
+            icon={<Scale className="h-4 w-4" />}
+            label="Passifs"
+            value={mutedLiab ? zeroValue : formatCurrency(String(liab), baseCurrency)}
+            muted={mutedLiab}
+            testId="kpi-liabilities"
+          />
           <Kpi
             icon={<Coins className="h-4 w-4" />}
             label="Patrimoine net"

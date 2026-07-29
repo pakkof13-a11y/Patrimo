@@ -787,6 +787,14 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
   const cash = explicitCash.totalEur;
   const alternativesEur = d(String(alternatives?.totalEur ?? 0));
   const employeeSavingsEur = esEur;
+  // Sous-totaux informatifs — déjà inclus dans marketValue (holdings), pas
+  // additifs au net worth (contrairement à alternatives/ES qui vivent hors holdings).
+  const realEstateEur = holdings
+    .filter((h) => h.accountType === "IMMOBILIER")
+    .reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
+  const lifeInsuranceEur = holdings
+    .filter((h) => h.accountType === "AV")
+    .reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
   const realized = totalRealizedPnl(ledger);
   const unrealized = marketValue.minus(costBasis);
   const cashIncome = ledger.cashIncomeEur;
@@ -808,6 +816,12 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     totalAlternativesBase: toBase(alternativesEur),
     totalEmployeeSavingsEur: toFixed(employeeSavingsEur, 8),
     totalEmployeeSavingsBase: toBase(employeeSavingsEur),
+    /** Sous-total holdings accountType=IMMOBILIER — déjà dans totalMarketValueEur */
+    totalRealEstateEur: toFixed(realEstateEur, 8),
+    totalRealEstateBase: toBase(realEstateEur),
+    /** Sous-total holdings accountType=AV — déjà dans totalMarketValueEur */
+    totalLifeInsuranceEur: toFixed(lifeInsuranceEur, 8),
+    totalLifeInsuranceBase: toBase(lifeInsuranceEur),
     /** Actif brut = cotés + cash + alternatifs + ES */
     portfolioPlusCashEur: toFixed(totalAssets, 8),
     totalGrossAssetsEur: toFixed(totalAssets, 8),

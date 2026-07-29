@@ -13,6 +13,7 @@ export function Kpi({
   tone,
   testId,
   accent = false,
+  muted = false,
 }: {
   icon: React.ReactNode;
   label: React.ReactNode;
@@ -26,6 +27,12 @@ export function Kpi({
    * position, alors que c'est le chiffre que l'on vient lire en premier.
    */
   accent?: boolean;
+  /**
+   * Tuile à valeur ~nulle (smartFilter) : on la garde montée pour ne pas
+   * casser la grille ni la faire disparaître/réapparaître au fil des
+   * chargements, mais on l'efface visuellement.
+   */
+  muted?: boolean;
 }) {
   return (
     <div
@@ -36,7 +43,8 @@ export function Kpi({
         tone === "up" &&
           "border-l-[3px] border-l-[var(--success)]/80 dark:border-l-[var(--success)]/70",
         tone === "down" &&
-          "border-l-[3px] border-l-[var(--danger)]/75 dark:border-l-[var(--danger)]/65"
+          "border-l-[3px] border-l-[var(--danger)]/75 dark:border-l-[var(--danger)]/65",
+        muted && "opacity-50"
       )}
       data-testid={testId}
     >
@@ -57,9 +65,13 @@ export function Kpi({
           accent
             ? "kpi-value--primary text-[1.2rem] sm:text-xl xl:text-[1.4rem]"
             : "text-[1.05rem] sm:text-lg xl:text-[1.2rem]",
-          tone === "up" && "text-[var(--success)]",
-          tone === "down" && "text-[var(--danger)]",
-          !tone && !accent && "text-[var(--foreground)]"
+          muted
+            ? "text-[var(--muted-foreground)]"
+            : tone === "up"
+              ? "text-[var(--success)]"
+              : tone === "down"
+                ? "text-[var(--danger)]"
+                : !accent && "text-[var(--foreground)]"
         )}
       >
         {value}
