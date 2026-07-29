@@ -260,6 +260,8 @@ export const liabilitySchema = z.object({
   currency: z.string().min(3).max(3).default("EUR"),
   interestRate: decimalString.optional(),
   monthlyPayment: decimalString.optional(),
+  /** Assurance emprunteur mensuelle, hors intérêts. Absent/vide = 0. */
+  insuranceMonthly: decimalString.optional(),
   startDate: z.string().optional().nullable(),
   endDate: z.string().optional().nullable(),
   /** Day of month 1–31 for automatic monthly debit */
@@ -755,6 +757,7 @@ export const liabilityUpdateSchema = z.object({
   currency: currencyCode.optional(),
   interestRate: clearableDecimal.optional(),
   monthlyPayment: clearableDecimal.optional(),
+  insuranceMonthly: clearableDecimal.optional(),
   startDate: optionalDateString.optional(),
   endDate: optionalDateString.optional(),
   paymentDay: optionalClearableInt(1, 31).optional(),

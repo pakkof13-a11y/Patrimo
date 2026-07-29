@@ -58,6 +58,7 @@ type LiabilityRow = {
   currency: string;
   interestRate: string | null;
   monthlyPayment: string | null;
+  insuranceMonthly: string | null;
   startDate: string | null;
   endDate: string | null;
   paymentDay: number | null;
@@ -755,6 +756,13 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
                 onEditCategory={(v) => {
                   if (v !== l.category) patchMut.mutate({ id: l.id, category: v });
                 }}
+                onEditInsurance={(v) => {
+                  if (v !== (l.insuranceMonthly ?? ""))
+                    patchMut.mutate({
+                      id: l.id,
+                      insuranceMonthly: v === "" ? null : v,
+                    });
+                }}
                 onRepay={() => {
                   setEarlyId(l.id);
                   setEarlyKind("PARTIAL");
@@ -1388,6 +1396,7 @@ function LiabilityDetailPanel({
   onEditPaymentDay,
   onEditBank,
   onEditCategory,
+  onEditInsurance,
   onRepay,
 }: {
   liability: LiabilityRow;
@@ -1396,10 +1405,12 @@ function LiabilityDetailPanel({
   onEditPaymentDay: (v: string) => void;
   onEditBank: (v: string) => void;
   onEditCategory: (v: string) => void;
+  onEditInsurance: (v: string) => void;
   onRepay: () => void;
 }) {
   const [rateInvalid, setRateInvalid] = useState(false);
   const [remainingInvalid, setRemainingInvalid] = useState(false);
+  const [insuranceInvalid, setInsuranceInvalid] = useState(false);
   const [dayInvalid, setDayInvalid] = useState(false);
 
   const scheduleResult = useMemo(() => {
@@ -1417,6 +1428,7 @@ function LiabilityDetailPanel({
         startDate: l.startDate ? new Date(l.startDate) : new Date(),
         paymentDay: l.paymentDay ?? 1,
         maxMonths: 480,
+        insuranceMonthly: l.insuranceMonthly || "0",
       });
       return { rows, error: false };
     } catch {
@@ -1430,6 +1442,18 @@ function LiabilityDetailPanel({
     () => currentScheduleIndex(schedule, l.remainingAmount),
     [schedule, l.remainingAmount]
   );
+
+  const insuranceMonthlyNum = l.insuranceMonthly ? Number(l.insuranceMonthly) : 0;
+  // N = mois restants estimés (moteur d'amortissement) ; à défaut, échéances
+  // encore à venir dans le tableau généré ici (schedule.length si l'index
+  // courant est introuvable).
+  const insuranceMonthsRemaining =
+    l.monthsRemaining ??
+    (currentIdx >= 0 ? schedule.length - currentIdx : schedule.length);
+  const estimatedInsuranceRemaining =
+    insuranceMonthlyNum > 0 && insuranceMonthsRemaining > 0
+      ? insuranceMonthlyNum * insuranceMonthsRemaining
+      : null;
 
   // Afficher une fenêtre autour de l’échéance courante (perf grands tableaux)
   const windowRows = useMemo(() => {
@@ -1599,7 +1623,59 @@ function LiabilityDetailPanel({
             ))}
           </select>
         </label>
+        <label className="text-[11px]">
+          <span className="text-[var(--muted-foreground)]">
+            Assurance mensuelle
+          </span>
+          <input
+            className={cn(
+              "input mt-0.5 !py-1 text-right text-xs",
+              insuranceInvalid && "ring-2 ring-red-500 !border-red-500"
+            )}
+            inputMode="decimal"
+            min={0}
+            defaultValue={l.insuranceMonthly ?? ""}
+            key={`${l.id}-insurance-${l.insuranceMonthly}`}
+            onFocus={() => setInsuranceInvalid(false)}
+            onBlur={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === "") {
+                setInsuranceInvalid(false);
+                if ((l.insuranceMonthly ?? "") !== "") onEditInsurance("");
+                return;
+              }
+              const num = Number(raw.replace(",", "."));
+              if (!Number.isFinite(num) || num < 0) {
+                setInsuranceInvalid(true);
+                e.target.value = l.insuranceMonthly ?? "";
+                return;
+              }
+              setInsuranceInvalid(false);
+              if (raw !== (l.insuranceMonthly ?? "")) onEditInsurance(raw);
+            }}
+            data-testid={`liability-insurance-input-${l.id}`}
+          />
+          {insuranceInvalid && (
+            <span className="mt-0.5 block text-[10px] text-red-600">
+              Montant invalide (≥ 0)
+            </span>
+          )}
+        </label>
       </div>
+
+      {estimatedInsuranceRemaining != null && (
+        <p
+          className="text-[11px] text-[var(--muted-foreground)]"
+          data-testid={`liability-insurance-remaining-${l.id}`}
+        >
+          Assurance cumulée estimée (durée résiduelle) ≈{" "}
+          <strong className="text-[var(--foreground)]">
+            {formatCurrency(String(estimatedInsuranceRemaining), l.currency)}
+          </strong>{" "}
+          ({insuranceMonthsRemaining} ×{" "}
+          {formatCurrency(l.insuranceMonthly || "0", l.currency)})
+        </p>
+      )}
 
       {/* Tableau d’amortissement */}
       {scheduleError && (
@@ -1680,8 +1756,11 @@ function LiabilityDetailPanel({
             </table>
           </div>
           <p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
-            Calculs en Decimal.js · assurance non modélisée en base (colonne à
-            0 €) · échéance courante mise en évidence.
+            Calculs en Decimal.js
+            {insuranceMonthlyNum > 0
+              ? ""
+              : " · Assurance non renseignée — colonne à 0 €"}{" "}
+            · échéance courante mise en évidence.
           </p>
         </div>
       )}

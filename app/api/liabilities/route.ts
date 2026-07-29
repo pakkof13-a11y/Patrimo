@@ -109,6 +109,9 @@ export async function POST(req: Request) {
       monthlyPayment: parsed.data.monthlyPayment
         ? new Prisma.Decimal(parsed.data.monthlyPayment)
         : null,
+      insuranceMonthly: parsed.data.insuranceMonthly
+        ? new Prisma.Decimal(parsed.data.insuranceMonthly)
+        : null,
       startDate: parsed.data.startDate ? new Date(parsed.data.startDate) : null,
       endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
       paymentDay,
@@ -149,6 +152,9 @@ export async function PUT(req: Request) {
   if (f.monthlyPayment !== undefined)
     data.monthlyPayment =
       f.monthlyPayment != null ? new Prisma.Decimal(f.monthlyPayment) : null;
+  if (f.insuranceMonthly !== undefined)
+    data.insuranceMonthly =
+      f.insuranceMonthly != null ? new Prisma.Decimal(f.insuranceMonthly) : null;
   if (f.bankName !== undefined) data.bankName = f.bankName || null;
   if (f.category !== undefined) data.category = f.category;
   if (f.notes !== undefined) data.notes = f.notes || null;

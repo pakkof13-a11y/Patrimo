@@ -540,6 +540,8 @@ model Liability {
   currency             String    @default("EUR")
   interestRate         Decimal?  @db.Decimal(10, 6)
   monthlyPayment       Decimal?  @db.Decimal(28, 12)
+  /// Assurance emprunteur mensuelle (hors intérêts). Null = 0.
+  insuranceMonthly     Decimal?  @db.Decimal(28, 12)
   startDate            DateTime?
   endDate              DateTime?
   /// Day of month for automatic debit (1–31). Clamped to last day of short months.

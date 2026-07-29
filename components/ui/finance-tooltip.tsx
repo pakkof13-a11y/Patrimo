@@ -41,6 +41,8 @@ const TIPS: Record<string, string> = {
     "Montant de capital encore à rembourser. Diminue à chaque prélèvement mensuel ou remboursement anticipé.",
   Mensualité:
     "Montant prélevé périodiquement. Utilisée pour le décrément auto du capital et l’estimation de durée restante.",
+  "Assurance emprunteur":
+    "Prime mensuelle hors intérêts (décès, invalidité…). Ajoutée à la mensualité dans le tableau d’amortissement, sans réduire le capital restant dû.",
   Avenant:
     "Modification contractuelle (mensualité ou taux) : les projections (durée, intérêts restants) sont recalculées.",
   "Remboursement anticipé":

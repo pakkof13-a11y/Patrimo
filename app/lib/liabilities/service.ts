@@ -166,6 +166,7 @@ export async function listLiabilities(userId: string) {
       currency: l.currency,
       interestRate: l.interestRate?.toString() ?? null,
       monthlyPayment: l.monthlyPayment?.toString() ?? null,
+      insuranceMonthly: l.insuranceMonthly?.toString() ?? null,
       startDate: l.startDate?.toISOString() ?? null,
       endDate: l.endDate?.toISOString() ?? null,
       paymentDay: l.paymentDay,

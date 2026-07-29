@@ -200,6 +200,7 @@ const emptyDefaults = (): LiabilityForm => ({
   currency: "EUR",
   interestRate: "",
   monthlyPayment: "",
+  insuranceMonthly: "",
   startDate: new Date().toISOString().slice(0, 10),
   endDate: "",
   paymentDay: 5,
@@ -251,6 +252,7 @@ export function LiabilityCreateForm({
   const remainingAmount = form.watch("remainingAmount") || "";
   const monthlyPayment = form.watch("monthlyPayment") || "";
   const interestRate = form.watch("interestRate") || "";
+  const insuranceMonthly = form.watch("insuranceMonthly") || "";
   const currency = form.watch("currency") || "EUR";
   const name = form.watch("name") || "";
   const category = form.watch("category") || "AUTRE";
@@ -385,6 +387,7 @@ export function LiabilityCreateForm({
         bankName: v.bankName || null,
         interestRate: v.interestRate || undefined,
         monthlyPayment: v.monthlyPayment || undefined,
+        insuranceMonthly: v.insuranceMonthly || undefined,
         notes: v.notes || null,
       });
     })();
@@ -570,6 +573,22 @@ export function LiabilityCreateForm({
                 />
               </Field>
             </div>
+            <Field
+              label={
+                <span className="inline-flex items-center gap-1">
+                  Assurance mensuelle (€)
+                  <FinanceTip term="Assurance emprunteur" />
+                </span>
+              }
+            >
+              <input
+                className="input tabular-nums"
+                inputMode="decimal"
+                {...form.register("insuranceMonthly")}
+                placeholder="ex. 25 (optionnel)"
+                data-testid="liability-insurance"
+              />
+            </Field>
           </div>
         )}
 
@@ -676,6 +695,12 @@ export function LiabilityCreateForm({
                     "Mensualité",
                     monthlyPayment
                       ? formatCurrency(monthlyPayment, currency)
+                      : "—",
+                  ],
+                  [
+                    "Assurance mensuelle",
+                    insuranceMonthly
+                      ? formatCurrency(insuranceMonthly, currency)
                       : "—",
                   ],
                   [

@@ -75,6 +75,38 @@ describe("liability amortization", () => {
     expect(idx).toBeGreaterThanOrEqual(0);
   });
 
+  it("adds monthly insurance on top of principal + interest without touching capital amortization", () => {
+    const withoutInsurance = buildAmortizationSchedule({
+      principal: "120000",
+      annualPercent: "3.5",
+      monthlyPayment: "1000",
+      startDate: new Date(Date.UTC(2026, 0, 1)),
+      paymentDay: 5,
+      maxMonths: 360,
+    });
+    const withInsurance = buildAmortizationSchedule({
+      principal: "120000",
+      annualPercent: "3.5",
+      monthlyPayment: "1000",
+      startDate: new Date(Date.UTC(2026, 0, 1)),
+      paymentDay: 5,
+      maxMonths: 360,
+      insuranceMonthly: "25",
+    });
+    // Assurance affichée chaque mois, mais sans effet sur le capital restant
+    // (l'amortissement reste calculé hors assurance).
+    expect(withInsurance[0]!.insurance).toBe("25.00000000");
+    expect(withInsurance[0]!.principalPaid).toBe(withoutInsurance[0]!.principalPaid);
+    expect(withInsurance[0]!.remainingAfter).toBe(withoutInsurance[0]!.remainingAfter);
+    // La mensualité affichée inclut l'assurance en plus.
+    expect(Number(withInsurance[0]!.payment)).toBeCloseTo(
+      Number(withoutInsurance[0]!.payment) + 25,
+      6
+    );
+    // Défaut (absent) : colonne assurance à 0, comportement inchangé.
+    expect(withoutInsurance[0]!.insurance).toBe("0.00000000");
+  });
+
   it("computes next payment due date after last applied", () => {
     const next = nextPaymentDueDate({
       paymentDay: 10,

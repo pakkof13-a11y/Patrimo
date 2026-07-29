@@ -68,6 +68,22 @@ describe("update schemas", () => {
     }
   });
 
+  it("liabilityUpdateSchema accepts and clears insuranceMonthly", () => {
+    const set = liabilityUpdateSchema.safeParse({ insuranceMonthly: "25,50" });
+    expect(set.success).toBe(true);
+    if (set.success) expect(set.data.insuranceMonthly).toBe("25.50");
+
+    const cleared = liabilityUpdateSchema.safeParse({ insuranceMonthly: null });
+    expect(cleared.success).toBe(true);
+    if (cleared.success) expect(cleared.data.insuranceMonthly).toBeNull();
+
+    // Absent : ne doit pas apparaître dans le résultat parsé (pas d'écrasement silencieux)
+    const untouched = liabilityUpdateSchema.safeParse({ name: "Crédit X" });
+    expect(untouched.success).toBe(true);
+    if (untouched.success)
+      expect(untouched.data.insuranceMonthly).toBeUndefined();
+  });
+
   it("envelopeCashUpdateSchema requires envelope enum", () => {
     expect(envelopeCashUpdateSchema.safeParse({ balance: "10" }).success).toBe(
       false
