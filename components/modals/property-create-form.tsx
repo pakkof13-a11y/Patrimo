@@ -17,6 +17,8 @@ import {
   isDvfEstimable,
   isRentalUsage,
 } from "@/app/lib/real-estate/constants";
+import { AddressAutocomplete } from "@/components/real-estate/address-autocomplete";
+import type { GeocodeResult } from "@/app/lib/real-estate/geocode";
 import { cn, formatCurrency } from "@/app/lib/utils";
 
 /**
@@ -65,6 +67,10 @@ type FormState = {
   addressLine: string;
   postalCode: string;
   city: string;
+  /** Renseignés par la sélection d'une suggestion d'adresse, jamais saisis. */
+  inseeCode: string;
+  latitude: string;
+  longitude: string;
   purchaseDate: string;
   purchasePriceEur: string;
   acquisitionFeesEur: string;
@@ -94,6 +100,9 @@ const EMPTY: FormState = {
   addressLine: "",
   postalCode: "",
   city: "",
+  inseeCode: "",
+  latitude: "",
+  longitude: "",
   purchaseDate: "",
   purchasePriceEur: "",
   acquisitionFeesEur: "",
@@ -143,6 +152,23 @@ export function PropertyCreateForm({
     setForm((f) => ({ ...f, [key]: value }));
     setErrors((e) => (e[key as string] ? { ...e, [key]: "" } : e));
   };
+
+  /**
+   * Applique une suggestion d'adresse retenue : `addressLine` est mis à jour
+   * par `AddressAutocomplete` lui-même (valeur affichée du champ), le reste
+   * — code postal, ville, code INSEE, coordonnées — vient uniquement de la
+   * BAN et ne se saisit jamais à la main.
+   */
+  function applyGeocodeResult(result: GeocodeResult) {
+    setForm((f) => ({
+      ...f,
+      postalCode: result.postalCode ?? f.postalCode,
+      city: result.city ?? f.city,
+      inseeCode: result.inseeCode ?? "",
+      latitude: String(result.latitude),
+      longitude: String(result.longitude),
+    }));
+  }
 
   const share = num(form.ownershipSharePct) / 100;
   const price = num(form.purchasePriceEur);
@@ -219,6 +245,9 @@ export function PropertyCreateForm({
           addressLine: form.addressLine.trim() || null,
           postalCode: form.postalCode.trim() || null,
           city: form.city.trim() || null,
+          inseeCode: form.inseeCode.trim() || null,
+          latitude: form.latitude ? num(form.latitude) : null,
+          longitude: form.longitude ? num(form.longitude) : null,
           monthlyRentEur: form.monthlyRentEur
             ? form.monthlyRentEur.replace(",", ".")
             : null,
@@ -388,13 +417,15 @@ export function PropertyCreateForm({
             optional={!estimable}
             hint="Sert à retrouver les ventes comparables autour du bien"
           >
-            <input
+            <AddressAutocomplete
               id="prop-address"
-              className="input mt-1 w-full"
+              testId="property-address"
               placeholder="12 rue de la République"
               value={form.addressLine}
-              onChange={(e) => set("addressLine", e.target.value)}
-              data-testid="property-address"
+              postalCode={form.postalCode}
+              city={form.city}
+              onChangeValue={(v) => set("addressLine", v)}
+              onSelect={(result) => applyGeocodeResult(result)}
             />
           </Field>
 

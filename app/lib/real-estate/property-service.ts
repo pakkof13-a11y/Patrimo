@@ -56,6 +56,10 @@ export type CreatePropertyInput = {
   addressLine?: string | null;
   postalCode?: string | null;
   city?: string | null;
+  /** Issus d'une sélection d'adresse (BAN) au moment de la saisie. */
+  inseeCode?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 
   monthlyRentEur?: string | null;
   monthlyChargesEur?: string | null;
@@ -218,6 +222,13 @@ export async function createProperty(
         addressLine: input.addressLine?.trim() || null,
         postalCode: input.postalCode?.trim() || null,
         city: input.city?.trim() || null,
+        // Coordonnées issues d'une sélection d'adresse à la saisie — évite le
+        // géocodage différé de `ensureGeocoded` au premier appel d'estimation
+        // (celui-ci ne s'exécute que si `latitude`/`longitude` sont encore nulles).
+        inseeCode: input.inseeCode?.trim() || null,
+        latitude: input.latitude ?? null,
+        longitude: input.longitude ?? null,
+        geocodedAt: input.latitude != null && input.longitude != null ? new Date() : null,
         valuationMode,
         lastValuedAt: purchaseDate,
         monthlyRentEur: dec(input.monthlyRentEur),

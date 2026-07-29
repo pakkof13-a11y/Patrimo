@@ -49,6 +49,10 @@ const createSchema = z.object({
   addressLine: z.string().trim().max(300).optional().nullable(),
   postalCode: z.string().trim().max(10).optional().nullable(),
   city: z.string().trim().max(120).optional().nullable(),
+  /** Issus d'une sélection d'adresse (BAN), jamais saisis directement. */
+  inseeCode: z.string().trim().max(10).optional().nullable(),
+  latitude: z.coerce.number().min(-90).max(90).optional().nullable(),
+  longitude: z.coerce.number().min(-180).max(180).optional().nullable(),
 
   monthlyRentEur: decimalString.optional().nullable(),
   monthlyChargesEur: decimalString.optional().nullable(),
