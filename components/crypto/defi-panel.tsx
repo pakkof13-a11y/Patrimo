@@ -51,12 +51,15 @@ export function DefiPanel({ className }: { className?: string }) {
   const [showForm, setShowForm] = useState(false);
   const [showSync, setShowSync] = useState(false);
 
+  // `includeInactive` est toujours demandé : les positions fermées/liquidées
+  // sont filtrées côté client par `matchesDefiFilters`, exactement comme
+  // masquées/ignorées — cohérent entre les trois bascules, et ça évite un
+  // aller-retour serveur (donc un flash de chargement) au simple clic sur la
+  // case « fermées / liquidées incluses ».
   const q = useQuery({
-    queryKey: ["crypto-defi-portfolio", filters.showInactive],
+    queryKey: ["crypto-defi-portfolio"],
     queryFn: () =>
-      fetchJson<ClientDefiPortfolioBundle>(
-        `/api/crypto/defi/portfolio${filters.showInactive ? "?includeInactive=true" : ""}`
-      ),
+      fetchJson<ClientDefiPortfolioBundle>("/api/crypto/defi/portfolio?includeInactive=true"),
   });
 
   const platformsQ = useQuery({
