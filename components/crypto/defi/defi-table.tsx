@@ -36,6 +36,7 @@ export function DefiTable({
             <th className="py-1.5 pr-2">Actif</th>
             <th className="py-1.5 pr-2 text-right">Brute</th>
             <th className="py-1.5 pr-2 text-right">Dette</th>
+            <th className="hidden py-1.5 pr-2 text-right sm:table-cell">Collatéral</th>
             <th className="py-1.5 pr-2 text-right">Nette</th>
             <th className="hidden py-1.5 pr-2 text-right sm:table-cell">Rewards</th>
             <th className="hidden py-1.5 pr-2 lg:table-cell">Dernière MàJ</th>
@@ -96,6 +97,9 @@ function DefiTableRow({
         )}
       >
         {isDebtLine ? `− ${formatCurrency(p.valuation.debtEur, "EUR")}` : "—"}
+      </td>
+      <td className="hidden py-1.5 pr-2 text-right tabular-nums sm:table-cell">
+        {Number(p.valuation.collateralEur) > 0 ? formatCurrency(p.valuation.collateralEur, "EUR") : "—"}
       </td>
       <td className="py-1.5 pr-2 text-right font-medium tabular-nums">
         {formatCurrency(p.valuation.netEur, "EUR")}

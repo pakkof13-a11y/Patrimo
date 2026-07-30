@@ -135,6 +135,15 @@ test.describe("DeFi — wizard d'ajout", () => {
     await goToSummary(page);
     await page.getByTestId("defi-wizard-submit").click();
     await expect(page.getByText("Position enregistrée")).toBeVisible({ timeout: 15_000 });
+
+    // cas 15 : un protocole non divulgué doit être signalé proprement, jamais
+    // silencieusement présenté comme un protocole normal. Le nom de ligne
+    // n'inclut que symbole + protocole (ici vide) : on retrouve la position
+    // via le badge dédié plutôt qu'un nom qui ne serait pas affiché.
+    const row = page.getByTestId("defi-row").filter({ hasText: "Protocole non divulgué" });
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    await row.getByTestId("defi-row-open").click();
+    await expect(page.getByTestId("defi-badge-unknown-protocol")).toBeVisible();
   });
 
   test("CeFi : chaîne et protocole masqués (cas K)", async ({ page }) => {
@@ -218,6 +227,91 @@ test.describe("DeFi — wizard d'ajout", () => {
     const row = page.getByTestId("defi-row").filter({ hasText: `EigenLayer ${runId}` });
     await row.getByTestId("defi-row-open").click();
     await expect(page.getByTestId("defi-badge-points")).toContainText("hors valorisation");
+  });
+
+  test("liquid staking : le jeton reçu porte un libellé dédié (cas B)", async ({ page }) => {
+    await page.getByTestId("defi-wizard-next").click(); // -> Détention
+    await page.getByTestId("defi-w-platform").selectOption({ label: DEFI_WALLET_NAME });
+    await page.getByTestId("defi-wizard-next").click(); // -> Type
+    await page.getByTestId("defi-w-position-type").selectOption("LIQUID_STAKING");
+    await page.getByTestId("defi-w-chain").fill("ethereum");
+    await page.getByTestId("defi-w-protocol").fill(`Lido Liquid ${runId}`);
+    await page.getByTestId("defi-wizard-next").click(); // Infrastructure
+    await page.getByTestId("defi-wizard-next").click(); // Exposition
+    // Le jeton détenu réellement (receipt token) n'est pas l'actif déposé à
+    // l'origine — le libellé doit le dire, pas juste "Actif engagé".
+    await expect(page.getByText("Jeton reçu (receipt token)")).toBeVisible();
+    await page.getByTestId("defi-w-symbol").fill("stETH");
+    await page.getByTestId("defi-w-quantity").fill("3");
+    await page.getByTestId("defi-w-unit-price").fill("3000");
+
+    await goToSummary(page);
+    await page.getByTestId("defi-wizard-submit").click();
+    await expect(page.getByText("Position enregistrée")).toBeVisible({ timeout: 15_000 });
+
+    const row = page.getByTestId("defi-row").filter({ hasText: `Lido Liquid ${runId}` });
+    await expect(row).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("LP classique : paire de jetons requise (cas F)", async ({ page }) => {
+    await page.getByTestId("defi-wizard-next").click();
+    await page.getByTestId("defi-w-platform").selectOption({ label: DEFI_WALLET_NAME });
+    await page.getByTestId("defi-wizard-next").click();
+    await page.getByTestId("defi-w-position-type").selectOption("LP");
+    await page.getByTestId("defi-w-chain").fill("ethereum");
+    await page.getByTestId("defi-w-protocol").fill(`Uniswap LP ${runId}`);
+    await page.getByTestId("defi-wizard-next").click(); // Infra
+    await expect(page.getByTestId("defi-w-pool")).toBeVisible();
+    await page.getByTestId("defi-w-pool").fill("ETH/USDC 0.3%");
+    await page.getByTestId("defi-wizard-next").click(); // Exposition
+    await page.getByTestId("defi-w-symbol").fill("ETH");
+    await page.getByTestId("defi-w-quantity").fill("1");
+    await page.getByTestId("defi-w-unit-price").fill("3000");
+    await expect(page.getByTestId("defi-w-lp-section")).toBeVisible();
+    await page.getByTestId("defi-w-paired-symbol").fill("USDC");
+    await page.getByTestId("defi-w-paired-amount").fill("3000");
+    await page.getByTestId("defi-w-paired-entry").fill("1");
+
+    await goToSummary(page);
+    await page.getByTestId("defi-wizard-submit").click();
+    await expect(page.getByText("Position enregistrée")).toBeVisible({ timeout: 15_000 });
+
+    const row = page.getByTestId("defi-row").filter({ hasText: `Uniswap LP ${runId}` });
+    await expect(row).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("LP concentrée (CLMM) : bornes de prix visibles et enregistrées (cas G, 13)", async ({
+    page,
+  }) => {
+    await page.getByTestId("defi-wizard-next").click();
+    await page.getByTestId("defi-w-platform").selectOption({ label: DEFI_WALLET_NAME });
+    await page.getByTestId("defi-wizard-next").click();
+    await page.getByTestId("defi-w-position-type").selectOption("LP");
+    await page.getByTestId("defi-w-chain").fill("ethereum");
+    await page.getByTestId("defi-w-protocol").fill(`Uniswap CLMM ${runId}`);
+    await page.getByTestId("defi-wizard-next").click(); // Infra
+    await page.getByTestId("defi-wizard-next").click(); // Exposition
+    await page.getByTestId("defi-w-symbol").fill("ETH");
+    await page.getByTestId("defi-w-quantity").fill("1");
+    await page.getByTestId("defi-w-unit-price").fill("3000");
+    await page.getByTestId("defi-w-paired-symbol").fill("USDC");
+    await page.getByTestId("defi-w-paired-amount").fill("3000");
+    await page.getByTestId("defi-w-paired-entry").fill("1");
+    // Les bornes de prix n'existent que pour une liquidité concentrée.
+    await expect(page.getByTestId("defi-w-range-min")).toHaveCount(0);
+    await page.getByTestId("defi-w-concentrated").check();
+    await expect(page.getByTestId("defi-w-range-min")).toBeVisible();
+    await page.getByTestId("defi-w-range-min").fill("2800");
+    await page.getByTestId("defi-w-range-max").fill("3200");
+
+    await goToSummary(page);
+    await page.getByTestId("defi-wizard-submit").click();
+    await expect(page.getByText("Position enregistrée")).toBeVisible({ timeout: 15_000 });
+
+    const row = page.getByTestId("defi-row").filter({ hasText: `Uniswap CLMM ${runId}` });
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    await row.getByTestId("defi-row-open").click();
+    await expect(page.getByTestId("defi-badge-clmm")).toBeVisible();
   });
 });
 
