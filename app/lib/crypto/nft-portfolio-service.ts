@@ -59,6 +59,22 @@ export type EnrichedNftHolding = {
   isSoulbound: boolean;
   rarityRank: number | null;
   metadataQuality: string;
+  /**
+   * Floor de la collection — déjà chargée par `loadRows` (include nftAsset →
+   * collection), simplement pas encore projetée. Distincte de
+   * `retainedValueEur` : la retenue peut suivre une autre méthode
+   * (appraisal, dernière vente, coût d'acquisition) — jamais la même donnée
+   * sous deux noms.
+   */
+  collectionFloorPriceEur: string | null;
+  collectionFloorPriceUpdatedAt: string | null;
+  /** Reste de la fiche collection — même provenance (déjà jointe, projetée en plus). */
+  collectionCreatorName: string | null;
+  collectionCreatorAddress: string | null;
+  collectionImageUrl: string | null;
+  collectionBannerUrl: string | null;
+  collectionExternalUrl: string | null;
+  collectionRoyaltiesBps: number | null;
   platformId: string;
   platformName: string;
   ownerLabel: string | null;
@@ -273,6 +289,14 @@ export async function getNftPortfolio(
       isSoulbound: row.nftAsset.isSoulbound,
       rarityRank: row.nftAsset.rarityRank,
       metadataQuality: row.nftAsset.metadataQuality,
+      collectionFloorPriceEur: row.nftAsset.collection?.floorPriceEur?.toString() ?? null,
+      collectionFloorPriceUpdatedAt: row.nftAsset.collection?.floorPriceUpdatedAt?.toISOString() ?? null,
+      collectionCreatorName: row.nftAsset.collection?.creatorName ?? null,
+      collectionCreatorAddress: row.nftAsset.collection?.creatorAddress ?? null,
+      collectionImageUrl: row.nftAsset.collection?.imageUrl ?? null,
+      collectionBannerUrl: row.nftAsset.collection?.bannerUrl ?? null,
+      collectionExternalUrl: row.nftAsset.collection?.externalUrl ?? null,
+      collectionRoyaltiesBps: row.nftAsset.collection?.royaltiesBps ?? null,
       platformId: row.asset.platformId,
       platformName: row.asset.platform.name,
       ownerLabel: row.ownerLabel,
