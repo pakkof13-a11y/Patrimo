@@ -4,6 +4,7 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { clientErrorMessage, clientErrorStatus } from "@/app/lib/api/error-response";
 import { prisma } from "@/app/lib/prisma";
 import { POSITION_STATUS_KEYS } from "@/app/lib/crypto/defi-taxonomy";
+import { recordEvent } from "@/app/lib/crypto/defi-position-service";
 
 export const dynamic = "force-dynamic";
 
@@ -69,24 +70,59 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   try {
     const position = await prisma.defiPositionDetail.findFirst({
       where: { id, asset: { is: { userId } } },
-      select: { id: true },
+      select: { id: true, isIgnoredInPortfolio: true, status: true, conflictFlag: true },
     });
     if (!position) {
       return NextResponse.json({ error: "Position introuvable" }, { status: 404 });
     }
 
-    await prisma.defiPositionDetail.update({
-      where: { id },
-      data: {
-        ...(input.isHidden !== undefined ? { isHidden: input.isHidden } : {}),
-        ...(input.isIgnoredInPortfolio !== undefined
-          ? { isIgnoredInPortfolio: input.isIgnoredInPortfolio }
-          : {}),
-        ...(input.status !== undefined ? { status: input.status } : {}),
-        ...(input.clearConflict
-          ? { conflictFlag: false, conflictReason: null }
-          : {}),
-      },
+    // Seul un changement réel est historisé — réappliquer le même drapeau
+    // (double clic, rejeu de requête) n'empile pas d'événements.
+    const ignoreChanged =
+      input.isIgnoredInPortfolio !== undefined &&
+      input.isIgnoredInPortfolio !== position.isIgnoredInPortfolio;
+    const statusChanged = input.status !== undefined && input.status !== position.status;
+    const conflictCleared = Boolean(input.clearConflict) && position.conflictFlag;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.defiPositionDetail.update({
+        where: { id },
+        data: {
+          ...(input.isHidden !== undefined ? { isHidden: input.isHidden } : {}),
+          ...(input.isIgnoredInPortfolio !== undefined
+            ? { isIgnoredInPortfolio: input.isIgnoredInPortfolio }
+            : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.clearConflict
+            ? { conflictFlag: false, conflictReason: null }
+            : {}),
+        },
+      });
+
+      // Exclure du patrimoine ou changer de statut modifie ce que la position
+      // représente : sans trace, une marche dans la courbe de patrimoine
+      // resterait inexplicable. `isHidden` seul, cosmétique et sans effet sur
+      // les totaux, n'en pose pas.
+      if (ignoreChanged || statusChanged || conflictCleared) {
+        await recordEvent(
+          id,
+          {
+            eventType: "MANUAL_OVERRIDE",
+            eventDate: new Date(),
+            sourceProvider: "MANUAL",
+            rawPayload: {
+              ...(ignoreChanged
+                ? { isIgnoredInPortfolio: input.isIgnoredInPortfolio }
+                : {}),
+              ...(statusChanged
+                ? { statusFrom: position.status, statusTo: input.status }
+                : {}),
+              ...(conflictCleared ? { conflictCleared: true } : {}),
+            },
+          },
+          tx
+        );
+      }
     });
 
     return NextResponse.json({ ok: true });

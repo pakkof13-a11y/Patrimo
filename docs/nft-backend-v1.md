@@ -257,5 +257,35 @@ réels trouvés et corrigés, tous liés au même angle mort : `NftAsset` et
    mettait à jour le total de l'en-tête qu'au rechargement. Corrigé dans les
    quatre panneaux (NFT et DeFi, liste et détail).
 
+5. **Changements de drapeaux non historisés.** `setNftHoldingFlags` ne posait
+   aucun événement, alors que `reclassifyNftSpam` juste à côté pose bien un
+   `SPAM_FLAG`. Exclure une détention du patrimoine change les totaux : sans
+   trace, la marche correspondante dans la courbe de patrimoine reste
+   inexplicable a posteriori. Un `MANUAL_OVERRIDE` est désormais posé sur
+   l'exclusion/réintégration et sur la levée d'un conflit — et seulement sur
+   un changement réel, pour qu'un rejeu de requête n'empile pas d'événements.
+   `isHidden` seul, cosmétique et sans effet sur les totaux, n'en pose pas :
+   journaliser un rangement d'écran noierait le journal.
+
+   Le même oubli existait côté DeFi et a été corrigé de la même façon, dans
+   les deux chemins qui touchent ces champs : la route `flags` et l'édition
+   complète (`PUT`). Côté DeFi, le statut de cycle de vie et la quote-part
+   sont historisés en plus de l'exclusion — ils changent eux aussi ce que la
+   position pèse.
+
 Couverture ajoutée : `e2e/nft-panel.spec.ts` vérifie désormais que l'exclusion
-d'un NFT fait effectivement bouger le total crypto (cas 56).
+d'un NFT fait effectivement bouger le total crypto (cas 56) **et** qu'elle
+apparaît au journal d'événements de la fiche.
+
+### Ce qui n'a délibérément pas été fait
+
+Les snapshots de patrimoine déjà écrits ne sont **pas** recalculés quand un
+actif est exclu : la courbe garde donc une marche à la date d'exclusion.
+`PortfolioSnapshot` ne stocke que des agrégats — aucune ventilation par actif
+— la contribution passée de l'actif exclu n'y est donc pas récupérable, et un
+recalcul supposerait de rejouer tout le journal avec des prix historiques que
+les NFT valorisés par repli n'ont pas. Au-delà du coût, un snapshot est une
+photo datée : le réécrire à chaque changement d'avis lui retirerait sa raison
+d'être. La marche est l'information, pas l'artefact — elle dit « ce jour-là,
+cet actif est sorti du patrimoine suivi », et l'événement `MANUAL_OVERRIDE`
+ci-dessus en porte désormais la justification.

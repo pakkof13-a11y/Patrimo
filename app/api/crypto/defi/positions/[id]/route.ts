@@ -5,7 +5,7 @@ import { clientErrorMessage, clientErrorStatus } from "@/app/lib/api/error-respo
 import { prisma } from "@/app/lib/prisma";
 import { DefiInputError } from "@/app/lib/crypto/defi-manual-service";
 import { getDefiPortfolio } from "@/app/lib/crypto/defi-portfolio-service";
-import { replaceLegs } from "@/app/lib/crypto/defi-position-service";
+import { recordEvent, replaceLegs } from "@/app/lib/crypto/defi-position-service";
 import {
   ACCESS_MODE_KEYS,
   CUSTODY_MODEL_KEYS,
@@ -206,6 +206,11 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
         protocol: true,
         chain: true,
         positionType: true,
+        // Trois champs qui changent ce que la position *pèse* au patrimoine —
+        // relus pour n'historiser qu'un changement réel (cf. plus bas).
+        status: true,
+        isIgnoredInPortfolio: true,
+        ownershipPct: true,
       },
     });
     if (!existing) {
@@ -361,6 +366,45 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
             isActive: l.isActive,
           })),
           tx as Parameters<typeof replaceLegs>[2]
+        );
+      }
+
+      // Une édition qui change l'exclusion patrimoniale, le statut ou la
+      // quote-part modifie ce que la position pèse : historisée au même titre
+      // que via la route `flags`. Les autres champs (libellés, références
+      // d'infrastructure, notes) sont descriptifs et ne le sont pas — sinon le
+      // journal se remplirait de corrections de frappe.
+      const ownershipChanged =
+        input.ownershipPct !== undefined &&
+        String(input.ownershipPct ?? "") !== String(existing.ownershipPct ?? "");
+      const statusChanged = input.status !== undefined && input.status !== existing.status;
+      const ignoreChanged =
+        input.isIgnoredInPortfolio !== undefined &&
+        input.isIgnoredInPortfolio !== existing.isIgnoredInPortfolio;
+
+      if (ownershipChanged || statusChanged || ignoreChanged) {
+        await recordEvent(
+          id,
+          {
+            eventType: "MANUAL_OVERRIDE",
+            eventDate: new Date(),
+            sourceProvider: "MANUAL",
+            rawPayload: {
+              ...(ignoreChanged
+                ? { isIgnoredInPortfolio: input.isIgnoredInPortfolio }
+                : {}),
+              ...(statusChanged
+                ? { statusFrom: existing.status, statusTo: input.status }
+                : {}),
+              ...(ownershipChanged
+                ? {
+                    ownershipPctFrom: existing.ownershipPct?.toString() ?? null,
+                    ownershipPctTo: input.ownershipPct ?? null,
+                  }
+                : {}),
+            },
+          },
+          tx
         );
       }
     });

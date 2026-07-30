@@ -547,7 +547,17 @@ function extractTransactionId(result: unknown): string | null {
   return null;
 }
 
-/** Masque/affiche et inclut/exclut des agrégats — cosmétique vs patrimonial, jamais confondus. */
+/**
+ * Masque/affiche et inclut/exclut des agrégats — cosmétique vs patrimonial,
+ * jamais confondus.
+ *
+ * Exclure une détention du patrimoine change les totaux : c'est une décision
+ * patrimoniale, elle est donc historisée par un `MANUAL_OVERRIDE` au même
+ * titre qu'une requalification spam (`reclassifyNftSpam`). Sans cette trace,
+ * une marche dans la courbe de patrimoine resterait inexplicable.
+ * `isHidden` seul, purement cosmétique et sans effet sur les totaux, n'en
+ * pose pas — journaliser un rangement d'écran noierait le journal.
+ */
 export async function setNftHoldingFlags(
   userId: string,
   assetId: string,
@@ -555,19 +565,47 @@ export async function setNftHoldingFlags(
 ) {
   const holding = await prisma.nftItemDetail.findFirst({
     where: { assetId, asset: { is: { userId } } },
-    select: { id: true },
+    select: { id: true, nftAssetId: true, isIgnoredInPortfolio: true, conflictFlag: true },
   });
   if (!holding) throw new NftInputError("NFT introuvable");
 
-  return prisma.nftItemDetail.update({
-    where: { id: holding.id },
-    data: {
-      ...(flags.isHidden !== undefined ? { isHidden: flags.isHidden } : {}),
-      ...(flags.isIgnoredInPortfolio !== undefined
-        ? { isIgnoredInPortfolio: flags.isIgnoredInPortfolio }
-        : {}),
-      ...(flags.clearConflict ? { conflictFlag: false, conflictReason: null } : {}),
-    },
+  // Seul un changement réel mérite une trace : réappliquer le même drapeau
+  // (double clic, rejeu d'une requête) ne doit pas empiler des événements.
+  const ignoreChanged =
+    flags.isIgnoredInPortfolio !== undefined &&
+    flags.isIgnoredInPortfolio !== holding.isIgnoredInPortfolio;
+  const conflictCleared = Boolean(flags.clearConflict) && holding.conflictFlag;
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.nftItemDetail.update({
+      where: { id: holding.id },
+      data: {
+        ...(flags.isHidden !== undefined ? { isHidden: flags.isHidden } : {}),
+        ...(flags.isIgnoredInPortfolio !== undefined
+          ? { isIgnoredInPortfolio: flags.isIgnoredInPortfolio }
+          : {}),
+        ...(flags.clearConflict ? { conflictFlag: false, conflictReason: null } : {}),
+      },
+    });
+
+    if (ignoreChanged || conflictCleared) {
+      await recordNftEvent(
+        holding.nftAssetId,
+        {
+          eventType: "MANUAL_OVERRIDE",
+          eventDate: new Date(),
+          nftHoldingId: holding.id,
+          sourceProvider: "MANUAL",
+          rawPayload: {
+            ...(ignoreChanged ? { isIgnoredInPortfolio: flags.isIgnoredInPortfolio } : {}),
+            ...(conflictCleared ? { conflictCleared: true } : {}),
+          },
+        },
+        tx
+      );
+    }
+
+    return updated;
   });
 }
 

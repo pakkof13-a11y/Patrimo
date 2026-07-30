@@ -302,6 +302,11 @@ test.describe("NFT — détail, vues, filtres, cycle de vie", () => {
     await card.getByTestId("nft-card-open").click();
     await page.getByTestId("nft-detail-action-ignore").click();
     await expect(page.getByTestId("nft-detail-action-unignore")).toBeVisible({ timeout: 10_000 });
+    // La décision est historisée : sans trace, la marche dans la courbe de
+    // patrimoine serait inexplicable a posteriori.
+    await expect(page.getByTestId("nft-detail-events")).toContainText("Surcharge manuelle", {
+      timeout: 10_000,
+    });
     await page.getByTestId("modal-close").click();
 
     await expect(page.getByTestId("crypto-total")).toHaveText(totalBeforeCreate ?? "", {
