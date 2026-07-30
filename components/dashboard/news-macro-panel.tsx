@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   Briefcase,
   ExternalLink,
   Landmark,
@@ -214,7 +215,8 @@ export function NewsMacroPanel({
                 ))}
               </ul>
             ) : newsQ.isError ? (
-              <p className="py-8 text-center text-xs text-[var(--muted-foreground)]">
+              <p className="py-8 flex items-center justify-center gap-1.5 text-center text-xs text-[var(--warning)]">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 Actualités momentanément indisponibles
               </p>
             ) : newsAll.length === 0 ? (
@@ -313,7 +315,8 @@ export function NewsMacroPanel({
                 ))}
               </ul>
             ) : macroQ.isError ? (
-              <p className="py-6 text-center text-xs text-[var(--muted-foreground)]">
+              <p className="py-6 flex items-center justify-center gap-1.5 text-center text-xs text-[var(--warning)]">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 Calendrier macro indisponible
               </p>
             ) : macroAll.length === 0 ? (
@@ -410,7 +413,8 @@ export function NewsMacroPanel({
                 ))}
               </ul>
             ) : earnQ.isError ? (
-              <p className="py-6 text-center text-xs text-[var(--muted-foreground)]">
+              <p className="flex items-center justify-center gap-1.5 py-6 text-center text-xs text-[var(--warning)]">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 Calendrier des résultats indisponible
               </p>
             ) : earnAll.length === 0 ? (

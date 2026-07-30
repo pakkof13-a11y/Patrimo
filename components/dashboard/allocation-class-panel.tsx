@@ -3,7 +3,10 @@
 import { useMemo, useState } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { LayoutGrid, PieChart as PieIcon } from "lucide-react";
-import { CHART_COLORS } from "@/app/lib/types/ui";
+import {
+  allocationColor,
+  readableInkOn,
+} from "@/app/lib/portfolio/allocation-colors";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import {
   EmptyPlaceholder,
@@ -11,6 +14,14 @@ import {
   SegmentedControl,
   SegmentedItem,
 } from "@/components/ui/panel";
+
+/** Pourcentage à la française — virgule décimale, comme les montants. */
+function formatPctFr(v: number): string {
+  return v.toLocaleString("fr-FR", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+}
 
 type Slice = { name: string; value: number };
 
@@ -158,25 +169,22 @@ function AllocationTiles({
   const tiles = useMemo(() => {
     const items: Item[] = [...data]
       .filter((d) => d.value > 0)
-      .map((d, i) => ({
+      .map((d) => ({
         name: d.name,
         value: d.value,
         pct: (d.value / total) * 100,
         amountLabel: formatCurrency(d.value, baseCurrency),
-        color: CHART_COLORS[i % CHART_COLORS.length]!,
+        // Couleur portée par la classe, jamais par son rang de taille : sinon
+        // une classe change de teinte dès qu'elle passe devant une autre.
+        color: allocationColor(d.name),
       }));
-    // re-index colors after sort inside squarify — color by size rank instead
     const sorted = [...items].sort((a, b) => b.value - a.value);
-    const colored = sorted.map((it, i) => ({
-      ...it,
-      color: CHART_COLORS[i % CHART_COLORS.length]!,
-    }));
-    return squarify(colored);
+    return squarify(sorted);
   }, [data, total, baseCurrency]);
 
   return (
     <div
-      className="relative h-44 w-full overflow-hidden rounded-lg bg-black sm:h-48 lg:h-52"
+      className="relative h-44 w-full overflow-hidden rounded-lg bg-[var(--surface-muted)] sm:h-48 lg:h-52"
       data-testid="allocation-tiles"
       role="img"
       aria-label="Allocation par classe d’actifs"
@@ -216,15 +224,18 @@ function AllocationTiles({
         return (
           <div
             key={t.name}
-            title={`${t.name} · ${t.pct.toFixed(1)} % · ${t.amountLabel}`}
-            className="absolute box-border overflow-hidden text-white transition-[filter] duration-150 hover:brightness-110"
+            title={`${t.name} · ${formatPctFr(t.pct)} % · ${t.amountLabel}`}
+            className="absolute box-border overflow-hidden transition-[filter] duration-150 hover:brightness-110"
             style={{
               left: `${t.x * 100}%`,
               top: `${t.y * 100}%`,
               width: `${t.w * 100}%`,
               height: `${t.h * 100}%`,
               backgroundColor: t.color,
-              boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.4)",
+              // Encre choisie selon la luminance de la tuile : du blanc forcé
+              // tombait sous 3:1 sur l'ambre et le cyan (seuil AA non tenu).
+              color: readableInkOn(t.color),
+              boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.25)",
               margin: 0,
               padding: rowMode ? "3px 7px" : "8px 10px",
               display: "flex",
@@ -239,7 +250,10 @@ function AllocationTiles({
                 className="min-w-0 font-semibold leading-tight"
                 style={{
                   fontSize: nameFs,
-                  textShadow: "0 1px 2px rgba(0,0,0,0.55)",
+                  textShadow:
+                    readableInkOn(t.color) === "#ffffff"
+                      ? "0 1px 2px rgba(0,0,0,0.55)"
+                      : "none",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -251,14 +265,19 @@ function AllocationTiles({
             )}
             <div
               className="min-w-0 shrink-0"
-              style={{ textShadow: "0 1px 2px rgba(0,0,0,0.55)" }}
+              style={{
+                textShadow:
+                  readableInkOn(t.color) === "#ffffff"
+                    ? "0 1px 2px rgba(0,0,0,0.55)"
+                    : "none",
+              }}
             >
               {showPct && (
                 <div
                   className="font-bold tabular-nums leading-none"
                   style={{ fontSize: pctFs }}
                 >
-                  {t.pct.toFixed(1)}&nbsp;%
+                  {formatPctFr(t.pct)}&nbsp;%
                 </div>
               )}
               {showAmount && (
@@ -360,10 +379,10 @@ function PieWithLegend({
   const rows = [...data]
     .filter((d) => d.value > 0)
     .sort((a, b) => b.value - a.value)
-    .map((d, i) => ({
+    .map((d) => ({
       ...d,
       pct: (d.value / total) * 100,
-      color: CHART_COLORS[i % CHART_COLORS.length]!,
+      color: allocationColor(d.name),
     }));
 
   return (
@@ -396,7 +415,7 @@ function PieWithLegend({
                       )
                     : 0;
                 return [
-                  `${formatCurrency(round2(Number(v ?? 0)), baseCurrency)} · ${pct.toFixed(1)} %`,
+                  `${formatCurrency(round2(Number(v ?? 0)), baseCurrency)} · ${formatPctFr(pct)} %`,
                   "Allocation",
                 ];
               }}
@@ -422,7 +441,7 @@ function PieWithLegend({
               {r.name}
             </span>
             <span className="shrink-0 tabular-nums text-[var(--muted-foreground)]">
-              {r.pct.toFixed(1)}&nbsp;%
+              {formatPctFr(r.pct)}&nbsp;%
             </span>
             <span className="shrink-0 tabular-nums font-medium text-[var(--foreground)]">
               {formatCurrency(round2(r.value), baseCurrency)}

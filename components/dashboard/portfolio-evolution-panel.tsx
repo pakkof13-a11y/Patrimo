@@ -362,8 +362,8 @@ export function PortfolioEvolutionPanel({
               className={cn(
                 "shrink-0 text-right text-xs font-semibold tabular-nums",
                 summary.delta >= 0
-                  ? "text-[var(--success)]"
-                  : "text-[var(--danger)]"
+                  ? "text-[var(--positive)]"
+                  : "text-[var(--negative)]"
               )}
               data-testid="evolution-delta"
               title="Variation de la valeur totale sur la période affichée"
@@ -621,8 +621,8 @@ export function PortfolioEvolutionPanel({
                 className={cn(
                   "font-semibold tabular-nums",
                   gap.gapPct >= 0
-                    ? "text-[var(--success)]"
-                    : "text-[var(--danger)]"
+                    ? "text-[var(--positive)]"
+                    : "text-[var(--negative)]"
                 )}
                 title="Écart de performance portefeuille − indice sur la période"
                 data-testid="evolution-vs-gap"
