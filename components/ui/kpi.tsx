@@ -15,6 +15,12 @@ export function Kpi({
   testId,
   /** Variante "terminal" (Dashboard) : flèche de tendance au lieu du liseré coloré */
   variant = "default",
+  /**
+   * `secondary` recule la tuile d'un cran : les classes d'exposition ne
+   * doivent pas peser autant que le résultat, la trésorerie et la dette,
+   * qui sont les seuls chiffres réellement pilotables.
+   */
+  emphasis = "default",
 }: {
   icon: React.ReactNode;
   label: React.ReactNode;
@@ -22,18 +28,21 @@ export function Kpi({
   tone?: "up" | "down";
   testId?: string;
   variant?: "default" | "terminal";
+  emphasis?: "default" | "secondary";
 }) {
   const terminal = variant === "terminal";
+  const secondary = emphasis === "secondary";
   return (
     <div
       className={cn(
         "kpi-tile flex min-h-[5.25rem] min-w-0 flex-col justify-between gap-2 p-3 sm:p-3.5",
+        secondary && "bg-[var(--surface-muted)]/40",
         !terminal &&
           tone === "up" &&
-          "border-l-[3px] border-l-[var(--success)]/80 dark:border-l-[var(--success)]/70",
+          "border-l-[3px] border-l-[var(--positive)]/80 dark:border-l-[var(--positive)]/70",
         !terminal &&
           tone === "down" &&
-          "border-l-[3px] border-l-[var(--danger)]/75 dark:border-l-[var(--danger)]/65"
+          "border-l-[3px] border-l-[var(--negative)]/75 dark:border-l-[var(--negative)]/65"
       )}
       data-testid={testId}
     >
@@ -51,23 +60,30 @@ export function Kpi({
       <div className="flex min-w-0 items-center gap-1">
         <div
           className={cn(
-            "kpi-value min-w-0 text-[1.05rem] leading-none break-words sm:text-lg xl:text-[1.2rem]",
-            tone === "up" && "text-[var(--success)]",
-            tone === "down" && "text-[var(--danger)]",
+            "kpi-value min-w-0 leading-none break-words",
+            secondary
+              ? "text-[0.95rem] sm:text-base xl:text-[1.05rem]"
+              : "text-[1.05rem] sm:text-lg xl:text-[1.2rem]",
+            tone === "up" && "text-[var(--positive)]",
+            tone === "down" && "text-[var(--negative)]",
             !tone && "text-[var(--foreground)]"
           )}
         >
           {value}
         </div>
+        {/*
+          La flèche double la couleur pour la direction — un liseré vert seul
+          ne dit rien à qui ne distingue pas les teintes.
+        */}
         {terminal && tone === "up" && (
           <ArrowUpRight
-            className="h-3.5 w-3.5 shrink-0 text-[var(--success)]"
+            className="h-3.5 w-3.5 shrink-0 text-[var(--positive)]"
             aria-hidden
           />
         )}
         {terminal && tone === "down" && (
           <ArrowDownRight
-            className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]"
+            className="h-3.5 w-3.5 shrink-0 text-[var(--negative)]"
             aria-hidden
           />
         )}
@@ -103,8 +119,8 @@ export function Stat({
         className={cn(
           "kpi-value tabular-nums",
           compact ? "text-sm sm:text-base" : "text-lg",
-          tone === "up" && "text-[var(--success)]",
-          tone === "down" && "text-[var(--danger)]",
+          tone === "up" && "text-[var(--positive)]",
+          tone === "down" && "text-[var(--negative)]",
           (!tone || tone === "neutral") && "text-[var(--foreground)]"
         )}
       >

@@ -39,6 +39,37 @@
   --ring: rgb(13 107 99 / 0.28);
   --focus-ring: 0 0 0 2px var(--card), 0 0 0 4px var(--ring);
 
+  /**
+   * Rôles sémantiques — couche additive au-dessus des tokens historiques
+   * ci-dessus (qui restent la source de vérité pour les composants déjà
+   * livrés). Objectif : nommer l'intention (« surface élevée », « valeur en
+   * hausse ») plutôt que la teinte, pour que le restyle Dashboard n'ait qu'à
+   * redéfinir ces variables.
+   *
+   * Sémantique stricte, valable dans les deux thèmes :
+   * - positive = hausse / gain          - negative = baisse / perte / alerte
+   * - warning  = estimation, donnée ancienne, attention modérée
+   * - info     = neutre, secondaire
+   * L'ambre (--primary) est une couleur d'action et d'attention, jamais la
+   * couleur générique des gains — celle-ci est toujours --positive.
+   */
+  --surface: var(--card);
+  --surface-elevated: var(--elevated);
+  --surface-muted: var(--muted);
+  --border-subtle: rgb(18 20 26 / 0.06);
+  --foreground-muted: var(--muted-foreground);
+  --foreground-faint: #8b8f99;
+  --primary-hover: #0a564f;
+  --primary-muted: var(--primary-soft);
+  --positive: var(--success);
+  --positive-muted: rgb(20 122 63 / 0.1);
+  --negative: var(--danger);
+  --negative-muted: rgb(180 35 24 / 0.1);
+  --warning: #9a6510;
+  --warning-muted: rgb(154 101 16 / 0.12);
+  --info: var(--accent);
+  --info-muted: rgb(29 111 191 / 0.1);
+
   /* Elevation */
   --shadow-xs: 0 1px 0 rgb(18 20 26 / 0.04);
   --shadow-sm: 0 1px 2px rgb(18 20 26 / 0.05), 0 1px 1px rgb(18 20 26 / 0.03);
@@ -100,6 +131,16 @@
   --accent: #5ba3e8;
   --ring: rgb(45 212 191 / 0.32);
   --focus-ring: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+
+  /* Rôles sémantiques — cf. bloc équivalent dans :root */
+  --border-subtle: rgb(148 163 184 / 0.08);
+  --foreground-faint: #6f7a8c;
+  --primary-hover: #5eead4;
+  --positive-muted: rgb(52 211 153 / 0.14);
+  --negative-muted: rgb(248 113 113 / 0.14);
+  --warning: #e0b062;
+  --warning-muted: rgb(224 176 98 / 0.16);
+  --info-muted: rgb(91 163 232 / 0.14);
 
   --shadow-xs: 0 1px 0 rgb(0 0 0 / 0.25);
   --shadow-sm: 0 2px 8px rgb(0 0 0 / 0.28);
@@ -857,6 +898,14 @@ body.col-resizing {
   --muted-foreground: #6b6252;
   --ring: rgb(156 106 31 / 0.28);
 
+  /* Rôles sémantiques rehaussés sur fond papier chaud */
+  --border-subtle: rgb(107 98 82 / 0.14);
+  --foreground-faint: #8d8271;
+  --primary-hover: #7d5417;
+  --primary-muted: rgb(156 106 31 / 0.1);
+  --warning: #8a5a12;
+  --warning-muted: rgb(138 90 18 / 0.13);
+
   border-radius: var(--radius-xl);
   background: linear-gradient(180deg, #fbf9f4 0%, #f6f2e7 100%);
   border: 1px solid var(--border);
@@ -912,16 +961,23 @@ body.col-resizing {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Bandeau ticker défilant (indices / crypto / forex) ── */
+/**
+ * ── Bandeau ticker défilant (indices / crypto / forex) ──
+ * Surface dérivée des tokens, jamais un noir dur : en thème clair un bandeau
+ * noir cassait la promesse « lumineux, calme, premium » et faisait basculer
+ * l'écran du côté poste de trading.
+ */
 .dashboard-ticker {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: #0b0a08;
+  background: var(--surface-muted);
   overflow: hidden;
 }
 
-.dark .dashboard-ticker {
-  background: #000000;
+.dashboard-ticker-viewport {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
 }
 
 .dashboard-ticker-track {
@@ -929,11 +985,16 @@ body.col-resizing {
   align-items: center;
   gap: 1.75rem;
   white-space: nowrap;
-  animation: pt-ticker 32s linear infinite;
+  animation: pt-ticker 44s linear infinite;
   font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
-.dashboard-ticker:hover .dashboard-ticker-track {
+/* Pause au survol ET au focus clavier — sans quoi un utilisateur au clavier
+   ne peut jamais lire une valeur qui défile sous son curseur de focus. */
+.dashboard-ticker:hover .dashboard-ticker-track,
+.dashboard-ticker:focus-within .dashboard-ticker-track,
+.dashboard-ticker[data-paused="true"] .dashboard-ticker-track {
   animation-play-state: paused;
 }
 
@@ -946,9 +1007,18 @@ body.col-resizing {
   }
 }
 
+/**
+ * Animation réduite : le défilement s'arrête, mais le contenu déborderait
+ * alors hors d'un conteneur en `overflow: hidden` et deviendrait
+ * définitivement inatteignable. On rend donc le bandeau scrollable à la
+ * main — l'information reste accessible sans aucune animation.
+ */
 @media (prefers-reduced-motion: reduce) {
   .dashboard-ticker-track {
     animation: none;
+  }
+  .dashboard-ticker-viewport {
+    overflow-x: auto;
   }
 }
 

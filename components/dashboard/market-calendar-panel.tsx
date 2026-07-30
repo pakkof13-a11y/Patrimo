@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Briefcase, CalendarDays, Landmark } from "lucide-react";
+import { AlertTriangle, Briefcase, CalendarDays, Landmark } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import type {
   EarningsEvent,
@@ -435,8 +435,11 @@ function CalendarCard({
           ))}
         </ul>
       )}
+      {/* Icône + teinte d'alerte : une indisponibilité ne doit pas se lire
+          comme un simple « rien à afficher ». */}
       {error && !loading && (
-        <p className="py-4 text-center text-xs text-[var(--muted-foreground)]">
+        <p className="flex items-center justify-center gap-1.5 py-4 text-center text-xs text-[var(--warning)]">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
           {errorLabel}
         </p>
       )}
