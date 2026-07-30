@@ -302,14 +302,26 @@ export async function clickNav(page: Page, label: string) {
   const tid = map[label];
   const fallbackPath = NAV_PATH[label];
 
-  const groupForTid: Record<string, string> = {
-    "nav-platforms": "sources",
-    "nav-banques": "sources",
-    "nav-epargne-salariale": "extended",
-    "nav-alternatifs": "extended",
-    "nav-liabilities": "extended",
-    "nav-fiscal": "tax",
-  };
+  /**
+   * Entrées rangées derrière le dépliant « Patrimoine » de la sidebar.
+   *
+   * La navigation est passée d'une rangée d'onglets à une colonne de sept
+   * entrées : les sections patrimoniales ne sont plus visibles d'emblée, il
+   * faut d'abord ouvrir le panneau. Sans cette table, le helper tombait
+   * systématiquement sur le repli par URL et ne testait plus la navigation
+   * réelle.
+   */
+  const BEHIND_WEALTH_MENU = new Set([
+    "nav-securities",
+    "nav-immobilier",
+    "nav-crypto",
+    "nav-banques",
+    "nav-assurance-vie",
+    "nav-trading",
+    "nav-epargne-salariale",
+    "nav-alternatifs",
+    "nav-liabilities",
+  ]);
 
   async function ensureUrl() {
     if (!fallbackPath) return;
@@ -331,9 +343,8 @@ export async function clickNav(page: Page, label: string) {
       return;
     }
 
-    const preferred = groupForTid[tid];
-    if (preferred) {
-      const gb = page.getByTestId(`nav-group-${preferred}`);
+    if (BEHIND_WEALTH_MENU.has(tid)) {
+      const gb = page.getByTestId("nav-wealth");
       if (await gb.isVisible().catch(() => false)) {
         await gb.click();
         try {

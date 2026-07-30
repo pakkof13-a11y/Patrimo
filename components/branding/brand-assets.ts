@@ -7,6 +7,14 @@ export const BRAND = {
   /** Sous-titre court (header, méta). */
   tagline: "Suivi de patrimoine",
   /**
+   * Descripteur affiché sous le nom dans le header du terminal.
+   *
+   * Distinct de `tagline` (qui reste la formulation grand public employée
+   * par les métadonnées et l'écran de connexion) : celui-ci annonce la
+   * nature de l'outil à un utilisateur déjà connecté.
+   */
+  terminal: "Terminal patrimonial",
+  /**
    * Slogan marketing — login, onboarding, hero.
    * Source unique : ne pas hardcoder ailleurs.
    */

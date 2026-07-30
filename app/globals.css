@@ -8,140 +8,297 @@
  * Palette sobre : papier chaud / navy profond, accent teal institutionnel.
  * Spacing 4px-based ; densité confortable sans aérer comme un SaaS marketing.
  */
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  PATRIMO — DESIGN SYSTEM « TERMINAL PATRIMONIAL »
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ *  Références : Bloomberg Terminal (densité, chiffres monospacés, hiérarchie
+ *  stricte) × Apple (calme, espace, matière) × Porsche Design (précision
+ *  usinée). Ni SaaS, ni crypto.
+ *
+ *  RÈGLE ABSOLUE — aucun composant ne code en dur une couleur, un espace, un
+ *  rayon, une durée, une graisse ou une taille. Tout passe par ces tokens. Un
+ *  écran qui a besoin d'une valeur absente d'ici ajoute un token ; il ne crée
+ *  pas d'exception locale.
+ *
+ *  Le thème sombre est la RÉFÉRENCE de design. Le thème clair en est la
+ *  transposition rigoureuse — même structure, mêmes rôles, contrastes
+ *  recalculés — et non une seconde interprétation.
+ *
+ *  Contraste : chaque couleur porteuse de texte est vérifiée ≥ 4,5:1 sur sa
+ *  surface (AA), chaque trait de graphique ≥ 3:1. Voir
+ *  `tests/unit/design-tokens-contrast.test.ts` : la suite échoue si une
+ *  valeur de ce fichier passe sous le seuil.
+ */
 :root {
-  /* Surfaces */
-  --background: #f4f3ef;
-  --background-gradient: linear-gradient(
-    180deg,
-    #faf9f6 0%,
-    #f4f3ef 48%,
-    #efeee9 100%
-  );
-  --foreground: #12141a;
-  --card: #ffffff;
-  --card-foreground: #12141a;
-  --elevated: #ffffff;
-  --muted: #ebeae4;
-  --muted-foreground: #5c6370;
-  --border: #dddcd5;
-  --border-strong: #c9c8c0;
+  /* ══ 1. ESPACEMENT — base 4 px ═══════════════════════════════════════ */
+  --space-0: 0;
+  --space-px: 1px;
+  --space-1: 0.25rem;   /*  4 */
+  --space-2: 0.5rem;    /*  8 */
+  --space-3: 0.75rem;   /* 12 */
+  --space-4: 1rem;      /* 16 */
+  --space-5: 1.25rem;   /* 20 */
+  --space-6: 1.5rem;    /* 24 */
+  --space-7: 1.75rem;   /* 28 */
+  --space-8: 2rem;      /* 32 */
+  --space-10: 2.5rem;   /* 40 */
+  --space-12: 3rem;     /* 48 */
+  --space-16: 4rem;     /* 64 */
+
+  /* Rythmes de composition — dérivés, jamais réécrits en dur */
+  --gap-card: var(--space-3);          /* entre cartes d'une même rangée */
+  --gap-section: var(--space-4);       /* entre blocs du dashboard */
+  --pad-card: var(--space-4);          /* respiration interne d'une carte */
+  --pad-card-lg: var(--space-5);
+  --section-gap: var(--space-4);
+  --section-gap-lg: var(--space-5);
+  --module-after-kpi: var(--space-4);
+  --module-after-kpi-lg: var(--space-5);
+  --module-intro-gap: var(--space-1);
+
+  /* ══ 2. TYPOGRAPHIE ══════════════════════════════════════════════════
+     IBM Plex Sans porte les libellés, IBM Plex Mono TOUS les nombres —
+     l'alignement vertical des chiffres est ce qui fait lire « terminal »
+     plutôt que « site web ». */
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
+
+  --text-2xs: 0.625rem;    /* 10 — micro-labels, unités */
+  --text-xs: 0.6875rem;    /* 11 — méta, légendes */
+  --text-sm: 0.75rem;      /* 12 — libellés, cellules */
+  --text-base: 0.8125rem;  /* 13 — corps */
+  --text-md: 0.875rem;     /* 14 */
+  --text-lg: 1rem;         /* 16 */
+  --text-xl: 1.25rem;      /* 20 — valeurs KPI */
+  --text-2xl: 1.5rem;      /* 24 */
+  --text-3xl: 2rem;        /* 32 */
+  --text-4xl: 2.75rem;     /* 44 */
+  --text-5xl: 3.75rem;     /* 60 — patrimoine net */
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+
+  /* Les titres sont en capitales, très légèrement espacés — signature
+     Bloomberg. Les grands nombres se resserrent au contraire. */
+  --tracking-title: 0.09em;
+  --tracking-label: 0.055em;
+  --tracking-normal: 0;
+  --tracking-tight: -0.02em;
+  --tracking-tighter: -0.035em;
+
+  /* ══ 3. RAYONS ═══════════════════════════════════════════════════════
+     10 px sur les cartes (mockup). Rien d'arrondi au point de paraître
+     ludique : l'objet doit sembler usiné. */
+  --radius-xs: 0.25rem;    /*  4 */
+  --radius-sm: 0.375rem;   /*  6 */
+  --radius-md: 0.5rem;     /*  8 */
+  --radius-lg: 0.625rem;   /* 10 — rayon canonique des cartes */
+  --radius-xl: 0.75rem;    /* 12 */
+  --radius-full: 9999px;
+
+  /* ══ 4. BORDURES ═════════════════════════════════════════════════════ */
+  --border-width: 1px;
+  --border: rgba(16, 17, 20, 0.09);
+  --border-strong: rgba(16, 17, 20, 0.16);
+  --border-subtle: rgba(16, 17, 20, 0.05);
+
+  /* ══ 5. OMBRES — quasi absentes, la profondeur vient des bordures ════ */
+  --shadow-xs: 0 1px 0 rgba(16, 17, 20, 0.03);
+  --shadow-sm: 0 1px 2px rgba(16, 17, 20, 0.05);
+  --shadow-md: 0 4px 16px rgba(16, 17, 20, 0.07);
+  --shadow-lg: 0 12px 32px rgba(16, 17, 20, 0.1);
+  --shadow-lift: 0 6px 20px rgba(16, 17, 20, 0.09);
+
+  /* ══ 6. MOUVEMENT ════════════════════════════════════════════════════
+     150 ms ease-out par défaut. Aucun rebond : un terminal financier ne
+     joue pas, il répond. */
+  --duration-instant: 80ms;
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+  --duration-slow: 320ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --transition-fast: var(--duration-fast) var(--ease-out);
+
+  /* ══ 7. MISE EN PAGE ═════════════════════════════════════════════════ */
+  --app-max-width: 1800px;      /* pensé 1440p → 4K, le dashboard respire */
+  --shell-pad-x: var(--space-5);
+  --shell-pad-y: var(--space-5);
+  /* 6,5 rem : largeur minimale qui laisse « TRANSACTIONS » tenir sur une
+     ligne à --text-2xs. En dessous, le mot se coupait en deux. */
+  --sidebar-width: 6.5rem;
+  --header-height: 3.5rem;
+  --ticker-height: 1.875rem;
+
+  /* ══ 8. COULEURS — PRIMITIVES ════════════════════════════════════════
+     Palette brute. Aucun composant ne les appelle : ils passent par les
+     rôles sémantiques du §9. */
+  --gold-base: #d9a64d;     /* accent de marque — aplats, traits, focus */
+  --gold-bright: #e8bd72;
+  --gold-deep: #a8781f;
+  --gold-ink-light: #7d5a12; /* teinte lisible sur fond clair (AA) */
+
+  --green-base: #63c48b;
+  --green-ink-light: #17794a;
+  --red-base: #e06a6a;
+  --red-ink-light: #b8342a;
+  --cyan-base: #4fb8c9;
+  --cyan-ink-light: #0d6f80;
+
+  /* ══ 9. COULEURS — RÔLES SÉMANTIQUES (thème clair) ═══════════════════
+     Transposition du mockup sombre : papier chaud plutôt que blanc pur,
+     pour que l'or reste un accent et non une alerte. */
+
+  /* Surfaces, de la plus profonde à la plus élevée */
+  --background: #f5f4f1;
+  --background-gradient: none;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: #eceae5;
+  --surface-hover: #faf9f7;
+  --card: var(--surface);
+  --elevated: var(--surface-raised);
+  --muted: var(--surface-sunken);
   --input-bg: #ffffff;
-  --table-head: #f7f6f2;
-  --header-bg: rgba(255, 255, 255, 0.86);
+  --table-head: #f7f6f3;
+  --header-bg: rgba(245, 244, 241, 0.88);
+  --ticker-bg: #ecebe7;
 
-  /* Brand & status */
-  --primary: #0d6b63;
-  --primary-foreground: #ffffff;
-  --primary-soft: rgba(13, 107, 99, 0.08);
-  --success: #147a3f;
-  --danger: #b42318;
-  /* Graphite chaud — remplace un bleu générique qui entrait en concurrence
-     avec le doré de marque plutôt que de le mettre en valeur. */
+  /* Texte — trois niveaux, jamais plus */
+  --foreground: #14161a;
+  --card-foreground: var(--foreground);
+  --foreground-secondary: #5e636b;
+  --foreground-faint: #8a8f97;
+  --muted-foreground: var(--foreground-secondary);
+
+  /* Accent de marque */
+  --primary: var(--gold-base);
+  --primary-foreground: #17130a;   /* encre sombre sur aplat doré */
+  --primary-soft: rgba(217, 166, 77, 0.12);
+  --primary-text: var(--gold-ink-light);
   --accent: #57534e;
-  --ring: rgb(13 107 99 / 0.28);
-  --focus-ring: 0 0 0 2px var(--card), 0 0 0 4px var(--ring);
 
-  /* Elevation */
-  --shadow-xs: 0 1px 0 rgb(18 20 26 / 0.04);
-  --shadow-sm: 0 1px 2px rgb(18 20 26 / 0.05), 0 1px 1px rgb(18 20 26 / 0.03);
-  --shadow-md: 0 4px 16px rgb(18 20 26 / 0.06), 0 1px 3px rgb(18 20 26 / 0.04);
+  /* Statuts — variante « ink » pour le texte, « base » pour les traits */
+  --positive: var(--green-ink-light);
+  --negative: var(--red-ink-light);
+  --warning: #a8600f;
+  --info: var(--cyan-ink-light);
+  --success: var(--positive);
+  --danger: var(--negative);
 
-  /* Radius — angular enough for finance, not toy-like */
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 0.875rem;
+  /* Graphiques — traits (seuil 3:1, pas 4,5:1) */
+  --chart-gold: var(--gold-deep);
+  --chart-positive: #2e9e63;
+  --chart-negative: #d0453a;
+  --chart-cyan: #0e8ba3;
+  --chart-neutral: #9a9ea6;
+  --chart-grid: rgba(16, 17, 20, 0.06);
+  --chart-glow: rgba(217, 166, 77, 0.1);
 
-  /* Spacing scale (4px) */
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.25rem;
-  --space-6: 1.5rem;
-  --space-8: 2rem;
-  --section-gap: 1.25rem;
-  --section-gap-lg: 1.75rem;
-  /* Transition KPI bandeau → module (Positions, Transactions, etc.) */
-  --module-after-kpi: 1.125rem;
-  --module-after-kpi-lg: 1.5rem;
-  /* Sous-titre d’intro sous le titre de module */
-  --module-intro-gap: 0.375rem;
+  /* Focus */
+  --ring: rgba(217, 166, 77, 0.42);
+  --focus-ring: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
 
-  --app-max-width: 2560px;
-  --shell-pad-x: 0.875rem;
-  --shell-pad-y: 1rem;
-
-  /* Marque or (slogan / wordmark) + teinte bannière KPI */
-  --gold-1: #fcd34d;
-  --gold-2: #ca8a04;
-  --gold-3: #a16207;
-  --gold-muted: color-mix(in srgb, var(--gold-2) 10%, transparent);
-  --gold-border: color-mix(in srgb, var(--gold-2) 18%, var(--border));
-  --nav-active-gold: color-mix(in srgb, var(--gold-2) 90%, var(--gold-3));
-  /* Warning chaud — cohérent or, distinct du jaune Tailwind générique */
-  --warning: #b45309;
-  --banner-fill: #f7f4ec;
-  --banner-edge: #f4f3ef;
+  /* Compat marque (bannières, nav) — alias, pas de nouvelle teinte */
+  --gold-1: var(--gold-bright);
+  --gold-2: var(--gold-base);
+  --gold-3: var(--gold-deep);
+  --gold-muted: rgba(217, 166, 77, 0.1);
+  --gold-border: rgba(217, 166, 77, 0.24);
+  --nav-active-gold: var(--gold-ink-light);
+  --banner-fill: #f7f6f3;
+  --banner-edge: #f5f4f1;
 
   color-scheme: light;
 }
 
+/**
+ * ─────────────────────────────────────────────────────────────────────────
+ *  THÈME SOMBRE — la référence du mockup
+ *  Fond #090909, cartes #111214, bordures rgba(255,255,255,.06).
+ *  Seuls les rôles changent de valeur : aucune structure n'est redéfinie.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
 .dark {
-  /*
-   * Surfaces désaturées vers un charcoal neutre — c'était un bleu marine
-   * (#0a101c, #0d1524…) qui donnait aux fenêtres un ton bleuté même
-   * derrière le flou liquid glass. Même luminosité, teinte neutre : le
-   * doré de marque ressort au lieu de se battre avec le bleu.
-   */
-  --background: #0b0b0d;
-  --background-gradient: linear-gradient(
-    180deg,
-    #121214 0%,
-    #0b0b0d 55%,
-    #08080a 100%
-  );
-  --foreground: #e6ebf4;
-  --card: rgba(20, 20, 22, 0.94);
-  --card-foreground: #e6ebf4;
-  --elevated: #1a1a1d;
-  --muted: #1c1c1f;
-  --muted-foreground: #9a9a9f;
-  --border: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.18);
-  --input-bg: #131316;
-  --table-head: rgba(18, 18, 20, 0.95);
-  --header-bg: rgba(14, 14, 16, 0.9);
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.13);
+  --border-subtle: rgba(255, 255, 255, 0.035);
 
-  --primary: #2dd4bf;
-  --primary-foreground: #042f2e;
-  --primary-soft: rgba(45, 212, 191, 0.1);
-  --success: #34d399;
-  --danger: #f87171;
-  /* Graphite clair chaud — même logique qu'en clair, cf. :root --accent. */
+  /* Sur fond noir, une ombre portée ne se voit pas : la profondeur passe
+     entièrement par la bordure et le niveau de surface. */
+  --shadow-xs: 0 1px 0 rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --shadow-lift: 0 6px 20px rgba(0, 0, 0, 0.5);
+
+  --background: #090909;
+  --background-gradient: none;
+  --surface: #111214;
+  --surface-raised: #17181b;
+  --surface-sunken: #0d0e10;
+  --surface-hover: #17181b;
+  --card: var(--surface);
+  --elevated: var(--surface-raised);
+  --muted: var(--surface-raised);
+  --input-bg: #0d0e10;
+  --table-head: #131417;
+  --header-bg: rgba(9, 9, 9, 0.88);
+  --ticker-bg: #0c0d0f;
+
+  --foreground: #f3f2f0;
+  --card-foreground: var(--foreground);
+  --foreground-secondary: #a0a3a8;
+  --foreground-faint: #6e7278;
+  --muted-foreground: var(--foreground-secondary);
+
+  --primary: var(--gold-base);
+  --primary-foreground: #17130a;
+  --primary-soft: rgba(217, 166, 77, 0.14);
+  --primary-text: var(--gold-base);
   --accent: #a8a29e;
-  --ring: rgb(45 212 191 / 0.32);
+
+  /* En sombre, les teintes « base » atteignent déjà l'AA sur #111214 :
+     aucune variante assombrie n'est nécessaire. */
+  --positive: var(--green-base);
+  --negative: var(--red-base);
+  --warning: #e0a04d;
+  --info: var(--cyan-base);
+  --success: var(--positive);
+  --danger: var(--negative);
+
+  --chart-gold: var(--gold-base);
+  --chart-positive: var(--green-base);
+  --chart-negative: var(--red-base);
+  --chart-cyan: var(--cyan-base);
+  --chart-neutral: #6e7278;
+  --chart-grid: rgba(255, 255, 255, 0.05);
+  --chart-glow: rgba(217, 166, 77, 0.14);
+
+  --ring: rgba(217, 166, 77, 0.45);
   --focus-ring: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
 
-  --shadow-xs: 0 1px 0 rgb(0 0 0 / 0.25);
-  --shadow-sm: 0 2px 8px rgb(0 0 0 / 0.28);
-  --shadow-md: 0 8px 28px rgb(0 0 0 / 0.35);
-
-  --gold-1: #fde68a;
-  --gold-2: #eab308;
-  --gold-3: #a16207;
-  --gold-muted: color-mix(in srgb, var(--gold-2) 12%, transparent);
-  --gold-border: color-mix(in srgb, var(--gold-2) 22%, var(--border));
-  --nav-active-gold: color-mix(in srgb, var(--gold-1) 55%, var(--gold-2));
-  --warning: #d97706;
-  --banner-fill: #121212;
-  --banner-edge: #0b0b0d;
+  --gold-1: var(--gold-bright);
+  --gold-2: var(--gold-base);
+  --gold-3: var(--gold-deep);
+  --gold-muted: rgba(217, 166, 77, 0.12);
+  --gold-border: rgba(217, 166, 77, 0.26);
+  --nav-active-gold: var(--gold-base);
+  --banner-fill: #111214;
+  --banner-edge: #090909;
 
   color-scheme: dark;
 }
 
 body {
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-sans);
   /* Fond image (BrandPageBackground) visible sous le liquid glass des cartes.
      Fallback teinte page si l’image rate ; pas de gradient opaque qui masque le fond. */
   background-color: var(--background);
@@ -232,29 +389,6 @@ html {
 .brand-logo {
   opacity: 1 !important;
   isolation: isolate;
-}
-
-/**
- * Liquid glass Apple — semi-transparence (~20 % de fond visible) + blur léger.
- * N’altère pas les tokens --card / --primary ; uniquement le rendu des surfaces.
- */
-.glass-surface {
-  background: color-mix(in srgb, var(--card) 80%, transparent);
-  backdrop-filter: blur(18px) saturate(1.35);
-  -webkit-backdrop-filter: blur(18px) saturate(1.35);
-}
-
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass-surface {
-    background: var(--card);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .glass-surface {
-    backdrop-filter: blur(12px) saturate(1.15);
-    -webkit-backdrop-filter: blur(12px) saturate(1.15);
-  }
 }
 
 /* ── Bannière KPI : fondus latéraux thématiques ──────────────── */
@@ -415,37 +549,59 @@ html {
   line-height: 1.5;
 }
 
-/* Typographie utilitaire */
+/* ── Typographie utilitaire — 100 % pilotée par les tokens ─────────── */
 .text-label {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-title);
   text-transform: uppercase;
-  color: var(--muted-foreground);
-  line-height: 1.3;
+  color: var(--foreground-faint);
+  line-height: var(--leading-snug);
 }
 
 .text-meta {
-  font-size: 0.75rem;
-  line-height: 1.45;
-  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--foreground-secondary);
 }
 
+/*
+ * Titre de carte — capitales légèrement espacées. C'est la signature
+ * Bloomberg : un en-tête qui s'annonce comme une étiquette d'instrument, pas
+ * comme un titre de page web.
+ */
 .text-title {
-  font-size: 0.9375rem;
-  font-weight: 600;
-  letter-spacing: -0.015em;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  text-transform: uppercase;
   color: var(--foreground);
-  line-height: 1.35;
+  line-height: var(--leading-snug);
 }
 
 /* Section page (hors carte) — « Votre patrimoine », « Contexte marché » */
 .section-heading {
-  font-size: 0.875rem;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  color: var(--foreground);
-  line-height: 1.35;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  text-transform: uppercase;
+  color: var(--foreground-secondary);
+  line-height: var(--leading-snug);
+}
+
+/*
+ * Tout nombre affiché passe par `.num`.
+ *
+ * `tabular-nums` fige la chasse des chiffres : sans lui, une colonne de
+ * montants danse d'une ligne à l'autre au moindre changement de valeur, et
+ * c'est précisément ce qui distingue un tableau de bord amateur d'un
+ * terminal. Le léger resserrement compense la largeur naturelle du mono.
+ */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+  font-feature-settings: "zero" on;
 }
 
 /* Titre de module mis en avant (identité or, sans shine) */
@@ -811,65 +967,64 @@ body.col-resizing {
   user-select: none !important;
 }
 
+/**
+ * Surfaces — opaques et plates.
+ *
+ * Le design system précédent empilait un « liquid glass » (semi-transparence
+ * + blur 18–26 px) sur chaque carte. Sur un fond #090909 ce flou ne produit
+ * plus aucune matière visible : il coûte du GPU, fait baver les bordures à
+ * 1 px et brouille les chiffres — l'inverse exact d'un terminal. La
+ * profondeur vient désormais du seul empilement de surfaces (--background <
+ * --surface < --surface-raised) et d'une bordure filaire.
+ */
 .card {
-  background: color-mix(in srgb, var(--card) 80%, transparent);
+  background: var(--surface);
   color: var(--card-foreground);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-sm);
-  max-width: 100%;
-  min-width: 0;
-  backdrop-filter: blur(18px) saturate(1.35);
-  -webkit-backdrop-filter: blur(18px) saturate(1.35);
-}
-
-.dark .card {
-  box-shadow: var(--shadow-sm);
-  /* Plus opaque qu'avant (78 % → 92 %) : les fenêtres se distinguaient mal
-     d'un fond déjà sombre et laissaient trop transparaître la teinte bleutée
-     sous-jacente. Le flou monte en retour pour garder l'effet liquid glass. */
-  background: color-mix(in srgb, var(--card) 92%, transparent);
-  backdrop-filter: blur(26px) saturate(1.2);
-  -webkit-backdrop-filter: blur(26px) saturate(1.2);
-}
-
-/* Carte plate (toolbar / table chrome) — moins de « boîte dans boîte » */
-.card-flat {
-  background: color-mix(in srgb, var(--card) 80%, transparent);
-  color: var(--card-foreground);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  box-shadow: none;
-  max-width: 100%;
-  min-width: 0;
-  backdrop-filter: blur(14px) saturate(1.25);
-  -webkit-backdrop-filter: blur(14px) saturate(1.25);
-}
-
-.surface-inset {
-  background: color-mix(in srgb, var(--muted) 82%, transparent);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  backdrop-filter: blur(12px) saturate(1.2);
-  -webkit-backdrop-filter: blur(12px) saturate(1.2);
-}
-
-.kpi-tile {
-  background: color-mix(in srgb, var(--card) 80%, transparent);
-  color: var(--card-foreground);
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xs);
   max-width: 100%;
   min-width: 0;
-  backdrop-filter: blur(16px) saturate(1.3);
-  -webkit-backdrop-filter: blur(16px) saturate(1.3);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
 
+/* Carte plate (toolbar / table chrome) — moins de « boîte dans boîte » */
+.card-flat {
+  background: var(--surface);
+  color: var(--card-foreground);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.surface-inset {
+  background: var(--surface-sunken);
+  border: var(--border-width) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.kpi-tile {
+  background: var(--surface);
+  color: var(--card-foreground);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  max-width: 100%;
+  min-width: 0;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+/* Survol : éclaircissement + soulèvement d'1 px. Aucun rebond. */
 .kpi-tile:hover {
+  background: var(--surface-hover);
   border-color: var(--border-strong);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-lift);
+  transform: translateY(-1px);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1172,4 +1327,340 @@ textarea:focus-visible,
 [tabindex]:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  COUCHE COMPOSANTS — TERMINAL
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Variantes réutilisables construites exclusivement sur les tokens du haut
+ *  de ce fichier. Toute valeur littérale ici serait un bug.
+ */
+
+/* ── Bandeau marchés — la ligne la plus fine de l'interface ────────── */
+.term-ticker {
+  height: var(--ticker-height);
+  background: var(--ticker-bg);
+  border-bottom: var(--border-width) solid var(--border);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-normal);
+  color: var(--foreground-secondary);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.term-ticker-rail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding-inline: var(--space-4);
+  white-space: nowrap;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.term-ticker-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.term-ticker-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.term-ticker-symbol {
+  color: var(--foreground-faint);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+}
+
+.term-ticker-price {
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Coquille : colonne de navigation + zone de travail ───────────── */
+.term-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  min-height: 0;
+}
+
+@media (max-width: 900px) {
+  /* Sous 900 px la colonne passe en barre horizontale : une sidebar de
+     72 px ampute trop la largeur utile des tableaux. */
+  .term-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.term-sidebar {
+  background: var(--background);
+  border-right: var(--border-width) solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding-block: var(--space-3);
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+}
+
+@media (max-width: 900px) {
+  .term-sidebar {
+    flex-direction: row;
+    height: auto;
+    width: 100%;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: var(--border-width) solid var(--border);
+    padding-inline: var(--space-2);
+    scrollbar-width: none;
+  }
+  .term-sidebar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/*
+ * Entrée de navigation : icône + micro-libellé.
+ * L'état actif se signale par un filet doré à gauche plutôt que par un aplat
+ * — sur une colonne étroite, un fond plein écrase l'icône et alourdit la
+ * page ; le filet suffit et reste dans le registre « instrument ».
+ */
+.term-nav-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  width: calc(var(--sidebar-width) - var(--space-3));
+  padding-block: var(--space-2);
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-md);
+  color: var(--foreground-faint);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  /* Pas d'interlettrage ici, contrairement aux autres capitales du système :
+     sur 80 px utiles il ferait déborder « TRANSACTIONS ». */
+  letter-spacing: var(--tracking-normal);
+  text-transform: uppercase;
+  text-align: center;
+  line-height: var(--leading-tight);
+  /* Coupure aux espaces uniquement : « TRANSACTIONS » doit rester entier,
+     « TABLEAU DE BORD » a le droit de passer à la ligne. */
+  overflow-wrap: normal;
+  hyphens: none;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.term-nav-item:hover {
+  color: var(--foreground);
+  background: var(--surface-hover);
+}
+
+.term-nav-item[data-active="true"] {
+  color: var(--primary-text);
+  background: var(--primary-soft);
+}
+
+/* Filet doré collé au bord de la colonne — repère périphérique qui survit à
+   la vision floue, là où un simple changement de teinte d'icône se perd. */
+.term-nav-item[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--space-1);
+  bottom: var(--space-1);
+  width: calc(var(--space-px) * 2);
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  box-shadow: 0 0 var(--space-2) var(--chart-glow);
+}
+
+@media (max-width: 900px) {
+  .term-nav-item[data-active="true"]::before {
+    left: var(--space-2);
+    right: var(--space-2);
+    top: auto;
+    bottom: 0;
+    width: auto;
+    height: calc(var(--space-px) * 2);
+  }
+}
+
+/* ── Carte / panneau ─────────────────────────────────────────────── */
+.panel {
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  min-width: 0;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.panel--interactive:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--pad-card) var(--pad-card) var(--space-3);
+  min-width: 0;
+}
+
+.panel-body {
+  padding: 0 var(--pad-card) var(--pad-card);
+  min-width: 0;
+}
+
+/* ── Contrôle segmenté (1M · 3M · 1A · Tout) ──────────────────────── */
+.term-seg {
+  display: inline-flex;
+  padding: var(--space-px);
+  gap: var(--space-px);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.term-seg-item {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-label);
+  color: var(--foreground-faint);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.term-seg-item:hover:not([data-active="true"]) {
+  color: var(--foreground);
+}
+
+.term-seg-item[data-active="true"] {
+  color: var(--primary-text);
+  background: var(--surface);
+  border-color: var(--gold-border);
+  box-shadow: inset 0 0 0 var(--border-width) var(--gold-border);
+}
+
+/* ── Tableau terminal ─────────────────────────────────────────────── */
+.term-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.term-table thead th {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-title);
+  text-transform: uppercase;
+  color: var(--foreground-faint);
+  border-bottom: var(--border-width) solid var(--border);
+  white-space: nowrap;
+}
+
+.term-table tbody td {
+  padding: var(--space-3);
+  border-bottom: var(--border-width) solid var(--border-subtle);
+  color: var(--foreground);
+  vertical-align: middle;
+}
+
+.term-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.term-table tbody tr {
+  transition: background-color var(--transition-fast);
+}
+
+.term-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+/* Colonnes de nombres : alignées à droite et monospacées, sans exception. */
+.term-table .col-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+  white-space: nowrap;
+}
+
+/* ── Graphiques ───────────────────────────────────────────────────── */
+.term-chart-grid line,
+.term-chart-grid path {
+  stroke: var(--chart-grid);
+}
+
+/* Infobulle Recharts — même matière que les cartes */
+.term-tooltip {
+  background: var(--surface-raised);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+}
+
+.term-tooltip-label {
+  color: var(--foreground-faint);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  margin-bottom: var(--space-1);
+}
+
+.term-tooltip-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+  font-weight: var(--weight-medium);
+}
+
+/* ── Statuts ──────────────────────────────────────────────────────── */
+.val-positive {
+  color: var(--positive);
+}
+.val-negative {
+  color: var(--negative);
+}
+.val-neutral {
+  color: var(--foreground-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .term-nav-item,
+  .term-seg-item,
+  .panel,
+  .kpi-tile,
+  .term-table tbody tr {
+    transition: none;
+  }
+  .kpi-tile:hover {
+    transform: none;
+  }
 }

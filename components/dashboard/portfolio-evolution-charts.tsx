@@ -170,6 +170,7 @@ export function PortfolioValueChart({
           fill="url(#evolution-value-fill)"
           dot={false}
           activeDot={{ r: 4, strokeWidth: 0 }}
+          isAnimationActive={false}
         />
       </ComposedChart>
     </ResponsiveContainer>
@@ -291,6 +292,7 @@ export function PortfolioPercentChart({
           fill="url(#evolution-percent-fill)"
           dot={false}
           activeDot={{ r: 4, strokeWidth: 0 }}
+          isAnimationActive={false}
         />
         {hasBenchmark && (
           <Line
@@ -301,6 +303,7 @@ export function PortfolioPercentChart({
             strokeWidth={1.5}
             strokeDasharray="5 4"
             dot={false}
+            isAnimationActive={false}
           />
         )}
       </ComposedChart>

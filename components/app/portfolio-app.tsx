@@ -21,7 +21,7 @@ import {
   type PlatformForm,
 } from "@/app/lib/schemas";
 import { ACCOUNT_TYPES, type AccountType } from "@/app/lib/constants";
-import { formatCurrency } from "@/app/lib/utils";
+import { formatCurrency, cn } from "@/app/lib/utils";
 import { fetchJson, reloadHoldings } from "@/app/lib/api-client";
 import { usePriceAutoRefresh } from "@/app/hooks/use-price-auto-refresh";
 import { useGlobalShortcuts } from "@/app/hooks/use-global-shortcuts";
@@ -66,6 +66,10 @@ import {
 
 import dynamic from "next/dynamic";
 import { AppHeader } from "@/components/layout/app-header";
+import { AppSidebar } from "@/components/layout/app-sidebar";
+import { MarketTicker } from "@/components/layout/market-ticker";
+import { PreferencesPanel } from "@/components/layout/preferences-panel";
+import { Modal } from "@/components/ui/modal";
 import { Shell } from "@/components/layout/display-provider";
 import { BrandBannerSurface } from "@/components/branding/brand-surfaces";
 import { KpiStrip } from "@/components/dashboard/kpi-strip";
@@ -286,6 +290,8 @@ function PortfolioAppClient({
   // Deep-link / e2e : ?import=1 → état d’import dérivé + manuel
   const importFromUrl = searchParams.get("import") === "1";
   const [showImportManual, setShowImportManual] = useState(false);
+  /** Préférences — ouvertes depuis la sidebar, en plus du menu Compte. */
+  const [showPreferences, setShowPreferences] = useState(false);
   const showImport = importFromUrl || showImportManual;
   const setShowImport = (v: boolean) => {
     setShowImportManual(v);
@@ -797,7 +803,9 @@ function PortfolioAppClient({
   });
   const dashBlocks = dashboardBlocksFor(dashboardMaturity);
   /** KPI globaux : toujours hors dashboard ; sur dashboard seulement si mature */
-  const showGlobalKpis = !isDashboard || dashBlocks.showKpiStrip;
+  // Le dashboard porte désormais sa propre rangée d'indicateurs (hero +
+  // TerminalKpiRow) : réafficher le bandeau générique au-dessus ferait doublon.
+  const showGlobalKpis = !isDashboard;
 
   /**
    * Plateformes « Notaire / immobilier » : la saisie d'un bien y suit un
@@ -1043,13 +1051,19 @@ function PortfolioAppClient({
       {/* Skip link a11y — premier Tab */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-teal-600 focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-lg"
+        className={cn(
+          "sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100]",
+          "focus:rounded-[var(--radius-md)] focus:bg-[var(--primary)] focus:px-3 focus:py-2",
+          "focus:text-sm focus:font-medium focus:text-[var(--primary-foreground)]"
+        )}
       >
         Aller au contenu principal
       </a>
+
+      {/* Bandeau marchés — la ligne la plus haute et la plus fine du terminal */}
+      <MarketTicker />
+
       <AppHeader
-        tab={tab}
-        onTabChange={setTab}
         baseCurrency={baseCurrency}
         onBaseCurrencyChange={changeBase}
         lastPriceSync={lastPriceSync}
@@ -1061,7 +1075,19 @@ function PortfolioAppClient({
         onOpenCommandPalette={() => setCmdOpen(true)}
       />
 
-      <Shell>
+      {/*
+        Coquille : colonne de navigation figée + zone de travail défilante.
+        La sidebar remplace la rangée d'onglets — c'est ce qui libère le centre
+        du header pour la recherche.
+      */}
+      <div className="term-shell">
+        <AppSidebar
+          tab={tab}
+          onTabChange={setTab}
+          onOpenPreferences={() => setShowPreferences(true)}
+        />
+
+        <Shell>
         {/*
           module-flow : rythme vertical KPI → corps du module (tous onglets).
           Avant : main-content plat → Positions/Transactions collés aux indicateurs.
@@ -1163,6 +1189,7 @@ function PortfolioAppClient({
               <DashboardTab
                 baseCurrency={baseCurrency}
                 summary={summary}
+                holdings={allHoldings}
                 allocation={holdingsQ.data?.allocation}
                 history={historyQ.data?.history ?? []}
                 historyLoading={historyQ.isPending && !historyQ.data}
@@ -1269,7 +1296,18 @@ function PortfolioAppClient({
             {tab === "fiscal" && <FiscalYearTab baseCurrency={baseCurrency} />}
           </div>
         </div>
-      </Shell>
+        </Shell>
+      </div>
+
+      {showPreferences && (
+        <Modal
+          title="Préférences"
+          onClose={() => setShowPreferences(false)}
+          testId="preferences-modal"
+        >
+          <PreferencesPanel embedded />
+        </Modal>
+      )}
 
       <TransactionModal
         open={showTx}

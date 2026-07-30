@@ -1,16 +1,28 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+/**
+ * IBM Plex — la famille du terminal patrimonial.
+ *
+ * Plex Sans porte les libellés, Plex Mono TOUS les nombres : c'est
+ * l'alignement vertical des chiffres d'une colonne à l'autre qui fait lire
+ * « instrument financier » plutôt que « site web ». Les graisses sont
+ * limitées à 400/500/600 — au-delà, la densité tourne au bruit.
+ */
+const plexSans = IBM_Plex_Sans({
+  variable: "--font-plex-sans",
   subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const plexMono = IBM_Plex_Mono({
+  variable: "--font-plex-mono",
   subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -25,7 +37,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="fr" suppressHydrationWarning>
       {/* suppressHydrationWarning : next-themes / extensions navigateur touchent le DOM */}
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${plexSans.variable} ${plexMono.variable} antialiased`}
         suppressHydrationWarning
       >
         <Providers>{children}</Providers>

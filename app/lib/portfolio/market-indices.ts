@@ -10,7 +10,10 @@ export type MarketIndexKey =
   | "nasdaq"
   | "eurostoxx50"
   | "msciworld"
-  | "bitcoin";
+  | "bitcoin"
+  | "ethereum"
+  | "eurusd"
+  | "gold";
 
 export type MarketIndex = {
   key: MarketIndexKey;
@@ -39,10 +42,41 @@ export const MARKET_INDICES: MarketIndex[] = [
   { key: "bitcoin", label: "Bitcoin", yahoo: "BTC-EUR", hint: "BTC en euro" },
 ];
 
-const BY_KEY = new Map(MARKET_INDICES.map((i) => [i.key, i]));
+/**
+ * Bandeau marchés du terminal — catalogue distinct de `MARKET_INDICES`.
+ *
+ * Les deux listes servent des rôles différents et ne doivent pas fusionner :
+ * `MARKET_INDICES` peuple le sélecteur « Versus » du graphique d'évolution
+ * (seules des références auxquelles comparer un portefeuille y ont un sens),
+ * tandis que celle-ci est un fil d'actualité de marché — une parité EUR/USD
+ * s'y lit très bien mais ne serait pas un benchmark patrimonial recevable.
+ *
+ * Les deux alimentent en revanche la même liste blanche côté API.
+ */
+export const MARKET_TICKERS: MarketIndex[] = [
+  { key: "cac40", label: "CAC 40", yahoo: "^FCHI", hint: "Actions françaises" },
+  { key: "sp500", label: "S&P 500", yahoo: "^GSPC", hint: "Grandes cap. US" },
+  { key: "bitcoin", label: "BTC/EUR", yahoo: "BTC-EUR", hint: "Bitcoin en euro" },
+  { key: "ethereum", label: "ETH/EUR", yahoo: "ETH-EUR", hint: "Ether en euro" },
+  { key: "eurusd", label: "EUR/USD", yahoo: "EURUSD=X", hint: "Parité euro / dollar" },
+  { key: "gold", label: "OR", yahoo: "GC=F", hint: "Once d'or (futures)" },
+];
+
+const BY_KEY = new Map(
+  [...MARKET_INDICES, ...MARKET_TICKERS].map((i) => [i.key, i])
+);
+
+/**
+ * Vrai uniquement pour les clés proposées dans le sélecteur « Versus ».
+ *
+ * Volontairement plus strict que `BY_KEY` : une préférence persistée pointant
+ * sur un symbole réservé au bandeau (EUR/USD…) laisserait le `<select>` sans
+ * option correspondante, donc sans valeur affichée.
+ */
+const SELECTABLE = new Set(MARKET_INDICES.map((i) => i.key));
 
 export function isMarketIndexKey(v: unknown): v is MarketIndexKey {
-  return typeof v === "string" && BY_KEY.has(v as MarketIndexKey);
+  return typeof v === "string" && SELECTABLE.has(v as MarketIndexKey);
 }
 
 export function marketIndexByKey(key: string): MarketIndex | undefined {
@@ -53,7 +87,10 @@ export function marketIndexLabel(key: string): string {
   return BY_KEY.get(key as MarketIndexKey)?.label ?? "Indice";
 }
 
-/** Table {key → symbole Yahoo} pour l'API benchmark. */
+/**
+ * Liste blanche {key → symbole Yahoo} de l'API `/api/benchmark`.
+ * Union des deux catalogues : tout ce que l'UI peut demander, et rien de plus.
+ */
 export const MARKET_INDEX_SYMBOLS: Record<string, string> = Object.fromEntries(
-  MARKET_INDICES.map((i) => [i.key, i.yahoo])
+  [...MARKET_INDICES, ...MARKET_TICKERS].map((i) => [i.key, i.yahoo])
 );

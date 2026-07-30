@@ -4,15 +4,24 @@ import { useMemo, useState } from "react";
 import { NewsMacroPanel } from "@/components/dashboard/news-macro-panel";
 import type { PortfolioTickerProp } from "@/components/dashboard/market-calendar-panel";
 import { PortfolioEvolutionPanel } from "@/components/dashboard/portfolio-evolution-panel";
-import { AllocationClassPanel } from "@/components/dashboard/allocation-class-panel";
-import { PortfolioSummaryPanel } from "@/components/dashboard/portfolio-summary-panel";
-import { DashboardActivation } from "@/components/dashboard/dashboard-activation";
 import {
-  DashboardQuickActions,
-  type DashboardNavTarget,
-} from "@/components/dashboard/dashboard-quick-actions";
+  TerminalHero,
+  TerminalKpiRow,
+  type TerminalKpi,
+} from "@/components/dashboard/terminal-hero";
+import {
+  AllocationCard,
+  RecentActivityCard,
+  WatchlistCard,
+} from "@/components/dashboard/terminal-panels";
+import { DashboardActivation } from "@/components/dashboard/dashboard-activation";
+import type { DashboardNavTarget } from "@/components/dashboard/dashboard-quick-actions";
 import { getAssetClassLabel, cn } from "@/app/lib/utils";
-import { type HistoryPoint, type PortfolioAllocation } from "@/app/lib/types/ui";
+import type {
+  Holding,
+  HistoryPoint,
+  PortfolioAllocation,
+} from "@/app/lib/types/ui";
 import {
   dashboardBlocksFor,
   resolveDashboardMaturity,
@@ -21,12 +30,43 @@ import {
   type DashboardMaturityInput,
 } from "@/app/lib/dashboard/maturity";
 
-type ClassSlice = { name: string; value: number };
+/**
+ * Profondeur d'historique des tuiles KPI (sparkline + variation).
+ * Trente points ≈ un mois de relevés quotidiens : assez pour dessiner une
+ * tendance, assez court pour que le pourcentage reste interprétable.
+ */
+const KPI_WINDOW_POINTS = 30;
 
-/** Round to 2 decimals (display + pie labels) */
 function round2(n: number): number {
   if (!Number.isFinite(n)) return 0;
   return Math.round(n * 100) / 100;
+}
+
+function num(v: unknown): number {
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Variation d'une série d'historique, en %.
+ *
+ * La base est la première valeur **non nulle**, pas la première valeur tout
+ * court : un portefeuille commence à zéro, et prendre ce zéro comme référence
+ * rendait la variation incalculable sur presque tous les indicateurs — tous
+ * affichaient « — » alors que l'historique existait. Les zéros de tête sont
+ * l'absence de position, pas une valeur mesurée.
+ *
+ * `null` quand la série est trop courte ou entièrement nulle : mieux vaut ne
+ * rien afficher qu'un pourcentage inventé.
+ */
+function seriesChangePct(values: number[]): number | null {
+  if (values.length < 2) return null;
+  const baseIdx = values.findIndex((v) => Number.isFinite(v) && v !== 0);
+  if (baseIdx < 0 || baseIdx === values.length - 1) return null;
+  const first = values[baseIdx]!;
+  const last = values[values.length - 1]!;
+  if (!Number.isFinite(last)) return null;
+  return ((last - first) / Math.abs(first)) * 100;
 }
 
 export type DashboardTabProps = {
@@ -35,25 +75,28 @@ export type DashboardTabProps = {
   allocation?: PortfolioAllocation;
   history: HistoryPoint[];
   historyLoading?: boolean;
-  /** Compteurs pour maturité (si absents → dérivés des props data) */
+  /** Lignes détenues — alimentent la watchlist. */
+  holdings?: Holding[];
   maturityInput?: DashboardMaturityInput;
-  /** Override test / story */
   maturityOverride?: DashboardMaturity;
-  /** Titres cotés pour le calendrier des résultats (priorité portefeuille) */
   portfolioTickers?: PortfolioTickerProp[];
   onAddPlatform?: () => void;
   onImport?: () => void;
   onAddTransaction?: () => void;
-  /** Navigation cockpit → vues métier */
   onNavigate?: (target: DashboardNavTarget) => void;
   showEveryStart?: boolean;
   onShowEveryStartChange?: (v: boolean) => void;
 };
 
 /**
- * Tableau de bord adaptatif :
- * - empty / setup → activation (faible densité)
- * - active → cockpit analytique complet
+ * Tableau de bord — terminal patrimonial.
+ *
+ * Hiérarchie de lecture, dans cet ordre et sans exception :
+ *   patrimoine net → indicateurs → évolution → répartition → activité.
+ *
+ * Chaque bloc est plus dense et moins contrasté que le précédent ; c'est ce
+ * dégradé, plus que les tailles de police prises isolément, qui fait que
+ * l'œil descend la page sans hésiter.
  */
 export function DashboardTab({
   baseCurrency,
@@ -61,6 +104,7 @@ export function DashboardTab({
   allocation,
   history,
   historyLoading,
+  holdings = [],
   maturityInput,
   maturityOverride,
   portfolioTickers = [],
@@ -78,8 +122,7 @@ export function DashboardTab({
     historyPointCount: history.length,
   };
 
-  const maturity =
-    maturityOverride ?? resolveDashboardMaturity(resolvedInput);
+  const maturity = maturityOverride ?? resolveDashboardMaturity(resolvedInput);
   const blocks = dashboardBlocksFor(maturity);
   const signals = toOnboardingSignals(resolvedInput);
 
@@ -93,41 +136,29 @@ export function DashboardTab({
     if (target === "platforms") onAddPlatform?.();
   }
 
-  // Keep last non-empty allocation visible while holdings/history refetch mid-refresh
+  // Conserve la dernière allocation non vide pendant un rafraîchissement :
+  // sans cela le camembert disparaît à chaque refetch.
   const [stableAllocation, setStableAllocation] = useState<
     PortfolioAllocation | undefined
   >(allocation);
   const [prevAllocation, setPrevAllocation] = useState(allocation);
-
   if (allocation !== prevAllocation) {
     setPrevAllocation(allocation);
     if (allocation) {
       const hasClass = (allocation.byClass?.length ?? 0) > 0;
       const hasPlat = (allocation.byPlatform?.length ?? 0) > 0;
-      if (hasClass || hasPlat) {
-        setStableAllocation(allocation);
-      }
+      if (hasClass || hasPlat) setStableAllocation(allocation);
     }
   }
-
   const displayAllocation = stableAllocation ?? allocation;
 
-  const classChart: ClassSlice[] = useMemo(
+  const classChart = useMemo(
     () =>
       displayAllocation?.byClass.map((x) => ({
         name: getAssetClassLabel(x.name),
-        value: round2(Number(x.value) || 0),
+        value: round2(num(x.value)),
       })) ?? [],
     [displayAllocation?.byClass]
-  );
-
-  const platformChart = useMemo(
-    () =>
-      (displayAllocation?.byPlatform || []).map((x) => ({
-        name: x.name,
-        value: round2(Number(x.value) || 0),
-      })),
-    [displayAllocation?.byPlatform]
   );
 
   const [stableHistory, setStableHistory] = useState<HistoryPoint[]>(history);
@@ -138,33 +169,109 @@ export function DashboardTab({
   }
 
   const showHistoryLoading =
-    Boolean(historyLoading) &&
-    stableHistory.length === 0 &&
-    history.length === 0;
+    Boolean(historyLoading) && stableHistory.length === 0 && history.length === 0;
+
+  /**
+   * Indicateurs — l'ordre du mockup, qui est aussi l'ordre de pilotage :
+   * d'abord l'exposition cotée et le résultat, puis les poches annexes.
+   *
+   * Une sparkline n'est fournie que là où l'historique porte réellement la
+   * grandeur. Alternatifs, épargne salariale et passifs n'y figurent pas :
+   * leur tracer une courbe reviendrait à inventer une trajectoire.
+   */
+  const kpis = useMemo<TerminalKpi[]>(() => {
+    // Fenêtre glissante plutôt que l'historique entier : sur un portefeuille
+    // parti de zéro, une variation « depuis l'origine » affiche +30 000 % et
+    // n'apprend rien. Un indicateur de tête répond à « où en est-on
+    // récemment ? », pas à « qu'a-t-on accumulé depuis toujours ? ».
+    const h = stableHistory.slice(-KPI_WINDOW_POINTS);
+    const seriesOf = (pick: (p: HistoryPoint) => number) =>
+      h.length >= 2 ? h.map(pick) : undefined;
+
+    const listed = seriesOf((p) => num(p.positionsBase));
+    const latent = seriesOf((p) => num(p.unrealizedPnlBase));
+    const cash = seriesOf((p) => num(p.cashTotalBase));
+    const realized = seriesOf(
+      (p) => num(p.realizedPnlBase) + num(p.cashIncomeBase)
+    );
+
+    return [
+      {
+        key: "listed",
+        label: "Cotés",
+        value: num(summary?.totalMarketValueBase ?? summary?.totalMarketValueEur),
+        spark: listed,
+        changePct: listed ? seriesChangePct(listed) : null,
+        tone: "gold",
+      },
+      {
+        key: "latent",
+        label: "P&L latent",
+        value: num(summary?.unrealizedPnlBase ?? summary?.unrealizedPnlEur),
+        spark: latent,
+        changePct: latent ? seriesChangePct(latent) : null,
+      },
+      {
+        key: "cash",
+        label: "Cash",
+        value: num(summary?.totalCashBase ?? summary?.totalCashEur),
+        spark: cash,
+        changePct: cash ? seriesChangePct(cash) : null,
+        tone: "cyan",
+      },
+      {
+        key: "alternatives",
+        label: "Alternatifs",
+        value: num(summary?.totalAlternativesBase ?? summary?.totalAlternativesEur),
+        changePct: null,
+        tone: "neutral",
+      },
+      {
+        key: "employee-savings",
+        label: "Épargne salariale",
+        value: num(
+          summary?.totalEmployeeSavingsBase ?? summary?.totalEmployeeSavingsEur
+        ),
+        changePct: null,
+        tone: "neutral",
+      },
+      {
+        key: "liabilities",
+        label: "Passifs",
+        value: num(summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur),
+        changePct: null,
+        tone: "negative",
+      },
+      {
+        key: "realized",
+        label: "Réalisé + revenus",
+        value:
+          num(summary?.realizedPnlBase ?? summary?.realizedPnlEur) +
+          num(summary?.cashIncomeBase ?? summary?.cashIncomeEur),
+        spark: realized,
+        changePct: realized ? seriesChangePct(realized) : null,
+      },
+    ];
+  }, [summary, stableHistory]);
+
+  const netWorth = summary
+    ? num(summary.netWorthBase ?? summary.netWorthEur)
+    : null;
 
   const canActivate =
-    Boolean(onAddPlatform) &&
-    Boolean(onImport) &&
-    Boolean(onAddTransaction);
-
-  // En maturité `empty` / `setup`, `dashboardBlocksFor` désactive tous les
-  // autres blocs : la carte d'activation est seule à l'écran et laissait
-  // plusieurs centaines de pixels vides en dessous, ce qui se lit comme une page
-  // inachevée plutôt que comme un point de départ. On la centre verticalement
-  // dans ce cas — `section-stack` est déjà un flex column, donc il suffit de la
-  // hauteur et de l'alignement.
+    Boolean(onAddPlatform) && Boolean(onImport) && Boolean(onAddTransaction);
   const onboardingAlone = blocks.showOnboardingHero && canActivate;
 
   return (
     <div
       className={cn(
-        "section-stack",
+        "flex min-w-0 flex-col gap-[var(--gap-section)]",
         onboardingAlone && "min-h-[62vh] justify-center"
       )}
       data-testid="dashboard-tab"
       data-maturity={maturity}
     >
-      {/* —— 1. Activation (empty / setup) —— */}
+      {/* —— Activation (compte vierge ou en cours de constitution) —— */}
       {blocks.showOnboardingHero && canActivate && (
         <DashboardActivation
           maturity={maturity === "active" ? "setup" : maturity}
@@ -177,133 +284,64 @@ export function DashboardTab({
         />
       )}
 
-      {/* —— 1b. Actions rapides (mature) —— */}
-      {blocks.showQuickActions && (
-        <DashboardQuickActions onNavigate={handleNav} />
+      {/* —— 1. Patrimoine net —— */}
+      {blocks.showEvolutionChart && (
+        <TerminalHero
+          netWorth={netWorth}
+          history={stableHistory}
+          baseCurrency={baseCurrency}
+          loading={showHistoryLoading}
+        />
       )}
 
-      {maturity === "setup" && !blocks.showOnboardingHero && (
-        <p
-          className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--muted)]/50 px-3.5 py-2.5 text-xs leading-relaxed text-[var(--muted-foreground)]"
-          data-testid="dashboard-setup-hint"
-        >
-          Continuez le journal d&apos;opérations pour enrichir l&apos;analyse
-          patrimoniale (courbe, allocation, synthèse).
-        </p>
+      {/* —— 2. Indicateurs —— */}
+      {blocks.showKpiStrip && (
+        <TerminalKpiRow items={kpis} baseCurrency={baseCurrency} />
       )}
 
-      {/* —— 2. Analyse patrimoniale (grille modulaire) —— */}
-      {(blocks.showEvolutionChart ||
-        blocks.showAllocations ||
-        blocks.showSecondaryStats) && (
-        <section
-          className="space-y-4"
-          data-testid="dashboard-portfolio-section"
-          aria-labelledby="dashboard-portfolio-heading"
+      {/* —— 3 & 4. Évolution · Répartition + Watchlist —— */}
+      {(blocks.showEvolutionChart || blocks.showAllocations) && (
+        <div
+          className={cn(
+            "grid min-w-0 gap-[var(--gap-card)]",
+            blocks.showEvolutionChart && blocks.showAllocations
+              ? "xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] xl:items-start"
+              : ""
+          )}
+          data-testid="dashboard-analytics"
         >
-          <div className="flex flex-wrap items-end justify-between gap-2 px-0.5">
-            <div>
-              <h2
-                id="dashboard-portfolio-heading"
-                className="section-heading"
-              >
-                Votre patrimoine
-              </h2>
-              <p className="text-meta">
-                Évolution, allocation et synthèse en un coup d&apos;œil
-              </p>
-            </div>
-            {onNavigate && (
-              <button
-                type="button"
-                className="rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--primary)] transition hover:bg-[var(--primary-soft)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-                data-testid="dashboard-link-positions"
-                onClick={() => handleNav("positions")}
-              >
-                Voir les positions →
-              </button>
-            )}
-          </div>
+          {blocks.showEvolutionChart && (
+            <PortfolioEvolutionPanel
+              history={stableHistory}
+              baseCurrency={baseCurrency}
+              loading={showHistoryLoading}
+              className="min-h-[22rem]"
+            />
+          )}
 
-          {/*
-            Desktop : ~70/30 — évolution (large) alignée en hauteur sur la colonne
-            Allocation + Plateforme (même système de cartes).
-          */}
-          <div
-            className={cn(
-              "grid min-w-0 gap-4",
-              blocks.showEvolutionChart && blocks.showAllocations
-                ? "lg:grid-cols-[2fr_1fr] lg:items-stretch"
-                : blocks.showAllocations
-                  ? "sm:grid-cols-2"
-                  : ""
-            )}
-            data-testid="dashboard-analytics"
-          >
-            {blocks.showEvolutionChart && (
-              <div
-                className={cn(
-                  "min-w-0",
-                  blocks.showAllocations
-                    ? "flex lg:h-full"
-                    : "mx-auto w-full max-w-3xl xl:max-w-4xl"
-                )}
-              >
-                <PortfolioEvolutionPanel
-                  history={stableHistory}
-                  baseCurrency={baseCurrency}
-                  loading={showHistoryLoading}
-                  className={blocks.showAllocations ? "w-full" : undefined}
-                />
-              </div>
-            )}
-
-            {blocks.showAllocations && (
-              <div
-                className={cn(
-                  "flex min-w-0 flex-col gap-4",
-                  blocks.showEvolutionChart
-                    ? "lg:h-full"
-                    : "sm:col-span-2 sm:grid sm:grid-cols-2 sm:gap-4"
-                )}
-              >
-                <AllocationClassPanel
-                  data={classChart}
-                  baseCurrency={baseCurrency}
-                  compact
-                />
-                <PortfolioSummaryPanel
-                  baseCurrency={baseCurrency}
-                  summary={summary}
-                  platforms={platformChart}
-                  showGlobal={blocks.showSecondaryStats}
-                  className="flex-1"
-                />
-              </div>
-            )}
-
-            {/* Synthèse seule si allocations masquées mais stats actives */}
-            {blocks.showSecondaryStats && !blocks.showAllocations && (
-              <PortfolioSummaryPanel
-                baseCurrency={baseCurrency}
-                summary={summary}
-                platforms={platformChart}
-                showGlobal
+          {blocks.showAllocations && (
+            <div className="flex min-w-0 flex-col gap-[var(--gap-card)]">
+              <AllocationCard data={classChart} baseCurrency={baseCurrency} />
+              <WatchlistCard
+                holdings={holdings}
+                onOpenPositions={() => handleNav("positions")}
               />
-            )}
-          </div>
-        </section>
+            </div>
+          )}
+        </div>
       )}
 
-      {/* —— 3. Contexte marché (zone distincte, sous le patrimoine) —— */}
+      {/* —— 5. Activité récente —— */}
+      {blocks.showEvolutionChart && (
+        <RecentActivityCard
+          baseCurrency={baseCurrency}
+          onOpenJournal={() => handleNav("transactions")}
+        />
+      )}
+
+      {/* —— Contexte marché — zone secondaire, sous le patrimoine —— */}
       {blocks.showNewsMacro && (
-        <section
-          className="pt-0.5"
-          data-testid="dashboard-market-section"
-          aria-label="Contexte marché"
-        >
-          <NewsMacroPanel portfolioTickers={portfolioTickers} compact />
-        </section>
+        <NewsMacroPanel portfolioTickers={portfolioTickers} compact />
       )}
     </div>
   );

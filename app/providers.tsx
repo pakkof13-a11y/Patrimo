@@ -8,7 +8,6 @@ import { Toaster } from "sonner";
 import { DisplayProvider } from "@/components/layout/display-provider";
 import { NotificationsProvider } from "@/app/lib/notifications/context";
 import { ErrorBoundary } from "@/components/layout/error-boundary";
-import { BrandPageBackground } from "@/components/branding/brand-page-background";
 
 /** Durée d’affichage des toasts Sonner (source unique). */
 const TOAST_DURATION_MS = 4000;
@@ -40,8 +39,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
         sur logos / fonds marque. Anti-flash initial : suppressHydrationWarning
         sur <html>/<body> + logos en fallback light tant que le thème n’est pas monté.
       */}
+      {/*
+        Plus de fond décoratif full-bleed derrière l'application.
+        L'illustration de marque (volutes dorées) restait lisible sous des
+        cartes semi-transparentes ; sur un terminal aux surfaces opaques elle
+        n'apparaît plus que dans les gouttières, où elle bruite la lecture des
+        chiffres sans rien apporter. Elle demeure sur l'écran de connexion,
+        seul endroit où la marque a le premier rôle.
+      */}
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-        <BrandPageBackground />
         <DisplayProvider>
           <NotificationsProvider>
             <QueryClientProvider client={client}>
