@@ -132,12 +132,13 @@ describe("validateLegs — composantes économiques", () => {
     expect(() => validateLegs("BORROWING", [])).not.toThrow();
   });
 
-  it("exige une dette sur un emprunt (cas 8)", () => {
-    // Sans elle, la position serait valorisée comme un dépôt et gonflerait le
-    // patrimoine du montant exact de ce qu'on doit.
+  it("accepte un emprunt sans DEBT explicite — l'auto-ajout de la jambe primaire la couvre (cas 8)", () => {
+    // `createDefiPosition` ajoute d'office une jambe DEBT pour l'actif
+    // principal quand aucune composante ne le porte déjà : un collatéral seul
+    // reste donc valide ici.
     expect(() =>
-      validateLegs("BORROWING", [leg({ legType: "COLLATERAL" })])
-    ).toThrow(/au moins une composante DEBT/);
+      validateLegs("BORROWING", [leg({ legType: "COLLATERAL" })], "USDC")
+    ).not.toThrow();
 
     expect(() =>
       validateLegs("BORROWING", [
@@ -145,6 +146,18 @@ describe("validateLegs — composantes économiques", () => {
         leg({ legType: "DEBT", symbol: "USDC", quantity: "1000" }),
       ])
     ).not.toThrow();
+  });
+
+  it("refuse un actif principal mal étiqueté sur un emprunt (cas 8bis)", () => {
+    // Un symbole principal explicitement listé sous un autre rôle bloquerait
+    // l'auto-ajout de la jambe DEBT : la dette ne serait jamais retranchée.
+    expect(() =>
+      validateLegs(
+        "BORROWING",
+        [leg({ legType: "ASSET", symbol: "USDC", quantity: "1000" })],
+        "USDC"
+      )
+    ).toThrow(/doit être déclaré en composante DEBT/);
   });
 
   it("refuse une dette sur une position qui n'est ni emprunt ni CDP", () => {

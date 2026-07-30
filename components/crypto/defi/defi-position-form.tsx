@@ -291,6 +291,7 @@ export function DefiPositionForm({
         nftPositionRef: form.nftPositionRef || null,
         notes: form.notes || null,
         legs: legs.length > 0 ? legs : null,
+        rewards: rewards.length > 0 ? rewards : null,
 
         ...(isLp
           ? {

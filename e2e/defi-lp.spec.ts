@@ -116,7 +116,10 @@ test.describe("DeFi — positions LP (nouveau wizard)", () => {
     const row = page.getByTestId("defi-row").filter({ hasText: `Uniswap V3 ${runId}` });
     await expect(row).toBeVisible({ timeout: 10_000 });
     await row.getByTestId("defi-row-open").click();
-    await expect(page.getByTestId("defi-detail-panel")).toBeVisible();
-    await expect(page.getByTestId("defi-badge-clmm")).toBeVisible();
+    const detail = page.getByTestId("defi-detail-panel");
+    await expect(detail).toBeVisible();
+    // Le même badge existe aussi sur la ligne de tableau derrière le panneau —
+    // on scope la recherche au détail pour éviter la violation de strict mode.
+    await expect(detail.getByTestId("defi-badge-clmm")).toBeVisible();
   });
 });

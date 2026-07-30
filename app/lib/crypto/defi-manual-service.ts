@@ -436,7 +436,8 @@ const MAX_LEGS = 12;
  */
 export function validateLegs(
   positionType: string,
-  legs: PositionLegInput[]
+  legs: PositionLegInput[],
+  primarySymbol?: string
 ): void {
   if (legs.length === 0) {
     // Un emprunt sans jambes reste accepté : c'est le comportement historique,
@@ -470,11 +471,6 @@ export function validateLegs(
     seen.add(key);
   }
 
-  if (positionType === "BORROWING" && !legs.some((l) => l.legType === "DEBT")) {
-    throw new DefiInputError(
-      "Un emprunt doit déclarer au moins une composante DEBT — sans elle, la dette ne serait pas retranchée du patrimoine"
-    );
-  }
   // Une dette déclarée sur autre chose qu'un emprunt ou un CDP est une erreur de
   // saisie : elle se retrancherait du patrimoine sans qu'aucun libellé ne
   // l'explique.
@@ -486,6 +482,23 @@ export function validateLegs(
     throw new DefiInputError(
       `Une composante DEBT n'a pas de sens sur une position ${positionType} — utilisez BORROWING ou CDP`
     );
+  }
+
+  // Un emprunt n'a pas besoin de déclarer sa dette explicitement : si aucune
+  // composante ne porte déjà le symbole principal, `createDefiPosition` lui
+  // ajoute d'office une jambe DEBT (cf. auto-ajout de la jambe primaire).
+  // La seule vraie erreur est un symbole principal explicitement mal étiqueté
+  // (ASSET/COLLATERAL) — ce cas bloquerait cet auto-ajout et la dette ne
+  // serait jamais retranchée du patrimoine.
+  if (positionType === "BORROWING" && primarySymbol) {
+    const primary = legs.find(
+      (l) => l.symbol.trim().toUpperCase() === primarySymbol.trim().toUpperCase()
+    );
+    if (primary && primary.legType !== "DEBT") {
+      throw new DefiInputError(
+        `L'actif principal d'un emprunt (${primarySymbol}) doit être déclaré en composante DEBT, pas ${primary.legType}`
+      );
+    }
   }
 }
 
@@ -628,7 +641,7 @@ export async function createDefiPosition(
   // Contexte d'accès, composantes et récompenses structurées — chantier F1.
   validateAccessContext(input);
   const positionLegs = input.legs ?? [];
-  validateLegs(input.positionType, positionLegs);
+  validateLegs(input.positionType, positionLegs, symbol);
   const positionRewards = input.rewards ?? [];
   validateRewards(positionRewards);
 

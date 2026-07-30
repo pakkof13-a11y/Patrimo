@@ -158,16 +158,21 @@ test.describe("DeFi — wizard d'ajout", () => {
   test("changement de mode d'accès demande confirmation et réinitialise (cas F2)", async ({
     page,
   }) => {
-    await page.getByTestId("defi-wizard-next").click();
+    await page.getByTestId("defi-wizard-next").click(); // -> Détention
     await page.getByTestId("defi-w-platform").selectOption({ label: DEFI_WALLET_NAME });
-    await page.getByTestId("defi-wizard-next").click();
+    await page.getByTestId("defi-wizard-next").click(); // -> Type
     await page.getByTestId("defi-w-chain").fill("ethereum");
     await page.getByTestId("defi-w-protocol").fill("Aave");
 
+    // Le sélecteur de mode d'accès n'existe que sur l'étape « Accès » : il
+    // faut y revenir pour le solliciter à nouveau.
+    await page.getByTestId("defi-wizard-prev").click(); // -> Détention
+    await page.getByTestId("defi-wizard-prev").click(); // -> Accès
     await page.getByTestId("defi-w-access-mode").selectOption("CEFI");
     await expect(page.getByTestId("defi-confirm-access-mode-change")).toBeVisible();
     await page.getByTestId("defi-confirm-access-mode-change-confirm").click();
-    // Le protocole saisi avant bascule a été réinitialisé.
+    // Le wallet saisi avant bascule a été réinitialisé.
+    await page.getByTestId("defi-wizard-next").click(); // -> Détention
     await expect(page.getByTestId("defi-w-platform")).toHaveValue("");
   });
 
@@ -255,6 +260,9 @@ test.describe("DeFi — détail, filtres, cycle de vie", () => {
   }) => {
     // Crée une position dédiée pour ne pas perturber les autres tests.
     await ensureDefiWallet(request, DEFI_WALLET_NAME);
+    // Re-navigue pour que la requête des plateformes reflète le wallet qu'on
+    // vient de créer (le `beforeEach` du describe l'a déjà chargée avant).
+    await openDefiTab(page);
     await page.getByTestId("defi-toolbar-add").click();
     await page.getByTestId("defi-wizard-next").click();
     await page.getByTestId("defi-w-platform").selectOption({ label: DEFI_WALLET_NAME });
