@@ -12,6 +12,7 @@ import {
   NftInputError,
 } from "@/app/lib/crypto/nft-manual-service";
 import { NFT_STANDARDS } from "@/app/lib/crypto/nft-constants";
+import { NFT_HOLDING_ACCESS_MODES, NFT_CUSTODY_MODELS, NFT_ACQUISITION_SOURCES } from "@/app/lib/crypto/nft-taxonomy";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -64,6 +65,12 @@ const createSchema = z.object({
   acquisitionDate: z.string().min(1),
   manualFloorPriceEur: decimalString.optional().nullable(),
   notes: z.string().trim().max(2000).optional().nullable(),
+  // ── Champs additifs du chantier NFT (optionnels) ──
+  ownerLabel: z.string().trim().max(120).optional().nullable(),
+  ownershipShare: decimalString.optional().nullable(),
+  accessMode: z.enum(Object.keys(NFT_HOLDING_ACCESS_MODES) as [string, ...string[]]).optional().nullable(),
+  custodyModel: z.enum(Object.keys(NFT_CUSTODY_MODELS) as [string, ...string[]]).optional().nullable(),
+  acquisitionSource: z.enum(Object.keys(NFT_ACQUISITION_SOURCES) as [string, ...string[]]).optional().nullable(),
 });
 
 /** POST — saisie manuelle d'un NFT (fonctionne sans aucune clé API). */

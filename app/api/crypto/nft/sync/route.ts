@@ -66,6 +66,9 @@ export async function POST(req: Request) {
       itemsFound: result.fetched.ok ? result.fetched.items.length : 0,
       assetsCreated: result.assetsCreated,
       assetsExisting: result.assetsExisting,
+      reappeared: result.reappeared,
+      missingFlagged: result.missingFlagged,
+      completed: result.completed,
     });
   } catch (e) {
     console.error("[crypto/nft/sync POST]", e);
