@@ -24,9 +24,23 @@ const PERIOD_LABEL: Record<string, string> = {
   all: "historique",
 };
 
-function num(v: unknown): number {
-  const n = Number(v ?? 0);
-  return Number.isFinite(n) ? n : 0;
+/**
+ * `null` quand la valeur n'est pas encore calculée — jamais 0 : afficher un
+ * patrimoine net à « 0,00 € » pendant le chargement ferait lire une ruine là
+ * où il n'y a qu'une donnée manquante.
+ */
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Pourcentage à la française — virgule décimale, comme `formatCurrency`. */
+function formatPctFr(v: number): string {
+  return v.toLocaleString("fr-FR", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
 }
 
 /** Chemin SVG d'une sparkline normalisée dans un viewBox width×height. */
@@ -79,9 +93,19 @@ export function DashboardHero({
   );
   const delta = useMemo(() => evolutionDeltaSummary(points), [points]);
 
-  const netWorth = num(summary?.netWorthBase ?? summary?.netWorthEur);
+  const netWorth = numOrNull(summary?.netWorthBase ?? summary?.netWorthEur);
   const sparkValues = points.map((p) => p.total);
   const path = sparklinePath(sparkValues, 300, 72);
+
+  /** Date de la dernière valorisation réellement présente dans l'historique. */
+  const lastValuationAt = points.length > 0 ? points[points.length - 1]!.date : null;
+  const lastValuationLabel = lastValuationAt
+    ? new Date(lastValuationAt).toLocaleDateString("fr-FR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      })
+    : null;
 
   return (
     <div
@@ -91,21 +115,53 @@ export function DashboardHero({
       <div className="min-w-0">
         <div className="text-label">Patrimoine net</div>
         <div className="dashboard-hero-value mt-1 text-[2rem] font-semibold leading-none sm:text-[2.5rem]">
-          {formatCurrency(String(netWorth), baseCurrency)}
+          {netWorth == null ? (
+            <span
+              className="text-[1.5rem] font-medium text-[var(--foreground-muted)] sm:text-[1.75rem]"
+              data-testid="dashboard-hero-unknown"
+            >
+              Non calculé
+            </span>
+          ) : (
+            formatCurrency(String(netWorth), baseCurrency)
+          )}
         </div>
         {delta && points.length > 1 && (
           <div
             className={cn(
-              "mt-2 inline-flex items-center gap-1 text-[13px] font-semibold tabular-nums",
-              delta.delta >= 0 ? "text-[var(--success)]" : "text-[var(--danger)]"
+              "mt-2 inline-flex flex-wrap items-center gap-x-1 text-[13px] font-semibold tabular-nums",
+              delta.delta >= 0
+                ? "text-[var(--positive)]"
+                : "text-[var(--negative)]"
             )}
             data-testid="dashboard-hero-delta"
           >
-            {delta.delta >= 0 ? "+" : ""}
-            {delta.pct.toFixed(1)}&nbsp;% · {delta.delta >= 0 ? "+" : ""}
-            {formatCurrency(delta.delta, baseCurrency)} ·{" "}
-            {PERIOD_LABEL[effectiveRange] ?? effectiveRange}
+            {/* Le signe double la couleur : un daltonien lit la direction sans elle. */}
+            <span aria-hidden>{delta.delta >= 0 ? "▲" : "▼"}</span>
+            {delta.delta >= 0 ? "+" : "−"}
+            {formatPctFr(Math.abs(delta.pct))}&nbsp;% · {delta.delta >= 0 ? "+" : "−"}
+            {formatCurrency(Math.abs(delta.delta), baseCurrency)}
+            <span className="font-normal text-[var(--foreground-muted)]">
+              {" "}
+              sur {PERIOD_LABEL[effectiveRange] ?? effectiveRange}
+            </span>
           </div>
+        )}
+        {/*
+          Cette variation est un écart de valeur totale : elle contient aussi
+          les apports et retraits de la période. Le dire évite de la lire comme
+          une performance — le module Évolution reste la vue d'analyse.
+        */}
+        {delta && points.length > 1 && (
+          <p className="mt-1 text-xs leading-snug text-[var(--foreground-muted)]">
+            Variation de valeur, apports et retraits inclus.
+            {lastValuationLabel ? ` Valorisation au ${lastValuationLabel}.` : ""}
+          </p>
+        )}
+        {!delta && lastValuationLabel && (
+          <p className="mt-1 text-xs text-[var(--foreground-muted)]">
+            Valorisation au {lastValuationLabel}.
+          </p>
         )}
       </div>
 
