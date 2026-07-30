@@ -33,7 +33,13 @@ const decimalString = z
 const createSchema = z.object({
   platformId: z.string().min(1),
   assetSymbol: z.string().trim().min(1, "Actif requis").max(24),
-  protocol: z.string().trim().min(1, "Protocole requis").max(80),
+  /**
+   * Vide accepté : `validateAccessContext` (couche service) est seule
+   * responsable de l'obligation, qui ne s'applique qu'en DeFi directe — un
+   * produit CeFi ou hybride ne divulgue pas toujours son protocole, et
+   * l'exiger ici forcerait l'utilisateur à en inventer un.
+   */
+  protocol: z.string().trim().max(80).optional().default(""),
   positionType: z.enum(
     Object.keys(DEFI_POSITION_TYPES) as [string, ...string[]]
   ),

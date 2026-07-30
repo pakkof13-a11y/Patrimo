@@ -181,7 +181,8 @@ export async function syncDefiPositions(
   userId: string,
   platformId: string,
   address: string,
-  apiKey?: string | null
+  apiKey?: string | null,
+  opts?: { ownerLabel?: string | null; ownershipPct?: string | null }
 ): Promise<DefiSyncResult> {
   const items = await fetchZerionDefiPositions(address, apiKey);
   const fxUsdToEur = await fxRateToEur("USD");
@@ -248,6 +249,11 @@ export async function syncDefiPositions(
           providerKey: defiProviderKey(item),
           openedAt: new Date(),
           lastSyncedAt: new Date(),
+          // Posés à la création seulement — au même titre que `dataOrigin` :
+          // une resynchronisation ne doit pas écraser une quote-part que
+          // l'utilisateur aurait ensuite corrigée à la main.
+          ownerLabel: opts?.ownerLabel?.trim() || null,
+          ownershipPct: opts?.ownershipPct ? new Prisma.Decimal(opts.ownershipPct) : null,
         },
         update: {
           protocol,

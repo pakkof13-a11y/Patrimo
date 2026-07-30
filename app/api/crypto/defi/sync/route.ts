@@ -20,6 +20,20 @@ const syncSchema = z.object({
    * fait. Limite V1 documentée dans `docs/defi-backend-v1.md`.
    */
   provider: z.literal("ZERION").optional(),
+  /**
+   * Appliqués aux positions **nouvellement créées** par cette synchronisation
+   * seulement — `syncDefiPositions` ne les pose jamais sur une position déjà
+   * existante, pour ne pas écraser une correction faite à la main entre deux
+   * synchronisations.
+   */
+  ownerLabel: z.string().trim().max(120).optional().nullable(),
+  ownershipPct: z
+    .string()
+    .trim()
+    .regex(/^\d+([.,]\d+)?$/, "Quote-part invalide")
+    .transform((v) => v.replace(",", "."))
+    .optional()
+    .nullable(),
 });
 
 /**
@@ -77,7 +91,8 @@ export async function POST(req: Request) {
       userId,
       platform.id,
       platform.walletAddress,
-      platform.walletApiKey
+      platform.walletApiKey,
+      { ownerLabel: parsed.data.ownerLabel, ownershipPct: parsed.data.ownershipPct }
     );
 
     await updateSyncCursor(userId, provider, {

@@ -103,6 +103,22 @@ export type EnrichedDefiPosition = {
   isIgnoredInPortfolio: boolean;
   strategyId: string | null;
 
+  /// Liquidité concentrée (Uniswap V3, Curve concentré) — colonnes déjà
+  /// portées par `DefiPositionDetail` (mécanisme LP historique), simplement
+  /// pas encore relayées par ce DTO. Aucun calcul de statut in-range : sans
+  /// prix de marché du second jeton (cf. limite V1 de `docs/defi-backend-v1.md`),
+  /// affirmer « dans la plage » serait une donnée incertaine présentée comme sûre.
+  isConcentrated: boolean;
+  priceRangeMin: string | null;
+  priceRangeMax: string | null;
+  pairedSymbol: string | null;
+
+  /// Lock-up simple (date de déblocage / de cliff). Le vesting multi-tranches
+  /// (`vestingSchedule`, JSON) n'est pas relayé ici — limite V1 assumée, le
+  /// verrou binaire couvre l'essentiel des cas DeFi (staking, vault, RWA).
+  unlockAt: string | null;
+  cliffAt: string | null;
+
   legs: Array<{
     legType: string;
     symbol: string;
@@ -480,6 +496,13 @@ export async function getDefiPortfolio(
       isHidden: row.isHidden,
       isIgnoredInPortfolio: row.isIgnoredInPortfolio,
       strategyId: row.strategyId,
+
+      isConcentrated: row.isConcentrated,
+      priceRangeMin: row.priceRangeMin ? row.priceRangeMin.toString() : null,
+      priceRangeMax: row.priceRangeMax ? row.priceRangeMax.toString() : null,
+      pairedSymbol: row.pairedSymbol,
+      unlockAt: row.unlockAt?.toISOString() ?? null,
+      cliffAt: row.cliffAt?.toISOString() ?? null,
 
       legs: legacyLegs.map((l) => ({
         legType: String(l.legType),

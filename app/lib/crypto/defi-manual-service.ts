@@ -540,8 +540,10 @@ export async function createDefiPosition(
   const symbol = input.assetSymbol.trim().toUpperCase();
   if (!symbol) throw new DefiInputError("L'actif engagé est requis");
 
+  // Le protocole n'est obligatoire qu'en DeFi directe : `validateAccessContext`
+  // (appelée plus bas) applique cette règle selon `accessMode`. Un produit
+  // hybride ou CeFi qui ne divulgue pas son protocole reste un vide légitime.
   const protocol = input.protocol.trim();
-  if (!protocol) throw new DefiInputError("Le protocole est requis");
 
   if (!(input.positionType in DEFI_POSITION_TYPES)) {
     throw new DefiInputError("Type de position DeFi inconnu");

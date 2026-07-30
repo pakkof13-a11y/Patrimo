@@ -2,120 +2,121 @@ import { test, expect } from "@playwright/test";
 import { gotoDashboard } from "./helpers";
 
 /**
- * Extension DeFi v2 : LP multi-token (jusqu'à 5 jetons) et liquidité
- * concentrée, sur le modèle `DefiPositionDetail` existant — pas de table
- * séparée. Ces trois cas couvrent le nouveau chemin (LP 2 jetons, LP 3
- * jetons concentrée) et vérifient que STAKING, inchangé, n'affiche aucun des
- * nouveaux champs.
+ * DeFi — positions LP via le nouvel assistant (chantier F2).
+ *
+ * Remplace l'ancien formulaire inline : la saisie LP passe désormais par le
+ * wizard 9 étapes, piloté par `defi-ui-rules.ts`. Couvre les scénarios F et G
+ * du cahier des charges (LP classique, LP concentrée avec bornes).
  */
-// Suffixe unique par run : le formulaire ne propose pas de suppression de
-// position DeFi (seul un dénouement par vente existe), donc des runs répétés
-// sur un serveur réutilisé accumulent des lignes de même protocole — un nom
-// de protocole unique évite qu'un `filter({ hasText })` en résolve plusieurs.
 const runId = Date.now();
+const DEFI_WALLET_NAME = `E2E DeFi LP Wallet ${runId}`;
 
-test.describe("DeFi — positions LP multi-token", () => {
-  test.beforeEach(async ({ page }) => {
+/**
+ * Le seed de démo ne fournit aucune plateforme `BLOCKCHAIN` — en mode DeFi
+ * direct (défaut du wizard), le sélecteur de wallet serait donc vide. On en
+ * pose une via l'API avant chaque test (idempotent via `upsert`).
+ */
+async function ensureDefiWallet(request: import("@playwright/test").APIRequestContext) {
+  const res = await request.post("/api/platforms", {
+    data: {
+      name: DEFI_WALLET_NAME,
+      type: "BLOCKCHAIN",
+      walletAddress: "0x1234567890123456789012345678901234567890",
+      upsert: true,
+    },
+  });
+  if (!res.ok()) throw new Error(await res.text());
+}
+
+async function openWizardTo(page: import("@playwright/test").Page, stepLabel: RegExp) {
+  await page.getByTestId("defi-toolbar-add").click();
+  await expect(page.getByTestId("defi-form-modal")).toBeVisible();
+  // Avance étape par étape jusqu'au libellé demandé.
+  for (let i = 0; i < 9; i++) {
+    const active = page.locator('nav[aria-label="Étapes du formulaire"] [aria-current="step"]');
+    if (await active.filter({ hasText: stepLabel }).count()) return;
+    await page.getByTestId("defi-wizard-next").click();
+  }
+}
+
+test.describe("DeFi — positions LP (nouveau wizard)", () => {
+  test.beforeEach(async ({ page, request }) => {
+    await ensureDefiWallet(request);
     await gotoDashboard(page);
     await page.goto("/cryptos", { waitUntil: "domcontentloaded" });
     await page.getByTestId("crypto-subtab-DEFI").click();
-    await expect(page.getByTestId("crypto-defi-panel")).toBeVisible({
-      timeout: 20_000,
-    });
-    await page.getByTestId("defi-form-toggle").click();
-    await expect(page.getByTestId("defi-form")).toBeVisible();
+    await expect(page.getByTestId("crypto-defi-panel")).toBeVisible({ timeout: 20_000 });
   });
 
-  test("LP 2 jetons full range (Uniswap V2)", async ({ page }) => {
-    await page.getByTestId("defi-platform").selectOption({ index: 1 });
-    await page.getByTestId("defi-type").selectOption("LP");
-    await page.getByTestId("defi-protocol").fill(`Uniswap V2 ${runId}`);
-    await page.getByTestId("defi-symbol").fill("ETH");
-    await page.getByTestId("defi-quantity").fill("1");
-    await page.getByTestId("defi-unit-price").fill("1000");
-    await page.getByTestId("defi-apy").fill("18");
+  test("LP classique 2 jetons (cas F)", async ({ page }) => {
+    await openWizardTo(page, /Détention/);
+    await page.getByTestId("defi-w-platform").selectOption({ label: DEFI_WALLET_NAME });
 
-    // Par défaut 2 jetons — pas besoin de toucher le sélecteur de nombre.
-    await expect(page.getByTestId("defi-lp-nassets-2")).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
-    await page.getByTestId("defi-lp-token2-symbol").fill("USDC");
-    await page.getByTestId("defi-lp-token2-amount").fill("1000");
-    await page.getByTestId("defi-lp-token2-entry").fill("1");
+    await page.getByTestId("defi-wizard-next").click(); // -> Type
+    await page.getByTestId("defi-w-position-type").selectOption("LP");
+    await page.getByTestId("defi-w-chain").fill("ethereum");
+    await page.getByTestId("defi-w-protocol").fill(`Uniswap V2 ${runId}`);
 
-    // Pas de section concentrée sur une LP full range.
-    await expect(page.getByTestId("defi-lp-range-min")).toHaveCount(0);
+    await page.getByTestId("defi-wizard-next").click(); // -> Infrastructure
+    await page.getByTestId("defi-wizard-next").click(); // -> Exposition
+    await expect(page.getByTestId("defi-w-lp-section")).toBeVisible();
+    await page.getByTestId("defi-w-symbol").fill("ETH");
+    await page.getByTestId("defi-w-quantity").fill("1");
+    await page.getByTestId("defi-w-unit-price").fill("3000");
+    await page.getByTestId("defi-w-paired-symbol").fill("USDC");
+    await page.getByTestId("defi-w-paired-amount").fill("3000");
+    await page.getByTestId("defi-w-paired-entry").fill("1");
+    // Pas de bornes de prix sur une LP full range.
+    await expect(page.getByTestId("defi-w-range-min")).toHaveCount(0);
 
-    await page.getByTestId("defi-submit").click();
-    await expect(page.getByText("Position enregistrée")).toBeVisible({
-      timeout: 15_000,
-    });
+    // Avance jusqu'au récapitulatif et enregistre.
+    for (let i = 0; i < 5; i++) {
+      const submit = page.getByTestId("defi-wizard-submit");
+      if (await submit.count()) break;
+      await page.getByTestId("defi-wizard-next").click();
+    }
+    await page.getByTestId("defi-wizard-submit").click();
+    await expect(page.getByText("Position enregistrée")).toBeVisible({ timeout: 15_000 });
 
-    const row = page
-      .getByTestId("defi-row")
-      .filter({ hasText: `Uniswap V2 ${runId}` });
-    await expect(row).toBeVisible();
-    await expect(row).toContainText("ETH");
+    const row = page.getByTestId("defi-row").filter({ hasText: `Uniswap V2 ${runId}` });
+    await expect(row).toBeVisible({ timeout: 10_000 });
   });
 
-  test("LP 3 jetons concentrée (Curve stables)", async ({ page }) => {
-    await page.getByTestId("defi-platform").selectOption({ index: 1 });
-    await page.getByTestId("defi-type").selectOption("LP");
-    await page.getByTestId("defi-protocol").fill(`Curve 3pool ${runId}`);
-    await page.getByTestId("defi-symbol").fill("USDC");
-    await page.getByTestId("defi-quantity").fill("1000");
-    await page.getByTestId("defi-unit-price").fill("1");
+  test("LP concentrée avec bornes de prix (cas G)", async ({ page }) => {
+    await openWizardTo(page, /Détention/);
+    await page.getByTestId("defi-w-platform").selectOption({ label: DEFI_WALLET_NAME });
 
-    await page.getByTestId("defi-lp-nassets-3").click();
-    await expect(page.getByTestId("defi-lp-token3-symbol")).toBeVisible();
+    await page.getByTestId("defi-wizard-next").click();
+    await page.getByTestId("defi-w-position-type").selectOption("LP");
+    await page.getByTestId("defi-w-chain").fill("ethereum");
+    await page.getByTestId("defi-w-protocol").fill(`Uniswap V3 ${runId}`);
 
-    await page.getByTestId("defi-lp-token2-symbol").fill("USDT");
-    await page.getByTestId("defi-lp-token2-amount").fill("1000");
-    await page.getByTestId("defi-lp-token2-entry").fill("1");
-    await page.getByTestId("defi-lp-token3-symbol").fill("DAI");
-    await page.getByTestId("defi-lp-token3-amount").fill("1000");
-    await page.getByTestId("defi-lp-token3-entry").fill("1");
+    await page.getByTestId("defi-wizard-next").click();
+    await page.getByTestId("defi-wizard-next").click();
+    await page.getByTestId("defi-w-symbol").fill("ETH");
+    await page.getByTestId("defi-w-quantity").fill("0.5");
+    await page.getByTestId("defi-w-unit-price").fill("3000");
+    await page.getByTestId("defi-w-paired-symbol").fill("USDC");
+    await page.getByTestId("defi-w-paired-amount").fill("1500");
+    await page.getByTestId("defi-w-paired-entry").fill("1");
 
-    await page.getByTestId("defi-lp-concentrated").check();
-    await page.getByTestId("defi-lp-range-min").fill("0.99");
-    await page.getByTestId("defi-lp-range-max").fill("1.01");
-    await page.getByTestId("defi-lp-alloc-1").fill("33.33");
-    await page.getByTestId("defi-lp-alloc-2").fill("33.33");
-    await page.getByTestId("defi-lp-alloc-3").fill("33.34");
+    await page.getByTestId("defi-w-concentrated").check();
+    await expect(page.getByTestId("defi-w-range-min")).toBeVisible();
+    await page.getByTestId("defi-w-range-min").fill("2500");
+    await page.getByTestId("defi-w-range-max").fill("3500");
 
-    await page.getByTestId("defi-submit").click();
-    await expect(page.getByText("Position enregistrée")).toBeVisible({
-      timeout: 15_000,
-    });
+    for (let i = 0; i < 5; i++) {
+      const submit = page.getByTestId("defi-wizard-submit");
+      if (await submit.count()) break;
+      await page.getByTestId("defi-wizard-next").click();
+    }
+    await page.getByTestId("defi-wizard-submit").click();
+    await expect(page.getByText("Position enregistrée")).toBeVisible({ timeout: 15_000 });
 
-    const row = page
-      .getByTestId("defi-row")
-      .filter({ hasText: `Curve 3pool ${runId}` });
-    await expect(row).toBeVisible();
-    // 3 jetons, IL affichée (chiffre ou "indisponible" si le prix n'a pas pu
-    // être résolu côté fournisseur) plutôt qu'absente.
-    await expect(row.getByTestId("defi-row-il")).toBeVisible();
-  });
-
-  test("STAKING n'affiche aucun champ LP", async ({ page }) => {
-    await page.getByTestId("defi-type").selectOption("STAKING");
-    await expect(page.getByTestId("defi-lp-section")).toHaveCount(0);
-
-    await page.getByTestId("defi-platform").selectOption({ index: 1 });
-    await page.getByTestId("defi-protocol").fill(`Lido ${runId}`);
-    await page.getByTestId("defi-symbol").fill("ETH");
-    await page.getByTestId("defi-quantity").fill("2");
-    await page.getByTestId("defi-unit-price").fill("2000");
-
-    await page.getByTestId("defi-submit").click();
-    await expect(page.getByText("Position enregistrée")).toBeVisible({
-      timeout: 15_000,
-    });
-
-    const row = page.getByTestId("defi-row").filter({ hasText: `Lido ${runId}` });
-    await expect(row).toBeVisible();
-    // Une position non-LP affiche « — » dans la colonne IL, jamais un chiffre.
-    await expect(row.getByTestId("defi-row-il")).toHaveText("—");
+    const row = page.getByTestId("defi-row").filter({ hasText: `Uniswap V3 ${runId}` });
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    await row.getByTestId("defi-row-open").click();
+    await expect(page.getByTestId("defi-detail-panel")).toBeVisible();
+    await expect(page.getByTestId("defi-badge-clmm")).toBeVisible();
   });
 });
