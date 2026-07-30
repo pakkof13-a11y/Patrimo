@@ -21,7 +21,7 @@ import {
   type PlatformForm,
 } from "@/app/lib/schemas";
 import { ACCOUNT_TYPES, type AccountType } from "@/app/lib/constants";
-import { formatCurrency } from "@/app/lib/utils";
+import { cn, formatCurrency } from "@/app/lib/utils";
 import { fetchJson, reloadHoldings } from "@/app/lib/api-client";
 import { usePriceAutoRefresh } from "@/app/hooks/use-price-auto-refresh";
 import { useGlobalShortcuts } from "@/app/hooks/use-global-shortcuts";
@@ -69,6 +69,8 @@ import { AppHeader } from "@/components/layout/app-header";
 import { Shell } from "@/components/layout/display-provider";
 import { KpiStrip } from "@/components/dashboard/kpi-strip";
 import { DashboardTab } from "@/components/dashboard/dashboard-tab";
+import { DashboardHero } from "@/components/dashboard/dashboard-hero";
+import { MarketTicker } from "@/components/dashboard/market-ticker";
 import { HoldingsSection } from "@/components/holdings/holdings-section";
 import { TransactionModal } from "@/components/modals/transaction-modal";
 import { PlatformModal } from "@/components/modals/platform-modal";
@@ -976,8 +978,28 @@ function PortfolioAppClient({
         <div
           id="main-content"
           tabIndex={-1}
-          className="module-flow outline-none"
+          className={cn(
+            "module-flow outline-none",
+            isDashboard && "dashboard-premium"
+          )}
         >
+          {/*
+            Dashboard "terminal premium" (cockpit mature uniquement) :
+            ticker marchés + hero patrimoine net, avant le bandeau KPI.
+            Restyle uniquement — Positions/Transactions/etc. non affectés
+            (scope via la classe dashboard-premium ci-dessus).
+          */}
+          {isDashboard && dashBlocks.showKpiStrip && (
+            <>
+              <MarketTicker />
+              <DashboardHero
+                baseCurrency={baseCurrency}
+                summary={summary}
+                history={historyQ.data?.history ?? []}
+              />
+            </>
+          )}
+
           {/*
             KPI strip :
             - onglets métier : toujours
@@ -991,6 +1013,7 @@ function PortfolioAppClient({
                 baseCurrency={baseCurrency}
                 history={historyQ.data?.history}
                 smartFilter={isDashboard && dashBlocks.kpiSmartFilter}
+                dashboardStyle={isDashboard}
               />
             </div>
           )}

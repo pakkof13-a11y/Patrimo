@@ -53,12 +53,15 @@ export function KpiStrip({
   history,
   /** Masque alternatifs / épargne / passifs à zéro pour alléger le bandeau */
   smartFilter = false,
+  /** Variante terminal (Dashboard uniquement) : flèche de tendance sur les tuiles */
+  dashboardStyle = false,
 }: {
   summary?: Record<string, string | number | unknown>;
   baseCurrency: string;
   /** Points d’évolution pour P&L latent de période */
   history?: HistoryPoint[];
   smartFilter?: boolean;
+  dashboardStyle?: boolean;
 }) {
   /** true = afficher les KPI (défaut) — seed client via lazy + sync event */
   const [visible, setVisible] = useState(() =>
@@ -174,6 +177,7 @@ export function KpiStrip({
             value={formatCurrency(String(latentValue), baseCurrency)}
             tone={latentValue >= 0 ? "up" : "down"}
             testId="kpi-latent"
+            variant={dashboardStyle ? "terminal" : "default"}
           />
           <Kpi
             icon={<TrendingUp className="h-4 w-4" />}
@@ -234,6 +238,7 @@ export function KpiStrip({
                 ? "up"
                 : "down"
             }
+            variant={dashboardStyle ? "terminal" : "default"}
           />
         </div>
       )}

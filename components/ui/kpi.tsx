@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { cn } from "@/app/lib/utils";
 
 /**
@@ -12,20 +13,26 @@ export function Kpi({
   value,
   tone,
   testId,
+  /** Variante "terminal" (Dashboard) : flèche de tendance au lieu du liseré coloré */
+  variant = "default",
 }: {
   icon: React.ReactNode;
   label: React.ReactNode;
   value: string;
   tone?: "up" | "down";
   testId?: string;
+  variant?: "default" | "terminal";
 }) {
+  const terminal = variant === "terminal";
   return (
     <div
       className={cn(
         "kpi-tile flex min-h-[5.25rem] min-w-0 flex-col justify-between gap-2 p-3 sm:p-3.5",
-        tone === "up" &&
+        !terminal &&
+          tone === "up" &&
           "border-l-[3px] border-l-[var(--success)]/80 dark:border-l-[var(--success)]/70",
-        tone === "down" &&
+        !terminal &&
+          tone === "down" &&
           "border-l-[3px] border-l-[var(--danger)]/75 dark:border-l-[var(--danger)]/65"
       )}
       data-testid={testId}
@@ -41,15 +48,29 @@ export function Kpi({
           {label}
         </span>
       </div>
-      <div
-        className={cn(
-          "kpi-value min-w-0 text-[1.05rem] leading-none break-words sm:text-lg xl:text-[1.2rem]",
-          tone === "up" && "text-[var(--success)]",
-          tone === "down" && "text-[var(--danger)]",
-          !tone && "text-[var(--foreground)]"
+      <div className="flex min-w-0 items-center gap-1">
+        <div
+          className={cn(
+            "kpi-value min-w-0 text-[1.05rem] leading-none break-words sm:text-lg xl:text-[1.2rem]",
+            tone === "up" && "text-[var(--success)]",
+            tone === "down" && "text-[var(--danger)]",
+            !tone && "text-[var(--foreground)]"
+          )}
+        >
+          {value}
+        </div>
+        {terminal && tone === "up" && (
+          <ArrowUpRight
+            className="h-3.5 w-3.5 shrink-0 text-[var(--success)]"
+            aria-hidden
+          />
         )}
-      >
-        {value}
+        {terminal && tone === "down" && (
+          <ArrowDownRight
+            className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]"
+            aria-hidden
+          />
+        )}
       </div>
     </div>
   );

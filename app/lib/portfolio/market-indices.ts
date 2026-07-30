@@ -10,7 +10,10 @@ export type MarketIndexKey =
   | "nasdaq"
   | "eurostoxx50"
   | "msciworld"
-  | "bitcoin";
+  | "bitcoin"
+  | "ethereum"
+  | "eurusd"
+  | "gold";
 
 export type MarketIndex = {
   key: MarketIndexKey;
@@ -37,6 +40,9 @@ export const MARKET_INDICES: MarketIndex[] = [
     hint: "Actions monde (proxy ETF)",
   },
   { key: "bitcoin", label: "Bitcoin", yahoo: "BTC-EUR", hint: "BTC en euro" },
+  { key: "ethereum", label: "Ethereum", yahoo: "ETH-EUR", hint: "ETH en euro" },
+  { key: "eurusd", label: "EUR/USD", yahoo: "EURUSD=X", hint: "Change euro / dollar" },
+  { key: "gold", label: "Or", yahoo: "GC=F", hint: "Once d'or (USD, futures Comex)" },
 ];
 
 const BY_KEY = new Map(MARKET_INDICES.map((i) => [i.key, i]));
