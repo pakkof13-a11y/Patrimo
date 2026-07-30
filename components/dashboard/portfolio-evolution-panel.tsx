@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import { ChevronDown, SlidersHorizontal } from "lucide-react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import type { HistoryPoint } from "@/app/lib/types/ui";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
@@ -15,19 +8,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/app/lib/api-client";
 import {
-  bucketKey,
   buildEvolutionSeries,
+  benchmarkGapPct,
+  benchmarkLabel,
   evolutionDeltaSummary,
   evolutionIntervalHint,
   evolutionIntervalLabel,
   isEvolutionRangeEnabled,
+  toPercentSeries,
   withBenchmarkSeries,
-  benchmarkLabel,
-  benchmarkGapPct,
-  type EvolutionChartStyle,
-  type EvolutionMetric,
   type EvolutionRange,
-  type EvolutionViewMode,
   type IndexClosePoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
 import {
@@ -35,38 +25,23 @@ import {
   loadEvolutionPrefs,
   saveEvolutionPrefs,
   type EvolutionBenchmark,
-  type EvolutionBenchmarkChoice,
-  type EvolutionPrefsV4,
+  type EvolutionPrefsV5,
 } from "@/app/lib/portfolio/evolution-prefs";
-import { loadDefaultBenchmark } from "@/app/lib/portfolio/benchmark-prefs";
 import {
   MARKET_INDICES,
   marketIndexLabel,
   type MarketIndexKey,
 } from "@/app/lib/portfolio/market-indices";
-
-/** Réponse de `/api/portfolio/class-pnl` (P&L journalier par classe d'actif). */
-type ClassPnlResponse = {
-  points: { day: string; pnlByClass: Record<string, number> }[];
-  classes: string[];
-  estimated: boolean;
-};
+import {
+  PortfolioPercentChart,
+  PortfolioValueChart,
+} from "@/components/dashboard/portfolio-evolution-charts";
 
 const emptySubscribe = () => () => undefined;
 
 function useIsClient() {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
 }
-import {
-  classPnlKey,
-  DecomposedCumulAreas,
-  DecomposedCumulColumns,
-  DecomposedPeriodChart,
-  GlobalColumnsChart,
-  GlobalLineChart,
-  PeriodColumnsChart,
-  PeriodLineChart,
-} from "@/components/dashboard/portfolio-evolution-charts";
 
 const RANGES: { id: EvolutionRange; label: string }[] = [
   { id: "7d", label: "7J" },
@@ -79,44 +54,12 @@ const RANGES: { id: EvolutionRange; label: string }[] = [
   { id: "all", label: "Tout" },
 ];
 
-const METRICS: { id: EvolutionMetric; label: string; title: string }[] = [
-  {
-    id: "cumul",
-    label: "Cumulée",
-    title: "Niveau de patrimoine à chaque période",
-  },
-  {
-    id: "period",
-    label: "Périodique",
-    title: "Variation entre deux périodes",
-  },
-];
-
-const STYLES: { id: EvolutionChartStyle; label: string }[] = [
-  { id: "line", label: "Courbe" },
-  { id: "columns", label: "Colonnes" },
-];
-
-const VIEWS: { id: EvolutionViewMode; label: string; title: string }[] = [
-  { id: "global", label: "Globale", title: "Patrimoine total uniquement" },
-  {
-    id: "decomposed",
-    label: "Décomposée",
-    title: "Positions, cash, revenus (div. / coupons / loyers), P&L",
-  },
-];
-
-const BENCHMARK_CHOICES: {
-  id: EvolutionBenchmarkChoice;
+const VERSUS_CHOICES: {
+  id: EvolutionBenchmark;
   label: string;
   title: string;
 }[] = [
-  {
-    id: "default",
-    label: "Défaut",
-    title: "Benchmark défini dans Préférences",
-  },
-  { id: "none", label: "Aucun", title: "Pas de comparaison" },
+  { id: "none", label: "Aucun", title: "Valeur du portefeuille, en devise" },
   {
     id: "inflation",
     label: "Inflation",
@@ -135,26 +78,16 @@ function Segmented<T extends string>({
   onChange,
   ariaLabel,
   testIdPrefix,
-  size = "md",
-  muted = false,
 }: {
   items: { id: T; label: string; title?: string }[];
   value: T;
   onChange: (v: T) => void;
   ariaLabel: string;
   testIdPrefix?: string;
-  size?: "md" | "sm";
-  /** Contrôles secondaires : moins saillants */
-  muted?: boolean;
 }) {
   return (
     <div
-      className={cn(
-        "inline-flex max-w-full flex-wrap rounded-[var(--radius-md)] border p-0.5",
-        muted
-          ? "border-[var(--border)]/70 bg-transparent"
-          : "border-[var(--border)] bg-[var(--muted)]/45"
-      )}
+      className="inline-flex max-w-full flex-wrap rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/45 p-0.5"
       role="tablist"
       aria-label={ariaLabel}
     >
@@ -172,19 +105,11 @@ function Segmented<T extends string>({
             }
             onClick={() => onChange(item.id)}
             className={cn(
-              "rounded-[var(--radius-sm)] font-medium transition",
+              "rounded-[var(--radius-sm)] px-2.5 py-1 text-[11px] font-medium transition",
               "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-              size === "sm"
-                ? "px-1.5 py-0.5 text-[10px]"
-                : "px-2.5 py-1 text-[11px]",
-              selected &&
-                !muted &&
-                "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]",
-              selected &&
-                muted &&
-                "bg-[var(--muted)] font-semibold text-[var(--foreground)]",
-              !selected &&
-                "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              selected
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]"
+                : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
             )}
           >
             {item.label}
@@ -196,10 +121,11 @@ function Segmented<T extends string>({
 }
 
 /**
- * Module Évolution du portefeuille — V3
- * Hiérarchie : période → lecture/style → options avancées (vue / Vs)
- * Prefs persistées (localStorage versionné).
- * Conçu pour s'insérer dans une colonne de grille (pas de bandeau full-width).
+ * Module Évolution du portefeuille — refonte « premium » orientée
+ * investissement, à deux réglages seulement : la période et la comparaison
+ * (« Versus »). Toute la logique d'affichage (numéraire vs pourcentage,
+ * rebasage du benchmark) est centralisée ici et dans `evolution-aggregate.ts`
+ * — aucun calcul de performance dupliqué ailleurs dans l'app.
  */
 export function PortfolioEvolutionPanel({
   history,
@@ -213,55 +139,23 @@ export function PortfolioEvolutionPanel({
   className?: string;
 }) {
   const isClient = useIsClient();
-  const [prefs, setPrefs] = useState<EvolutionPrefsV4>(DEFAULT_EVOLUTION_PREFS);
-  const [userDefaultBm, setUserDefaultBm] = useState<EvolutionBenchmark>("none");
+  const [prefs, setPrefs] = useState<EvolutionPrefsV5>(DEFAULT_EVOLUTION_PREFS);
   const [hydrated, setHydrated] = useState(false);
-  const styleTouched = useRef(false);
 
-  // Seed prefs/benchmark depuis localStorage au passage client (adjust state while rendering)
+  // Seed prefs depuis localStorage au passage client (adjust state while rendering)
   if (isClient && !hydrated) {
     setHydrated(true);
     setPrefs(loadEvolutionPrefs());
-    setUserDefaultBm(loadDefaultBenchmark());
   }
 
-  useEffect(() => {
-    if (!hydrated) return;
-    saveEvolutionPrefs(prefs);
-  }, [prefs, hydrated]);
+  const { range, versus, indexKey } = prefs;
 
-  // Recharger le défaut si l'utilisateur change les Préférences (autre onglet / focus)
-  useEffect(() => {
-    function onFocus() {
-      setUserDefaultBm(loadDefaultBenchmark());
-    }
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, []);
-
-  const { range, metric, style, view, benchmark, indexKey, advancedOpen } =
-    prefs;
-
-  /** Benchmark effectif (héritage préférences ou override dashboard) */
-  const activeBenchmark: EvolutionBenchmark =
-    benchmark === "default" ? userDefaultBm : benchmark;
-
-  const update = (patch: Partial<EvolutionPrefsV4>) => {
-    setPrefs((p) => ({ ...p, ...patch, v: 4 }));
-  };
-
-  const setMetric = (m: EvolutionMetric) => {
-    // Soft default style only if user n'a pas forcé le style
-    if (!styleTouched.current) {
-      update({ metric: m, style: m === "period" ? "columns" : "line" });
-    } else {
-      update({ metric: m });
-    }
-  };
-
-  const setStyle = (s: EvolutionChartStyle) => {
-    styleTouched.current = true;
-    update({ style: s });
+  const update = (patch: Partial<EvolutionPrefsV5>) => {
+    setPrefs((p) => {
+      const next = { ...p, ...patch, v: 5 as const };
+      if (hydrated) saveEvolutionPrefs(next);
+      return next;
+    });
   };
 
   const firstDate = history[0]?.date ?? null;
@@ -276,17 +170,17 @@ export function PortfolioEvolutionPanel({
 
   // Repli 7j si la période courante devient indisponible (adjust state while rendering)
   if (hydrated && !rangeEnabled[range] && range !== "7d") {
-    setPrefs((p) => ({ ...p, range: "7d", v: 4 as const }));
+    setPrefs((p) => ({ ...p, range: "7d", v: 5 as const }));
   }
 
   const { points: rawPoints, interval } = useMemo(
-    () => buildEvolutionSeries(history, range, metric),
-    [history, range, metric]
+    () => buildEvolutionSeries(history, range, "cumul"),
+    [history, range]
   );
 
   // Mode "index" : récupère les clôtures réelles de l'indice choisi sur la
   // fenêtre affichée (marge amont pour disposer d'une clôture de base).
-  const wantIndex = view === "global" && activeBenchmark === "index";
+  const wantIndex = versus === "index";
   const idxFromKey = rawPoints[0]?.date.slice(0, 10) ?? "";
   const idxToKey = rawPoints[rawPoints.length - 1]?.date.slice(0, 10) ?? "";
   const indexQ = useQuery({
@@ -303,91 +197,37 @@ export function PortfolioEvolutionPanel({
       );
     },
   });
-  const indexData = indexQ.data;
   const indexCloses = useMemo<IndexClosePoint[]>(
-    () => indexData?.points ?? [],
-    [indexData]
+    () => indexQ.data?.points ?? [],
+    [indexQ.data]
   );
 
   const points = useMemo(
-    () =>
-      view === "global" && activeBenchmark !== "none"
-        ? withBenchmarkSeries(rawPoints, activeBenchmark, { indexCloses })
-        : withBenchmarkSeries(rawPoints, "none"),
-    [rawPoints, view, activeBenchmark, indexCloses]
+    () => withBenchmarkSeries(rawPoints, versus, { indexCloses }),
+    [rawPoints, versus, indexCloses]
+  );
+
+  const percentPoints = useMemo(
+    () => (versus === "none" ? [] : toPercentSeries(points)),
+    [points, versus]
   );
 
   const gap = useMemo(
-    () =>
-      view === "global" && activeBenchmark !== "none"
-        ? benchmarkGapPct(points)
-        : null,
-    [points, view, activeBenchmark]
+    () => (versus === "none" ? null : benchmarkGapPct(points)),
+    [points, versus]
   );
 
   const benchmarkDisplayName =
-    activeBenchmark === "index"
-      ? marketIndexLabel(indexKey)
-      : benchmarkLabel(activeBenchmark);
+    versus === "index" ? marketIndexLabel(indexKey) : benchmarkLabel(versus);
 
   const summary = useMemo(() => evolutionDeltaSummary(points), [points]);
+  const headlinePct =
+    percentPoints.length > 0
+      ? percentPoints[percentPoints.length - 1]!.portfolioPct
+      : 0;
 
   const empty = !loading && history.length === 0;
-  const noPoints = !loading && !empty && points.length === 0;
-
-  // P&L par classe d'actif — uniquement en décomposée périodique, la seule vue
-  // qui l'affiche. Le calcul peut déclencher des appels fournisseurs côté
-  // serveur pour compléter le cache de cours : on ne le demande donc pas tant
-  // que l'utilisateur n'a pas ouvert cette vue.
-  const wantClassPnl = view === "decomposed" && metric === "period";
-  const classPnlQ = useQuery({
-    queryKey: ["class-pnl", range],
-    enabled: wantClassPnl && !empty,
-    staleTime: 15 * 60_000,
-    queryFn: () =>
-      fetchJson<ClassPnlResponse>(`/api/portfolio/class-pnl?range=${range}`),
-  });
-
-  /**
-   * Reventile le P&L journalier par classe sur les points affichés, qui peuvent
-   * être hebdomadaires ou mensuels : chaque point reçoit la **somme** des jours
-   * de son bucket, le P&L étant un flux.
-   */
-  const classPoints = useMemo(() => {
-    const daily = classPnlQ.data?.points;
-    if (!wantClassPnl || !daily?.length || points.length === 0) return points;
-
-    const interval = points[0]!.intervalType;
-    const byBucket = new Map<string, Record<string, number>>();
-    for (const day of daily) {
-      const key = bucketKey(`${day.day}T12:00:00Z`, interval);
-      const acc = byBucket.get(key) ?? {};
-      for (const [cls, v] of Object.entries(day.pnlByClass)) {
-        acc[cls] = (acc[cls] ?? 0) + v;
-      }
-      byBucket.set(key, acc);
-    }
-
-    return points.map((p) => {
-      const acc = byBucket.get(bucketKey(p.date, interval));
-      if (!acc) return p;
-      const merged: Record<string, unknown> = { ...p };
-      for (const [cls, v] of Object.entries(acc)) {
-        merged[classPnlKey(cls)] = v;
-      }
-      return merged as typeof p;
-    });
-  }, [points, classPnlQ.data, wantClassPnl]);
-
-  const classNames = useMemo(() => {
-    if (!wantClassPnl) return undefined;
-    const list = classPnlQ.data?.classes;
-    return list?.length ? list : undefined;
-  }, [classPnlQ.data, wantClassPnl]);
-
-
-  const showBenchmark =
-    view === "global" && activeBenchmark !== "none";
+  const noPoints = !loading && !empty && rawPoints.length === 0;
 
   return (
     <div
@@ -404,10 +244,7 @@ export function PortfolioEvolutionPanel({
             Positions et liquidités
             <span className="mx-1 opacity-40">·</span>
             {evolutionIntervalLabel(interval)}
-            <span className="sr-only">
-              {" "}
-              ({evolutionIntervalHint(interval)})
-            </span>
+            <span className="sr-only"> ({evolutionIntervalHint(interval)})</span>
             {baseCurrency !== "EUR" ? (
               <>
                 <span className="mx-1 opacity-40">·</span>
@@ -418,28 +255,38 @@ export function PortfolioEvolutionPanel({
         }
         actions={
           summary && points.length > 0 ? (
-            <div
-              className={cn(
-                "shrink-0 text-right text-xs font-semibold tabular-nums",
-                summary.delta >= 0
-                  ? "text-[var(--success)]"
-                  : "text-[var(--danger)]"
-              )}
-              data-testid="evolution-delta"
-              title="Variation de la valeur totale sur la période affichée"
-            >
-              {summary.delta >= 0 ? "+" : ""}
-              {formatCurrency(summary.delta, baseCurrency)}
-              <span className="ml-1 font-medium opacity-90">
-                ({summary.delta >= 0 ? "+" : ""}
-                {summary.pct.toFixed(1)}&nbsp;%)
-              </span>
+            <div className="shrink-0 text-right" data-testid="evolution-headline">
+              <div
+                className={cn(
+                  "text-lg font-bold tabular-nums sm:text-xl",
+                  (versus === "none" ? summary.delta : headlinePct) >= 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--danger)]"
+                )}
+              >
+                {versus === "none" ? (
+                  <>
+                    {summary.delta >= 0 ? "+" : ""}
+                    {formatCurrency(summary.delta, baseCurrency)}
+                  </>
+                ) : (
+                  <>
+                    {headlinePct >= 0 ? "+" : ""}
+                    {headlinePct.toFixed(1)}&nbsp;%
+                  </>
+                )}
+              </div>
+              <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
+                {versus === "none"
+                  ? `${summary.pct >= 0 ? "+" : ""}${summary.pct.toFixed(1)} % sur la période`
+                  : `Vs ${benchmarkDisplayName}`}
+              </div>
             </div>
           ) : null
         }
       />
 
-      {/* Primaire : période + cumul/périodique · Avancé repliable */}
+      {/* Période + Versus — deux réglages, rien d'autre. */}
       <div className="mb-2.5 space-y-2" data-testid="evolution-controls">
         <div
           className="flex min-w-0 flex-wrap items-center gap-0.5 sm:gap-1"
@@ -483,202 +330,85 @@ export function PortfolioEvolutionPanel({
           })}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+            Vs
+          </span>
           <Segmented
-            items={METRICS}
-            value={metric}
-            onChange={setMetric}
-            ariaLabel="Mode de lecture"
-            testIdPrefix="evolution-metric"
+            items={VERSUS_CHOICES}
+            value={versus}
+            onChange={(v) => update({ versus: v })}
+            ariaLabel="Comparaison"
+            testIdPrefix="evolution-versus"
           />
-          <button
-            type="button"
-            className={cn(
-              "ml-auto inline-flex items-center gap-1 rounded-[var(--radius-md)] border border-[var(--border)] px-2 py-1 text-[11px] font-medium transition",
-              "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-              advancedOpen
-                ? "border-[var(--primary)]/30 bg-[var(--primary-soft)] text-[var(--foreground)]"
-                : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-            )}
-            aria-expanded={advancedOpen}
-            data-testid="evolution-advanced-toggle"
-            onClick={() => update({ advancedOpen: !advancedOpen })}
-          >
-            <SlidersHorizontal className="h-3 w-3" aria-hidden />
-            Affichage
-            <ChevronDown
-              className={cn(
-                "h-3 w-3 transition-transform",
-                advancedOpen && "rotate-180"
-              )}
-              aria-hidden
-            />
-          </button>
+          {versus === "index" && (
+            <select
+              className="input !h-7 !w-auto !min-w-0 !py-0 !pl-2 !pr-6 text-[11px]"
+              value={indexKey}
+              onChange={(e) =>
+                update({ indexKey: e.target.value as MarketIndexKey })
+              }
+              data-testid="evolution-index-select"
+              aria-label="Choix de l'indice de comparaison"
+              title="Indice de marché comparé au portefeuille"
+            >
+              {MARKET_INDICES.map((idx) => (
+                <option key={idx.key} value={idx.key} title={idx.hint}>
+                  {idx.label}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
-
-        {advancedOpen && (
-          <div
-            className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/15 px-2.5 py-2"
-            data-testid="evolution-advanced"
-          >
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                Style
-              </span>
-              <Segmented
-                items={STYLES}
-                value={style}
-                onChange={setStyle}
-                ariaLabel="Style de graphique"
-                testIdPrefix="evolution-style"
-                size="sm"
-                muted
-              />
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                Vue
-              </span>
-              <Segmented
-                items={VIEWS}
-                value={view}
-                onChange={(v) => update({ view: v })}
-                ariaLabel="Mode de vue"
-                testIdPrefix="evolution-view"
-                size="sm"
-                muted
-              />
-            </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                Vs
-              </span>
-              <Segmented
-                items={BENCHMARK_CHOICES}
-                value={benchmark}
-                onChange={(b) => update({ benchmark: b })}
-                ariaLabel="Comparaison"
-                testIdPrefix="evolution-benchmark"
-                size="sm"
-                muted
-              />
-            </div>
-            {activeBenchmark === "index" && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                  Indice
-                </span>
-                <select
-                  className="input !h-7 !w-auto !min-w-0 !py-0 !pl-2 !pr-6 text-[11px]"
-                  value={indexKey}
-                  onChange={(e) =>
-                    update({ indexKey: e.target.value as MarketIndexKey })
-                  }
-                  data-testid="evolution-index-select"
-                  aria-label="Choix de l'indice de comparaison"
-                  title="Indice de marché comparé au portefeuille"
-                >
-                  {MARKET_INDICES.map((idx) => (
-                    <option key={idx.key} value={idx.key} title={idx.hint}>
-                      {idx.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {view === "decomposed" && activeBenchmark !== "none" && (
-              <p className="text-meta w-full basis-full">
-                Comparaison disponible en vue globale
-              </p>
-            )}
-          </div>
-        )}
       </div>
 
-      {/* —— Graphique (flex pour s'aligner sur la colonne droite) —— */}
+      {/* Graphique — flex pour s'aligner sur la colonne droite du dashboard */}
       <div
         className="relative min-h-[12.5rem] w-full flex-1 sm:min-h-[13.5rem]"
         data-testid="evolution-chart"
       >
         <div className="absolute inset-0">
-        {loading ? (
-          <div
-            className="flex h-full flex-col gap-3 px-2 py-2"
-            data-testid="evolution-loading-skeleton"
-            aria-busy="true"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <Skeleton className="h-3 w-28" />
-              <Skeleton className="h-6 w-20 rounded-full" />
+          {loading ? (
+            <div
+              className="flex h-full flex-col gap-3 px-2 py-2"
+              data-testid="evolution-loading-skeleton"
+              aria-busy="true"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <Skeleton className="h-3 w-28" />
+                <Skeleton className="h-6 w-20 rounded-full" />
+              </div>
+              <Skeleton className="min-h-[10rem] w-full flex-1 rounded-[var(--radius-lg)]" />
+              <div className="flex gap-2">
+                <Skeleton className="h-2 w-14" />
+                <Skeleton className="h-2 w-16" />
+                <Skeleton className="h-2 w-12" />
+              </div>
             </div>
-            <Skeleton className="min-h-[10rem] w-full flex-1 rounded-[var(--radius-lg)]" />
-            <div className="flex gap-2">
-              <Skeleton className="h-2 w-14" />
-              <Skeleton className="h-2 w-16" />
-              <Skeleton className="h-2 w-12" />
-            </div>
-          </div>
-        ) : empty ? (
-          <EmptyPlaceholder
-            compact
-            title="Historique encore vide"
-            description="Actualisez les cours pour enregistrer un premier point de courbe."
-          />
-        ) : noPoints ? (
-          <EmptyPlaceholder
-            compact
-            title="Période trop courte"
-            description="Choisissez une plage plus large ou attendez davantage d'historique."
-          />
-        ) : view === "decomposed" && metric === "cumul" ? (
-          style === "columns" ? (
-            <DecomposedCumulColumns data={points} baseCurrency={baseCurrency} />
+          ) : empty ? (
+            <EmptyPlaceholder
+              compact
+              title="Historique encore vide"
+              description="Actualisez les cours pour enregistrer un premier point de courbe."
+            />
+          ) : noPoints ? (
+            <EmptyPlaceholder
+              compact
+              title="Période trop courte"
+              description="Choisissez une plage plus large ou attendez davantage d'historique."
+            />
+          ) : versus === "none" ? (
+            <PortfolioValueChart data={points} baseCurrency={baseCurrency} />
           ) : (
-            <DecomposedCumulAreas data={points} baseCurrency={baseCurrency} />
-          )
-        ) : view === "decomposed" && metric === "period" ? (
-          <DecomposedPeriodChart
-            data={classPoints}
-            baseCurrency={baseCurrency}
-            style={style}
-            classes={classNames}
-          />
-        ) : metric === "period" ? (
-          style === "line" ? (
-            <PeriodLineChart
-              data={points}
-              baseCurrency={baseCurrency}
-              showBenchmark={showBenchmark}
+            <PortfolioPercentChart
+              data={percentPoints}
               benchmarkName={benchmarkDisplayName}
             />
-          ) : (
-            <PeriodColumnsChart data={points} baseCurrency={baseCurrency} />
-          )
-        ) : style === "columns" ? (
-          <GlobalColumnsChart data={points} baseCurrency={baseCurrency} />
-        ) : (
-          <GlobalLineChart
-            data={points}
-            baseCurrency={baseCurrency}
-            showBenchmark={showBenchmark}
-            benchmarkName={benchmarkDisplayName}
-          />
-        )}
+          )}
         </div>
       </div>
 
-      {view === "decomposed" && !empty && points.length > 0 && (
-        <p className="text-meta mt-2 shrink-0" data-testid="evolution-decomposed-note">
-          {classNames
-            ? `P&L par classe d'actif · valorisation au cours de clôture, flux neutralisés${
-                classPnlQ.data?.estimated
-                  ? " · estimé (cours manquants sur certains jours)"
-                  : ""
-              }`
-            : "Revenus du journal · dividendes, coupons, loyers"}
-        </p>
-      )}
-      {showBenchmark && (
+      {versus !== "none" && !empty && !noPoints && points.length > 0 && (
         <p className="text-meta mt-1.5 shrink-0" data-testid="evolution-vs-note">
           Vs {benchmarkDisplayName}
           {gap ? (
@@ -705,8 +435,6 @@ export function PortfolioEvolutionPanel({
           ) : (
             ""
           )}
-          {activeBenchmark === "inflation" ? " · IPC France" : ""}
-          {benchmark === "default" ? " · défaut préférences" : ""}
         </p>
       )}
     </div>

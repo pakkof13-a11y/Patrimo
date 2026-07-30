@@ -651,6 +651,41 @@ export function withBenchmarkSeries(
   });
 }
 
+export type EvolutionPercentPoint = {
+  date: string;
+  label: string;
+  periodLabel: string;
+  /** Performance du portefeuille depuis le premier point affiché, en %. */
+  portfolioPct: number;
+  /** Performance du benchmark sur la même fenêtre, rebasée à 0 % au même point. */
+  benchmarkPct?: number;
+};
+
+/**
+ * Reprojette une série déjà rebasée par `withBenchmarkSeries` en performance
+ * relative : les deux courbes partent à 0 % au premier point affiché. C'est
+ * la seule transformation qui rend portefeuille et benchmark comparables sans
+ * mélanger unité monétaire et pourcentage sur le même axe — l'un des deux
+ * axes doit céder, jamais un affichage mixte.
+ */
+export function toPercentSeries(
+  points: EvolutionSeriesPoint[]
+): EvolutionPercentPoint[] {
+  if (points.length === 0) return [];
+  const base = points[0]!.total;
+  const safeBase = base > 0 ? base : null;
+  return points.map((p) => ({
+    date: p.date,
+    label: p.label,
+    periodLabel: p.periodLabel,
+    portfolioPct: safeBase ? ((p.total - safeBase) / safeBase) * 100 : 0,
+    benchmarkPct:
+      safeBase && p.benchmark != null
+        ? ((p.benchmark - safeBase) / safeBase) * 100
+        : undefined,
+  }));
+}
+
 export function benchmarkLabel(mode: EvolutionBenchmarkMode): string {
   switch (mode) {
     case "none":

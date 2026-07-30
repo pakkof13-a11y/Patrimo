@@ -18,7 +18,7 @@ import type {
   IndexClosePoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
 
-describe("evolution prefs v4", () => {
+describe("evolution prefs v5", () => {
   beforeEach(() => {
     const store = new Map<string, string>();
     const ls = {
@@ -51,14 +51,17 @@ describe("evolution prefs v4", () => {
     expect(loadEvolutionPrefs()).toEqual(DEFAULT_EVOLUTION_PREFS);
   });
 
-  it("round-trips valid prefs with default benchmark inheritance", () => {
+  it("seeds versus from the Préférences default benchmark on first load", () => {
+    saveDefaultBenchmark("inflation");
+    expect(loadEvolutionPrefs().versus).toBe("inflation");
+  });
+
+  it("round-trips valid prefs", () => {
     const next = {
       ...DEFAULT_EVOLUTION_PREFS,
       range: "1y" as const,
-      metric: "period" as const,
-      view: "decomposed" as const,
-      benchmark: "default" as const,
-      advancedOpen: true,
+      versus: "index" as const,
+      indexKey: "sp500" as const,
     };
     saveEvolutionPrefs(next);
     expect(loadEvolutionPrefs()).toEqual(next);

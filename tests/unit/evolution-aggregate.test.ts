@@ -4,7 +4,9 @@ import {
   bucketKey,
   resolveEvolutionInterval,
   startOfIsoWeekMonday,
+  toPercentSeries,
   type EvolutionRange,
+  type EvolutionSeriesPoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
 import type { HistoryPoint } from "@/app/lib/types/ui";
 
@@ -110,5 +112,66 @@ describe("buildEvolutionSeries", () => {
     expect(points.length).toBeGreaterThan(1);
     const mid = points[Math.floor(points.length / 2)]!;
     expect(Math.abs(mid.chartValue - 100)).toBeLessThan(1);
+  });
+});
+
+describe("toPercentSeries", () => {
+  function bare(total: number, benchmark?: number): EvolutionSeriesPoint {
+    return {
+      date: "2026-01-01T00:00:00.000Z",
+      label: "1 janv.",
+      periodLabel: "1 janv.",
+      total,
+      cash: 0,
+      positions: total,
+      realized: 0,
+      unrealized: 0,
+      income: 0,
+      dividends: 0,
+      coupons: 0,
+      rents: 0,
+      chartValue: total,
+      pos: total,
+      neg: 0,
+      dPositions: 0,
+      dCash: 0,
+      dRealized: 0,
+      dUnrealized: 0,
+      dIncome: 0,
+      dDividends: 0,
+      dCoupons: 0,
+      dRents: 0,
+      benchmark,
+      intervalType: "day",
+    };
+  }
+
+  it("both curves start at 0 % on the first point", () => {
+    const out = toPercentSeries([bare(100_000, 100_000), bare(110_000, 105_000)]);
+    expect(out[0]!.portfolioPct).toBe(0);
+    expect(out[0]!.benchmarkPct).toBe(0);
+  });
+
+  it("reflects relative performance, not absolute levels", () => {
+    const out = toPercentSeries([bare(100_000, 100_000), bare(110_000, 95_000)]);
+    expect(out[1]!.portfolioPct).toBeCloseTo(10, 6);
+    expect(out[1]!.benchmarkPct).toBeCloseTo(-5, 6);
+  });
+
+  it("benchmarkPct is undefined when the source has no benchmark", () => {
+    const out = toPercentSeries([bare(100_000), bare(90_000)]);
+    expect(out[0]!.benchmarkPct).toBeUndefined();
+    expect(out[1]!.benchmarkPct).toBeUndefined();
+    expect(out[1]!.portfolioPct).toBeCloseTo(-10, 6);
+  });
+
+  it("degrades to 0 rather than dividing by a non-positive base", () => {
+    const out = toPercentSeries([bare(0), bare(50_000)]);
+    expect(out[0]!.portfolioPct).toBe(0);
+    expect(out[1]!.portfolioPct).toBe(0);
+  });
+
+  it("empty input yields empty output", () => {
+    expect(toPercentSeries([])).toEqual([]);
   });
 });
