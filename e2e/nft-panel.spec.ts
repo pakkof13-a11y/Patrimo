@@ -167,8 +167,14 @@ test.describe("NFT — wizard d'ajout", () => {
 
     const card = page.getByTestId("nft-card").filter({ hasText: name });
     await expect(card).toBeVisible({ timeout: 10_000 });
-    await expect(card).toContainText("Inconnue");
-    await expect(card).not.toContainText("0,00 €");
+    // La ligne "Valeur retenue" doit afficher "Inconnue", jamais "0,00 €" —
+    // même si l'utilisateur a par ailleurs saisi un coût d'acquisition à 0
+    // (une saisie manuelle à 0 est un fait déclaré, distinct d'une valeur
+    // patrimoniale inconnue : la ligne "Acquisition" peut légitimement
+    // afficher 0,00 € sans que cela contredise la règle absolue).
+    const retainedLine = card.getByTestId("nft-card-retained-value");
+    await expect(retainedLine).toContainText("Inconnue");
+    await expect(retainedLine).not.toContainText("0,00 €");
   });
 
   test("expertise manuelle : prévaut et s'affiche avec son badge (cas F)", async ({ page }) => {
@@ -258,8 +264,14 @@ test.describe("NFT — détail, vues, filtres, cycle de vie", () => {
     const name = `Hide Test ${runId}`;
     await createBasicNft(page, name);
 
+    // Attendre que la carte du NFT créé soit visible garantit que le bundle
+    // portefeuille (et donc le KPI, dérivé de la même requête) a déjà pris en
+    // compte ce nouveau NFT avant de capturer la valeur de référence.
+    const card = page.getByTestId("nft-card").filter({ hasText: name });
+    await expect(card).toBeVisible({ timeout: 10_000 });
+
     const retainedBefore = await page.getByTestId("nft-kpi-retained").textContent();
-    await page.getByTestId("nft-card").filter({ hasText: name }).getByTestId("nft-card-open").click();
+    await card.getByTestId("nft-card-open").click();
     await page.getByTestId("nft-detail-action-hide").click();
     await expect(page.getByTestId("nft-detail-action-unhide")).toBeVisible({ timeout: 10_000 });
     await page.getByTestId("modal-close").click();
@@ -302,6 +314,9 @@ test.describe("NFT — détail, vues, filtres, cycle de vie", () => {
     await page.getByTestId("nft-dispose-price").fill("55");
     await page.getByTestId("nft-dispose-submit").click();
     await expect(page.getByTestId("nft-dispose-modal")).toHaveCount(0, { timeout: 10_000 });
+    // Le dénouement ferme aussi le panneau détail sous-jacent — sinon la
+    // modale reste ouverte au premier plan et bloque les contrôles derrière.
+    await expect(page.getByTestId("nft-detail-panel")).toHaveCount(0, { timeout: 10_000 });
 
     await expect(page.getByTestId("nft-card").filter({ hasText: name })).toHaveCount(0);
 

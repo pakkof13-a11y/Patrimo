@@ -115,6 +115,7 @@ export function NftDetailPanel({
       toast.success("NFT sorti du patrimoine actif — historique conservé");
       setDisposing(false);
       invalidate();
+      onClose();
     },
     onError: (e: Error) => toast.error(e.message),
   });

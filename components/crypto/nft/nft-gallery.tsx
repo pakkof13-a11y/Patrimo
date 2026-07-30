@@ -107,6 +107,7 @@ function NftCard({
               label="Valeur retenue"
               displayText={valuation.retainedDisplayText}
               strong
+              testId="nft-card-retained-value"
             />
             {h.collectionFloorPriceEur && (
               <ValueLine label="Floor collection" displayText={h.collectionFloorPriceEur} muted />
@@ -149,11 +150,13 @@ function ValueLine({
   displayText,
   strong,
   muted,
+  testId,
 }: {
   label: string;
   displayText: string | null;
   strong?: boolean;
   muted?: boolean;
+  testId?: string;
 }) {
   return (
     <p
@@ -162,6 +165,7 @@ function ValueLine({
         strong ? "text-xs font-semibold" : "text-[10px]",
         muted && "text-[var(--muted-foreground)]"
       )}
+      data-testid={testId}
     >
       <span className="truncate font-normal text-[var(--muted-foreground)]">{label}</span>
       {displayText != null ? (
