@@ -1,28 +1,28 @@
 /**
  * Saisie manuelle d'un NFT.
  *
- * Le chemin qui fonctionne intégralement dès aujourd'hui, sans aucune clé
- * API : l'utilisateur renseigne le prix d'acquisition (qui devient le coût de
- * revient au journal, comme pour tout autre actif) et peut fixer une valeur
- * manuelle qui tient lieu de floor price tant qu'aucun rafraîchissement
- * automatique n'a eu lieu.
+ * Chemin qui fonctionne intégralement sans aucune clé API : l'utilisateur
+ * renseigne le prix d'acquisition (coût de revient au journal) et peut fixer
+ * une valeur manuelle qui prévaut tant qu'aucun rafraîchissement automatique
+ * n'a eu lieu.
  *
- * Reprend `indirect-service.ts` / `defi-manual-service.ts` : actif et
- * transaction d'entrée créés dans la même transaction de base.
+ * Reprend `defi-manual-service.ts` : actif, identité (`NftAsset`), détention
+ * (`NftItemDetail`) et écriture d'entrée créés dans une même transaction DB.
+ * Le contrat public (`CreateNftInput`) reste inchangé depuis avant ce
+ * chantier — le frontend existant (`components/crypto/nft-panel.tsx`)
+ * continue de fonctionner sans modification.
  */
 
 import { prisma } from "../prisma";
 import { d } from "../money/decimal";
 import { createTransaction } from "../transactions/service";
 import { NFT_STANDARDS } from "./nft-constants";
+import { allowsQuantityAboveOne, isSolanaStandard } from "./nft-taxonomy";
+import { ensureNftAsset, ensureNftCollection, applyNftValuation, recordNftEvent, NftInputError } from "./nft-position-service";
+import { classifyNftSpam, spamStatusToAssetFlags } from "./nft-classification";
+import { chooseNftValuation } from "./nft-valuation";
 
-export class NftInputError extends Error {
-  readonly code = "NFT_INPUT";
-  constructor(message: string) {
-    super(message);
-    this.name = "NftInputError";
-  }
-}
+export { NftInputError };
 
 export type CreateNftInput = {
   platformId: string;
@@ -39,6 +39,12 @@ export type CreateNftInput = {
   acquisitionDate: string;
   manualFloorPriceEur?: string | null;
   notes?: string | null;
+  // ── Champs additifs du chantier NFT (optionnels, défauts patrimoniaux sûrs) ──
+  ownerLabel?: string | null;
+  ownershipShare?: string | null;
+  accessMode?: string | null;
+  custodyModel?: string | null;
+  acquisitionSource?: string | null;
 };
 
 export type CreateNftResult = {
@@ -65,13 +71,19 @@ export async function createNftManual(
   if (!input.name.trim()) throw new NftInputError("Le nom du NFT est requis");
   if (!input.tokenId.trim()) throw new NftInputError("Le token ID est requis");
   if (!input.chain.trim()) throw new NftInputError("La chaîne est requise");
-  if (input.standard && !(input.standard in NFT_STANDARDS)) {
+  const standard = input.standard || (input.chain.trim().toLowerCase() === "solana" ? "SPL" : "ERC_721");
+  if (!(standard in NFT_STANDARDS)) {
     throw new NftInputError("Standard de jeton inconnu");
   }
 
   const quantity = d(input.quantity || "1");
   if (!quantity.isFinite() || quantity.lte(0)) {
     throw new NftInputError("La quantité doit être strictement positive");
+  }
+  if (quantity.gt(1) && !allowsQuantityAboveOne(standard)) {
+    throw new NftInputError(
+      `Une quantité supérieure à 1 n'a de sens que pour un ERC-1155 (reçu : ${standard})`
+    );
   }
 
   const acqPrice = d(input.acquisitionPriceEur);
@@ -84,7 +96,15 @@ export async function createNftManual(
     throw new NftInputError("Date d'acquisition invalide");
   }
 
+  if (input.ownershipShare != null && input.ownershipShare !== "") {
+    const share = d(input.ownershipShare);
+    if (!share.isFinite() || share.lte(0) || share.gt(100)) {
+      throw new NftInputError("La quote-part doit être comprise dans ]0 ; 100]");
+    }
+  }
+
   const manualFloor = dec(input.manualFloorPriceEur);
+  const isSolana = isSolanaStandard(standard);
 
   return prisma.$transaction(async (tx) => {
     const asset = await tx.asset.create({
@@ -97,39 +117,82 @@ export async function createNftManual(
         accountType: "CRYPTO",
         currency: "EUR",
         priceProvider: "MANUAL",
-        manualPrice: manualFloor
-          ? d(manualFloor).toFixed(12)
-          : quantity.gt(0)
-            ? acqPrice.div(quantity).toFixed(12)
-            : "0",
+        // Valeur définitive posée par `applyNftValuation` plus bas — ce
+        // premier chiffre n'est qu'un repli avant que la valorisation ne
+        // tourne, jamais affiché tel quel dans les agrégats.
+        manualPrice: manualFloor ? d(manualFloor).toFixed(12) : quantity.gt(0) ? acqPrice.div(quantity).toFixed(12) : "0",
         logoUrl: input.imageUrl?.trim() || null,
         acquisitionDate,
         notes: input.notes?.trim() || null,
       },
     });
 
+    const collection = await ensureNftCollection(
+      userId,
+      {
+        chainId: input.chain,
+        contractAddress: isSolana ? null : input.contractAddr,
+        slug: input.collectionSlug,
+        name: input.collectionName,
+      },
+      tx
+    );
+
+    // Une saisie manuelle payée n'est jamais un airdrop non sollicité : la
+    // classification retombe presque toujours sur CLEAN, sauf motif de
+    // phishing explicite dans le nom.
+    const spam = classifyNftSpam({
+      collectionVerifiedStatus: "UNKNOWN",
+      hasReliableFloor: false,
+      acquisitionSource: input.acquisitionSource || "MANUAL",
+      acquisitionCostEur: acqPrice,
+      name: input.name,
+      description: null,
+    });
+    const spamFlags = spamStatusToAssetFlags(spam.spamStatus);
+
+    const nftAsset = await ensureNftAsset(
+      userId,
+      {
+        standard,
+        chainId: input.chain,
+        contractAddress: isSolana ? null : input.contractAddr,
+        tokenId: isSolana ? null : input.tokenId,
+        mintAddress: isSolana ? input.tokenId : null,
+        collectionId: collection?.id ?? null,
+        name: input.name.trim(),
+        imageUrl: input.imageUrl,
+        metadataQuality: input.imageUrl ? "PARTIAL" : "UNKNOWN",
+        category: "UNKNOWN",
+        ...spamFlags,
+      },
+      asset.id,
+      tx
+    );
+
     const item = await tx.nftItemDetail.create({
       data: {
         assetId: asset.id,
-        tokenId: input.tokenId.trim(),
-        contractAddr: input.contractAddr?.trim() || null,
-        chain: input.chain.trim().toLowerCase(),
-        collectionName: input.collectionName?.trim() || null,
-        collectionSlug: input.collectionSlug?.trim() || null,
-        imageUrl: input.imageUrl?.trim() || null,
-        standard: input.standard || null,
-        valuationMode: "MANUAL",
-        floorPriceEur: manualFloor,
-        estimateSource: manualFloor ? "MANUAL" : null,
-        estimateDate: manualFloor ? new Date() : null,
+        nftAssetId: nftAsset.id,
+        accessMode: input.accessMode || "SELF_CUSTODY",
+        custodyModel: input.custodyModel || "UNKNOWN",
+        dataOrigin: "MANUAL",
+        ownerLabel: input.ownerLabel?.trim() || null,
+        ownershipShare: dec(input.ownershipShare),
+        status: "HELD",
+        acquisitionDate,
+        acquisitionSource: input.acquisitionSource || "MANUAL",
+        acquisitionCostNative: acqPrice.toString(),
+        acquisitionCurrency: "EUR",
+        acquisitionCostEur: acqPrice.toFixed(2),
         notes: input.notes?.trim() || null,
       },
     });
 
     // `allowNegativeCash` comme pour une souscription SCPI ou un engagement
-    // DeFi : l'acquisition d'un NFT déjà réglée (souvent en cash ou via une
-    // autre position) n'est pas financée par la trésorerie suivie ici.
-    await createTransaction(
+    // DeFi : l'acquisition d'un NFT déjà réglée n'est pas financée par la
+    // trésorerie suivie ici.
+    const ledgerTx = await createTransaction(
       {
         userId,
         type: "ACHAT",
@@ -145,6 +208,46 @@ export async function createNftManual(
         notes: `Acquisition NFT — ${input.name.trim()}`,
       } as Parameters<typeof createTransaction>[0],
       tx as unknown as Parameters<typeof createTransaction>[1]
+    );
+
+    await recordNftEvent(
+      nftAsset.id,
+      {
+        eventType: "BUY",
+        eventDate: acquisitionDate,
+        nftHoldingId: item.id,
+        priceEur: acqPrice.toFixed(2),
+        sourceProvider: "MANUAL",
+        ledgerTransactionId:
+          ledgerTx && typeof ledgerTx === "object" && "id" in ledgerTx
+            ? (ledgerTx as { id: string }).id
+            : null,
+      },
+      tx
+    );
+
+    const ownershipShareDecimal = item.ownershipShare
+      ? d(item.ownershipShare.toString()).div(100)
+      : d(1);
+    const choice = chooseNftValuation({
+      spamStatus: spam.spamStatus,
+      manualAppraisal: manualFloor ? { amountEur: d(manualFloor) } : null,
+      lastSale: null,
+      floorPrice: null,
+      acquisitionCostEur: acqPrice,
+    });
+    await applyNftValuation(
+      nftAsset.id,
+      item.id,
+      asset.id,
+      ownershipShareDecimal,
+      choice,
+      {
+        valuationDate: acquisitionDate,
+        sourceProvider: "MANUAL",
+        isManual: choice.method === "APPRAISAL",
+      },
+      tx
     );
 
     return { assetId: asset.id, itemId: item.id };
@@ -179,24 +282,16 @@ export async function setNftManualFloorPrice(
     throw new NftInputError("Le prix ne peut pas être négatif");
   }
 
-  return prisma.$transaction(async (tx) => {
-    await tx.nftItemDetail.update({
-      where: { id: item.id },
-      data: {
-        valuationMode: "MANUAL",
-        floorPriceEur: floor.toFixed(2),
-        estimateSource: "MANUAL",
-        estimateDate: new Date(),
-        lastValuedAt: new Date(),
-      },
-    });
-    await tx.asset.update({
-      where: { id: assetId },
-      data: { manualPrice: floor.toFixed(12) },
-    });
-  });
+  const { overrideNftValuation } = await import("./nft-position-service");
+  await overrideNftValuation(userId, assetId, floor.toFixed(2));
 }
 
+/**
+ * Suppression physique — réservée à la correction d'une saisie manuelle
+ * erronée, sans historique réel à préserver (D8 de `docs/nft-backend-v1.md`).
+ * Une sortie patrimoniale réelle (vente, burn, transfert) doit passer par
+ * `disposeNftHolding`, qui conserve la ligne.
+ */
 export async function deleteNftItem(userId: string, assetId: string) {
   const item = await prisma.nftItemDetail.findFirst({
     where: { assetId, asset: { is: { userId } } },

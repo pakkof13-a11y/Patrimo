@@ -16,20 +16,28 @@ type MagicEdenWalletToken = {
   collectionName?: string | null;
 };
 
-export const fetchMagicEdenWalletNfts: WalletNftProvider = async (address) => {
+/**
+ * `cursor` porte un offset décimal (Magic Eden pagine par `offset`/`limit`,
+ * pas par jeton opaque) — piloté par l'appelant via `NftSyncCursor.cursor`.
+ */
+export const fetchMagicEdenWalletNfts: WalletNftProvider = async (address, _chain, cursor) => {
   const apiKey = resolveMagicEdenApiKey();
   if (!apiKey) return { ok: false, reason: "not-configured" };
 
+  const limit = 50;
+  const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
+
   try {
     const res = await fetch(
-      `${MAGIC_EDEN_BASE}/wallets/${address}/tokens?limit=50`,
+      `${MAGIC_EDEN_BASE}/wallets/${address}/tokens?offset=${offset}&limit=${limit}`,
       { headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" } }
     );
     if (res.status === 429) return { ok: false, reason: "rate-limited" };
     if (!res.ok) return { ok: false, reason: "not-found" };
 
     const json = (await res.json()) as MagicEdenWalletToken[];
-    const items: WalletNftItem[] = (Array.isArray(json) ? json : [])
+    const rows = Array.isArray(json) ? json : [];
+    const items: WalletNftItem[] = rows
       .filter((t) => t.mintAddress)
       .map((t) => ({
         tokenId: t.mintAddress!,
@@ -42,7 +50,10 @@ export const fetchMagicEdenWalletNfts: WalletNftProvider = async (address) => {
         standard: "SPL",
       }));
 
-    const result: WalletNftFetchResult = { ok: true, items };
+    // Magic Eden ne renvoie pas de total : une page pleine laisse supposer
+    // qu'il en reste une suivante, une page incomplète marque la fin.
+    const nextCursor = rows.length >= limit ? String(offset + limit) : null;
+    const result: WalletNftFetchResult = { ok: true, items, nextCursor };
     return result;
   } catch {
     return { ok: false, reason: "network-error" };

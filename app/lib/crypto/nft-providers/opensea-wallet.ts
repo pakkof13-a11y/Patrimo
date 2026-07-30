@@ -38,8 +38,13 @@ type OpenSeaAccountNftsResponse = {
   next?: string | null;
 };
 
-/** Une seule page (50 NFT) — largement suffisant pour un portefeuille type. */
-export const fetchOpenSeaWalletNfts: WalletNftProvider = async (address, chain) => {
+/**
+ * Une page (50 NFT) par appel — la pagination réelle (curseur `next`) est
+ * pilotée par l'appelant via `NftSyncCursor.cursor`, pas rejouée en boucle
+ * ici : c'est ce qui permet à une synchronisation dense de reprendre là où
+ * elle s'est arrêtée plutôt que de tout relire à chaque passage.
+ */
+export const fetchOpenSeaWalletNfts: WalletNftProvider = async (address, chain, cursor) => {
   const apiKey = resolveOpenSeaApiKey();
   if (!apiKey) return { ok: false, reason: "not-configured" };
 
@@ -48,8 +53,9 @@ export const fetchOpenSeaWalletNfts: WalletNftProvider = async (address, chain) 
 
   try {
     await openSeaGetLimiter.acquire();
+    const cursorParam = cursor ? `&next=${encodeURIComponent(cursor)}` : "";
     const res = await fetch(
-      `${OPENSEA_BASE}/chain/${chainParam}/account/${address}/nfts?limit=50`,
+      `${OPENSEA_BASE}/chain/${chainParam}/account/${address}/nfts?limit=50${cursorParam}`,
       { headers: { "X-API-KEY": apiKey, Accept: "application/json" } }
     );
     if (res.status === 429) return { ok: false, reason: "rate-limited" };
@@ -70,7 +76,7 @@ export const fetchOpenSeaWalletNfts: WalletNftProvider = async (address, chain) 
           n.token_standard?.toLowerCase() === "erc1155" ? "ERC_1155" : "ERC_721",
       }));
 
-    const result: WalletNftFetchResult = { ok: true, items };
+    const result: WalletNftFetchResult = { ok: true, items, nextCursor: json.next || null };
     return result;
   } catch {
     return { ok: false, reason: "network-error" };

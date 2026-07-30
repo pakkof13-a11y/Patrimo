@@ -19,13 +19,23 @@ export type WalletNftItem = {
 };
 
 export type WalletNftFetchResult =
-  | { ok: true; items: WalletNftItem[] }
+  | {
+      ok: true;
+      items: WalletNftItem[];
+      /** Curseur de page suivante — `null`/absent quand tout a été lu. */
+      nextCursor?: string | null;
+    }
   | {
       ok: false;
       reason: "not-configured" | "not-found" | "rate-limited" | "network-error";
     };
 
+/**
+ * `cursor` : curseur opaque de reprise, tel que renvoyé par un appel
+ * précédent (`NftSyncCursor.cursor`). `undefined`/`null` = première page.
+ */
 export type WalletNftProvider = (
   address: string,
-  chain: string
+  chain: string,
+  cursor?: string | null
 ) => Promise<WalletNftFetchResult>;
