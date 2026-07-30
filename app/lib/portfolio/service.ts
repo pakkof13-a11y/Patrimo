@@ -25,6 +25,7 @@ import {
   type HoldingPlatformSlice,
 } from "./holdings-platform-slice";
 import { asAccountType } from "../types/account-type";
+import { isNonOwnedStatus } from "../crypto/nft-taxonomy";
 import {
   asBaseAmount,
   asEurAmount,
@@ -245,13 +246,16 @@ export async function getHoldings(
         // solde comptant de même ticker (cf. `mergeKey`), et permettent à
         // l'onglet Cryptos d'isoler le comptant de la DeFi et des NFT sans
         // second aller-retour serveur.
-        // `isIgnoredInPortfolio` : une position DeFi que l'utilisateur a
+        // `isIgnoredInPortfolio` : une position DeFi/NFT que l'utilisateur a
         // explicitement écartée des agrégats patrimoniaux. Lue ici et non
-        // seulement dans l'onglet DeFi, sinon le patrimoine net contredirait la
-        // vue DeFi qui, elle, l'exclut. Distinct de `isHidden`, purement
-        // cosmétique, qui continue de compter.
+        // seulement dans l'onglet DeFi/NFT, sinon le patrimoine net
+        // contredirait ces vues qui, elles, l'excluent. Distinct de
+        // `isHidden`, purement cosmétique, qui continue de compter.
         defiPosition: { select: { id: true, isIgnoredInPortfolio: true } },
-        nftItem: { select: { id: true } },
+        // `status` : un NFT `BORROWED_IN` est détenu sans être possédé — il
+        // doit être restitué, donc il ne s'ajoute jamais au patrimoine net
+        // (`isNonOwnedStatus`, même règle que `countsInTotals` côté onglet).
+        nftItem: { select: { id: true, isIgnoredInPortfolio: true, status: true } },
       },
     }),
     prisma.transaction.findMany({
@@ -307,6 +311,10 @@ export async function getHoldings(
     // plus dans aucun total. Une position *fermée* n'a pas besoin de ce test —
     // son dénouement l'a ramenée à zéro, elle est déjà écartée plus haut.
     if (asset.defiPosition?.isIgnoredInPortfolio) continue;
+    // Même règle pour les NFT — plus le cas d'un NFT emprunté, présent au
+    // journal mais qui n'appartient pas à l'utilisateur.
+    if (asset.nftItem?.isIgnoredInPortfolio) continue;
+    if (asset.nftItem && isNonOwnedStatus(asset.nftItem.status)) continue;
 
     const platform =
       platformMap.get(pos.platformId) ||

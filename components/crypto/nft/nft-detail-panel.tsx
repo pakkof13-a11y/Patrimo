@@ -90,6 +90,9 @@ export function NftDetailPanel({
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["crypto-nft-portfolio"] });
     void qc.invalidateQueries({ queryKey: ["crypto-nft-position", assetId] });
+    // Cf. `nft-panel.tsx` : exclure/réintégrer un NFT change le total crypto
+    // de l'en-tête, qui vit dans une autre requête.
+    void qc.invalidateQueries({ queryKey: ["crypto-summary"] });
     onChanged();
   };
 

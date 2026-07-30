@@ -18,6 +18,7 @@ import { readDailyCloses } from "../market/daily-closes";
 import { closeAtOrBefore } from "../portfolio/class-history";
 import { isDebtPosition } from "./constants";
 import { isInactiveStatus } from "./defi-taxonomy";
+import { isInactiveHoldingStatus, isNonOwnedStatus } from "./nft-taxonomy";
 import {
   computeVariation24h,
   summarizeCryptoTotals,
@@ -54,7 +55,19 @@ export async function getCryptoKpis(userId: string): Promise<CryptoKpis> {
             ownershipPct: true,
           },
         },
-        nftItem: { select: { id: true } },
+        // Chantier G : mêmes garde-fous côté NFT que côté DeFi ci-dessus —
+        // sans eux, un NFT ignoré, sorti du patrimoine, emprunté, en doublon
+        // ou détenu en quote-part comptait pour 100 % dans le KPI crypto,
+        // alors que l'onglet NFT l'excluait déjà (`countsInTotals`).
+        nftItem: {
+          select: {
+            id: true,
+            isIgnoredInPortfolio: true,
+            status: true,
+            conflictFlag: true,
+            ownershipShare: true,
+          },
+        },
       },
     }),
     prisma.platform.count({
@@ -87,6 +100,17 @@ export async function getCryptoKpis(userId: string): Promise<CryptoKpis> {
       if (defi.conflictFlag) continue;
     }
 
+    // Même raisonnement pour un NFT, plus le cas d'un NFT emprunté : détenu
+    // en garde temporaire, il doit être restitué et n'appartient donc pas au
+    // patrimoine (cf. `countsInTotals`, seule définition de référence).
+    const nft = a.nftItem;
+    if (nft) {
+      if (nft.isIgnoredInPortfolio) continue;
+      if (isInactiveHoldingStatus(nft.status)) continue;
+      if (isNonOwnedStatus(nft.status)) continue;
+      if (nft.conflictFlag) continue;
+    }
+
     const kind = a.nftItem
       ? "NFT"
       : defi
@@ -101,7 +125,9 @@ export async function getCryptoKpis(userId: string): Promise<CryptoKpis> {
     const share =
       defi?.ownershipPct != null
         ? d(defi.ownershipPct.toString()).div(100)
-        : null;
+        : nft?.ownershipShare != null
+          ? d(nft.ownershipShare.toString()).div(100)
+          : null;
 
     inputs.push({
       assetId: a.id,

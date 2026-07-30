@@ -103,6 +103,9 @@ export function DefiDetailPanel({
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["crypto-defi-portfolio"] });
     void qc.invalidateQueries({ queryKey: ["crypto-defi-position", positionId] });
+    // Cf. `defi-panel.tsx` : exclure/clôturer une position change le total
+    // crypto de l'en-tête, qui vit dans une autre requête.
+    void qc.invalidateQueries({ queryKey: ["crypto-summary"] });
     onChanged();
   };
 

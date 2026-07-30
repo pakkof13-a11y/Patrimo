@@ -195,7 +195,10 @@ export function CryptosTab({
           <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
             Total poche crypto
           </div>
-          <div className="text-xl font-semibold tabular-nums tracking-tight text-teal-700 dark:text-teal-300">
+          <div
+            className="text-xl font-semibold tabular-nums tracking-tight text-teal-700 dark:text-teal-300"
+            data-testid="crypto-total"
+          >
             {formatCurrency(String(total), baseCurrency)}
           </div>
           {variation != null && (

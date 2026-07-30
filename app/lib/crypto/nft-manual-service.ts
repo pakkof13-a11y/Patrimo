@@ -293,10 +293,41 @@ export async function setNftManualFloorPrice(
 export async function deleteNftItem(userId: string, assetId: string) {
   const item = await prisma.nftItemDetail.findFirst({
     where: { assetId, asset: { is: { userId } } },
-    select: { id: true },
+    select: { id: true, nftAssetId: true },
   });
   if (!item) throw new NftInputError("NFT introuvable");
-  await prisma.transaction.deleteMany({ where: { assetId } });
-  await prisma.nftItemDetail.delete({ where: { id: item.id } });
-  await prisma.asset.delete({ where: { id: assetId } });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.transaction.deleteMany({ where: { assetId } });
+    await tx.nftItemDetail.delete({ where: { id: item.id } });
+    await tx.asset.delete({ where: { id: assetId } });
+
+    // L'identité (`NftAsset`) ne pend pas de l'`Asset` : sans ce nettoyage
+    // elle survivrait à la correction d'une saisie erronée, et un réajout du
+    // même NFT (même `uniqueKey`) réutiliserait silencieusement son nom, ses
+    // médias et sa classification spam d'origine — `ensureNftAsset` retourne
+    // l'existant sans jamais rejouer la classification (D9).
+    // Uniquement si plus aucune détention ne la référence : une revente puis
+    // un rachat du même NFT doit conserver l'identité et son historique.
+    const remaining = await tx.nftItemDetail.count({
+      where: { nftAssetId: item.nftAssetId },
+    });
+    if (remaining === 0) {
+      const { collectionId } = (await tx.nftAsset.findUnique({
+        where: { id: item.nftAssetId },
+        select: { collectionId: true },
+      })) ?? { collectionId: null };
+
+      // Cascade : traits, médias, événements et valorisations de cette identité.
+      await tx.nftAsset.delete({ where: { id: item.nftAssetId } });
+
+      // La collection devient orpheline dès qu'elle ne porte plus aucun NFT.
+      if (collectionId) {
+        const siblings = await tx.nftAsset.count({ where: { collectionId } });
+        if (siblings === 0) {
+          await tx.nftCollection.delete({ where: { id: collectionId } });
+        }
+      }
+    }
+  });
 }

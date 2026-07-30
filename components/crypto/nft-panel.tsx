@@ -108,6 +108,10 @@ export function NftPanel({ className }: { className?: string }) {
     void qc.invalidateQueries({ queryKey: ["crypto-nft-portfolio"] });
     void qc.invalidateQueries({ queryKey: ["holdings"] });
     void qc.invalidateQueries({ queryKey: ["portfolio"] });
+    // « Total poche crypto » de l'en-tête de l'onglet : il agrège comptant +
+    // DeFi + NFT et bouge donc dès qu'un NFT entre, sort ou est exclu du
+    // patrimoine. Sans cette invalidation il restait figé jusqu'au rechargement.
+    void qc.invalidateQueries({ queryKey: ["crypto-summary"] });
   }
 
   if (q.isPending) {

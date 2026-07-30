@@ -281,6 +281,34 @@ test.describe("NFT — détail, vues, filtres, cycle de vie", () => {
     await expect(page.getByTestId("nft-card").filter({ hasText: name })).toHaveCount(0);
   });
 
+  test("exclure un NFT du patrimoine le retire aussi du total crypto (cas 56)", async ({ page }) => {
+    // Référence prise *avant* la création : attendre que le total ait intégré
+    // le nouveau NFT est alors une assertion explicite, et non une course
+    // avec le rafraîchissement du KPI.
+    const totalBeforeCreate = await page.getByTestId("crypto-total").textContent();
+
+    const name = `Ignore Test ${runId}`;
+    await createBasicNft(page, name);
+
+    const card = page.getByTestId("nft-card").filter({ hasText: name });
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("crypto-total")).not.toHaveText(totalBeforeCreate ?? "", {
+      timeout: 15_000,
+    });
+
+    // « Exclure du patrimoine » n'est pas cosmétique : contrairement au
+    // masquage, le total crypto global doit revenir à sa valeur d'avant, sinon
+    // le patrimoine net contredirait la vue NFT qui, elle, exclut la ligne.
+    await card.getByTestId("nft-card-open").click();
+    await page.getByTestId("nft-detail-action-ignore").click();
+    await expect(page.getByTestId("nft-detail-action-unignore")).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("modal-close").click();
+
+    await expect(page.getByTestId("crypto-total")).toHaveText(totalBeforeCreate ?? "", {
+      timeout: 15_000,
+    });
+  });
+
   test("filtre spam/masqué uniquement montre les NFT concernés", async ({ page }) => {
     const hiddenName = `Filter Hidden ${runId}`;
     await createBasicNft(page, hiddenName);

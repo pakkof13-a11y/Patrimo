@@ -100,6 +100,10 @@ export function DefiPanel({ className }: { className?: string }) {
     void qc.invalidateQueries({ queryKey: ["crypto-defi-portfolio"] });
     void qc.invalidateQueries({ queryKey: ["holdings"] });
     void qc.invalidateQueries({ queryKey: ["portfolio"] });
+    // « Total poche crypto » de l'en-tête : agrège comptant + DeFi + NFT, il
+    // bouge donc dès qu'une position DeFi change. Sans cette invalidation il
+    // restait figé jusqu'au rechargement.
+    void qc.invalidateQueries({ queryKey: ["crypto-summary"] });
   };
 
   if (q.isPending) {

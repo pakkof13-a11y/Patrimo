@@ -42,6 +42,19 @@ async function wipeUserData(userId: string) {
     .deleteMany({ where: { userId } })
     .catch(() => undefined);
   await prisma.asset.deleteMany({ where: { userId } });
+  // Identités NFT et références DeFi : rattachées à `User`, pas à `Asset` —
+  // la suppression ci-dessus ne les emporte donc pas. Sans ce nettoyage, un
+  // `NftAsset` d'un run précédent survit au wipe et `ensureNftAsset` le
+  // retrouve par `uniqueKey`, réutilisant son nom, ses médias et sa
+  // classification spam d'origine (tests e2e non déterministes).
+  // Après `asset.deleteMany` uniquement : `NftItemDetail.nftAsset` est en
+  // `Restrict`, les détentions doivent avoir disparu par cascade avant.
+  await prisma.nftAsset.deleteMany({ where: { userId } }).catch(() => undefined);
+  await prisma.nftCollection.deleteMany({ where: { userId } }).catch(() => undefined);
+  await prisma.nftSyncCursor.deleteMany({ where: { userId } }).catch(() => undefined);
+  await prisma.defiProtocolRef.deleteMany({ where: { userId } }).catch(() => undefined);
+  await prisma.defiStrategy.deleteMany({ where: { userId } }).catch(() => undefined);
+  await prisma.defiSyncCursor.deleteMany({ where: { userId } }).catch(() => undefined);
   await prisma.platform.deleteMany({ where: { userId } });
   await prisma.portfolioSnapshot.deleteMany({ where: { userId } });
 }

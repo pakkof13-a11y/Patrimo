@@ -220,3 +220,42 @@ détection `SYNC_MISSING` dans `syncNftsFromWallet`).
 
 Aucun TODO flou laissé dans le code livré ; les limites V1 réelles sont
 listées au §3 ci-dessus, pas en commentaire dans le code.
+
+## 5. Audit post-livraison — correctifs
+
+Relecture du chantier livré contre le cahier des charges. Quatre défauts
+réels trouvés et corrigés, tous liés au même angle mort : `NftAsset` et
+`NftCollection` pendent de `User`, pas d'`Asset`, et l'onglet NFT était seul
+à connaître ses propres règles d'exclusion.
+
+1. **Identités NFT orphelines après suppression.** `resetUserData()`
+   (réinitialisation complète depuis les préférences) et le wipe du seed
+   supprimaient les `Asset` — donc les `NftItemDetail` par cascade — mais
+   laissaient les `NftAsset`/`NftCollection`/`NftSyncCursor`, et avec eux
+   leurs événements, valorisations et classification spam. Un réajout du même
+   NFT retrouvait l'identité périmée par `uniqueKey` et en héritait
+   silencieusement (`ensureNftAsset` ne rejoue jamais la classification, D9).
+   Corrigé dans les deux chemins, plus les équivalents DeFi
+   (`DefiProtocolRef`/`DefiStrategy`/`DefiSyncCursor`), touchés par le même
+   oubli.
+2. **`deleteNftItem` laissait l'identité derrière lui.** Même cause, chemin
+   utilisateur : corriger une saisie erronée par suppression puis re-saisie
+   ne corrigeait rien, l'ancien nom/média/flag spam revenait. La suppression
+   nettoie désormais l'identité — et la collection — devenues orphelines, et
+   seulement dans ce cas (une revente puis un rachat doit conserver
+   l'historique).
+3. **`isIgnoredInPortfolio` ignoré par les agrégats globaux.** La règle
+   `countsInTotals()` n'était appliquée que dans l'onglet NFT : le patrimoine
+   net et le KPI crypto comptaient malgré tout un NFT explicitement exclu, un
+   NFT emprunté (`BORROWED_IN`, détenu sans être possédé), un doublon
+   signalé, et ignoraient la quote-part. F1 avait fait ce branchement pour la
+   DeFi (`app/lib/portfolio/service.ts`), le chantier NFT ne l'avait pas
+   répliqué. Corrigé dans `portfolio/service.ts` et
+   `crypto/summary-service.ts`.
+4. **« Total poche crypto » figé.** Aucun panneau crypto n'invalidait
+   `crypto-summary` : exclure un NFT (ou modifier une position DeFi) ne
+   mettait à jour le total de l'en-tête qu'au rechargement. Corrigé dans les
+   quatre panneaux (NFT et DeFi, liste et détail).
+
+Couverture ajoutée : `e2e/nft-panel.spec.ts` vérifie désormais que l'exclusion
+d'un NFT fait effectivement bouger le total crypto (cas 56).

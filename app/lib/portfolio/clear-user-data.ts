@@ -12,6 +12,8 @@ export type ResetUserDataResult = {
   employeeSavingsDeleted: number;
   alternativesDeleted: number;
   snapshotsDeleted: number;
+  /** Identités NFT, collections et curseurs de sync — ne cascadent pas depuis `Asset`. */
+  nftIdentitiesDeleted: number;
 };
 
 /**
@@ -69,6 +71,33 @@ export async function resetUserData(userId: string): Promise<ResetUserDataResult
       /* ignore */
     }
 
+    // Identités NFT et références DeFi : elles ne pendent pas d'`Asset` mais
+    // de `User`, donc la suppression des actifs ci-dessus ne les emporte pas.
+    // Sans ce nettoyage, une réinitialisation « complète » laisse derrière
+    // elle des `NftAsset` orphelins qui conservent nom, médias, événements,
+    // valorisations et surtout classification spam — et qu'un réajout du même
+    // NFT (même `uniqueKey`) réutiliserait silencieusement.
+    // Ordre imposé : `NftItemDetail.nftAsset` est en `Restrict`, donc les
+    // détentions doivent avoir disparu (cascade depuis `Asset`) avant ici.
+    let nftIdentities = 0;
+    try {
+      const nftAssets = await tx.nftAsset.deleteMany({ where: { userId } });
+      const nftCollections = await tx.nftCollection.deleteMany({ where: { userId } });
+      const nftCursors = await tx.nftSyncCursor.deleteMany({ where: { userId } });
+      const defiRefs = await tx.defiProtocolRef.deleteMany({ where: { userId } });
+      const defiStrategies = await tx.defiStrategy.deleteMany({ where: { userId } });
+      const defiCursors = await tx.defiSyncCursor.deleteMany({ where: { userId } });
+      nftIdentities =
+        nftAssets.count +
+        nftCollections.count +
+        nftCursors.count +
+        defiRefs.count +
+        defiStrategies.count +
+        defiCursors.count;
+    } catch {
+      /* models may be missing in older DBs */
+    }
+
     // Platforms after assets/transactions
     const platforms = await tx.platform.deleteMany({ where: { userId } });
 
@@ -84,6 +113,7 @@ export async function resetUserData(userId: string): Promise<ResetUserDataResult
       employeeSavingsDeleted: es,
       alternativesDeleted: alt,
       snapshotsDeleted: snaps,
+      nftIdentitiesDeleted: nftIdentities,
     };
   });
 }
