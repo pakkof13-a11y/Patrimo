@@ -17,6 +17,7 @@ import { getAssetValues } from "../portfolio/asset-values";
 import { readDailyCloses } from "../market/daily-closes";
 import { closeAtOrBefore } from "../portfolio/class-history";
 import { isDebtPosition } from "./constants";
+import { isInactiveStatus } from "./defi-taxonomy";
 import {
   computeVariation24h,
   summarizeCryptoTotals,
@@ -41,7 +42,18 @@ export async function getCryptoKpis(userId: string): Promise<CryptoKpis> {
       where: { userId, accountType: "CRYPTO" },
       select: {
         id: true,
-        defiPosition: { select: { positionType: true } },
+        defiPosition: {
+          select: {
+            positionType: true,
+            // Chantier F1 : ces quatre champs décident si la position pèse au
+            // patrimoine, et pour quelle part. Sans eux, une position ignorée,
+            // fermée, en doublon ou détenue à 30 % comptait pour 100 %.
+            isIgnoredInPortfolio: true,
+            status: true,
+            conflictFlag: true,
+            ownershipPct: true,
+          },
+        },
         nftItem: { select: { id: true } },
       },
     }),
@@ -62,19 +74,40 @@ export async function getCryptoKpis(userId: string): Promise<CryptoKpis> {
     const v = values.get(a.id);
     if (!v) continue; // position fermée : aucune contribution actuelle.
 
+    const defi = a.defiPosition;
+
+    // Une position DeFi explicitement écartée ne doit pas peser au patrimoine :
+    // l'ignorer est une décision de l'utilisateur, une position fermée ou
+    // liquidée n'a plus d'exposition, et un doublon compterait la même valeur
+    // deux fois. `isHidden` n'est **pas** dans cette liste — masquer une ligne
+    // est cosmétique, elle continue de compter.
+    if (defi) {
+      if (defi.isIgnoredInPortfolio) continue;
+      if (isInactiveStatus(defi.status)) continue;
+      if (defi.conflictFlag) continue;
+    }
+
     const kind = a.nftItem
       ? "NFT"
-      : a.defiPosition
-        ? isDebtPosition(a.defiPosition.positionType)
+      : defi
+        ? isDebtPosition(defi.positionType)
           ? "DEFI_DEBT"
           : "DEFI_DEPOSIT"
         : "SPOT";
 
+    // Quote-part : seule la fraction détenue entre au patrimoine. Appliquée à
+    // la valeur **et** au coût, sans quoi le P&L latent d'une position détenue
+    // à 30 % serait celui d'une position détenue en totalité.
+    const share =
+      defi?.ownershipPct != null
+        ? d(defi.ownershipPct.toString()).div(100)
+        : null;
+
     inputs.push({
       assetId: a.id,
       kind,
-      valueEur: v.marketValueEur,
-      costBasisEur: v.costBasisEur,
+      valueEur: share ? v.marketValueEur.times(share) : v.marketValueEur,
+      costBasisEur: share ? v.costBasisEur.times(share) : v.costBasisEur,
     });
   }
 

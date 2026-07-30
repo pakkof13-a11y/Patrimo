@@ -245,7 +245,12 @@ export async function getHoldings(
         // solde comptant de même ticker (cf. `mergeKey`), et permettent à
         // l'onglet Cryptos d'isoler le comptant de la DeFi et des NFT sans
         // second aller-retour serveur.
-        defiPosition: { select: { id: true } },
+        // `isIgnoredInPortfolio` : une position DeFi que l'utilisateur a
+        // explicitement écartée des agrégats patrimoniaux. Lue ici et non
+        // seulement dans l'onglet DeFi, sinon le patrimoine net contredirait la
+        // vue DeFi qui, elle, l'exclut. Distinct de `isHidden`, purement
+        // cosmétique, qui continue de compter.
+        defiPosition: { select: { id: true, isIgnoredInPortfolio: true } },
         nftItem: { select: { id: true } },
       },
     }),
@@ -297,6 +302,11 @@ export async function getHoldings(
     if (pos.quantity.lte(0)) continue;
     const asset = assetMap.get(pos.assetId);
     if (!asset) continue;
+    // Position DeFi explicitement exclue du patrimoine : ses écritures restent
+    // au journal (l'historique et la fiscalité en dépendent), mais elle ne pèse
+    // plus dans aucun total. Une position *fermée* n'a pas besoin de ce test —
+    // son dénouement l'a ramenée à zéro, elle est déjà écartée plus haut.
+    if (asset.defiPosition?.isIgnoredInPortfolio) continue;
 
     const platform =
       platformMap.get(pos.platformId) ||

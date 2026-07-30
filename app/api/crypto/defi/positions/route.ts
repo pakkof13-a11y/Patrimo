@@ -13,6 +13,14 @@ import {
 import { setPositionStrategy } from "@/app/lib/crypto/defi-strategy-service";
 import { AccountingError } from "@/app/lib/accounting";
 import { DEFI_POSITION_TYPES } from "@/app/lib/crypto/constants";
+import {
+  ACCESS_MODE_KEYS,
+  CUSTODY_MODEL_KEYS,
+  DATA_ORIGIN_KEYS,
+  LEG_TYPE_KEYS,
+  POSITION_STATUS_KEYS,
+  REWARD_TYPE_KEYS,
+} from "@/app/lib/crypto/defi-taxonomy";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +105,58 @@ const createSchema = z.object({
   pairedAllocationPct: decimalString.optional().nullable(),
 
   notes: z.string().trim().max(2000).optional().nullable(),
+
+  // ── Contexte d'accès, cycle de vie et composantes (chantier F1) ──
+  // Tous optionnels : les appelants existants continuent de fonctionner, la
+  // position prend alors les défauts historiques (`DEFI`, `ACTIVE`, 100 %).
+  accessMode: z.enum(ACCESS_MODE_KEYS).optional().nullable(),
+  custodyModel: z.enum(CUSTODY_MODEL_KEYS).optional().nullable(),
+  dataOrigin: z.enum(DATA_ORIGIN_KEYS).optional().nullable(),
+  ownerLabel: z.string().trim().max(120).optional().nullable(),
+  /** ]0 ; 100] — la borne haute est vérifiée ici *et* dans le service. */
+  ownershipPct: decimalString.optional().nullable(),
+
+  protocolVersion: z.string().trim().max(24).optional().nullable(),
+  underlyingProtocol: z.string().trim().max(80).optional().nullable(),
+  marketRef: z.string().trim().max(120).optional().nullable(),
+  vaultRef: z.string().trim().max(120).optional().nullable(),
+  poolRef: z.string().trim().max(120).optional().nullable(),
+  validatorName: z.string().trim().max(120).optional().nullable(),
+  nftPositionRef: z.string().trim().max(120).optional().nullable(),
+
+  status: z.enum(POSITION_STATUS_KEYS).optional().nullable(),
+  isHidden: z.boolean().optional(),
+  isIgnoredInPortfolio: z.boolean().optional(),
+  linkedPositionId: z.string().min(1).optional().nullable(),
+
+  legs: z
+    .array(
+      z.object({
+        legType: z.enum(LEG_TYPE_KEYS),
+        symbol: z.string().trim().min(1).max(24),
+        quantity: decimalString,
+        tokenRole: z.string().trim().max(40).optional().nullable(),
+        unitCostEur: decimalString.optional().nullable(),
+        metadata: z.record(z.string(), z.unknown()).optional().nullable(),
+      })
+    )
+    .max(12)
+    .optional()
+    .nullable(),
+
+  rewards: z
+    .array(
+      z.object({
+        symbol: z.string().trim().min(1).max(24),
+        rewardType: z.enum(REWARD_TYPE_KEYS).optional(),
+        accruedQuantity: decimalString.optional().nullable(),
+        valueEur: decimalString.optional().nullable(),
+        sourceLabel: z.string().trim().max(80).optional().nullable(),
+      })
+    )
+    .max(8)
+    .optional()
+    .nullable(),
 });
 
 /** POST — saisie manuelle d'une position DeFi. */
@@ -146,6 +206,12 @@ const closeSchema = z.object({
   assetId: z.string().min(1),
   exitUnitPriceEur: decimalString.optional().nullable(),
   closedAt: z.string().optional().nullable(),
+  /**
+   * Sortie subie et non choisie. Les deux ramènent la quantité à zéro, mais
+   * confondre l'une avec l'autre effacerait l'événement le plus important de
+   * l'historique d'un emprunt.
+   */
+  liquidated: z.boolean().optional(),
 });
 
 /**
@@ -180,6 +246,7 @@ export async function DELETE(req: Request) {
     const out = await closeDefiPosition(userId, parsed.data.assetId, {
       exitUnitPriceEur: parsed.data.exitUnitPriceEur,
       closedAt: parsed.data.closedAt,
+      liquidated: parsed.data.liquidated,
     });
     return NextResponse.json(out);
   } catch (e) {

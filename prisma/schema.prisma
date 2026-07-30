@@ -50,6 +50,9 @@ model User {
   defiStrategies         DefiStrategy[]
   securitiesAccounts     SecuritiesAccount[]
   tradingAccounts        TradingAccount[]
+  defiSyncCursors        DefiSyncCursor[]
+  defiProtocolRefs       DefiProtocolRef[]
+  defiMarketRefs         DefiMarketRef[]
 
   @@index([role])
 }
@@ -118,6 +121,7 @@ model Platform {
   transactionsTo     Transaction[]         @relation("TxToPlatform")
   onchainTxs         BlockchainOnchainTx[]
   securitiesAccounts SecuritiesAccount[]
+  defiSyncCursors    DefiSyncCursor[]
 
   @@unique([userId, name])
   @@index([userId])
@@ -223,6 +227,9 @@ model Asset {
   lifeSupport        LifeInsuranceSupport?
   liabilities        Liability[]
   securitiesAccount  SecuritiesAccount?        @relation(fields: [securitiesAccountId], references: [id], onDelete: SetNull)
+  defiLegs           DefiLeg[]
+  defiEvents         DefiEvent[]
+  defiRewards        DefiReward[]
 
   @@index([userId])
   @@index([platformId])
@@ -270,6 +277,7 @@ model Transaction {
   platform   Platform  @relation("TxPlatform", fields: [platformId], references: [id], onDelete: Restrict)
   toPlatform Platform? @relation("TxToPlatform", fields: [toPlatformId], references: [id], onDelete: Restrict)
   asset      Asset?    @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  defiEvents DefiEvent[]
 
   @@index([userId, occurredAt])
   @@index([platformId, occurredAt])
@@ -1585,18 +1593,473 @@ model DefiPositionDetail {
   liqThresholdPct Decimal? @db.Decimal(6, 3)
 
   /// ZERION | MANUAL — une ligne saisie à la main n'est jamais écrasée par
-  /// une synchronisation.
+  /// une synchronisation. Conservé pour compatibilité ; `dataOrigin` est la
+  /// généralisation (MANUAL | WALLET_SYNC | PLATFORM_API | CSV_IMPORT).
   source       String    @default("MANUAL")
   lastSyncedAt DateTime?
   notes        String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  // ───────────────────────── Contexte d'accès ─────────────────────────
+  // Ajouté au chantier F1. Cf. docs/defi-backend-v1.md.
+
+  /// DEFI | HYBRID | CEFI — cf. `DEFI_ACCESS_MODES`. L'axe le plus
+  /// structurant du module : le risque de contrepartie d'un contrat et celui
+  /// du bilan d'une plateforme ne se pilotent pas de la même façon, et une
+  /// position hybride cumule les deux.
+  accessMode   String  @default("DEFI")
+  /// SELF_CUSTODY | CUSTODIAL | SHARED_CUSTODY | UNKNOWN. Orthogonal à
+  /// `accessMode` : un staking délégué reste auto-détenu.
+  custodyModel String  @default("UNKNOWN")
+  /// MANUAL | WALLET_SYNC | PLATFORM_API | CSV_IMPORT — pilote la priorité
+  /// d'écrasement lors d'une resynchronisation.
+  dataOrigin   String  @default("MANUAL")
+  /// Entité détentrice, en clair (SCI, holding…). Aucun modèle d'entité
+  /// n'existe dans le dépôt : une chaîne libre trace l'information sans
+  /// inventer une table hors périmètre. Limite V1 assumée.
+  ownerLabel   String?
+  /// Quote-part détenue, en %. `null` = 100 %. Même convention que
+  /// `BankAccount.ownershipPct`.
+  ownershipPct Decimal? @db.Decimal(6, 3)
+
+  // ───────────────────────── Infrastructure ─────────────────────────
+
+  /// v2 | v3 | v3.1… Deux versions d'un même protocole ont des risques et des
+  /// mécaniques distincts (Uniswap V2 vs V3), les confondre dans un seul
+  /// libellé `protocol` empêche de les distinguer dans les agrégats.
+  protocolVersion String?
+  /// Protocole réellement à l'œuvre derrière un produit hybride — le « Earn »
+  /// d'un exchange qui route vers Aave. `UNKNOWN_NOT_DISCLOSED` est une valeur
+  /// légitime : la plateforme ne le dit pas toujours.
+  underlyingProtocol String?
+  /// Marché de prêt (« USDC », « WETH » chez Aave), vault, ou pool identifié.
+  /// Trois champs distincts plutôt qu'un seul `marketId` : ils ne désignent
+  /// pas la même chose et une position peut en porter plusieurs (un vault sur
+  /// un pool).
+  marketRef String?
+  vaultRef  String?
+  poolRef   String?
+  /// Validateur d'un staking natif — le risque de slashing lui est propre.
+  validatorName String?
+  /// Référence de la position NFT quand le protocole la matérialise ainsi
+  /// (Uniswap V3). Support technique : sa valeur vient des legs, jamais du
+  /// marché NFT — sans quoi une CLMM serait comptée deux fois.
+  nftPositionRef String?
+
+  // ───────────────────────── Cycle de vie ─────────────────────────
+
+  /// ACTIVE | LOCKED | WITHDRAWING | UNSTAKING | PAUSED | CLOSED |
+  /// LIQUIDATED | UNKNOWN. `CLOSED`/`LIQUIDATED` sortent de la valorisation
+  /// sans sortir de la base : les récompenses perçues restent dues
+  /// fiscalement.
+  status   String    @default("ACTIVE")
+  openedAt DateTime?
+  closedAt DateTime?
+
+  /// Masquée de l'affichage, mais toujours comptée au patrimoine.
+  isHidden Boolean @default(false)
+  /// Exclue des agrégats patrimoniaux, mais historisée. Distinct de
+  /// `isHidden` : l'un est cosmétique, l'autre change les totaux.
+  isIgnoredInPortfolio Boolean @default(false)
+
+  /// Position liée — jambe opposée d'un bridge, ou position d'origine après
+  /// une migration de protocole. Sert à l'anti-double-compte : une seule des
+  /// deux extrémités compte. `SetNull` plutôt que `Cascade` : supprimer une
+  /// position ne doit jamais emporter celle qui lui est liée.
+  linkedPositionId String?
+  linkedPosition   DefiPositionDetail?  @relation("DefiPositionLink", fields: [linkedPositionId], references: [id], onDelete: SetNull)
+  linkedFrom       DefiPositionDetail[] @relation("DefiPositionLink")
+
+  /// Conflit de déduplication détecté (même position vue par deux sources).
+  /// Jamais résolu silencieusement : la position reste visible pour revue.
+  conflictFlag   Boolean @default(false)
+  conflictReason String?
+
+  /// Clé d'identité côté fournisseur — `df:chain:proto:type:asset` pour
+  /// Zerion. Portée ici en plus de `Asset.providerSymbol` pour que la
+  /// déduplication n'ait pas à charger l'actif.
+  providerKey String?
+
+  asset       Asset            @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  legs        DefiLeg[]
+  events      DefiEvent[]
+  valuations  DefiValuation[]
+  rewards     DefiReward[]
 
   @@index([protocol])
   @@index([positionType])
   @@index([strategyId])
+  @@index([accessMode])
+  @@index([status])
+  @@index([dataOrigin])
+  @@index([isHidden, isIgnoredInPortfolio])
+  @@index([chain, protocol, positionType])
+  @@index([openedAt])
+  @@index([closedAt])
+  @@index([providerKey])
+  @@index([linkedPositionId])
+}
+
+/// Composante économique d'une position DeFi.
+///
+/// C'est le modèle qui rend le module capable de décrire autre chose qu'« un
+/// actif et un montant ». Un emprunt Aave est un `COLLATERAL` **et** un `DEBT` ;
+/// une LP, deux `ASSET` et un `SHARE` ; un stETH Lido, un `ASSET` déposé et un
+/// `RECEIPT` reçu. Sans cette séparation, impossible de retrancher une dette ni
+/// d'éviter de compter un dépôt et son reçu deux fois.
+///
+/// Les quantités portées ici décrivent l'**exposition**, pas la valorisation :
+/// la valeur vivante continue de venir du journal (`getAssetValues`). Une
+/// jambe sans `assetId` (un jeton apparié qui n'a pas d'`Asset` propre) porte
+/// son symbole en clair — c'est déjà la convention de `pairedSymbol`.
+model DefiLeg {
+  id                 String @id @default(cuid())
+  defiPositionId     String
+
+  /// ASSET | COLLATERAL | DEBT | RECEIPT | REWARD | SHARE | UNDERLYING.
+  legType String
+
+  /// Actif du dépôt quand il en a un. `SetNull` : supprimer un actif ne doit
+  /// pas effacer la description de la jambe, qui garde son symbole.
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  /// Symbole en clair — seule identification des jambes sans `Asset`.
+  symbol String
+  /// Rôle du jeton dans la position : « token0 », « token1 », « debt »…
+  /// Déclaratif, sert à l'affichage et au rapprochement avec le protocole.
+  tokenRole String?
+
+  quantity Decimal @db.Decimal(38, 18)
+
+  /// Coût unitaire — en jeton natif et en euros. Sans le prix d'entrée, l'IL
+  /// d'une LP n'est pas calculable (cf. `pairedEntryPriceEur`).
+  unitCostNative Decimal? @db.Decimal(38, 18)
+  unitCostEur    Decimal? @db.Decimal(28, 12)
+  totalCostEur   Decimal? @db.Decimal(18, 2)
+
+  /// Une jambe soldée est conservée : elle explique l'exposition passée.
+  isActive Boolean @default(true)
+
+  /// Bornes d'une position concentrée quand la jambe les porte, adresse de
+  /// contrat, décimales du jeton… Ce qui n'a pas de colonne dédiée et n'entre
+  /// dans aucun calcul.
+  metadataJson Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  position DefiPositionDetail @relation(fields: [defiPositionId], references: [id], onDelete: Cascade)
+
+  @@index([defiPositionId])
+  @@index([defiPositionId, legType])
+  @@index([assetId])
+  @@index([legType, isActive])
+  @@index([symbol])
+}
+
+/// Événement de cycle de vie d'une position DeFi.
+///
+/// Le journal (`Transaction`) reste seul maître des quantités valorisées : ce
+/// modèle ne le double pas, il le **qualifie**. Un `Transaction` dit « +3 ETH
+/// sur cet actif » ; un `DefiEvent` dit « c'était un `CLAIM_REWARD` chez Lido,
+/// tx 0xabc… ». Les deux sont liés par `ledgerTransactionId` quand l'événement
+/// déplace de la quantité ; un `SYNC_REFRESH` n'en a pas, exiger une écriture
+/// pour un passage de sync fabriquerait des transactions vides.
+model DefiEvent {
+  id             String @id @default(cuid())
+  defiPositionId String
+
+  /// DEPOSIT | WITHDRAW | STAKE | UNSTAKE | CLAIM_REWARD | COMPOUND |
+  /// BORROW | REPAY | ADD_LIQUIDITY | REMOVE_LIQUIDITY | REBALANCE |
+  /// MIGRATE | LIQUIDATION | BRIDGE_IN | BRIDGE_OUT | WRAP | UNWRAP |
+  /// SYNC_REFRESH | MANUAL_OVERRIDE.
+  eventType String
+  eventDate DateTime
+
+  /// Identifiants on-chain — absents d'un événement CeFi ou saisi à la main.
+  chainId String?
+  txHash  String?
+
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  symbol  String?
+
+  fromAddress String?
+  toAddress   String?
+
+  quantity     Decimal? @db.Decimal(38, 18)
+  amountNative Decimal? @db.Decimal(38, 18)
+  amountEur    Decimal? @db.Decimal(18, 2)
+  feesNative   Decimal? @db.Decimal(38, 18)
+  feesEur      Decimal? @db.Decimal(18, 2)
+
+  /// Protocole d'arrivée d'une migration, protocole de pont… en clair, comme
+  /// `DefiPositionDetail.protocol`.
+  relatedProtocol String?
+
+  /// Écriture de journal correspondante. `SetNull` : purger une transaction ne
+  /// doit pas effacer la trace de l'événement, qui reste explicatif.
+  ledgerTransactionId String?
+  ledgerTransaction   Transaction? @relation(fields: [ledgerTransactionId], references: [id], onDelete: SetNull)
+
+  /// ZERION | DEBANK | COVALENT | SOLANA_RPC | CSV | MANUAL.
+  sourceProvider String @default("MANUAL")
+  rawPayloadJson Json?
+
+  createdAt DateTime @default(now())
+
+  position DefiPositionDetail @relation(fields: [defiPositionId], references: [id], onDelete: Cascade)
+
+  /// Un même hash peut porter plusieurs événements d'une position (un
+  /// `REMOVE_LIQUIDITY` qui rend deux jetons), mais pas deux fois le même
+  /// type : c'est la garantie de re-sync sans doublon.
+  @@unique([defiPositionId, txHash, eventType])
+  @@index([defiPositionId])
+  @@index([defiPositionId, eventDate])
+  @@index([eventType])
+  @@index([eventDate])
+  @@index([txHash])
+  @@index([ledgerTransactionId])
+}
+
+/// Snapshot de valorisation — historique, pas vérité.
+///
+/// Règle absolue du chantier : ne pas stocker `currentValue` comme vérité
+/// indépendante. La valeur vivante d'une position vient donc toujours du journal.
+/// Ce modèle conserve la **méthode** retenue, sa provenance et la raison d'un
+/// éventuel repli, pour qu'une valeur affichée hier reste explicable aujourd'hui.
+///
+/// Une seule exception, explicite : `isManual = true` fait prévaloir le snapshot
+/// le plus récent. C'est un choix délibéré sur une position dont aucun marché ne
+/// donne le prix (vault opaque, receipt token sans cotation) — signalé comme tel
+/// dans la qualité de valorisation des agrégats.
+model DefiValuation {
+  id             String   @id @default(cuid())
+  defiPositionId String
+  valuationDate  DateTime
+
+  /// MARKET | UNDERLYING_ASSETS | MANUAL | PROVIDER_ESTIMATE |
+  /// ACQUISITION_COST_FALLBACK | UNKNOWN.
+  valuationMethod String
+  /// Fournisseur du chiffre — cf. `DEFI_PROVIDERS`.
+  sourceProvider  String @default("MANUAL")
+
+  /// Décomposition complète. `net = gross − debt` ; `retained = net ×
+  /// ownershipPct`. Séparées et non recalculables l'une de l'autre : un
+  /// portefeuille à 100 k€ déposés / 60 k€ empruntés ne se pilote pas comme un
+  /// portefeuille à 40 k€ sans levier, bien que les deux pèsent 40 k€.
+  grossValueEur      Decimal? @db.Decimal(18, 2)
+  netValueEur        Decimal? @db.Decimal(18, 2)
+  debtValueEur       Decimal? @db.Decimal(18, 2)
+  collateralValueEur Decimal? @db.Decimal(18, 2)
+  rewardsValueEur    Decimal? @db.Decimal(18, 2)
+  retainedValueEur   Decimal? @db.Decimal(18, 2)
+  /// Somme des sous-jacents d'une LP / d'un vault, quand elle est connue —
+  /// à comparer à la valeur de marché de la part pour détecter un écart.
+  lpUnderlyingValueEur Decimal? @db.Decimal(18, 2)
+  /// Frais accumulés non collectés (LP concentrée notamment).
+  feesAccruedEur       Decimal? @db.Decimal(18, 2)
+
+  /// 0–100, dérivé de la méthode (cf. `VALUATION_METHOD_CONFIDENCE`).
+  confidenceScore Int?
+  isManual        Boolean @default(false)
+  /// Pourquoi la méthode nominale n'a pas pu s'appliquer. Renseigné dès que la
+  /// méthode est un repli — une valeur de repli prise pour un prix de marché
+  /// fait croire à une position stable alors qu'elle n'est plus cotée.
+  fallbackReason  String?
+  rawPayloadJson  Json?
+
+  createdAt DateTime @default(now())
+
+  position DefiPositionDetail @relation(fields: [defiPositionId], references: [id], onDelete: Cascade)
+
+  /// Un seul snapshot par position et par instant de valorisation : une
+  /// re-synchronisation qui rejoue la même date met à jour au lieu d'empiler.
+  @@unique([defiPositionId, valuationDate])
+  @@index([defiPositionId])
+  @@index([defiPositionId, valuationDate])
+  @@index([valuationDate])
+  @@index([valuationMethod])
+  @@index([isManual])
+}
+
+/// Récompense d'une position, par jeton.
+///
+/// Remplace à terme le JSON `extraRewardLegs`, conservé pour compatibilité : un
+/// JSON n'est pas requêtable (« combien de CRV en attente, tous protocoles
+/// confondus ? ») et ne distingue pas l'accru du réclamé.
+///
+/// `POINTS` est le cas qui justifie `rewardType` : un programme de points n'a pas
+/// de marché fiable, et lui attribuer une valeur inscrirait au patrimoine la
+/// spéculation sur un airdrop futur. Cf. `isValuableRewardType`.
+model DefiReward {
+  id             String @id @default(cuid())
+  defiPositionId String
+
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  /// Symbole en clair — un jeton de récompense n'a pas toujours d'`Asset`.
+  symbol  String
+
+  /// YIELD | TRADING_FEES | EMISSIONS | AIRDROP | POINTS | COUPON | OTHER.
+  rewardType String @default("YIELD")
+
+  /// Accumulé et non réclamé. Un claim le décrémente et devient une quantité
+  /// au journal — c'est ce qui évite de compter deux fois une récompense.
+  accruedQuantity Decimal? @db.Decimal(38, 18)
+  claimedQuantity Decimal? @db.Decimal(38, 18)
+  /// Valeur de l'accru. Nulle par construction pour un `POINTS`.
+  valueEur        Decimal? @db.Decimal(18, 2)
+
+  /// Origine déclarative — « trading fees », « emissions », nom de campagne.
+  sourceLabel    String?
+  sourceProvider String  @default("MANUAL")
+  lastUpdatedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  position DefiPositionDetail @relation(fields: [defiPositionId], references: [id], onDelete: Cascade)
+
+  /// Un jeton de récompense n'apparaît qu'une fois par position et par nature :
+  /// une re-sync met à jour l'accru au lieu d'empiler des lignes.
+  @@unique([defiPositionId, symbol, rewardType])
+  @@index([defiPositionId])
+  @@index([symbol])
+  @@index([rewardType])
+}
+
+/// Curseur de pagination d'une synchronisation DeFi.
+///
+/// `Platform.lastSyncedAt` / `lastKnownSignature` ne suffisent pas : une même
+/// plateforme peut être interrogée par plusieurs fournisseurs, et une sync
+/// partielle doit pouvoir reprendre là où elle s'est arrêtée plutôt que de
+/// tout rejouer. Les compteurs `imported`/`updated`/`ignored` rendent une sync
+/// silencieusement infructueuse visible.
+model DefiSyncCursor {
+  id     String @id @default(cuid())
+  userId String
+
+  /// ZERION | DEBANK | COVALENT | SOLANA_RPC | CSV | MANUAL.
+  provider String
+  /// Plateforme interrogée — un wallet **est** une `Platform` dans ce dépôt
+  /// (`type = BLOCKCHAIN`, champ `walletAddress`). Cf. D4 de la note.
+  platformId String?
+  platform   Platform? @relation(fields: [platformId], references: [id], onDelete: Cascade)
+  /// Adresse interrogée, quand elle diffère de celle de la plateforme.
+  sourceRef  String?
+
+  /// Portée du curseur, dérivée de `platformId` et `sourceRef`, jamais nulle.
+  ///
+  /// Nécessaire et non redondante : PostgreSQL ne fait pas collisionner deux
+  /// `NULL` dans un index unique, si bien qu'une contrainte posée directement
+  /// sur `(userId, provider, platformId, sourceRef)` laisserait créer autant de
+  /// curseurs « sans plateforme » qu'on veut — exactement le doublon qu'elle
+  /// prétend interdire. Cf. `syncScopeKey()`.
+  scopeKey String
+
+  /// Curseur opaque du fournisseur.
+  cursor String?
+
+  lastSyncAt    DateTime?
+  lastSuccessAt DateTime?
+  lastError     String?
+
+  importedCount Int @default(0)
+  updatedCount  Int @default(0)
+  ignoredCount  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Un curseur par (utilisateur, fournisseur, portée) : deux syncs
+  /// concurrentes sur la même source partageraient sinon un curseur et se
+  /// voleraient mutuellement leur position de lecture.
+  @@unique([userId, provider, scopeKey])
+  @@index([userId])
+  @@index([provider])
+  @@index([platformId])
+  @@index([userId, provider])
+}
+
+/// Référentiel de protocoles — rempli à la volée, pas livré pré-peuplé.
+///
+/// Sert à normaliser les libellés (« Aave », « aave v3 », « AAVE V3 » désignent
+/// le même risque de contrepartie) et à porter ce qui est propre au protocole et
+/// non à la position : sa catégorie, son logo, la chaîne principale.
+model DefiProtocolRef {
+  id     String @id @default(cuid())
+  userId String
+
+  /// Clé normalisée — minuscules, sans espaces (« aave-v3 »).
+  slug String
+  name String
+  /// Version, quand le protocole en distingue plusieurs.
+  version String?
+  /// LENDING | DEX | LIQUID_STAKING | VAULT | RESTAKING | BRIDGE | CEFI…
+  /// Déclaratif : sert au regroupement, jamais à un calcul.
+  category String?
+  logoUrl  String?
+  /// Chaîne principale — informative, une position porte la sienne.
+  primaryChain String?
+  websiteUrl   String?
+  notes        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  markets DefiMarketRef[]
+
+  @@unique([userId, slug])
+  @@index([userId])
+  @@index([slug])
+  @@index([category])
+}
+
+/// Marché, pool ou vault d'un protocole.
+///
+/// Un même protocole en expose des dizaines aux risques distincts : un pool
+/// USDC/USDT et un pool d'un jeton illiquide ne se comparent pas, bien que
+/// Uniswap porte les deux. Regroupe `marketRef`/`poolRef`/`vaultRef` sous une
+/// seule table parce que ces trois notions partagent exactement les mêmes
+/// attributs — seul `kind` les distingue.
+model DefiMarketRef {
+  id     String @id @default(cuid())
+  userId String
+
+  protocolRefId String?
+  protocolRef   DefiProtocolRef? @relation(fields: [protocolRefId], references: [id], onDelete: SetNull)
+
+  /// MARKET | POOL | VAULT | VALIDATOR.
+  kind String @default("POOL")
+  /// Clé normalisée, unique par utilisateur et par chaîne.
+  slug String
+  name String
+
+  chain           String?
+  contractAddress String?
+  /// Jetons du marché, en clair — « USDC », « WETH/USDC ».
+  tokenSymbols    String?
+  /// Frais du pool en % (0.05, 0.3, 1) — indicatif.
+  feeTierPct      Decimal? @db.Decimal(9, 4)
+  notes           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind, slug])
+  @@index([userId])
+  @@index([protocolRefId])
+  @@index([chain])
+  @@index([kind])
+  @@index([contractAddress])
 }
 
 /// Compte de trading à levier — CFD, futures, spread betting.

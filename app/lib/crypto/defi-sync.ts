@@ -118,6 +118,58 @@ async function upsertPriceEur(assetId: string, priceEur: number | null) {
 }
 
 /**
+ * Écrit la jambe d'exposition que le fournisseur décrit.
+ *
+ * Zerion ne renvoie qu'un actif et un montant par position : la jambe est donc
+ * unique, et son rôle se déduit du type de position — une `BORROWING` est une
+ * `DEBT`, un staking liquide un `RECEIPT` (c'est le jeton dérivé que le wallet
+ * détient), le reste un `ASSET`. Ce rôle n'est pas cosmétique : c'est lui qui
+ * décide si la valeur s'ajoute ou se retranche, et si elle doit être écartée
+ * comme représentation d'un dépôt compté ailleurs.
+ *
+ * Remplacement complet à chaque passage : une jambe conservée après que le
+ * fournisseur a cessé de la voir laisserait une exposition fantôme.
+ */
+async function syncPositionLegs(
+  defiPositionId: string,
+  assetId: string,
+  item: ZerionDefiItem,
+  positionType: string,
+  unitEur: string | null
+): Promise<void> {
+  const legType =
+    positionType === "BORROWING"
+      ? "DEBT"
+      : positionType === "CDP"
+        ? "COLLATERAL"
+        : positionType === "LIQUID_STAKING" || positionType === "RESTAKING"
+          ? "RECEIPT"
+          : positionType === "LP" || positionType === "VAULT"
+            ? "SHARE"
+            : "ASSET";
+
+  await prisma.defiLeg.deleteMany({ where: { defiPositionId } });
+  if (item.amount <= 0) return;
+
+  await prisma.defiLeg.create({
+    data: {
+      defiPositionId,
+      legType,
+      symbol: item.ticker.trim().toUpperCase().slice(0, 24),
+      quantity: toFixed(d(item.amount), 18),
+      assetId,
+      tokenRole: "primary",
+      unitCostEur: unitEur,
+      isActive: true,
+      metadataJson: {
+        contractAddress: item.contractAddress ?? null,
+        chainId: item.chainId ?? null,
+      },
+    },
+  });
+}
+
+/**
  * Aligne les positions DeFi du wallet sur le journal.
  *
  * Une position disparue chez Zerion n'est pas supprimée : elle est ramenée à
@@ -174,8 +226,13 @@ export async function syncDefiPositions(
       }
     }
 
+    let positionId: string | null = null;
     try {
-      await prisma.defiPositionDetail.upsert({
+      // `dataOrigin`/`accessMode` sont posés à la création seulement : une
+      // position qu'un utilisateur a reclassée à la main (passée en `HYBRID`,
+      // dotée d'une quote-part) ne doit pas être ramenée aux valeurs du
+      // fournisseur à chaque passage. C'est la même règle que `source`.
+      const position = await prisma.defiPositionDetail.upsert({
         where: { assetId },
         create: {
           assetId,
@@ -184,6 +241,12 @@ export async function syncDefiPositions(
           chain: item.chainId,
           positionType,
           source: "ZERION",
+          dataOrigin: "WALLET_SYNC",
+          accessMode: "DEFI",
+          custodyModel: "SELF_CUSTODY",
+          status: "ACTIVE",
+          providerKey: defiProviderKey(item),
+          openedAt: new Date(),
           lastSyncedAt: new Date(),
         },
         update: {
@@ -192,12 +255,34 @@ export async function syncDefiPositions(
           chain: item.chainId,
           positionType,
           source: "ZERION",
+          providerKey: defiProviderKey(item),
+          // Une position réapparue après une absence temporaire redevient
+          // active : la sync l'avait laissée en base précisément pour ça.
+          ...(item.amount > 0 ? { status: "ACTIVE" } : {}),
           lastSyncedAt: new Date(),
         },
+        select: { id: true },
       });
+      positionId = position.id;
     } catch (e) {
       errors += 1;
       console.warn("[defi-sync] detail", item.ticker, e instanceof Error ? e.message : e);
+    }
+
+    // Jambe d'exposition, reflétant ce que le fournisseur voit. Remplacée à
+    // chaque passage : les jambes sont la photographie de l'exposition
+    // courante, l'historique vit dans `DefiEvent`.
+    if (positionId) {
+      try {
+        await syncPositionLegs(positionId, assetId, item, positionType, unitEur);
+      } catch (e) {
+        console.warn(
+          "[defi-sync] legs",
+          item.ticker,
+          e instanceof Error ? e.message : e
+        );
+        /* non bloquant : la position reste valorisée par le journal */
+      }
     }
 
     // Quantité : réconciliation vers la cible, comme pour les soldes simples.
@@ -212,8 +297,9 @@ export async function syncDefiPositions(
     const note = `${DEFI_SYNC_NOTE_TAG} ${item.ticker} protocol=${protocol} type=${positionType} target=${toFixed(targetQty, 12)}`;
 
     try {
+      let ledgerTx: unknown;
       if (delta.gt(0)) {
-        await createTransaction({
+        ledgerTx = await createTransaction({
           userId,
           type: unitEur && d(unitEur).gt(0) ? "ACHAT" : "REWARD",
           platformId,
@@ -228,7 +314,7 @@ export async function syncDefiPositions(
           allowNegativeCash: true,
         });
       } else {
-        await createTransaction({
+        ledgerTx = await createTransaction({
           userId,
           type: "VENTE",
           platformId,
@@ -244,6 +330,38 @@ export async function syncDefiPositions(
         });
       }
       txsCreated += 1;
+
+      // Événement qualifiant l'écart réconcilié. Le journal dit « ±N jetons » ;
+      // cet événement dit qu'il vient d'une synchronisation et non d'une action
+      // de l'utilisateur — sans quoi un historique de position devient
+      // impossible à relire.
+      if (positionId) {
+        await prisma.defiEvent
+          .create({
+            data: {
+              defiPositionId: positionId,
+              eventType: delta.gt(0) ? "DEPOSIT" : "WITHDRAW",
+              eventDate: new Date(occurredAt),
+              chainId: item.chainId,
+              assetId,
+              symbol: item.ticker.trim().toUpperCase().slice(0, 24),
+              quantity: toFixed(delta.abs(), 18),
+              amountEur:
+                unitEur && d(unitEur).gt(0)
+                  ? toFixed(delta.abs().times(d(unitEur)), 2)
+                  : null,
+              relatedProtocol: protocol,
+              ledgerTransactionId:
+                ledgerTx && typeof ledgerTx === "object" && "id" in ledgerTx
+                  ? String((ledgerTx as { id: unknown }).id)
+                  : null,
+              sourceProvider: "ZERION",
+            },
+          })
+          .catch(() => {
+            /* la trace d'événement ne doit pas faire échouer la sync */
+          });
+      }
     } catch (e) {
       errors += 1;
       console.warn("[defi-sync] tx", item.ticker, e instanceof Error ? e.message : e);
