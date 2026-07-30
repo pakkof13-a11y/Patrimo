@@ -143,6 +143,20 @@ export function nftDuplicateIdsToExclude(conflicts: NftConflict[]): Set<string> 
 }
 
 /**
+ * Détentions précédemment vues (synchronisées, actives) qui n'apparaissent
+ * plus dans le passage courant — D7 de `docs/nft-backend-v1.md`. Extrait en
+ * fonction pure pour être testable sans Prisma : `syncNftsFromWallet` ne
+ * l'appelle qu'après un passage **complet** (jamais sur une page partielle,
+ * qui ne dit rien des NFT non encore lus).
+ */
+export function holdingsGoneMissing(
+  previouslyHeldAssetIds: string[],
+  seenAssetIds: Set<string>
+): string[] {
+  return previouslyHeldAssetIds.filter((id) => !seenAssetIds.has(id));
+}
+
+/**
  * Clé de déduplication d'un événement NFT — une re-synchronisation doit
  * pouvoir rejouer les mêmes événements sans les empiler (même raison que
  * `eventDedupKey` en DeFi ; appliquée ici à `nftAssetId` plutôt qu'à une

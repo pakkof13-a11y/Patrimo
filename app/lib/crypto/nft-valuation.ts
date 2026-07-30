@@ -136,3 +136,18 @@ export function isLastSaleReliable(
   const ratio = lastSaleEur.div(floorEur);
   return ratio.gte(1 / maxDeviationRatio) && ratio.lte(maxDeviationRatio);
 }
+
+/**
+ * Applique la quote-part détenue à une valeur pleine — utilisé par
+ * `applyNftValuation` pour calculer `retainedValueEur`. `sharePct = null`
+ * signifie 100 % (même convention que `DefiPositionDetail.ownershipPct`).
+ *
+ * Simplification V1 assumée (documentée dans `docs/nft-backend-v1.md`) :
+ * appliquée au prix, correcte pour une quantité de 1 (l'immense majorité des
+ * ERC-721/SPL), approximative pour un ERC-1155 en quantité > 1 combiné à une
+ * quote-part fractionnaire — combinaison rare, non affinée ici.
+ */
+export function applyOwnershipShare(amountEur: Decimal, sharePct: Decimal | null): Decimal {
+  if (!sharePct) return amountEur;
+  return amountEur.times(sharePct).div(100);
+}

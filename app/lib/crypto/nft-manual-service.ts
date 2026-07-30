@@ -226,9 +226,7 @@ export async function createNftManual(
       tx
     );
 
-    const ownershipShareDecimal = item.ownershipShare
-      ? d(item.ownershipShare.toString()).div(100)
-      : d(1);
+    const ownershipSharePct = item.ownershipShare ? d(item.ownershipShare.toString()) : null;
     const choice = chooseNftValuation({
       spamStatus: spam.spamStatus,
       manualAppraisal: manualFloor ? { amountEur: d(manualFloor) } : null,
@@ -240,7 +238,7 @@ export async function createNftManual(
       nftAsset.id,
       item.id,
       asset.id,
-      ownershipShareDecimal,
+      ownershipSharePct,
       choice,
       {
         valuationDate: acquisitionDate,

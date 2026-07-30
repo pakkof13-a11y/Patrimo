@@ -181,4 +181,42 @@ dégradent déjà proprement en `not-configured`/`rate-limited`/`network-error`.
 
 ## 4. Vérification finale (mise à jour en fin de chantier)
 
-Voir §6 en fin de document une fois les vagues 2 à 6 livrées.
+Vagues 2 à 6 livrées. État à l'issue du chantier :
+
+- `npx tsc --noEmit` : aucune erreur.
+- `npx eslint` (fichiers du chantier) : aucun avertissement.
+- `npx vitest run` (suite complète) : 162 fichiers, **1871 tests**, tous
+  verts — dont 7 nouveaux fichiers dédiés au backend NFT
+  (`nft-identity.test.ts`, `nft-valuation.test.ts`, `nft-dedup.test.ts`,
+  `nft-classification.test.ts`, `nft-aggregates.test.ts`,
+  `nft-taxonomy.test.ts`, `nft-wallet-providers.test.ts`) couvrant les 25
+  scénarios obligatoires du cahier des charges, plus les deux fichiers
+  préexistants (`nft-wallet-sync.test.ts`, `nft-estimate.test.ts`) confirmés
+  toujours compatibles sans modification.
+- `npm run build` : compilation Next.js réussie, toutes les routes
+  `/api/crypto/nft/...` listées dans la sortie de build.
+
+**Convention de test respectée** : comme pour la DeFi (F1), la suite reste
+composée exclusivement de tests de fonctions pures (aucun mock Prisma). Trois
+refactors ont été faits spécifiquement pour rendre testable une logique
+auparavant enchevêtrée avec Prisma, sans changer son comportement :
+`nftDisposalOutcome()` (extrait de `disposeNftHolding`), `applyOwnershipShare()`
+(extrait de `applyNftValuation`, avec un changement d'unité du paramètre —
+pourcentage brut 0–100 plutôt qu'une fraction pré-divisée — répercuté sur ses
+3 points d'appel), et `holdingsGoneMissing()` (extrait de la boucle de
+détection `SYNC_MISSING` dans `syncNftsFromWallet`).
+
+**Limites de couverture assumées** (aucun équivalent fonction pure propre) :
+- Cas 6 (« collection auto-créée puis enrichie ») : couvert indirectement par
+  les tests de `collectionDedupKey` (la clé qui permet de retrouver puis
+  d'enrichir la même collection) et par relecture du code de
+  `ensureNftCollection` — pas de test Prisma-mocké dédié, cohérent avec la
+  convention du dépôt.
+- Cas 20 (« sync partielle avec curseur ») : couvert au niveau provider
+  (`nft-wallet-providers.test.ts`, fetch mocké selon le patron de
+  `finnhub-provider.test.ts`) — pagination OpenSea (`next`) et Magic Eden
+  (offset) vérifiées indépendamment de l'orchestration Prisma de
+  `syncNftsFromWallet`.
+
+Aucun TODO flou laissé dans le code livré ; les limites V1 réelles sont
+listées au §3 ci-dessus, pas en commentaire dans le code.

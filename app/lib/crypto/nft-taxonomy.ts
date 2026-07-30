@@ -311,6 +311,42 @@ export const NFT_DISPOSAL_SOURCES = {
 export type NftDisposalSource = keyof typeof NFT_DISPOSAL_SOURCES;
 
 /**
+ * Traduit une sortie patrimoniale en couple (type d'événement, statut de
+ * détention) — utilisé par `disposeNftHolding` (D8 de la note de décision).
+ * Extrait en fonction pure pour être testable sans toucher Prisma : le choix
+ * du statut cible n'est pas un détail, une vente et un burn ne doivent
+ * jamais devenir indistinguables.
+ */
+export function nftDisposalOutcome(disposalSource: string): {
+  eventType: NftEventType;
+  status: NftHoldingStatus;
+} {
+  const eventTypeBySource: Partial<Record<NftDisposalSource, NftEventType>> = {
+    SOLD: "SELL",
+    BURNED: "BURN",
+    TRANSFER_OUT: "TRANSFER_OUT",
+    DONATION_OUT: "DONATION_OUT",
+    BRIDGE_OUT: "BRIDGE_OUT",
+    WRAP: "WRAP",
+    BUNDLE: "BUNDLE",
+  };
+  const statusBySource: Partial<Record<NftDisposalSource, NftHoldingStatus>> = {
+    SOLD: "SOLD",
+    BURNED: "BURNED",
+    TRANSFER_OUT: "TRANSFERRED_OUT",
+    DONATION_OUT: "TRANSFERRED_OUT",
+    BRIDGE_OUT: "BRIDGED_OUT",
+    WRAP: "WRAPPED",
+    BUNDLE: "TRANSFERRED_OUT",
+  };
+  const key = disposalSource as NftDisposalSource;
+  return {
+    eventType: eventTypeBySource[key] ?? "MANUAL_OVERRIDE",
+    status: statusBySource[key] ?? "UNKNOWN",
+  };
+}
+
+/**
  * Événement de cycle de vie — journal qualitatif, cf. `NftEvent`.
  * `SYNC_MISSING` (D7 de la note de décision) qualifie une disparition du
  * wallet courant sans jamais en déduire silencieusement une vente ou un burn.

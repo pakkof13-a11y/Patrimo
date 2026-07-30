@@ -14,8 +14,8 @@ import { prisma } from "../prisma";
 import { d } from "../money/decimal";
 import { createTransaction } from "../transactions/service";
 import { buildNftIdentity, collectionDedupKey, normalizeChainId, normalizeEvmAddress } from "./nft-identity";
-import type { NftValuationInputs } from "./nft-valuation";
-import { defaultNftValuationConfidence } from "./nft-taxonomy";
+import { applyOwnershipShare, type NftValuationInputs } from "./nft-valuation";
+import { defaultNftValuationConfidence, nftDisposalOutcome } from "./nft-taxonomy";
 
 export class NftInputError extends Error {
   readonly code = "NFT_INPUT";
@@ -289,7 +289,8 @@ export async function applyNftValuation(
   nftAssetId: string,
   holdingId: string,
   holdingAssetId: string,
-  ownershipShare: Decimal,
+  /** Quote-part en % (0–100) — `null` = 100 %. Cf. `applyOwnershipShare`. */
+  ownershipSharePct: Decimal | null,
   choice: {
     method: string;
     amountEur: Decimal | null;
@@ -339,7 +340,7 @@ export async function applyNftValuation(
     select: { id: true },
   });
 
-  const retainedEur = choice.amountEur ? choice.amountEur.times(ownershipShare) : null;
+  const retainedEur = choice.amountEur ? applyOwnershipShare(choice.amountEur, ownershipSharePct) : null;
 
   await client.nftItemDetail.update({
     where: { id: holdingId },
@@ -392,7 +393,7 @@ export async function overrideNftValuation(
   if (!amount.isFinite() || amount.lt(0)) {
     throw new NftInputError("La valeur saisie ne peut pas être négative");
   }
-  const share = holding.ownershipShare ? d(holding.ownershipShare.toString()).div(100) : d(1);
+  const sharePct = holding.ownershipShare ? d(holding.ownershipShare.toString()) : null;
   const valuationDate = opts?.valuationDate ? new Date(opts.valuationDate) : new Date();
 
   return prisma.$transaction(async (tx) => {
@@ -400,7 +401,7 @@ export async function overrideNftValuation(
       holding.nftAssetId,
       holding.id,
       assetId,
-      share,
+      sharePct,
       {
         method: "APPRAISAL",
         amountEur: amount,
@@ -466,25 +467,7 @@ export async function disposeNftHolding(
     throw new NftInputError("Le prix de sortie ne peut pas être négatif");
   }
 
-  const eventTypeBySource: Record<string, string> = {
-    SOLD: "SELL",
-    BURNED: "BURN",
-    TRANSFER_OUT: "TRANSFER_OUT",
-    DONATION_OUT: "DONATION_OUT",
-    BRIDGE_OUT: "BRIDGE_OUT",
-    WRAP: "WRAP",
-    BUNDLE: "BUNDLE",
-  };
-  const statusBySource: Record<string, string> = {
-    SOLD: "SOLD",
-    BURNED: "BURNED",
-    TRANSFER_OUT: "TRANSFERRED_OUT",
-    DONATION_OUT: "TRANSFERRED_OUT",
-    BRIDGE_OUT: "BRIDGED_OUT",
-    WRAP: "WRAPPED",
-    BUNDLE: "TRANSFERRED_OUT",
-  };
-  const nextStatus = statusBySource[opts.disposalSource] ?? "UNKNOWN";
+  const { eventType: disposalEventType, status: nextStatus } = nftDisposalOutcome(opts.disposalSource);
 
   // Quantité réellement détenue au journal — jamais supposée, une
   // resynchronisation a pu la faire évoluer depuis l'acquisition.
@@ -535,7 +518,7 @@ export async function disposeNftHolding(
     await recordNftEvent(
       holding.nftAssetId,
       {
-        eventType: eventTypeBySource[opts.disposalSource] ?? "MANUAL_OVERRIDE",
+        eventType: disposalEventType,
         eventDate: disposalDate,
         nftHoldingId: holding.id,
         txHash: opts.disposalTxHash ?? null,

@@ -18,6 +18,7 @@ import type { WalletNftFetchResult, WalletNftItem } from "./nft-providers/wallet
 import { ensureNftAsset, ensureNftCollection, recordNftEvent, updateNftSyncCursor, getNftSyncCursor } from "./nft-position-service";
 import { classifyNftSpam, spamStatusToAssetFlags } from "./nft-classification";
 import { isSolanaStandard } from "./nft-taxonomy";
+import { holdingsGoneMissing } from "./nft-dedup";
 
 export const NFT_SYNC_NOTE_TAG = "[wallet-sync:nft]";
 
@@ -227,7 +228,7 @@ export async function syncNftsFromWallet(
         });
         if (holding) {
           await recordNftEvent(holding.nftAssetId, {
-            eventType: didReappear ? "TRANSFER_IN" : "TRANSFER_IN",
+            eventType: "TRANSFER_IN",
             eventDate: new Date(),
             nftHoldingId: holding.id,
             sourceProvider: provider === "OPENSEA_WALLET" ? "OPENSEA" : "MAGIC_EDEN",
@@ -259,8 +260,12 @@ export async function syncNftsFromWallet(
       },
       select: { id: true, assetId: true, nftAssetId: true },
     });
-    for (const row of previouslyHeld) {
-      if (seenAssetIds.has(row.assetId)) continue;
+    const missingAssetIds = holdingsGoneMissing(
+      previouslyHeld.map((r) => r.assetId),
+      seenAssetIds
+    );
+    const missingRows = previouslyHeld.filter((r) => missingAssetIds.includes(r.assetId));
+    for (const row of missingRows) {
       await prisma.nftItemDetail.update({ where: { id: row.id }, data: { status: "UNKNOWN" } });
       await recordNftEvent(row.nftAssetId, {
         eventType: "SYNC_MISSING",

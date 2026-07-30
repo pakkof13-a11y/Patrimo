@@ -130,12 +130,12 @@ export async function refreshNftFloorPrices(
           acquisitionCostEur: acquisitionCost,
         });
 
-        const share = item.ownershipShare ? d(item.ownershipShare.toString()).div(100) : d(1);
+        const sharePct = item.ownershipShare ? d(item.ownershipShare.toString()) : null;
         await applyNftValuation(
           item.nftAssetId,
           item.id,
           item.assetId,
-          share,
+          sharePct,
           choice,
           {
             valuationDate: now,
