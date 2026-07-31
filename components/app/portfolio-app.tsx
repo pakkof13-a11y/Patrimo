@@ -71,7 +71,6 @@ import { MarketTicker } from "@/components/layout/market-ticker";
 import { PreferencesPanel } from "@/components/layout/preferences-panel";
 import { Modal } from "@/components/ui/modal";
 import { Shell } from "@/components/layout/display-provider";
-import { BrandBannerSurface } from "@/components/branding/brand-surfaces";
 import { KpiStrip } from "@/components/dashboard/kpi-strip";
 import { DashboardTab } from "@/components/dashboard/dashboard-tab";
 import { HoldingsSection } from "@/components/holdings/holdings-section";
@@ -802,10 +801,14 @@ function PortfolioAppClient({
     historyPointCount: historyQ.data?.history?.length ?? 0,
   });
   const dashBlocks = dashboardBlocksFor(dashboardMaturity);
-  /** KPI globaux : toujours hors dashboard ; sur dashboard seulement si mature */
-  // Le dashboard porte désormais sa propre rangée d'indicateurs (hero +
-  // TerminalKpiRow) : réafficher le bandeau générique au-dessus ferait doublon.
-  const showGlobalKpis = !isDashboard;
+  /**
+   * Bandeau d'indicateurs générique — partout sauf là où l'écran porte déjà
+   * les siens : le dashboard (hero + TerminalKpiRow) et le portefeuille (les
+   * cinq cartes de `PortfolioKpiCards`). Les empiler donnerait deux fois la
+   * même valeur totale à quinze pixels d'écart, et le lecteur chercherait la
+   * différence entre les deux plutôt que de lire la page.
+   */
+  const showGlobalKpis = !isDashboard && !positionsView;
 
   /**
    * Plateformes « Notaire / immobilier » : la saisie d'un bien y suit un
@@ -1105,17 +1108,20 @@ function PortfolioAppClient({
           */}
           {showGlobalKpis && (
             <div className="module-kpi-band min-w-0" data-slot="kpi-band">
-              <BrandBannerSurface
-                className="p-2.5 sm:p-3"
-                extendBelow={isDashboard && dashBlocks.showQuickActions}
-              >
+              {/*
+                Plus de `BrandBannerSurface` : la bannière dorée était le
+                dernier vestige décoratif du fond de marque, et sur un bandeau
+                d'indicateurs elle bruitait directement la lecture des
+                chiffres. Les tuiles portent leur propre surface.
+              */}
+              <div className="min-w-0">
                 <KpiStrip
                   summary={summary}
                   baseCurrency={baseCurrency}
                   history={historyQ.data?.history}
                   smartFilter={isDashboard && dashBlocks.kpiSmartFilter}
                 />
-              </BrandBannerSurface>
+              </div>
             </div>
           )}
 
@@ -1156,6 +1162,7 @@ function PortfolioAppClient({
                 <HoldingsSection
                   tab={tab}
                   holdings={holdings}
+                  history={historyQ.data?.history}
                   loading={holdingsQ.isPending && !holdingsQ.data}
                   baseCurrency={baseCurrency}
                   envelopeFilters={envelopeFilters}

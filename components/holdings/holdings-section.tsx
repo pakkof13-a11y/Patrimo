@@ -38,6 +38,12 @@ import {
   type HoldingsPageSize,
 } from "@/components/holdings/holdings-toolbar";
 import { HoldingsEmptyState } from "@/components/holdings/holdings-empty-state";
+import { PortfolioKpiCards } from "@/components/holdings/portfolio-kpi-cards";
+import {
+  modeForVisibility,
+  visibilityForMode,
+  type HoldingsViewMode,
+} from "@/app/lib/portfolio/holdings-view-mode";
 import {
   applyPlatformFilterToHolding,
   holdingMatchesPlatform,
@@ -72,7 +78,12 @@ import {
   getChangeColor,
   cn,
 } from "@/app/lib/utils";
-import { priceSourceLabel, type Holding, type MainTab } from "@/app/lib/types/ui";
+import {
+  priceSourceLabel,
+  type HistoryPoint,
+  type Holding,
+  type MainTab,
+} from "@/app/lib/types/ui";
 import {
   HOLDINGS_GROUP_BY_KEY,
   HOLDINGS_GROUP_COLLAPSED_KEY,
@@ -99,7 +110,6 @@ import {
   resetHoldingsColumns,
   defaultColumnOrder,
   defaultColumnSizing,
-  defaultHoldingsVisibility,
   loadColumnOrder,
   loadColumnSizing,
   loadColumnVisibility,
@@ -127,6 +137,7 @@ const EXPAND_COL_PX = HOLDINGS_EXPAND_COL_PX;
 export function HoldingsSection({
   tab,
   holdings,
+  history,
   loading,
   baseCurrency,
   envelopeFilters,
@@ -141,6 +152,8 @@ export function HoldingsSection({
 }: {
   tab: MainTab;
   holdings: Holding[];
+  /** Historique patrimonial global — alimente les sparklines des KPI. */
+  history?: HistoryPoint[];
   loading: boolean;
   baseCurrency: string;
   /** Multi-sélection d’enveloppes (filtrage déjà appliqué côté parent ou ici) */
@@ -300,8 +313,16 @@ export function HoldingsSection({
       return next;
     });
   }
+  /**
+   * Même valeur qu'au chargement des préférences : sans cela le premier rendu
+   * afficherait huit colonnes puis en ajouterait trois après hydratation, et
+   * le tableau sauterait sous les yeux à chaque arrivée sur la page.
+   */
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() =>
-    defaultHoldingsVisibility("fluid")
+    visibilityForMode(
+      "summary",
+      HOLDINGS_COLUMN_META.map((c) => c.id)
+    )
   );
   const [columnOrder, setColumnOrder] = useState<ColumnOrderState>(() =>
     defaultColumnOrder()
@@ -328,7 +349,16 @@ export function HoldingsSection({
 
   // Load saved column prefs (visibility + order + locked widths)
   useEffect(() => {
-    const fallback = defaultHoldingsVisibility(layoutWidth);
+    /**
+     * À défaut de préférence enregistrée, le portefeuille s'ouvre en « Synthèse »
+     * — les colonnes du mockup. Le défaut historique (colonnes obligatoires
+     * seules) ne correspondait à aucun des trois modes : les trois onglets
+     * s'affichaient éteints à la première visite, ce qui se lit comme une panne.
+     */
+    const fallback = visibilityForMode(
+      "summary",
+      HOLDINGS_COLUMN_META.map((c) => c.id)
+    );
     setColumnVisibility(loadColumnVisibility(TABLE_KEY, fallback));
     setColumnOrder(loadColumnOrder(TABLE_KEY));
     setLockedSizing(loadColumnSizing(TABLE_KEY));
@@ -1030,17 +1060,50 @@ export function HoldingsSection({
   }, [sortedAllRows]);
 
   const allEnvelopesCount = Object.keys(ACCOUNT_TYPES).length;
-  const positionsTitle =
-    envelopeFilters.length === 0
-      // « Aucune enveloppe » en titre principal se lisait comme une absence de
-      // données plutôt qu'une invite à sélectionner un filtre — le sous-titre
-      // porte déjà l'explication ("Sélectionnez au moins une enveloppe…").
-      ? "Positions"
-      : envelopeFilters.length === allEnvelopesCount
-        ? "Positions (toutes les enveloppes)"
-        : envelopeFilters.length === 1
-          ? `Positions — ${ACCOUNT_TYPES[envelopeFilters[0]!]}`
-          : `Positions — ${envelopeFilters.length} enveloppes`;
+  /**
+   * Titre invariable.
+   *
+   * Il portait auparavant l'état du filtre d'enveloppe (« Positions — PEA »,
+   * « Positions — 3 enveloppes »). Le filtre étant désormais matérialisé par
+   * une puce juste en dessous, le répéter dans le titre faisait bouger le
+   * repère principal de la page à chaque clic — exactement ce qu'un titre ne
+   * doit pas faire.
+   */
+  const positionsTitle = "Portefeuille";
+
+  /** Toutes les colonnes déclarées par le tableau (visibles ou non). */
+  const allLeafKey = table
+    .getAllLeafColumns()
+    .map((c) => c.id)
+    .join("|");
+  const allLeafIds = useMemo(
+    () => (allLeafKey ? allLeafKey.split("|") : []),
+    [allLeafKey]
+  );
+
+  /**
+   * Niveau de détail courant — *déduit* des colonnes affichées, jamais stocké
+   * à côté. Un réglage manuel via « Colonnes » renvoie donc `null` et aucun
+   * onglet n'est actif, ce qui est plus honnête qu'un « Synthèse » allumé
+   * au-dessus de colonnes qui n'en sont plus.
+   */
+  const viewMode = useMemo(
+    () =>
+      modeForVisibility(columnVisibility as Record<string, boolean>, allLeafIds),
+    [columnVisibility, allLeafIds]
+  );
+
+  /**
+   * Changement de mode : on repart des colonnes réellement déclarées par le
+   * tableau, jamais d'une liste figée — une colonne ajoutée plus tard hérite
+   * ainsi d'une décision explicite dans les trois modes.
+   */
+  const applyViewMode = useCallback(
+    (mode: HoldingsViewMode) => {
+      setColumnVisibility(visibilityForMode(mode, allLeafIds));
+    },
+    [allLeafIds]
+  );
 
   /** Clé stable des colonnes visibles (identité stable entre renders). */
   const visibleLeafKey = table
@@ -1144,9 +1207,23 @@ export function HoldingsSection({
           </div>
         </>
       )}
+      <PortfolioKpiCards
+        holdings={filteredHoldings}
+        history={history}
+        baseCurrency={baseCurrency}
+        filtered={
+          Boolean(debouncedSearch.trim()) ||
+          Boolean(accountFilter) ||
+          Boolean(platformFilterId) ||
+          pnlFilter !== "all" ||
+          envelopeFilters.length < allEnvelopesCount
+        }
+      />
       <div className="card-flat min-w-0 overflow-hidden">
         <HoldingsToolbar
           title={positionsTitle}
+          viewMode={viewMode}
+          onViewModeChange={applyViewMode}
           subtitle={
             envelopeFilters.length === allEnvelopesCount
               ? "Positions calculées depuis le journal · CUMP multi-compte"

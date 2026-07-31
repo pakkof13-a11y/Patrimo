@@ -47,7 +47,7 @@ export function DashboardQuickActions({
     },
     {
       id: "positions",
-      label: "Positions",
+      label: "Portefeuille",
       hint: "Tableau des actifs",
       icon: Layers,
     },

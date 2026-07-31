@@ -28,7 +28,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     id: "portfolio",
     label: "Portefeuille",
-    items: [{ id: "holdings", label: "Positions", testId: "holdings" }],
+    items: [{ id: "holdings", label: "Portefeuille", testId: "holdings" }],
   },
   {
     // Même raisonnement que l'immobilier et la crypto : un PEA porte une date

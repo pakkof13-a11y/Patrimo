@@ -8,7 +8,7 @@ import {
   Layers,
   PieChart,
   Settings,
-  TrendingUp,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/app/lib/utils";
@@ -73,7 +73,7 @@ type DirectEntry = {
 /** Les six entrées qui mènent directement à un écran. */
 const DIRECT_TOP: DirectEntry[] = [
   { id: "dashboard", label: "Tableau de bord", icon: LayoutGrid, testId: "dashboard" },
-  { id: "holdings", label: "Positions", icon: TrendingUp, testId: "holdings" },
+  { id: "holdings", label: "Portefeuille", icon: Wallet, testId: "holdings" },
   { id: "transactions", label: "Transactions", icon: ArrowLeftRight, testId: "transactions" },
   { id: "platforms", label: "Plateformes", icon: Layers, testId: "platforms" },
 ];

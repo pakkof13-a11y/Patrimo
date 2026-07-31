@@ -1792,7 +1792,7 @@ export function ImportCsvModal({
                 onClick={goToJournal}
                 data-testid="import-success-journal"
               >
-                Voir les positions
+                Voir le portefeuille
               </Button>
             </div>
           </div>

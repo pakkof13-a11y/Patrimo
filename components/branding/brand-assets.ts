@@ -29,10 +29,6 @@ export const BRAND = {
     dark: "/branding/logo-gold.png",
     light: "/branding/logo-gold.png",
   },
-  banner: {
-    dark: "/branding/banner-dark.png",
-    light: "/branding/banner-light.png",
-  },
   /**
    * Fond de l'écran de connexion — image unique, indépendante du thème.
    * Cet écran ne suit plus next-themes (voir `app/login/page.tsx`) : la scène

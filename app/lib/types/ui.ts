@@ -280,7 +280,7 @@ export function isPositionsTab(tab: MainTab): boolean {
  */
 export const PRIMARY_NAV: { id: MainTab; label: string }[] = [
   { id: "dashboard", label: "Tableau de bord" },
-  { id: "holdings", label: "Positions" },
+  { id: "holdings", label: "Portefeuille" },
   // Libellé volontairement explicite plutôt que « Titres » : les deux sigles
   // parlent immédiatement, là où « Titres » demande un temps de traduction.
   { id: "securities", label: "PEA & CTO" },

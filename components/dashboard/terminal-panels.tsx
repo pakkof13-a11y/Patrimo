@@ -303,7 +303,7 @@ export function WatchlistCard({
               "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
             )}
           >
-            Voir toutes les positions →
+            Voir tout le portefeuille →
           </button>
         )}
       </div>

@@ -92,7 +92,7 @@ export function DashboardActivation({
     {
       id: "portfolio",
       done: progress.portfolio,
-      title: "Positions",
+      title: "Portefeuille",
       body: "Calculées depuis les transactions.",
       cta: "Nouvel achat",
       onClick: onAddTransaction,
