@@ -299,8 +299,6 @@
 
 body {
   font-family: var(--font-sans);
-  /* Fond image (BrandPageBackground) visible sous le liquid glass des cartes.
-     Fallback teinte page si l’image rate ; pas de gradient opaque qui masque le fond. */
   background-color: var(--background);
   background-image: none;
   color: var(--foreground);
@@ -516,58 +514,14 @@ html {
  *  ÉCRAN DE CONNEXION — « entrance experience »
  * ═══════════════════════════════════════════════════════════════════════════
  *
- *  Cet écran est le seul de l'application où la marque a le premier rôle : on
- *  s'y autorise donc une mise en scène (vignette, grain, particules) que le
- *  terminal s'interdit partout ailleurs. Elle reste sous le seuil de la
- *  perception consciente — rien ne doit attirer l'œil plus que le formulaire.
- *
- *  Tokens locaux : le sombre est la référence, le clair en est la
- *  transposition. Aucun composant React ne code ces valeurs en dur.
+ *  Cet écran est le seul de l'application où la marque a le premier rôle.
+ *  Il ne suit plus next-themes : la photo de fond (halo doré, poussière
+ *  d'étoiles, horizon en pointillés) fixe elle-même une ambiance sombre, et la
+ *  composition n'a plus de sens en clair. Un seul jeu de tokens, donc — pas de
+ *  bloc `.dark .login-stage`.
  */
 .login-stage {
-  --login-bg: #f8f6f2;
-  --login-halo: rgba(217, 166, 77, 0.1);
-  --login-vignette: rgba(120, 105, 80, 0.14);
-  --login-grain-opacity: 0.035;
-  --login-contour: rgba(120, 100, 60, 0.055);
-  --login-particle: rgba(168, 120, 31, 0.28);
-  --login-wave-dot: rgba(140, 116, 60, 0.16);
-
-  --login-card-bg: #ffffff;
-  --login-card-border: rgba(16, 17, 20, 0.07);
-  --login-card-shadow: 0 24px 70px rgba(60, 50, 30, 0.1);
-
-  --login-field-bg: #fbfaf8;
-  --login-field-border: rgba(16, 17, 20, 0.11);
-  --login-placeholder: rgba(20, 22, 26, 0.35);
-
-  --login-title: #14161a;
-  --login-subtitle: rgba(20, 22, 26, 0.55);
-  --login-footer: rgba(20, 22, 26, 0.45);
-
-  --login-card-w: 28.75rem;      /* 460 px */
-  --login-card-radius: 1.125rem; /* 18 px */
-  --login-field-h: 3.5rem;       /* 56 px */
-  --login-field-radius: 0.75rem; /* 12 px */
-  --login-btn-h: 3.375rem;       /* 54 px */
-  --login-rule-min: 3.75rem;     /* 60 px */
-  --login-rule-max: 5.625rem;    /* 90 px */
-
-  position: relative;
-  min-height: 100svh;
-  isolation: isolate;
-  background: var(--login-bg);
-  overflow: hidden;
-}
-
-.dark .login-stage {
-  --login-bg: #090909;
   --login-halo: rgba(217, 166, 77, 0.13);
-  --login-vignette: rgba(0, 0, 0, 0.72);
-  --login-grain-opacity: 0.02;
-  --login-contour: rgba(217, 166, 77, 0.035);
-  --login-particle: rgba(217, 166, 77, 0.5);
-  --login-wave-dot: rgba(217, 166, 77, 0.22);
 
   --login-card-bg: rgba(18, 18, 20, 0.9);
   --login-card-border: rgba(255, 255, 255, 0.05);
@@ -580,136 +534,40 @@ html {
   --login-title: #f3f2f0;
   --login-subtitle: rgba(255, 255, 255, 0.6);
   --login-footer: rgba(255, 255, 255, 0.45);
-}
 
-/* ── Couches de fond ─────────────────────────────────────────────────
-   Toutes en pseudo-éléments ou en dégradés : aucun fichier image. */
+  --login-card-w: 28.75rem;      /* 460 px */
+  --login-card-radius: 1.125rem; /* 18 px */
+  --login-field-h: 3.5rem;       /* 56 px */
+  --login-field-radius: 0.75rem; /* 12 px */
+  --login-btn-h: 3.375rem;       /* 54 px */
+  --login-rule-min: 3.75rem;     /* 60 px */
+  --login-rule-max: 5.625rem;    /* 90 px */
 
-/* 1 · Halo chaud derrière le logo + vignette périphérique */
-.login-stage::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(
-      42rem 26rem at 50% 18%,
-      var(--login-halo) 0%,
-      transparent 68%
-    ),
-    radial-gradient(
-      120% 100% at 50% 50%,
-      transparent 42%,
-      var(--login-vignette) 100%
-    );
+  position: relative;
+  min-height: 100svh;
+  isolation: isolate;
+  /* Aplat de secours : visible une fraction de seconde si la photo tarde,
+     dans la même teinte qu'elle pour qu'aucun flash clair n'apparaisse. */
+  background: #090909;
+  overflow: hidden;
 }
 
 /*
- * 2 · Grain procédural.
- *
- * `feTurbulence` en data-URI : le bruit est calculé par le moteur de rendu,
- * il n'y a aucun fichier à charger. C'est la seule façon d'obtenir un grain
- * réellement aléatoire — un dégradé répété produirait une trame visible.
+ * Photo de fond — un <img> et non un `background-image` CSS : c'est la
+ * convention du dépôt pour les assets de marque volumineux (source unique
+ * dans `brand-assets.ts`, cf. l'ancien `BrandPageBackground`), et elle laisse
+ * l'image participer au flux de chargement (`decoding="async"`, repli
+ * `onError`) plutôt que de dépendre silencieusement d'une URL CSS.
  */
-.login-stage::after {
-  content: "";
+.login-bg-image {
   position: absolute;
   inset: 0;
   z-index: 0;
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+  object-position: center;
   pointer-events: none;
-  opacity: var(--login-grain-opacity);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-/* 3 · Courbes de niveau — présentes, jamais lisibles */
-.login-contours {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background-image:
-    repeating-radial-gradient(
-      70rem 50rem at 50% 120%,
-      transparent 0,
-      transparent 5.5rem,
-      var(--login-contour) 5.5rem,
-      var(--login-contour) calc(5.5rem + 1px)
-    );
-  mask-image: linear-gradient(to bottom, transparent 30%, #000 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 30%, #000 100%);
-}
-
-/* 4 · Particules dorées — quinze au maximum, dérive très lente */
-.login-particle {
-  position: absolute;
-  z-index: 0;
-  width: 2px;
-  height: 2px;
-  border-radius: var(--radius-full);
-  background: var(--login-particle);
-  opacity: 0;
-  animation: login-drift linear infinite;
-  will-change: transform, opacity;
-}
-
-@keyframes login-drift {
-  0% {
-    transform: translate3d(0, 0, 0);
-    opacity: 0;
-  }
-  20%,
-  80% {
-    opacity: 1;
-  }
-  100% {
-    transform: translate3d(0, -8rem, 0);
-    opacity: 0;
-  }
-}
-
-/* 5 · Onde topographique pointillée — 20 % inférieurs seulement */
-.login-wave {
-  position: absolute;
-  inset: auto 0 0 0;
-  z-index: 0;
-  height: 20%;
-  pointer-events: none;
-  background-image: radial-gradient(
-    var(--login-wave-dot) 0.5px,
-    transparent 0.5px
-  );
-  background-size: 1.375rem 1.375rem;
-  mask-image:
-    radial-gradient(120% 90% at 50% 100%, #000 15%, transparent 70%),
-    linear-gradient(to top, #000 0%, transparent 90%);
-  -webkit-mask-image:
-    radial-gradient(120% 90% at 50% 100%, #000 15%, transparent 70%),
-    linear-gradient(to top, #000 0%, transparent 90%);
-  mask-composite: intersect;
-  -webkit-mask-composite: source-in;
-}
-
-/**
- * Logo — détouré de sa tuile par fusion, jamais réencodé.
- *
- * Les assets de marque sont des PNG posés sur un aplat (sombre ou clair)
- * selon le thème. Tel quel, le sigle apparaît dans un carré qui casse
- * l'impression de flottement voulue sur cet écran. `screen` neutralise le
- * noir sur fond sombre, `multiply` neutralise le blanc sur fond clair : le
- * fichier reste intact, seule sa composition change.
- */
-.login-logo {
-  /* `.brand-logo` pose `isolation: isolate` pour empêcher tout effet de
-     transparence ailleurs dans l'app. Ce contexte d'empilement isole aussi la
-     fusion : sans ce retour à `auto`, `mix-blend-mode` n'atteint jamais le
-     fond de page et la tuile reste visible. */
-  isolation: auto;
-  mix-blend-mode: multiply;
-}
-
-.dark .login-logo {
-  mix-blend-mode: screen;
 }
 
 /* ── Titre ─────────────────────────────────────────────────────────── */
@@ -847,10 +705,6 @@ html {
   .login-rule {
     animation: none;
     width: var(--login-rule-min);
-  }
-  .login-particle {
-    animation: none;
-    opacity: 0.5;
   }
   .login-field,
   .login-submit {

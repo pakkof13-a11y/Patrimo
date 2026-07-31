@@ -4,7 +4,6 @@ import { FormEvent, useState, useSyncExternalStore } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Eye, EyeOff, Lock, User } from "lucide-react";
-import { ThemeModeToggle } from "@/components/ui/theme-mode-toggle";
 import { BrandLogo } from "@/components/branding/brand-logo";
 import { BRAND } from "@/components/branding/brand-assets";
 import { cn } from "@/app/lib/utils";
@@ -35,36 +34,6 @@ function useIsClient() {
     () => false
   );
 }
-
-/**
- * Particules dorées — positions figées, jamais tirées au sort.
- *
- * `Math.random()` produirait un rendu serveur différent du rendu client et
- * déclencherait une erreur d'hydratation à chaque chargement. Les valeurs
- * sont donc écrites une fois pour toutes, réparties à la main pour éviter
- * l'alignement qu'une suite arithmétique laisserait voir.
- *
- * Quinze au maximum, conformément à la direction artistique : au-delà, la
- * scène bascule du « grain de lumière » vers le ciel étoilé.
- */
-const PARTICLES: { left: string; top: string; delay: string; duration: string }[] =
-  [
-    { left: "8%", top: "72%", delay: "0s", duration: "34s" },
-    { left: "17%", top: "45%", delay: "6s", duration: "41s" },
-    { left: "23%", top: "88%", delay: "12s", duration: "37s" },
-    { left: "31%", top: "22%", delay: "3s", duration: "45s" },
-    { left: "38%", top: "64%", delay: "18s", duration: "32s" },
-    { left: "44%", top: "35%", delay: "9s", duration: "48s" },
-    { left: "52%", top: "80%", delay: "21s", duration: "36s" },
-    { left: "58%", top: "18%", delay: "14s", duration: "43s" },
-    { left: "64%", top: "58%", delay: "2s", duration: "39s" },
-    { left: "71%", top: "84%", delay: "24s", duration: "35s" },
-    { left: "77%", top: "29%", delay: "7s", duration: "46s" },
-    { left: "83%", top: "67%", delay: "16s", duration: "33s" },
-    { left: "89%", top: "41%", delay: "11s", duration: "44s" },
-    { left: "94%", top: "76%", delay: "27s", duration: "38s" },
-    { left: "12%", top: "15%", delay: "20s", duration: "42s" },
-  ];
 
 export default function LoginPage() {
   const router = useRouter();
@@ -122,34 +91,28 @@ export default function LoginPage() {
 
   return (
     <div className="login-stage" data-testid="login-stage">
-      {/* ── Couches de fond (§ CSS `login-*`) ── */}
-      <div className="login-contours" aria-hidden />
-      <div aria-hidden>
-        {PARTICLES.map((p, i) => (
-          <span
-            key={i}
-            className="login-particle"
-            style={{
-              left: p.left,
-              top: p.top,
-              animationDelay: p.delay,
-              animationDuration: p.duration,
-            }}
-          />
-        ))}
-      </div>
-      <div className="login-wave" aria-hidden />
-
-      <div className="absolute right-[var(--space-4)] top-[var(--space-4)] z-20">
-        <ThemeModeToggle />
-      </div>
-
-      {/* ── Contenu ── */}
       {/*
-        `relative` sans `z-index` : suffisant pour passer au-dessus des couches
-        de fond (positionnées en z-0, mais antérieures dans le DOM) tout en
-        évitant de créer un contexte d'empilement. Un `z-10` ici enfermerait le
-        logo et sa fusion ne verrait plus le fond de la scène.
+        Fond fixe, indépendant du thème de l'application — voir le
+        commentaire sur `.login-stage` dans globals.css. Pas de bouton
+        clair/sombre ici : le réglage reste une affaire du terminal, une fois
+        connecté.
+      */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- photo de marque plein cadre, pas un composant Next/Image */}
+      <img
+        src={BRAND.background.login}
+        alt=""
+        aria-hidden
+        decoding="async"
+        fetchPriority="high"
+        className="login-bg-image"
+      />
+
+      {/*
+        ── Contenu ──
+        `relative` sans `z-index` : dans la pile d'empilement de `.login-stage`
+        (isolée), un élément positionné à z-index:auto peint après ses
+        frères de niveau 0 quand il les suit dans le DOM — donc au-dessus de
+        la photo, sans qu'il soit nécessaire de lui donner un z-index propre.
       */}
       <main
         className={cn(
@@ -157,11 +120,16 @@ export default function LoginPage() {
           "items-center justify-center px-[var(--space-5)] py-[var(--space-12)]"
         )}
       >
+        {/*
+          Sigle sur fond réellement transparent (contrairement à l'ancien
+          asset) : un rendu normal suffit, plus besoin de fusion pour
+          neutraliser une tuile derrière la lettre.
+        */}
         <BrandLogo
           size={72}
           priority
           alt=""
-          className="login-logo h-[3.25rem] w-[3.25rem] object-contain"
+          className="h-[3.25rem] w-[3.25rem] object-contain"
         />
 
         <p

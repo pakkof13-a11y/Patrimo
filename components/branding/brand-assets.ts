@@ -19,20 +19,26 @@ export const BRAND = {
    * Source unique : ne pas hardcoder ailleurs.
    */
   slogan: "Wealth. Unified",
+  /**
+   * Sigle doré sur fond transparent — un seul asset pour les deux thèmes.
+   * L'ancien logo était un PNG posé sur un aplat plein (un par thème) ; celui-ci
+   * n'a pas ce problème, `dark`/`light` restent distincts dans le type pour ne
+   * pas rouvrir `BrandLogo` si un jour les deux redivergent.
+   */
   logo: {
-    dark: "/branding/logo-dark.png",
-    light: "/branding/logo-light.png",
+    dark: "/branding/logo-gold.png",
+    light: "/branding/logo-gold.png",
   },
   banner: {
     dark: "/branding/banner-dark.png",
     light: "/branding/banner-light.png",
   },
   /**
-   * Fonds full-bleed (liquid glass) — light/dark via next-themes.
-   * Sources : « fond white mode.png » / « fond dark mode.png » (Downloads).
+   * Fond de l'écran de connexion — image unique, indépendante du thème.
+   * Cet écran ne suit plus next-themes (voir `app/login/page.tsx`) : la scène
+   * reste la même quel que soit le réglage clair/sombre de l'application.
    */
   background: {
-    dark: "/branding/bg-dark.png",
-    light: "/branding/bg-light.png",
+    login: "/branding/login-bg.png",
   },
 } as const;
