@@ -136,7 +136,7 @@ const BanksTab = dynamic(
 );
 const AssuranceVieTab = dynamic(
   () =>
-    import("@/components/tabs/assurance-vie-tab").then((m) => ({
+    import("@/components/life-insurance/assurance-vie-page").then((m) => ({
       default: m.AssuranceVieTab,
     })),
   { loading: () => <TabChunkFallback />, ssr: false }
@@ -804,13 +804,16 @@ function PortfolioAppClient({
   /**
    * Bandeau d'indicateurs générique — partout sauf là où l'écran porte déjà
    * les siens : le dashboard (hero + TerminalKpiRow), le portefeuille (les
-   * cinq cartes de `PortfolioKpiCards`) et PEA & CTO (sa propre rangée). Les
-   * empiler donnerait deux fois la même valeur totale à quinze pixels d'écart,
-   * et le lecteur chercherait la différence entre les deux plutôt que de lire
-   * la page.
+   * cinq cartes de `PortfolioKpiCards`), PEA & CTO et l'assurance-vie (leur
+   * propre rangée). Les empiler donnerait deux fois la même valeur totale à
+   * quinze pixels d'écart, et le lecteur chercherait la différence entre les
+   * deux plutôt que de lire la page.
    */
   const showGlobalKpis =
-    !isDashboard && !positionsView && tab !== "securities";
+    !isDashboard &&
+    !positionsView &&
+    tab !== "securities" &&
+    tab !== "assurance-vie";
 
   /**
    * Plateformes « Notaire / immobilier » : la saisie d'un bien y suit un

@@ -423,6 +423,22 @@ export type SupportRow = {
  * « sans contrat rattaché », donnant à croire que les données étaient perdues.
  * Une position AV existe : elle doit se voir, fiche ou pas.
  */
+/**
+ * Nature d'un support dépourvu de fiche.
+ *
+ * Une ligne reprise de l'ancienne saisie n'a pas de `LifeSupport` : sa nature
+ * doit donc se relire ailleurs. On inverse la classification que l'application
+ * pose elle-même à la création (`assetClassForKind`) : un fonds euro est rangé
+ * en obligataire, tout le reste relève de l'UC. Ce n'est pas une devinette sur
+ * le nom du support, c'est la lecture de ce que l'app a déjà décidé.
+ *
+ * L'enjeu n'est pas cosmétique : présenter un fonds en euros comme une unité
+ * de compte annonce un capital à risque là où l'assureur le garantit.
+ */
+function kindFromAssetClass(assetClass: string | null | undefined): string {
+  return assetClass === "OBLIGATIONS" ? "FONDS_EURO" : "UC";
+}
+
 export async function listSupports(userId: string): Promise<SupportRow[]> {
   // La valorisation vient de `getHoldings` : quantité × cours, repli manualPrice
   // → cotation → devise → FX. La recalculer ici reviendrait à répliquer cette
@@ -437,6 +453,7 @@ export async function listSupports(userId: string): Promise<SupportRow[]> {
         id: true,
         name: true,
         isin: true,
+        assetClass: true,
         lifeSupport: true,
       },
       orderBy: { createdAt: "asc" },
@@ -454,9 +471,7 @@ export async function listSupports(userId: string): Promise<SupportRow[]> {
       supportId: s?.id ?? "",
       lifeInsuranceId: s?.lifeInsuranceId ?? null,
       name: a.name,
-      // Sans fiche, la nature est inconnue : « UC » est le cas courant et le
-      // moins engageant — pas de barrière, pas de garantie supposée.
-      kind: s?.kind ?? "UC",
+      kind: s?.kind ?? kindFromAssetClass(a.assetClass),
       isin: s?.isin ?? a.isin,
       issuer: s?.issuer ?? null,
       underlying: s?.underlying ?? null,
@@ -491,7 +506,7 @@ export async function attachSupportToContract(
 ): Promise<void> {
   const asset = await prisma.asset.findFirst({
     where: { id: assetId, userId, accountType: "AV" },
-    select: { id: true, name: true },
+    select: { id: true, name: true, assetClass: true },
   });
   if (!asset) throw new LifeInsuranceInputError("Support introuvable");
 
@@ -504,10 +519,17 @@ export async function attachSupportToContract(
   }
 
   // Un support migré depuis l'ancienne table n'a pas encore de fiche : on la
-  // crée à la volée plutôt que d'exiger une ressaisie.
+  // crée à la volée plutôt que d'exiger une ressaisie. Sa nature se relit dans
+  // la classe d'actif, seule trace laissée par la reprise — un fonds euro
+  // figé en « unité de compte » annoncerait un capital à risque là où
+  // l'assureur le garantit, et le rattachement est irréversible.
   await prisma.lifeInsuranceSupport.upsert({
     where: { assetId },
-    create: { assetId, lifeInsuranceId, kind: "UC" },
+    create: {
+      assetId,
+      lifeInsuranceId,
+      kind: kindFromAssetClass(asset.assetClass),
+    },
     update: { lifeInsuranceId },
   });
 }

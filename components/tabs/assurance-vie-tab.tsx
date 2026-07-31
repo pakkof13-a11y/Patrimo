@@ -915,7 +915,14 @@ function SupportRow({
  * support crée un actif et une transaction d'achat, comme une action. C'est ce
  * qui lui donne un prix de revient, donc une plus-value.
  */
-export function AssuranceVieTab() {
+/**
+ * Gestion des contrats — ouverture, versements, supports, rattachements.
+ *
+ * Cet écran reste ce qu'il était : une surface de **saisie**. Il vit désormais
+ * sous un repli, derrière la vue d'ensemble, parce qu'on consulte son épargne
+ * dix fois pour une fois qu'on la modifie.
+ */
+export function AssuranceVieManagement() {
   const qc = useQueryClient();
 
   const policiesQ = useQuery({
@@ -1037,7 +1044,7 @@ export function AssuranceVieTab() {
   const orphans = byContract.get("__orphan__") ?? [];
 
   return (
-    <div className="space-y-4" data-testid="assurance-vie-tab">
+    <div className="space-y-4" data-testid="av-management">
       {/*
         En tête : une constatation échue est une décision en attente, elle passe
         avant la saisie. Le panneau disparaît quand il n'y a rien à trancher.
