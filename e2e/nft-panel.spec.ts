@@ -345,8 +345,18 @@ test.describe("NFT — détail, vues, filtres, cycle de vie", () => {
     await expect(page.getByTestId("nft-dispose-modal")).toBeVisible();
     await page.getByTestId("nft-dispose-source").selectOption("SOLD");
     await page.getByTestId("nft-dispose-price").fill("55");
+
+    // On attend la réponse du serveur avant de juger l'écran : la fermeture de
+    // la modale est déclenchée par le succès de la mutation, pas par le clic.
+    // Sans cette attente, le test échouait quand la suite complète chargeait
+    // le serveur — un délai, pas une régression, mais rouge quand même.
+    const disposed = page.waitForResponse(
+      (r) => r.url().includes("/dispose") && r.request().method() === "POST"
+    );
     await page.getByTestId("nft-dispose-submit").click();
-    await expect(page.getByTestId("nft-dispose-modal")).toHaveCount(0, { timeout: 10_000 });
+    expect((await disposed).ok()).toBe(true);
+
+    await expect(page.getByTestId("nft-dispose-modal")).toHaveCount(0, { timeout: 15_000 });
     // Le dénouement ferme aussi le panneau détail sous-jacent — sinon la
     // modale reste ouverte au premier plan et bloque les contrôles derrière.
     await expect(page.getByTestId("nft-detail-panel")).toHaveCount(0, { timeout: 10_000 });

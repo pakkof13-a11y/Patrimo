@@ -39,6 +39,17 @@ export async function GET() {
     uptimeSec: Math.floor(process.uptime()),
     latencyMs: Date.now() - started,
     timestamp: new Date().toISOString(),
+    /**
+     * Ce serveur a-t-il été lancé pour les tests de bout en bout ?
+     *
+     * Playwright réutilise un serveur déjà à l'écoute sur le port. Si celui-ci
+     * est un `npm run dev` ordinaire, la suite s'exécute alors contre la base
+     * de **travail** au lieu de la base isolée : les fixtures s'y accumulent,
+     * et les tests finissent par échouer pour une raison qui n'a rien à voir
+     * avec le code. Ce drapeau permet au `globalSetup` de refuser tout de
+     * suite plutôt que de laisser croire à une régression.
+     */
+    e2e: process.env.E2E === "1",
     env: {
       nodeEnv: env.nodeEnv,
       authSecretConfigured: env.authSecretConfigured,
