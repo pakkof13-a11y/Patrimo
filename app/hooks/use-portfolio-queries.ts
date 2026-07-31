@@ -213,3 +213,41 @@ export function useAssetDetailQuery(detailAssetId: string | null) {
     staleTime: 15_000,
   });
 }
+
+/**
+ * P&L journalier par classe d'actifs — alimente les courbes et la variation
+ * du jour des en-têtes de groupe du portefeuille.
+ *
+ * Requête à part, jamais fusionnée dans `usePortfolioHistoryQuery` : le calcul
+ * peut déclencher des appels fournisseurs pour compléter le cache de clôtures
+ * (voir `class-pnl-service`). Le cache est donc volontairement long, et la
+ * requête ne se relance ni au montage ni au retour de focus — un tableau qui
+ * reste lisible vaut mieux qu'une courbe rafraîchie à la seconde.
+ */
+const CLASS_PNL_STALE_MS = 5 * 60_000;
+
+export type ClassPnlPoint = {
+  day: string;
+  valueByClass: Record<string, number>;
+  pnlByClass: Record<string, number>;
+  incompleteClasses: string[];
+};
+
+export function useClassPnlQuery(range: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["portfolio-class-pnl", range],
+    queryFn: () =>
+      fetchJson<{
+        points: ClassPnlPoint[];
+        classes: string[];
+        estimated: boolean;
+      }>(`/api/portfolio/class-pnl?range=${encodeURIComponent(range)}`),
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: CLASS_PNL_STALE_MS,
+    gcTime: 15 * 60_000,
+    retry: 1,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  });
+}

@@ -49,11 +49,32 @@ test.describe("Positions — toolbar & filtres", () => {
     await page.keyboard.press("Escape");
   });
 
+  test("regroupement par classe d'actifs par défaut", async ({ page }) => {
+    // Le portefeuille s'ouvre groupé : des en-têtes de classe, et une
+    // pagination inactive puisque toutes les lignes sont rendues.
+    const groups = page.locator("[data-testid^='class-group-header-']");
+    await expect(groups.first()).toBeVisible();
+
+    const first = groups.first();
+    const toggle = first.locator("[data-testid^='class-group-toggle-']");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    const rowsExpanded = await page.locator("tbody tr").count();
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(await page.locator("tbody tr").count()).toBeLessThan(rowsExpanded);
+
+    // Le clic sur la ligne entière rouvre le groupe.
+    await first.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
   test("options avancées : regroupement et page size", async ({ page }) => {
     await page.getByTestId("holdings-advanced-toggle").click();
     await expect(page.getByTestId("holdings-advanced-panel")).toBeVisible();
 
-    // Page size is only rendered when not in group mode
+    // La pagination n'existe qu'à plat : sortir du regroupement d'abord.
+    await page.getByTestId("holdings-group-by").selectOption("none");
     const pageSize = page.getByTestId("holdings-page-size");
     await expect(pageSize).toBeVisible();
     await pageSize.selectOption("10");
@@ -84,6 +105,11 @@ test.describe("Positions — toolbar & filtres", () => {
   });
 
   test("pagination sans Page 0 / 0", async ({ page }) => {
+    // La pagination ne s'affiche qu'en vue à plat (regroupée, toutes les
+    // lignes sont rendues d'un coup).
+    await page.getByTestId("holdings-advanced-toggle").click();
+    await page.getByTestId("holdings-group-by").selectOption("none");
+
     const label = page.getByTestId("holdings-page-label");
     await expect(label).toBeVisible();
     await expect(label).not.toHaveText(/Page\s*0\s*\/\s*0/i);

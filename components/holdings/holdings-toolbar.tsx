@@ -481,11 +481,12 @@ export function HoldingsToolbar({
                   data-testid="holdings-group-by"
                   aria-label="Regrouper les positions"
                 >
-                  <option value="none">Aucun</option>
+                  <option value="assetClass">Classe d&apos;actifs</option>
                   <option value="assetCategory">
                     Sous-catégorie d&apos;actif
                   </option>
                   <option value="blockchain">Blockchain (crypto)</option>
+                  <option value="none">Aucun</option>
                 </select>
               </label>
 

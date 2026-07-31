@@ -1813,6 +1813,50 @@ textarea:focus-visible,
   background: var(--surface-hover);
 }
 
+/* ── Ligne de groupe du portefeuille (classe d'actifs) ────────────── */
+.group-row {
+  border-top: var(--border-width) solid var(--border);
+  background: var(--surface-sunken);
+}
+
+.group-row:first-child {
+  border-top: 0;
+}
+
+.group-row td {
+  font-size: var(--text-sm);
+}
+
+.group-row:hover {
+  background: var(--surface-hover);
+  cursor: pointer;
+}
+
+/**
+ * Le clic est porté par la ligne entière (surface confortable), mais le point
+ * focusable reste ce bouton dans la colonne de dépliage — même colonne que le
+ * chevron des lignes d'actif, donc même geste au clavier comme à la souris.
+ */
+.group-row-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: var(--space-1) 0;
+  color: var(--foreground-faint);
+  transition: color var(--transition-fast);
+}
+
+.group-row-toggle:hover {
+  color: var(--foreground);
+}
+
+.group-row-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
 /* ── Tableau terminal ─────────────────────────────────────────────── */
 .term-table {
   width: 100%;

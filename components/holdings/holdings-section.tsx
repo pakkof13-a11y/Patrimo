@@ -32,6 +32,7 @@ import { PlatformLogo } from "@/components/ui/platform-logo";
 import { EnvelopeCashPanel } from "@/components/tabs/envelope-cash-panel";
 import { LifeInsuranceTab } from "@/components/tabs/life-insurance-tab";
 import { PositionCategoryGroupHeader } from "@/components/holdings/position-category-group-header";
+import { PositionGroupHeader } from "@/components/holdings/position-group-header";
 import { EditAssetCategoryModal } from "@/components/holdings/edit-asset-category-modal";
 import {
   HoldingsToolbar,
@@ -101,6 +102,11 @@ import {
   type HoldingsGroupBy,
 } from "@/app/lib/assets/categories";
 import { groupPositionsByBlockchain } from "@/app/lib/assets/blockchain";
+import {
+  groupPositionsByAssetClass,
+  parseAssetClass,
+} from "@/app/lib/assets/asset-class-groups";
+import { useClassPnlQuery } from "@/app/hooks/use-portfolio-queries";
 
 const DEFAULT_PAGE_SIZE: HoldingsPageSize = 20;
 import {
@@ -223,7 +229,7 @@ export function HoldingsSection({
   });
 
   // ── Regroupement par sous-catégorie ──────────────────────────────────────
-  const [groupBy, setGroupByState] = useState<HoldingsGroupBy>("none");
+  const [groupBy, setGroupByState] = useState<HoldingsGroupBy>("assetClass");
   const [groupPrefsReady, setGroupPrefsReady] = useState(false);
   /** envelopeKey → category → collapsed */
   const [collapsedByEnvelope, setCollapsedByEnvelope] = useState<
@@ -247,8 +253,10 @@ export function HoldingsSection({
     if (fromUrl != null) {
       setGroupByState(parseHoldingsGroupBy(fromUrl));
     } else {
+      // Le portefeuille s'ouvre regroupé par classe d'actifs : trente lignes
+      // à plat ne disent pas de quoi le patrimoine est fait, six groupes si.
       setGroupByState(
-        parseHoldingsGroupBy(loadUiPref(HOLDINGS_GROUP_BY_KEY, "none"))
+        parseHoldingsGroupBy(loadUiPref(HOLDINGS_GROUP_BY_KEY, "assetClass"))
       );
     }
     setCollapsedByEnvelope(
@@ -574,8 +582,7 @@ export function HoldingsSection({
     return platformNameFromUrl || "Plateforme sélectionnée";
   }, [platformFilterId, platformNameFromUrl, holdings]);
 
-  const groupMode =
-    groupBy === "assetCategory" || groupBy === "blockchain";
+  const groupMode = groupBy !== "none";
 
   const allFilteredSelected =
     filteredHoldings.length > 0 &&
@@ -1125,6 +1132,10 @@ export function HoldingsSection({
 
   /** Lignes triées (pré-pagination) pour regroupement — order = tri tableau */
   const sortedAllRows = table.getPrePaginationRowModel().rows;
+  const classGroups =
+    groupBy === "assetClass"
+      ? groupPositionsByAssetClass(sortedAllRows.map((r) => r.original))
+      : [];
   const categoryGroups =
     groupBy === "assetCategory"
       ? groupPositionsByAssetCategory(sortedAllRows.map((r) => r.original))
@@ -1134,13 +1145,80 @@ export function HoldingsSection({
       ? groupPositionsByBlockchain(sortedAllRows.map((r) => r.original))
       : [];
   const activeGroups =
-    groupBy === "blockchain" ? blockchainGroups : categoryGroups;
+    groupBy === "assetClass"
+      ? classGroups
+      : groupBy === "blockchain"
+        ? blockchainGroups
+        : categoryGroups;
   const rowByAssetId = useMemo(() => {
     const m = new Map<string, Row<Holding>>();
     for (const r of sortedAllRows) m.set(r.original.assetId, r);
     return m;
      
   }, [sortedAllRows]);
+
+  /**
+   * Courbe et variation du jour de chaque classe.
+   *
+   * Chargées seulement quand le tableau est effectivement regroupé par classe :
+   * ce calcul peut réveiller le cache de clôtures côté serveur, et le
+   * portefeuille n'a pas à le payer quand personne ne regarde les groupes.
+   */
+  const classPnlQ = useClassPnlQuery("1m", groupBy === "assetClass");
+  const classSeries = useMemo(() => {
+    const points = classPnlQ.data?.points;
+    if (!points?.length) return null;
+
+    const incomplete = new Set<string>();
+    for (const p of points) {
+      for (const cls of p.incompleteClasses ?? []) {
+        incomplete.add(parseAssetClass(cls));
+      }
+    }
+
+    /**
+     * Une valeur par jour de la fenêtre, et non une valeur par jour *connu* :
+     * empiler seulement les jours renseignés recollerait le 3 et le 20 du mois
+     * côte à côte, et la courbe raconterait une progression régulière là où il
+     * manque deux semaines. Les jours sans cours reprennent la dernière valeur
+     * connue (palier horizontal, visiblement plat), et une classe dont moins
+     * de la moitié des jours est connue n'a pas de courbe du tout.
+     */
+    const seen = new Set<string>();
+    for (const p of points) {
+      for (const cls of Object.keys(p.valueByClass ?? {})) {
+        seen.add(parseAssetClass(cls));
+      }
+    }
+
+    const values = new Map<string, number[]>();
+    for (const cls of seen) {
+      const series: number[] = [];
+      let known = 0;
+      let last: number | null = null;
+      for (const p of points) {
+        const raw = p.valueByClass?.[cls];
+        if (typeof raw === "number" && Number.isFinite(raw)) {
+          last = raw;
+          known += 1;
+        }
+        if (last != null) series.push(last);
+      }
+      if (series.length >= 2 && known >= points.length / 2) {
+        values.set(cls, series);
+      }
+    }
+    // Variation du jour = P&L de la dernière journée connue, pas la différence
+    // entre deux valeurs de marché : celle-ci intègre les apports et retraits,
+    // et afficherait un « gain » là où l'utilisateur a simplement versé.
+    const last = points[points.length - 1]!;
+    const dayPnl = new Map<string, number>();
+    for (const [cls, v] of Object.entries(last.pnlByClass ?? {})) {
+      const key = parseAssetClass(cls);
+      dayPnl.set(key, (dayPnl.get(key) ?? 0) + v);
+    }
+    return { values, dayPnl, incomplete };
+  }, [classPnlQ.data]);
 
   const allEnvelopesCount = Object.keys(ACCOUNT_TYPES).length;
   /**
@@ -1226,6 +1304,23 @@ export function HoldingsSection({
   );
   /** +2 : colonne sélection + colonne expand (plus de colonne ⋯ — actions dans l’historique) */
   const visibleColCount = visibleLeafIds.length + 2;
+
+  /**
+   * Colonnes visibles avec leur largeur — les en-têtes de groupe rendent une
+   * cellule par colonne pour que leurs totaux tombent sous la colonne qu'ils
+   * totalisent, quel que soit l'ordre choisi par l'utilisateur.
+   */
+  const groupHeaderColumns = useMemo(
+    () =>
+      table.getVisibleLeafColumns().map((c) => ({
+        id: c.id,
+        size: c.getSize(),
+      })),
+    // `columnSizing` n'est pas lu directement : c'est lui qui fait bouger
+    // `getSize()`, d'où sa présence explicite dans les dépendances.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [table, visibleLeafKey, columnSizing]
+  );
   const isResizingColumn = table.getState().columnSizingInfo.isResizingColumn;
 
   useEffect(() => {
@@ -1346,9 +1441,11 @@ export function HoldingsSection({
           onExpandAllGroups={expandAllGroups}
           onCollapseAllGroups={() =>
             collapseAllGroups(
-              groupBy === "blockchain"
-                ? blockchainGroups.map((g) => g.blockchainKey)
-                : categoryGroups.map((g) => g.category)
+              groupBy === "assetClass"
+                ? classGroups.map((g) => g.assetClass)
+                : groupBy === "blockchain"
+                  ? blockchainGroups.map((g) => g.blockchainKey)
+                  : categoryGroups.map((g) => g.category)
             )
           }
           search={searchInput}
@@ -1763,23 +1860,49 @@ export function HoldingsSection({
                 groupMode &&
                 activeGroups.map((group) => {
                   const groupKey =
-                    "blockchainKey" in group
-                      ? group.blockchainKey
-                      : group.category;
+                    "assetClass" in group
+                      ? group.assetClass
+                      : "blockchainKey" in group
+                        ? group.blockchainKey
+                        : group.category;
                   const expanded = !isGroupCollapsed(groupKey);
                   return (
                     <Fragment key={groupKey}>
-                      <PositionCategoryGroupHeader
-                        label={group.label}
-                        count={group.count}
-                        totalMarketValue={group.totalMarketValue}
-                        totalUnrealizedPnl={group.totalUnrealizedPnl}
-                        weightPct={group.weightPct}
-                        baseCurrency={baseCurrency}
-                        expanded={expanded}
-                        onToggle={() => toggleGroupCollapsed(groupKey)}
-                        colSpan={Math.max(visibleColCount, 1)}
-                      />
+                      {"assetClass" in group ? (
+                        <PositionGroupHeader
+                          label={group.label}
+                          assetClass={group.assetClass}
+                          count={group.count}
+                          totalMarketValue={group.totalMarketValue}
+                          totalUnrealizedPnl={group.totalUnrealizedPnl}
+                          unrealizedPnlPct={group.unrealizedPnlPct}
+                          weightPct={group.weightPct}
+                          spark={classSeries?.values.get(group.assetClass)}
+                          dayChange={
+                            classSeries?.dayPnl.get(group.assetClass) ?? null
+                          }
+                          estimated={classSeries?.incomplete.has(
+                            group.assetClass
+                          )}
+                          totalCostBasis={group.totalCostBasis}
+                          baseCurrency={baseCurrency}
+                          expanded={expanded}
+                          onToggle={() => toggleGroupCollapsed(groupKey)}
+                          columns={groupHeaderColumns}
+                        />
+                      ) : (
+                        <PositionCategoryGroupHeader
+                          label={group.label}
+                          count={group.count}
+                          totalMarketValue={group.totalMarketValue}
+                          totalUnrealizedPnl={group.totalUnrealizedPnl}
+                          weightPct={group.weightPct}
+                          baseCurrency={baseCurrency}
+                          expanded={expanded}
+                          onToggle={() => toggleGroupCollapsed(groupKey)}
+                          colSpan={Math.max(visibleColCount, 1)}
+                        />
+                      )}
                       {expanded &&
                         group.positions.map((pos) => {
                           const row = rowByAssetId.get(pos.assetId);
