@@ -60,9 +60,14 @@ function LogoImage({
   className?: string;
 }) {
   const [index, setIndex] = useState(0);
-  // Repartir du début quand les sources changent : sans cette clé, une ligne
-  // recyclée par le tableau garderait l'échec de la précédente.
-  const key = sources[0] ?? name;
+  // Une ligne de tableau est recyclée d'un actif à l'autre sans être démontée :
+  // sans cette remise à zéro, le rang atteint par l'actif précédent — souvent
+  // le monogramme — s'appliquerait au suivant, qui n'a rien tenté.
+  const [seenFirst, setSeenFirst] = useState(sources[0]);
+  if (sources[0] !== seenFirst) {
+    setSeenFirst(sources[0]);
+    setIndex(0);
+  }
 
   if (index >= sources.length) {
     return <Monogram name={name} size={size} className={className} />;
@@ -71,7 +76,6 @@ function LogoImage({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      key={key}
       data-logo
       src={sources[index]}
       alt={name}

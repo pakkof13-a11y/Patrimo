@@ -56,10 +56,21 @@ export function logoByTicker(ticker: string, opts?: LogoDevOptions): string {
   return withParams(`ticker/${encodeURIComponent(t)}`, opts);
 }
 
-/** Crypto symbol — crypto/BTC */
+/**
+ * Symbole crypto — crypto/BTC.
+ *
+ * Les tickers arrivent sous plusieurs formes selon la source : « BTC »,
+ * « BTCUSDT » (exchanges), « SOL-USD » ou « SOL/USDC » (flux de cotation).
+ * Seule la monnaie de base identifie l'actif ; la contrepartie est retirée,
+ * séparateur compris — sans quoi on interrogerait « SOL- ».
+ */
 export function logoByCrypto(symbol: string, opts?: LogoDevOptions): string {
-  const s = symbol.trim().toUpperCase().replace(/USDT$|USD$|EUR$/, "");
-  return withParams(`crypto/${encodeURIComponent(s)}`, opts);
+  const s = symbol
+    .trim()
+    .toUpperCase()
+    .split(/[-/:_]/)[0]!
+    .replace(/(USDT|USDC|USD|EUR)$/, "");
+  return withParams(`crypto/${encodeURIComponent(s || symbol.trim().toUpperCase())}`, opts);
 }
 
 /** ISIN — isin/US0378331005 */
@@ -112,7 +123,11 @@ function chain(
   );
 }
 
-const CRYPTO_QUOTE_SUFFIX = /(USDT|USDC|USD|EUR)$/i;
+/** Monnaie de base d'un ticker de paire : SOL-USD, BTCUSDT, ETH/EUR → SOL, BTC, ETH. */
+function baseSymbol(ticker: string): string {
+  const head = ticker.trim().toUpperCase().split(/[-/:_]/)[0] ?? "";
+  return head.replace(/(USDT|USDC|USD|EUR)$/, "") || head;
+}
 
 /**
  * Tickers crypto usuels : la classe d'actif suffit dans la plupart des cas,
@@ -126,7 +141,7 @@ const KNOWN_CRYPTO_TICKERS = new Set([
 function isCryptoAsset(assetClass: string, ticker: string): boolean {
   const cls = assetClass.toUpperCase();
   if (cls === "CRYPTO" || cls === "STABLECOIN" || cls === "NFT") return true;
-  return KNOWN_CRYPTO_TICKERS.has(ticker.toUpperCase().replace(CRYPTO_QUOTE_SUFFIX, ""));
+  return KNOWN_CRYPTO_TICKERS.has(baseSymbol(ticker));
 }
 
 /**

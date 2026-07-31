@@ -624,6 +624,14 @@ function CompanyLogo({
     return src ? [src, ...fromTicker] : fromTicker;
   }, [src, ticker, name, size]);
   const [index, setIndex] = useState(0);
+  // Le composant est réutilisé d'une société à l'autre quand le fil se
+  // rafraîchit : sans remise à zéro, l'échec de la précédente vaudrait échec
+  // de la suivante.
+  const [seenFirst, setSeenFirst] = useState(sources[0]);
+  if (sources[0] !== seenFirst) {
+    setSeenFirst(sources[0]);
+    setIndex(0);
+  }
 
   if (index >= sources.length) {
     return (
@@ -644,7 +652,6 @@ function CompanyLogo({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      key={sources[0]}
       src={sources[index]}
       alt=""
       width={size}
