@@ -511,36 +511,354 @@ html {
     0 0 0 1px color-mix(in srgb, var(--gold-2) 12%, transparent);
 }
 
-/* Carte login premium + liquid glass */
-.login-card {
-  border: 1px solid color-mix(in srgb, var(--gold-2) 22%, var(--border));
-  background: color-mix(in srgb, var(--card) 80%, transparent);
-  box-shadow:
-    var(--shadow-md),
-    0 0 0 1px color-mix(in srgb, var(--primary) 8%, transparent),
-    0 12px 40px color-mix(in srgb, var(--gold-3) 8%, transparent);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  transition:
-    border-color 350ms ease-in-out,
-    box-shadow 350ms ease-in-out,
-    background-color 350ms ease-in-out;
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  ÉCRAN DE CONNEXION — « entrance experience »
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ *  Cet écran est le seul de l'application où la marque a le premier rôle : on
+ *  s'y autorise donc une mise en scène (vignette, grain, particules) que le
+ *  terminal s'interdit partout ailleurs. Elle reste sous le seuil de la
+ *  perception consciente — rien ne doit attirer l'œil plus que le formulaire.
+ *
+ *  Tokens locaux : le sombre est la référence, le clair en est la
+ *  transposition. Aucun composant React ne code ces valeurs en dur.
+ */
+.login-stage {
+  --login-bg: #f8f6f2;
+  --login-halo: rgba(217, 166, 77, 0.1);
+  --login-vignette: rgba(120, 105, 80, 0.14);
+  --login-grain-opacity: 0.035;
+  --login-contour: rgba(120, 100, 60, 0.055);
+  --login-particle: rgba(168, 120, 31, 0.28);
+  --login-wave-dot: rgba(140, 116, 60, 0.16);
+
+  --login-card-bg: #ffffff;
+  --login-card-border: rgba(16, 17, 20, 0.07);
+  --login-card-shadow: 0 24px 70px rgba(60, 50, 30, 0.1);
+
+  --login-field-bg: #fbfaf8;
+  --login-field-border: rgba(16, 17, 20, 0.11);
+  --login-placeholder: rgba(20, 22, 26, 0.35);
+
+  --login-title: #14161a;
+  --login-subtitle: rgba(20, 22, 26, 0.55);
+  --login-footer: rgba(20, 22, 26, 0.45);
+
+  --login-card-w: 28.75rem;      /* 460 px */
+  --login-card-radius: 1.125rem; /* 18 px */
+  --login-field-h: 3.5rem;       /* 56 px */
+  --login-field-radius: 0.75rem; /* 12 px */
+  --login-btn-h: 3.375rem;       /* 54 px */
+  --login-rule-min: 3.75rem;     /* 60 px */
+  --login-rule-max: 5.625rem;    /* 90 px */
+
+  position: relative;
+  min-height: 100svh;
+  isolation: isolate;
+  background: var(--login-bg);
+  overflow: hidden;
 }
 
-.dark .login-card {
-  border-color: color-mix(in srgb, var(--gold-2) 18%, var(--border));
-  background: color-mix(in srgb, var(--card) 78%, transparent);
-  box-shadow:
-    var(--shadow-md),
-    0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent),
-    0 16px 48px rgb(0 0 0 / 0.45),
-    0 0 40px color-mix(in srgb, var(--gold-2) 6%, transparent);
+.dark .login-stage {
+  --login-bg: #090909;
+  --login-halo: rgba(217, 166, 77, 0.13);
+  --login-vignette: rgba(0, 0, 0, 0.72);
+  --login-grain-opacity: 0.02;
+  --login-contour: rgba(217, 166, 77, 0.035);
+  --login-particle: rgba(217, 166, 77, 0.5);
+  --login-wave-dot: rgba(217, 166, 77, 0.22);
+
+  --login-card-bg: rgba(18, 18, 20, 0.9);
+  --login-card-border: rgba(255, 255, 255, 0.05);
+  --login-card-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+
+  --login-field-bg: rgba(9, 9, 10, 0.85);
+  --login-field-border: rgba(255, 255, 255, 0.08);
+  --login-placeholder: rgba(255, 255, 255, 0.28);
+
+  --login-title: #f3f2f0;
+  --login-subtitle: rgba(255, 255, 255, 0.6);
+  --login-footer: rgba(255, 255, 255, 0.45);
 }
 
+/* ── Couches de fond ─────────────────────────────────────────────────
+   Toutes en pseudo-éléments ou en dégradés : aucun fichier image. */
+
+/* 1 · Halo chaud derrière le logo + vignette périphérique */
+.login-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      42rem 26rem at 50% 18%,
+      var(--login-halo) 0%,
+      transparent 68%
+    ),
+    radial-gradient(
+      120% 100% at 50% 50%,
+      transparent 42%,
+      var(--login-vignette) 100%
+    );
+}
+
+/*
+ * 2 · Grain procédural.
+ *
+ * `feTurbulence` en data-URI : le bruit est calculé par le moteur de rendu,
+ * il n'y a aucun fichier à charger. C'est la seule façon d'obtenir un grain
+ * réellement aléatoire — un dégradé répété produirait une trame visible.
+ */
+.login-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--login-grain-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 3 · Courbes de niveau — présentes, jamais lisibles */
+.login-contours {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    repeating-radial-gradient(
+      70rem 50rem at 50% 120%,
+      transparent 0,
+      transparent 5.5rem,
+      var(--login-contour) 5.5rem,
+      var(--login-contour) calc(5.5rem + 1px)
+    );
+  mask-image: linear-gradient(to bottom, transparent 30%, #000 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 30%, #000 100%);
+}
+
+/* 4 · Particules dorées — quinze au maximum, dérive très lente */
+.login-particle {
+  position: absolute;
+  z-index: 0;
+  width: 2px;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: var(--login-particle);
+  opacity: 0;
+  animation: login-drift linear infinite;
+  will-change: transform, opacity;
+}
+
+@keyframes login-drift {
+  0% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0;
+  }
+  20%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(0, -8rem, 0);
+    opacity: 0;
+  }
+}
+
+/* 5 · Onde topographique pointillée — 20 % inférieurs seulement */
+.login-wave {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 0;
+  height: 20%;
+  pointer-events: none;
+  background-image: radial-gradient(
+    var(--login-wave-dot) 0.5px,
+    transparent 0.5px
+  );
+  background-size: 1.375rem 1.375rem;
+  mask-image:
+    radial-gradient(120% 90% at 50% 100%, #000 15%, transparent 70%),
+    linear-gradient(to top, #000 0%, transparent 90%);
+  -webkit-mask-image:
+    radial-gradient(120% 90% at 50% 100%, #000 15%, transparent 70%),
+    linear-gradient(to top, #000 0%, transparent 90%);
+  mask-composite: intersect;
+  -webkit-mask-composite: source-in;
+}
+
+/**
+ * Logo — détouré de sa tuile par fusion, jamais réencodé.
+ *
+ * Les assets de marque sont des PNG posés sur un aplat (sombre ou clair)
+ * selon le thème. Tel quel, le sigle apparaît dans un carré qui casse
+ * l'impression de flottement voulue sur cet écran. `screen` neutralise le
+ * noir sur fond sombre, `multiply` neutralise le blanc sur fond clair : le
+ * fichier reste intact, seule sa composition change.
+ */
 .login-logo {
-  box-shadow: var(--shadow-md);
-  outline: 1px solid color-mix(in srgb, var(--gold-2) 28%, var(--border));
-  outline-offset: 0;
+  /* `.brand-logo` pose `isolation: isolate` pour empêcher tout effet de
+     transparence ailleurs dans l'app. Ce contexte d'empilement isole aussi la
+     fusion : sans ce retour à `auto`, `mix-blend-mode` n'atteint jamais le
+     fond de page et la tuile reste visible. */
+  isolation: auto;
+  mix-blend-mode: multiply;
+}
+
+.dark .login-logo {
+  mix-blend-mode: screen;
+}
+
+/* ── Titre ─────────────────────────────────────────────────────────── */
+.login-title {
+  font-family: var(--font-sans);
+  font-weight: 300;
+  letter-spacing: -0.015em;
+  line-height: 1.28;
+  color: var(--login-title);
+  text-wrap: balance;
+}
+
+/*
+ * Filet doré animé.
+ *
+ * Seule la largeur bouge : ni opacité, ni lueur. Une respiration de 30 px sur
+ * quatre secondes se situe juste sous le seuil où l'œil identifie un
+ * mouvement — on la ressent sans jamais la regarder.
+ */
+.login-rule {
+  height: 1px;
+  width: var(--login-rule-min);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--gold-2) 50%,
+    transparent
+  );
+  animation: login-rule-breathe 4s ease-in-out infinite;
+}
+
+@keyframes login-rule-breathe {
+  0%,
+  100% {
+    width: var(--login-rule-min);
+  }
+  50% {
+    width: var(--login-rule-max);
+  }
+}
+
+.login-eyebrow {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.45em;
+  /* L'interlettrage ajoute l'espace après la dernière lettre : sans cette
+     correction, le bloc paraît décalé vers la gauche. */
+  text-indent: 0.45em;
+  color: var(--login-subtitle);
+}
+
+/* ── Panneau ───────────────────────────────────────────────────────── */
+.login-card {
+  width: 100%;
+  max-width: var(--login-card-w);
+  border-radius: var(--login-card-radius);
+  background: var(--login-card-bg);
+  border: 1px solid var(--login-card-border);
+  box-shadow: var(--login-card-shadow);
+  /* Ni flou d'arrière-plan ni transparence : le panneau doit se lire comme
+     une pièce d'aluminium usinée posée sur le fond, pas comme un calque. */
+}
+
+.login-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.25em;
+  color: var(--login-subtitle);
+}
+
+.login-field {
+  width: 100%;
+  height: var(--login-field-h);
+  border-radius: var(--login-field-radius);
+  background: var(--login-field-bg);
+  border: 1px solid var(--login-field-border);
+  color: var(--login-title);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  transition:
+    border-color 180ms var(--ease-out),
+    box-shadow 180ms var(--ease-out);
+}
+
+.login-field::placeholder {
+  color: var(--login-placeholder);
+}
+
+.login-field:focus {
+  outline: none;
+  border-color: var(--gold-2);
+  box-shadow: 0 0 0 3px var(--login-halo);
+}
+
+.login-submit {
+  width: 100%;
+  height: var(--login-btn-h);
+  border-radius: var(--login-field-radius);
+  background: linear-gradient(180deg, var(--gold-1) 0%, var(--gold-2) 100%);
+  color: var(--primary-foreground);
+  font-family: var(--font-sans);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.02em;
+  transition:
+    transform 120ms var(--ease-out),
+    filter 120ms var(--ease-out),
+    box-shadow 120ms var(--ease-out);
+}
+
+.login-submit:hover:not(:disabled) {
+  /* Aucun changement d'échelle : un bouton qui grossit au survol appartient
+     au registre du jeu, pas à celui de la banque privée. */
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 8px 24px var(--login-halo);
+}
+
+.login-submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.login-footer {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--login-footer);
+}
+
+/* Mouvement réduit : la scène devient parfaitement immobile. */
+@media (prefers-reduced-motion: reduce) {
+  .login-rule {
+    animation: none;
+    width: var(--login-rule-min);
+  }
+  .login-particle {
+    animation: none;
+    opacity: 0.5;
+  }
+  .login-field,
+  .login-submit {
+    transition: none;
+  }
+  .login-submit:hover:not(:disabled) {
+    transform: none;
+  }
 }
 
 /* Sous-titre de présentation sous le titre d’onglet (transition visuelle) */
