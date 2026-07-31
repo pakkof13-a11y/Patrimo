@@ -20,7 +20,7 @@ test.describe("Navigation & shell", () => {
       page.getByTestId("portfolio-evolution-panel")
     ).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText("Évolution du portefeuille")).toBeVisible();
-    await expect(page.getByText("Allocation par classe")).toBeVisible();
+    await expect(page.getByTestId("allocation-card")).toBeVisible();
 
     await clickNav(page, "Transactions");
     await expect(page).toHaveURL(/\/transactions/);

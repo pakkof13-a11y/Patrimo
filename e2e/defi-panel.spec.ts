@@ -311,7 +311,10 @@ test.describe("DeFi — wizard d'ajout", () => {
     const row = page.getByTestId("defi-row").filter({ hasText: `Uniswap CLMM ${runId}` });
     await expect(row).toBeVisible({ timeout: 10_000 });
     await row.getByTestId("defi-row-open").click();
-    await expect(page.getByTestId("defi-badge-clmm")).toBeVisible();
+    // Badge cherché sur la ligne créée par ce test, pas dans toute la page :
+    // `defi-lp.spec.ts` laisse déjà une position à liquidité concentrée
+    // derrière lui, et un sélecteur global en trouve alors deux.
+    await expect(row.getByTestId("defi-badge-clmm")).toBeVisible();
   });
 });
 
