@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ArrowRight, Coins } from "lucide-react";
-import { PlatformLogo } from "@/components/ui/platform-logo";
+import { AssetLogo, PlatformLogo } from "@/components/ui/platform-logo";
 import { ModuleCard, ModuleCardHeader } from "@/components/ui/module-shell";
 import { AltEmptyState, AltMiniKpi } from "@/components/tabs/alternatives-shell";
 import { ModuleKpiStrip } from "@/components/ui/module-shell";
@@ -171,7 +171,13 @@ export function SpotPanel({
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2.5">
-                    <PlatformLogo src={c.logoUrl} name={c.name} size={32} />
+                    <AssetLogo
+                      src={c.logoUrl}
+                      name={c.name}
+                      ticker={c.symbol}
+                      assetClass="CRYPTO"
+                      size={32}
+                    />
                     <div className="min-w-0">
                       <div className="flex items-baseline gap-1.5">
                         <span className="text-sm font-semibold">{c.symbol}</span>

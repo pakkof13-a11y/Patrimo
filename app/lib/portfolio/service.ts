@@ -347,6 +347,7 @@ export async function getHoldings(
     const assetLogo = resolveAssetLogo({
       logoUrl: asset.logoUrl,
       ticker: asset.ticker,
+      isin: asset.isin,
       name: asset.name,
       assetClass: asset.assetClass,
     });
@@ -1579,6 +1580,7 @@ export async function getAssetDetail(userId: string, assetId: string) {
       assetLogoUrl: resolveAssetLogo({
         logoUrl: asset.logoUrl,
         ticker: asset.ticker,
+        isin: asset.isin,
         name: asset.name,
         assetClass: asset.assetClass,
       }),

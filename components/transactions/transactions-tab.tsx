@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
-import { PlatformLogo } from "@/components/ui/platform-logo";
+import { AssetLogo } from "@/components/ui/platform-logo";
 import { TableFilters } from "@/components/ui/table-filters";
 import { PageJump } from "@/components/ui/page-jump";
 import { ColumnPicker, type ColumnPickerItem } from "@/components/ui/column-picker";
@@ -310,9 +310,12 @@ export function TransactionsTab({
           const name = a?.name || "—";
           return (
             <div className="flex min-w-0 max-w-[16rem] items-center gap-2.5">
-              <PlatformLogo
+              <AssetLogo
                 src={a?.logoUrl || null}
                 name={name === "—" ? "?" : name}
+                ticker={a?.ticker}
+                isin={a?.isin}
+                assetClass={a?.assetClass}
                 size={28}
               />
               <div className="min-w-0">

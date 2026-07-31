@@ -1,4 +1,5 @@
 import { parisLocalToUtcIso } from "@/app/lib/utils/timezone";
+import { logoByDomain } from "@/app/lib/logos/logodev";
 
 export type NewsItem = {
   id: string;
@@ -7,12 +8,12 @@ export type NewsItem = {
   url: string;
   publishedAt: string;
   summary?: string;
-  /** Favicon / logo du site source (optionnel) */
+  /** Logo du site source (optionnel) */
   sourceLogoUrl?: string;
 };
 
 /**
- * Favicon du site source (Google s2 — robuste, pas de CORS image côté client).
+ * Logo du site source, via logo.dev.
  * Priorité : domaine de l’article ; fallback domaine connu par nom de source.
  */
 export function newsSourceLogoUrl(
@@ -71,7 +72,9 @@ export function newsSourceLogoUrl(
     }
   }
   if (!host) host = "news.google.com";
-  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`;
+  // logo.dev plutôt que la favicon Google : même identifiant (le domaine), mais
+  // un vrai logo carré au lieu d'un 16×16 remis à l'échelle.
+  return logoByDomain(host, { size: 64, format: "png", retina: true });
 }
 
 export type MacroImpact = "low" | "medium" | "high";

@@ -68,86 +68,135 @@ export function logoByIsin(isin: string, opts?: LogoDevOptions): string {
 }
 
 /**
- * Best-effort logo for a portfolio asset.
- * Priority: explicit URL → crypto → ticker → company name.
+ * URLs héritées de fournisseurs abandonnés. Elles restent stockées en base sur
+ * d'anciennes lignes et répondent encore 200 pour certaines, mais mélanger deux
+ * sources donne des logos de tailles et de fonds différents sur la même ligne :
+ * on les ignore au profit de logo.dev.
  */
-export function logoForAsset(opts: {
+const LEGACY_HOSTS = [
+  "clearbit.com",
+  "simpleicons.org",
+  "jsdelivr.net",
+  "cryptologos.cc",
+];
+
+function isUsableStoredUrl(url?: string | null): url is string {
+  if (!url) return false;
+  const u = url.trim();
+  if (!/^https?:\/\//i.test(u) && !u.startsWith("/")) return false;
+  return !LEGACY_HOSTS.some((host) => u.includes(host));
+}
+
+/**
+ * Les identifiants de logo.dev ne se valident pas côté client : un ticker
+ * inconnu et un ticker valide renvoient tous deux une image. On ne peut donc
+ * pas « choisir » la bonne source à l'avance — on ordonne les tentatives de la
+ * plus spécifique à la plus générale et on laisse le rendu descendre la liste
+ * sur erreur. Seul le dernier maillon a un fallback monogramme : sinon logo.dev
+ * répondrait 200 avec une initiale dès la première tentative et masquerait les
+ * suivantes.
+ */
+function chain(
+  builders: Array<(o: LogoDevOptions) => string>,
+  size: number,
+  theme: "auto" | "light" | "dark"
+): string[] {
+  return builders.map((build, i) =>
+    build({
+      size: Math.max(size * 2, 64),
+      format: "png",
+      theme,
+      retina: true,
+      fallback: i === builders.length - 1 ? "monogram" : "404",
+    })
+  );
+}
+
+const CRYPTO_QUOTE_SUFFIX = /(USDT|USDC|USD|EUR)$/i;
+
+/**
+ * Tickers crypto usuels : la classe d'actif suffit dans la plupart des cas,
+ * mais une ligne mal classée ne doit pas partir chercher une action « BTC ».
+ */
+const KNOWN_CRYPTO_TICKERS = new Set([
+  "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "DOT", "LINK",
+  "MATIC", "ATOM", "EGLD", "ARB", "OP", "USDT", "USDC", "DAI", "LTC", "TRX",
+]);
+
+function isCryptoAsset(assetClass: string, ticker: string): boolean {
+  const cls = assetClass.toUpperCase();
+  if (cls === "CRYPTO" || cls === "STABLECOIN" || cls === "NFT") return true;
+  return KNOWN_CRYPTO_TICKERS.has(ticker.toUpperCase().replace(CRYPTO_QUOTE_SUFFIX, ""));
+}
+
+/**
+ * Sources candidates pour un actif, de la plus fiable à la plus approximative.
+ * Crypto → symbole ; titre coté → ticker puis ISIN ; à défaut, le nom.
+ */
+export function assetLogoSources(opts: {
   logoUrl?: string | null;
   ticker?: string | null;
+  isin?: string | null;
   name?: string | null;
   assetClass?: string | null;
   size?: number;
   theme?: "auto" | "light" | "dark";
-}): string | null {
-  if (opts.logoUrl && !opts.logoUrl.includes("clearbit.com") && !opts.logoUrl.includes("simpleicons.org")) {
-    // Keep custom / already-resolved non-legacy URLs
-    if (opts.logoUrl.includes("logo.dev") || opts.logoUrl.startsWith("http")) {
-      // Re-use explicit stored logo.dev or other URLs
-      if (!opts.logoUrl.includes("clearbit.com") && !opts.logoUrl.includes("jsdelivr.net")) {
-        return opts.logoUrl;
-      }
-    }
-  }
-  if (opts.logoUrl?.includes("logo.dev")) return opts.logoUrl;
-
+}): string[] {
   const ticker = (opts.ticker || "").trim();
+  const isin = (opts.isin || "").trim();
   const name = (opts.name || "").trim();
-  const cls = (opts.assetClass || "").toUpperCase();
-  const common: LogoDevOptions = {
-    size: opts.size ?? 128,
-    format: "png",
-    theme: opts.theme ?? "auto",
-    retina: true,
-    fallback: "monogram",
-  };
+  const size = opts.size ?? 64;
+  const theme = opts.theme ?? "auto";
 
-  if (cls === "CRYPTO" || isLikelyCryptoTicker(ticker)) {
-    const sym = ticker.replace(/USDT$|USD$|EUR$/i, "") || name;
-    if (sym) return logoByCrypto(sym, common);
+  const builders: Array<(o: LogoDevOptions) => string> = [];
+  if (ticker && isCryptoAsset(opts.assetClass || "", ticker)) {
+    builders.push((o) => logoByCrypto(ticker, o));
+  } else {
+    // Euronext & co. arrivent déjà sous la forme MC.PA — laissée telle quelle.
+    if (ticker) builders.push((o) => logoByTicker(ticker, o));
+    if (isin) builders.push((o) => logoByIsin(isin, o));
   }
+  if (name) builders.push((o) => logoByName(name, o));
 
-  if (ticker) {
-    // Euronext etc. already use MC.PA form — pass through
-    return logoByTicker(ticker, common);
+  const sources = chain(builders, size, theme);
+  // Une URL déjà stockée passe devant : c'est un choix explicite de l'utilisateur
+  // ou le résultat d'un import, pas une déduction.
+  return isUsableStoredUrl(opts.logoUrl) ? [opts.logoUrl, ...sources] : sources;
+}
+
+/** Domaine connu d'une plateforme, insensible à la casse et aux espaces. */
+export function platformDomain(name?: string | null): string | null {
+  if (!name) return null;
+  const key = name.trim().toLowerCase();
+  for (const [label, domain] of Object.entries(PLATFORM_DOMAINS)) {
+    if (label.toLowerCase() === key) return domain;
   }
-
-  if (name) {
-    return logoByName(name, common);
-  }
-
   return null;
 }
 
 /**
- * Best-effort logo for a platform (broker, bank, exchange).
+ * Sources candidates pour une plateforme (courtier, banque, exchange, chaîne).
+ * Le domaine est de loin le plus fiable chez logo.dev ; la recherche par nom
+ * ne sert que pour les établissements absents de la table.
  */
-export function logoForPlatform(opts: {
+export function platformLogoSources(opts: {
   logoUrl?: string | null;
   name?: string | null;
   domain?: string | null;
   size?: number;
   theme?: "auto" | "light" | "dark";
-}): string | null {
-  if (opts.logoUrl?.includes("logo.dev")) return opts.logoUrl;
+}): string[] {
+  const name = (opts.name || "").trim();
+  const domain = opts.domain?.trim() || platformDomain(name);
+  const size = opts.size ?? 64;
+  const theme = opts.theme ?? "auto";
 
-  const common: LogoDevOptions = {
-    size: opts.size ?? 128,
-    format: "png",
-    theme: opts.theme ?? "auto",
-    retina: true,
-    fallback: "monogram",
-  };
+  const builders: Array<(o: LogoDevOptions) => string> = [];
+  if (domain) builders.push((o) => logoByDomain(domain, o));
+  if (name) builders.push((o) => logoByName(name, o));
 
-  if (opts.domain) return logoByDomain(opts.domain, common);
-  if (opts.name) return logoByName(opts.name, common);
-  return opts.logoUrl || null;
-}
-
-function isLikelyCryptoTicker(ticker: string): boolean {
-  const t = ticker.toUpperCase();
-  return ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "DOT", "LINK", "USDT", "USDC"].includes(
-    t
-  );
+  const sources = chain(builders, size, theme);
+  return isUsableStoredUrl(opts.logoUrl) ? [opts.logoUrl, ...sources] : sources;
 }
 
 /** Known platform website domains for more reliable lookups */

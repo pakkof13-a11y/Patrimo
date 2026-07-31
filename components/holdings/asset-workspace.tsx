@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
-import { PlatformLogo } from "@/components/ui/platform-logo";
+import { AssetLogo } from "@/components/ui/platform-logo";
 import { Button } from "@/components/ui/button";
 import {
   sectionsForAsset,
@@ -135,9 +135,12 @@ export function AssetWorkspace({
           data-testid="asset-detail-header"
         >
           <div className="flex min-w-0 items-start gap-[var(--space-3)]">
-            <PlatformLogo
+            <AssetLogo
               src={asset?.assetLogoUrl}
               name={asset?.name || "—"}
+              ticker={asset?.ticker}
+              isin={asset?.isin}
+              assetClass={asset?.assetClass}
               size={40}
             />
             <div className="min-w-0 flex-1">

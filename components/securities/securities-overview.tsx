@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import { Button } from "@/components/ui/button";
-import { PlatformLogo } from "@/components/ui/platform-logo";
+import { AssetLogo, PlatformLogo } from "@/components/ui/platform-logo";
 import { AllocationCard } from "@/components/dashboard/terminal-panels";
 import { PendingBackend } from "@/components/ui/pending-backend";
 import { assetCategoryLabel } from "@/app/lib/assets/categories";
@@ -594,9 +594,10 @@ function AccountCard({
                   >
                     <td className="min-w-0 py-[var(--space-2)]">
                       <div className="flex min-w-0 items-center gap-[var(--space-2)]">
-                        <PlatformLogo
+                        <AssetLogo
                           src={p.logoUrl ?? null}
                           name={p.name}
+                          ticker={p.ticker}
                           size={20}
                         />
                         <span className="min-w-0">

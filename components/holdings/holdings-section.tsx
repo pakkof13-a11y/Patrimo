@@ -28,7 +28,7 @@ import {
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, GripVertical, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
-import { PlatformLogo } from "@/components/ui/platform-logo";
+import { AssetLogo, PlatformLogo } from "@/components/ui/platform-logo";
 import { EnvelopeCashPanel } from "@/components/tabs/envelope-cash-panel";
 import { LifeInsuranceTab } from "@/components/tabs/life-insurance-tab";
 import { PositionCategoryGroupHeader } from "@/components/holdings/position-category-group-header";
@@ -608,9 +608,12 @@ export function HoldingsSection({
           // Loca », sans ellipse, ce qui se lit comme un bug plutôt que comme une
           // troncature. Le nom complet reste accessible au survol.
           <div className="flex min-w-0 items-center gap-2.5">
-            <PlatformLogo
+            <AssetLogo
               src={row.original.assetLogoUrl || row.original.logoUrl}
               name={row.original.name}
+              ticker={row.original.ticker}
+              isin={row.original.isin}
+              assetClass={row.original.assetClass}
               size={28}
             />
             <div className="min-w-0">

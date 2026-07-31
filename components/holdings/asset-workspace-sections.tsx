@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, Plus, Tags } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import { Button } from "@/components/ui/button";
-import { PlatformLogo } from "@/components/ui/platform-logo";
+import { ImageLogo, PlatformLogo } from "@/components/ui/platform-logo";
 import { AssetPriceChart } from "@/components/assets/asset-price-chart";
 import { AssetRelatedNews } from "@/components/assets/asset-related-news";
 import { FxPnlPanel } from "@/components/assets/fx-pnl-panel";
@@ -945,7 +945,7 @@ function LinkedNfts({
           key={n.id}
           className="flex min-w-0 items-center gap-[var(--space-3)] px-[var(--pad-card)] py-[var(--space-2)]"
         >
-          <PlatformLogo
+          <ImageLogo
             src={n.imageUrl ?? null}
             name={n.name || "NFT"}
             size={28}
