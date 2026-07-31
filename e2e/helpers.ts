@@ -103,7 +103,9 @@ export async function gotoDashboard(page: Page) {
   await expect(page.getByTestId("holdings-table")).toBeVisible({
     timeout: 45_000,
   });
-  await expect(page.getByTestId("kpi-cash")).toBeVisible();
+  // Le portefeuille porte ses propres indicateurs (le bandeau générique
+  // `kpi-*` n'y est plus affiché : il ferait doublon avec ces cinq cartes).
+  await expect(page.getByTestId("portfolio-kpi-cards")).toBeVisible();
 }
 
 /** Select a platform in PlatformCombobox by typing + clicking option */
@@ -178,7 +180,7 @@ const ENVELOPE_URL: Record<string, string> = {
 const NO_URL_ENVELOPES = new Set(["CRYPTO", "IMMOBILIER"]);
 
 /**
- * Sélecteur Enveloppe = <button> + listbox multi-cases (plus de <select>).
+ * Sélecteur Enveloppe = puce de filtre + menu d'options (`FilterChip`).
  * `code` = CTO | PEA | … ou "" pour tout sélectionner.
  */
 export async function selectEnvelopeFilter(
@@ -188,7 +190,7 @@ export async function selectEnvelopeFilter(
   const trigger = page.getByTestId("envelope-select");
   await expect(trigger).toBeVisible({ timeout: 15_000 });
   // Ouvrir le menu si fermé
-  const listbox = page.getByTestId("envelope-multiselect");
+  const listbox = page.getByTestId("envelope-select-menu");
   if (!(await listbox.isVisible().catch(() => false))) {
     await trigger.click();
   }
@@ -197,23 +199,16 @@ export async function selectEnvelopeFilter(
   if (!code) {
     await page.getByTestId("envelope-select-all").click();
   } else {
-    // Une seule enveloppe : tout décocher puis cocher la cible
+    // Une seule enveloppe : tout désélectionner puis cocher la cible
     await page.getByTestId("envelope-select-none").click();
-    const check = page.getByTestId(`envelope-check-${code}`);
-    await expect(check).toBeVisible();
-    // Après « tout désélectionner », la case est décochée → cocher
-    if (!(await check.isChecked().catch(() => false))) {
-      await check.check();
-    }
+    const option = page.getByTestId(`envelope-select-option-${code}`);
+    await expect(option).toBeVisible();
+    await option.click();
   }
 
-  // Fermer le popover (évite de masquer d’autres contrôles)
-  const close = page.getByTestId("envelope-close");
-  if (await close.isVisible().catch(() => false)) {
-    await close.click();
-  } else {
-    await page.keyboard.press("Escape").catch(() => undefined);
-  }
+  // Fermer le menu (évite de masquer d’autres contrôles)
+  await page.keyboard.press("Escape").catch(() => undefined);
+  await expect(listbox).toBeHidden({ timeout: 5_000 });
 }
 
 /** Chemins URL pour les onglets (secours si le clic nav ne navigue pas). */
@@ -376,9 +371,10 @@ export async function clickNav(page: Page, label: string) {
   await page.getByRole("button", { name: label, exact: true }).click();
 }
 
+/** Indicateurs du portefeuille (page /positions). */
 export async function expectKpiVisible(page: Page) {
-  await expect(page.getByTestId("kpi-cash")).toBeVisible();
-  await expect(page.getByTestId("kpi-realized")).toBeVisible();
+  await expect(page.getByTestId("pkpi-total")).toBeVisible();
+  await expect(page.getByTestId("pkpi-pnl")).toBeVisible();
 }
 
 export async function waitForHoldingsReady(page: Page) {

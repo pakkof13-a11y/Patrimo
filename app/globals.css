@@ -1735,6 +1735,84 @@ textarea:focus-visible,
   box-shadow: inset 0 0 0 var(--border-width) var(--gold-border);
 }
 
+/* ── Puce de filtre (Enveloppe · Type · Plateforme · Devise) ──────── */
+.term-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--foreground-secondary);
+  white-space: nowrap;
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.term-chip:hover {
+  color: var(--foreground);
+  border-color: var(--border-strong);
+}
+
+/* Un filtre qui restreint réellement l'affichage se signale en or : sans
+   marqueur, on cherche pendant dix secondes pourquoi le tableau est court. */
+.term-chip[data-filtered="true"] {
+  color: var(--primary-text);
+  border-color: var(--gold-border);
+  background: var(--surface);
+}
+
+.term-chip-label {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-title);
+  text-transform: uppercase;
+  color: var(--foreground-faint);
+}
+
+.term-chip[data-filtered="true"] .term-chip-label {
+  color: inherit;
+}
+
+.term-chip-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: var(--weight-medium);
+}
+
+/* Menu déroulant partagé par les puces de filtre. */
+.term-chip-menu {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-2);
+}
+
+.term-chip-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--foreground);
+  cursor: pointer;
+  text-align: left;
+}
+
+.term-chip-option:hover {
+  background: var(--surface-hover);
+}
+
 /* ── Tableau terminal ─────────────────────────────────────────────── */
 .term-table {
   width: 100%;

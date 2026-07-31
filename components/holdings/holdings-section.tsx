@@ -193,6 +193,14 @@ export function HoldingsSection({
   const [accountFilter, setAccountFilter] = useState("");
   /** Filtre rapide P&L latent : tout / gagnants / perdants */
   const [pnlFilter, setPnlFilter] = useState<PnlFilter>("all");
+  /**
+   * Puces de filtre. Convention commune : liste vide = aucune restriction.
+   * Elles ne sont pas persistées — un filtre est un geste de consultation,
+   * pas un réglage ; le retrouver actif trois jours plus tard ferait croire
+   * à un portefeuille amputé.
+   */
+  const [assetClassFilters, setAssetClassFilters] = useState<string[]>([]);
+  const [currencyFilters, setCurrencyFilters] = useState<string[]>([]);
   /** Filtre plateforme (deep-link depuis Mes plateformes : ?platformId=) */
   const platformIdFromUrl = searchParams.get("platformId") || "";
   const platformFilterId = platformIdFromUrl.trim();
@@ -399,7 +407,7 @@ export function HoldingsSection({
   }, []);
 
   // Reset page quand tab/filtres/tri changent (adjust state while rendering)
-  const paginationResetKey = `${tab}:${envelopeKey}:${holdings.length}:${debouncedSearch}:${accountFilter}:${platformFilterId}:${groupBy}:${pnlFilter}`;
+  const paginationResetKey = `${tab}:${envelopeKey}:${holdings.length}:${debouncedSearch}:${accountFilter}:${platformFilterId}:${groupBy}:${pnlFilter}:${assetClassFilters.join(",")}:${currencyFilters.join(",")}`;
   const [prevPaginationResetKey, setPrevPaginationResetKey] = useState(
     paginationResetKey
   );
@@ -409,13 +417,29 @@ export function HoldingsSection({
     setSelectedIds(new Set());
   }
 
-  function clearPlatformFilter() {
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("platformId");
-    params.delete("platformName");
-    const q = params.toString();
-    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
-  }
+  /**
+   * Le filtre plateforme passe par l'URL, pas par un état local : c'est le même
+   * paramètre que le lien profond « voir les positions de cette plateforme »
+   * depuis l'écran Plateformes. Deux mécanismes pour un seul filtre finiraient
+   * par se contredire.
+   */
+  const setPlatformFilter = useCallback(
+    (id: string | null, name?: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (id) {
+        params.set("platformId", id);
+        if (name) params.set("platformName", name);
+        else params.delete("platformName");
+      } else {
+        params.delete("platformId");
+        params.delete("platformName");
+      }
+      const q = params.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
 
   const holdingsWithCategory = useMemo(() => {
     return holdings.map((h) => ({
@@ -436,6 +460,15 @@ export function HoldingsSection({
         return false;
       }
       if (accountFilter && (h.accountType || "CTO") !== accountFilter) return false;
+      if (
+        assetClassFilters.length > 0 &&
+        !assetClassFilters.includes(h.assetClass)
+      ) {
+        return false;
+      }
+      if (currencyFilters.length > 0 && !currencyFilters.includes(h.currency)) {
+        return false;
+      }
       return matchesSearchQuery(debouncedSearch, [
         h.name,
         h.ticker,
@@ -464,7 +497,57 @@ export function HoldingsSection({
     accountFilter,
     platformFilterId,
     pnlFilter,
+    assetClassFilters,
+    currencyFilters,
   ]);
+
+  /**
+   * Options des puces, tirées des positions **avant** filtrage : une liste qui
+   * se vide au fur et à mesure qu'on filtre empêche de revenir en arrière.
+   * Les compteurs, eux, sont ceux de la source — ils disent combien de lignes
+   * la valeur représente, pas combien il en reste après les autres filtres.
+   */
+  const chipOptions = useMemo(() => {
+    const classes = new Map<string, number>();
+    const currencies = new Map<string, number>();
+    const platforms = new Map<string, { label: string; count: number }>();
+    for (const h of holdingsWithCategory) {
+      classes.set(h.assetClass, (classes.get(h.assetClass) ?? 0) + 1);
+      currencies.set(h.currency, (currencies.get(h.currency) ?? 0) + 1);
+      const slices =
+        h.platformSlices && h.platformSlices.length > 0
+          ? h.platformSlices.map((s) => ({
+              id: s.platformId,
+              name: s.platformName,
+            }))
+          : [{ id: h.platformId, name: h.platformName }];
+      for (const p of slices) {
+        if (!p.id) continue;
+        const prev = platforms.get(p.id);
+        platforms.set(p.id, {
+          label: prev?.label || p.name || "—",
+          count: (prev?.count ?? 0) + 1,
+        });
+      }
+    }
+    const byLabel = (a: { label: string }, b: { label: string }) =>
+      a.label.localeCompare(b.label, "fr", { sensitivity: "base" });
+    return {
+      assetClasses: [...classes.entries()]
+        .map(([value, count]) => ({
+          value,
+          label: getAssetClassLabel(value),
+          count,
+        }))
+        .sort(byLabel),
+      currencies: [...currencies.entries()]
+        .map(([value, count]) => ({ value, label: value, count }))
+        .sort(byLabel),
+      platforms: [...platforms.entries()]
+        .map(([value, { label, count }]) => ({ value, label, count }))
+        .sort(byLabel),
+    };
+  }, [holdingsWithCategory]);
 
   const platformFilterLabel = useMemo(() => {
     if (!platformFilterId) return null;
@@ -1071,6 +1154,32 @@ export function HoldingsSection({
    */
   const positionsTitle = "Portefeuille";
 
+  /**
+   * Un filtre restreint-il l'affichage ? Sert à deux choses : afficher le
+   * bouton de réinitialisation, et retirer les sparklines des cartes KPI
+   * (l'historique porte sur tout le patrimoine, pas sur la sélection).
+   */
+  const hasActiveFilters =
+    Boolean(debouncedSearch.trim()) ||
+    Boolean(accountFilter) ||
+    Boolean(platformFilterId) ||
+    pnlFilter !== "all" ||
+    assetClassFilters.length > 0 ||
+    currencyFilters.length > 0 ||
+    envelopeFilters.length < allEnvelopesCount;
+
+  const resetFilters = useCallback(() => {
+    setSearchInput("");
+    setAccountFilter("");
+    setPnlFilter("all");
+    setAssetClassFilters([]);
+    setCurrencyFilters([]);
+    setPlatformFilter(null);
+    // Réinitialiser = revenir à « toutes les enveloppes », pas à aucune :
+    // le seul état où le tableau est vide n'est pas un point de départ.
+    onEnvelopeFiltersChange?.(Object.keys(ACCOUNT_TYPES) as AccountType[]);
+  }, [onEnvelopeFiltersChange, setPlatformFilter]);
+
   /** Toutes les colonnes déclarées par le tableau (visibles ou non). */
   const allLeafKey = table
     .getAllLeafColumns()
@@ -1211,13 +1320,7 @@ export function HoldingsSection({
         holdings={filteredHoldings}
         history={history}
         baseCurrency={baseCurrency}
-        filtered={
-          Boolean(debouncedSearch.trim()) ||
-          Boolean(accountFilter) ||
-          Boolean(platformFilterId) ||
-          pnlFilter !== "all" ||
-          envelopeFilters.length < allEnvelopesCount
-        }
+        filtered={hasActiveFilters}
       />
       <div className="card-flat min-w-0 overflow-hidden">
         <HoldingsToolbar
@@ -1254,10 +1357,23 @@ export function HoldingsSection({
           onAccountFilterChange={setAccountFilter}
           pnlFilter={pnlFilter}
           onPnlFilterChange={setPnlFilter}
-          platformFilterLabel={platformFilterLabel}
-          onClearPlatformFilter={
-            platformFilterId ? clearPlatformFilter : undefined
+          assetClassOptions={chipOptions.assetClasses}
+          assetClassFilters={assetClassFilters}
+          onAssetClassFiltersChange={setAssetClassFilters}
+          currencyOptions={chipOptions.currencies}
+          currencyFilters={currencyFilters}
+          onCurrencyFiltersChange={setCurrencyFilters}
+          platformOptions={chipOptions.platforms}
+          platformFilterId={platformFilterId}
+          onPlatformFilterChange={(id) =>
+            setPlatformFilter(
+              id,
+              chipOptions.platforms.find((p) => p.value === id)?.label
+            )
           }
+          platformFilterLabel={platformFilterLabel}
+          hasActiveFilters={hasActiveFilters}
+          onResetFilters={resetFilters}
           pageSize={pagination.pageSize}
           onPageSizeChange={(n) =>
             setPagination({ pageIndex: 0, pageSize: n })

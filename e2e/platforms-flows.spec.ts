@@ -158,9 +158,13 @@ test.describe("Mes plateformes — flux critiques", () => {
     await expect(page.getByTestId("holdings-table")).toBeVisible({
       timeout: 15_000,
     });
-    await expect(page.getByTestId("holdings-platform-filter")).toBeVisible({
-      timeout: 10_000,
-    });
+    // Le lien profond alimente la puce Plateforme, qui se signale comme
+    // restreignant l'affichage.
+    await expect(page.getByTestId("platform-filter")).toHaveAttribute(
+      "data-filtered",
+      "true",
+      { timeout: 10_000 }
+    );
     await expect(page.getByText(/E2E Preview Equity|E2EPV/i).first()).toBeVisible({
       timeout: 15_000,
     });

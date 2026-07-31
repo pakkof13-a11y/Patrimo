@@ -1,7 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
   ensurePlatform,
-  gotoDashboard,
   parseFrenchMoney,
   waitForHoldingInTable,
 } from "./helpers";
@@ -101,11 +100,14 @@ test.describe("Achat puis vente", () => {
     // Sync UI = même pattern que perf-day1 (skeleton + fetch holdings + poll)
     await waitForHoldingInTable(page, /E2E Hybrid|E2H/i, { search: "E2H" });
 
-    // KPI cash UI cohérent (tolérance large : accruals / refresh possible)
-    const cashUi = parseFrenchMoney(
-      await page.getByTestId("kpi-cash").innerText()
+    // Indicateur monétaire de la page rendu et lisible. Le portefeuille
+    // n'affiche plus le bandeau `kpi-cash` (il porte ses propres cartes, sans
+    // ligne cash — le cash n'est pas une position) ; la cohérence du cash
+    // elle-même est déjà vérifiée plus haut, côté API.
+    const totalUi = parseFrenchMoney(
+      await page.getByTestId("pkpi-total").innerText()
     );
-    expect(Number.isFinite(cashUi)).toBeTruthy();
+    expect(Number.isFinite(totalUi)).toBeTruthy();
 
     const sell = await request.post("/api/transactions", {
       data: {
@@ -127,8 +129,11 @@ test.describe("Achat puis vente", () => {
     const cashAfterSell = await holdingsCashEur(request);
     expect(Math.abs(cashAfterSell - cashBefore)).toBeLessThan(1);
 
-    await page.reload();
-    await gotoDashboard(page);
-    await expect(page.getByTestId("kpi-realized")).toBeVisible();
+    // Le P&L réalisé est un indicateur patrimonial, pas une mesure de
+    // position : il vit sur le tableau de bord, plus sur le portefeuille.
+    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("kpi-realized")).toBeVisible({
+      timeout: 30_000,
+    });
   });
 });
