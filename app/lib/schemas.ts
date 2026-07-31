@@ -389,6 +389,13 @@ export const employeeSavingsSources = [
   "ABONDEMENT",
 ] as const;
 export const employeeSavingsUnlockModes = ["DATE", "RETIREMENT"] as const;
+export const employeeSavingsFundCategories = [
+  "EQUITY",
+  "DIVERSIFIED",
+  "BOND",
+  "MONETARY",
+  "OTHER",
+] as const;
 
 export const employeeSavingsLineSchema = z.object({
   planType: z.enum(employeeSavingsPlanTypes),
@@ -400,6 +407,9 @@ export const employeeSavingsLineSchema = z.object({
   currency: z.string().min(3).max(3).default("EUR"),
   sourceType: z.enum(employeeSavingsSources).default("VOLUNTARY"),
   contributionDate: z.string().optional().nullable(),
+  /** Montant versé — facultatif, et distinct de zéro quand il manque. */
+  contributedAmount: z.union([decimalString, z.literal("")]).optional().nullable(),
+  fundCategory: z.enum(employeeSavingsFundCategories).optional().nullable(),
   unlockDate: z.string().optional().nullable(),
   unlockMode: z.enum(employeeSavingsUnlockModes).optional().nullable(),
   notes: z.string().optional().nullable(),

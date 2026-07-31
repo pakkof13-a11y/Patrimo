@@ -150,7 +150,7 @@ const LiabilitiesTab = dynamic(
 );
 const EmployeeSavingsTab = dynamic(
   () =>
-    import("@/components/tabs/employee-savings-tab").then((m) => ({
+    import("@/components/employee-savings/employee-savings-page").then((m) => ({
       default: m.EmployeeSavingsTab,
     })),
   { loading: () => <TabChunkFallback />, ssr: false }
@@ -813,7 +813,8 @@ function PortfolioAppClient({
     !isDashboard &&
     !positionsView &&
     tab !== "securities" &&
-    tab !== "assurance-vie";
+    tab !== "assurance-vie" &&
+    tab !== "epargne-salariale";
 
   /**
    * Plateformes « Notaire / immobilier » : la saisie d'un bien y suit un

@@ -951,6 +951,21 @@ model EmployeeSavingsLine {
   /// Origine des fonds : VOLUNTARY | INTERESTEMENT | PARTICIPATION | ABONDEMENT
   sourceType String @default("VOLUNTARY")
 
+  /// Montant réellement versé sur cette ligne, dans sa devise.
+  ///
+  /// Sans lui, `parts × VL` ne dit que ce que la position vaut aujourd'hui :
+  /// ni le versement, ni le gain, ni la performance ne sont calculables. C'est
+  /// le montant qui figure sur le relevé de l'employeur, donc celui que
+  /// l'utilisateur peut saisir. Nullable : les lignes existantes n'en ont pas,
+  /// et l'écran préfère l'annoncer plutôt que de deviner.
+  contributedAmount Decimal? @db.Decimal(28, 12)
+
+  /// Famille du support : EQUITY | DIVERSIFIED | BOND | MONETARY | OTHER
+  ///
+  /// Renseignée = choix de l'utilisateur. Nulle = l'écran la déduit du nom du
+  /// fonds et le signale comme telle, sans jamais l'écrire en base à sa place.
+  fundCategory String?
+
   /// Date d'origine du versement (base pour +5 ans PEE)
   contributionDate DateTime?
   /// Date de déblocage théorique (null si mode RETIREMENT)

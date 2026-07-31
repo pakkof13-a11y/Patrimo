@@ -210,6 +210,9 @@ export function AvPerformanceCard({
                     content={<PerfTooltip />}
                     cursor={{ stroke: "var(--border-strong)", strokeWidth: 1 }}
                   />
+                  {/* Sous React 19, l'animation d'entrée de Recharts laisse
+                      le tracé à longueur nulle : la courbe ne s'affiche
+                      jamais. Même choix que partout ailleurs dans le dépôt. */}
                   <Area
                     type="monotone"
                     dataKey="cumulativePct"
@@ -218,6 +221,7 @@ export function AvPerformanceCard({
                     fill="url(#avPerfFill)"
                     dot={false}
                     activeDot={{ r: 3, strokeWidth: 0 }}
+                    isAnimationActive={false}
                   />
                 </ComposedChart>
               </ResponsiveContainer>

@@ -76,6 +76,10 @@ export type EmployeeSavingsLineDto = {
   currency: string;
   sourceType: EmployeeSavingsSource;
   contributionDate: string | null;
+  /** Montant versé déclaré, `null` si l'utilisateur ne l'a pas saisi. */
+  contributedAmount: string | null;
+  /** Famille déclarée du support, `null` si elle doit être déduite du nom. */
+  fundCategory: string | null;
   unlockDate: string | null;
   unlockMode: EmployeeSavingsUnlockMode;
   notes: string | null;

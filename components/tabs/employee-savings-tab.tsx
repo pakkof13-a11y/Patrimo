@@ -60,7 +60,14 @@ import {
 
 const emptyForm = emptyEsForm;
 
-export function EmployeeSavingsTab({
+/**
+ * Gestion des supports d'épargne salariale — saisie, import, déblocages.
+ *
+ * Cet écran reste ce qu'il était : une surface de **saisie**. Il vit désormais
+ * sous un repli, derrière la vue d'ensemble, parce qu'on consulte son épargne
+ * bien plus souvent qu'on ne la modifie.
+ */
+export function EmployeeSavingsManagement({
   baseCurrency = "EUR",
 }: {
   baseCurrency?: string;
@@ -244,7 +251,7 @@ export function EmployeeSavingsTab({
   }, [form.units, form.nav]);
 
   return (
-    <div className="section-stack" data-testid="employee-savings-tab">
+    <div className="section-stack" data-testid="es-management">
       <ModulePageHeader
         title="Épargne salariale"
         subtitle={
