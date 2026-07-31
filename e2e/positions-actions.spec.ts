@@ -57,8 +57,14 @@ test.describe("Positions — chemins d’action", () => {
     await expect(row).toBeVisible({ timeout: 15_000 });
     await row.dblclick();
 
-    await expect(page.getByTestId("modal-overlay")).toBeVisible({
+    // La fiche est désormais un espace de travail latéral, pas une modale.
+    await expect(page.getByTestId("asset-workspace-panel")).toBeVisible({
       timeout: 10_000,
+    });
+    // Les onglets s'affichent avant la donnée : attendre la fin du chargement,
+    // sinon on clique sur une section dont le corps est encore un squelette.
+    await expect(page.getByTestId("asset-detail-loading")).toHaveCount(0, {
+      timeout: 30_000,
     });
     await page.getByTestId("asset-detail-tab-transactions").click();
     await expect(page.getByTestId("asset-detail-history")).toBeVisible({

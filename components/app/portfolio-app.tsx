@@ -76,7 +76,7 @@ import { DashboardTab } from "@/components/dashboard/dashboard-tab";
 import { HoldingsSection } from "@/components/holdings/holdings-section";
 import { TransactionModal } from "@/components/modals/transaction-modal";
 import { PlatformModal } from "@/components/modals/platform-modal";
-import { AssetDetailModal } from "@/components/modals/asset-detail-modal";
+import { AssetWorkspace } from "@/components/holdings/asset-workspace";
 import { ImportCsvModal } from "@/components/modals/import-csv-modal";
 import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
 import { PropertyModal } from "@/components/modals/property-modal";
@@ -1368,10 +1368,11 @@ function PortfolioAppClient({
         pending={savePlatform.isPending}
       />
 
-      <AssetDetailModal
+      <AssetWorkspace
         open={Boolean(detailAssetId)}
         loading={detailQ.isPending && !detailQ.data}
         data={detailQ.data}
+        baseCurrency={baseCurrency}
         onClose={() => setDetailAssetId(null)}
         onEditTx={(t) => {
           setDetailAssetId(null);

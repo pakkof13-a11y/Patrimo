@@ -90,10 +90,14 @@ test.describe("Performance cumulée jour 1", () => {
     await row.locator("button[aria-expanded]").first().click();
     await page.getByTestId(`holding-open-detail-${assetId}`).click();
 
-    // Modal détail + chart
+    // Espace de travail + graphique (section Performance)
     await expect(page.getByTestId("asset-detail-header")).toBeVisible({
       timeout: 30_000,
     });
+    await expect(page.getByTestId("asset-detail-loading")).toHaveCount(0, {
+      timeout: 30_000,
+    });
+    await page.getByTestId("asset-workspace-tab-performance").click();
     await expect(page.getByTestId("asset-price-chart")).toBeVisible({
       timeout: 30_000,
     });
@@ -115,9 +119,9 @@ test.describe("Performance cumulée jour 1", () => {
     await expect(latent).toBeVisible();
     expect((await latent.innerText()).replace(/\s/g, " ")).toMatch(/0[,.]00/);
 
-    // Fermer la modal (bouton ✕ — aria-label mis à jour a11y)
-    await page.getByTestId("modal-close").click();
-    await expect(page.getByTestId("modal-panel")).toHaveCount(0, {
+    // Fermer l'espace de travail
+    await page.getByTestId("asset-workspace-close").click();
+    await expect(page.getByTestId("asset-workspace-panel")).toHaveCount(0, {
       timeout: 10_000,
     });
 
