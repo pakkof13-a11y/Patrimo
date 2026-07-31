@@ -77,10 +77,32 @@ export function AllocationCard({
   data,
   baseCurrency,
   className,
+  title = "Répartition du portefeuille",
+  subtitle,
+  showValues = false,
+  emptyHint = "Les classes d'actifs apparaîtront dès le premier achat.",
+  testId = "allocation-card",
+  toneOf = allocationTone,
+  compact = false,
 }: {
   data: { name: string; value: number }[];
   baseCurrency: string;
   className?: string;
+  /** Le même camembert sert le tableau de bord et la vue PEA & CTO. */
+  title?: string;
+  subtitle?: string;
+  /** Ajoute le montant à côté du pourcentage dans la légende. */
+  showValues?: boolean;
+  emptyHint?: string;
+  testId?: string;
+  /**
+   * Teinte d'une part. Le tableau de bord répartit par classe d'actifs, la vue
+   * PEA & CTO par sous-catégorie : deux vocabulaires, donc deux palettes, mais
+   * un seul camembert.
+   */
+  toneOf?: (label: string) => string;
+  /** Anneau resserré : la légende porte alors les montants sans se faire rogner. */
+  compact?: boolean;
 }) {
   const rows = useMemo(() => {
     const positive = data.filter((d) => d.value > 0);
@@ -90,30 +112,43 @@ export function AllocationCard({
       .map((d) => ({
         ...d,
         pct: (d.value / total) * 100,
-        tone: allocationTone(d.name),
+        tone: toneOf(d.name),
       }));
-  }, [data]);
+  }, [data, toneOf]);
 
   return (
     <section
       className={cn("panel", className)}
-      data-testid="allocation-card"
+      data-testid={testId}
       aria-labelledby="allocation-heading"
     >
       <div className="panel-head">
-        <h3 id="allocation-heading" className="text-title">
-          Répartition du portefeuille
-        </h3>
+        <div className="min-w-0">
+          <h3 id="allocation-heading" className="text-title">
+            {title}
+          </h3>
+          {subtitle && <p className="text-meta">{subtitle}</p>}
+        </div>
       </div>
 
       <div className="panel-body">
         {rows.length === 0 ? (
           <p className="text-meta py-[var(--space-6)] text-center">
-            Les classes d&apos;actifs apparaîtront dès le premier achat.
+            {emptyHint}
           </p>
         ) : (
-          <div className="flex items-center gap-[var(--space-5)]">
-            <div className="h-[7.5rem] w-[7.5rem] shrink-0">
+          <div
+            className={cn(
+              "flex items-center",
+              compact ? "gap-[var(--space-3)]" : "gap-[var(--space-5)]"
+            )}
+          >
+            <div
+              className={cn(
+                "shrink-0",
+                compact ? "h-[5.5rem] w-[5.5rem]" : "h-[7.5rem] w-[7.5rem]"
+              )}
+            >
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -145,19 +180,29 @@ export function AllocationCard({
               {rows.map((r) => (
                 <li
                   key={r.name}
-                  className="flex items-center gap-[var(--space-2)] text-[length:var(--text-sm)]"
+                  className="flex items-baseline gap-[var(--space-2)] text-[length:var(--text-sm)]"
                 >
                   <span
-                    className="h-[0.5rem] w-[0.5rem] shrink-0 rounded-[var(--radius-xs)]"
+                    className="h-[0.5rem] w-[0.5rem] shrink-0 translate-y-[-1px] rounded-[var(--radius-xs)]"
                     style={{ backgroundColor: r.tone }}
                     aria-hidden
                   />
-                  <span className="min-w-0 flex-1 truncate text-[var(--foreground-secondary)]">
+                  <span
+                    className="min-w-0 flex-1 truncate text-[var(--foreground-secondary)]"
+                    title={r.name}
+                  >
                     {r.name}
                   </span>
+                  {/* `%` et montant ne rétrécissent pas : ce sont les faits.
+                      Seul le libellé s'abrège, et son `title` le rend entier. */}
                   <span className="num shrink-0 text-[var(--foreground)]">
                     {formatPct1(r.pct)}
                   </span>
+                  {showValues && (
+                    <span className="num shrink-0 text-right text-[length:var(--text-xs)] text-[var(--foreground-faint)]">
+                      {formatCurrency(r.value, baseCurrency)}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>

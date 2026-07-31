@@ -48,7 +48,10 @@ test.describe("PEA & CTO", () => {
   test.beforeEach(async ({ page }) => {
     await gotoDashboard(page);
     await resetAccounts(page.request);
-    await page.goto("/pea-cto", { waitUntil: "domcontentloaded" });
+    // La page s'ouvre sur la vue d'ensemble ; la gestion des comptes — ce que
+    // couvre cette suite — vit derrière un repli dont l'état est porté par
+    // l'URL, donc conservé au rechargement.
+    await page.goto("/pea-cto#gestion", { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("securities-panel")).toBeVisible({
       timeout: 20_000,
     });
@@ -305,14 +308,13 @@ test.describe("PEA & CTO", () => {
   test("les anciennes URL d'enveloppe mènent à l'onglet dédié", async ({
     page,
   }) => {
-    await page.goto("/positions/pea", { waitUntil: "domcontentloaded" });
-    await expect(page.getByTestId("securities-panel")).toBeVisible({
-      timeout: 20_000,
-    });
-
-    await page.goto("/positions/cto", { waitUntil: "domcontentloaded" });
-    await expect(page.getByTestId("securities-panel")).toBeVisible({
-      timeout: 20_000,
-    });
+    // Ce qui compte est d'atterrir sur l'écran dédié — sa vue d'ensemble,
+    // donc, et non le repli de gestion qui n'est plus ouvert par défaut.
+    for (const legacy of ["/positions/pea", "/positions/cto"]) {
+      await page.goto(legacy, { waitUntil: "domcontentloaded" });
+      await expect(page.getByTestId("securities-page")).toBeVisible({
+        timeout: 20_000,
+      });
+    }
   });
 });

@@ -81,7 +81,7 @@ import { ImportCsvModal } from "@/components/modals/import-csv-modal";
 import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
 import { PropertyModal } from "@/components/modals/property-modal";
 import { RealEstateTab } from "@/components/real-estate/real-estate-tab";
-import { SecuritiesTab } from "@/components/securities/securities-tab";
+import { SecuritiesPage } from "@/components/securities/securities-page";
 import {
   CryptosTab,
   type CryptoSubTab,
@@ -803,12 +803,14 @@ function PortfolioAppClient({
   const dashBlocks = dashboardBlocksFor(dashboardMaturity);
   /**
    * Bandeau d'indicateurs générique — partout sauf là où l'écran porte déjà
-   * les siens : le dashboard (hero + TerminalKpiRow) et le portefeuille (les
-   * cinq cartes de `PortfolioKpiCards`). Les empiler donnerait deux fois la
-   * même valeur totale à quinze pixels d'écart, et le lecteur chercherait la
-   * différence entre les deux plutôt que de lire la page.
+   * les siens : le dashboard (hero + TerminalKpiRow), le portefeuille (les
+   * cinq cartes de `PortfolioKpiCards`) et PEA & CTO (sa propre rangée). Les
+   * empiler donnerait deux fois la même valeur totale à quinze pixels d'écart,
+   * et le lecteur chercherait la différence entre les deux plutôt que de lire
+   * la page.
    */
-  const showGlobalKpis = !isDashboard && !positionsView;
+  const showGlobalKpis =
+    !isDashboard && !positionsView && tab !== "securities";
 
   /**
    * Plateformes « Notaire / immobilier » : la saisie d'un bien y suit un
@@ -1136,7 +1138,7 @@ function PortfolioAppClient({
               <RealEstateTab holdings={allHoldings} className="mb-3" />
             )}
 
-            {tab === "securities" && <SecuritiesTab className="mb-3" />}
+            {tab === "securities" && <SecuritiesPage className="mb-3" />}
 
             {tab === "crypto" && (
               <CryptosTab
