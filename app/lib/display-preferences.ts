@@ -148,10 +148,16 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
     minWidth: 100,
   },
   {
+    /*
+      Optionnelle, et non plus verrouillée : le dépositaire répond à « où
+      est-ce gardé ? », question de garde et non de valorisation. Elle a sa
+      place dans le panneau de détail et dans les modes Analyse et Expert,
+      pas dans la lecture de synthèse — où elle coûtait 120 px à côté des
+      chiffres qui, eux, décrivent la position.
+    */
     id: "platformName",
     label: "Plateforme",
-    group: "mandatory",
-    locked: true,
+    group: "optional",
     minWidth: 120,
   },
   {
@@ -227,15 +233,44 @@ function sortColumnsByLabel(cols: HoldingsColumnMeta[]): HoldingsColumnMeta[] {
   );
 }
 
-/** Alphabetical (fr) within mandatory, then optional — initial & reset order. */
+/**
+ * Ordre de lecture du portefeuille.
+ *
+ * Il suit une phrase, et non l'alphabet : *quoi* (actif, ticker, enveloppe),
+ * *combien* (quantité, prix payé, cours du jour), *ce que ça vaut* (valeur),
+ * *ce que ça a fait* (P&L en euros puis en pourcentage), *ce que ça pèse*.
+ *
+ * L'ordre alphabétique qui régnait ici plaçait « Cours » avant « Enveloppe » et
+ * « PRU » après « Allocation » : chaque colonne était à sa place dans le
+ * dictionnaire, aucune ne l'était dans le raisonnement.
+ *
+ * Les colonnes absentes de cette liste suivent, par ordre alphabétique : une
+ * colonne ajoutée demain se rangera d'elle-même sans casser cet ordre-ci.
+ */
+const READING_ORDER = [
+  "name",
+  "ticker",
+  "accountType",
+  "quantity",
+  "avgCostEur",
+  "currentPriceNative",
+  "marketValueBase",
+  "unrealizedPnlBase",
+  "unrealizedPnlPct",
+  "allocationPct",
+] as const;
+
 export function defaultColumnOrder(): string[] {
-  const mandatory = sortColumnsByLabel(
-    HOLDINGS_COLUMN_META.filter((c) => c.group === "mandatory")
+  const known = new Set<string>(READING_ORDER);
+  const rest = sortColumnsByLabel(
+    HOLDINGS_COLUMN_META.filter((c) => !known.has(c.id))
   ).map((c) => c.id);
-  const optional = sortColumnsByLabel(
-    HOLDINGS_COLUMN_META.filter((c) => c.group === "optional")
-  ).map((c) => c.id);
-  return [...mandatory, ...optional];
+  // Filtré sur la méta : une entrée de `READING_ORDER` dont la colonne
+  // disparaîtrait ne laisserait pas un identifiant fantôme dans l'ordre.
+  const lead = READING_ORDER.filter((id) =>
+    HOLDINGS_COLUMN_META.some((c) => c.id === id)
+  );
+  return [...lead, ...rest];
 }
 
 export const DEFAULT_COLUMN_ORDER = defaultColumnOrder();

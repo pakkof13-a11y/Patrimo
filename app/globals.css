@@ -1645,6 +1645,41 @@ textarea:focus-visible,
   font-variant-numeric: tabular-nums;
 }
 
+/*
+  Pastille d'enveloppe du portefeuille.
+
+  C'est un `<select>` déguisé : l'apparence d'un badge, le comportement d'un
+  champ. `appearance: none` retire le chevron natif, qui doublerait la largeur
+  pour trois lettres.
+*/
+.holdings-envelope-pill {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  padding-inline: var(--space-2);
+  height: 1.25rem;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-full, 999px);
+  background: var(--surface-raised);
+  color: var(--foreground-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.holdings-envelope-pill:hover {
+  border-color: var(--border-strong);
+  color: var(--foreground);
+}
+
+.holdings-envelope-pill:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 /* ── Coquille : colonne de navigation + zone de travail ───────────── */
 .term-shell {
   display: grid;

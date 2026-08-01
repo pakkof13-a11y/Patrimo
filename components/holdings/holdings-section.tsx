@@ -648,8 +648,10 @@ export function HoldingsSection({
         accessorKey: "ticker",
         id: "ticker",
         header: "Ticker",
+        // Or et monospace : le ticker est un code, pas un nom. La couleur le
+        // distingue du libellé de l'actif sans ajouter de séparateur.
         cell: ({ row }) => (
-          <span className="font-mono text-xs tabular-nums text-slate-600 dark:text-slate-300">
+          <span className="font-mono text-[length:var(--text-xs)] tracking-[var(--tracking-label)] text-[var(--primary-text)]">
             {row.original.ticker || "—"}
           </span>
         ),
@@ -658,9 +660,21 @@ export function HoldingsSection({
         accessorKey: "accountType",
         id: "accountType",
         header: "Enveloppe",
+        /*
+          Pastille compacte plutôt que menu déroulant pleine largeur.
+
+          Le libellé long (« Compte-Titres », « Assurance-Vie ») imposait une
+          colonne de 160 px pour une information qui tient en trois lettres, et
+          la boîte de sélection tirait l'œil plus que les nombres voisins. On
+          affiche donc le code, dans une pastille — mais le champ reste un
+          `<select>` : l'enveloppe se corrige toujours d'un clic depuis le
+          tableau, ce qu'un simple badge aurait retiré.
+        */
         cell: ({ row }) => (
           <select
-            className="input !w-auto !py-1 text-xs"
+            className="holdings-envelope-pill"
+            aria-label="Enveloppe"
+            title={ACCOUNT_TYPES[(row.original.accountType || "CTO") as AccountType]}
             value={row.original.accountType || "CTO"}
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => {
@@ -670,7 +684,7 @@ export function HoldingsSection({
           >
             {(Object.keys(ACCOUNT_TYPES) as AccountType[]).map((k) => (
               <option key={k} value={k}>
-                {ACCOUNT_TYPES[k]}
+                {k}
               </option>
             ))}
           </select>

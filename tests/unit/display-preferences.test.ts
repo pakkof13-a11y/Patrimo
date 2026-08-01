@@ -48,28 +48,55 @@ describe("mandatory / optional column defaults", () => {
     expect(vis.ticker).toBe(false);
     expect(vis.avgCostEur).toBe(false);
     expect(vis.quantity).toBe(true);
-    expect(vis.platformName).toBe(true);
+    // La plateforme a quitté le socle obligatoire : elle répond à « où est-ce
+    // gardé ? », question de garde que le panneau de détail et les modes
+    // Analyse / Expert traitent, pas la lecture de synthèse.
+    expect(vis.platformName).toBe(false);
     expect(vis.currency).toBe(false);
     expect(vis.stopLoss).toBe(false);
     expect(HOLDINGS_COLUMN_META.find((c) => c.id === "tp1")?.label).toBe("TP1");
   });
 
-  it("orders mandatory then optional, alpha by label within each group", () => {
+  it("suit l'ordre de lecture d'une position, pas l'alphabet", () => {
     const order = defaultColumnOrder();
-    const mandatory = HOLDINGS_COLUMN_META.filter((c) => c.group === "mandatory").map(
-      (c) => c.id
+
+    /*
+      L'ordre raconte une phrase : quoi, combien, ce que ça vaut, ce que ça a
+      fait, ce que ça pèse. L'alphabet plaçait « Cours » avant « Enveloppe » et
+      « PRU » après « Allocation » — chaque colonne à sa place dans le
+      dictionnaire, aucune dans le raisonnement.
+    */
+    expect(order.slice(0, 10)).toEqual([
+      "name",
+      "ticker",
+      "accountType",
+      "quantity",
+      "avgCostEur",
+      "currentPriceNative",
+      "marketValueBase",
+      "unrealizedPnlBase",
+      "unrealizedPnlPct",
+      "allocationPct",
+    ]);
+  });
+
+  it("range les colonnes restantes par ordre alphabétique, sans en perdre", () => {
+    const order = defaultColumnOrder();
+    const all = HOLDINGS_COLUMN_META.map((c) => c.id);
+
+    // Aucune colonne oubliée, aucun identifiant fantôme.
+    expect([...order].sort()).toEqual([...all].sort());
+    expect(new Set(order).size).toBe(order.length);
+
+    // La queue suit le libellé : une colonne ajoutée demain s'y range seule.
+    const tail = order.slice(10);
+    const labels = tail.map(
+      (id) => HOLDINGS_COLUMN_META.find((c) => c.id === id)!.label
     );
-    const optional = HOLDINGS_COLUMN_META.filter((c) => c.group === "optional").map(
-      (c) => c.id
+    const sorted = [...labels].sort((a, b) =>
+      a.localeCompare(b, "fr", { sensitivity: "base", numeric: true })
     );
-    expect(order.slice(0, mandatory.length).sort()).toEqual([...mandatory].sort());
-    expect(order.slice(mandatory.length).sort()).toEqual([...optional].sort());
-    // first mandatory by fr label should be Actif
-    expect(order[0]).toBe("name");
-    // ticker (désormais optionnel) reste listé, seulement plus loin dans l'ordre
-    expect(order).toContain("ticker");
-    // stop loss (optionnel) après tout le socle obligatoire (quantity en fait partie)
-    expect(order.indexOf("stopLoss")).toBeGreaterThan(order.indexOf("quantity"));
+    expect(labels).toEqual(sorted);
   });
 
   it("resetHoldingsColumns restores mandatory visibility + default order", () => {

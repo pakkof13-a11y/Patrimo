@@ -54,10 +54,18 @@ const ALWAYS_VISIBLE = HOLDINGS_COLUMN_META.filter(
 /** Synthèse = les colonnes du mockup : ticker, PRU, poids. */
 const SUMMARY_EXTRA = ["ticker", "avgCostEur", "allocationPct"] as const;
 
-/** Analyse = synthèse + combien la ligne a coûté et ce qu'elle pèse chez elle. */
+/**
+ * Analyse = synthèse + combien la ligne a coûté, où elle est gardée, et ce
+ * qu'elle pèse dans sa classe.
+ *
+ * Le dépositaire entre ici et non en synthèse : savoir qu'une position vaut
+ * 8 000 € et qu'elle a gagné 20 % se lit sans savoir chez qui elle dort. La
+ * question de la garde vient ensuite — et le panneau de détail y répond aussi.
+ */
 const ANALYSIS_EXTRA = [
   "costBasisEur",
   "currency",
+  "platformName",
   "allocationPctOfClass",
 ] as const;
 
