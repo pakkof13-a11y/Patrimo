@@ -591,10 +591,20 @@ export function HoldingsSection({
       fetchJson<{ series: Record<string, number[]> }>(
         `/api/portfolio/sparklines?ids=${encodeURIComponent(sparklineIds.join(","))}`
       ),
-    staleTime: SPARKLINE_STALE_MS,
+    /*
+      Une réponse vide n'est pas mise en cache : elle veut souvent dire que la
+      route n'a pas encore fini de peupler le cache de clôtures. La garder cinq
+      minutes afficherait un tableau de tirets alors que les données sont
+      arrivées entre-temps. Dès qu'une seule courbe revient, on tient la
+      réponse pour bonne — un portefeuille où *rien* n'a d'historique est un
+      cache froid, pas un état stable.
+    */
+    staleTime: (query) =>
+      Object.keys(query.state.data?.series ?? {}).length > 0
+        ? SPARKLINE_STALE_MS
+        : 0,
     gcTime: 15 * 60_000,
     retry: 1,
-    refetchOnMount: false,
     refetchOnWindowFocus: false,
   });
   const sparklines = sparklinesQuery.data?.series;
@@ -865,16 +875,22 @@ export function HoldingsSection({
           }
           const up = closes[closes.length - 1]! >= closes[0]!;
           return (
+            /*
+              Taille fixe et centrée, jamais étirée sur la largeur de la
+              colonne : une vignette qui s'allonge quand la colonne s'élargit
+              écrase sa propre pente, et deux lignes voisines cessent d'être
+              comparables entre elles.
+            */
             <span
-              className="block h-6 w-full"
+              className="flex h-5 w-full items-center justify-center"
               title={`Tendance sur ${closes.length} clôtures (30 derniers jours)`}
             >
               <Sparkline
                 values={closes}
                 stroke={up ? "var(--chart-positive)" : "var(--chart-negative)"}
-                width={80}
-                height={24}
-                className="h-full w-full"
+                width={56}
+                height={20}
+                strokeWidth={1.1}
               />
             </span>
           );
@@ -1573,8 +1589,12 @@ export function HoldingsSection({
             visibility: columnVisibility as Record<string, boolean>,
             order: columnOrder,
             onVisibilityChange: (id, visible) => {
+              // Seul le verrou refuse le décochage — pas l'appartenance au
+              // groupe obligatoire, qui dit seulement « affichée au départ ».
+              // La case du sélecteur applique la même règle : les deux doivent
+              // s'accorder, sinon elle se décoche à l'écran sans rien changer.
               const meta = HOLDINGS_COLUMN_META.find((c) => c.id === id);
-              if (meta?.group === "mandatory" || meta?.locked) {
+              if (meta?.locked) {
                 setColumnVisibility((prev) => ({ ...prev, [id]: true }));
                 return;
               }

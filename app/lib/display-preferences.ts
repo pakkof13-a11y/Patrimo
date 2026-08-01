@@ -349,8 +349,14 @@ export function sanitizeColumnVisibility(
     merged[k] = v;
     anyKnown = true;
   }
+  /*
+    Seules les colonnes verrouillées sont réimposées. Rétablir tout le groupe
+    obligatoire annulerait, au rechargement suivant, le décochage d'une colonne
+    que le sélecteur autorise pourtant à masquer — le réglage disparaîtrait
+    sans explication.
+  */
   for (const c of HOLDINGS_COLUMN_META) {
-    if (c.group === "mandatory" || c.locked) merged[c.id] = true;
+    if (c.locked) merged[c.id] = true;
   }
   // Unusable blob (no known keys) → treat as corrupt
   if (!anyKnown && Object.keys(raw as object).length > 0) return null;

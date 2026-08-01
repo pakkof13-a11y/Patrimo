@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { parisDayKey } from "@/app/lib/dates/paris";
-import { readDailyCloses } from "@/app/lib/market/daily-closes";
+import {
+  assetsNeedingFetch,
+  fillDailyCloses,
+  readDailyCloses,
+} from "@/app/lib/market/daily-closes";
 import {
   clientErrorMessage,
   clientErrorStatus,
@@ -15,14 +19,18 @@ import {
  * portefeuille de trente positions, la seconde solution ferait trente
  * aller-retours pour dessiner trente courbes de quelques pixels.
  *
- * **Lecture seule du cache.** On lit `AssetDailyClose` sans jamais déclencher
- * d'appel fournisseur, comme le fait déjà le bandeau KPI crypto. La raison est
- * la même : ouvrir le portefeuille ne doit pas coûter trente téléchargements
- * d'historique. Un actif absent du cache n'a donc pas de vignette — et c'est
- * préférable à une diagonale tracée entre deux points inventés, qui aurait
- * l'apparence d'une tendance sans en être une. Le cache se remplit quand
- * l'utilisateur ouvre une vue qui en a besoin (P&L par classe, crypto
- * comptant, fiche d'un actif).
+ * **Le cache d'abord, quelques appels ensuite.** On lit `AssetDailyClose`, et
+ * on ne complète que les actifs qu'il ignore encore — au plus une poignée par
+ * requête. Tout remplir d'un coup ferait payer trente téléchargements
+ * d'historique à l'ouverture du portefeuille ; ne rien remplir laisserait la
+ * colonne vide jusqu'à ce qu'un autre écran passe par là, ce qui se lit comme
+ * une panne. Un portefeuille froid se peuple donc en quelques visites, et
+ * immédiatement dès que le P&L par classe tourne sur la même page — il remplit
+ * le même cache pour les mêmes actifs.
+ *
+ * Un actif que les fournisseurs ignorent n'a pas de vignette, et c'est le
+ * comportement voulu : une diagonale tracée entre deux points inventés aurait
+ * l'apparence d'une tendance sans en être une.
  */
 
 /** Fenêtre de la vignette : un mois de clôtures donne une pente lisible. */
@@ -39,6 +47,15 @@ const MAX_ASSETS = 120;
 
 /** En dessous, la « courbe » est un segment : on n'en dessine pas. */
 const MIN_POINTS = 2;
+
+/**
+ * Actifs complétés depuis les fournisseurs au cours d'une même requête.
+ *
+ * Le chiffre est délibérément petit : il borne le coût du pire cas — un
+ * portefeuille entier dont le cache est vide — à l'équivalent de quelques
+ * fiches d'actif ouvertes. Le reste se remplit à la visite suivante.
+ */
+const MAX_FILLS_PER_REQUEST = 8;
 
 export type SparklinesResponse = {
   /** Clôtures par actif, du plus ancien au plus récent. */
@@ -85,6 +102,28 @@ export async function GET(req: Request) {
     const fromDay = parisDayKey(
       new Date(now.getTime() - WINDOW_DAYS * 24 * 3600 * 1000)
     );
+
+    /*
+      Complément best effort, jamais bloquant : un fournisseur muet laisse la
+      ligne sans vignette, il ne fait pas échouer la requête. Le tableau lui
+      est déjà affiché — ces courbes l'enrichissent, elles ne le portent pas.
+    */
+    const toFill = (await assetsNeedingFetch(ownedIds, toDay, now)).slice(
+      0,
+      MAX_FILLS_PER_REQUEST
+    );
+    for (const assetId of toFill) {
+      try {
+        await fillDailyCloses(
+          userId,
+          assetId,
+          new Date(`${fromDay}T00:00:00Z`),
+          now
+        );
+      } catch (err) {
+        console.error(`[portfolio/sparklines] ${assetId} non complété:`, err);
+      }
+    }
 
     const index = await readDailyCloses(ownedIds, fromDay, toDay);
 

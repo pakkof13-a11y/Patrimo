@@ -49,6 +49,45 @@ test.describe("Positions — toolbar & filtres", () => {
     await page.keyboard.press("Escape");
   });
 
+  test("vignette de tendance : affichée d'emblée, décochable, et le choix tient", async ({
+    page,
+  }) => {
+    const cells = page.locator('td[data-column-id="trend"]');
+    await expect(cells.first()).toBeVisible();
+
+    /*
+      Ni verrouillée ni cachée par défaut. C'est un cas que le tableau ne
+      connaissait pas : « obligatoire » y valait « indécochable ». Le test
+      tient les deux bouts — la case doit être cochée *et* active.
+    */
+    const row = page
+      .getByTestId("column-picker-menu")
+      .locator("li")
+      .filter({ hasText: "Tendance" });
+
+    await page.getByTestId("column-picker").click();
+    await expect(page.getByTestId("column-picker-menu")).toBeVisible();
+    const box = row.locator('input[type="checkbox"]');
+    await expect(box).toBeChecked();
+    await expect(box).toBeEnabled();
+
+    await box.click();
+    await expect(cells).toHaveCount(0);
+
+    // Le réglage doit survivre au rechargement : une case qui se recoche
+    // toute seule à la visite suivante n'est pas un réglage.
+    await page.reload();
+    await expect(page.getByTestId("holdings-table")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(cells).toHaveCount(0);
+
+    await page.getByTestId("column-picker").click();
+    await row.locator('input[type="checkbox"]').click();
+    await page.keyboard.press("Escape");
+    await expect(cells.first()).toBeVisible();
+  });
+
   test("regroupement par classe d'actifs par défaut", async ({ page }) => {
     // Le portefeuille s'ouvre groupé : des en-têtes de classe, et une
     // pagination inactive puisque toutes les lignes sont rendues.

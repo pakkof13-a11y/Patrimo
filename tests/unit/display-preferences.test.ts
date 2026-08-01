@@ -303,14 +303,17 @@ describe("localStorage column prefs", () => {
 });
 
 describe("sanitize column prefs", () => {
-  it("sanitizeColumnVisibility forces mandatory on", () => {
+  it("sanitizeColumnVisibility forces locked on, respecte le reste", () => {
     const fallback = defaultHoldingsVisibility();
     const s = sanitizeColumnVisibility(
-      { name: false, currency: true, unknownCol: true },
+      { name: false, currency: true, trend: false, unknownCol: true },
       fallback
     );
     expect(s).not.toBeNull();
-    expect(s!.name).toBe(true); // mandatory
+    expect(s!.name).toBe(true); // verrouillée : indécochable
+    // Affichée par défaut mais décochable : le réglage doit survivre au
+    // rechargement, sinon il s'annule tout seul d'une visite à l'autre.
+    expect(s!.trend).toBe(false);
     expect(s!.currency).toBe(true);
     expect(
       Object.prototype.hasOwnProperty.call(s, "unknownCol")
