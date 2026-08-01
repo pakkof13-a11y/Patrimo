@@ -786,6 +786,18 @@ export function measureColumnAutosize(
       const padX = horizontalPadding(cs);
       const isHeader = el.tagName === "TH";
 
+      /*
+        Cellule qui désigne elle-même sa boîte de référence (pastille
+        d'enveloppe). Sa largeur rendue *est* la mesure : inutile de deviner
+        le texte, d'autant que le `<select>` qu'elle contient est transparent
+        et déclarerait la largeur de sa plus longue option.
+      */
+      const box = el.querySelector<HTMLElement>("[data-autosize-box]");
+      if (box) {
+        max = Math.max(max, box.getBoundingClientRect().width + padX);
+        return;
+      }
+
       // Prefer selected option text for <select> cells
       const select = el.querySelector("select");
       if (select instanceof HTMLSelectElement) {

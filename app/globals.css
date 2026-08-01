@@ -1652,18 +1652,24 @@ textarea:focus-visible,
 /*
   Pastille d'enveloppe du portefeuille.
 
-  C'est un `<select>` déguisé : l'apparence d'un badge, le comportement d'un
-  champ. `appearance: none` retire le chevron natif, qui doublerait la largeur
-  pour trois lettres.
+  L'apparence d'un badge, le comportement d'un champ — mais en deux éléments
+  et non un seul. Un `<select>`, même en `width: fit-content`, prend la largeur
+  de sa plus longue option : « AV » réservait la place d'« IMMOBILIER ». Le
+  libellé est donc un `<span>`, qui ne mesure que ce qu'il affiche, et le
+  `<select>` s'étend par-dessus, transparent, pour garder son menu natif.
 */
+.holdings-envelope-cell {
+  display: flex;
+  /* Centrées : de largeurs inégales, alignées à gauche, les pastilles
+     dessinaient un bord droit en dents de scie le long de la colonne. */
+  justify-content: center;
+}
+
 .holdings-envelope-pill {
-  appearance: none;
-  -webkit-appearance: none;
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* Au plus juste du texte : trois lettres n'ont pas besoin d'une boîte. */
-  width: fit-content;
   padding-inline: var(--space-2);
   height: 1.25rem;
   border: var(--border-width) solid var(--border);
@@ -1673,6 +1679,7 @@ textarea:focus-visible,
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   letter-spacing: var(--tracking-label);
+  line-height: 1;
   cursor: pointer;
   transition: border-color var(--transition-fast), color var(--transition-fast);
 }
@@ -1682,9 +1689,32 @@ textarea:focus-visible,
   color: var(--foreground);
 }
 
-.holdings-envelope-pill:focus-visible {
+/* Le focus vit sur le `<select>` invisible : c'est la pastille qui le montre. */
+.holdings-envelope-pill:focus-within {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+
+.holdings-envelope-pill__label {
+  /* Le clic doit atteindre le `<select>` qui recouvre la pastille. */
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.holdings-envelope-pill__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
 }
 
 /* ── Coquille : colonne de navigation + zone de travail ───────────── */

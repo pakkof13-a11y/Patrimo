@@ -689,25 +689,42 @@ export function HoldingsSection({
           `<select>` : l'enveloppe se corrige toujours d'un clic depuis le
           tableau, ce qu'un simple badge aurait retiré.
         */
-        cell: ({ row }) => (
-          <select
-            className="holdings-envelope-pill"
-            aria-label="Enveloppe"
-            title={ACCOUNT_TYPES[(row.original.accountType || "CTO") as AccountType]}
-            value={row.original.accountType || "CTO"}
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => {
-              e.stopPropagation();
-              onAccountTypeChange(row.original.assetId, e.target.value);
-            }}
-          >
-            {(Object.keys(ACCOUNT_TYPES) as AccountType[]).map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </select>
-        ),
+        cell: ({ row }) => {
+          const code = (row.original.accountType || "CTO") as AccountType;
+          return (
+            <span className="holdings-envelope-cell">
+              {/*
+                Le libellé visible est un `<span>`, le `<select>` est transparent
+                par-dessus. Un `<select>` prend la largeur de sa plus longue
+                option, quelle que soit celle qui est choisie : « AV » occupait
+                donc la place d'« IMMOBILIER », et la colonne alignait six
+                pastilles identiques dont aucune ne faisait la taille de son
+                texte. Le `<span>`, lui, ne mesure que ce qu'il affiche — et le
+                `<select>` conserve son menu natif, appréciable au doigt.
+              */}
+              <span className="holdings-envelope-pill" data-autosize-box>
+                <span className="holdings-envelope-pill__label">{code}</span>
+                <select
+                  className="holdings-envelope-pill__input"
+                  aria-label="Enveloppe"
+                  title={ACCOUNT_TYPES[code]}
+                  value={code}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    onAccountTypeChange(row.original.assetId, e.target.value);
+                  }}
+                >
+                  {(Object.keys(ACCOUNT_TYPES) as AccountType[]).map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+                </select>
+              </span>
+            </span>
+          );
+        },
       },
       {
         accessorKey: "platformName",
