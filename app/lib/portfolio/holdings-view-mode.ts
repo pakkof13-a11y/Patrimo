@@ -67,6 +67,10 @@ const ANALYSIS_EXTRA = [
   "currency",
   "platformName",
   "allocationPctOfClass",
+  // Le pourcentage a sa propre colonne ici, en plus de celui qu'affiche
+  // « Variation » : c'est la seule façon de trier par performance plutôt que
+  // par gain, et c'est une question d'analyse, pas de synthèse.
+  "unrealizedPnlPct",
 ] as const;
 
 /**

@@ -4,6 +4,8 @@ import {
   COLUMN_RESIZE_MIN,
   HOLDINGS_COLUMN_META,
   columnMinWidth,
+  columnOrderStorageKey,
+  columnsStorageKey,
   compareAssetNames,
   computeFlexColumnLayout,
   defaultColumnOrder,
@@ -260,19 +262,19 @@ describe("localStorage column prefs", () => {
 
   it("resets visibility when stored blob is corrupt", () => {
     mem.set(
-      "patrimo.display.columns.holdings.v4",
+      columnsStorageKey("holdings"),
       JSON.stringify({ totally: "wrong", schema: 1 })
     );
     const fallback = defaultHoldingsVisibility();
     const loaded = loadColumnVisibility("holdings", fallback);
     expect(loaded).toEqual(fallback);
     // corrupt key wiped
-    expect(mem.get("patrimo.display.columns.holdings.v4")).toBeUndefined();
+    expect(mem.get(columnsStorageKey("holdings"))).toBeUndefined();
   });
 
   it("resets order when stored value is not an array", () => {
     mem.set(
-      "patrimo.display.columnOrder.holdings.v4",
+      columnOrderStorageKey("holdings"),
       JSON.stringify({ not: "array" })
     );
     expect(loadColumnOrder("holdings")).toEqual(defaultColumnOrder());
@@ -281,7 +283,7 @@ describe("localStorage column prefs", () => {
   it("ignores non-boolean visibility values", () => {
     const fallback = defaultHoldingsVisibility("standard");
     mem.set(
-      "patrimo.display.columns.holdings.v4",
+      columnsStorageKey("holdings"),
       JSON.stringify({ ...fallback, quantity: "yes", currency: false })
     );
     const loaded = loadColumnVisibility("holdings", fallback);
@@ -293,7 +295,7 @@ describe("localStorage column prefs", () => {
   it("keeps locked columns always visible", () => {
     const fallback = defaultHoldingsVisibility("standard");
     mem.set(
-      "patrimo.display.columns.holdings.v4",
+      columnsStorageKey("holdings"),
       JSON.stringify({ ...fallback, name: false, marketValueBase: false })
     );
     const loaded = loadColumnVisibility("holdings", fallback);

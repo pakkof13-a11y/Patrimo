@@ -79,6 +79,26 @@ const COLUMN_VALUES: Record<string, ColumnValueFn> = {
 };
 
 /**
+ * Colonnes de l'écran qui portent deux nombres, et qui donnent donc deux
+ * champs au CSV.
+ *
+ * « Variation » affiche le montant et le pourcentage l'un sous l'autre. Les
+ * empiler dans une seule cellule (« +1 707,30 € / +20,21 % ») rendrait le
+ * fichier illisible par un tableur : on écrit deux colonnes, chacune
+ * calculable. Le pourcentage n'est pas perdu parce que l'écran l'a fusionné.
+ */
+const COLUMN_SPLITS: Record<string, { id: string; label: string }[]> = {
+  unrealizedPnlBase: [
+    { id: "unrealizedPnlBase", label: "Variation (€)" },
+    { id: "unrealizedPnlPct", label: "Variation (%)" },
+  ],
+};
+
+function labelOf(id: string): string {
+  return HOLDINGS_COLUMN_META.find((c) => c.id === id)?.label ?? id;
+}
+
+/**
  * Construit le CSV pour les positions données, restreint aux colonnes
  * connues parmi `columnIds` (ordre respecté — reflète la vue courante).
  */
@@ -87,14 +107,22 @@ export function holdingsToCsv(
   columnIds: string[],
   baseCurrency: string
 ): string {
-  const knownIds = columnIds.filter((id) => COLUMN_VALUES[id] != null);
-  const headerLabels = knownIds.map(
-    (id) => HOLDINGS_COLUMN_META.find((c) => c.id === id)?.label ?? id
-  );
-  const lines = [headerLabels.map(csvField).join(CSV_DELIMITER)];
+  const fields: { id: string; label: string }[] = [];
+  const seen = new Set<string>();
+  for (const id of columnIds) {
+    for (const f of COLUMN_SPLITS[id] ?? [{ id, label: labelOf(id) }]) {
+      // Une colonne éclatée peut recouvrir une colonne affichée par ailleurs
+      // (« Variation (%) » cochée en plus de « Variation ») : un seul champ.
+      if (COLUMN_VALUES[f.id] == null || seen.has(f.id)) continue;
+      seen.add(f.id);
+      fields.push(f);
+    }
+  }
+
+  const lines = [fields.map((f) => csvField(f.label)).join(CSV_DELIMITER)];
   for (const h of holdings) {
-    const row = knownIds.map((id) =>
-      csvField(COLUMN_VALUES[id]!(h, baseCurrency))
+    const row = fields.map((f) =>
+      csvField(COLUMN_VALUES[f.id]!(h, baseCurrency))
     );
     lines.push(row.join(CSV_DELIMITER));
   }

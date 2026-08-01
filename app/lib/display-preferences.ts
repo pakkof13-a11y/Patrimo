@@ -47,8 +47,15 @@ const LAYOUT_KEY = "patrimo.display.layoutWidth";
 const COLUMNS_PREFIX = "patrimo.display.columns.";
 const ORDER_PREFIX = "patrimo.display.columnOrder.";
 const SIZE_PREFIX = "patrimo.display.columnSizing.";
-/** Bumped when default mandatory/optional set changes (Ticker + reset rules). */
-const COLUMNS_VERSION = "v4";
+/**
+ * Bumped when default mandatory/optional set changes (Ticker + reset rules).
+ *
+ * v5 : fusion des deux colonnes de P&L en une seule « Variation », et arrivée
+ * de la vignette de tendance. Une préférence enregistrée sous v4 décrivait un
+ * tableau qui n'existe plus — elle aurait ressuscité la colonne de pourcentage
+ * à côté de celle qui l'affiche déjà. On repart donc des défauts, une fois.
+ */
+const COLUMNS_VERSION = "v5";
 /**
  * Sizing v5: only stores *user-locked* column widths (manual resize / autosize).
  * Unlocked columns flex-fill the remaining space (no empty right margin).
@@ -61,6 +68,21 @@ export const COLUMN_RESIZE_MIN = 80;
 export const COLUMN_RESIZE_MAX = 640;
 /** Extra padding applied by double-click autosize (px) */
 export const COLUMN_AUTOSIZE_PAD = 24;
+
+/**
+ * Clés de stockage des préférences de colonnes.
+ *
+ * Exportées pour que les tests décrivent le comportement de version sans
+ * recopier le numéro courant : une montée de version ne doit pas se solder
+ * par trois tests rouges qui ne testaient que leur propre littéral.
+ */
+export function columnsStorageKey(tableKey: string): string {
+  return `${COLUMNS_PREFIX}${tableKey}.${COLUMNS_VERSION}`;
+}
+
+export function columnOrderStorageKey(tableKey: string): string {
+  return `${ORDER_PREFIX}${tableKey}.${COLUMNS_VERSION}`;
+}
 
 function canUseStorage(): boolean {
   try {
@@ -121,7 +143,21 @@ export type HoldingsColumnMeta = {
   locked?: boolean;
   /** Min width for fluid table cells (px) */
   minWidth?: number;
+  /**
+   * Alignement horizontal de la colonne, en-tête compris. Absent = à gauche.
+   *
+   * Les nombres se lisent alignés à droite : les unités sous les unités, les
+   * dizaines sous les dizaines. Alignés à gauche, « 8 880,00 € » et
+   * « 87 300,00 € » commencent au même endroit et ne se comparent plus d'un
+   * coup d'œil — il faut compter les chiffres.
+   */
+  align?: "right" | "center";
 };
+
+/** Alignement d'une colonne, en-tête et cellules confondus. */
+export function columnAlign(id: string): "right" | "center" | undefined {
+  return HOLDINGS_COLUMN_META.find((c) => c.id === id)?.align;
+}
 
 export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
   // —— MANDATORY (always visible, checkbox locked) ——
@@ -132,20 +168,34 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
     group: "mandatory",
     locked: true,
     minWidth: 110,
+    align: "right",
   },
   {
+    /*
+      Une seule colonne pour les deux chiffres : le montant au-dessus, le
+      pourcentage en dessous. Séparés, ils occupaient deux en-têtes que la
+      troncature rendait jumeaux (« P&L LAT… » deux fois) pour une seule
+      question — combien cette ligne a-t-elle gagné, et dans quelle
+      proportion. On ne lit jamais l'un sans chercher l'autre.
+    */
     id: "unrealizedPnlBase",
-    label: "P&L latent (€)",
+    label: "Variation",
     group: "mandatory",
     locked: true,
-    minWidth: 110,
+    minWidth: 120,
+    align: "right",
   },
   {
+    /*
+      Le pourcentage seul reste disponible, décoché par défaut : la colonne
+      fusionnée l'affiche déjà, mais elle se trie sur les euros. Qui veut
+      classer ses lignes par performance plutôt que par gain l'ajoute ici.
+    */
     id: "unrealizedPnlPct",
-    label: "P&L latent (%)",
-    group: "mandatory",
-    locked: true,
+    label: "Variation (%)",
+    group: "optional",
     minWidth: 100,
+    align: "right",
   },
   {
     /*
@@ -166,7 +216,7 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
     group: "optional",
     minWidth: 110,
   },
-  { id: "quantity", label: "Quantité", group: "mandatory", locked: true, minWidth: 96 },
+  { id: "quantity", label: "Quantité", group: "mandatory", locked: true, minWidth: 96, align: "right" },
   {
     id: "accountType",
     // Le libellé affiché dans l'en-tête du tableau est "Enveloppe" — harmonisé
@@ -176,6 +226,7 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
     group: "mandatory",
     locked: true,
     minWidth: 120,
+    align: "center",
   },
   {
     id: "marketValueBase",
@@ -183,6 +234,7 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
     group: "mandatory",
     locked: true,
     minWidth: 120,
+    align: "right",
   },
   {
     /*
@@ -198,24 +250,27 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
     label: "Tendance 30 j",
     group: "mandatory",
     minWidth: 96,
+    align: "center",
   },
   // —— OPTIONAL (togglable, hidden by default) ——
-  { id: "avgCostEur", label: "PRU", group: "optional", minWidth: 100 },
+  { id: "avgCostEur", label: "PRU", group: "optional", minWidth: 100, align: "right" },
   { id: "ticker", label: "Ticker", group: "optional", minWidth: 88 },
-  { id: "allocationPctOfClass", label: "Alloc. classe", group: "optional", minWidth: 110 },
+  { id: "allocationPctOfClass", label: "Alloc. classe", group: "optional", minWidth: 110, align: "right" },
   {
     id: "allocationPct",
     label: "Allocation portefeuille (%)",
     group: "optional",
     minWidth: 132,
+    align: "right",
   },
   {
     id: "breakEvenBase",
     label: "Break-even / Seuil de rentabilité",
     group: "optional",
     minWidth: 128,
+    align: "right",
   },
-  { id: "costBasisEur", label: "Capital investi", group: "optional", minWidth: 110 },
+  { id: "costBasisEur", label: "Capital investi", group: "optional", minWidth: 110, align: "right" },
   { id: "assetClass", label: "Classe", group: "optional", minWidth: 100 },
   { id: "lastUpdatedAt", label: "Dernière mise à jour", group: "optional", minWidth: 120 },
   { id: "currency", label: "Devise", group: "optional", minWidth: 88 },
@@ -224,18 +279,20 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
     label: "Dividendes / Rendement cumulé",
     group: "optional",
     minWidth: 130,
+    align: "right",
   },
   {
     id: "acquisitionFeesBase",
     label: "Frais de transaction",
     group: "optional",
     minWidth: 110,
+    align: "right",
   },
-  { id: "stopLoss", label: "Stop Loss", group: "optional", minWidth: 100 },
-  { id: "tp1", label: "TP1", group: "optional", minWidth: 88 },
-  { id: "tp2", label: "TP2", group: "optional", minWidth: 88 },
-  { id: "tp3", label: "TP3", group: "optional", minWidth: 88 },
-  { id: "tp4", label: "TP4", group: "optional", minWidth: 88 },
+  { id: "stopLoss", label: "Stop Loss", group: "optional", minWidth: 100, align: "right" },
+  { id: "tp1", label: "TP1", group: "optional", minWidth: 88, align: "right" },
+  { id: "tp2", label: "TP2", group: "optional", minWidth: 88, align: "right" },
+  { id: "tp3", label: "TP3", group: "optional", minWidth: 88, align: "right" },
+  { id: "tp4", label: "TP4", group: "optional", minWidth: 88, align: "right" },
 ];
 
 const MANDATORY_IDS = new Set(
@@ -369,20 +426,19 @@ export function loadColumnVisibility(
 ): ColumnVisibilityMap {
   if (!canUseStorage()) return fallback;
   try {
-    const raw = localStorage.getItem(
-      `${COLUMNS_PREFIX}${tableKey}.${COLUMNS_VERSION}`
-    );
-    const legacy = localStorage.getItem(COLUMNS_PREFIX + tableKey);
-    const source = raw || legacy;
+    /*
+      Seule la clé de la version courante est lue. Une lecture de repli sur la
+      clé sans version annulait l'intérêt même du numéro de version : après un
+      changement du jeu de colonnes par défaut, l'ancien réglage revenait par
+      la porte de derrière et décrivait un tableau qui n'existe plus.
+    */
+    const source = localStorage.getItem(columnsStorageKey(tableKey));
     if (!source) return fallback;
     const parsed = JSON.parse(source) as unknown;
     const sanitized = sanitizeColumnVisibility(parsed, fallback);
     if (!sanitized) {
-      // Corrupt → wipe versioned + legacy keys
       try {
-        localStorage.removeItem(
-          `${COLUMNS_PREFIX}${tableKey}.${COLUMNS_VERSION}`
-        );
+        localStorage.removeItem(columnsStorageKey(tableKey));
         localStorage.removeItem(COLUMNS_PREFIX + tableKey);
       } catch {
         /* ignore */
@@ -397,10 +453,7 @@ export function loadColumnVisibility(
 
 export function saveColumnVisibility(tableKey: string, visibility: ColumnVisibilityMap) {
   try {
-    localStorage.setItem(
-      `${COLUMNS_PREFIX}${tableKey}.${COLUMNS_VERSION}`,
-      JSON.stringify(visibility)
-    );
+    localStorage.setItem(columnsStorageKey(tableKey), JSON.stringify(visibility));
   } catch {
     /* ignore */
   }
@@ -441,17 +494,13 @@ export function loadColumnOrder(
   const defaults = defaultOrder ?? defaultColumnOrder();
   if (!canUseStorage()) return defaults;
   try {
-    const raw = localStorage.getItem(
-      `${ORDER_PREFIX}${tableKey}.${COLUMNS_VERSION}`
-    );
+    const raw = localStorage.getItem(columnOrderStorageKey(tableKey));
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as unknown;
     const sanitized = sanitizeColumnOrder(parsed, defaults);
     if (!sanitized) {
       try {
-        localStorage.removeItem(
-          `${ORDER_PREFIX}${tableKey}.${COLUMNS_VERSION}`
-        );
+        localStorage.removeItem(columnOrderStorageKey(tableKey));
       } catch {
         /* ignore */
       }
@@ -465,10 +514,7 @@ export function loadColumnOrder(
 
 export function saveColumnOrder(tableKey: string, order: string[]) {
   try {
-    localStorage.setItem(
-      `${ORDER_PREFIX}${tableKey}.${COLUMNS_VERSION}`,
-      JSON.stringify(order)
-    );
+    localStorage.setItem(columnOrderStorageKey(tableKey), JSON.stringify(order));
   } catch {
     /* ignore */
   }

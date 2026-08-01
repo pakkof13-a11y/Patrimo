@@ -46,8 +46,31 @@ describe("holdingsToCsv", () => {
       "EUR"
     );
     const lines = csv.split("\r\n");
-    expect(lines[0]).toBe("Actif;Quantité;P&L latent (%)");
+    expect(lines[0]).toBe("Actif;Quantité;Variation (%)");
     expect(lines[1]).toBe("Apple Inc.;10;20,00 %");
+  });
+
+  it("éclate la colonne Variation en deux champs calculables", () => {
+    /*
+      À l'écran, « Variation » empile le montant et le pourcentage. Dans un
+      tableur, « +300,00 € / +20,00 % » dans une seule cellule ne s'additionne
+      ni ne se trie : deux colonnes, deux nombres.
+    */
+    const csv = holdingsToCsv([makeHolding()], ["name", "unrealizedPnlBase"], "EUR");
+    const lines = csv.split("\r\n");
+    expect(lines[0]).toBe("Actif;Variation (€);Variation (%)");
+    // `Intl` sépare le montant du symbole par une espace insécable : l'écrire
+    // en clair donnerait un test rouge pour un caractère invisible.
+    expect(lines[1]).toBe("Apple Inc.;300,00 €;20,00 %");
+  });
+
+  it("n'écrit pas deux fois le pourcentage si sa colonne est aussi affichée", () => {
+    const csv = holdingsToCsv(
+      [makeHolding()],
+      ["unrealizedPnlBase", "unrealizedPnlPct"],
+      "EUR"
+    );
+    expect(csv.split("\r\n")[0]).toBe("Variation (€);Variation (%)");
   });
 
   it("ignore les colonnes inconnues sans planter", () => {

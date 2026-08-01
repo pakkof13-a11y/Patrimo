@@ -11,7 +11,12 @@ import {
   Shapes,
   type LucideIcon,
 } from "lucide-react";
-import { formatCurrency, cn } from "@/app/lib/utils";
+import {
+  cn,
+  formatCurrency,
+  formatSignedCurrency,
+  formatSignedPercent,
+} from "@/app/lib/utils";
 import { Sparkline } from "@/components/ui/sparkline";
 import {
   HOLDINGS_EXPAND_COL_PX,
@@ -32,17 +37,6 @@ const ICON_BY_CLASS: Record<AssetClass, LucideIcon> = {
   CASH: Coins,
   AUTRE: Shapes,
 };
-
-function signedCurrency(v: number, currency: string): string {
-  return `${v >= 0 ? "+" : "−"}${formatCurrency(Math.abs(v), currency)}`;
-}
-
-function signedPct(v: number): string {
-  return `${v >= 0 ? "+" : "−"}${Math.abs(v).toLocaleString("fr-FR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} %`;
-}
 
 export type GroupHeaderColumn = { id: string; size: number };
 
@@ -210,7 +204,7 @@ export function PositionGroupHeader({
             >
               {dayChange == null
                 ? "—"
-                : `${estimated ? "≈ " : ""}${signedCurrency(dayChange, baseCurrency)}`}
+                : `${estimated ? "≈ " : ""}${formatSignedCurrency(dayChange, baseCurrency)}`}
             </div>
           </div>
         );
@@ -223,14 +217,23 @@ export function PositionGroupHeader({
         );
 
       case "unrealizedPnlBase":
+        // Montant puis proportion, comme sur les lignes qu'il totalise : la
+        // colonne fusionnée doit se lire pareil du groupe à ses positions.
         return (
           <div
             className={cn(
-              "num text-right font-medium",
+              "text-right",
               pnlUp ? "val-positive" : "val-negative"
             )}
           >
-            {signedCurrency(totalUnrealizedPnl, baseCurrency)}
+            <div className="num font-medium">
+              {formatSignedCurrency(totalUnrealizedPnl, baseCurrency)}
+            </div>
+            {unrealizedPnlPct != null && (
+              <div className="num text-[length:var(--text-2xs)]">
+                {formatSignedPercent(unrealizedPnlPct)}
+              </div>
+            )}
           </div>
         );
 
@@ -242,7 +245,7 @@ export function PositionGroupHeader({
               pnlUp ? "val-positive" : "val-negative"
             )}
           >
-            {signedPct(unrealizedPnlPct)}
+            {formatSignedPercent(unrealizedPnlPct)}
           </div>
         );
 

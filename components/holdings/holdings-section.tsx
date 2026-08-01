@@ -71,7 +71,8 @@ import {
 } from "@/app/lib/constants";
 import {
   formatCurrency,
-  formatPercent,
+  formatSignedCurrency,
+  formatSignedPercent,
   formatUnitPrice,
   getAssetClassLabel,
   getChangeColor,
@@ -110,6 +111,7 @@ import {
   COLUMN_RESIZE_MAX,
   COLUMN_RESIZE_MIN,
   HOLDINGS_COLUMN_META,
+  columnAlign,
   resetHoldingsColumns,
   defaultColumnOrder,
   defaultColumnSizing,
@@ -914,28 +916,48 @@ export function HoldingsSection({
         },
       },
       {
+        /*
+          Variation : le montant, puis la proportion sous lui.
+
+          Les deux chiffres répondent à une seule question et ne se lisent
+          jamais l'un sans l'autre — « +1 700 € » ne dit pas si la ligne a bien
+          travaillé, « +20 % » ne dit pas ce que ça pèse. En deux colonnes,
+          leurs en-têtes se tronquaient de la même façon (« P&L LAT… » deux
+          fois) et l'œil devait faire l'aller-retour de l'une à l'autre.
+
+          Le tri porte sur les euros ; la colonne « Variation (%) », décochée
+          par défaut, reste disponible pour classer par performance.
+        */
         accessorKey: "unrealizedPnlBase",
         id: "unrealizedPnlBase",
-        // Unité placée avant « latent » : tronqués, « P&L latent (€) » et
-        // « P&L latent (%) » donnaient tous deux « P&L LAT… » — deux colonnes
-        // voisines impossibles à distinguer sans survoler chaque en-tête.
-        header: "P&L €",
-        cell: ({ row }) => (
-          <span className={cn("tabular-nums font-medium", getChangeColor(row.original.unrealizedPnlBase))}>
-            {formatCurrency(
-              row.original.unrealizedPnlBase || row.original.unrealizedPnlEur,
-              baseCurrency
-            )}
-          </span>
-        ),
+        header: "Variation",
+        cell: ({ row }) => {
+          const amount =
+            row.original.unrealizedPnlBase || row.original.unrealizedPnlEur;
+          return (
+            <div>
+              <div className={cn("num font-medium", getChangeColor(amount))}>
+                {formatSignedCurrency(amount, baseCurrency)}
+              </div>
+              <div
+                className={cn(
+                  "num text-[length:var(--text-2xs)]",
+                  getChangeColor(row.original.unrealizedPnlPct)
+                )}
+              >
+                {formatSignedPercent(row.original.unrealizedPnlPct)}
+              </div>
+            </div>
+          );
+        },
       },
       {
         accessorKey: "unrealizedPnlPct",
         id: "unrealizedPnlPct",
-        header: "P&L %",
+        header: "Variation %",
         cell: ({ row }) => (
-          <span className={cn("tabular-nums", getChangeColor(row.original.unrealizedPnlPct))}>
-            {formatPercent(row.original.unrealizedPnlPct)}
+          <span className={cn("num", getChangeColor(row.original.unrealizedPnlPct))}>
+            {formatSignedPercent(row.original.unrealizedPnlPct)}
           </span>
         ),
       },
@@ -961,7 +983,10 @@ export function HoldingsSection({
       {
         accessorKey: "allocationPct",
         id: "allocationPct",
-        header: "Alloc. portefeuille",
+        // « Poids » plutôt qu'« Alloc. portefeuille » : tronqué, l'en-tête
+        // affichait « ALLOC. PORTEFE… ». Le libellé complet reste dans le
+        // sélecteur de colonnes et dans l'infobulle.
+        header: "Poids",
         cell: ({ row }) => (
           <span className="tabular-nums">
             {Number(row.original.allocationPct || 0).toLocaleString("fr-FR", {
@@ -1670,6 +1695,7 @@ export function HoldingsSection({
                         style={{
                           width: size,
                           minWidth: floor,
+                          textAlign: columnAlign(colId),
                         }}
                         title={`${fullLabel}\nClic = trier · glisser = déplacer · bord = largeur`}
                         /*

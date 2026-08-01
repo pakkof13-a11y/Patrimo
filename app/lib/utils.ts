@@ -165,6 +165,32 @@ export function formatPercent(value: number | string) {
   return formatPctPoints(value);
 }
 
+/**
+ * Variation signée : « +1 707,30 € », « −312,00 € », « 0,00 € ».
+ *
+ * Le signe est écrit, pas seulement peint. Une variation qui ne se distingue
+ * que par sa couleur disparaît pour un lecteur daltonien, sur une capture en
+ * noir et blanc, ou dès qu'un thème adoucit la palette. Zéro ne prend pas de
+ * signe : « +0,00 € » annoncerait un gain là où il n'y a rien.
+ *
+ * Le moins est un vrai signe moins (U+2212) et non un trait d'union : c'est
+ * lui qui a la chasse d'un chiffre, donc qui garde la colonne alignée.
+ */
+export function formatSignedCurrency(
+  value: number | string,
+  currency: string = "EUR"
+) {
+  const n = Number(value) || 0;
+  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  return `${sign}${formatCurrency(Math.abs(n), currency)}`;
+}
+
+export function formatSignedPercent(value: number | string) {
+  const n = Number(value) || 0;
+  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  return `${sign}${formatPercent(Math.abs(n))}`;
+}
+
 export function formatDate(value: string | Date) {
   return formatDateParis(value);
 }

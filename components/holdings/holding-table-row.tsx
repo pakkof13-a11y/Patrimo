@@ -6,7 +6,7 @@ import { AlertTriangle } from "lucide-react";
 import { cn } from "@/app/lib/utils";
 import { type Holding } from "@/app/lib/types/ui";
 import { parseAssetCategory } from "@/app/lib/assets/categories";
-import { columnMinWidth } from "@/app/lib/display-preferences";
+import { columnAlign, columnMinWidth } from "@/app/lib/display-preferences";
 import {
   computeTriggerLevelStatus,
   triggerKindOf,
@@ -178,6 +178,10 @@ export function renderHoldingRow(row: Row<Holding>, opts: HoldingRowRenderOpts) 
               style={{
                 width: size,
                 minWidth: floor,
+                // Déclaré par colonne plutôt que répété dans chaque cellule :
+                // l'en-tête et le corps lisent la même source et ne peuvent
+                // plus diverger.
+                textAlign: columnAlign(cell.column.id),
               }}
             >
               {flexRender(cell.column.columnDef.cell, cell.getContext())}
