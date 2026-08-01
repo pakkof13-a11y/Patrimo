@@ -96,7 +96,7 @@ export function SpotOverviewPage({
   const operationsQuery = useQuery({
     queryKey: ["crypto-spot-operations"],
     queryFn: () =>
-      fetchJson<{ rows: TxRow[] }>(
+      fetchJson<{ transactions: TxRow[] }>(
         `/api/transactions?accountType=CRYPTO&pageSize=${RECENT_OPERATIONS}`
       ),
     staleTime: 60_000,
@@ -134,14 +134,14 @@ export function SpotOverviewPage({
 
   const operations: SpotOperation[] = useMemo(
     () =>
-      (operationsQuery.data?.rows ?? []).slice(0, RECENT_OPERATIONS).map((tx) => ({
+      (operationsQuery.data?.transactions ?? []).slice(0, RECENT_OPERATIONS).map((tx) => ({
         id: tx.id,
         type: tx.type,
         occurredAt: tx.occurredAt,
         label: operationLabel(tx),
         amount: operationAmount(tx),
       })),
-    [operationsQuery.data?.rows]
+    [operationsQuery.data?.transactions]
   );
 
   return (

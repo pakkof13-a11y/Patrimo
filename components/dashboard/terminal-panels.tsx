@@ -12,8 +12,19 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
+import { AssetLogo } from "@/components/ui/platform-logo";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import type { Holding } from "@/app/lib/types/ui";
+
+/**
+ * Logos du tableau de bord.
+ *
+ * Plus petits que dans Portefeuille (28 px) : ici le logo sert à reconnaître
+ * une ligne d'un coup d'œil au milieu d'un écran dense, pas à identifier une
+ * position qu'on s'apprête à ouvrir. Au-delà, il prendrait le pas sur les
+ * chiffres, qui sont le sujet de ces deux panneaux.
+ */
+const DASHBOARD_LOGO_SIZE = 18;
 
 /* ══════════════════════════════════════════════════════════════════════════
    RÉPARTITION DU PORTEFEUILLE
@@ -303,12 +314,22 @@ export function WatchlistCard({
                 return (
                   <tr key={h.assetId} data-testid={`watchlist-${h.assetId}`}>
                     <td>
-                      <div className="min-w-0">
-                        <div className="truncate text-[length:var(--text-sm)] text-[var(--foreground)]">
-                          {h.name}
-                        </div>
-                        <div className="num truncate text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
-                          {h.ticker || h.assetClass}
+                      <div className="flex min-w-0 items-center gap-[var(--space-2)]">
+                        <AssetLogo
+                          src={h.assetLogoUrl || h.logoUrl}
+                          name={h.name}
+                          ticker={h.ticker}
+                          isin={h.isin}
+                          assetClass={h.assetClass}
+                          size={DASHBOARD_LOGO_SIZE}
+                        />
+                        <div className="min-w-0">
+                          <div className="truncate text-[length:var(--text-sm)] text-[var(--foreground)]">
+                            {h.name}
+                          </div>
+                          <div className="num truncate text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
+                            {h.ticker || h.assetClass}
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -369,7 +390,13 @@ type TxRow = {
   grossAmountEur: string | number | null;
   netCashImpactEur: string | number | null;
   currency: string | null;
-  asset: { name: string | null; ticker: string | null } | null;
+  asset: {
+    name: string | null;
+    ticker: string | null;
+    isin?: string | null;
+    assetClass?: string | null;
+    logoUrl?: string | null;
+  } | null;
 };
 
 /** Type d'opération → libellé, icône, teinte. Table unique, pas de `switch`. */
@@ -524,8 +551,22 @@ export function RecentActivityCard({
                           </span>
                         </span>
                       </td>
-                      <td className="max-w-[12rem] truncate text-[var(--foreground)]">
-                        {tx.asset?.name || tx.asset?.ticker || "—"}
+                      <td className="max-w-[12rem]">
+                        <div className="flex min-w-0 items-center gap-[var(--space-2)]">
+                          {tx.asset && (
+                            <AssetLogo
+                              src={tx.asset.logoUrl}
+                              name={tx.asset.name || tx.asset.ticker || "?"}
+                              ticker={tx.asset.ticker}
+                              isin={tx.asset.isin}
+                              assetClass={tx.asset.assetClass}
+                              size={DASHBOARD_LOGO_SIZE}
+                            />
+                          )}
+                          <span className="truncate text-[var(--foreground)]">
+                            {tx.asset?.name || tx.asset?.ticker || "—"}
+                          </span>
+                        </div>
                       </td>
                       <td className="col-num text-[var(--foreground-secondary)]">
                         {formatQty(tx.quantity)}
