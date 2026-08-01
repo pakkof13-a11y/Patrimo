@@ -40,8 +40,19 @@ describe("mandatory / optional column defaults", () => {
     const vis = defaultHoldingsVisibility();
     for (const c of HOLDINGS_COLUMN_META) {
       expect(vis[c.id]).toBe(c.group === "mandatory");
-      if (c.group === "mandatory") expect(c.locked).toBe(true);
+      /*
+        `locked` est plus fort que `mandatory`, et non son synonyme : une
+        colonne verrouillée est visible par défaut *et* indécochable. La
+        réciproque est fausse — la vignette de tendance s'affiche d'emblée
+        mais reste décochable, puisqu'elle ne porte aucun chiffre sans lequel
+        la ligne cesserait d'être lisible.
+      */
+      if (c.locked) expect(c.group).toBe("mandatory");
     }
+    expect(HOLDINGS_COLUMN_META.find((c) => c.id === "trend")?.locked).toBe(
+      undefined
+    );
+    expect(vis.trend).toBe(true);
     // Ticker et PRU sont désormais optionnels (accessibles en un clic) — le
     // socle par défaut ne garde que ce qui est indispensable à la lecture
     // d'une position (Actif, Enveloppe, Cours, Valeur, P&L, Quantité, Plateforme).
@@ -66,7 +77,7 @@ describe("mandatory / optional column defaults", () => {
       « PRU » après « Allocation » — chaque colonne à sa place dans le
       dictionnaire, aucune dans le raisonnement.
     */
-    expect(order.slice(0, 10)).toEqual([
+    expect(order.slice(0, 11)).toEqual([
       "name",
       "ticker",
       "accountType",
@@ -74,6 +85,9 @@ describe("mandatory / optional column defaults", () => {
       "avgCostEur",
       "currentPriceNative",
       "marketValueBase",
+      // La vignette se lit entre la valeur et ce qu'elle a fait : elle dit par
+      // quel chemin le P&L qui suit est arrivé là.
+      "trend",
       "unrealizedPnlBase",
       "unrealizedPnlPct",
       "allocationPct",
@@ -89,7 +103,7 @@ describe("mandatory / optional column defaults", () => {
     expect(new Set(order).size).toBe(order.length);
 
     // La queue suit le libellé : une colonne ajoutée demain s'y range seule.
-    const tail = order.slice(10);
+    const tail = order.slice(11);
     const labels = tail.map(
       (id) => HOLDINGS_COLUMN_META.find((c) => c.id === id)!.label
     );

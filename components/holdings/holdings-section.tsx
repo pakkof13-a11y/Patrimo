@@ -25,8 +25,11 @@ import {
   type ColumnOrderState,
   type ColumnSizingState,
 } from "@tanstack/react-table";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Sparkline } from "@/components/ui/sparkline";
+import { fetchJson } from "@/app/lib/api-client";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
 import { AssetLogo, PlatformLogo } from "@/components/ui/platform-logo";
 import { EnvelopeCashPanel } from "@/components/tabs/envelope-cash-panel";
@@ -133,6 +136,15 @@ import {
 
 const TABLE_KEY = "holdings";
 const EXPAND_COL_PX = HOLDINGS_EXPAND_COL_PX;
+
+/** Aligné sur le plafond de la route : au-delà, elle tronque la demande. */
+const SPARKLINE_MAX_ASSETS = 120;
+/**
+ * Les clôtures d'hier ne changent plus : le cache peut être long. Il n'y a
+ * aucune raison de retélécharger un mois d'historique parce qu'on est revenu
+ * sur l'onglet.
+ */
+const SPARKLINE_STALE_MS = 5 * 60_000;
 
 export function HoldingsSection({
   tab,
@@ -554,6 +566,39 @@ export function HoldingsSection({
 
   const groupMode = groupBy !== "none";
 
+  /**
+   * Vignettes de tendance — une requête pour tout le tableau.
+   *
+   * La clé porte les actifs du portefeuille **avant** filtrage, et non les
+   * lignes visibles : sinon chaque frappe dans la recherche relancerait une
+   * requête pour redessiner des courbes déjà en cache. La liste est triée pour
+   * que deux rendus du même portefeuille produisent la même clé.
+   */
+  const sparklineIds = useMemo(() => {
+    const ids = [...new Set(holdings.map((h) => h.assetId).filter(Boolean))];
+    ids.sort();
+    return ids.slice(0, SPARKLINE_MAX_ASSETS);
+  }, [holdings]);
+
+  const trendColumnVisible = columnVisibility.trend !== false;
+
+  const sparklinesQuery = useQuery({
+    queryKey: ["portfolio-sparklines", sparklineIds],
+    // Colonne masquée = aucune requête : on ne télécharge pas trente
+    // historiques pour des courbes que personne ne regarde.
+    enabled: sparklineIds.length > 0 && trendColumnVisible,
+    queryFn: () =>
+      fetchJson<{ series: Record<string, number[]> }>(
+        `/api/portfolio/sparklines?ids=${encodeURIComponent(sparklineIds.join(","))}`
+      ),
+    staleTime: SPARKLINE_STALE_MS,
+    gcTime: 15 * 60_000,
+    retry: 1,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  });
+  const sparklines = sparklinesQuery.data?.series;
+
   const columns = useMemo<ColumnDef<Holding>[]>(
     () => [
       {
@@ -788,6 +833,52 @@ export function HoldingsSection({
             </span>
           </div>
         ),
+      },
+      {
+        /*
+          Tendance à trente jours.
+
+          Une colonne sans donnée propre : elle ne trie pas, ne se redimensionne
+          pas, ne dit rien qu'une autre colonne ne dise en chiffres. Elle donne
+          la seule chose qu'un nombre ne donne pas — la forme du chemin parcouru
+          pour y arriver.
+
+          Vide quand l'actif n'a pas de clôtures en cache. Une diagonale entre
+          deux points inventés aurait l'apparence d'une tendance sans en être
+          une, ce qui serait pire que la case vide.
+        */
+        id: "trend",
+        accessorKey: "assetId",
+        // En-tête muet : le mockup n'en montre aucun au-dessus des vignettes,
+        // et le libellé complet reste disponible — infobulle de l'en-tête et
+        // sélecteur de colonnes le lisent depuis la méta.
+        header: () => <span className="sr-only">Tendance 30 j</span>,
+        enableSorting: false,
+        cell: ({ row }) => {
+          const closes = sparklines?.[row.original.assetId];
+          if (!closes || closes.length < 2) {
+            return (
+              <span className="text-[10px] text-slate-400 dark:text-slate-600">
+                —
+              </span>
+            );
+          }
+          const up = closes[closes.length - 1]! >= closes[0]!;
+          return (
+            <span
+              className="block h-6 w-full"
+              title={`Tendance sur ${closes.length} clôtures (30 derniers jours)`}
+            >
+              <Sparkline
+                values={closes}
+                stroke={up ? "var(--chart-positive)" : "var(--chart-negative)"}
+                width={80}
+                height={24}
+                className="h-full w-full"
+              />
+            </span>
+          );
+        },
       },
       {
         accessorKey: "unrealizedPnlBase",
@@ -1038,7 +1129,7 @@ export function HoldingsSection({
           ),
       },
     ],
-    [baseCurrency, onAccountTypeChange, onTriggerLevelChange]
+    [baseCurrency, onAccountTypeChange, onTriggerLevelChange, sparklines]
   );
 
   const table = useReactTable({

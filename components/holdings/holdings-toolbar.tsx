@@ -266,7 +266,7 @@ export function HoldingsToolbar({
             columns={HOLDINGS_COLUMN_META.map((c) => ({
               id: c.id,
               label: c.label,
-              locked: c.group === "mandatory" || Boolean(c.locked),
+              locked: Boolean(c.locked),
               group: c.group,
             }))}
             visibility={columns.visibility}

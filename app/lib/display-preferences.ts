@@ -184,6 +184,21 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
     locked: true,
     minWidth: 120,
   },
+  {
+    /*
+      Visible par défaut, mais décochable — d'où `mandatory` sans `locked`.
+
+      Les colonnes verrouillées sont celles sans lesquelles une ligne cesse
+      d'être identifiable ou chiffrable. Une vignette de tendance n'entre dans
+      aucune de ces deux catégories : elle ne dit rien qu'un nombre voisin ne
+      dise, elle dit seulement par quel chemin il est arrivé là. Qui veut un
+      tableau de chiffres denses doit pouvoir s'en défaire.
+    */
+    id: "trend",
+    label: "Tendance 30 j",
+    group: "mandatory",
+    minWidth: 96,
+  },
   // —— OPTIONAL (togglable, hidden by default) ——
   { id: "avgCostEur", label: "PRU", group: "optional", minWidth: 100 },
   { id: "ticker", label: "Ticker", group: "optional", minWidth: 88 },
@@ -238,7 +253,8 @@ function sortColumnsByLabel(cols: HoldingsColumnMeta[]): HoldingsColumnMeta[] {
  *
  * Il suit une phrase, et non l'alphabet : *quoi* (actif, ticker, enveloppe),
  * *combien* (quantité, prix payé, cours du jour), *ce que ça vaut* (valeur),
- * *ce que ça a fait* (P&L en euros puis en pourcentage), *ce que ça pèse*.
+ * *par quel chemin* (vignette de tendance), *ce que ça a fait* (P&L en euros
+ * puis en pourcentage), *ce que ça pèse*.
  *
  * L'ordre alphabétique qui régnait ici plaçait « Cours » avant « Enveloppe » et
  * « PRU » après « Allocation » : chaque colonne était à sa place dans le
@@ -255,6 +271,7 @@ const READING_ORDER = [
   "avgCostEur",
   "currentPriceNative",
   "marketValueBase",
+  "trend",
   "unrealizedPnlBase",
   "unrealizedPnlPct",
   "allocationPct",

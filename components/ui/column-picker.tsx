@@ -26,8 +26,17 @@ function reorderIds(order: string[], fromId: string, toId: string): string[] {
   return next;
 }
 
+/**
+ * Seul `locked` décide : c'est lui qui dit « cette case ne se décoche pas ».
+ *
+ * `group` disait la même chose jusqu'ici, et la confusion était sans
+ * conséquence tant que les deux allaient de pair. Elle en a une depuis qu'une
+ * colonne peut être affichée par défaut sans être imposée : la vignette de
+ * tendance. Un groupe décrit ce qu'on montre au départ, un verrou décrit ce
+ * qu'on interdit d'enlever — ce ne sont pas les mêmes questions.
+ */
 function isMandatoryItem(c: ColumnPickerItem): boolean {
-  return Boolean(c.locked) || c.group === "mandatory";
+  return Boolean(c.locked);
 }
 
 type MenuCoords = {
