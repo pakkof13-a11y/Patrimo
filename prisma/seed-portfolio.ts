@@ -25,6 +25,8 @@ const THREE_YEARS = 1095;
 type AssetSeed = {
   name: string;
   ticker: string;
+  /** Épinglé dans la watchlist du tableau de bord (démo). */
+  watched?: boolean;
   isin?: string;
   assetClass: string;
   category?:
@@ -117,6 +119,7 @@ export async function seedUserPortfolio(
     {
       name: "LVMH",
       ticker: "MC.PA",
+      watched: true,
       isin: "FR0000121014",
       assetClass: "ACTIONS",
       category: "EQUITY",
@@ -346,6 +349,7 @@ export async function seedUserPortfolio(
     {
       name: "Bitcoin",
       ticker: "BTC",
+      watched: true,
       assetClass: "CRYPTO",
       category: "CRYPTO",
       accountType: "CRYPTO",
@@ -544,6 +548,7 @@ export async function seedUserPortfolio(
     {
       name: "Nvidia",
       ticker: "NVDA",
+      watched: true,
       assetClass: "ACTIONS",
       category: "EQUITY",
       accountType: "CTO",
@@ -612,6 +617,10 @@ export async function seedUserPortfolio(
         stopLoss: s.stopLoss != null ? D(s.stopLoss) : null,
         tp1: s.tp1 != null ? D(s.tp1) : null,
         acquisitionDate: daysAgo(s.openDaysAgo),
+        // Quelques lignes suivies d'emblée : une carte « Watchlist » vide au
+        // premier lancement se lit comme une fonctionnalité en panne plutôt
+        // que comme une liste à composer.
+        watchlistedAt: s.watched ? daysAgo(Math.min(s.openDaysAgo, 30)) : null,
       },
     });
     positions.push({ ...s, id: asset.id });

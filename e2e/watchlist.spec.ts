@@ -23,19 +23,23 @@ test.describe("Watchlist", () => {
       timeout: 20_000,
     });
 
-    // On part d'une watchlist vide pour que l'assertion porte sur *cet* actif.
+    /*
+      On part d'une watchlist vide pour que l'assertion porte sur *cet* actif,
+      et on rend la base telle qu'on l'a trouvée à la fin : la démo épingle
+      quelques lignes, et les autres tests de la série tournent après celui-ci.
+    */
     const holdings = await (
       await request.get("/api/holdings?base=EUR")
     ).json();
-    for (const h of holdings.holdings as Array<{
-      assetId: string;
-      watchlisted?: boolean;
-    }>) {
-      if (h.watchlisted) {
-        await request.patch(`/api/assets/${h.assetId}/watchlist`, {
-          data: { watchlisted: false },
-        });
-      }
+    const preWatched = (
+      holdings.holdings as Array<{ assetId: string; watchlisted?: boolean }>
+    )
+      .filter((h) => h.watchlisted)
+      .map((h) => h.assetId);
+    for (const assetId of preWatched) {
+      await request.patch(`/api/assets/${assetId}/watchlist`, {
+        data: { watchlisted: false },
+      });
     }
 
     const row = page.locator("tr.holdings-row").first();
@@ -66,6 +70,12 @@ test.describe("Watchlist", () => {
     await expect(page.getByTestId("watchlist-empty")).toBeVisible({
       timeout: 20_000,
     });
+
+    for (const assetId of preWatched) {
+      await request.patch(`/api/assets/${assetId}/watchlist`, {
+        data: { watchlisted: true },
+      });
+    }
   });
 
   test("API : un actif d'un autre compte ne peut pas être épinglé", async ({
