@@ -151,7 +151,7 @@ export function renderHoldingRow(row: Row<Holding>, opts: HoldingRowRenderOpts) 
         arrêtent la propagation pour rester utilisables.
       */}
       <tr
-        className="holdings-row holdings-row--clickable border-t border-[var(--border)]"
+        className="holdings-row holdings-row--clickable"
         title={`Ouvrir la fiche de ${holding.name}`}
         role="button"
         tabIndex={0}

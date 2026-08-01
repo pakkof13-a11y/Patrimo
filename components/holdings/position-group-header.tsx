@@ -153,11 +153,19 @@ export function PositionGroupHeader({
               className="h-4 w-4 shrink-0 text-[var(--primary-text)]"
               aria-hidden
             />
-            <span className="min-w-0 truncate font-medium text-[var(--foreground)]">
-              {label}
-            </span>
-            <span className="text-label shrink-0 tabular-nums">
-              {count} {count === 1 ? "ligne" : "lignes"}
+            {/*
+              Nom au-dessus, décompte en dessous : le groupe se lit alors comme
+              les lignes qu'il coiffe, dont le nom surmonte aussi sa précision.
+              Sur une seule ligne, le décompte se disputait la place avec le
+              libellé et le tronquait sur les classes au nom long.
+            */}
+            <span className="min-w-0">
+              <span className="block truncate font-medium text-[var(--foreground)]">
+                {label}
+              </span>
+              <span className="text-label block tabular-nums">
+                {count} {count === 1 ? "position" : "positions"}
+              </span>
             </span>
             {spark && spark.length >= 2 && (
               <span className="ml-auto hidden h-[1.25rem] w-[4.5rem] shrink-0 lg:block">

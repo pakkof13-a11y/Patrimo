@@ -1034,6 +1034,27 @@ input:focus-visible {
   border-right: none;
 }
 
+/*
+ * Portefeuille : aucun séparateur, ni vertical ni horizontal.
+ *
+ * Le quadrillage appartient au tableur, pas au relevé. Ce que l'œil doit
+ * suivre ici est une colonne de nombres alignés ; les filets qui les
+ * encadraient ajoutaient trente-six traits pour n'aider en rien, et le
+ * regroupement par classe donne déjà le seul découpage qui compte.
+ *
+ * L'alignement suffit à tenir les colonnes, la rangée survolée à tenir la
+ * ligne. Portée à la seule table du portefeuille : les autres écrans gardent
+ * leur grille.
+ */
+.holdings-table-scroll .table-fluid th,
+.holdings-table-scroll .table-fluid td {
+  border-right: none;
+}
+
+.holdings-table-scroll .holdings-row {
+  border-top: none;
+}
+
 .table-fluid th.col-tight,
 .table-fluid td.col-tight {
   min-width: 5rem;
@@ -1060,16 +1081,6 @@ input:focus-visible {
 .dark .table-fluid th.col-drag-over {
   box-shadow: inset 3px 0 0 0 rgb(45 212 191);
 }
-.table-fluid th .col-drag-hint {
-  opacity: 0.35;
-  vertical-align: middle;
-  margin-right: 0.25rem;
-  cursor: grab;
-}
-.table-fluid th:hover .col-drag-hint {
-  opacity: 0.75;
-}
-
 /* Manual column resize (Excel-like) + flex-fill widths from JS */
 .table-fluid.table-col-resize {
   table-layout: fixed;
@@ -1650,6 +1661,9 @@ textarea:focus-visible,
   -webkit-appearance: none;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  /* Au plus juste du texte : trois lettres n'ont pas besoin d'une boîte. */
+  width: fit-content;
   padding-inline: var(--space-2);
   height: 1.25rem;
   border: var(--border-width) solid var(--border);

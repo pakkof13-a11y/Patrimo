@@ -25,7 +25,7 @@ import {
   type ColumnOrderState,
   type ColumnSizingState,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
 import { AssetLogo, PlatformLogo } from "@/components/ui/platform-logo";
@@ -75,7 +75,6 @@ import {
   cn,
 } from "@/app/lib/utils";
 import {
-  priceSourceLabel,
   type HistoryPoint,
   type Holding,
   type MainTab,
@@ -758,18 +757,18 @@ export function HoldingsSection({
                 { crypto: row.original.assetClass === "CRYPTO" }
               )}
             </div>
-            <div className="text-[10px] tracking-wide text-slate-400">
-              {priceSourceLabel(row.original.priceSource)}
-              {row.original.priceStatus === "STALE" && (
-                <span className="ml-1 text-amber-500">· périmé</span>
-              )}
-              {row.original.priceStatus === "OK" &&
-                row.original.priceSource &&
-                row.original.priceSource !== "seed" &&
-                row.original.priceSource !== "coût" && (
-                  <span className="ml-1 text-emerald-500">· live</span>
-                )}
-            </div>
+            {/*
+              La provenance du cours ne s'affiche plus sous chaque ligne : elle
+              répétait « Démo » trente fois pour une information qui n'intéresse
+              que lorsqu'elle cloche. Seul le cas qui cloche reste visible — un
+              cours périmé —, et la ligne entière le signale déjà par
+              `data-stale`. Le détail complet vit dans le panneau de droite.
+            */}
+            {row.original.priceStatus === "STALE" && (
+              <div className="text-[10px] tracking-wide text-amber-500">
+                cours périmé
+              </div>
+            )}
           </div>
         ),
       },
@@ -787,7 +786,6 @@ export function HoldingsSection({
                 baseCurrency
               )}
             </span>
-            <div className="text-[10px] text-slate-400">qté × cours</div>
           </div>
         ),
       },
@@ -1545,7 +1543,27 @@ export function HoldingsSection({
                           width: size,
                           minWidth: floor,
                         }}
-                        title={`${fullLabel}\nClic = trier · ⋮⋮ = déplacer · bord = largeur`}
+                        title={`${fullLabel}\nClic = trier · glisser = déplacer · bord = largeur`}
+                        /*
+                          L'en-tête entier porte le glisser-déposer, au lieu
+                          d'une poignée dédiée. Celle-ci occupait seize pixels
+                          dans chacune des dix colonnes — assez pour tronquer
+                          « TICKER » en « TICK… » — et le mockup n'en montre
+                          aucune. La cible est désormais plus grande, pas plus
+                          petite.
+                        */
+                        draggable
+                        onDragStart={(e) => {
+                          dragColRef.current = colId;
+                          setDraggingCol(colId);
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/plain", colId);
+                        }}
+                        onDragEnd={() => {
+                          dragColRef.current = null;
+                          setDraggingCol(null);
+                          setDragOverCol(null);
+                        }}
                         onDragOver={(e) => {
                           e.preventDefault();
                           e.dataTransfer.dropEffect = "move";
@@ -1572,26 +1590,6 @@ export function HoldingsSection({
                         }}
                       >
                         <span className="inline-flex max-w-full items-center gap-0.5 overflow-hidden">
-                          <span
-                            draggable
-                            className="col-drag-hint inline-flex shrink-0"
-                            title="Glisser pour réordonner"
-                            onDragStart={(e) => {
-                              dragColRef.current = colId;
-                              setDraggingCol(colId);
-                              e.dataTransfer.effectAllowed = "move";
-                              e.dataTransfer.setData("text/plain", colId);
-                              e.stopPropagation();
-                            }}
-                            onDragEnd={() => {
-                              dragColRef.current = null;
-                              setDraggingCol(null);
-                              setDragOverCol(null);
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <GripVertical className="h-3 w-3" aria-hidden />
-                          </span>
                           <span
                             className="min-w-0 truncate"
                             data-column-label
