@@ -40,7 +40,7 @@ test.describe("Portefeuille — chemins d’action", () => {
     await expect(row).toBeVisible({ timeout: 15_000 });
     await row.click();
 
-    await expect(page.getByTestId("asset-workspace-panel")).toBeVisible({
+    await expect(page.getByTestId("asset-panel-head")).toBeVisible({
       timeout: 10_000,
     });
     // Les onglets s'affichent avant la donnée : attendre la fin du chargement,
@@ -72,7 +72,7 @@ test.describe("Portefeuille — chemins d’action", () => {
     await row.focus();
     await row.press("Enter");
 
-    await expect(page.getByTestId("asset-workspace-panel")).toBeVisible({
+    await expect(page.getByTestId("asset-panel-head")).toBeVisible({
       timeout: 10_000,
     });
   });

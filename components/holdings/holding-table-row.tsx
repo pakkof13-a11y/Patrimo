@@ -122,8 +122,10 @@ export function TriggerLevelInput({
 }
 
 export type HoldingRowRenderOpts = {
-  /** Ouvre la fiche latérale de l'actif. */
+  /** Affiche l'actif dans la colonne de détail. */
   onOpenAsset: (id: string) => void;
+  /** Actif actuellement affiché dans cette colonne, s'il y en a un. */
+  selectedAssetId?: string | null;
 };
 
 /**
@@ -133,6 +135,7 @@ export type HoldingRowRenderOpts = {
 export function renderHoldingRow(row: Row<Holding>, opts: HoldingRowRenderOpts) {
   const assetId = row.original.assetId;
   const holding = row.original;
+  const selected = opts.selectedAssetId === assetId;
   return (
     <Fragment key={row.id}>
       {/*
@@ -161,6 +164,8 @@ export function renderHoldingRow(row: Row<Holding>, opts: HoldingRowRenderOpts) 
         }}
         data-category={parseAssetCategory(holding.category)}
         data-stale={holding.priceStatus === "STALE" ? "true" : "false"}
+        data-selected={selected ? "true" : "false"}
+        aria-current={selected ? "true" : undefined}
       >
         {row.getVisibleCells().map((cell) => {
           const size = cell.column.getSize();

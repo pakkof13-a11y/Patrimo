@@ -146,6 +146,7 @@ export function HoldingsSection({
   onAccountTypeChange,
   onTriggerLevelChange,
   onRowDoubleClick,
+  selectedAssetId,
   onCategoryChange,
   onAddTransaction,
   onImport,
@@ -166,6 +167,8 @@ export function HoldingsSection({
     value: string | null
   ) => void;
   onRowDoubleClick: (assetId: string) => void;
+  /** Ligne actuellement affichée dans la colonne de détail. */
+  selectedAssetId?: string | null;
   /** CTA empty state */
   onAddTransaction?: () => void;
   onImport?: () => void;
@@ -1727,7 +1730,10 @@ export function HoldingsSection({
               {!loading &&
                 !groupMode &&
                 table.getRowModel().rows.map((row) =>
-                  renderHoldingRow(row, { onOpenAsset: onRowDoubleClick })
+                  renderHoldingRow(row, {
+                    onOpenAsset: onRowDoubleClick,
+                    selectedAssetId,
+                  })
                 )}
               {!loading &&
                 groupMode &&
@@ -1780,7 +1786,10 @@ export function HoldingsSection({
                         group.positions.map((pos) => {
                           const row = rowByAssetId.get(pos.assetId);
                           if (!row) return null;
-                          return renderHoldingRow(row, { onOpenAsset: onRowDoubleClick });
+                          return renderHoldingRow(row, {
+                    onOpenAsset: onRowDoubleClick,
+                    selectedAssetId,
+                  });
                         })}
                     </Fragment>
                   );

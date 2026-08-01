@@ -81,23 +81,22 @@ test.describe("Performance cumulée jour 1", () => {
       search: "E2PERF",
     });
 
-    // Ouvrir la fiche actif : expand → « Fiche complète » (plus fiable que dblclick e2e)
+    // Sélectionner la ligne : un clic suffit, la colonne de détail se remplit.
     const row = page
       .getByTestId("holdings-table")
       .locator("tr", { hasText: /E2PERF|E2E Perf Day1/i })
       .first();
     await expect(row).toBeVisible({ timeout: 15_000 });
-    await row.locator("button[aria-expanded]").first().click();
-    await page.getByTestId(`holding-open-detail-${assetId}`).click();
+    await row.click();
 
-    // Espace de travail + graphique (section Performance)
-    await expect(page.getByTestId("asset-detail-header")).toBeVisible({
+    // Colonne de détail + graphique (section Performance)
+    await expect(page.getByTestId("asset-panel-head")).toBeVisible({
       timeout: 30_000,
     });
     await expect(page.getByTestId("asset-detail-loading")).toHaveCount(0, {
       timeout: 30_000,
     });
-    await page.getByTestId("asset-workspace-tab-performance").click();
+    await page.getByTestId("asset-panel-section-performance").click();
     await expect(page.getByTestId("asset-price-chart")).toBeVisible({
       timeout: 30_000,
     });
@@ -119,9 +118,10 @@ test.describe("Performance cumulée jour 1", () => {
     await expect(latent).toBeVisible();
     expect((await latent.innerText()).replace(/\s/g, " ")).toMatch(/0[,.]00/);
 
-    // Fermer l'espace de travail
-    await page.getByTestId("asset-workspace-close").click();
-    await expect(page.getByTestId("asset-workspace-panel")).toHaveCount(0, {
+    // Refermer la sélection : la colonne reste en place et redevient vide,
+    // puisqu'elle est ancrée dans la page et non superposée.
+    await page.getByTestId("asset-panel-close").click();
+    await expect(page.getByTestId("asset-panel-empty")).toBeVisible({
       timeout: 10_000,
     });
 

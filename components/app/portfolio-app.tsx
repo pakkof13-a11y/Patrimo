@@ -76,7 +76,7 @@ import { DashboardTab } from "@/components/dashboard/dashboard-tab";
 import { HoldingsSection } from "@/components/holdings/holdings-section";
 import { TransactionModal } from "@/components/modals/transaction-modal";
 import { PlatformModal } from "@/components/modals/platform-modal";
-import { AssetWorkspace } from "@/components/holdings/asset-workspace";
+import { AssetPanel } from "@/components/holdings/asset-panel";
 import { ImportCsvModal } from "@/components/modals/import-csv-modal";
 import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
 import { PropertyModal } from "@/components/modals/property-modal";
@@ -1165,21 +1165,112 @@ function PortfolioAppClient({
 
             <div data-slot="positions">
               {positionsView ? (
-                <HoldingsSection
-                  tab={tab}
-                  holdings={holdings}
-                  history={historyQ.data?.history}
-                  loading={holdingsQ.isPending && !holdingsQ.data}
-                  baseCurrency={baseCurrency}
-                  envelopeFilters={envelopeFilters}
-                  onEnvelopeFiltersChange={onEnvelopeFiltersChange}
-                  onAccountTypeChange={onAccountTypeChange}
-                  onTriggerLevelChange={onTriggerLevelChange}
-                  onRowDoubleClick={setDetailAssetId}
-                  onCategoryChange={onCategoryChange}
-                  onAddTransaction={() => openNewTransaction("ACHAT")}
-                  onImport={() => setShowImport(true)}
-                />
+                /*
+                  Liste et détail côte à côte : la colonne de droite est un
+                  élément de la grille, pas une surimpression. Sélectionner une
+                  ligne ne masque donc jamais le portefeuille — c'était tout le
+                  défaut du panneau modal qu'elle remplace.
+                */
+                <div className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_23rem] xl:items-start">
+                  <HoldingsSection
+                    tab={tab}
+                    holdings={holdings}
+                    history={historyQ.data?.history}
+                    loading={holdingsQ.isPending && !holdingsQ.data}
+                    baseCurrency={baseCurrency}
+                    envelopeFilters={envelopeFilters}
+                    onEnvelopeFiltersChange={onEnvelopeFiltersChange}
+                    onAccountTypeChange={onAccountTypeChange}
+                    onTriggerLevelChange={onTriggerLevelChange}
+                    onRowDoubleClick={setDetailAssetId}
+                    selectedAssetId={detailAssetId}
+                    onCategoryChange={onCategoryChange}
+                    onAddTransaction={() => openNewTransaction("ACHAT")}
+                    onImport={() => setShowImport(true)}
+                  />
+
+                  <AssetPanel
+                    loading={detailQ.isPending && Boolean(detailAssetId)}
+                    data={detailAssetId ? detailQ.data : null}
+                    baseCurrency={baseCurrency}
+                    /*
+                      Le poids ne peut pas se calculer dans le panneau : il ne
+                      connaît qu'un actif, pas le total. Il vient d'ici, où les
+                      positions sont déjà chargées — et reste `null` si la ligne
+                      est introuvable, plutôt que d'afficher 0 %.
+                    */
+                    portfolioSharePct={(() => {
+                      const h = allHoldings.find(
+                        (x) => x.assetId === detailAssetId
+                      );
+                      const pct =
+                        h?.allocationPct != null ? Number(h.allocationPct) : NaN;
+                      return Number.isFinite(pct) ? pct : null;
+                    })()}
+                    onClose={() => setDetailAssetId(null)}
+                    onEditTx={(t) => {
+                      setDetailAssetId(null);
+                      openEditTx(t);
+                    }}
+                    onDeleteTx={(id) => {
+                      deleteTx.mutate(id, {
+                        onSuccess: () => {
+                          qc.invalidateQueries({
+                            queryKey: ["asset-detail", detailAssetId],
+                          });
+                        },
+                      });
+                    }}
+              onAddTransaction={(type) => {
+                const h = allHoldings.find((x) => x.assetId === detailAssetId);
+                setDetailAssetId(null);
+                if (h) {
+                  openNewTransaction(type || "ACHAT", h);
+                  return;
+                }
+                // Fallback si position absente mais détail chargé
+                const d = detailQ.data;
+                if (d?.asset) {
+                  const platformId =
+                    d.transactions[0]?.platformId || platforms[0]?.id || "";
+                  openNewTransaction(type || "ACHAT", {
+                    assetId: d.asset.id,
+                    name: d.asset.name,
+                    ticker: d.asset.ticker,
+                    assetClass: d.asset.assetClass,
+                    accountType: asAccountType(
+                      (d.asset as { accountType?: string }).accountType,
+                      "CTO"
+                    ),
+                    currency: d.asset.currency,
+                    platformId,
+                    platformName: d.asset.platformName,
+                    platformLogoUrl: d.asset.platformLogoUrl,
+                    quantity: asQuantityString(d.holding?.quantity || "0"),
+                    avgCostEur: asEurAmount(d.holding?.avgCostEur || "0"),
+                    costBasisEur: asEurAmount("0"),
+                    currentPriceEur: asPriceString(
+                      d.asset.priceQuote?.priceEur || "0"
+                    ),
+                    currentPriceNative: asPriceString(
+                      d.asset.priceQuote?.priceNative || "0"
+                    ),
+                    marketValueEur: asEurAmount(d.holding?.marketValueEur || "0"),
+                    marketValueBase: asBaseAmount(d.holding?.marketValueEur || "0"),
+                    costBasisBase: asBaseAmount("0"),
+                    unrealizedPnlEur: asEurAmount("0"),
+                    unrealizedPnlBase: asBaseAmount("0"),
+                    unrealizedPnlPct: asPercentString("0"),
+                    priceSource: null,
+                    priceStatus: null,
+                    lastUpdatedAt: null,
+                  });
+                } else {
+                  openNewTransaction(type || "ACHAT");
+                }
+              }}
+                  />
+                </div>
               ) : null}
             </div>
 
@@ -1369,84 +1460,6 @@ function PortfolioAppClient({
         onClose={() => setShowPlatform(false)}
         onSubmit={(v) => savePlatform.mutate(v)}
         pending={savePlatform.isPending}
-      />
-
-      <AssetWorkspace
-        open={Boolean(detailAssetId)}
-        loading={detailQ.isPending && !detailQ.data}
-        data={detailQ.data}
-        baseCurrency={baseCurrency}
-        /*
-          Le poids dans le patrimoine ne peut pas se calculer dans le panneau :
-          il ne connaît qu'un actif, pas le total. Il vient donc d'ici, où les
-          positions sont déjà toutes chargées — et reste `null` si la ligne
-          n'est pas trouvée, plutôt que d'afficher 0 %.
-        */
-        portfolioSharePct={(() => {
-          const h = allHoldings.find((x) => x.assetId === detailAssetId);
-          const pct = h?.allocationPct != null ? Number(h.allocationPct) : NaN;
-          return Number.isFinite(pct) ? pct : null;
-        })()}
-        onClose={() => setDetailAssetId(null)}
-        onEditTx={(t) => {
-          setDetailAssetId(null);
-          openEditTx(t);
-        }}
-        onDeleteTx={(id) => {
-          deleteTx.mutate(id, {
-            onSuccess: () => {
-              qc.invalidateQueries({ queryKey: ["asset-detail", detailAssetId] });
-            },
-          });
-        }}
-        onAddTransaction={(type) => {
-          const h = allHoldings.find((x) => x.assetId === detailAssetId);
-          setDetailAssetId(null);
-          if (h) {
-            openNewTransaction(type || "ACHAT", h);
-            return;
-          }
-          // Fallback si position absente mais détail chargé
-          const d = detailQ.data;
-          if (d?.asset) {
-            const platformId =
-              d.transactions[0]?.platformId || platforms[0]?.id || "";
-            openNewTransaction(type || "ACHAT", {
-              assetId: d.asset.id,
-              name: d.asset.name,
-              ticker: d.asset.ticker,
-              assetClass: d.asset.assetClass,
-              accountType: asAccountType(
-                (d.asset as { accountType?: string }).accountType,
-                "CTO"
-              ),
-              currency: d.asset.currency,
-              platformId,
-              platformName: d.asset.platformName,
-              platformLogoUrl: d.asset.platformLogoUrl,
-              quantity: asQuantityString(d.holding?.quantity || "0"),
-              avgCostEur: asEurAmount(d.holding?.avgCostEur || "0"),
-              costBasisEur: asEurAmount("0"),
-              currentPriceEur: asPriceString(
-                d.asset.priceQuote?.priceEur || "0"
-              ),
-              currentPriceNative: asPriceString(
-                d.asset.priceQuote?.priceNative || "0"
-              ),
-              marketValueEur: asEurAmount(d.holding?.marketValueEur || "0"),
-              marketValueBase: asBaseAmount(d.holding?.marketValueEur || "0"),
-              costBasisBase: asBaseAmount("0"),
-              unrealizedPnlEur: asEurAmount("0"),
-              unrealizedPnlBase: asBaseAmount("0"),
-              unrealizedPnlPct: asPercentString("0"),
-              priceSource: null,
-              priceStatus: null,
-              lastUpdatedAt: null,
-            });
-          } else {
-            openNewTransaction(type || "ACHAT");
-          }
-        }}
       />
 
       {/*
