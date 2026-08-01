@@ -1176,9 +1176,6 @@ function PortfolioAppClient({
                   onAccountTypeChange={onAccountTypeChange}
                   onTriggerLevelChange={onTriggerLevelChange}
                   onRowDoubleClick={setDetailAssetId}
-                  onOpenTransactionForAsset={(type, h) =>
-                    openNewTransaction(type, h)
-                  }
                   onCategoryChange={onCategoryChange}
                   onAddTransaction={() => openNewTransaction("ACHAT")}
                   onImport={() => setShowImport(true)}

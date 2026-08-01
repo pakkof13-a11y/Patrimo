@@ -2,11 +2,13 @@ import { test, expect } from "@playwright/test";
 import { gotoDashboard, clickNav } from "./helpers";
 
 /**
- * Hiérarchie d’actions Positions :
- * flèche = historique · double-clic = détail · Transaction contextuelle préremplie.
- * Plus de menu ⋯ en bout de ligne.
+ * Chemins d'action du tableau Portefeuille.
+ *
+ * La ligne n'a plus qu'un seul geste : un clic ouvre la fiche. La case à
+ * cocher, le chevron d'historique dépliable et le double-clic ont disparu
+ * avec elle — la fiche latérale dit tout ce qu'ils disaient, et plus.
  */
-test.describe("Positions — chemins d’action", () => {
+test.describe("Portefeuille — chemins d’action", () => {
   test.beforeEach(async ({ page }) => {
     await gotoDashboard(page);
     await clickNav(page, "Positions");
@@ -20,44 +22,24 @@ test.describe("Positions — chemins d’action", () => {
     await expect(actions).toHaveCount(0);
   });
 
-  test("expansion : historique + Transaction préremplie", async ({ page }) => {
-    const expand = page.locator("[data-testid^='holding-expand-']").first();
-    await expect(expand).toBeVisible({ timeout: 15_000 });
-    const assetId = (await expand.getAttribute("data-testid"))?.replace(
-      "holding-expand-",
-      ""
-    );
-    expect(assetId).toBeTruthy();
-
-    await expand.click();
-    const panel = page.getByTestId(`holding-expand-panel-${assetId}`);
-    await expect(panel).toBeVisible();
-    await expect(page.getByTestId("holding-recent-txs")).toBeVisible();
-
-    await expect(
-      page.getByTestId(`holding-add-tx-${assetId}`)
-    ).toBeVisible();
-    await page.getByTestId(`holding-add-tx-${assetId}`).click();
-
-    // Modal transaction ouverte (flow global)
-    await expect(page.getByTestId("modal-overlay")).toBeVisible({
-      timeout: 10_000,
-    });
-    // Actif prérempli : label non vide dans l’autocomplete / champ
-    const overlay = page.getByTestId("modal-overlay");
-    await expect(overlay.getByText(/Transaction|Achat|Nouvell/i).first()).toBeVisible({
-      timeout: 5_000,
-    });
-  });
-
-  test("double-clic ouvre la fiche avec Transaction dans l’historique", async ({
+  test("plus de case à cocher ni de chevron d'historique en tête de ligne", async ({
     page,
   }) => {
-    const row = page.locator("[data-testid='holdings-table'] tbody tr.holdings-row").first();
-    await expect(row).toBeVisible({ timeout: 15_000 });
-    await row.dblclick();
+    await expect(
+      page.locator("[data-testid^='holding-select-']")
+    ).toHaveCount(0);
+    await expect(
+      page.locator("[data-testid^='holding-expand-']")
+    ).toHaveCount(0);
+  });
 
-    // La fiche est désormais un espace de travail latéral, pas une modale.
+  test("un clic ouvre la fiche de l'actif", async ({ page }) => {
+    const row = page
+      .locator("[data-testid='holdings-table'] tbody tr.holdings-row")
+      .first();
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await row.click();
+
     await expect(page.getByTestId("asset-workspace-panel")).toBeVisible({
       timeout: 10_000,
     });
@@ -73,10 +55,25 @@ test.describe("Positions — chemins d’action", () => {
     await expect(page.getByTestId("asset-detail-add-tx")).toBeVisible();
 
     await page.getByTestId("asset-detail-add-tx").click();
-    // Fiche se ferme, flow transaction s’ouvre
+    // Fiche se ferme, flow transaction s'ouvre
     await expect(page.getByTestId("asset-detail-history")).toHaveCount(0, {
       timeout: 5_000,
     });
     await expect(page.getByTestId("modal-overlay")).toBeVisible();
+  });
+
+  test("le clavier ouvre aussi la fiche (Entrée sur une ligne focalisée)", async ({
+    page,
+  }) => {
+    const row = page
+      .locator("[data-testid='holdings-table'] tbody tr.holdings-row")
+      .first();
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await row.focus();
+    await row.press("Enter");
+
+    await expect(page.getByTestId("asset-workspace-panel")).toBeVisible({
+      timeout: 10_000,
+    });
   });
 });

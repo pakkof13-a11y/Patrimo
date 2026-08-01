@@ -2,8 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { flexRender, type Row } from "@tanstack/react-table";
-import { AlertTriangle, ChevronRight } from "lucide-react";
-import { HoldingRecentTxs } from "@/components/holdings/holding-recent-txs";
+import { AlertTriangle } from "lucide-react";
 import { cn } from "@/app/lib/utils";
 import { type Holding } from "@/app/lib/types/ui";
 import { parseAssetCategory } from "@/app/lib/assets/categories";
@@ -123,14 +122,8 @@ export function TriggerLevelInput({
 }
 
 export type HoldingRowRenderOpts = {
-  expandedIds: Set<string>;
-  toggleExpanded: (id: string) => void;
-  visibleColCount: number;
-  onRowDoubleClick: (id: string) => void;
-  onOpenTransactionForAsset?: (type: string, holding: Holding) => void;
-  onEditCategory: (holding: Holding) => void;
-  selectedIds: Set<string>;
-  toggleSelected: (id: string) => void;
+  /** Ouvre la fiche latérale de l'actif. */
+  onOpenAsset: (id: string) => void;
 };
 
 /**
@@ -140,76 +133,35 @@ export type HoldingRowRenderOpts = {
 export function renderHoldingRow(row: Row<Holding>, opts: HoldingRowRenderOpts) {
   const assetId = row.original.assetId;
   const holding = row.original;
-  const expanded = opts.expandedIds.has(assetId);
-  const selected = opts.selectedIds.has(assetId);
   return (
     <Fragment key={row.id}>
+      {/*
+        Un clic ouvre la fiche.
+
+        La ligne portait auparavant deux commandes en tête — une case à cocher
+        et un chevron d'historique — et n'ouvrait la fiche qu'au double-clic,
+        geste que rien n'annonçait. Les deux colonnes ont disparu au profit du
+        panneau de détail, qui dit tout ce qu'elles disaient et davantage.
+
+        `<tr onClick>` plutôt qu'un bouton par cellule : la cible cliquable est
+        la ligne entière, et les contrôles qu'elle contient encore (l'enveloppe)
+        arrêtent la propagation pour rester utilisables.
+      */}
       <tr
-        className="holdings-row border-t border-[var(--border)]"
-        title="Double-clic = fiche détail · flèche = historique rapide"
-        onDoubleClick={() => opts.onRowDoubleClick(assetId)}
-        data-expanded={expanded ? "true" : "false"}
+        className="holdings-row holdings-row--clickable border-t border-[var(--border)]"
+        title={`Ouvrir la fiche de ${holding.name}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => opts.onOpenAsset(assetId)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            opts.onOpenAsset(assetId);
+          }
+        }}
         data-category={parseAssetCategory(holding.category)}
         data-stale={holding.priceStatus === "STALE" ? "true" : "false"}
-        data-selected={selected ? "true" : "false"}
       >
-        <td
-          className="px-0 py-2 align-middle text-center"
-          style={{
-            width: HOLDINGS_SELECT_COL_PX,
-            minWidth: HOLDINGS_SELECT_COL_PX,
-            maxWidth: HOLDINGS_SELECT_COL_PX,
-          }}
-        >
-          <input
-            type="checkbox"
-            className="accent-teal-700"
-            checked={selected}
-            aria-label={`Sélectionner ${holding.name}`}
-            data-testid={`holding-select-${assetId}`}
-            onClick={(e) => e.stopPropagation()}
-            onDoubleClick={(e) => e.stopPropagation()}
-            onChange={() => opts.toggleSelected(assetId)}
-          />
-        </td>
-        <td
-          className="holdings-expand-col px-0 py-2 align-middle text-center"
-          style={{
-            width: HOLDINGS_EXPAND_COL_PX,
-            minWidth: HOLDINGS_EXPAND_COL_PX,
-            maxWidth: HOLDINGS_EXPAND_COL_PX,
-          }}
-        >
-          <button
-            type="button"
-            className={cn(
-              "inline-flex h-4 w-4 items-center justify-center rounded border border-[var(--border)] bg-[var(--card)] p-0 text-[var(--foreground)] shadow-sm transition hover:border-[var(--primary)] hover:bg-[var(--primary-soft)] hover:text-[var(--primary)]",
-              expanded &&
-                "border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)]"
-            )}
-            aria-expanded={expanded}
-            aria-label={
-              expanded
-                ? "Masquer l'historique rapide"
-                : "Afficher l'historique rapide"
-            }
-            data-testid={`holding-expand-${assetId}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              opts.toggleExpanded(assetId);
-            }}
-            onDoubleClick={(e) => e.stopPropagation()}
-          >
-            <ChevronRight
-              className={cn(
-                "h-[10px] w-[10px] shrink-0 transition-transform duration-150",
-                expanded && "rotate-90"
-              )}
-              strokeWidth={2.5}
-              aria-hidden
-            />
-          </button>
-        </td>
         {row.getVisibleCells().map((cell) => {
           const size = cell.column.getSize();
           const floor = columnMinWidth(cell.column.id);
@@ -228,32 +180,6 @@ export function renderHoldingRow(row: Row<Holding>, opts: HoldingRowRenderOpts) 
           );
         })}
       </tr>
-      {expanded && (
-        <tr
-          className="border-t border-[var(--border)] bg-[var(--muted)]/35"
-          data-testid={`holding-expand-panel-${assetId}`}
-        >
-          <td colSpan={opts.visibleColCount} className="px-3 py-2 sm:px-4">
-            <div className="ml-1 border-l-2 border-[var(--primary)]/35 pl-3 sm:ml-2">
-              <HoldingRecentTxs
-                assetId={assetId}
-                enabled={expanded}
-                onOpenTransaction={
-                  opts.onOpenTransactionForAsset
-                    ? (type) =>
-                        opts.onOpenTransactionForAsset!(
-                          type || "ACHAT",
-                          holding
-                        )
-                    : undefined
-                }
-                onEditCategory={() => opts.onEditCategory(holding)}
-                onOpenDetail={() => opts.onRowDoubleClick(assetId)}
-              />
-            </div>
-          </td>
-        </tr>
-      )}
     </Fragment>
   );
 }

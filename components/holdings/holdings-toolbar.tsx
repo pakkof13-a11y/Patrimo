@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   ChevronDown,
+  Download,
   HelpCircle,
   RotateCcw,
   SlidersHorizontal,
@@ -24,10 +25,6 @@ import {
 import type { SavedHoldingsView } from "@/app/lib/ui-preferences";
 import type { VisibilityState } from "@tanstack/react-table";
 import type { PnlFilter } from "@/app/lib/portfolio/pnl-filter";
-import {
-  HOLDINGS_VIEW_MODES,
-  type HoldingsViewMode,
-} from "@/app/lib/portfolio/holdings-view-mode";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 export type HoldingsPageSize = (typeof PAGE_SIZE_OPTIONS)[number];
@@ -54,8 +51,8 @@ export type HoldingsToolbarProps = {
    * Niveau de détail courant, ou `null` quand les colonnes ont été composées
    * à la main et ne correspondent à aucun des trois modes.
    */
-  viewMode: HoldingsViewMode | null;
-  onViewModeChange: (mode: HoldingsViewMode) => void;
+  /** Exporte les lignes affichées. Absent = pas de bouton. */
+  onExportCsv?: () => void;
   /** Enveloppes sélectionnées (multi). Vide = aucune (liste vide). */
   envelopeFilters: AccountType[];
   onEnvelopeFiltersChange?: (v: AccountType[]) => void;
@@ -111,9 +108,8 @@ export function HoldingsToolbar({
   sourceCount,
   filteredCount,
   loading,
-  viewMode,
-  onViewModeChange,
   envelopeFilters,
+  onExportCsv,
   onEnvelopeFiltersChange,
   groupBy,
   onGroupByChange,
@@ -198,31 +194,27 @@ export function HoldingsToolbar({
           className="flex shrink-0 flex-wrap items-center gap-1.5"
           data-testid="holdings-toolbar-group-c"
         >
-          {/* Niveau de détail — devant le sélecteur de colonnes, qui reste
-              l'outil de réglage fin une fois le niveau choisi. Aucun onglet
-              n'est actif si les colonnes ont été composées à la main. */}
-          <div
-            className="term-seg"
-            role="group"
-            aria-label="Niveau de détail du tableau"
-            data-testid="holdings-view-mode"
-            data-custom={viewMode === null ? "true" : "false"}
-          >
-            {HOLDINGS_VIEW_MODES.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                className="term-seg-item"
-                data-active={viewMode === m.id ? "true" : "false"}
-                aria-pressed={viewMode === m.id}
-                title={m.hint}
-                data-testid={`holdings-view-mode-${m.id}`}
-                onClick={() => onViewModeChange(m.id)}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
+          {/*
+            Les trois niveaux de détail — Synthèse, Analyse, Expert — ont été
+            retirés. Ils proposaient trois compositions de colonnes là où le
+            sélecteur « Colonnes » permet déjà toutes les autres : deux outils
+            pour un même réglage, dont l'un contredisait l'autre dès qu'on y
+            touchait. Reste l'export, que le tableau seul ne sait pas offrir.
+          */}
+          {onExportCsv && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 px-2 text-xs"
+              onClick={onExportCsv}
+              title="Exporter les lignes affichées au format CSV"
+              data-testid="holdings-export-csv"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+              Exporter
+            </Button>
+          )}
           <div className="relative">
             <Button
               type="button"

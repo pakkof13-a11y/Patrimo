@@ -25,7 +25,7 @@ import {
   type ColumnOrderState,
   type ColumnSizingState,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, GripVertical, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
 import { AssetLogo, PlatformLogo } from "@/components/ui/platform-logo";
@@ -40,11 +40,7 @@ import {
 } from "@/components/holdings/holdings-toolbar";
 import { HoldingsEmptyState } from "@/components/holdings/holdings-empty-state";
 import { PortfolioKpiCards } from "@/components/holdings/portfolio-kpi-cards";
-import {
-  modeForVisibility,
-  visibilityForMode,
-  type HoldingsViewMode,
-} from "@/app/lib/portfolio/holdings-view-mode";
+import { visibilityForMode } from "@/app/lib/portfolio/holdings-view-mode";
 import {
   applyPlatformFilterToHolding,
   holdingMatchesPlatform,
@@ -53,7 +49,6 @@ import {
 import {
   formatRelativeUpdate,
   HOLDINGS_EXPAND_COL_PX,
-  HOLDINGS_SELECT_COL_PX,
   renderHoldingRow,
   TriggerLevelInput,
   type TriggerField,
@@ -151,7 +146,6 @@ export function HoldingsSection({
   onAccountTypeChange,
   onTriggerLevelChange,
   onRowDoubleClick,
-  onOpenTransactionForAsset,
   onCategoryChange,
   onAddTransaction,
   onImport,
@@ -175,11 +169,6 @@ export function HoldingsSection({
   /** CTA empty state */
   onAddTransaction?: () => void;
   onImport?: () => void;
-  /** Menu contextuel ligne : type tx + holding */
-  onOpenTransactionForAsset?: (
-    type: string,
-    holding: Holding
-  ) => void;
   /** Après changement de sous-catégorie (rechargement holdings) */
   onCategoryChange?: (assetId: string, category: string) => void;
 }) {
@@ -211,18 +200,6 @@ export function HoldingsSection({
   const platformIdFromUrl = searchParams.get("platformId") || "";
   const platformFilterId = platformIdFromUrl.trim();
   const platformNameFromUrl = (searchParams.get("platformName") || "").trim();
-  /** Asset ids with expanded recent-transactions panel */
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
-  /** Asset ids sélectionnés (checkboxes) — export CSV de la sélection */
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const toggleSelected = useCallback((assetId: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(assetId)) next.delete(assetId);
-      else next.add(assetId);
-      return next;
-    });
-  }, []);
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: DEFAULT_PAGE_SIZE,
@@ -321,14 +298,6 @@ export function HoldingsSection({
     [envelopeKey]
   );
 
-  function toggleExpanded(assetId: string) {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(assetId)) next.delete(assetId);
-      else next.add(assetId);
-      return next;
-    });
-  }
   /**
    * Même valeur qu'au chargement des préférences : sans cela le premier rendu
    * afficherait huit colonnes puis en ajouterait trois après hydratation, et
@@ -422,7 +391,6 @@ export function HoldingsSection({
   if (paginationResetKey !== prevPaginationResetKey) {
     setPrevPaginationResetKey(paginationResetKey);
     setPagination((prev) => ({ ...prev, pageIndex: 0 }));
-    setSelectedIds(new Set());
   }
 
   /**
@@ -583,12 +551,6 @@ export function HoldingsSection({
   }, [platformFilterId, platformNameFromUrl, holdings]);
 
   const groupMode = groupBy !== "none";
-
-  const allFilteredSelected =
-    filteredHoldings.length > 0 &&
-    filteredHoldings.every((h) => selectedIds.has(h.assetId));
-  const someFilteredSelected =
-    !allFilteredSelected && filteredHoldings.some((h) => selectedIds.has(h.assetId));
 
   const columns = useMemo<ColumnDef<Holding>[]>(
     () => [
@@ -1275,40 +1237,6 @@ export function HoldingsSection({
     onEnvelopeFiltersChange?.(Object.keys(ACCOUNT_TYPES) as AccountType[]);
   }, [onEnvelopeFiltersChange, setPlatformFilter]);
 
-  /** Toutes les colonnes déclarées par le tableau (visibles ou non). */
-  const allLeafKey = table
-    .getAllLeafColumns()
-    .map((c) => c.id)
-    .join("|");
-  const allLeafIds = useMemo(
-    () => (allLeafKey ? allLeafKey.split("|") : []),
-    [allLeafKey]
-  );
-
-  /**
-   * Niveau de détail courant — *déduit* des colonnes affichées, jamais stocké
-   * à côté. Un réglage manuel via « Colonnes » renvoie donc `null` et aucun
-   * onglet n'est actif, ce qui est plus honnête qu'un « Synthèse » allumé
-   * au-dessus de colonnes qui n'en sont plus.
-   */
-  const viewMode = useMemo(
-    () =>
-      modeForVisibility(columnVisibility as Record<string, boolean>, allLeafIds),
-    [columnVisibility, allLeafIds]
-  );
-
-  /**
-   * Changement de mode : on repart des colonnes réellement déclarées par le
-   * tableau, jamais d'une liste figée — une colonne ajoutée plus tard hérite
-   * ainsi d'une décision explicite dans les trois modes.
-   */
-  const applyViewMode = useCallback(
-    (mode: HoldingsViewMode) => {
-      setColumnVisibility(visibilityForMode(mode, allLeafIds));
-    },
-    [allLeafIds]
-  );
-
   /** Clé stable des colonnes visibles (identité stable entre renders). */
   const visibleLeafKey = table
     .getVisibleLeafColumns()
@@ -1398,9 +1326,16 @@ export function HoldingsSection({
     skipSortRef.current = true;
   }
 
-  /** Export CSV de la sélection courante — colonnes = celles visibles à l'écran, dans leur ordre. */
+  /**
+   * Export CSV de ce qui est à l'écran.
+   *
+   * Il portait sur une sélection par cases à cocher, dont la colonne a
+   * disparu. Exporter les lignes filtrées revient au même geste en un clic de
+   * moins : ce que l'utilisateur voit est ce qu'il emporte. Les colonnes
+   * exportées restent celles affichées, dans leur ordre.
+   */
   function downloadSelectionCsv() {
-    const selected = filteredHoldings.filter((h) => selectedIds.has(h.assetId));
+    const selected = filteredHoldings;
     if (selected.length === 0) return;
     const csv = holdingsToCsv(selected, visibleLeafIds, baseCurrency);
     const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
@@ -1437,8 +1372,7 @@ export function HoldingsSection({
       <div className="card-flat min-w-0 overflow-hidden">
         <HoldingsToolbar
           title={positionsTitle}
-          viewMode={viewMode}
-          onViewModeChange={applyViewMode}
+          onExportCsv={downloadSelectionCsv}
           subtitle={
             envelopeFilters.length === allEnvelopesCount
               ? "Positions calculées depuis le journal · CUMP multi-compte"
@@ -1564,37 +1498,6 @@ export function HoldingsSection({
             },
           }}
         />
-        {selectedIds.size > 0 && (
-          <div
-            className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--primary-soft)] px-4 py-2 text-sm"
-            data-testid="holdings-selection-bar"
-          >
-            <span className="font-medium text-[var(--primary)]">
-              {selectedIds.size} position{selectedIds.size !== 1 ? "s" : ""}{" "}
-              sélectionnée{selectedIds.size !== 1 ? "s" : ""}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadSelectionCsv}
-                data-testid="holdings-export-csv"
-              >
-                <Download className="h-3.5 w-3.5" />
-                Exporter CSV
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSelectedIds(new Set())}
-                data-testid="holdings-clear-selection"
-              >
-                <X className="h-3.5 w-3.5" />
-                Désélectionner
-              </Button>
-            </div>
-          </div>
-        )}
         <div
           ref={scrollWrapRef}
           className="table-container-responsive table-fluid-wrap holdings-table-scroll"
@@ -1616,44 +1519,6 @@ export function HoldingsSection({
             <thead className="table-head text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id}>
-                  <th
-                    className="px-0 py-3 text-center"
-                    style={{
-                      width: HOLDINGS_SELECT_COL_PX,
-                      minWidth: HOLDINGS_SELECT_COL_PX,
-                      maxWidth: HOLDINGS_SELECT_COL_PX,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      className="accent-teal-700"
-                      checked={allFilteredSelected}
-                      ref={(el) => {
-                        if (el) el.indeterminate = someFilteredSelected;
-                      }}
-                      aria-label="Tout sélectionner"
-                      data-testid="holdings-select-all"
-                      onChange={() => {
-                        // La nouvelle sélection ne dépend pas de l'ancienne :
-                        // tout cocher ou tout décocher se décide sur l'état
-                        // courant du filtre, pas sur la sélection précédente.
-                        setSelectedIds(
-                          allFilteredSelected
-                            ? new Set()
-                            : new Set(filteredHoldings.map((h) => h.assetId))
-                        );
-                      }}
-                    />
-                  </th>
-                  <th
-                    className="holdings-expand-col px-0 py-3 text-center"
-                    style={{
-                      width: EXPAND_COL_PX,
-                      minWidth: EXPAND_COL_PX,
-                      maxWidth: EXPAND_COL_PX,
-                    }}
-                    aria-label="Déplier les transactions"
-                  />
                   {hg.headers.map((h) => {
                     const colId = h.column.id;
                     const size = h.getSize();
@@ -1862,16 +1727,7 @@ export function HoldingsSection({
               {!loading &&
                 !groupMode &&
                 table.getRowModel().rows.map((row) =>
-                  renderHoldingRow(row, {
-                    expandedIds,
-                    toggleExpanded,
-                    visibleColCount,
-                    onRowDoubleClick,
-                    onOpenTransactionForAsset,
-                    onEditCategory: setEditCategoryHolding,
-                    selectedIds,
-                    toggleSelected,
-                  })
+                  renderHoldingRow(row, { onOpenAsset: onRowDoubleClick })
                 )}
               {!loading &&
                 groupMode &&
@@ -1924,16 +1780,7 @@ export function HoldingsSection({
                         group.positions.map((pos) => {
                           const row = rowByAssetId.get(pos.assetId);
                           if (!row) return null;
-                          return renderHoldingRow(row, {
-                            expandedIds,
-                            toggleExpanded,
-                            visibleColCount,
-                            onRowDoubleClick,
-                            onOpenTransactionForAsset,
-                            onEditCategory: setEditCategoryHolding,
-                            selectedIds,
-                            toggleSelected,
-                          });
+                          return renderHoldingRow(row, { onOpenAsset: onRowDoubleClick });
                         })}
                     </Fragment>
                   );

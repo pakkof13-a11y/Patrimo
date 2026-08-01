@@ -1261,47 +1261,26 @@ body.col-resizing {
   border-color: var(--border);
 }
 
-.holdings-row {
+/*
+ * Ligne cliquable : la ligne entière ouvre la fiche de l'actif, pas une
+ * case ni un chevron dédiés — les deux ont disparu avec la sélection multiple
+ * et l'historique dépliable, remplacés par le panneau de détail.
+ */
+.holdings-row--clickable {
   cursor: pointer;
   transition: background 0.12s ease;
 }
 
-.holdings-row:hover {
+.holdings-row--clickable:hover {
   background: var(--gold-muted);
 }
 
-.holdings-row:focus-visible {
+.holdings-row--clickable:focus-visible {
   outline: none;
   box-shadow: inset var(--focus-ring);
 }
 
-/* Expand / collapse control column — always visible under table-layout:fixed */
-.table-fluid.table-col-resize th.holdings-expand-col,
-.table-fluid.table-col-resize td.holdings-expand-col {
-  width: 44px;
-  min-width: 44px !important;
-  max-width: 44px;
-  padding-left: 0.25rem;
-  padding-right: 0.25rem;
-  overflow: visible;
-  white-space: nowrap;
-  position: sticky;
-  left: 0;
-  z-index: 3;
-  background: var(--card);
-  box-shadow: 1px 0 0 0 var(--border);
-}
-
-.table-fluid.table-col-resize thead th.holdings-expand-col {
-  background: var(--table-head);
-  z-index: 4;
-}
-
-.holdings-row:hover td.holdings-expand-col {
-  background: var(--gold-muted);
-}
-
-.dark .holdings-row:hover {
+.dark .holdings-row--clickable:hover {
   background: var(--gold-muted);
 }
 
