@@ -1379,6 +1379,17 @@ function PortfolioAppClient({
         loading={detailQ.isPending && !detailQ.data}
         data={detailQ.data}
         baseCurrency={baseCurrency}
+        /*
+          Le poids dans le patrimoine ne peut pas se calculer dans le panneau :
+          il ne connaît qu'un actif, pas le total. Il vient donc d'ici, où les
+          positions sont déjà toutes chargées — et reste `null` si la ligne
+          n'est pas trouvée, plutôt que d'afficher 0 %.
+        */
+        portfolioSharePct={(() => {
+          const h = allHoldings.find((x) => x.assetId === detailAssetId);
+          const pct = h?.allocationPct != null ? Number(h.allocationPct) : NaN;
+          return Number.isFinite(pct) ? pct : null;
+        })()}
         onClose={() => setDetailAssetId(null)}
         onEditTx={(t) => {
           setDetailAssetId(null);

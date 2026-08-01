@@ -172,6 +172,7 @@ export function WorkspaceSection({
   onDeleteTx,
   onAddTransaction,
   onEditCategory,
+  portfolioSharePct,
 }: {
   section: AssetWorkspaceSectionId;
   data: AssetWorkspaceData;
@@ -180,6 +181,8 @@ export function WorkspaceSection({
   onDeleteTx: (id: string) => void;
   onAddTransaction?: (type?: string) => void;
   onEditCategory?: () => void;
+  /** Poids de l'actif dans le patrimoine, en %. Calculé en amont. */
+  portfolioSharePct?: number | null;
 }) {
   switch (section) {
     case "overview":
@@ -189,6 +192,7 @@ export function WorkspaceSection({
             data={data}
             baseCurrency={baseCurrency}
             onEditCategory={onEditCategory}
+            portfolioSharePct={portfolioSharePct}
           />
         </SectionShell>
       );
@@ -270,10 +274,12 @@ function Overview({
   data,
   baseCurrency,
   onEditCategory,
+  portfolioSharePct,
 }: {
   data: AssetWorkspaceData;
   baseCurrency: string;
   onEditCategory?: () => void;
+  portfolioSharePct?: number | null;
 }) {
   const { asset, holding } = data;
   const qty = holding ? num(holding.quantity) : null;
@@ -290,6 +296,14 @@ function Overview({
   return (
     <>
       <dl className="panel divide-y divide-[var(--border-subtle)] p-[var(--pad-card)]">
+        <Row
+          label="Plateforme"
+          value={
+            asset.platformCount && asset.platformCount > 1
+              ? `${asset.platformName} +${asset.platformCount - 1}`
+              : asset.platformName || "—"
+          }
+        />
         <Row
           label="Quantité"
           value={qty != null ? formatQuantity(qty) : "—"}
@@ -336,6 +350,46 @@ function Overview({
               : "—"
           }
         />
+
+        {/*
+          Poids dans le patrimoine, en barre.
+
+          C'est la seule mesure du panneau qui situe la position par rapport au
+          reste : les autres décrivent la ligne pour elle-même. La barre dit en
+          un coup d'œil ce qu'un pourcentage seul demande de rapporter à une
+          échelle — « 18,6 % » ne se lit vraiment qu'à côté d'une jauge.
+
+          Absente si le poids est inconnu, plutôt qu'une barre vide qui se
+          lirait « négligeable ».
+        */}
+        {portfolioSharePct != null && (
+          <div
+            className="flex items-center justify-between gap-[var(--space-3)] py-[var(--space-2)]"
+            data-testid="asset-detail-portfolio-share"
+          >
+            <dt className="text-[length:var(--text-xs)] text-[var(--foreground-secondary)]">
+              Répartition globale
+            </dt>
+            <dd className="flex min-w-0 flex-1 items-center justify-end gap-[var(--space-2)]">
+              <div
+                className="h-[0.3rem] w-[6rem] overflow-hidden rounded-full bg-[var(--surface-raised)]"
+                role="img"
+                aria-label={`${portfolioSharePct.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} % du patrimoine`}
+              >
+                <div
+                  className="h-full rounded-full bg-[var(--chart-gold)]"
+                  style={{ width: `${Math.min(100, Math.max(0, portfolioSharePct))}%` }}
+                />
+              </div>
+              <span className="num shrink-0 text-[length:var(--text-xs)] font-medium text-[var(--foreground)]">
+                {portfolioSharePct.toLocaleString("fr-FR", {
+                  maximumFractionDigits: 1,
+                })}{" "}
+                %
+              </span>
+            </dd>
+          </div>
+        )}
       </dl>
 
       <dl className="panel divide-y divide-[var(--border-subtle)] p-[var(--pad-card)]">

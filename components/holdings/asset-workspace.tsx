@@ -40,6 +40,7 @@ export function AssetWorkspace({
   loading,
   data,
   baseCurrency,
+  portfolioSharePct,
   onClose,
   onEditTx,
   onDeleteTx,
@@ -49,6 +50,8 @@ export function AssetWorkspace({
   open: boolean;
   loading: boolean;
   data?: AssetWorkspaceData | null;
+  /** Poids de l'actif dans le patrimoine, en %. `null` si inconnu. */
+  portfolioSharePct?: number | null;
   baseCurrency: string;
   onClose: () => void;
   onEditTx: (t: TxRow) => void;
@@ -264,6 +267,7 @@ export function AssetWorkspace({
               onDeleteTx={onDeleteTx}
               onAddTransaction={onAddTransaction}
               onEditCategory={onEditCategory}
+              portfolioSharePct={portfolioSharePct}
             />
           ) : (
             <p className="text-meta">Aucun détail disponible pour cet actif.</p>
