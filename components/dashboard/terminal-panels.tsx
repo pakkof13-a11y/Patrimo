@@ -269,7 +269,10 @@ export function WatchlistCard({
 }) {
   const rows = useMemo(
     () =>
-      [...holdings]
+      // `filter` rend déjà un tableau neuf : le trier sur place ne touche pas
+      // la liste d'origine, et la copie préalable des centaines de positions
+      // n'avait plus lieu d'être.
+      holdings
         .filter((h) => h.watchlisted)
         .sort((a, b) => Number(b.marketValueBase) - Number(a.marketValueBase))
         .slice(0, limit),

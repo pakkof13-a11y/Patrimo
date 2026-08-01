@@ -14,7 +14,7 @@ import {
   formatUnitPrice,
   getAssetClassLabel,
 } from "@/app/lib/utils";
-import { HOLDINGS_COLUMN_META } from "@/app/lib/display-preferences";
+import { columnLabel } from "@/app/lib/display-preferences";
 
 const CSV_DELIMITER = ";";
 
@@ -94,10 +94,6 @@ const COLUMN_SPLITS: Record<string, { id: string; label: string }[]> = {
   ],
 };
 
-function labelOf(id: string): string {
-  return HOLDINGS_COLUMN_META.find((c) => c.id === id)?.label ?? id;
-}
-
 /**
  * Construit le CSV pour les positions données, restreint aux colonnes
  * connues parmi `columnIds` (ordre respecté — reflète la vue courante).
@@ -110,7 +106,7 @@ export function holdingsToCsv(
   const fields: { id: string; label: string }[] = [];
   const seen = new Set<string>();
   for (const id of columnIds) {
-    for (const f of COLUMN_SPLITS[id] ?? [{ id, label: labelOf(id) }]) {
+    for (const f of COLUMN_SPLITS[id] ?? [{ id, label: columnLabel(id) }]) {
       // Une colonne éclatée peut recouvrir une colonne affichée par ailleurs
       // (« Variation (%) » cochée en plus de « Variation ») : un seul champ.
       if (COLUMN_VALUES[f.id] == null || seen.has(f.id)) continue;

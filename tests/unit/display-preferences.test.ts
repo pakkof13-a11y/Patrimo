@@ -3,6 +3,9 @@ import {
   COLUMN_RESIZE_MAX,
   COLUMN_RESIZE_MIN,
   HOLDINGS_COLUMN_META,
+  columnAlign,
+  columnLabel,
+  columnMeta,
   columnMinWidth,
   columnOrderStorageKey,
   columnsStorageKey,
@@ -121,6 +124,35 @@ describe("mandatory / optional column defaults", () => {
     for (const c of HOLDINGS_COLUMN_META) {
       expect(r.visibility[c.id]).toBe(c.group === "mandatory" || Boolean(c.locked));
     }
+  });
+});
+
+describe("index des colonnes", () => {
+  it("résout chaque colonne de la méta, et rien d'autre", () => {
+    /*
+      L'index est construit une fois au chargement du module. S'il venait à
+      être déclaré avant le tableau qu'il indexe, ou à ne plus le refléter,
+      il rendrait `undefined` partout — et les colonnes retomberaient
+      silencieusement sur leurs valeurs de repli : largeur 100, alignement à
+      gauche, libellé remplacé par l'identifiant.
+    */
+    for (const c of HOLDINGS_COLUMN_META) {
+      expect(columnMeta(c.id)).toBe(c);
+      expect(columnLabel(c.id)).toBe(c.label);
+      expect(columnAlign(c.id)).toBe(c.align);
+    }
+    expect(columnMeta("colonne-inexistante")).toBeUndefined();
+    expect(columnLabel("colonne-inexistante")).toBe("colonne-inexistante");
+  });
+
+  it("les nombres sont alignés à droite, l'actif à gauche", () => {
+    expect(columnAlign("unrealizedPnlBase")).toBe("right");
+    expect(columnAlign("marketValueBase")).toBe("right");
+    expect(columnAlign("quantity")).toBe("right");
+    // Pastille et vignette sont centrées ; le nom de l'actif reste à gauche.
+    expect(columnAlign("accountType")).toBe("center");
+    expect(columnAlign("trend")).toBe("center");
+    expect(columnAlign("name")).toBeUndefined();
   });
 });
 

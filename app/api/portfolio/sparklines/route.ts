@@ -4,7 +4,7 @@ import { prisma } from "@/app/lib/prisma";
 import { parisDayKey } from "@/app/lib/dates/paris";
 import {
   assetsNeedingFetch,
-  fillDailyCloses,
+  getDailyCloses,
   readDailyCloses,
 } from "@/app/lib/market/daily-closes";
 import {
@@ -107,22 +107,22 @@ export async function GET(req: Request) {
       Complément best effort, jamais bloquant : un fournisseur muet laisse la
       ligne sans vignette, il ne fait pas échouer la requête. Le tableau lui
       est déjà affiché — ces courbes l'enrichissent, elles ne le portent pas.
+
+      Le remplissage est délégué au service partagé plutôt que refait ici : il
+      borne sa concurrence et avale les erreurs actif par actif. La boucle
+      séquentielle qui traînait à cette place attendait chaque fournisseur à
+      son tour — huit actifs froids, huit attentes bout à bout, pour une
+      colonne d'illustration.
+
+      `assetsNeedingFetch` est appelé ici pour décider *qui* compléter, parce
+      que le plafond doit porter sur les actifs à combler et non sur les huit
+      premiers de la liste : un portefeuille dont les huit premières lignes
+      sont déjà en cache ne comblerait jamais les suivantes.
     */
-    const toFill = (await assetsNeedingFetch(ownedIds, toDay, now)).slice(
-      0,
-      MAX_FILLS_PER_REQUEST
-    );
-    for (const assetId of toFill) {
-      try {
-        await fillDailyCloses(
-          userId,
-          assetId,
-          new Date(`${fromDay}T00:00:00Z`),
-          now
-        );
-      } catch (err) {
-        console.error(`[portfolio/sparklines] ${assetId} non complété:`, err);
-      }
+    const stale = await assetsNeedingFetch(ownedIds, toDay, now);
+    const toFill = stale.slice(0, MAX_FILLS_PER_REQUEST);
+    if (toFill.length > 0) {
+      await getDailyCloses(userId, toFill, fromDay, toDay, { now });
     }
 
     const index = await readDailyCloses(ownedIds, fromDay, toDay);

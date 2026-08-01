@@ -112,6 +112,7 @@ import {
   COLUMN_RESIZE_MIN,
   HOLDINGS_COLUMN_META,
   columnAlign,
+  columnMeta,
   resetHoldingsColumns,
   defaultColumnOrder,
   defaultColumnSizing,
@@ -1635,7 +1636,7 @@ export function HoldingsSection({
               // groupe obligatoire, qui dit seulement « affichée au départ ».
               // La case du sélecteur applique la même règle : les deux doivent
               // s'accorder, sinon elle se décoche à l'écran sans rien changer.
-              const meta = HOLDINGS_COLUMN_META.find((c) => c.id === id);
+              const meta = columnMeta(id);
               if (meta?.locked) {
                 setColumnVisibility((prev) => ({ ...prev, [id]: true }));
                 return;
@@ -1680,7 +1681,7 @@ export function HoldingsSection({
                     const isResizing = h.column.getIsResizing();
                     const isLocked = lockedSizing[colId] != null;
                     const fullLabel =
-                      HOLDINGS_COLUMN_META.find((c) => c.id === colId)?.label ??
+                      columnMeta(colId)?.label ??
                       String(h.column.columnDef.header ?? colId);
                     return (
                       <th

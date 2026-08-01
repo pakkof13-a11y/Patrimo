@@ -154,10 +154,6 @@ export type HoldingsColumnMeta = {
   align?: "right" | "center";
 };
 
-/** Alignement d'une colonne, en-tête et cellules confondus. */
-export function columnAlign(id: string): "right" | "center" | undefined {
-  return HOLDINGS_COLUMN_META.find((c) => c.id === id)?.align;
-}
 
 export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
   // —— MANDATORY (always visible, checkbox locked) ——
@@ -294,6 +290,36 @@ export const HOLDINGS_COLUMN_META: HoldingsColumnMeta[] = [
   { id: "tp3", label: "TP3", group: "optional", minWidth: 88, align: "right" },
   { id: "tp4", label: "TP4", group: "optional", minWidth: 88, align: "right" },
 ];
+
+/**
+ * Index des colonnes par identifiant.
+ *
+ * Construit une fois : ces descripteurs sont consultés dans les chemins les
+ * plus chauds de l'écran — largeur minimale et alignement sont demandés pour
+ * *chaque cellule* à chaque rendu, et le redimensionnement d'une colonne
+ * rappelle `columnMinWidth` à chaque mouvement de souris. Un parcours linéaire
+ * du tableau y refaisait des milliers de comparaisons pour une réponse que
+ * rien ne fait varier.
+ *
+ * La méta est figée à l'import ; aucun code n'y ajoute d'entrée à l'exécution.
+ */
+const COLUMN_META_BY_ID = new Map(
+  HOLDINGS_COLUMN_META.map((c) => [c.id, c] as const)
+);
+
+export function columnMeta(id: string): HoldingsColumnMeta | undefined {
+  return COLUMN_META_BY_ID.get(id);
+}
+
+/** Libellé complet d'une colonne — à défaut, son identifiant. */
+export function columnLabel(id: string): string {
+  return COLUMN_META_BY_ID.get(id)?.label ?? id;
+}
+
+/** Alignement d'une colonne, en-tête et cellules confondus. */
+export function columnAlign(id: string): "right" | "center" | undefined {
+  return COLUMN_META_BY_ID.get(id)?.align;
+}
 
 const MANDATORY_IDS = new Set(
   HOLDINGS_COLUMN_META.filter((c) => c.group === "mandatory").map((c) => c.id)
@@ -533,10 +559,7 @@ export function reorderColumnIds(order: string[], fromId: string, toId: string):
 }
 
 export function columnMinWidth(id: string): number {
-  return Math.max(
-    COLUMN_RESIZE_MIN,
-    HOLDINGS_COLUMN_META.find((c) => c.id === id)?.minWidth ?? 100
-  );
+  return Math.max(COLUMN_RESIZE_MIN, COLUMN_META_BY_ID.get(id)?.minWidth ?? 100);
 }
 
 /**
@@ -872,7 +895,7 @@ export function measureColumnAutosize(
           .replace(/\s+/g, " ")
           .trim();
         if (!text) {
-          text = HOLDINGS_COLUMN_META.find((c) => c.id === columnId)?.label ?? "";
+          text = COLUMN_META_BY_ID.get(columnId)?.label ?? "";
         }
         if (!text) return;
         // th styles drive uppercase / letter-spacing used in the UI
