@@ -489,6 +489,30 @@ function PortfolioAppClient({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  /**
+   * Épingle / retire un actif de la watchlist du tableau de bord.
+   *
+   * L'état voulu part au serveur plutôt qu'une bascule : deux onglets ouverts
+   * sur la même fiche convergent alors vers le même résultat.
+   */
+  const patchWatchlist = useMutation({
+    mutationFn: (body: { assetId: string; watchlisted: boolean }) =>
+      fetchJson(`/api/assets/${body.assetId}/watchlist`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ watchlisted: body.watchlisted }),
+      }),
+    onSuccess: async (_data, vars) => {
+      await reloadHoldings(qc, baseCurrency);
+      toast.success(
+        vars.watchlisted
+          ? "Ajouté à la watchlist"
+          : "Retiré de la watchlist"
+      );
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const onCategoryChange = useCallback(
     async (_assetId: string, _category: string) => {
       await reloadHoldings(qc, baseCurrencyRef.current);
@@ -1207,6 +1231,17 @@ function PortfolioAppClient({
                         h?.allocationPct != null ? Number(h.allocationPct) : NaN;
                       return Number.isFinite(pct) ? pct : null;
                     })()}
+                    watchlisted={Boolean(
+                      allHoldings.find((x) => x.assetId === detailAssetId)
+                        ?.watchlisted
+                    )}
+                    onToggleWatchlist={(next) => {
+                      if (!detailAssetId) return;
+                      patchWatchlist.mutate({
+                        assetId: detailAssetId,
+                        watchlisted: next,
+                      });
+                    }}
                     onClose={() => setDetailAssetId(null)}
                     onEditTx={(t) => {
                       setDetailAssetId(null);

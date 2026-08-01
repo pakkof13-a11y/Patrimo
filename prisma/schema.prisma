@@ -216,6 +216,11 @@ model Asset {
   tp3                 Decimal?      @db.Decimal(28, 12)
   tp4                 Decimal?      @db.Decimal(28, 12)
   acquisitionDate     DateTime?
+  /// Suivi manuel : date d'ajout à la watchlist du tableau de bord, `null`
+  /// si la ligne n'y figure pas. Une date plutôt qu'un booléen — elle donne
+  /// gratuitement l'ordre d'ajout, et « depuis quand je surveille ça » est
+  /// une question qu'on finit toujours par se poser.
+  watchlistedAt       DateTime?
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
@@ -240,6 +245,7 @@ model Asset {
   @@index([platformId])
   @@index([userId, assetClass])
   @@index([userId, accountType])
+  @@index([userId, watchlistedAt])
   @@index([userId, category])
   @@index([isin])
   @@index([securitiesAccountId])

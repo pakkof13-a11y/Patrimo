@@ -84,6 +84,8 @@ export type Holding = {
   tp4?: string | null;
   /** True si des niveaux SL/TP existent sur une jambe non-principale (multi-plateforme). */
   hasSecondaryLevels?: boolean;
+  /** Ligne épinglée dans la watchlist du tableau de bord. */
+  watchlisted?: boolean;
 };
 
 export type MainTab =

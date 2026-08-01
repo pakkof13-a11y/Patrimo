@@ -2116,6 +2116,37 @@ textarea:focus-visible,
   background: var(--surface-hover);
 }
 
+/* Étoile de suivi — même gabarit que la fermeture, elles vivent côte à côte. */
+.asset-panel-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  color: var(--foreground-faint);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.asset-panel-star:hover {
+  color: var(--primary-text);
+  background: var(--surface-hover);
+}
+
+/* Suivi : l'or du thème, la même couleur que partout où l'on marque une
+   ligne comme retenue. */
+.asset-panel-star[data-on="true"] {
+  color: var(--chart-gold);
+}
+
+.asset-panel-star:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 /*
   Aucun filet entre les lignes : l'étiquette à gauche et la valeur à droite
   suffisent à les tenir séparées, et sept traits dans un panneau de 360 px

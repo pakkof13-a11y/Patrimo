@@ -212,6 +212,8 @@ export type HoldingRow = {
   tp2: string | null;
   tp3: string | null;
   tp4: string | null;
+  /** Ligne épinglée dans la watchlist du tableau de bord. */
+  watchlisted: boolean;
   /**
    * True si un niveau SL/TP existe sur une jambe non-principale (multi-plateforme).
    * Les niveaux affichés (stopLoss/tpN) restent ceux de la jambe principale si
@@ -423,6 +425,7 @@ export async function getHoldings(
       tp2: asset.tp2?.toString() ?? null,
       tp3: asset.tp3?.toString() ?? null,
       tp4: asset.tp4?.toString() ?? null,
+      watchlisted: asset.watchlistedAt != null,
       hasSecondaryLevels: false,
     };
     leg.platformSlices = [sliceFromHoldingLeg(leg)];
@@ -577,6 +580,9 @@ export async function getHoldings(
       tp2,
       tp3,
       tp4,
+      // Une seule ligne affichée pour deux jambes : elle est suivie dès que
+      // l'une l'est, sinon l'étoile s'éteindrait en changeant de dépositaire.
+      watchlisted: prev.watchlisted || row.watchlisted,
       hasSecondaryLevels,
     });
   }

@@ -15,6 +15,7 @@ import {
   LineChart,
   Newspaper,
   Scale,
+  Star,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -150,6 +151,8 @@ export function AssetPanel({
   data,
   baseCurrency,
   portfolioSharePct,
+  watchlisted,
+  onToggleWatchlist,
   onClose,
   onEditTx,
   onDeleteTx,
@@ -162,6 +165,10 @@ export function AssetPanel({
   baseCurrency: string;
   /** Poids de l'actif dans le portefeuille, en %. `null` si inconnu. */
   portfolioSharePct?: number | null;
+  /** Ligne épinglée dans la watchlist du tableau de bord. */
+  watchlisted?: boolean;
+  /** Épingle / retire l'actif. Absent = l'étoile ne s'affiche pas. */
+  onToggleWatchlist?: (next: boolean) => void;
   /** Vide la sélection. */
   onClose: () => void;
   onEditTx: (t: TxRow) => void;
@@ -319,15 +326,42 @@ export function AssetPanel({
       */}
       <div className="asset-panel-bar">
         <span className="text-label">Détail</span>
-        <button
-          type="button"
-          className="asset-panel-close"
-          onClick={onClose}
-          aria-label="Fermer le détail"
-          data-testid="asset-panel-close"
-        >
-          <X className="h-4 w-4" aria-hidden />
-        </button>
+        <div className="flex items-center gap-[var(--space-1)]">
+          {onToggleWatchlist && assetId && (
+            <button
+              type="button"
+              className="asset-panel-star"
+              data-on={watchlisted ? "true" : "false"}
+              aria-pressed={Boolean(watchlisted)}
+              onClick={() => onToggleWatchlist(!watchlisted)}
+              title={
+                watchlisted
+                  ? "Retirer de la watchlist du tableau de bord"
+                  : "Suivre cet actif sur le tableau de bord"
+              }
+              aria-label={
+                watchlisted ? "Retirer de la watchlist" : "Ajouter à la watchlist"
+              }
+              data-testid="asset-panel-star"
+            >
+              {/* Pleine quand l'actif est suivi : l'état se lit sans survol. */}
+              <Star
+                className="h-4 w-4"
+                fill={watchlisted ? "currentColor" : "none"}
+                aria-hidden
+              />
+            </button>
+          )}
+          <button
+            type="button"
+            className="asset-panel-close"
+            onClick={onClose}
+            aria-label="Fermer le détail"
+            data-testid="asset-panel-close"
+          >
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
       </div>
 
       {/* ── En-tête ──────────────────────────────────────────────── */}

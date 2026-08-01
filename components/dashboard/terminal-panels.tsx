@@ -243,18 +243,18 @@ export function AllocationCard({
    ══════════════════════════════════════════════════════════════════════════ */
 
 /**
- * Watchlist — les lignes cotées les plus lourdes du portefeuille.
+ * Watchlist — les lignes que l'utilisateur a explicitement épinglées.
  *
- * Ce n'est pas une liste de suivi arbitraire : afficher les positions de plus
- * gros poids répond à la question qui compte réellement au réveil (« qu'est-ce
- * qui bouge sur ce qui pèse ? »), sans demander à l'utilisateur d'entretenir
- * une seconde liste à la main.
+ * Elle affichait auparavant les positions de plus gros poids. C'était une
+ * approximation commode, mais elle répondait à « qu'est-ce qui pèse ? » et non
+ * à « qu'est-ce que je surveille en ce moment ? » — or une ligne modeste peut
+ * être précisément celle qu'on regarde tous les matins. L'étoile de la fiche
+ * d'un actif alimente désormais cette liste.
  *
  * Pas de sparkline par ligne, contrairement au mockup : l'historique de cours
- * par actif n'est pas chargé sur ce écran, et une diagonale tracée entre 0 et
+ * par actif n'est pas chargé sur cet écran, et une diagonale tracée entre 0 et
  * la variation courante aurait l'apparence d'une tendance sans en être une.
- * Mieux vaut la colonne absente qu'une courbe qui ment. Elle reviendra le jour
- * où l'API exposera les clôtures par actif.
+ * Mieux vaut la colonne absente qu'une courbe qui ment.
  */
 export function WatchlistCard({
   holdings,
@@ -270,7 +270,7 @@ export function WatchlistCard({
   const rows = useMemo(
     () =>
       [...holdings]
-        .filter((h) => Number(h.currentPriceEur) > 0)
+        .filter((h) => h.watchlisted)
         .sort((a, b) => Number(b.marketValueBase) - Number(a.marketValueBase))
         .slice(0, limit),
     [holdings, limit]
@@ -290,8 +290,14 @@ export function WatchlistCard({
 
       <div className="panel-body">
         {rows.length === 0 ? (
-          <p className="text-meta py-[var(--space-5)] text-center">
-            Aucune ligne cotée pour l&apos;instant.
+          /* L'état vide dit comment le remplir : sans cela, une carte vide se
+             lit comme une panne plutôt que comme une liste à composer. */
+          <p
+            className="text-meta py-[var(--space-5)] text-center"
+            data-testid="watchlist-empty"
+          >
+            Aucun actif suivi. Ouvrez une ligne du portefeuille et cliquez
+            l&apos;étoile pour l&apos;épingler ici.
           </p>
         ) : (
           <table className="term-table">

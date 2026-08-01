@@ -933,3 +933,16 @@ export const updateAccountTypeSchema = z.object({
 });
 
 export type UpdateAccountTypeForm = z.infer<typeof updateAccountTypeSchema>;
+
+/**
+ * Suivi d'un actif dans la watchlist du tableau de bord.
+ *
+ * L'état voulu est envoyé explicitement plutôt qu'une bascule : deux clics
+ * partis en même temps depuis deux onglets laisseraient une bascule dans un
+ * état imprévisible, alors qu'ils convergent ici vers le même résultat.
+ */
+export const updateWatchlistSchema = z.object({
+  watchlisted: z.boolean(),
+});
+
+export type UpdateWatchlistForm = z.infer<typeof updateWatchlistSchema>;
