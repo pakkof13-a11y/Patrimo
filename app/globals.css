@@ -2060,6 +2060,20 @@ textarea:focus-visible,
   }
 }
 
+/*
+  Bandeau du panneau : il nomme la colonne et porte sa fermeture, à part de
+  l'actif. La croix posée au niveau du nom se lisait comme « retirer cet
+  actif » plutôt que « refermer le détail ».
+*/
+.asset-panel-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: var(--space-2) var(--pad-card);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
 .asset-panel-head {
   flex-shrink: 0;
   padding: var(--pad-card);
@@ -2102,13 +2116,14 @@ textarea:focus-visible,
   background: var(--surface-hover);
 }
 
+/*
+  Aucun filet entre les lignes : l'étiquette à gauche et la valeur à droite
+  suffisent à les tenir séparées, et sept traits dans un panneau de 360 px
+  pèsent plus lourd que les sept chiffres qu'ils encadrent.
+*/
 .asset-panel-facts {
   display: flex;
   flex-direction: column;
-}
-
-.asset-panel-facts > * + * {
-  border-top: var(--border-width) solid var(--border-subtle);
 }
 
 /* Liste des sections — chacune ouvre son contenu dans ce même panneau. */

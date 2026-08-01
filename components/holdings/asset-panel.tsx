@@ -2,7 +2,22 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Blocks,
+  ChevronLeft,
+  ChevronRight,
+  Coins,
+  FileText,
+  Folder,
+  Image as ImageIcon,
+  Landmark,
+  LineChart,
+  Newspaper,
+  Scale,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { AssetLogo } from "@/components/ui/platform-logo";
 import { Sparkline } from "@/components/ui/sparkline";
 import {
@@ -12,6 +27,8 @@ import {
 import {
   formatCurrency,
   formatQuantity,
+  formatSignedCurrency,
+  formatSignedPercent,
   getAssetClassLabel,
   cn,
 } from "@/app/lib/utils";
@@ -38,49 +55,91 @@ export type { AssetWorkspaceData };
  * ne décide de rien, ne navigue nulle part, ne connaît pas la liste.
  */
 
-/** Un mois de clôtures : assez pour une pente, pas plus qu'une vignette. */
-const MINI_POINTS = 30;
+/**
+ * Fenêtres du graphique de tête.
+ *
+ * Ce sont des plages et non des unités de temps : « 3 mois » est une question
+ * que l'on se pose, « bougies de 4 heures » un réglage. La séance intraday du
+ * mockup n'y figure pas — un OPCVM, une SCPI ou un bien immobilier n'ont pas
+ * de cours dans la journée, et une plage vide sur la moitié du portefeuille
+ * n'est pas une fenêtre, c'est un piège.
+ *
+ * `1m` par défaut : c'est ce que le panneau chargeait déjà, donc ouvrir une
+ * fiche ne coûte pas un aller-retour de plus qu'avant.
+ */
+const PANEL_RANGES = [
+  { id: "7d", label: "7 J" },
+  { id: "1m", label: "1 M" },
+  { id: "3m", label: "3 M" },
+  { id: "1y", label: "1 A" },
+  { id: "all", label: "TOUT" },
+] as const;
+
+type PanelRange = (typeof PANEL_RANGES)[number]["id"];
+
+const DEFAULT_RANGE: PanelRange = "1m";
+
+/** Points du graphique de tête — au-delà, la courbe se tasse sans rien gagner. */
+const MINI_POINTS = 120;
+
+/**
+ * Une icône par section. Elles vivent ici et non dans le registre : celui-ci
+ * est une donnée pure, testée, et n'a pas à connaître de composants React.
+ */
+const SECTION_ICONS: Record<AssetWorkspaceSectionId, LucideIcon> = {
+  overview: LineChart,
+  performance: LineChart,
+  transactions: ArrowLeftRight,
+  platforms: Landmark,
+  costBasis: Scale,
+  income: Coins,
+  tax: FileText,
+  defi: Blocks,
+  nfts: ImageIcon,
+  news: Newspaper,
+  documents: Folder,
+};
 
 function num(v: unknown): number {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
-function formatSignedPct(v: number): string {
-  return `${v >= 0 ? "+" : "−"}${Math.abs(v).toLocaleString("fr-FR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} %`;
-}
-
-function formatSignedCurrency(v: number, currency: string): string {
-  return `${v >= 0 ? "+" : "−"}${formatCurrency(Math.abs(v), currency)}`;
-}
-
-/** Une ligne du bloc « position ». */
+/**
+ * Une ligne du bloc « position ».
+ *
+ * Étiquette en capitales à gauche, valeur alignée à droite : le bloc se lit en
+ * colonne, l'œil descend les valeurs sans relire les intitulés.
+ */
 function Fact({
   label,
   value,
+  sub,
   tone,
 }: {
   label: string;
   value: React.ReactNode;
+  /** Seconde ligne sous la valeur — le pourcentage sous le montant. */
+  sub?: React.ReactNode;
   tone?: "positive" | "negative";
 }) {
   return (
     <div className="flex items-baseline justify-between gap-[var(--space-3)] py-[var(--space-2)]">
-      <dt className="text-[length:var(--text-xs)] text-[var(--foreground-secondary)]">
-        {label}
-      </dt>
+      <dt className="text-label">{label}</dt>
       <dd
         className={cn(
-          "num shrink-0 text-[length:var(--text-xs)] font-medium",
+          "shrink-0 text-right",
           tone === "positive" && "val-positive",
           tone === "negative" && "val-negative",
           !tone && "text-[var(--foreground)]"
         )}
       >
-        {value}
+        <span className="num block text-[length:var(--text-xs)] font-medium">
+          {value}
+        </span>
+        {sub != null && (
+          <span className="num block text-[length:var(--text-2xs)]">{sub}</span>
+        )}
       </dd>
     </div>
   );
@@ -136,36 +195,62 @@ export function AssetPanel({
   }
 
   /*
-    Vignette de tendance et variation de séance.
+    Courbe de tête et variation de séance.
 
-    Les deux dernières clôtures donnent la variation, les trente dernières la
-    courbe : inutile d'ajouter une route pour cela. La requête partage sa clé
-    avec le graphique complet de la section « Performance » — même cache, aucun
-    aller-retour en double quand on ouvre celle-ci.
+    Les deux dernières clôtures donnent la variation, la fenêtre choisie donne
+    la courbe : inutile d'ajouter une route pour cela.
   */
+  const [range, setRange] = useState<PanelRange>(DEFAULT_RANGE);
+
+  // Changer d'actif remet la fenêtre par défaut, comme pour la section : la
+  // plage choisie sur la ligne précédente n'a pas de sens sur la suivante.
+  const [seenRangeAsset, setSeenRangeAsset] = useState(assetId);
+  if (assetId !== seenRangeAsset) {
+    setSeenRangeAsset(assetId);
+    setRange(DEFAULT_RANGE);
+  }
+
   const historyQ = useQuery({
-    queryKey: ["asset-history", assetId, "price", "tf:1d", null],
+    queryKey: ["asset-history", assetId, "panel", `range:${range}`],
     enabled: Boolean(assetId),
     staleTime: 60_000,
     queryFn: () =>
       fetchJson<PriceHistoryResult>(
-        `/api/assets/${assetId}/history?interval=1d`
+        `/api/assets/${assetId}/history?range=${range}`
       ),
   });
 
+  /*
+    Une série `mock` est écartée, pas dessinée.
+
+    Le service de cours en fabrique une quand aucun fournisseur ne répond, pour
+    qu'un graphique d'illustration ne reste pas vide. Ici, elle produirait une
+    courbe et une variation de séance qui ont toutes les apparences d'un cours
+    réel — sur un écran patrimonial, c'est pire qu'une case vide. Le cache de
+    clôtures applique déjà exactement cette règle.
+  */
+  const isMock = historyQ.data?.source === "mock";
+
   const mini = useMemo(() => {
-    const closes = (historyQ.data?.points ?? [])
+    const closes = (isMock ? [] : historyQ.data?.points ?? [])
       .map((p) => Number(p.close))
       .filter((n) => Number.isFinite(n) && n > 0)
       .slice(-MINI_POINTS);
-    if (closes.length < 2) return { closes, changePct: null as number | null };
+    if (closes.length < 2) {
+      return {
+        closes,
+        changePct: null as number | null,
+        change: null as number | null,
+      };
+    }
     const last = closes[closes.length - 1]!;
     const prev = closes[closes.length - 2]!;
     return {
       closes,
+      change: last - prev,
       changePct: prev > 0 ? ((last - prev) / prev) * 100 : null,
     };
-  }, [historyQ.data?.points]);
+  }, [historyQ.data?.points, isMock]);
 
   /* ── Aucun actif sélectionné ─────────────────────────────────────── */
 
@@ -227,59 +312,70 @@ export function AssetPanel({
       */
       key={assetId ?? "none"}
     >
+      {/*
+        Bandeau du panneau : il nomme la colonne et porte sa fermeture. Sans
+        lui, la croix flottait au-dessus du nom de l'actif et se lisait comme
+        « supprimer cet actif » plutôt que « refermer le détail ».
+      */}
+      <div className="asset-panel-bar">
+        <span className="text-label">Détail</span>
+        <button
+          type="button"
+          className="asset-panel-close"
+          onClick={onClose}
+          aria-label="Fermer le détail"
+          data-testid="asset-panel-close"
+        >
+          <X className="h-4 w-4" aria-hidden />
+        </button>
+      </div>
+
       {/* ── En-tête ──────────────────────────────────────────────── */}
       <header className="asset-panel-head" data-testid="asset-panel-head">
-        <div className="flex min-w-0 items-start gap-[var(--space-3)]">
+        <div className="flex min-w-0 items-center gap-[var(--space-3)]">
           <AssetLogo
             src={asset?.assetLogoUrl}
             name={asset?.name || "—"}
             ticker={asset?.ticker}
             isin={asset?.isin}
             assetClass={asset?.assetClass}
-            size={32}
+            size={36}
           />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-[length:var(--text-base)] font-semibold text-[var(--foreground)]">
               {asset?.name || (loading ? "Chargement…" : "Actif")}
             </h2>
-            <p className="text-meta flex min-w-0 flex-wrap items-center gap-x-[var(--space-2)]">
-              {asset?.ticker && <span className="num">{asset.ticker}</span>}
-              {asset?.assetClass && (
-                <span>{getAssetClassLabel(asset.assetClass)}</span>
-              )}
+            {/* « BTC · CRYPTO » : le ticker identifie, la classe situe. Le
+                point médian les sépare sans peser comme un séparateur. */}
+            <p className="text-label truncate">
+              {[asset?.ticker, asset?.assetClass && getAssetClassLabel(asset.assetClass)]
+                .filter(Boolean)
+                .join(" · ")}
             </p>
           </div>
-          <button
-            type="button"
-            className="asset-panel-close"
-            onClick={onClose}
-            aria-label="Fermer le détail"
-            data-testid="asset-panel-close"
-          >
-            <X className="h-4 w-4" aria-hidden />
-          </button>
         </div>
 
         {/* ── Cours et séance ────────────────────────────────────── */}
         {quote && (
           <div className="mt-[var(--space-3)]" data-testid="asset-panel-quote">
             <p className="flex items-baseline gap-[var(--space-2)] leading-none">
-              <span className="num text-[length:var(--text-xl)] font-semibold text-[var(--foreground)]">
+              <span className="num text-[length:var(--text-2xl)] font-semibold text-[var(--foreground)]">
                 {formatCurrency(num(quote.priceNative), quote.nativeCurrency)}
               </span>
               <span className="text-label shrink-0">
                 {quote.nativeCurrency}
               </span>
             </p>
-            <p className="mt-[var(--space-1)] text-[length:var(--text-xs)] leading-none">
-              {mini.changePct != null ? (
+            <p className="mt-[var(--space-2)] text-[length:var(--text-xs)] leading-none">
+              {mini.changePct != null && mini.change != null ? (
                 <span
                   className={cn(
                     "num",
                     mini.changePct >= 0 ? "val-positive" : "val-negative"
                   )}
                 >
-                  {formatSignedPct(mini.changePct)}{" "}
+                  {formatSignedCurrency(mini.change, quote.nativeCurrency)} (
+                  {formatSignedPercent(mini.changePct)}){" "}
                   <span className="text-[var(--foreground-faint)]">séance</span>
                 </span>
               ) : (
@@ -291,20 +387,47 @@ export function AssetPanel({
               )}
             </p>
 
-            <div className="mt-[var(--space-2)] h-[2.5rem] w-full">
-              {mini.closes.length >= 2 && (
+            <div className="mt-[var(--space-3)] h-[4rem] w-full">
+              {mini.closes.length >= 2 ? (
                 <Sparkline
                   values={mini.closes}
-                  stroke={
-                    (mini.changePct ?? 0) >= 0
-                      ? "var(--chart-positive)"
-                      : "var(--chart-negative)"
-                  }
+                  stroke="var(--chart-gold)"
+                  fill
                   width={320}
-                  height={40}
+                  height={64}
                   className="h-full w-full"
                 />
+              ) : (
+                <span className="flex h-full items-center text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
+                  {historyQ.isPending
+                    ? "Chargement de l'historique…"
+                    : isMock
+                      ? "Aucun cours réel pour cet actif — courbe non tracée"
+                      : "Pas d'historique de cours sur cette période"}
+                </span>
               )}
+            </div>
+
+            {/* Fenêtres du graphique — mêmes pastilles que partout ailleurs. */}
+            <div
+              className="term-seg mt-[var(--space-3)] w-full justify-between"
+              role="group"
+              aria-label="Fenêtre du graphique"
+              data-testid="asset-panel-ranges"
+            >
+              {PANEL_RANGES.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  className="term-seg-item flex-1"
+                  data-active={r.id === range}
+                  aria-pressed={r.id === range}
+                  onClick={() => setRange(r.id)}
+                  data-testid={`asset-panel-range-${r.id}`}
+                >
+                  {r.label}
+                </button>
+              ))}
             </div>
           </div>
         )}
@@ -365,37 +488,29 @@ export function AssetPanel({
                 value={qty != null ? formatQuantity(qty) : "—"}
               />
               <Fact
-                label="Prix de revient"
+                label="PRU"
                 value={
                   avgCost != null ? formatCurrency(avgCost, baseCurrency) : "—"
                 }
               />
               <Fact
-                label="Valeur actuelle"
+                label="Valeur totale"
                 value={
                   marketValue != null
                     ? formatCurrency(marketValue, baseCurrency)
                     : "—"
                 }
               />
+              {/* Montant et proportion sur une seule ligne, comme la colonne
+                  « Variation » du tableau : même donnée, même grammaire. */}
               <Fact
-                label="Plus/moins-value"
+                label="P&L"
                 value={
                   pnl != null ? formatSignedCurrency(pnl, baseCurrency) : "—"
                 }
+                sub={pnlPct != null ? formatSignedPercent(pnlPct) : undefined}
                 tone={
                   pnl == null ? undefined : pnl >= 0 ? "positive" : "negative"
-                }
-              />
-              <Fact
-                label="Performance"
-                value={pnlPct != null ? formatSignedPct(pnlPct) : "—"}
-                tone={
-                  pnlPct == null
-                    ? undefined
-                    : pnlPct >= 0
-                      ? "positive"
-                      : "negative"
                 }
               />
 
@@ -403,37 +518,37 @@ export function AssetPanel({
                   actif. Il vient de l'écran, et vaut `null` s'il est inconnu. */}
               {portfolioSharePct != null && (
                 <div
-                  className="flex items-center justify-between gap-[var(--space-3)] py-[var(--space-2)]"
+                  className="flex items-end justify-between gap-[var(--space-3)] py-[var(--space-2)]"
                   data-testid="asset-panel-share"
                 >
-                  <dt className="text-[length:var(--text-xs)] text-[var(--foreground-secondary)]">
-                    Poids du portefeuille
-                  </dt>
-                  <dd className="flex min-w-0 flex-1 items-center justify-end gap-[var(--space-2)]">
-                    <div
-                      className="h-[0.3rem] w-[5rem] overflow-hidden rounded-full bg-[var(--surface-raised)]"
+                  <dt className="min-w-0 flex-1">
+                    <span className="text-label block">Répartition globale</span>
+                    {/* La barre sous l'étiquette et non à côté du nombre : elle
+                        illustre la part, elle ne la répète pas. */}
+                    <span
+                      className="mt-[var(--space-1)] block h-[0.25rem] w-full overflow-hidden rounded-full bg-[var(--surface-sunken)]"
                       role="img"
                       aria-label={`${portfolioSharePct.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} % du portefeuille`}
                     >
-                      <div
-                        className="h-full rounded-full bg-[var(--chart-gold)]"
+                      <span
+                        className="block h-full rounded-full bg-[var(--chart-gold)]"
                         style={{
                           width: `${Math.min(100, Math.max(0, portfolioSharePct))}%`,
                         }}
                       />
-                    </div>
-                    <span className="num shrink-0 text-[length:var(--text-xs)] font-medium text-[var(--foreground)]">
-                      {portfolioSharePct.toLocaleString("fr-FR", {
-                        maximumFractionDigits: 1,
-                      })}{" "}
-                      %
                     </span>
+                  </dt>
+                  <dd className="num shrink-0 text-[length:var(--text-xs)] font-medium text-[var(--foreground)]">
+                    {portfolioSharePct.toLocaleString("fr-FR", {
+                      maximumFractionDigits: 1,
+                    })}{" "}
+                    %
                   </dd>
                 </div>
               )}
 
               <Fact
-                label="Dernière mise à jour"
+                label="Mise à jour"
                 value={
                   quote?.lastUpdatedAt
                     ? formatRelativeUpdate(quote.lastUpdatedAt)
@@ -450,7 +565,9 @@ export function AssetPanel({
             >
               {sections
                 .filter((s) => s.id !== "overview")
-                .map((s) => (
+                .map((s) => {
+                  const Icon = SECTION_ICONS[s.id];
+                  return (
                   <button
                     key={s.id}
                     type="button"
@@ -464,6 +581,12 @@ export function AssetPanel({
                         : `asset-panel-section-${s.id}`
                     }
                   >
+                    {/* L'icône se reconnaît avant que le mot ne se lise : sur
+                        dix entrées, elle divise le temps de repérage. */}
+                    <Icon
+                      className="h-3.5 w-3.5 shrink-0 text-[var(--foreground-faint)]"
+                      aria-hidden
+                    />
                     <span className="min-w-0 flex-1 truncate text-left">
                       {s.label}
                     </span>
@@ -478,7 +601,8 @@ export function AssetPanel({
                       aria-hidden
                     />
                   </button>
-                ))}
+                  );
+                })}
             </nav>
           </>
         )}
