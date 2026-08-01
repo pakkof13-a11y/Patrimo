@@ -174,6 +174,13 @@ export function AssetPanel({
       <aside
         className={cn("asset-panel", className)}
         data-testid="asset-panel"
+        /*
+          Rien de sélectionné. En grand écran la colonne reste en place et
+          invite au clic ; sous 1280 px, où elle se superpose au tableau, elle
+          doit s'effacer — sinon elle recouvre le portefeuille en permanence.
+          Le CSS décide, à partir de cet attribut.
+        */
+        data-open="false"
         aria-label="Détail de l'actif"
       >
         <div className="asset-panel-empty" data-testid="asset-panel-empty">
@@ -211,6 +218,7 @@ export function AssetPanel({
     <aside
       className={cn("asset-panel", className)}
       data-testid="asset-panel"
+      data-open="true"
       aria-label={asset ? `Détail — ${asset.name}` : "Détail de l'actif"}
       /*
         La clé change avec l'actif : React remonte le sous-arbre, ce qui rejoue

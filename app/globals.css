@@ -2132,6 +2132,14 @@ textarea:focus-visible,
   deviendraient illisibles. Le bouton de fermeture reprend alors tout son sens.
 */
 @media (max-width: 1279px) {
+  /*
+    Sans sélection, la colonne superposée n'a rien à montrer et masquerait le
+    tableau entier. Elle s'efface donc, et ne revient qu'au clic sur une ligne.
+  */
+  .asset-panel[data-open="false"] {
+    display: none;
+  }
+
   .asset-panel {
     position: fixed;
     top: 0;
