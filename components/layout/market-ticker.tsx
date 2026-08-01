@@ -1,108 +1,46 @@
 "use client";
 
-import { useQueries } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/app/lib/api-client";
-import { MARKET_TICKERS } from "@/app/lib/portfolio/market-indices";
 import { cn } from "@/app/lib/utils";
-import { Sparkline } from "@/components/ui/sparkline";
+import {
+  describeQuote,
+  formatQuotePct,
+  formatQuotePrice,
+  isLive,
+  type MarketQuote,
+} from "@/app/lib/market/quotes";
 
-type ClosePoint = { date: string; close: number };
-
-/** Fenêtre courte : il ne faut qu'une tendance, pas un historique. */
-const WINDOW_DAYS = 12;
-const REFRESH_MS = 15 * 60_000;
-
-export type TickerQuote = {
-  key: string;
-  label: string;
-  last: number;
-  prevClose: number;
-  changePct: number;
-  closes: number[];
-};
-
-/**
- * Dérive une cotation affichable d'une série de clôtures.
- *
- * Exige **deux** points : avec un seul, la variation serait calculée contre
- * la valeur elle-même et afficherait un 0,00 % trompeur — un bandeau de
- * marché qui annonce « stable » alors qu'il n'en sait rien est pire que muet.
- */
-export function toQuote(
-  key: string,
-  label: string,
-  points: ClosePoint[] | undefined
-): TickerQuote | null {
-  const closes = (points ?? [])
-    .map((p) => Number(p.close))
-    .filter((n) => Number.isFinite(n) && n > 0);
-  if (closes.length < 2) return null;
-  const last = closes[closes.length - 1]!;
-  const prevClose = closes[closes.length - 2]!;
-  return {
-    key,
-    label,
-    last,
-    prevClose,
-    changePct: ((last - prevClose) / prevClose) * 100,
-    closes,
-  };
-}
-
-/** Cours : compact au-delà de 10 000 pour tenir dans une ligne de 30 px. */
-function formatPrice(v: number): string {
-  if (v >= 10_000) {
-    return v.toLocaleString("fr-FR", { maximumFractionDigits: 0 });
-  }
-  return v.toLocaleString("fr-FR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: v < 10 ? 4 : 2,
-  });
-}
-
-function formatPct(v: number): string {
-  const s = Math.abs(v).toLocaleString("fr-FR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return `${v >= 0 ? "+" : "−"}${s} %`;
-}
+/** Une minute — le cache serveur a le même pas, inutile de demander plus vite. */
+const REFRESH_MS = 60_000;
 
 /**
  * Bandeau des marchés — la ligne la plus fine de l'interface.
  *
- * Statique et non défilant, contrairement aux bandeaux de chaînes d'info : un
- * texte qui bouge tout seul est illisible au clavier, indexé deux fois par les
- * lecteurs d'écran (piste dupliquée) et impossible à pointer à la souris. La
- * rangée défile horizontalement à la demande quand la largeur manque.
+ * Il défile en continu, comme sur un terminal de salle des marchés. Ce choix a
+ * un coût d'accessibilité que le composant paie explicitement : la piste
+ * visuelle est dupliquée pour que la boucle soit sans couture, donc chaque
+ * cotation existe deux fois dans le DOM. Les deux copies sont `aria-hidden`, et
+ * un résumé textuel unique — lui, immobile — porte l'information pour les aides
+ * techniques. Sans cela, un lecteur d'écran annoncerait tout deux fois.
+ *
+ * Le défilement s'arrête au survol et au focus clavier, et ne démarre pas du
+ * tout si le système demande moins d'animations (`prefers-reduced-motion`).
  */
 export function MarketTicker({ className }: { className?: string }) {
-  const results = useQueries({
-    queries: MARKET_TICKERS.map((t) => ({
-      queryKey: ["market-ticker", t.key],
-      staleTime: REFRESH_MS,
-      refetchInterval: REFRESH_MS,
-      retry: 1,
-      queryFn: () => {
-        const to = new Date();
-        const from = new Date(to.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
-        const params = new URLSearchParams({
-          symbol: t.key,
-          from: from.toISOString(),
-          to: to.toISOString(),
-        });
-        return fetchJson<{ points: ClosePoint[] }>(
-          `/api/benchmark?${params.toString()}`
-        );
-      },
-    })),
+  const q = useQuery({
+    queryKey: ["market-quotes"],
+    queryFn: () =>
+      fetchJson<{ quotes: MarketQuote[] }>("/api/market/quotes"),
+    staleTime: REFRESH_MS,
+    refetchInterval: REFRESH_MS,
+    retry: 1,
   });
 
-  const quotes = MARKET_TICKERS.map((t, i) =>
-    toQuote(t.key, t.label, results[i]?.data?.points)
-  ).filter((q): q is TickerQuote => q !== null);
-
-  const loading = results.some((r) => r.isLoading) && quotes.length === 0;
+  // Un instrument sans cours ne défile pas : une place fermée reste affichée
+  // (« fermé » est une information), une cotation absente ne l'est pas.
+  const quotes = (q.data?.quotes ?? []).filter((x) => x.last != null);
+  const loading = q.isLoading && quotes.length === 0;
 
   return (
     <div
@@ -110,46 +48,82 @@ export function MarketTicker({ className }: { className?: string }) {
       data-testid="market-ticker"
       aria-label="Cotations de marché"
     >
-      {/*
-        Résumé unique pour les aides techniques. Les cotations visuelles sont
-        masquées (`aria-hidden`) : lues telles quelles, elles produiraient une
-        bouillie de nombres sans unité ni contexte.
-      */}
       <p className="sr-only">
         {quotes.length === 0
           ? "Cotations de marché indisponibles."
-          : quotes
-              .map(
-                (q) =>
-                  `${q.label} ${formatPrice(q.last)}, ${formatPct(q.changePct)}`
-              )
-              .join(". ")}
+          : quotes.map(describeQuote).join(". ")}
       </p>
 
-      <div className="term-ticker-rail" aria-hidden>
-        {loading && <span className="term-ticker-symbol">Chargement…</span>}
-        {!loading && quotes.length === 0 && (
-          <span className="term-ticker-symbol">Cotations indisponibles</span>
-        )}
-        {quotes.map((q) => {
-          const up = q.changePct >= 0;
-          const stroke = up ? "var(--chart-positive)" : "var(--chart-negative)";
-          return (
-            <span
-              key={q.key}
-              className="term-ticker-item"
-              data-testid={`ticker-${q.key}`}
-            >
-              <span className="term-ticker-symbol">{q.label}</span>
-              <span className="term-ticker-price">{formatPrice(q.last)}</span>
-              <span className={up ? "val-positive" : "val-negative"}>
-                {formatPct(q.changePct)}
-              </span>
-              <Sparkline values={q.closes} stroke={stroke} />
-            </span>
-          );
-        })}
-      </div>
+      {loading || quotes.length === 0 ? (
+        <div className="term-ticker-rail" aria-hidden>
+          <span className="term-ticker-symbol">
+            {loading ? "Chargement…" : "Cotations indisponibles"}
+          </span>
+        </div>
+      ) : (
+        <div className="term-ticker-marquee" aria-hidden>
+          {/*
+            Deux pistes identiques qui se suivent : quand la première a fini de
+            sortir par la gauche, la seconde occupe exactement sa place, et
+            l'animation peut repartir de zéro sans saut visible.
+          */}
+          {[0, 1].map((copy) => (
+            <div className="term-ticker-track" key={copy}>
+              {quotes.map((quote) => (
+                <TickerItem
+                  key={`${copy}-${quote.key}`}
+                  quote={quote}
+                  testId={copy === 0 ? `ticker-${quote.key}` : undefined}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
+  );
+}
+
+function TickerItem({
+  quote,
+  testId,
+}: {
+  quote: MarketQuote;
+  /** Seule la première copie porte un identifiant : la seconde est un doublon. */
+  testId?: string;
+}) {
+  const live = isLive(quote.state);
+  const up = (quote.changePct ?? 0) >= 0;
+
+  return (
+    <span className="term-ticker-item" data-testid={testId}>
+      <span className="term-ticker-symbol">{quote.label}</span>
+
+      {live ? (
+        <>
+          <span className="term-ticker-price">
+            {formatQuotePrice(quote.last!)}
+          </span>
+          {quote.changePct != null && (
+            <span className={up ? "val-positive" : "val-negative"}>
+              {formatQuotePct(quote.changePct)}
+            </span>
+          )}
+        </>
+      ) : (
+        /*
+          Place close : le dernier cours reste juste, mais l'afficher seul le
+          ferait passer pour le cours du moment. On annonce donc l'état, et le
+          cours de clôture le suit en retrait — l'information n'est pas perdue,
+          elle est simplement datée.
+        */
+        <>
+          <span className="term-ticker-closed">fermé</span>
+          <span className="term-ticker-price term-ticker-price--stale">
+            {formatQuotePrice(quote.last!)}
+          </span>
+        </>
+      )}
+    </span>
   );
 }

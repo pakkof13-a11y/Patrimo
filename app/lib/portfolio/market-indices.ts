@@ -5,15 +5,23 @@
  */
 
 export type MarketIndexKey =
+  // Comparateur « Versus »
   | "cac40"
   | "sp500"
   | "nasdaq"
   | "eurostoxx50"
   | "msciworld"
   | "bitcoin"
-  | "ethereum"
-  | "eurusd"
-  | "gold";
+  // Bandeau de marché
+  | "dax"
+  | "stoxx600"
+  | "nasdaq100"
+  | "djia"
+  | "btcusd"
+  | "ethusd"
+  | "xauusd"
+  | "xagusd"
+  | "eurusd";
 
 export type MarketIndex = {
   key: MarketIndexKey;
@@ -51,15 +59,36 @@ export const MARKET_INDICES: MarketIndex[] = [
  * tandis que celle-ci est un fil d'actualité de marché — une parité EUR/USD
  * s'y lit très bien mais ne serait pas un benchmark patrimonial recevable.
  *
+ * L'ordre est celui du défilement : les places européennes, puis les
+ * américaines, puis le hors-séance permanent (crypto, métaux, change). Il suit
+ * la journée d'un investisseur français, et regroupe les instruments qui
+ * ferment ensemble — un bandeau où « fermé » alterne avec des cours vivants se
+ * lit plus mal qu'un bandeau où les états se suivent.
+ *
  * Les deux alimentent en revanche la même liste blanche côté API.
  */
 export const MARKET_TICKERS: MarketIndex[] = [
   { key: "cac40", label: "CAC 40", yahoo: "^FCHI", hint: "Actions françaises" },
+  { key: "dax", label: "DAX", yahoo: "^GDAXI", hint: "Actions allemandes" },
+  {
+    key: "stoxx600",
+    label: "STOXX 600",
+    yahoo: "^STOXX",
+    hint: "Grandes cap. européennes",
+  },
   { key: "sp500", label: "S&P 500", yahoo: "^GSPC", hint: "Grandes cap. US" },
-  { key: "bitcoin", label: "BTC/EUR", yahoo: "BTC-EUR", hint: "Bitcoin en euro" },
-  { key: "ethereum", label: "ETH/EUR", yahoo: "ETH-EUR", hint: "Ether en euro" },
-  { key: "eurusd", label: "EUR/USD", yahoo: "EURUSD=X", hint: "Parité euro / dollar" },
-  { key: "gold", label: "OR", yahoo: "GC=F", hint: "Once d'or (futures)" },
+  { key: "nasdaq100", label: "NASDAQ 100", yahoo: "^NDX", hint: "Tech US" },
+  { key: "djia", label: "DOW JONES", yahoo: "^DJI", hint: "Industrielles US" },
+  { key: "btcusd", label: "BTC/USD", yahoo: "BTC-USD", hint: "Bitcoin en dollar" },
+  { key: "ethusd", label: "ETH/USD", yahoo: "ETH-USD", hint: "Ether en dollar" },
+  { key: "xauusd", label: "XAU/USD", yahoo: "XAUUSD=X", hint: "Once d'or" },
+  { key: "xagusd", label: "XAG/USD", yahoo: "XAGUSD=X", hint: "Once d'argent" },
+  {
+    key: "eurusd",
+    label: "EUR/USD",
+    yahoo: "EURUSD=X",
+    hint: "Parité euro / dollar",
+  },
 ];
 
 const BY_KEY = new Map(

@@ -1545,6 +1545,88 @@ textarea:focus-visible,
   display: none;
 }
 
+/*
+  Défilement continu.
+
+  L'animation translate la piste de la moitié de sa largeur : les deux copies
+  étant identiques, la position finale est visuellement la position initiale,
+  et la boucle est sans couture. `will-change` évite le repaint de toute la
+  barre à chaque image.
+*/
+.term-ticker-marquee {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--space-6),
+    #000 calc(100% - var(--space-6)),
+    transparent
+  );
+}
+
+.term-ticker-track {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding-inline-end: var(--space-6);
+  white-space: nowrap;
+  flex: none;
+  will-change: transform;
+  animation: term-ticker-scroll 90s linear infinite;
+}
+
+/* Le défilement est une commodité, pas une information : on l'arrête dès que
+   l'utilisateur veut lire ou pointer une cotation. */
+.term-ticker:hover .term-ticker-track,
+.term-ticker:focus-within .term-ticker-track {
+  animation-play-state: paused;
+}
+
+@keyframes term-ticker-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+/* Mouvement réduit : la piste s'immobilise et redevient défilable à la main.
+   Une seule des deux copies suffit alors — la seconde n'existait que pour la
+   boucle, et laissée visible elle afficherait chaque cotation en double. */
+@media (prefers-reduced-motion: reduce) {
+  .term-ticker-marquee {
+    overflow-x: auto;
+    scrollbar-width: none;
+    mask-image: none;
+  }
+
+  .term-ticker-marquee::-webkit-scrollbar {
+    display: none;
+  }
+
+  .term-ticker-track {
+    animation: none;
+  }
+
+  .term-ticker-track:nth-child(2) {
+    display: none;
+  }
+}
+
+.term-ticker-closed {
+  color: var(--foreground-faint);
+  font-style: italic;
+}
+
+/* Cours de clôture : présent, mais visiblement moins vif qu'un cours vivant. */
+.term-ticker-price--stale {
+  color: var(--foreground-faint);
+}
+
 .term-ticker-item {
   display: inline-flex;
   align-items: baseline;
