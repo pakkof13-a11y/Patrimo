@@ -25,7 +25,7 @@ import { cn, formatCurrency } from "@/app/lib/utils";
 import { CHART_COLORS } from "@/app/lib/types/ui";
 import { DefiPanel } from "@/components/crypto/defi-panel";
 import { NftPanel } from "@/components/crypto/nft-panel";
-import { SpotPanel } from "@/components/crypto/spot-panel";
+import { SpotOverviewPage } from "@/components/crypto/spot-overview-page";
 import { AltDashKpi } from "@/components/tabs/alternatives-shell";
 import type { CoinCardHolding } from "@/app/lib/crypto/coin-cards";
 
@@ -414,7 +414,7 @@ export function CryptosTab({
       )}
 
       {sub === "SPOT" && (
-        <SpotPanel
+        <SpotOverviewPage
           holdings={holdings}
           baseCurrency={baseCurrency}
           onOpenPositions={onOpenPositions}

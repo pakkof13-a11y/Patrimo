@@ -83,6 +83,37 @@ function symbolOf(a: { ticker: string | null; name: string }): string {
   return (raw.split(/[.\-/:]/)[0] ?? raw).toUpperCase();
 }
 
+/**
+ * Deux dernières clôtures cotées d'un actif, si elles sont assez rapprochées.
+ *
+ * `MAX_STALE_DAYS` borne la fraîcheur : au-delà, l'écart entre deux clôtures
+ * n'est plus une variation « 24 h » mais celle d'une semaine, et l'annoncer
+ * comme telle serait faux. On rend alors `null`, que l'écran sait dire.
+ */
+const MAX_STALE_DAYS = 3;
+
+function quotedPair(
+  index: Map<DayKey, number>,
+  toDay: DayKey
+): { last: number; previous: number } | null {
+  const days = [...index.keys()].filter((d) => d <= toDay).sort();
+  if (days.length < 2) return null;
+
+  const lastDay = days[days.length - 1]!;
+  const previousDay = days[days.length - 2]!;
+
+  const ageDays =
+    (Date.parse(`${toDay}T00:00:00Z`) - Date.parse(`${lastDay}T00:00:00Z`)) /
+    (24 * 3600 * 1000);
+  const gapDays =
+    (Date.parse(`${lastDay}T00:00:00Z`) -
+      Date.parse(`${previousDay}T00:00:00Z`)) /
+    (24 * 3600 * 1000);
+  if (ageDays > MAX_STALE_DAYS || gapDays > MAX_STALE_DAYS) return null;
+
+  return { last: index.get(lastDay)!, previous: index.get(previousDay)! };
+}
+
 export async function getSpotHistory(
   userId: string,
   range: SpotRange,
@@ -141,12 +172,11 @@ export async function getSpotHistory(
     ligne doit rester une courbe. On élargit donc la lecture du cache vers le
     passé — elle porte sur les mêmes actifs, et le cache est déjà en base.
   */
-  const sparkFrom = enumerateDays(
-    new Date(Date.parse(`${toDay}T00:00:00Z`) - SPARK_DAYS * 24 * 3600 * 1000)
-      .toISOString()
-      .slice(0, 10),
-    toDay
-  )[0]!;
+  const sparkFrom = new Date(
+    Date.parse(`${toDay}T00:00:00Z`) - SPARK_DAYS * 24 * 3600 * 1000
+  )
+    .toISOString()
+    .slice(0, 10);
   const readFrom = sparkFrom < fromDay ? sparkFrom : fromDay;
 
   const { closes } = await getDailyCloses(userId, [...heldIds], readFrom, toDay);
@@ -187,7 +217,6 @@ export async function getSpotHistory(
   /* ── Séries par coin ────────────────────────────────────────────── */
 
   const sparkDays = enumerateDays(sparkFrom, toDay);
-  const previousDay = sparkDays.at(-2) ?? toDay;
   const bySymbol: Record<string, SpotAssetSeries> = {};
 
   for (const assetId of heldIds) {
@@ -203,14 +232,17 @@ export async function getSpotHistory(
     if (series.length === 0) continue;
 
     /*
-      La variation 24 h se lit sur les clôtures **réellement cotées** des deux
-      derniers jours, et non sur la série ci-dessus : celle-ci reporte la
-      dernière clôture connue pour dessiner une courbe continue, si bien qu'un
-      cache périmé afficherait « 0,00 % » — « stable » là où la bonne réponse
-      est « on ne sait pas ».
+      La variation 24 h se lit sur deux clôtures **réellement cotées**, et non
+      sur la série ci-dessus : celle-ci reporte la dernière clôture connue pour
+      dessiner une courbe continue, si bien qu'un cache périmé afficherait
+      « 0,00 % » — « stable » là où la bonne réponse est « on ne sait pas ».
+
+      On prend les deux derniers jours cotés plutôt que strictement hier et
+      aujourd'hui : la clôture du jour n'est écrite qu'en fin de journée, et
+      exiger sa présence rendrait la mesure indisponible toute la matinée alors
+      que les deux veilles sont connues.
     */
-    const today = index.get(toDay) ?? null;
-    const yesterday = index.get(previousDay) ?? null;
+    const quoted = quotedPair(index, toDay);
 
     // Deux coins peuvent partager un symbole (même jeton sur deux réseaux) :
     // la première série connue fait foi, plutôt que d'en moyenner deux qui
@@ -219,18 +251,24 @@ export async function getSpotHistory(
 
     bySymbol[symbol] = {
       change24hPct:
-        today != null && yesterday != null && yesterday > 0
-          ? (today / yesterday - 1) * 100
+        quoted && quoted.previous > 0
+          ? (quoted.last / quoted.previous - 1) * 100
           : null,
       closes: series.slice(-SPARK_DAYS),
     };
   }
 
+  /*
+    Aucune ligne cotée : il n'y a pas une courbe plate à montrer, il n'y a pas
+    de courbe. Rendre 200 points à zéro dessinerait un portefeuille qui ne vaut
+    rien, alors que la bonne réponse est « on ne connaît aucun cours » — et
+    l'écran, lui, sait afficher une absence.
+  */
   return {
     range,
     fromDay,
     toDay,
-    points,
+    points: coveragePct > 0 ? points : [],
     coveragePct,
     bySymbol,
     btcPriceEur: bySymbol.BTC?.closes.at(-1) ?? null,

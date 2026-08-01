@@ -55,18 +55,21 @@ test.describe("Cryptos & Trading", () => {
 
     await page.goto("/cryptos", { waitUntil: "domcontentloaded" });
     await page.getByTestId("crypto-subtab-SPOT").click();
-    await expect(page.getByTestId("crypto-coin-cards")).toBeVisible({
+    await expect(page.getByTestId("spot-assets")).toBeVisible({
       timeout: 20_000,
     });
+    // La vue peut s'ouvrir en tableau si la poche compte beaucoup de lignes :
+    // on force les cartes pour compter la même chose dans les deux cas.
+    await page.getByTestId("spot-view-cards").click();
 
     // Une carte par coin distinct, pas une par couple actif × plateforme :
-    // c'est toute la différence avec le tableau Positions.
+    // c'est toute la différence avec le tableau Portefeuille.
     const distinctCoins = new Set(
       spot.map((h: { ticker?: string | null; name: string }) =>
         (h.ticker || h.name || "").split(/[.\-/:]/)[0]!.toUpperCase()
       )
     );
-    await expect(page.locator('[data-testid^="crypto-coin-card-"]')).toHaveCount(
+    await expect(page.locator('[data-testid^="spot-asset-card-"]')).toHaveCount(
       distinctCoins.size
     );
   });

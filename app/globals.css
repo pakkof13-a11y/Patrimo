@@ -200,6 +200,9 @@
   --chart-positive: #2e9e63;
   --chart-negative: #d0453a;
   --chart-cyan: #0e8ba3;
+  /* Cinquième teinte des répartitions — assez éloignée des quatre autres pour
+     rester distincte dans un anneau, y compris en vision déficiente. */
+  --chart-violet: #6d4aad;
   --chart-neutral: #9a9ea6;
   --chart-grid: rgba(16, 17, 20, 0.06);
   --chart-glow: rgba(217, 166, 77, 0.1);
@@ -281,6 +284,7 @@
   --chart-positive: var(--green-base);
   --chart-negative: var(--red-base);
   --chart-cyan: var(--cyan-base);
+  --chart-violet: #9d7fe0;
   --chart-neutral: #6e7278;
   --chart-grid: rgba(255, 255, 255, 0.05);
   --chart-glow: rgba(217, 166, 77, 0.14);
