@@ -21,6 +21,7 @@ import {
   resolveFundCategory,
   type FundCategory,
 } from "./fund-category";
+import { shiftMonths } from "../dates/day-window";
 import { PLAN_TYPE_LABELS, SOURCE_TYPE_LABELS } from "./types";
 
 /** Ligne telle que rendue par l'API. */
@@ -386,19 +387,6 @@ export function rangeStartDay(range: EsRange, now: Date): string | null {
   }
 }
 
-/**
- * Recule de `months` mois en bornant au dernier jour du mois d'arrivée : le
- * 31 juillet moins un mois donne le 30 juin, pas le 1er juillet.
- */
-function shiftMonths(now: Date, months: number): string {
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth() + months;
-  const day = now.getUTCDate();
-  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  return new Date(Date.UTC(year, month, Math.min(day, lastDay)))
-    .toISOString()
-    .slice(0, 10);
-}
 
 /* ── Disponibilités et échéances ──────────────────────────────────── */
 

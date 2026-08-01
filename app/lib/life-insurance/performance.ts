@@ -16,6 +16,8 @@
  * Module pur : ni Prisma, ni React, ni date « maintenant » implicite.
  */
 
+import { shiftMonths } from "../dates/day-window";
+
 export type DailyValuePoint = {
   /** Jour civil Europe/Paris, `YYYY-MM-DD`. */
   day: string;
@@ -181,19 +183,3 @@ export function rangeStartDay(range: PerfRange, now: Date): string | null {
   }
 }
 
-/**
- * Recule de `months` mois en bornant au dernier jour du mois d'arrivée.
- *
- * `setUTCMonth` déborde : le 31 juillet moins un mois donne le 31 juin, que
- * JavaScript reporte au 1er juillet — la fenêtre « 1M » ne couvrait alors
- * qu'un jour. On vise donc le 30 juin, comme le ferait un relevé.
- */
-function shiftMonths(now: Date, months: number): string {
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth() + months;
-  const day = now.getUTCDate();
-  const lastDayOfTarget = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  return new Date(Date.UTC(year, month, Math.min(day, lastDayOfTarget)))
-    .toISOString()
-    .slice(0, 10);
-}
