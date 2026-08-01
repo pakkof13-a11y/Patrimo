@@ -298,25 +298,26 @@ export async function clickNav(page: Page, label: string) {
   const fallbackPath = NAV_PATH[label];
 
   /**
-   * Entrées rangées derrière le dépliant « Patrimoine » de la sidebar.
+   * Entrées rangées derrière l'un des trois groupes patrimoniaux de la
+   * sidebar (Enveloppes, Actifs détenus, Positions & engagements).
    *
-   * La navigation est passée d'une rangée d'onglets à une colonne de sept
-   * entrées : les sections patrimoniales ne sont plus visibles d'emblée, il
-   * faut d'abord ouvrir le panneau. Sans cette table, le helper tombait
+   * Chaque groupe est son propre dépliant depuis le retrait du bouton
+   * générique « Patrimoine » : il faut savoir lequel ouvrir avant de pouvoir
+   * cliquer l'entrée visée. Sans cette table, le helper tombait
    * systématiquement sur le repli par URL et ne testait plus la navigation
    * réelle.
    */
-  const BEHIND_WEALTH_MENU = new Set([
-    "nav-securities",
-    "nav-immobilier",
-    "nav-crypto",
-    "nav-banques",
-    "nav-assurance-vie",
-    "nav-trading",
-    "nav-epargne-salariale",
-    "nav-alternatifs",
-    "nav-liabilities",
-  ]);
+  const WEALTH_GROUP_OF: Record<string, string> = {
+    "nav-securities": "nav-group-enveloppes",
+    "nav-assurance-vie": "nav-group-enveloppes",
+    "nav-banques": "nav-group-enveloppes",
+    "nav-epargne-salariale": "nav-group-enveloppes",
+    "nav-immobilier": "nav-group-actifs",
+    "nav-crypto": "nav-group-actifs",
+    "nav-alternatifs": "nav-group-actifs",
+    "nav-trading": "nav-group-positions",
+    "nav-liabilities": "nav-group-positions",
+  };
 
   async function ensureUrl() {
     if (!fallbackPath) return;
@@ -338,8 +339,8 @@ export async function clickNav(page: Page, label: string) {
       return;
     }
 
-    if (BEHIND_WEALTH_MENU.has(tid)) {
-      const gb = page.getByTestId("nav-wealth");
+    if (tid in WEALTH_GROUP_OF) {
+      const gb = page.getByTestId(WEALTH_GROUP_OF[tid]!);
       if (await gb.isVisible().catch(() => false)) {
         await gb.click();
         try {
