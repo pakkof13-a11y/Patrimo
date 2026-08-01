@@ -383,10 +383,12 @@ export function NewsMacroPanel({
               <h3 className="text-title">
                 Résultats des entreprises
               </h3>
+              {/* Le sous-titre dit ce que la liste contient, et rien d'autre :
+                  uniquement les titres détenus. */}
               <p className="text-meta">
                 {portfolioTickers.length > 0
-                  ? "Priorité portefeuille"
-                  : "Publications cotées"}
+                  ? "Vos titres uniquement"
+                  : "Aucun titre coté au portefeuille"}
               </p>
             </div>
           </header>
@@ -415,10 +417,18 @@ export function NewsMacroPanel({
                 Calendrier des résultats indisponible
               </p>
             ) : earnAll.length === 0 ? (
+              /*
+                Vide n'est pas une panne : sur un portefeuille de quelques
+                lignes, il se passe des semaines sans publication. On dit
+                laquelle des deux situations on rencontre — pas de titre coté,
+                ou pas d'annonce — pour que le silence s'explique de lui-même.
+              */
               <p className="py-6 text-center text-xs text-[var(--muted-foreground)]">
-                {earnFilter === "upcoming"
-                  ? "Aucun résultat à venir"
-                  : "Aucun résultat publié (24 h)"}
+                {portfolioTickers.length === 0
+                  ? "Aucun titre coté au portefeuille — rien à annoncer"
+                  : earnFilter === "upcoming"
+                    ? "Aucun résultat à venir pour vos titres"
+                    : "Aucun résultat publié pour vos titres (24 h)"}
               </p>
             ) : (
               <ul className="space-y-1.5">

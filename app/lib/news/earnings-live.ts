@@ -13,7 +13,6 @@ import type {
   EarningsTiming,
   PortfolioTickerRef,
 } from "@/app/lib/news/service";
-import { getEarningsCalendarMock } from "@/app/lib/news/service";
 import { toYahooSymbol, toFinnhubSymbol } from "@/app/lib/market/symbol";
 import { logoByName, logoByTicker } from "@/app/lib/logos/logodev";
 import { withTimeout } from "@/app/lib/utils/with-timeout";
@@ -23,7 +22,14 @@ const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey"],
 });
 
-export type EarningsSource = "yahoo" | "finnhub" | "mixed" | "mock";
+/**
+ * D'où viennent les annonces affichées.
+ *
+ * `none` n'est pas une panne : c'est « aucune annonce pour vos titres sur la
+ * fenêtre », un état parfaitement normal pour un portefeuille de quelques
+ * lignes. `mock` a disparu — voir `resolveEarningsCalendar`.
+ */
+export type EarningsSource = "yahoo" | "finnhub" | "mixed" | "none";
 
 export type EarningsCalendarResult = {
   events: EarningsEvent[];
@@ -388,18 +394,20 @@ export async function resolveEarningsCalendar(opts: {
     nameByTicker.set(normalizeKey(p.ticker), p.name);
   }
 
-  // Ordre de priorité des symboles à interroger
-  const ordered = dedupeRefs([...portfolio, ...watch]);
-  const targets =
-    ordered.length > 0
-      ? ordered.slice(0, 16)
-      : [
-          { ticker: "AAPL", name: "Apple" },
-          { ticker: "MSFT", name: "Microsoft" },
-          { ticker: "ASML.AS", name: "ASML Holding" },
-          { ticker: "MC.PA", name: "LVMH" },
-          { ticker: "SAP.DE", name: "SAP" },
-        ];
+  /*
+    Les symboles interrogés sont **ceux de l'utilisateur**, et rien d'autre.
+
+    Cette liste retombait auparavant sur Apple, Microsoft, ASML, LVMH et SAP
+    quand le portefeuille n'en fournissait aucun. L'intention était d'éviter un
+    panneau vide ; l'effet était un calendrier de résultats d'entreprises que
+    l'utilisateur ne détient pas — indiscernable, à l'écran, d'un calendrier qui
+    le concerne. Un panneau vide qui dit pourquoi vaut mieux qu'un panneau plein
+    qui parle d'autre chose.
+  */
+  const targets = dedupeRefs([...portfolio, ...watch]).slice(0, 16);
+  if (targets.length === 0) {
+    return { events: [], source: "none" };
+  }
 
   const now = new Date();
   const from = isoDate(addDays(now, -2));
@@ -456,17 +464,14 @@ export async function resolveEarningsCalendar(opts: {
       }
     }
 
-    // Si peu de résultats, calendrier global US (fenêtre courte)
-    if (byKey.size < Math.min(4, limit)) {
-      const bulk = await fetchFinnhubCalendar({ from, to });
-      for (const row of bulk.slice(0, 40)) {
-        const ev = finnhubRowToEvent(row, nameByTicker, portfolioSet);
-        if (!ev) continue;
-        sourcesUsed.add("finnhub");
-        const k = `${normalizeKey(ev.ticker)}|${ev.time.slice(0, 10)}`;
-        if (!byKey.has(k)) byKey.set(k, ev);
-      }
-    }
+    /*
+      Le calendrier américain en vrac a été retiré.
+
+      Il se déclenchait dès que moins de quatre annonces sortaient des symboles
+      détenus, et versait alors jusqu'à quarante sociétés quelconques dans la
+      liste. C'était la principale cause d'annonces sans rapport : le panneau
+      était d'autant plus pollué que le portefeuille était petit ou peu couvert.
+    */
   }
 
   let events = Array.from(byKey.values());
@@ -486,9 +491,11 @@ export async function resolveEarningsCalendar(opts: {
   });
 
   if (events.length > 0) {
+    // `sourcesUsed` est nécessairement non vide ici : sans source interrogée,
+    // `events` serait vide et l'on ne serait pas dans cette branche.
     const source: EarningsSource =
       sourcesUsed.size === 0
-        ? "mock"
+        ? "none"
         : sourcesUsed.size === 2
           ? "mixed"
           : sourcesUsed.has("yahoo")
@@ -501,13 +508,13 @@ export async function resolveEarningsCalendar(opts: {
     };
   }
 
-  // 3) Fallback mock
-  return {
-    events: getEarningsCalendarMock({
-      portfolio,
-      watchlist: watch,
-      limit,
-    }).map(enrichEarningsVisuals),
-    source: "mock",
-  };
+  /*
+    Aucune annonce : on le dit.
+
+    Le repli sur un jeu d'exemples a été retiré. Des résultats inventés,
+    affichés dans la même carte et avec la même mise en forme que de vrais,
+    n'ont aucun moyen d'être reconnus comme faux par celui qui les lit — c'est
+    la pire des trois sources d'erreur, parce qu'elle est invisible.
+  */
+  return { events: [], source: "none" };
 }
