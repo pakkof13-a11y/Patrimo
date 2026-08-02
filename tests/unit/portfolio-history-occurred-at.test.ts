@@ -162,3 +162,115 @@ describe("buildHistoryFromOccurredAt", () => {
   });
 });
 
+
+describe("valorisation au marché de l'historique", () => {
+  const txs: LedgerTx[] = [
+    tx({
+      id: "apport",
+      type: "APPORT",
+      platformId: "p1",
+      cashAmountOriginal: d(10_000),
+      occurredAt: new Date("2026-03-02T09:00:00.000Z"),
+    }),
+    tx({
+      id: "achat",
+      type: "ACHAT",
+      platformId: "p1",
+      assetId: "asset-a",
+      quantity: d(10),
+      unitPrice: d(100),
+      occurredAt: new Date("2026-03-02T10:00:00.000Z"),
+    }),
+  ];
+
+  /** Le cours monte de 100 à 130 sur trois séances. */
+  const closes = new Map([
+    [
+      "asset-a",
+      new Map([
+        ["2026-03-02", 100],
+        ["2026-03-03", 120],
+        ["2026-03-04", 130],
+      ]),
+    ],
+  ]);
+
+  it("suit le cours au lieu de figer le prix de revient", () => {
+    const points = buildHistoryFromOccurredAt(txs, identity, {
+      untilDayKey: "2026-03-04",
+      closes,
+    });
+
+    expect(points).toHaveLength(3);
+    /*
+      On mesure la part « positions » — total moins cash — plutôt que le total
+      brut : le test porte sur la valorisation au marché, pas sur la mécanique
+      de trésorerie du ledger.
+    */
+    const positions = points.map((p) => p.totalValueBase - p.cashTotalBase);
+    expect(positions[0]).toBeCloseTo(10 * 100, 2);
+    expect(positions[1]).toBeCloseTo(10 * 120, 2);
+    expect(positions[2]).toBeCloseTo(10 * 130, 2);
+
+    // Le latent n'est plus figé à zéro : il suit l'écart au prix de revient.
+    expect(points[0]!.unrealizedPnlBase).toBeCloseTo(0, 2);
+    expect(points[1]!.unrealizedPnlBase).toBeCloseTo(200, 2);
+    expect(points[2]!.unrealizedPnlBase).toBeCloseTo(300, 2);
+    expect(points.every((p) => !p.estimated)).toBe(true);
+  });
+
+  it("reporte le dernier cours connu, jamais un cours futur", () => {
+    const trous = new Map([
+      ["asset-a", new Map([["2026-03-03", 120]])],
+    ]);
+    const points = buildHistoryFromOccurredAt(txs, identity, {
+      untilDayKey: "2026-03-04",
+      closes: trous,
+    });
+
+    /*
+      Le 2 mars précède le premier cours connu : la position est retenue à son
+      coût et la journée se déclare estimée. Retenir 120 € ce jour-là
+      injecterait dans le passé une information qui n'existait pas encore.
+    */
+    expect(points[0]!.totalValueBase - points[0]!.cashTotalBase).toBeCloseTo(
+      1_000,
+      2
+    );
+    expect(points[0]!.estimated).toBe(true);
+    // Le 4 mars n'a pas de cours : report du 3 mars, et la journée est exacte.
+    expect(points[2]!.totalValueBase - points[2]!.cashTotalBase).toBeCloseTo(
+      10 * 120,
+      2
+    );
+    expect(points[2]!.estimated).toBeUndefined();
+  });
+
+  it("retombe sur le prix de revient sans aucun cours, et le signale", () => {
+    const points = buildHistoryFromOccurredAt(txs, identity, {
+      untilDayKey: "2026-03-04",
+      closes: new Map(),
+    });
+    // Positions retenues à leur coût, comme avant ce chantier — mais dit.
+    expect(
+      points.every(
+        (p) => Math.abs(p.totalValueBase - p.cashTotalBase - 1_000) < 0.005
+      )
+    ).toBe(true);
+    expect(points.every((p) => p.unrealizedPnlBase === 0)).toBe(true);
+    expect(points.every((p) => p.estimated)).toBe(true);
+  });
+
+  it("horodate chaque point à la fermeture de sa journée parisienne", () => {
+    const points = buildHistoryFromOccurredAt(txs, identity, {
+      untilDayKey: "2026-03-02",
+      closes,
+    });
+    /*
+      2 mars 2026, heure d'hiver (UTC+1) : la journée se ferme à 23 h 59 UTC.
+      C'est la milliseconde avant 00 h 00 Paris du 3 mars — la frontière
+      demandée, et non un ancrage arbitraire à midi UTC.
+    */
+    expect(points[0]!.date).toBe("2026-03-02T22:59:59.999Z");
+  });
+});
