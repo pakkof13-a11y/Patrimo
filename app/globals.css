@@ -1995,15 +1995,14 @@ textarea:focus-visible,
 
 /**
  * Le clic est porté par la ligne entière (surface confortable), mais le point
- * focusable reste ce bouton dans la colonne de dépliage — même colonne que le
- * chevron des lignes d'actif, donc même geste au clavier comme à la souris.
+ * focusable reste ce bouton, en tête de la cellule « Actif » — au bord gauche
+ * du tableau, là où le regard cherche l'ouverture d'un groupe.
  */
 .group-row-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  padding: var(--space-1) 0;
+  padding: var(--space-1);
   color: var(--foreground-faint);
   transition: color var(--transition-fast);
 }

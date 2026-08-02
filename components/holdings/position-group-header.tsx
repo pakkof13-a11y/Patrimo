@@ -18,10 +18,6 @@ import {
   formatSignedPercent,
 } from "@/app/lib/utils";
 import { Sparkline } from "@/components/ui/sparkline";
-import {
-  HOLDINGS_EXPAND_COL_PX,
-  HOLDINGS_SELECT_COL_PX,
-} from "@/components/holdings/holding-table-row";
 import type { AssetClass } from "@/app/lib/constants";
 
 /**
@@ -143,6 +139,36 @@ export function PositionGroupHeader({
       case "name":
         return (
           <div className="flex min-w-0 items-center gap-[var(--space-2)]">
+            {/*
+              Chevron et icône de classe ouvrent la ligne, au bord gauche du
+              tableau. Ils occupaient auparavant deux cellules que les lignes
+              d'actif n'ont pas : la ligne de groupe se décalait alors de deux
+              colonnes, ses totaux tombant sous des en-têtes qui n'étaient pas
+              les leurs. Les remettre dans la cellule « Actif » les aligne sur
+              les logos des positions qu'ils coiffent — et remet les totaux en
+              face de leurs colonnes.
+            */}
+            <button
+              type="button"
+              className="group-row-toggle shrink-0"
+              aria-expanded={expanded}
+              aria-label={`${expanded ? "Replier" : "Déplier"} ${label}`}
+              data-testid={`class-group-toggle-${assetClass}`}
+              onClick={(e) => {
+                // La ligne porte déjà le clic : sans cela, un clic sur le
+                // chevron déclencherait la bascule deux fois, donc rien.
+                e.stopPropagation();
+                onToggle();
+              }}
+            >
+              <ChevronRight
+                className={cn(
+                  "h-3.5 w-3.5 transition-transform",
+                  expanded && "rotate-90"
+                )}
+                aria-hidden
+              />
+            </button>
             <Icon
               className="h-4 w-4 shrink-0 text-[var(--primary-text)]"
               aria-hidden
@@ -272,34 +298,6 @@ export function PositionGroupHeader({
       data-testid={`class-group-header-${assetClass}`}
       onClick={onToggle}
     >
-      <td
-        className="p-0"
-        style={{ width: HOLDINGS_SELECT_COL_PX }}
-        aria-hidden
-      />
-      <td className="p-0" style={{ width: HOLDINGS_EXPAND_COL_PX }}>
-        <button
-          type="button"
-          className="group-row-toggle"
-          aria-expanded={expanded}
-          aria-label={`${expanded ? "Replier" : "Déplier"} ${label}`}
-          data-testid={`class-group-toggle-${assetClass}`}
-          onClick={(e) => {
-            // La ligne porte déjà le clic : sans cela, un clic sur le chevron
-            // déclencherait la bascule deux fois et n'aurait aucun effet.
-            e.stopPropagation();
-            onToggle();
-          }}
-        >
-          <ChevronRight
-            className={cn(
-              "h-3.5 w-3.5 transition-transform",
-              expanded && "rotate-90"
-            )}
-            aria-hidden
-          />
-        </button>
-      </td>
       {cells.map((cell) => (
         <td
           key={cell.id}

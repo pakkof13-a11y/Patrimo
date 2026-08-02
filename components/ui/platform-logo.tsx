@@ -17,13 +17,29 @@ import {
  * local — qui, lui, ne dépend d'aucun réseau.
  */
 
+/**
+ * Forme du logo.
+ *
+ * Rond par défaut : c'est la forme d'un jeton, d'une pastille de marque, et
+ * elle donne une colonne d'actifs bien plus calme qu'une file de carrés aux
+ * coins arrondis. Le carré reste pour les visuels qui *sont* l'image et non
+ * une marque — l'œuvre d'un NFT, qu'un cercle amputerait.
+ */
+type LogoShape = "circle" | "square";
+
+function shapeClass(shape: LogoShape): string {
+  return shape === "circle" ? "rounded-full" : "rounded-md";
+}
+
 function Monogram({
   name,
   size,
+  shape = "circle",
   className,
 }: {
   name: string;
   size: number;
+  shape?: LogoShape;
   className?: string;
 }) {
   const initials = name
@@ -37,7 +53,8 @@ function Monogram({
       data-logo
       data-logo-fallback="monogram"
       className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-md bg-teal-100 text-[10px] font-semibold text-teal-800 dark:bg-teal-950 dark:text-teal-200",
+        "inline-flex shrink-0 items-center justify-center bg-teal-100 text-[10px] font-semibold text-teal-800 dark:bg-teal-950 dark:text-teal-200",
+        shapeClass(shape),
         className
       )}
       style={{ width: size, height: size }}
@@ -52,11 +69,13 @@ function LogoImage({
   sources,
   name,
   size,
+  shape = "circle",
   className,
 }: {
   sources: string[];
   name: string;
   size: number;
+  shape?: LogoShape;
   className?: string;
 }) {
   const [index, setIndex] = useState(0);
@@ -70,7 +89,9 @@ function LogoImage({
   }
 
   if (index >= sources.length) {
-    return <Monogram name={name} size={size} className={className} />;
+    return (
+      <Monogram name={name} size={size} shape={shape} className={className} />
+    );
   }
 
   return (
@@ -82,7 +103,8 @@ function LogoImage({
       width={size}
       height={size}
       className={cn(
-        "shrink-0 rounded-md object-contain bg-white dark:bg-slate-900",
+        "shrink-0 object-contain bg-white dark:bg-slate-900",
+        shapeClass(shape),
         className
       )}
       style={{ width: size, height: size }}
@@ -158,23 +180,38 @@ export function AssetLogo({
 /**
  * Image déjà résolue (visuel de NFT, illustration importée) : aucune
  * déduction, seulement le repli monogramme si elle ne charge pas.
+ *
+ * Carrée, à la différence des logos : ici l'image *est* l'objet et non la
+ * marque qui le désigne — un cercle rognerait l'œuvre d'un NFT au lieu de la
+ * cadrer. `shape` reste ouvert pour les appelants qui montrent bien une
+ * marque par ce chemin.
  */
 export function ImageLogo({
   src,
   name,
   size = 20,
+  shape = "square",
   className,
 }: {
   src?: string | null;
   name: string;
   size?: number;
+  shape?: LogoShape;
   className?: string;
 }) {
   const sources = useMemo(() => (src ? [src] : []), [src]);
   if (sources.length === 0) {
-    return <Monogram name={name} size={size} className={className} />;
+    return (
+      <Monogram name={name} size={size} shape={shape} className={className} />
+    );
   }
   return (
-    <LogoImage sources={sources} name={name} size={size} className={className} />
+    <LogoImage
+      sources={sources}
+      name={name}
+      size={size}
+      shape={shape}
+      className={className}
+    />
   );
 }
