@@ -842,6 +842,28 @@ export function AssetPriceChart({
         </div>
       )}
 
+      {/*
+        Série synthétique : le dire en toutes lettres, pas seulement par un
+        badge de neuf pixels. Sans feed marché, l'API rend une courbe fabriquée
+        — elle a l'exacte apparence d'un historique réel, et c'est précisément
+        ce qui la rend trompeuse. Le graphique reste affiché (sa forme sert au
+        repérage des transactions), mais aucun niveau n'y est exploitable.
+      */}
+      {!historyError && q.data?.source === "mock" && (
+        <p
+          data-testid="chart-mock-notice"
+          className={cn(
+            "mb-2 rounded-md px-2 py-1 text-[10px] leading-snug",
+            "bg-amber-50 text-amber-900 ring-1 ring-inset ring-amber-300",
+            "dark:bg-amber-950/60 dark:text-amber-100 dark:ring-amber-700"
+          )}
+        >
+          Aucun historique de cours n&apos;est disponible pour cet actif : la
+          courbe ci-dessous est une série synthétique. Ni les niveaux ni la
+          performance affichés ne reflètent le marché.
+        </p>
+      )}
+
       {/* Zone graphique unique */}
       <div className={cn("relative w-full", chartH)}>
         {q.isFetching && q.data && (

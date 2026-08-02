@@ -83,6 +83,8 @@ export type DashboardTabProps = {
   onAddPlatform?: () => void;
   onImport?: () => void;
   onAddTransaction?: () => void;
+  /** Retire un actif de la watchlist depuis la carte du tableau de bord. */
+  onUnwatch?: (assetId: string) => void;
   onNavigate?: (target: DashboardNavTarget) => void;
   showEveryStart?: boolean;
   onShowEveryStartChange?: (v: boolean) => void;
@@ -111,6 +113,7 @@ export function DashboardTab({
   onAddPlatform,
   onImport,
   onAddTransaction,
+  onUnwatch,
   onNavigate,
   showEveryStart,
   onShowEveryStartChange,
@@ -324,6 +327,7 @@ export function DashboardTab({
               <AllocationCard data={classChart} baseCurrency={baseCurrency} />
               <WatchlistCard
                 holdings={holdings}
+                onUnwatch={onUnwatch}
                 onOpenPositions={() => handleNav("positions")}
               />
             </div>

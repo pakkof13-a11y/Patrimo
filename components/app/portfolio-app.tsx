@@ -1343,6 +1343,9 @@ function PortfolioAppClient({
                 }}
                 onImport={() => setShowImport(true)}
                 onAddTransaction={() => openNewTransaction("ACHAT")}
+                onUnwatch={(assetId) =>
+                  patchWatchlist.mutate({ assetId, watchlisted: false })
+                }
                 onNavigate={(target) => {
                   switch (target) {
                     case "positions":

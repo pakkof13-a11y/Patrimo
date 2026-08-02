@@ -9,6 +9,7 @@ import {
   ArrowUpRight,
   Coins,
   Receipt,
+  Star,
   type LucideIcon,
 } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
@@ -261,11 +262,20 @@ export function WatchlistCard({
   limit = 5,
   className,
   onOpenPositions,
+  onUnwatch,
 }: {
   holdings: Holding[];
   limit?: number;
   className?: string;
   onOpenPositions?: () => void;
+  /**
+   * Retire la ligne de la watchlist.
+   *
+   * Épingler se faisait depuis la fiche d'un actif, dépingler aussi — il
+   * fallait donc rouvrir la fiche d'une ligne qu'on ne voulait justement plus
+   * suivre. La liste se défait ici, là où elle se lit.
+   */
+  onUnwatch?: (assetId: string) => void;
 }) {
   const rows = useMemo(
     () =>
@@ -313,6 +323,11 @@ export function WatchlistCard({
                 <th scope="col" className="col-num">
                   Var.
                 </th>
+                {onUnwatch && (
+                  <th scope="col" className="w-[1.75rem]">
+                    <span className="sr-only">Retirer du suivi</span>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -359,6 +374,26 @@ export function WatchlistCard({
                         ? `${up ? "+" : "−"}${Math.abs(pct).toFixed(1)} %`
                         : "—"}
                     </td>
+                    {onUnwatch && (
+                      <td>
+                        <button
+                          type="button"
+                          onClick={() => onUnwatch(h.assetId)}
+                          data-testid={`watchlist-unpin-${h.assetId}`}
+                          title={`Retirer ${h.name} de la watchlist`}
+                          aria-label={`Retirer ${h.name} de la watchlist`}
+                          className={cn(
+                            "flex h-[1.25rem] w-[1.25rem] items-center justify-center",
+                            "rounded-[var(--radius-xs)] text-[var(--warning)]",
+                            "transition-colors duration-[var(--duration-fast)]",
+                            "hover:bg-[var(--surface-hover)]",
+                            "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                          )}
+                        >
+                          <Star size={12} fill="currentColor" aria-hidden />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
