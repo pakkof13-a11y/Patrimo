@@ -1044,6 +1044,29 @@ model PreciousMetalPosition {
   @@index([userId, format])
 }
 
+/// Cours de clôture d'un métal précieux, en euro par gramme de métal fin.
+///
+/// Cache partagé : un cours de l'or n'appartient à personne, et le lier à un
+/// utilisateur multiplierait les appels fournisseur par le nombre de comptes.
+/// Le vider ne perd aucune donnée patrimoniale — les lots restent la source
+/// de vérité.
+model MetalSpotPrice {
+  id String @id @default(cuid())
+
+  /// GOLD | SILVER | PLATINUM | PALLADIUM
+  metal      String
+  /// Jour civil parisien, `YYYY-MM-DD`
+  day        String
+  /// Prix du gramme de métal fin, en euro
+  eurPerGram Decimal  @db.Decimal(28, 12)
+  /// Symbole interrogé, et conversion appliquée le cas échéant
+  source     String
+  fetchedAt  DateTime @default(now())
+
+  @@unique([metal, day])
+  @@index([metal, day])
+}
+
 /// Cession d'un lot de métal précieux — le fait générateur de l'impôt.
 ///
 /// La ligne détenue ne dit rien de la fiscalité : seule la vente déclenche,
@@ -1349,7 +1372,40 @@ model TangibleAsset {
 
   @@index([userId])
   @@index([userId, category])
+
+  /// Revalorisations datées — la seule chronologie de valeur possible pour
+  /// un objet dont le marché ne cote pas.
+  valuations TangibleValuation[]
 }
+/// Valorisation datée d'un objet tangible.
+///
+/// Ces marchés ne cotent pas : il n'existe pas de cours d'une montre comme il
+/// existe un cours de l'or. On enregistre donc les estimations telles qu'elles
+/// surviennent — expertise, adjudication comparable, cote relevée — et la
+/// courbe se déduit de ces points, sans rien combler entre eux.
+model TangibleValuation {
+  id         String @id @default(cuid())
+  tangibleId String
+  userId     String
+
+  /// Date à laquelle la valeur a été constatée, et non celle de la saisie.
+  valuedAt DateTime
+  valueEur Decimal  @db.Decimal(28, 12)
+  /// APPRAISAL | AUCTION | MARKET | INSURANCE | MANUAL
+  ///
+  /// Une expertise d'assurance et une estimation personnelle ne se défendent
+  /// pas de la même façon : l'écran doit pouvoir les distinguer.
+  source   String   @default("MANUAL")
+  note     String?
+
+  createdAt DateTime @default(now())
+
+  tangible TangibleAsset @relation(fields: [tangibleId], references: [id], onDelete: Cascade)
+
+  @@index([tangibleId, valuedAt])
+  @@index([userId])
+}
+
 
 // ─── Poches cash CTO / PEA / AV ───────────────────────────────────────────────
 

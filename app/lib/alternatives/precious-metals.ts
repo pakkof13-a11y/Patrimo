@@ -18,6 +18,14 @@ import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "@/app/lib/prisma";
 import { d, type Decimal, type DecimalInput } from "@/app/lib/money/decimal";
 import {
+  metalValueEur,
+  premiumPct,
+} from "@/app/lib/precious-metals/spot";
+import {
+  readMetalSpots,
+  type MetalSpotIndex,
+} from "@/app/lib/market/metal-spot";
+import {
   FORMAT_LABELS,
   GRAMS_PER_TROY_OZ,
   isPreciousFormat,
@@ -76,7 +84,10 @@ type Row = {
   notes: string | null;
 };
 
-function mapRow(row: Row): PreciousMetalDto {
+function mapRow(
+  row: Row,
+  spot?: { eurPerGram: number; day: string } | null
+): PreciousMetalDto {
   const quantity = d(row.quantity.toString());
   const unitPrice = d(row.purchasePriceUnit.toString());
   const fees = d(row.acquisitionFees.toString());
@@ -92,6 +103,12 @@ function mapRow(row: Row): PreciousMetalDto {
   const pnlPct = costBasis.gt(0) ? pnl.div(costBasis).times(100) : d(0);
   const grossWeightG = quantity.times(unitWeightG);
   const fineWeightG = grossWeightG.times(fineness).div(1000);
+
+  const metalValue =
+    spot && spot.eurPerGram > 0 && fineWeightG.gt(0)
+      ? metalValueEur(fineWeightG, spot.eurPerGram)
+      : null;
+  const premium = metalValue ? premiumPct(current, metalValue) : null;
 
   return {
     id: row.id,
@@ -123,6 +140,17 @@ function mapRow(row: Row): PreciousMetalDto {
     fineWeightG: fineWeightG.toFixed(3),
     /** Valeur unitaire courante — base de comparaison au cours du métal. */
     unitValueEur: quantity.gt(0) ? current.div(quantity).toFixed(2) : "0.00",
+
+    /*
+      Contenu métal au cours du jour. C'est un plancher de valorisation, pas
+      un prix de revente : une pièce de collection vaut son métal *plus* une
+      prime, qu'on expose à côté plutôt que de la fondre dans un seul chiffre.
+      Sans cours connu, ces champs restent nuls — on n'invente pas un lingot.
+    */
+    metalValueEur: metalValue ? metalValue.toFixed(2) : null,
+    spotEurPerGram: spot ? d(spot.eurPerGram).toFixed(4) : null,
+    spotDay: spot?.day ?? null,
+    premiumPct: premium ? premium.toFixed(2) : null,
   };
 }
 
@@ -193,7 +221,22 @@ export async function listPreciousMetals(userId: string) {
     where: { userId },
     orderBy: [{ metal: "asc" }, { acquiredAt: "asc" }, { denomination: "asc" }],
   });
-  const lines = rows.map(mapRow);
+
+  /*
+    Lecture seule du cache : afficher la liste ne doit jamais attendre un
+    fournisseur. Le rafraîchissement est déclenché par la route dédiée, dont
+    l'échec n'empêche rien d'apparaître.
+  */
+  let spots: MetalSpotIndex = new Map();
+  try {
+    spots = await readMetalSpots();
+  } catch (e) {
+    console.error("[precious-metals] cours indisponibles", e);
+  }
+
+  const lines = rows.map((row) =>
+    mapRow(row, spots.get(row.metal as PreciousMetal) ?? null)
+  );
   return { lines, summary: summarizePreciousMetals(lines) };
 }
 

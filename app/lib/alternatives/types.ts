@@ -60,6 +60,23 @@ export type PreciousMetalDto = {
   /** Poids brut × titre : le seul comparable d'un métal à l'autre. */
   fineWeightG: string;
   unitValueEur: string;
+
+  // ── Cours du métal ────────────────────────────────────────────────────────
+  /**
+   * Valeur du métal contenu, au cours du jour. `null` quand le cours est
+   * inconnu — un métal non coté (« Autre »), ou un fournisseur muet.
+   */
+  metalValueEur: string | null;
+  /** Cours retenu, en euro par gramme de métal fin. */
+  spotEurPerGram: string | null;
+  /** Jour du cours : dit son âge, donc ce qu'il vaut. */
+  spotDay: string | null;
+  /**
+   * Écart entre la valeur retenue pour la ligne et son contenu métal, en
+   * pourcentage. C'est la prime numismatique d'une pièce, ou l'écart de
+   * suivi d'un ETC. `null` sans contenu métal valorisable.
+   */
+  premiumPct: string | null;
 };
 
 export type PreciousMetalsSummary = {
