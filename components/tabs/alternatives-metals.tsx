@@ -183,6 +183,42 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
     staleTime: 30_000,
   });
 
+  /*
+    Cours des métaux : lecture seule au chargement — l'écran ne doit jamais
+    attendre un fournisseur pour s'afficher — et rafraîchissement sur geste
+    explicite, comme l'actualisation des cours du portefeuille.
+  */
+  const spotQ = useQuery({
+    queryKey: ["metal-spot"],
+    queryFn: () =>
+      fetchJson<{
+        spots: Record<string, { eurPerGram: number; day: string; source: string }>;
+      }>("/api/precious-metals/spot"),
+    staleTime: 5 * 60_000,
+  });
+
+  const refreshSpot = useMutation({
+    mutationFn: () =>
+      fetchJson<{ missing?: string[] }>("/api/precious-metals/spot", {
+        method: "POST",
+      }),
+    onSuccess: async (data) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["metal-spot"] }),
+        qc.invalidateQueries({ queryKey: ["precious-metals"] }),
+      ]);
+      const missing = data.missing ?? [];
+      if (missing.length > 0) {
+        toast.warning(
+          `Cours indisponible pour ${missing.length} métal(aux) — les valeurs affichées datent`
+        );
+      } else {
+        toast.success("Cours des métaux actualisés");
+      }
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const salesQ = useQuery({
     queryKey: ["precious-metal-sales"],
     queryFn: () =>
@@ -813,6 +849,49 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
               </div>
             )}
 
+            {/*
+              Bandeau des cours : le gramme de métal fin, et la date à laquelle
+              il a été relevé. Afficher la date n'est pas un détail — une
+              valorisation d'hier reste utile, à condition de savoir qu'elle
+              date d'hier.
+            */}
+            <div
+              className="mb-[var(--space-3)] flex flex-wrap items-center gap-[var(--space-3)] rounded-[var(--radius-md)] border border-[var(--border)] px-[var(--space-3)] py-[var(--space-2)]"
+              data-testid="metal-spot-bar"
+            >
+              <span className="text-label">Cours du gramme fin</span>
+              {Object.entries(spotQ.data?.spots ?? {}).length === 0 ? (
+                <span className="text-[length:var(--text-xs)] text-[var(--foreground-faint)]">
+                  Aucun cours en cache — lancez une actualisation.
+                </span>
+              ) : (
+                Object.entries(spotQ.data?.spots ?? {}).map(([metal, spot]) => (
+                  <span
+                    key={metal}
+                    className="num text-[length:var(--text-xs)] text-[var(--foreground-secondary)]"
+                    title={`Relevé du ${spot.day} · source ${spot.source}`}
+                  >
+                    {METAL_LABELS[metal as PreciousMetal] ?? metal}{" "}
+                    <strong className="text-[var(--foreground)]">
+                      {formatCurrency(String(spot.eurPerGram), "EUR")}
+                    </strong>
+                    <span className="text-[var(--foreground-faint)]"> · {spot.day}</span>
+                  </span>
+                ))
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="ml-auto !h-7 !text-[11px]"
+                data-testid="metal-spot-refresh"
+                disabled={refreshSpot.isPending}
+                onClick={() => refreshSpot.mutate()}
+              >
+                {refreshSpot.isPending ? "Actualisation…" : "Actualiser les cours"}
+              </Button>
+            </div>
+
             <div className="table-container-responsive table-fluid-wrap">
               <table
                 className="table-fluid text-sm"
@@ -828,6 +907,12 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                     <th className="px-3 py-2.5 text-right">Poids fin</th>
                     <th className="px-3 py-2.5 text-left">Acquis le</th>
                     <th className="px-3 py-2.5 text-right">Prix de revient</th>
+                    <th className="px-3 py-2.5 text-right">
+                      Valeur métal
+                      <div className="text-[9px] font-normal normal-case tracking-normal text-slate-400">
+                        au cours du jour
+                      </div>
+                    </th>
                     <th className="px-3 py-2.5 text-right">Valeur act.</th>
                     <th className="px-3 py-2.5 text-right">+/- €</th>
                     <th className="px-3 py-2.5 text-right">+/- %</th>
@@ -839,7 +924,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                 <tbody>
                   {q.isLoading && (
                     <tr>
-                      <td colSpan={12} className="px-4 py-10 text-center text-sm text-slate-400">
+                      <td colSpan={13} className="px-4 py-10 text-center text-sm text-slate-400">
                         Chargement…
                       </td>
                     </tr>
@@ -887,6 +972,43 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {formatCurrency(l.costBasis, l.currency)}
+                      </td>
+                      {/*
+                        Contenu métal au cours du jour, et prime payée
+                        au-delà. Le lot garde sa valeur propre : une pièce de
+                        collection ne vaut pas son poids de métal, et écraser
+                        l'une par l'autre effacerait précisément l'écart qu'on
+                        cherche à suivre.
+                      */}
+                      <td className="px-3 py-2 text-right text-xs tabular-nums">
+                        {l.metalValueEur ? (
+                          <>
+                            <div className="text-[var(--foreground)]">
+                              {formatCurrency(l.metalValueEur, "EUR")}
+                            </div>
+                            {l.premiumPct && (
+                              <div
+                                className={cn(
+                                  "text-[10px]",
+                                  Number(l.premiumPct) >= 0
+                                    ? "text-slate-400"
+                                    : "val-negative"
+                                )}
+                                title={`Prime sur le contenu métal — cours du ${l.spotDay ?? "jour"}`}
+                              >
+                                prime {Number(l.premiumPct) >= 0 ? "+" : ""}
+                                {Number(l.premiumPct).toLocaleString("fr-FR", {
+                                  maximumFractionDigits: 1,
+                                })}
+                                 %
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-slate-400" title="Aucun cours connu pour ce métal">
+                            —
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-right font-medium tabular-nums">
                         {formatCurrency(l.currentValue, l.currency)}
