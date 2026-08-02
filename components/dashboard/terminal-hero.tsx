@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { formatCurrency, cn } from "@/app/lib/utils";
+import { Eye, EyeOff } from "lucide-react";
+import { maskAmount, useAmountsHidden } from "@/app/lib/ui/privacy-prefs";
 import type { HistoryPoint } from "@/app/lib/types/ui";
 import { Sparkline } from "@/components/ui/sparkline";
 import {
@@ -58,6 +60,7 @@ export function TerminalHero({
   loading?: boolean;
 }) {
   const [range, setRange] = useState<EvolutionRange>("1y");
+  const [amountsHidden] = useAmountsHidden();
 
   const series = useMemo(
     () => buildEvolutionSeries(history, range, "cumul").points,
@@ -107,7 +110,9 @@ export function TerminalHero({
                 )}
                 data-testid="hero-net-worth"
               >
-                {netWorth === null ? "—" : formatHeadline(netWorth)}
+                {netWorth === null
+                  ? "—"
+                  : maskAmount(formatHeadline(netWorth), amountsHidden)}
               </span>
             )}
             <span className="text-label">{baseCurrency}</span>
@@ -135,7 +140,10 @@ export function TerminalHero({
                   className={cn("num", up ? "val-positive" : "val-negative")}
                 >
                   {delta.abs >= 0 ? "+" : "−"}
-                  {formatCurrency(Math.abs(delta.abs), baseCurrency)}
+                  {maskAmount(
+                    formatCurrency(Math.abs(delta.abs), baseCurrency),
+                    amountsHidden
+                  )}
                 </span>
                 <span className="text-[var(--foreground-faint)]">·</span>
                 <span className="text-[var(--foreground-secondary)]">
@@ -232,14 +240,58 @@ export function TerminalKpiRow({
   items: TerminalKpi[];
   baseCurrency: string;
 }) {
+  const [amountsHidden, setAmountsHidden] = useAmountsHidden();
+
   return (
-    <div
-      className={cn(
-        "grid min-w-0 gap-[var(--gap-card)]",
-        "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7"
-      )}
-      data-testid="terminal-kpi-row"
-    >
+    <div className="min-w-0 space-y-[var(--space-2)]">
+      {/*
+        Bascule de confidentialité, au-dessus des indicateurs : c'est là que
+        se pose le regard juste avant de tourner l'écran vers quelqu'un. Un
+        réglage rangé dans les préférences arriverait toujours trop tard.
+      */}
+      <div className="flex items-center justify-between gap-[var(--space-2)]">
+        <p className="text-label hidden sm:block">Indicateurs</p>
+        <button
+          type="button"
+          onClick={() => setAmountsHidden(!amountsHidden)}
+          data-testid="privacy-toggle"
+          aria-pressed={amountsHidden}
+          title={
+            amountsHidden
+              ? "Afficher les montants"
+              : "Masquer les montants (confidentialité)"
+          }
+          aria-label={
+            amountsHidden ? "Afficher les montants" : "Masquer les montants"
+          }
+          className={cn(
+            "ml-auto inline-flex items-center gap-[var(--space-1)] rounded-[var(--radius-md)]",
+            "px-[var(--space-2)] py-[var(--space-1)] text-[length:var(--text-2xs)] font-medium",
+            "transition-colors duration-[var(--duration-fast)] hover:bg-[var(--surface-hover)]",
+            "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+            amountsHidden
+              ? "text-[var(--primary-text)]"
+              : "text-[var(--foreground-faint)] hover:text-[var(--foreground)]"
+          )}
+        >
+          {amountsHidden ? (
+            <EyeOff className="h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <Eye className="h-3.5 w-3.5" aria-hidden />
+          )}
+          <span className="hidden sm:inline">
+            {amountsHidden ? "Montants masqués" : "Masquer les montants"}
+          </span>
+        </button>
+      </div>
+
+      <div
+        className={cn(
+          "grid min-w-0 gap-[var(--gap-card)]",
+          "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7"
+        )}
+        data-testid="terminal-kpi-row"
+      >
       {items.map((item) => {
         const pct = item.changePct;
         const signed = typeof pct === "number" && Number.isFinite(pct);
@@ -264,7 +316,10 @@ export function TerminalKpiRow({
                   : "text-[var(--foreground)]"
               )}
             >
-              {formatCurrency(item.value, baseCurrency)}
+              {maskAmount(
+                formatCurrency(item.value, baseCurrency),
+                amountsHidden
+              )}
             </p>
 
             <p className="text-[length:var(--text-xs)] leading-none">
@@ -292,6 +347,7 @@ export function TerminalKpiRow({
           </article>
         );
       })}
+      </div>
     </div>
   );
 }

@@ -13,6 +13,8 @@ import {
   ShieldCheck,
   ChevronDown,
   ChevronUp,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Kpi } from "@/components/ui/kpi";
 import { formatCurrency, cn } from "@/app/lib/utils";
@@ -28,6 +30,10 @@ import {
   loadLatentPnlRange,
   type LatentPnlRange,
 } from "@/app/lib/portfolio/latent-pnl-prefs";
+import {
+  maskAmount,
+  useAmountsHidden,
+} from "@/app/lib/ui/privacy-prefs";
 import type { HistoryPoint } from "@/app/lib/types/ui";
 
 /**
@@ -78,6 +84,17 @@ export function KpiStrip({
   const [latentRange, setLatentRange] = useState<LatentPnlRange>(() =>
     typeof window !== "undefined" ? loadLatentPnlRange() : "all"
   );
+  const [amountsHidden, setAmountsHidden] = useAmountsHidden();
+
+  /**
+   * Formatage des montants du bandeau, masque compris.
+   *
+   * Le masque s'applique après le formatage et jamais sur la valeur : la
+   * substitution garde une longueur fixe, sinon la largeur de la tuile
+   * laisserait deviner l'ordre de grandeur qu'on cherche à cacher.
+   */
+  const money = (value: unknown) =>
+    maskAmount(formatCurrency(String(value ?? 0), baseCurrency), amountsHidden);
 
   // Écoute changements de préférence (autres onglets / settings) — pas de setState sync init
   useEffect(() => {
@@ -146,6 +163,45 @@ export function KpiStrip({
     >
       <div className="flex items-center justify-between gap-2">
         <p className="text-label hidden sm:block">Indicateurs patrimoniaux</p>
+
+        {/*
+          Confidentialité : un clic masque tous les montants, un clic les
+          rend. Placé au-dessus des tuiles, là où se pose le regard avant de
+          tourner l'écran vers quelqu'un — un réglage enfoui dans les
+          préférences arriverait toujours trop tard.
+        */}
+        <button
+          type="button"
+          onClick={() => setAmountsHidden(!amountsHidden)}
+          className={cn(
+            "ml-auto inline-flex items-center gap-1 rounded-[var(--radius-md)] px-2 py-1 text-[11px] font-medium",
+            "transition hover:bg-[var(--muted)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+            "motion-reduce:transition-none",
+            amountsHidden
+              ? "text-[var(--primary-text)]"
+              : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+          )}
+          data-testid="kpi-privacy-toggle"
+          aria-pressed={amountsHidden}
+          title={
+            amountsHidden
+              ? "Afficher les montants"
+              : "Masquer les montants (confidentialité)"
+          }
+          aria-label={
+            amountsHidden ? "Afficher les montants" : "Masquer les montants"
+          }
+        >
+          {amountsHidden ? (
+            <EyeOff className="h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <Eye className="h-3.5 w-3.5" aria-hidden />
+          )}
+          <span className="hidden sm:inline">
+            {amountsHidden ? "Montants masqués" : "Masquer les montants"}
+          </span>
+        </button>
+
         <button
           type="button"
           onClick={toggleVisible}
@@ -177,13 +233,8 @@ export function KpiStrip({
           <Kpi
             icon={<Wallet className="h-4 w-4" />}
             label="Cotés"
-            value={formatCurrency(
-              String(
-                summary?.totalMarketValueBase ??
-                  summary?.totalMarketValueEur ??
-                  0
-              ),
-              baseCurrency
+            value={money(
+              summary?.totalMarketValueBase ?? summary?.totalMarketValueEur
             )}
           />
           <Kpi
@@ -194,7 +245,7 @@ export function KpiStrip({
                 <FinanceTip term="P&L latent" />
               </span>
             }
-            value={formatCurrency(String(latentValue), baseCurrency)}
+            value={money(latentValue)}
             tone={latentValue >= 0 ? "up" : "down"}
             testId="kpi-latent"
           />
@@ -206,33 +257,29 @@ export function KpiStrip({
                 <FinanceTip term="P&L réalisé" />
               </span>
             }
-            value={formatCurrency(
+            value={money(
               num(summary?.realizedPnlBase ?? summary?.realizedPnlEur) +
-                num(summary?.cashIncomeBase ?? summary?.cashIncomeEur),
-              baseCurrency
+                num(summary?.cashIncomeBase ?? summary?.cashIncomeEur)
             )}
             testId="kpi-realized"
           />
           <Kpi
             icon={<Landmark className="h-4 w-4" />}
             label="Cash"
-            value={formatCurrency(
-              String(summary?.totalCashBase ?? summary?.totalCashEur ?? 0),
-              baseCurrency
-            )}
+            value={money(summary?.totalCashBase ?? summary?.totalCashEur)}
             testId="kpi-cash"
           />
           <Kpi
             icon={<Gem className="h-4 w-4" />}
             label="Alternatifs"
-            value={mutedAlt ? zeroValue : formatCurrency(String(alt), baseCurrency)}
+            value={mutedAlt ? zeroValue : money(alt)}
             muted={mutedAlt}
             testId="kpi-alternatives"
           />
           <Kpi
             icon={<PiggyBank className="h-4 w-4" />}
             label="Épargne salariale"
-            value={mutedEs ? zeroValue : formatCurrency(String(es), baseCurrency)}
+            value={mutedEs ? zeroValue : money(es)}
             muted={mutedEs}
             testId="kpi-employee-savings"
           />
@@ -242,7 +289,7 @@ export function KpiStrip({
             value={
               mutedRealEstate
                 ? zeroValue
-                : formatCurrency(String(realEstate), baseCurrency)
+                : money(realEstate)
             }
             muted={mutedRealEstate}
             testId="kpi-real-estate"
@@ -253,7 +300,7 @@ export function KpiStrip({
             value={
               mutedLifeInsurance
                 ? zeroValue
-                : formatCurrency(String(lifeInsurance), baseCurrency)
+                : money(lifeInsurance)
             }
             muted={mutedLifeInsurance}
             testId="kpi-life-insurance"
@@ -261,17 +308,14 @@ export function KpiStrip({
           <Kpi
             icon={<Scale className="h-4 w-4" />}
             label="Passifs"
-            value={mutedLiab ? zeroValue : formatCurrency(String(liab), baseCurrency)}
+            value={mutedLiab ? zeroValue : money(liab)}
             muted={mutedLiab}
             testId="kpi-liabilities"
           />
           <Kpi
             icon={<Coins className="h-4 w-4" />}
             label="Patrimoine net"
-            value={formatCurrency(
-              String(summary?.netWorthBase ?? summary?.netWorthEur ?? 0),
-              baseCurrency
-            )}
+            value={money(summary?.netWorthBase ?? summary?.netWorthEur)}
             tone={
               num(summary?.netWorthBase ?? summary?.netWorthEur) >= 0
                 ? "up"

@@ -9,6 +9,7 @@ import {
   Monitor,
   Moon,
   Settings,
+  ShieldCheck,
   Sun,
   Trash2,
 } from "lucide-react";
@@ -18,6 +19,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/app/lib/utils";
 import { fetchJson } from "@/app/lib/api-client";
 import { AdminUsersPanel } from "@/components/layout/admin-users-panel";
+import {
+  BASE_CURRENCY_OPTIONS,
+  currencyLabel,
+} from "@/app/lib/money/currencies";
 import { ChangePasswordForm } from "@/components/layout/change-password-form";
 import {
   DEFAULT_BENCHMARK_OPTIONS,
@@ -93,11 +98,27 @@ function SectionTitle({
   );
 }
 
+type PrefTab = "display" | "account" | "data";
+
+const PREF_TABS: { id: PrefTab; label: string; icon: typeof Settings }[] = [
+  { id: "display", label: "Affichage", icon: Monitor },
+  { id: "account", label: "Compte", icon: ShieldCheck },
+  { id: "data", label: "Données", icon: Database },
+];
+
 /**
- * Panneau Préférences — architecture en 3 zones :
- * 1. Affichage (thème, avatar, P&L latent, benchmark)
- * 2. Sécurité (mot de passe) + admin
- * 3. Données / zone de danger
+ * Panneau Préférences — trois onglets plutôt qu'une colonne à dérouler.
+ *
+ * Les réglages tenaient dans une seule pile de 900 pixels : le thème, la
+ * devise, le mot de passe et la suppression du patrimoine s'y succédaient au
+ * même niveau de gravité, et il fallait faire défiler tout un écran de
+ * confort d'affichage pour atteindre un formulaire de sécurité. Les trois
+ * familles n'appellent ni la même fréquence d'usage ni la même prudence :
+ * elles sont désormais séparées, la zone de danger n'étant plus jamais sous
+ * le curseur par accident.
+ *
+ * L'ordre suit la fréquence : ce qu'on règle souvent d'abord, l'irréversible
+ * en dernier. Aucune fonction n'a été retirée ni déplacée hors du panneau.
  *
  * - `embedded` : contenu seul (menu profil haut-droit)
  * - `header` : bouton icône + popover
@@ -106,11 +127,20 @@ function SectionTitle({
 export function PreferencesPanel({
   placement = "header",
   embedded = false,
+  baseCurrency,
+  onBaseCurrencyChange,
 }: {
   placement?: "bottom-left" | "header";
   /** Contenu inline sans bouton trigger (menu compte) */
   embedded?: boolean;
+  /**
+   * Devise de reporting. Fournie par le menu compte : le réglage vit dans
+   * l'onglet Affichage, avec le thème, et non plus au-dessus du panneau.
+   */
+  baseCurrency?: string;
+  onBaseCurrencyChange?: (code: string) => void;
 } = {}) {
+  const [tab, setTab] = useState<PrefTab>("display");
   const [open, setOpen] = useState(embedded);
   const [dangerOpen, setDangerOpen] = useState(false);
   const [confirmChecked, setConfirmChecked] = useState(false);
@@ -280,25 +310,72 @@ export function PreferencesPanel({
             </div>
           </div>
           )}
-          {embedded && (
-            <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
-              Préférences
-            </p>
-          )}
+          {/*
+            Barre d'onglets : le même contrôle segmenté que les périodes des
+            graphiques, pour que le panneau se lise comme le reste de
+            l'application plutôt que comme une boîte de dialogue rapportée.
+          */}
+          <div
+            className="term-seg mb-3 flex w-full"
+            role="tablist"
+            aria-label="Sections des préférences"
+            data-testid="preferences-tabs"
+          >
+            {PREF_TABS.map((t) => {
+              const Icon = t.icon;
+              const active = tab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  aria-controls={`prefs-panel-${t.id}`}
+                  id={`prefs-tab-${t.id}`}
+                  data-active={active}
+                  data-testid={`preferences-tab-${t.id}`}
+                  onClick={() => setTab(t.id)}
+                  className="term-seg-item flex flex-1 items-center justify-center gap-1"
+                >
+                  <Icon className="h-3 w-3" aria-hidden />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
 
           {/* ── 1. Affichage ──────────────────────────────────────────── */}
           <section
+            hidden={tab !== "display"}
+            id="prefs-panel-display"
+            role="tabpanel"
+            aria-labelledby="prefs-tab-display"
             className="mb-4"
-            aria-labelledby="prefs-display-heading"
             data-testid="display-settings"
           >
-            <SectionTitle icon={Monitor}>
-              <span id="prefs-display-heading">Affichage</span>
-            </SectionTitle>
-            <p className="text-meta mb-2.5">
-              La largeur de l&apos;interface s&apos;adapte automatiquement à
-              votre écran (mode fluide). Aucun réglage manuel requis.
-            </p>
+            {/* La largeur de l'interface est fluide : plus aucun réglage
+                manuel, donc plus de paragraphe pour l'annoncer. */}
+
+            {baseCurrency && onBaseCurrencyChange && (
+              <label className="mb-4 block">
+                <span className="mb-1.5 block text-[11px] font-medium text-[var(--foreground)]">
+                  Devise de reporting
+                </span>
+                <select
+                  className="input !w-full !py-1.5 text-sm"
+                  value={baseCurrency}
+                  onChange={(e) => onBaseCurrencyChange(e.target.value)}
+                  aria-label="Devise de reporting"
+                  data-testid="header-currency-select"
+                >
+                  {BASE_CURRENCY_OPTIONS.map((c) => (
+                    <option key={c} value={c}>
+                      {currencyLabel(c)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             {/* Avatar : sélection dans le bandeau identité du menu compte (à droite).
                 En mode non-embedded (FAB legacy), conserver un sélecteur compact. */}
@@ -498,25 +575,29 @@ export function PreferencesPanel({
 
           {/* ── 2. Sécurité ───────────────────────────────────────────── */}
           <section
-            className="mb-1 border-t border-[var(--border)] pt-3"
-            aria-labelledby="prefs-security-heading"
+            hidden={tab !== "account"}
+            id="prefs-panel-account"
+            role="tabpanel"
+            aria-labelledby="prefs-tab-account"
+            className="mb-1"
             data-testid="security-settings"
           >
-            <span id="prefs-security-heading" className="sr-only">
-              Sécurité du compte
-            </span>
+            {/* Pas de titre ici : `ChangePasswordForm` porte déjà le sien, et
+                deux en-têtes consécutifs se liraient comme deux sections. */}
             <ChangePasswordForm />
             {isAdmin && <AdminUsersPanel />}
           </section>
 
           {/* ── 3. Données / zone de danger ───────────────────────────── */}
           <section
-            className="mt-4 border-t border-[var(--border)] pt-3"
-            aria-labelledby="prefs-data-heading"
+            hidden={tab !== "data"}
+            id="prefs-panel-data"
+            role="tabpanel"
+            aria-labelledby="prefs-tab-data"
             data-testid="data-danger-zone"
           >
             <SectionTitle icon={Database} tone="danger">
-              <span id="prefs-data-heading">Données</span>
+              Données
             </SectionTitle>
             <p className="text-meta mb-2">
               Actions irréversibles sur{" "}

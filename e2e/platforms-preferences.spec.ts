@@ -45,17 +45,31 @@ test.describe("Mes plateformes & préférences", () => {
   }) => {
     await gotoDashboard(page);
     await openPreferences(page);
+    /*
+      Le panneau est découpé en trois onglets : confort d'affichage, sécurité
+      du compte, données. Une seule famille est montée à la fois — c'est le
+      point du découpage, la zone de danger ne devant plus se trouver sous le
+      curseur quand on venait changer de thème.
+    */
     await expect(page.getByTestId("display-settings")).toBeVisible();
     await expect(page.getByTestId("theme-settings")).toBeVisible();
     await expect(page.getByTestId("theme-option-system")).toBeVisible();
     await expect(page.getByTestId("theme-option-light")).toBeVisible();
     await expect(page.getByTestId("theme-option-dark")).toBeVisible();
+    // La devise de reporting a rejoint l'onglet Affichage.
+    await expect(page.getByTestId("header-currency-select")).toBeVisible();
     // Plus de modes de largeur d’écran dans l’UI
     await expect(page.getByText(/Fluide auto-adaptatif/i)).toHaveCount(0);
     await expect(page.getByText(/Ultra-large/i)).toHaveCount(0);
+    await expect(page.getByTestId("security-settings")).toBeHidden();
+
+    await page.getByTestId("preferences-tab-account").click();
     await expect(page.getByTestId("security-settings")).toBeVisible();
     await expect(page.getByTestId("change-password-section")).toBeVisible();
+    await expect(page.getByTestId("display-settings")).toBeHidden();
+
     // Zone danger : bouton d’entrée, pas d’action immédiate
+    await page.getByTestId("preferences-tab-data").click();
     await expect(page.getByTestId("data-danger-zone")).toBeVisible();
     await expect(page.getByTestId("open-clear-data")).toBeVisible();
     await expect(page.getByTestId("clear-all-transactions")).toHaveCount(0);
