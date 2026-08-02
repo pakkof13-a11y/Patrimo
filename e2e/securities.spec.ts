@@ -92,18 +92,22 @@ test.describe("PEA & CTO", () => {
   test("plusieurs CTO sont acceptés, et n'affichent ni plafond ni règle des 5 ans", async ({
     page,
   }) => {
-    for (const openDate of ["2020-01-01", "2022-06-15"]) {
+    const cards = page.getByTestId("securities-account-card");
+    const dates = ["2020-01-01", "2022-06-15"];
+    for (const [index, openDate] of dates.entries()) {
       await page.getByTestId("securities-form-toggle").click();
       await page.getByTestId("securities-envelope-type").selectOption("CTO");
       await page.getByTestId("securities-platform").selectOption({ index: 1 });
       await page.getByTestId("securities-open-date").fill(openDate);
       await page.getByTestId("securities-submit").click();
-      await expect(page.getByText("Compte enregistré")).toBeVisible({
-        timeout: 15_000,
-      });
+      /*
+        On attend la carte, pas le bandeau « Compte enregistré » : au second
+        tour celui du premier compte peut être encore à l'écran, l'attente
+        serait alors satisfaite avant même que la création n'aboutisse.
+      */
+      await expect(cards).toHaveCount(index + 1, { timeout: 15_000 });
     }
 
-    await expect(page.getByTestId("securities-account-card")).toHaveCount(2);
     // Un compte-titres n'a ni plafond de versement ni antériorité fiscale.
     await expect(page.getByTestId("securities-room-gauge")).toHaveCount(0);
     await expect(page.getByTestId("securities-maturity")).toHaveCount(0);
