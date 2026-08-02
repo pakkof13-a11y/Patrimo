@@ -60,11 +60,11 @@ const VALUE_COLUMNS = new Set([
  * possible (ticker, quantité, cours…) restent vides — additionner des
  * quantités d'actifs différents ne voudrait rien dire.
  *
- * Tous les totaux viennent du parent ; aucun calcul métier ici. `spark` et
- * `dayChange` sont facultatifs : ils viennent du P&L journalier par classe,
- * qui n'est pas toujours chargé et qui n'existe pas pour une classe sans
- * historique de cours. Leur place est réservée pour que leur arrivée ne fasse
- * pas sauter la ligne.
+ * Tous les totaux viennent du parent ; aucun calcul métier ici. `spark`,
+ * `periodPnl` et `periodPct` sont facultatifs : ils viennent du P&L journalier
+ * par classe, qui n'est pas toujours chargé et qui n'existe pas pour une
+ * classe sans historique de cours. Leur place est réservée pour que leur
+ * arrivée ne fasse pas sauter la ligne.
  */
 export function PositionGroupHeader({
   label,
@@ -76,7 +76,8 @@ export function PositionGroupHeader({
   unrealizedPnlPct,
   weightPct,
   spark,
-  dayChange,
+  periodPnl,
+  periodPct,
   estimated,
   baseCurrency,
   expanded,
@@ -91,10 +92,12 @@ export function PositionGroupHeader({
   totalUnrealizedPnl: number;
   unrealizedPnlPct: number | null;
   weightPct: number | null;
-  /** Valeur de marché de la classe, jour par jour. */
+  /** P&L cumulé de la classe, jour par jour, flux neutralisés. */
   spark?: number[];
-  /** P&L de la dernière journée connue, en devise de base. */
-  dayChange?: number | null;
+  /** P&L de la fenêtre (30 j), en devise de base — arrivée de la courbe. */
+  periodPnl?: number | null;
+  /** Rendement de la fenêtre, en % du capital engagé. */
+  periodPct?: number | null;
   /** Au moins un jour de la fenêtre manque de cours pour cette classe. */
   estimated?: boolean;
   baseCurrency: string;
@@ -105,7 +108,7 @@ export function PositionGroupHeader({
 }) {
   const Icon = ICON_BY_CLASS[assetClass];
   const pnlUp = totalUnrealizedPnl >= 0;
-  const dayUp = (dayChange ?? 0) >= 0;
+  const periodUp = (periodPnl ?? 0) >= 0;
 
   /**
    * Seule la cellule du libellé absorbe les colonnes vides qui la suivent
@@ -221,26 +224,35 @@ export function PositionGroupHeader({
             <div className="num font-semibold text-[var(--foreground)]">
               {formatCurrency(totalMarketValue, baseCurrency)}
             </div>
-            {/* Variation du jour : sous le total, comme « qté × cours » sous
-                la valeur d'une ligne — même grammaire, même place. */}
+            {/*
+              Performance sur 30 jours, sous le total : c'est exactement le
+              point d'arrivée de la courbe affichée à gauche, montant et
+              pourcentage. Cette place portait la variation de la seule
+              dernière journée — un chiffre qui ne se rattachait à rien de ce
+              qui était tracé.
+            */}
             <div
               className={cn(
                 "num text-[length:var(--text-2xs)]",
-                dayChange == null
+                periodPnl == null
                   ? "text-[var(--foreground-faint)]"
-                  : dayUp
+                  : periodUp
                     ? "val-positive"
                     : "val-negative"
               )}
+              data-testid={`class-group-period-${assetClass}`}
               title={
                 estimated
-                  ? "Estimation : des cours manquent sur la période"
-                  : "Variation de la dernière journée connue"
+                  ? "Performance sur 30 jours — estimation : des cours manquent sur la période"
+                  : "Performance sur 30 jours, apports et retraits neutralisés"
               }
             >
-              {dayChange == null
+              {periodPnl == null
                 ? "—"
-                : `${estimated ? "≈ " : ""}${formatSignedCurrency(dayChange, baseCurrency)}`}
+                : `${estimated ? "≈ " : ""}${formatSignedCurrency(periodPnl, baseCurrency)}` +
+                  (periodPct == null
+                    ? " · 30 j"
+                    : ` · ${formatSignedPercent(periodPct)} 30 j`)}
             </div>
           </div>
         );

@@ -29,6 +29,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sparkline } from "@/components/ui/sparkline";
+import { buildClassPeriodSeries } from "@/app/lib/portfolio/class-period-series";
 import { fetchJson } from "@/app/lib/api-client";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
 import { AssetLogo, PlatformLogo } from "@/components/ui/platform-logo";
@@ -1306,48 +1307,25 @@ export function HoldingsSection({
       }
     }
 
-    /**
-     * Une valeur par jour de la fenêtre, et non une valeur par jour *connu* :
-     * empiler seulement les jours renseignés recollerait le 3 et le 20 du mois
-     * côte à côte, et la courbe raconterait une progression régulière là où il
-     * manque deux semaines. Les jours sans cours reprennent la dernière valeur
-     * connue (palier horizontal, visiblement plat), et une classe dont moins
-     * de la moitié des jours est connue n'a pas de courbe du tout.
-     */
-    const seen = new Set<string>();
-    for (const p of points) {
-      for (const cls of Object.keys(p.valueByClass ?? {})) {
-        seen.add(parseAssetClass(cls));
-      }
-    }
+    /*
+      Performance de la période, et non valeur de marché : la courbe montait
+      d'un cran le jour d'un achat, si bien qu'un versement s'y lisait comme un
+      gain. Le P&L cumulé neutralise les flux — la ligne ne bouge que sous
+      l'effet des cours, et son point d'arrivée est le chiffre affiché à côté.
+    */
+    const performance = buildClassPeriodSeries(points);
 
     const values = new Map<string, number[]>();
-    for (const cls of seen) {
-      const series: number[] = [];
-      let known = 0;
-      let last: number | null = null;
-      for (const p of points) {
-        const raw = p.valueByClass?.[cls];
-        if (typeof raw === "number" && Number.isFinite(raw)) {
-          last = raw;
-          known += 1;
-        }
-        if (last != null) series.push(last);
-      }
-      if (series.length >= 2 && known >= points.length / 2) {
-        values.set(cls, series);
-      }
+    const periodPnl = new Map<string, number>();
+    const periodPct = new Map<string, number | null>();
+    for (const [rawClass, perf] of performance) {
+      const cls = parseAssetClass(rawClass);
+      values.set(cls, perf.cumulative);
+      periodPnl.set(cls, perf.pnl);
+      periodPct.set(cls, perf.pct);
     }
-    // Variation du jour = P&L de la dernière journée connue, pas la différence
-    // entre deux valeurs de marché : celle-ci intègre les apports et retraits,
-    // et afficherait un « gain » là où l'utilisateur a simplement versé.
-    const last = points[points.length - 1]!;
-    const dayPnl = new Map<string, number>();
-    for (const [cls, v] of Object.entries(last.pnlByClass ?? {})) {
-      const key = parseAssetClass(cls);
-      dayPnl.set(key, (dayPnl.get(key) ?? 0) + v);
-    }
-    return { values, dayPnl, incomplete };
+
+    return { values, periodPnl, periodPct, incomplete };
   }, [classPnlQ.data]);
 
   const allEnvelopesCount = Object.keys(ACCOUNT_TYPES).length;
@@ -1910,8 +1888,11 @@ export function HoldingsSection({
                           unrealizedPnlPct={group.unrealizedPnlPct}
                           weightPct={group.weightPct}
                           spark={classSeries?.values.get(group.assetClass)}
-                          dayChange={
-                            classSeries?.dayPnl.get(group.assetClass) ?? null
+                          periodPnl={
+                            classSeries?.periodPnl.get(group.assetClass) ?? null
+                          }
+                          periodPct={
+                            classSeries?.periodPct.get(group.assetClass) ?? null
                           }
                           estimated={classSeries?.incomplete.has(
                             group.assetClass

@@ -228,4 +228,30 @@ describe("aggregateClassPnl", () => {
     expect(out[0]!.incompleteClasses).toEqual([]);
     expect(out[1]!.incompleteClasses).toEqual(["CRYPTO"]);
   });
+
+  it("n'invente pas un gain le jour où le premier cours apparaît", () => {
+    /*
+      Fenêtre qui commence avant le premier cours en cache — le cas courant
+      d'un portefeuille ancien dont l'historique vient d'être constitué. La
+      veille valait zéro faute de donnée, non parce que la position était
+      absente : compter l'écart comme un P&L ferait bondir la courbe de zéro à
+      la valeur totale, un gain de 100 % qui n'a jamais eu lieu.
+    */
+    const days: ClassDailyInput[] = [
+      { day: "2026-01-02", quantityByAsset: { AAPL: 10 } },
+      { day: "2026-01-03", quantityByAsset: { AAPL: 10 } },
+      { day: "2026-01-04", quantityByAsset: { AAPL: 10 } },
+    ];
+    // Aucun cours le 2 : la valorisation ne commence que le 3.
+    const closes = closesOf({
+      AAPL: { "2026-01-03": 100, "2026-01-04": 110 },
+    });
+    const out = buildClassDailyPnl(days, CLASSES, closes);
+
+    expect(out[1]!.valueByClass.ACTIONS).toBeCloseTo(1000, 8);
+    // Jour d'apparition : rien de mesurable, surtout pas +1 000 €.
+    expect(out[1]!.pnlByClass.ACTIONS).toBeUndefined();
+    // Le lendemain, la comparaison redevient légitime : 1 100 − 1 000.
+    expect(out[2]!.pnlByClass.ACTIONS).toBeCloseTo(100, 8);
+  });
 });

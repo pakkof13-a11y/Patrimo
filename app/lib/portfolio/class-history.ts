@@ -138,6 +138,17 @@ export function buildClassDailyPnl(
 
   /** Valeur de marché par actif à la clôture de la veille. */
   let prevValueByAsset = new Map<string, Decimal>();
+  /**
+   * Actifs dont une valeur de marché non nulle a déjà été établie.
+   *
+   * Sans cette mémoire, la première cotation d'un actif se lit comme un gain
+   * égal à toute sa valeur : la veille valait zéro faute de cours, non parce
+   * que la position n'existait pas. Sur une fenêtre dont le début précède le
+   * premier cours en cache — le cas courant d'un portefeuille ancien dont
+   * l'historique vient d'être constitué — la courbe partait de zéro pour
+   * bondir à la valeur totale dès le deuxième jour.
+   */
+  const valued = new Set<string>();
 
   for (const input of days) {
     const valueByClass = new Map<string, Decimal>();
@@ -174,11 +185,28 @@ export function buildClassDailyPnl(
       valueByAsset.set(assetId, value);
       if (!value.isZero()) addTo(valueByClass, cls, value);
 
-      const prev = prevValueByAsset.get(assetId) ?? zero();
-      const flow = d(input.netFlowByAsset?.[assetId] ?? 0);
-      const income = d(input.incomeByAsset?.[assetId] ?? 0);
-      const pnl = value.minus(prev).minus(flow).plus(income);
-      if (!pnl.isZero()) addTo(pnlByClass, cls, pnl);
+      /*
+        Le P&L n'a de sens qu'entre deux valeurs comparables. Tant qu'aucune
+        valeur n'a pu être établie pour cet actif, la journée ne mesure rien :
+        l'écart observé n'est pas un mouvement de cours, c'est l'arrivée de la
+        donnée elle-même.
+      */
+      /*
+        Le garde ne vise que l'apparition d'une valeur de marché. Un actif qui
+        vaut zéro des deux côtés — aller-retour dans la journée, position
+        soldée — garde son P&L : il ne vient pas d'un cours qui apparaît, mais
+        d'un encaissement bien réel.
+      */
+      const firstValuation = !valued.has(assetId) && !value.isZero();
+      if (!value.isZero()) valued.add(assetId);
+
+      if (!firstValuation) {
+        const prev = prevValueByAsset.get(assetId) ?? zero();
+        const flow = d(input.netFlowByAsset?.[assetId] ?? 0);
+        const income = d(input.incomeByAsset?.[assetId] ?? 0);
+        const pnl = value.minus(prev).minus(flow).plus(income);
+        if (!pnl.isZero()) addTo(pnlByClass, cls, pnl);
+      }
     }
 
     out.push({
