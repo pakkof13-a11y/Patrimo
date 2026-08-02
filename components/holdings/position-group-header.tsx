@@ -187,8 +187,18 @@ export function PositionGroupHeader({
                 {count} {count === 1 ? "position" : "positions"}
               </span>
             </span>
+            {/*
+              Courbe 30 jours de la classe, juste après son nom — comme dans la
+              maquette. Elle était auparavant repoussée en bout de cellule
+              (`ml-auto`) et masquée sous 1024 px : à cette place elle flottait
+              sans rien à quoi se rattacher, alors qu'ici elle se lit dans le
+              même mouvement que le libellé qu'elle qualifie.
+            */}
             {spark && spark.length >= 2 && (
-              <span className="ml-auto hidden h-[1.25rem] w-[4.5rem] shrink-0 lg:block">
+              <span
+                className="hidden h-[1.5rem] w-[6rem] shrink-0 sm:block"
+                data-testid={`class-group-spark-${assetClass}`}
+              >
                 <Sparkline
                   values={spark}
                   stroke={
@@ -196,8 +206,8 @@ export function PositionGroupHeader({
                       ? "var(--chart-positive)"
                       : "var(--chart-negative)"
                   }
-                  width={72}
-                  height={20}
+                  width={96}
+                  height={24}
                   className="h-full w-full"
                 />
               </span>
