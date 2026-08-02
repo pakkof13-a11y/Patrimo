@@ -91,7 +91,13 @@ export function computePeriodLatentFromHistory(
   const start = latentRangeStart(range);
   if (!start) return null;
   const startMs = start.getTime();
-  const inRange = points.filter((p) => Date.parse(p.date) >= startMs - 12 * 3600_000);
+  /*
+    Plus de tolérance de douze heures : les points sont désormais horodatés à
+    la clôture de leur journée parisienne, et non plus approximés à midi UTC.
+    Cette marge servait à rattraper cet écart ; elle fait maintenant entrer
+    dans la fenêtre un point qui la précède.
+  */
+  const inRange = points.filter((p) => Date.parse(p.date) >= startMs);
   if (inRange.length < 2) return null;
   const first = inRange[0]!;
   const last = inRange[inRange.length - 1]!;

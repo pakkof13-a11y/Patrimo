@@ -196,6 +196,44 @@ export function buildClassDailyPnl(
 }
 
 /**
+ * Valeur de marché des positions détenues à une date, avec report du dernier
+ * cours connu.
+ *
+ * Sert à valoriser la courbe de patrimoine jour par jour, là où elle se
+ * contentait du prix de revient. Un actif dont aucun cours n'a jamais été
+ * observé — bien immobilier, part non cotée, ligne saisie à la main — est
+ * retenu **à son coût** plutôt qu'à zéro, et compté séparément : la courbe
+ * peut alors se déclarer estimée au lieu de laisser croire à une position
+ * évaporée. Le coût est le seul repli honnête ; projeter le cours d'aujourd'hui
+ * sur le passé fabriquerait une performance qui n'a jamais eu lieu.
+ */
+export function marketValueOfPositions(
+  positions: Iterable<{
+    assetId: string;
+    quantity: Decimal;
+    costBasisEur: Decimal;
+  }>,
+  closes: DailyCloseIndex,
+  day: DayKey
+): { marketEur: Decimal; unpricedAssets: number } {
+  let marketEur = zero();
+  const unpriced = new Set<string>();
+
+  for (const pos of positions) {
+    if (pos.quantity.isZero()) continue;
+    const close = closeAtOrBefore(closes.get(pos.assetId), day);
+    if (close == null) {
+      unpriced.add(pos.assetId);
+      marketEur = marketEur.plus(pos.costBasisEur);
+      continue;
+    }
+    marketEur = marketEur.plus(pos.quantity.times(d(close)));
+  }
+
+  return { marketEur, unpricedAssets: unpriced.size };
+}
+
+/**
  * Rejoue le journal jour par jour et relève, à chaque clôture, la quantité
  * détenue par actif (toutes plateformes confondues).
  *

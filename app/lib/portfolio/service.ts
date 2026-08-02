@@ -11,7 +11,10 @@ import {
   type TxType,
 } from "../accounting";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
-import { parisDayKey } from "../dates/paris";
+import { endOfParisDay, parisDayKey, parisDayStart } from "../dates/paris";
+import { marketValueOfPositions } from "./class-history";
+import type { DailyCloseIndex } from "./class-history";
+import { readDailyCloses } from "../market/daily-closes";
 import { resolvePlatformLogo } from "../platforms/presets";
 import { resolveAssetLogo } from "../assets/logos";
 import {
@@ -933,10 +936,17 @@ export async function recordPortfolioSnapshot(userId: string) {
   const cashIncomeEur = d(s.cashIncomeEur);
   const assetCount = Number(s.assetCount) || 0;
 
-  const dayStart = new Date();
-  dayStart.setUTCHours(0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+  /*
+    Journée civile **parisienne**, et non UTC.
+
+    Le découpage se faisait à minuit UTC, seul endroit de l'application à le
+    faire. En été, un relevé pris entre minuit et 2 h du matin retombait dans
+    le seau de la veille et en écrasait la clôture : la journée précédente
+    perdait sa valeur de fermeture, remplacée par une valeur d'ouverture.
+  */
+  const today = parisDayKey(new Date());
+  const dayStart = parisDayStart(today);
+  const dayEnd = new Date(endOfParisDay(today).getTime() + 1);
 
   const existing = await prisma.portfolioSnapshot.findFirst({
     where: {
@@ -996,6 +1006,12 @@ export type PortfolioHistoryPoint = {
   rentsBase?: number;
   totalCostBase?: number;
   isLive?: boolean;
+  /**
+   * Au moins une position n'avait aucun cours connu ce jour-là et a été
+   * retenue à son prix de revient. Le point reste utilisable, il n'est
+   * simplement pas exact — à l'UI de le dire plutôt que de le taire.
+   */
+  estimated?: boolean;
 };
 
 /**
@@ -1076,7 +1092,16 @@ function enumerateDayKeysInclusive(first: string, last: string): string[] {
 export function buildHistoryFromOccurredAt(
   txs: LedgerTx[],
   toBase: (eur: ReturnType<typeof d>) => number,
-  opts?: { maxPoints?: number; untilDayKey?: string }
+  opts?: {
+    maxPoints?: number;
+    untilDayKey?: string;
+    /**
+     * Clôtures journalières par actif. Fournies, la courbe est valorisée **au
+     * marché** jour par jour ; absentes, elle retombe sur le prix de revient —
+     * l'ancien comportement, conservé pour un journal sans aucun cours connu.
+     */
+    closes?: DailyCloseIndex;
+  }
 ): PortfolioHistoryPoint[] {
   if (txs.length === 0) return [];
 
@@ -1151,13 +1176,41 @@ export function buildHistoryFromOccurredAt(
     const cashEur = totalCash(state);
     const realizedEur = totalRealizedPnl(state);
     const incomeEur = state.cashIncomeEur;
-    // Historique : positions au coût (pas de mark-to-market rétroactif)
-    const totalEur = costEur.plus(cashEur);
+
+    /*
+      Valorisation au marché du jour.
+
+      La courbe valorisait l'historique au prix de revient : elle ne bougeait
+      qu'aux achats, ventes et encaissements, et racontait le capital investi
+      plutôt que ce qu'il valait. Le dernier point, lui, basculait en valeur de
+      marché — la marche qui en résultait mélangeait un changement de base
+      comptable avec le mouvement réel, sans qu'on puisse les distinguer.
+
+      Les cours viennent du cache de clôtures, jamais d'un appel fournisseur :
+      afficher un tableau de bord ne doit pas déclencher le téléchargement de
+      trois ans d'historique.
+    */
+    const valuation = opts?.closes
+      ? marketValueOfPositions(state.positions.values(), opts.closes, day)
+      : { marketEur: costEur, unpricedAssets: 0 };
+    const marketEur = valuation.marketEur;
+    const unrealizedEur = marketEur.minus(costEur);
+
+    const totalEur = marketEur.plus(cashEur);
     const totalBase = toBase(totalEur);
     const cashBase = toBase(cashEur);
-    // Date à 12:00 UTC du jour civil pour un ancrage stable
-    const [yy, mm, dd] = day.split("-").map(Number);
-    const date = new Date(Date.UTC(yy!, mm! - 1, dd!, 12, 0, 0));
+
+    /*
+      Ancrage : dernier instant du jour civil parisien.
+
+      Le point d'une journée porte son état de clôture ; l'horodater à midi UTC
+      en faisait une approximation que les filtres de période devaient
+      rattraper à la main (un décalage de douze heures traînait dans le calcul
+      du latent périodique). La journée se ferme à 00 h 00 Europe/Paris — heure
+      d'été comme d'hiver, puisque c'est le fuseau qui tranche, pas un décalage
+      fixe.
+    */
+    const date = endOfParisDay(day);
 
     points.push({
       date: date.toISOString(),
@@ -1173,10 +1226,11 @@ export function buildHistoryFromOccurredAt(
       cashTotalBase: cashBase,
       positionsBase: totalBase - cashBase,
       realizedPnlBase: toBase(realizedEur),
-      // Latent historique non connu sans prix → 0
-      unrealizedPnlBase: 0,
+      unrealizedPnlBase: toBase(unrealizedEur),
       cashIncomeBase: toBase(incomeEur),
       totalCostBase: toBase(costEur),
+      // Au moins une position sans cours connu ce jour-là : retenue au coût.
+      estimated: valuation.unpricedAssets > 0 || undefined,
     });
   }
 
@@ -1264,8 +1318,17 @@ export function mergeHistorySources(
     const day = parisDayKey(p.date);
     // Ne pas injecter de snapshot antérieur au 1er occurredAt (artefacts)
     if (firstTxDay && day < firstTxDay) continue;
-    // Jour déjà reconstruit : la reconstruction est la source de vérité.
-    if (byDay.has(day)) continue;
+    /*
+      Le rejeu prime, sauf quand il n'a pas su valoriser la journée.
+
+      Il produit un point pour *chaque* jour civil : écarter systématiquement
+      les snapshots revenait à ne jamais en lire un seul, alors qu'ils sont
+      écrits à chaque rafraîchissement de cours. Un snapshot est une mesure au
+      marché réellement constatée ce jour-là — il vaut mieux qu'une position
+      retenue à son coût faute de cours connu.
+    */
+    const existing = byDay.get(day);
+    if (existing && !existing.estimated) continue;
     byDay.set(day, p);
   }
 
@@ -1318,8 +1381,39 @@ export async function getPortfolioHistory(
   // Jusqu’à aujourd’hui (Paris) : l’historique suit les occurredAt même si
   // l’import a été fait le même jour (createdAt / snapshot bootstrap).
   const todayParis = parisDayKey(new Date());
+
+  /*
+    Cours de clôture pour valoriser l'historique au marché.
+
+    Lecture seule du cache : afficher un tableau de bord ne doit pas déclencher
+    le téléchargement de trois ans d'historique. Le cache se remplit par
+    ailleurs — P&L par classe, vignettes de tendance, fiche d'un actif — et la
+    courbe s'affine à mesure. Sans lui, la reconstruction retombe sur le prix
+    de revient et le signale.
+  */
+  const firstTxDayKey =
+    ledgerTxs.length > 0
+      ? parisDayKey(
+          ledgerTxs.reduce(
+            (min, t) => (t.occurredAt < min ? t.occurredAt : min),
+            ledgerTxs[0]!.occurredAt
+          )
+        )
+      : todayParis;
+  const assetIds = [
+    ...new Set(ledgerTxs.map((t) => t.assetId).filter((x): x is string => !!x)),
+  ];
+  let closes: DailyCloseIndex = new Map();
+  try {
+    closes = await readDailyCloses(assetIds, firstTxDayKey, todayParis);
+  } catch (e) {
+    // La courbe au coût vaut mieux qu'une page en erreur.
+    console.error("[portfolio-history] clôtures illisibles", e);
+  }
+
   const fromTx = buildHistoryFromOccurredAt(ledgerTxs, toBase, {
     untilDayKey: todayParis,
+    closes,
   });
 
   // Snapshots marché (mark-to-market) — utile pour les jours récents post-import
