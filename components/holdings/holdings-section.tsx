@@ -131,6 +131,7 @@ import {
 } from "@/app/lib/display-preferences";
 import { useDisplay } from "@/components/layout/display-provider";
 import { matchesSearchQuery } from "@/components/ui/table-filters";
+import { HorizontalScrollbar } from "@/components/ui/h-scrollbar";
 import { useDebouncedValue } from "@/app/hooks/use-debounced-value";
 import {
   formatPageLabel,
@@ -1633,6 +1634,7 @@ export function HoldingsSection({
         />
         <div
           ref={scrollWrapRef}
+          id="holdings-table-scroll"
           className="table-container-responsive table-fluid-wrap holdings-table-scroll"
           data-testid="holdings-table-scroll"
         >
@@ -1930,6 +1932,23 @@ export function HoldingsSection({
                 })}
             </tbody>
           </table>
+        </div>
+
+        {/*
+          Barre de défilement explicite, collée au bas du cadre.
+
+          La barre native est superposée sur la plupart des systèmes : elle
+          n'occupe aucune place et ne se montre qu'en cours de défilement, si
+          bien qu'à la souris les colonnes de droite étaient inatteignables.
+          Posée après le tableau, elle obligerait de surcroît à descendre
+          trente lignes pour l'atteindre puis à remonter pour lire.
+        */}
+        <div className="sticky bottom-0 z-10 bg-[var(--card)] px-[var(--space-3)] pb-[var(--space-2)] pt-[var(--space-1)]">
+          <HorizontalScrollbar
+            targetRef={scrollWrapRef}
+            controls="holdings-table-scroll"
+            label="Défilement horizontal du portefeuille"
+          />
         </div>
         {(() => {
           const total = filteredHoldings.length;

@@ -1104,6 +1104,49 @@ input:focus-visible {
   min-width: 0;
 }
 
+/*
+ * Barre de défilement horizontale visible, et non flottante.
+ *
+ * Ces conteneurs défilaient déjà — mais avec une barre superposée, de hauteur
+ * nulle, qui n'apparaît qu'en cours de défilement. Sur un poste sans molette
+ * horizontale ni pavé tactile, le tableau était donc tronqué sans aucun moyen
+ * d'atteindre les colonnes de droite : ni poignée à saisir, ni indice qu'il y
+ * avait quelque chose à aller chercher. On réserve une piste permanente, avec
+ * un curseur assez épais pour être attrapé.
+ */
+.table-container-responsive,
+.table-fluid-wrap,
+.holdings-table-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.table-container-responsive::-webkit-scrollbar,
+.table-fluid-wrap::-webkit-scrollbar,
+.holdings-table-scroll::-webkit-scrollbar {
+  height: 0.625rem;
+}
+
+.table-container-responsive::-webkit-scrollbar-track,
+.table-fluid-wrap::-webkit-scrollbar-track,
+.holdings-table-scroll::-webkit-scrollbar-track {
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.table-container-responsive::-webkit-scrollbar-thumb,
+.table-fluid-wrap::-webkit-scrollbar-thumb,
+.holdings-table-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.table-container-responsive::-webkit-scrollbar-thumb:hover,
+.table-fluid-wrap::-webkit-scrollbar-thumb:hover,
+.holdings-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground-faint);
+}
+
 .table-fluid th.col-header-resizable {
   position: relative;
   overflow: hidden;
@@ -1746,19 +1789,27 @@ textarea:focus-visible,
   height: 100vh;
 }
 
+/*
+ * Barre latérale repliée en rail horizontal sous 900 px.
+ *
+ * Elle défilait alors, barre masquée : les dernières entrées — Fiscalité,
+ * Paramètres — sortaient de l'écran sans aucun moyen de les atteindre à la
+ * souris, puisqu'une molette verticale ne fait pas défiler à l'horizontale et
+ * qu'aucune poignée n'était visible. Le rail passe donc à la ligne : huit
+ * entrées sur deux rangs se voient entièrement, sans geste à deviner.
+ */
 @media (max-width: 900px) {
   .term-sidebar {
     flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
     height: auto;
     width: 100%;
-    overflow-x: auto;
+    max-width: 100%;
+    overflow-x: visible;
     border-right: none;
     border-bottom: var(--border-width) solid var(--border);
     padding-inline: var(--space-2);
-    scrollbar-width: none;
-  }
-  .term-sidebar::-webkit-scrollbar {
-    display: none;
   }
 }
 
