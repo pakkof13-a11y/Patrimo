@@ -35,8 +35,10 @@ export const EVOLUTION_CHART_COLORS = {
   rents: "#c084fc",
   realized: "#d97706",
   unrealized: "#059669",
-  pos: "#10b981",
-  neg: "#f43f5e",
+  // Hausse / baisse : dérivées des tokens sémantiques, comme partout ailleurs,
+  // pour que le thème pilote la nuance au lieu de deux hex figés.
+  pos: "var(--positive)",
+  neg: "var(--negative)",
   benchmark: "#94a3b8",
 };
 export function yTick(v: number) {
@@ -56,8 +58,8 @@ export const tooltipStyle = {
 
 /** Couleur du texte de valeur : vert si positif, rouge si négatif, bleu si neutre (0). */
 function signColor(v: number): string {
-  if (v > 0) return "var(--success)";
-  if (v < 0) return "var(--danger)";
+  if (v > 0) return "var(--positive)";
+  if (v < 0) return "var(--negative)";
   return "var(--accent)";
 }
 

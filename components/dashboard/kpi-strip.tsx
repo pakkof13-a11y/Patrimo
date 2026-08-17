@@ -29,14 +29,15 @@ import {
 import type { HistoryPoint } from "@/app/lib/types/ui";
 
 /**
- * Grille fluide des 8 KPI (CSS Grid auto-fit) :
- * - min ~11.5rem par tuile → wrap élégant (2+ lignes) si l’espace manque
- * - 1fr → les tuiles se partagent l’espace restant sans écrasement
- * - largeur suffisante (≈ 8×11.5rem) → une seule ligne sur desktop XL
- * - min(100%, …) → une colonne pleine largeur sur très petit écran
+ * Grille fluide des KPI :
+ * - sous 640 px : deux colonnes fixes. Une seule colonne poussait le premier
+ *   indicateur utile très bas et transformait le bandeau en long scroll ;
+ *   deux colonnes gardent 4 tuiles visibles d'un coup d'œil sur mobile.
+ * - au-delà : auto-fit, min ~11.25rem par tuile → wrap élégant, 1fr pour se
+ *   partager l'espace restant sans écrasement, une seule ligne en desktop XL.
  */
 const KPI_GRID_CLASS =
-  "grid w-full min-w-0 gap-2.5 sm:gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,11.25rem),1fr))]";
+  "grid w-full min-w-0 grid-cols-2 gap-2.5 sm:gap-3 sm:[grid-template-columns:repeat(auto-fit,minmax(min(100%,11.25rem),1fr))]";
 
 /**
  * Bandeau des 8 indicateurs — même grille / taille de tuiles sur tous les onglets.
@@ -154,18 +155,12 @@ export function KpiStrip({
 
       {visible && (
         <div className={KPI_GRID_CLASS} data-testid="kpi-strip-grid">
-          <Kpi
-            icon={<Wallet className="h-4 w-4" />}
-            label="Cotés"
-            value={formatCurrency(
-              String(
-                summary?.totalMarketValueBase ??
-                  summary?.totalMarketValueEur ??
-                  0
-              ),
-              baseCurrency
-            )}
-          />
+          {/*
+            Ordre de lecture : d'abord ce qui se pilote (résultat, trésorerie,
+            dette), ensuite l'exposition par classe. Sur le Dashboard le hero
+            porte déjà le patrimoine net — le répéter ici avec le même poids
+            visuel diluerait la référence principale.
+          */}
           <Kpi
             icon={<TrendingUp className="h-4 w-4" />}
             label={
@@ -203,12 +198,36 @@ export function KpiStrip({
             )}
             testId="kpi-cash"
           />
+          {showLiab && (
+            <Kpi
+              icon={<Scale className="h-4 w-4" />}
+              label="Passifs"
+              value={formatCurrency(String(liab), baseCurrency)}
+              testId="kpi-liabilities"
+            />
+          )}
+
+          {/* ── Exposition par classe — lecture secondaire ── */}
+          <Kpi
+            icon={<Wallet className="h-4 w-4" />}
+            label="Cotés"
+            value={formatCurrency(
+              String(
+                summary?.totalMarketValueBase ??
+                  summary?.totalMarketValueEur ??
+                  0
+              ),
+              baseCurrency
+            )}
+            emphasis={dashboardStyle ? "secondary" : "default"}
+          />
           {showAlt && (
             <Kpi
               icon={<Gem className="h-4 w-4" />}
               label="Alternatifs"
               value={formatCurrency(String(alt), baseCurrency)}
               testId="kpi-alternatives"
+              emphasis={dashboardStyle ? "secondary" : "default"}
             />
           )}
           {showEs && (
@@ -217,29 +236,28 @@ export function KpiStrip({
               label="Épargne salariale"
               value={formatCurrency(String(es), baseCurrency)}
               testId="kpi-employee-savings"
+              emphasis={dashboardStyle ? "secondary" : "default"}
             />
           )}
-          {showLiab && (
+          {/*
+            Hors Dashboard, aucun hero ne porte le patrimoine net : la tuile
+            reste donc indispensable sur les autres onglets.
+          */}
+          {!dashboardStyle && (
             <Kpi
-              icon={<Scale className="h-4 w-4" />}
-              label="Passifs"
-              value={formatCurrency(String(liab), baseCurrency)}
+              icon={<Coins className="h-4 w-4" />}
+              label="Patrimoine net"
+              value={formatCurrency(
+                String(summary?.netWorthBase ?? summary?.netWorthEur ?? 0),
+                baseCurrency
+              )}
+              tone={
+                num(summary?.netWorthBase ?? summary?.netWorthEur) >= 0
+                  ? "up"
+                  : "down"
+              }
             />
           )}
-          <Kpi
-            icon={<Coins className="h-4 w-4" />}
-            label="Patrimoine net"
-            value={formatCurrency(
-              String(summary?.netWorthBase ?? summary?.netWorthEur ?? 0),
-              baseCurrency
-            )}
-            tone={
-              num(summary?.netWorthBase ?? summary?.netWorthEur) >= 0
-                ? "up"
-                : "down"
-            }
-            variant={dashboardStyle ? "terminal" : "default"}
-          />
         </div>
       )}
     </div>
