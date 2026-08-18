@@ -20,7 +20,7 @@ const roundQty = (n: number, dec = 4) => {
   return Math.max(1 / f, Math.round(n * f) / f);
 };
 
-const THREE_YEARS = 1095;
+const THREE_YEARS = 1825;
 
 type AssetSeed = {
   name: string;
@@ -743,7 +743,7 @@ export async function seedUserPortfolio(
     });
   }
   // Apports annuels
-  for (const year of [1, 2]) {
+  for (const year of [1, 2, 3, 4]) {
     pushTx({
       type: "APPORT",
       platformId: boursorama.id,
