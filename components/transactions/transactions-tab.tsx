@@ -211,7 +211,14 @@ export function TransactionsTab({
   onCreate,
   onOpenPlatform,
   platforms,
+  initialPlatformId,
 }: {
+  /**
+   * Plateforme sur laquelle ouvrir le journal — utilisé par le lien « Voir les
+   * transactions » du module Plateformes. Le filtre reste ensuite pilotable
+   * normalement : c'est une valeur d'entrée, pas un verrou.
+   */
+  initialPlatformId?: string;
   /** Ouvre la plateforme d'une opération depuis le panneau de détail. */
   onOpenPlatform?: (platformId: string) => void;
   onEdit: (t: TxRow) => void;
@@ -225,7 +232,18 @@ export function TransactionsTab({
   const [search, setSearch] = useState("");
   const [accountType, setAccountType] = useState("");
   const [typeFilter, setTypeFilter] = useState<TxTypeFilterId>("all");
-  const [platformFilter, setPlatformFilter] = useState("");
+  const [platformFilter, setPlatformFilter] = useState(initialPlatformId ?? "");
+  /*
+    Ajustement pendant le rendu plutôt qu'un effet : revenir depuis Plateformes
+    sur une autre plateforme doit changer le filtre sans provoquer un premier
+    rendu affichant le journal complet, puis un second filtré.
+  */
+  const [prevInitialPlatformId, setPrevInitialPlatformId] =
+    useState(initialPlatformId);
+  if (initialPlatformId !== prevInitialPlatformId) {
+    setPrevInitialPlatformId(initialPlatformId);
+    setPlatformFilter(initialPlatformId ?? "");
+  }
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   // Repliés par défaut sur mobile pour ne pas saturer la toolbar — toujours

@@ -17,7 +17,10 @@ test.describe("Mes plateformes & préférences", () => {
     await expect(page.getByTestId("platforms-tab")).toBeVisible({
       timeout: 15_000,
     });
-    await expect(page.getByText("Mes plateformes")).toBeVisible();
+    // Le titre de la page est « Plateformes » ; « Mes plateformes » reste le
+    // libellé de navigation. On s'appuie sur le testid plutôt que sur le
+    // wording, conformément au parti pris du reste de ce fichier.
+    await expect(page.getByTestId("platforms-summary")).toBeVisible();
     // CTA produit : ajout direct de plateforme
     await expect(page.getByTestId("platforms-add-platform")).toBeVisible();
 

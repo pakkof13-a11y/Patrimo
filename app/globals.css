@@ -2799,3 +2799,22 @@ textarea:focus-visible,
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* ── Plateformes : ligne de la table de connexions ────────────────── */
+
+.platform-row {
+  cursor: pointer;
+}
+
+.platform-row.is-selected > td {
+  background: var(--surface-hover);
+}
+
+.platform-row.is-selected > td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.platform-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

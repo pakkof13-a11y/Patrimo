@@ -122,14 +122,15 @@ test.describe("Mes plateformes — flux critiques", () => {
     const card = page.getByTestId(`platform-${name}`);
     await expect(card).toBeVisible({ timeout: 15_000 });
 
-    // Menu ⋯ → aperçu
-    await page.getByTestId(`platform-menu-${id}`).click();
-    await page.getByTestId(`preview-platform-${id}`).click();
-    await expect(page.getByTestId("platform-preview-modal")).toBeVisible();
-    await expect(page.getByTestId("platform-preview")).toBeVisible();
-    await expect(page.getByText(name).first()).toBeVisible();
+    // Sélection de la ligne → panneau de détail, section Activité
+    await card.click();
+    await expect(page.getByTestId("platform-panel")).toHaveAttribute(
+      "data-open",
+      "true"
+    );
+    await page.getByTestId("platform-tab-activity").click();
 
-    // Nouvelle transaction depuis aperçu (préremplie)
+    // Nouvelle transaction depuis le panneau (préremplie)
     await page.getByTestId("platform-preview-new-tx").click();
     await expect(page.getByTestId("modal-overlay")).toBeVisible({
       timeout: 10_000,
@@ -145,11 +146,11 @@ test.describe("Mes plateformes — flux critiques", () => {
       timeout: 5_000,
     });
 
-    // Retour plateformes → aperçu → Voir dans Positions
+    // Retour plateformes → panneau → Voir les positions
     await clickNav(page, "Mes plateformes");
     await expect(card).toBeVisible({ timeout: 15_000 });
-    await page.getByTestId(`platform-menu-${id}`).click();
-    await page.getByTestId(`preview-platform-${id}`).click();
+    await card.click();
+    await page.getByTestId("platform-tab-activity").click();
     await page.getByTestId("platform-preview-positions").click();
 
     await expect(page).toHaveURL(new RegExp(`platformId=${id}`), {
@@ -257,7 +258,7 @@ test.describe("Mes plateformes — flux critiques", () => {
     expect(Number(sliceB?.quantity || 0)).toBeCloseTo(3, 5);
   });
 
-  test("menu ⋯ : nouvelle transaction + deep-link filtre", async ({
+  test("panneau : nouvelle transaction préremplie", async ({
     page,
     request,
   }) => {
@@ -274,8 +275,9 @@ test.describe("Mes plateformes — flux critiques", () => {
       timeout: 15_000,
     });
 
-    await page.getByTestId(`platform-menu-${id}`).click();
-    await page.getByTestId(`new-tx-platform-${id}`).click();
+    await page.getByTestId(`platform-${name}`).click();
+    await page.getByTestId("platform-tab-activity").click();
+    await page.getByTestId("platform-preview-new-tx").click();
     await expect(page.getByTestId("modal-overlay")).toBeVisible({
       timeout: 10_000,
     });

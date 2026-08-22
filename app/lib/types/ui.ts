@@ -166,6 +166,22 @@ export type PlatformRow = {
   unrealizedPnlBase?: string;
   unrealizedPnlPct?: string;
   lastTransactionAt?: string | null;
+  /** Opérations rattachées à la plateforme (source du journal). */
+  transactionCount?: number;
+  /** Dernière synchronisation on-chain réussie — null si tenue à la main. */
+  lastSyncedAt?: string | null;
+  createdAt?: string;
+  /**
+   * Ventilation par enveloppe fiscale des positions ouvertes sur la
+   * plateforme. Patrimo n'a pas d'entité « compte » sous une plateforme :
+   * l'enveloppe portée par chaque actif est la seule ventilation réelle.
+   */
+  envelopes?: Array<{
+    accountType: string;
+    valueEur: string;
+    valueBase: string;
+    positionCount: number;
+  }>;
 };
 
 export type TxRow = {

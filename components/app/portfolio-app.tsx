@@ -1082,6 +1082,13 @@ function PortfolioAppClient({
     setShowPlatform(true);
   }
 
+  /** Plateforme sur laquelle ouvrir le journal depuis le module Plateformes. */
+  const [txPlatformFilter, setTxPlatformFilter] = useState("");
+  function viewTransactionsForPlatform(platform: { id: string }) {
+    setTxPlatformFilter(platform.id);
+    setTab("transactions");
+  }
+
   function viewPositionsForPlatform(platform: { id: string; name: string }) {
     const qs = new URLSearchParams({
       platformId: platform.id,
@@ -1450,6 +1457,7 @@ function PortfolioAppClient({
                 onImport={() => setShowImport(true)}
                 onCreate={() => openNewTransaction("ACHAT")}
                 onOpenPlatform={() => setTab("platforms")}
+                initialPlatformId={txPlatformFilter}
                 platforms={platforms}
               />
             )}
@@ -1457,6 +1465,7 @@ function PortfolioAppClient({
             {tab === "platforms" && (
               <PlatformsTab
                 platforms={platforms}
+                loading={platformsQ.isPending && !platformsQ.data}
                 baseCurrency={baseCurrency}
                 onDelete={(p, opts) =>
                   deletePlatform.mutate({
@@ -1493,6 +1502,7 @@ function PortfolioAppClient({
                   setImportDefaultPlatform({ id: p.id, name: p.name });
                   setShowImport(true);
                 }}
+                onViewTransactions={(p) => viewTransactionsForPlatform(p)}
               />
             )}
 

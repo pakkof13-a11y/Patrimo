@@ -578,6 +578,7 @@ export async function getPlatformCashBalances(
         select: {
           id: true,
           currency: true,
+          accountType: true,
           manualPrice: true,
           priceQuote: { select: { priceEur: true } },
         },
@@ -586,10 +587,25 @@ export async function getPlatformCashBalances(
     ]);
 
   const lastTxByPlatform = new Map<string, Date>();
+  /*
+    Le nombre d'opérations par plateforme se déduit du même balayage : les
+    lignes sont déjà chargées pour la date la plus récente, une requête de
+    comptage supplémentaire serait un aller-retour pour rien.
+  */
+  const txCountByPlatform = new Map<string, number>();
   for (const row of lastTxRows) {
     if (!lastTxByPlatform.has(row.platformId)) {
       lastTxByPlatform.set(row.platformId, row.occurredAt);
     }
+    txCountByPlatform.set(
+      row.platformId,
+      (txCountByPlatform.get(row.platformId) || 0) + 1
+    );
+  }
+
+  const accountTypeByAsset = new Map<string, string>();
+  for (const a of assetQuotes) {
+    accountTypeByAsset.set(a.id, a.accountType || "AUTRE");
   }
 
   const priceEurByAsset = new Map<string, ReturnType<typeof d>>();
@@ -607,6 +623,18 @@ export async function getPlatformCashBalances(
   const positionsValueByPlatform = new Map<string, ReturnType<typeof zero>>();
   const costBasisByPlatform = new Map<string, ReturnType<typeof zero>>();
   const openPositionCountByPlatform = new Map<string, number>();
+  /*
+    Répartition par enveloppe fiscale, plateforme par plateforme.
+
+    C'est la seule ventilation « par compte » que le modèle porte réellement :
+    Patrimo n'a pas d'entité compte générique sous une plateforme, mais chaque
+    actif déclare son enveloppe (CTO, PEA, CRYPTO…). Inventer une hiérarchie de
+    comptes pour coller à une maquette produirait une donnée qui n'existe pas.
+  */
+  const envelopesByPlatform = new Map<
+    string,
+    Map<string, { value: ReturnType<typeof zero>; count: number }>
+  >();
   for (const pos of led.positions.values()) {
     if (pos.quantity.lte(0)) continue;
     const platformId = pos.platformId;
@@ -627,6 +655,18 @@ export async function getPlatformCashBalances(
       platformId,
       (costBasisByPlatform.get(platformId) || zero()).plus(pos.costBasisEur)
     );
+
+    const envelope = accountTypeByAsset.get(pos.assetId) || "AUTRE";
+    let byEnvelope = envelopesByPlatform.get(platformId);
+    if (!byEnvelope) {
+      byEnvelope = new Map();
+      envelopesByPlatform.set(platformId, byEnvelope);
+    }
+    const cur = byEnvelope.get(envelope) || { value: zero(), count: 0 };
+    byEnvelope.set(envelope, {
+      value: cur.value.plus(mv),
+      count: cur.count + 1,
+    });
   }
 
   return platforms.map((p) => {
@@ -677,6 +717,19 @@ export async function getPlatformCashBalances(
       unrealizedPnlBase: convertFromEurSync(unrealizedPnlEur, baseCurrency, fx),
       unrealizedPnlPct: toFixed(unrealizedPnlPct, 4),
       lastTransactionAt: lastAt ? lastAt.toISOString() : null,
+      transactionCount: txCountByPlatform.get(p.id) || 0,
+      /** Dernière synchronisation on-chain réussie — null pour une plateforme
+       *  tenue à la main, ce qui est le cas le plus fréquent. */
+      lastSyncedAt: p.lastSyncedAt ? p.lastSyncedAt.toISOString() : null,
+      createdAt: p.createdAt.toISOString(),
+      envelopes: [...(envelopesByPlatform.get(p.id) ?? new Map())]
+        .map(([accountType, { value, count }]) => ({
+          accountType,
+          valueEur: toFixed(value, 8),
+          valueBase: convertFromEurSync(value, baseCurrency, fx),
+          positionCount: count,
+        }))
+        .sort((a, b) => Number(b.valueEur) - Number(a.valueEur)),
     };
   });
 }
