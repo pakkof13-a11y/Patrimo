@@ -13,6 +13,13 @@ import {
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
 import { endOfParisDay, parisDayKey, parisDayStart } from "../dates/paris";
 import { marketValueOfPositions } from "./class-history";
+import { PortfolioValuationEngine } from "./historical/engine";
+import { loadHistoricalInputs } from "./historical/load";
+import type {
+  HistoricalDataStatus,
+  PortfolioValuationPoint,
+  ValuationComponent,
+} from "./historical/types";
 import type { DailyCloseIndex } from "./class-history";
 import { readDailyCloses } from "../market/daily-closes";
 import { resolvePlatformLogo } from "../platforms/presets";
@@ -43,64 +50,8 @@ import {
 } from "../types/money-brands";
 import type { AccountType } from "../constants";
 
-export function mapDbTx(row: {
-  id: string;
-  type: string;
-  platformId: string;
-  toPlatformId: string | null;
-  assetId: string | null;
-  quantity: { toString(): string } | null;
-  unitPrice: { toString(): string } | null;
-  fees: { toString(): string };
-  currency: string;
-  fxRateToEur: { toString(): string };
-  grossAmountEur: { toString(): string };
-  occurredAt: Date;
-}): LedgerTx {
-  const qty = row.quantity ? d(row.quantity.toString()) : null;
-  const unit = row.unitPrice ? d(row.unitPrice.toString()) : null;
-  const fees = d(row.fees.toString());
-  const fx = d(row.fxRateToEur.toString());
-  const grossEur = d(row.grossAmountEur.toString());
-  // For cash ops without qty/price, recover original amount from EUR / fx
-  const cashAmountOriginal =
-    qty && unit
-      ? qty.times(unit)
-      : [
-            "APPORT",
-            "RETRAIT",
-            "FRAIS",
-            "DIVIDENDE",
-            "COUPON",
-            "LOYER",
-            "INTERET",
-            "TRANSFERT_CASH",
-            // Travaux capitalisés : le montant porte la dépense immobilisée et
-            // n'est déductible d'aucune quantité × prix. L'omettre ici ferait
-            // rejouer un montant nul, et le ledger rejetterait la transaction.
-            "TRAVAUX",
-          ].includes(row.type)
-        ? fx.isZero()
-          ? grossEur
-          : grossEur.div(fx)
-        : null;
-
-  return {
-    id: row.id,
-    type: row.type as TxType,
-    platformId: row.platformId,
-    toPlatformId: row.toPlatformId,
-    assetId: row.assetId,
-    quantity: qty,
-    unitPrice: unit,
-    fees,
-    currency: row.currency,
-    fxRateToEur: fx,
-    cashAmountOriginal,
-    grossOriginal: qty && unit ? qty.times(unit) : null,
-    occurredAt: row.occurredAt,
-  };
-}
+import { mapDbTx } from "./tx-mapper";
+export { mapDbTx };
 
 /**
  * Charge + rejoue le ledger, avec cache process-local (fingerprint tx).
@@ -1006,6 +957,29 @@ export type PortfolioHistoryPoint = {
   rentsBase?: number;
   totalCostBase?: number;
   isLive?: boolean;
+
+  /** Valeur brute des actifs — la métrique par défaut de la courbe. */
+  grossAssetsBase?: number;
+  /** `grossAssets - liabilities`. */
+  netWorthBase?: number;
+  liabilitiesBase?: number;
+  /** Capital externe entré (net) ce jour-là — jamais compté en performance. */
+  externalFlowsBase?: number;
+  /** Résultat du jour, flux neutralisés. */
+  investmentPerformanceBase?: number;
+
+  securitiesBase?: number;
+  cryptoBase?: number;
+  realEstateBase?: number;
+  lifeInsuranceBase?: number;
+  alternativesBase?: number;
+  employeeSavingsBase?: number;
+  otherAssetsBase?: number;
+
+  /** `EXACT` | `ESTIMATED` | `MISSING` — cf. moteur historique. */
+  status?: HistoricalDataStatus;
+  /** Compartiments qui n'étaient pas exacts ce jour-là. */
+  estimatedComponents?: ValuationComponent[];
   /**
    * Au moins une position n'avait aucun cours connu ce jour-là et a été
    * retenue à son prix de revient. Le point reste utilisable, il n'est
@@ -1056,448 +1030,203 @@ function attachIncomeSplit(
   }
 }
 
-const HISTORY_HARD_CAP = 5500;
-
-/** Liste inclusive des jours civils YYYY-MM-DD (UTC noon step). */
-function enumerateDayKeysInclusive(first: string, last: string): string[] {
-  if (first > last) return [first];
-  const out: string[] = [];
-  const [y0, m0, d0] = first.split("-").map(Number);
-  const [y1, m1, d1] = last.split("-").map(Number);
-  let t = Date.UTC(y0!, m0! - 1, d0!, 12, 0, 0);
-  const end = Date.UTC(y1!, m1! - 1, d1!, 12, 0, 0);
-  const dayMs = 24 * 60 * 60 * 1000;
-  // Garde-fou : max ~15 ans
-  while (t <= end && out.length < HISTORY_HARD_CAP) {
-    const dt = new Date(t);
-    const y = dt.getUTCFullYear();
-    const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
-    const d = String(dt.getUTCDate()).padStart(2, "0");
-    out.push(`${y}-${m}-${d}`);
-    t += dayMs;
-  }
-  return out;
-}
+/**
+ * Nombre de points renvoyés à l'écran. La série est toujours calculée au jour
+ * le jour ; seul l'affichage est échantillonné, et jamais en modifiant une
+ * valeur (cf. `downsampleSeries`).
+ */
+const HISTORY_DISPLAY_POINTS = 900;
 
 /**
- * Reconstruit des points d’évolution à partir des dates d’opération (`occurredAt`),
- * pas de `createdAt` ni des seuls snapshots post-import.
+ * Réduit une série quotidienne pour l'affichage **sans jamais altérer une
+ * valeur**.
  *
- * Valorisation historique = coût d’acquisition (CUMP) + cash ledger
- * (sans séries de cours journalières). Le point live du jour utilise le marché.
- *
- * Entre deux jours de transaction, la valeur (au coût) est reportée chaque jour
- * civil pour que les plages 7J / 1M / … reflètent la vraie profondeur temporelle.
+ * Trois catégories de points sont conservées quoi qu'il arrive : le premier, le
+ * dernier, et tous ceux qui portent un mouvement notable — flux externe, saut
+ * de valeur. Le reste est échantillonné régulièrement. Un point conservé garde
+ * exactement la valeur calculée : l'échantillonnage retire des points, il n'en
+ * lisse aucun et n'en invente aucun.
  */
-export function buildHistoryFromOccurredAt(
-  txs: LedgerTx[],
-  toBase: (eur: ReturnType<typeof d>) => number,
-  opts?: {
-    maxPoints?: number;
-    untilDayKey?: string;
-    /**
-     * Clôtures journalières par actif. Fournies, la courbe est valorisée **au
-     * marché** jour par jour ; absentes, elle retombe sur le prix de revient —
-     * l'ancien comportement, conservé pour un journal sans aucun cours connu.
-     */
-    closes?: DailyCloseIndex;
+export function downsampleSeries<T extends { grossAssets: number; externalFlows: number }>(
+  series: T[],
+  maxPoints = HISTORY_DISPLAY_POINTS
+): T[] {
+  if (series.length <= maxPoints) return series;
+
+  const keep = new Set<number>([0, series.length - 1]);
+
+  // Amplitude de référence : un mouvement compte s'il pèse dans la courbe.
+  let min = Infinity;
+  let max = -Infinity;
+  for (const p of series) {
+    if (p.grossAssets < min) min = p.grossAssets;
+    if (p.grossAssets > max) max = p.grossAssets;
   }
-): PortfolioHistoryPoint[] {
-  if (txs.length === 0) return [];
+  const threshold = Math.max((max - min) * 0.005, 1e-9);
 
-  const sorted = [...txs].sort((a, b) => {
-    const t = a.occurredAt.getTime() - b.occurredAt.getTime();
-    if (t !== 0) return t;
-    return a.id.localeCompare(b.id);
-  });
-
-  const firstDay = parisDayKey(sorted[0]!.occurredAt);
-  const lastTxDay = parisDayKey(sorted[sorted.length - 1]!.occurredAt);
-  const lastDay =
-    opts?.untilDayKey && opts.untilDayKey > lastTxDay
-      ? opts.untilDayKey
-      : lastTxDay;
-
-  // Tous les jours civils du 1er occurredAt → fin (report de valorisation)
-  let keys = enumerateDayKeysInclusive(firstDay, lastDay);
-
-  // Échantillonner si trop dense : toujours conserver 1er, dernier, et jours de tx
-  const maxPoints = opts?.maxPoints ?? 800;
-  if (keys.length > maxPoints) {
-    const mustKeep = new Set<string>([firstDay, lastDay]);
-    for (const tx of sorted) {
-      mustKeep.add(parisDayKey(tx.occurredAt));
+  for (let i = 1; i < series.length; i++) {
+    const p = series[i]!;
+    if (p.externalFlows !== 0) keep.add(i);
+    else if (Math.abs(p.grossAssets - series[i - 1]!.grossAssets) >= threshold) {
+      keep.add(i);
+      // Garder la veille rend la marche lisible plutôt que rétroactive.
+      keep.add(i - 1);
     }
-    const step = Math.ceil(keys.length / maxPoints);
-    keys = keys.filter(
-      (k, i) => mustKeep.has(k) || i % step === 0 || i === keys.length - 1
-    );
-    // Déduplique en gardant l’ordre
-    const seenK = new Set<string>();
-    keys = keys.filter((k) => {
-      if (seenK.has(k)) return false;
-      seenK.add(k);
-      return true;
-    });
   }
 
-  if (keys.length >= HISTORY_HARD_CAP) {
-    console.warn(
-      `[portfolio] buildHistoryFromOccurredAt: hardCap ${HISTORY_HARD_CAP} atteint (${keys.length} points) — courbe tronquée.`
-    );
-  }
+  const step = Math.max(1, Math.ceil(series.length / maxPoints));
+  for (let i = 0; i < series.length; i += step) keep.add(i);
 
-  const points: PortfolioHistoryPoint[] = [];
-  let cursor = 0;
-  // Replay incrémental : `sorted` est trié une fois pour toutes, donc chaque
-  // jour ne fait qu'appliquer les tx NOUVELLEMENT couvertes par le curseur
-  // sur un état persistant, au lieu de rejouer tout `applied` depuis zéro à
-  // chaque itération (O(jours × tx) → O(jours + tx)).
-  const state = createEmptyLedger();
-
-  for (const day of keys) {
-    // Inclure toutes les tx du jour (et antérieures non encore appliquées)
-    // — tri strict par occurredAt, jamais createdAt
-    while (cursor < sorted.length) {
-      const tx = sorted[cursor]!;
-      const tk = parisDayKey(tx.occurredAt);
-      if (tk > day) break;
-      try {
-        applyTransaction(state, tx);
-      } catch {
-        applyTransaction(state, tx, { allowNegativeCash: true, clampOversell: true });
-      }
-      cursor += 1;
-    }
-
-    if (cursor === 0) continue;
-
-    const costEur = totalCostBasis(state);
-    const cashEur = totalCash(state);
-    const realizedEur = totalRealizedPnl(state);
-    const incomeEur = state.cashIncomeEur;
-
-    /*
-      Valorisation au marché du jour.
-
-      La courbe valorisait l'historique au prix de revient : elle ne bougeait
-      qu'aux achats, ventes et encaissements, et racontait le capital investi
-      plutôt que ce qu'il valait. Le dernier point, lui, basculait en valeur de
-      marché — la marche qui en résultait mélangeait un changement de base
-      comptable avec le mouvement réel, sans qu'on puisse les distinguer.
-
-      Les cours viennent du cache de clôtures, jamais d'un appel fournisseur :
-      afficher un tableau de bord ne doit pas déclencher le téléchargement de
-      trois ans d'historique.
-    */
-    const valuation = opts?.closes
-      ? marketValueOfPositions(state.positions.values(), opts.closes, day)
-      : { marketEur: costEur, unpricedAssets: 0 };
-    const marketEur = valuation.marketEur;
-    const unrealizedEur = marketEur.minus(costEur);
-
-    const totalEur = marketEur.plus(cashEur);
-    const totalBase = toBase(totalEur);
-    const cashBase = toBase(cashEur);
-
-    /*
-      Ancrage : dernier instant du jour civil parisien.
-
-      Le point d'une journée porte son état de clôture ; l'horodater à midi UTC
-      en faisait une approximation que les filtres de période devaient
-      rattraper à la main (un décalage de douze heures traînait dans le calcul
-      du latent périodique). La journée se ferme à 00 h 00 Europe/Paris — heure
-      d'été comme d'hiver, puisque c'est le fuseau qui tranche, pas un décalage
-      fixe.
-    */
-    const date = endOfParisDay(day);
-
-    points.push({
-      date: date.toISOString(),
-      label: new Intl.DateTimeFormat("fr-FR", {
-        timeZone: "Europe/Paris",
-        day: "2-digit",
-        month: "short",
-        year: "2-digit",
-      }).format(date),
-      totalValueEur: totalEur.toNumber(),
-      cashTotalEur: cashEur.toNumber(),
-      totalValueBase: totalBase,
-      cashTotalBase: cashBase,
-      positionsBase: totalBase - cashBase,
-      realizedPnlBase: toBase(realizedEur),
-      unrealizedPnlBase: toBase(unrealizedEur),
-      cashIncomeBase: toBase(incomeEur),
-      totalCostBase: toBase(costEur),
-      // Au moins une position sans cours connu ce jour-là : retenue au coût.
-      estimated: valuation.unpricedAssets > 0 || undefined,
-    });
-  }
-
-  return points;
+  return [...keep].sort((a, b) => a - b).map((i) => series[i]!);
 }
 
 /**
- * Version allégée de getPortfolioBundle — ne calcule que les 6 champs
- * scalaires nécessaires au point « live » de l'historique (getPortfolioHistory).
- * Évite getPlatformCashBalances (breakdown par plateforme + poches banques)
- * et les boucles d'allocation byClass/byPlatform/byAccountType, qui ne
- * servent qu'au dashboard complet et représentaient l'essentiel du coût
- * inutile de getPortfolioBundle() pour un simple point du graphique.
+ * Rendement pondéré par le temps (TWR) d'une série.
+ *
+ * Un apport n'est pas une performance : chaîner les rendements période par
+ * période, en retirant les flux de chaque période, est la seule façon de mesurer
+ * ce que les investissements ont produit indépendamment des versements. C'est
+ * la réponse au « +178 % » qui n'était qu'un changement de périmètre.
+ *
+ * Renvoie `null` tant qu'aucune période n'a de base positive — un patrimoine
+ * qui démarre à zéro n'a pas de rendement, il a des versements.
  */
-async function getPortfolioLiveSummary(userId: string, baseCurrency = "EUR") {
-  const rates = await getEurRates();
-  const ledger = await loadLedgerForUser(userId);
+export function timeWeightedReturnPct(
+  series: Array<{ grossAssets: number; externalFlows: number }>
+): number | null {
+  if (series.length < 2) return null;
+  let factor = 1;
+  let measured = false;
 
-  const { getExplicitCashTotalEur } = await import("../cash/pockets");
-  const { getAlternativesPortfolioSlice } = await import(
-    "../alternatives/portfolio"
-  );
+  for (let i = 1; i < series.length; i++) {
+    const prev = series[i - 1]!.grossAssets;
+    const curr = series[i]!.grossAssets;
+    const flow = series[i]!.externalFlows;
+    // Le capital exposé sur la période inclut le flux du jour : sans lui, un
+    // versement le jour même compterait comme un gain sur la base de la veille.
+    const base = prev + flow;
+    if (base <= 0) continue;
+    factor *= curr / base;
+    measured = true;
+  }
 
-  const [holdings, explicitCash, alternatives, esEur] = await Promise.all([
-    getHoldings(userId, baseCurrency, rates),
-    getExplicitCashTotalEur(userId),
-    getAlternativesPortfolioSlice(userId, rates).catch((err) => {
-      console.error("[portfolio] alternatives slice failed:", err);
-      return { totalEur: 0 };
-    }),
-    getEmployeeSavingsTotalEur(userId, rates),
-  ]);
-
-  const marketValue = holdings.reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
-  const costBasis = totalCostBasis(ledger);
-  const cash = explicitCash.totalEur;
-  const alternativesEur = d(String(alternatives?.totalEur ?? 0));
-  const employeeSavingsEur = esEur;
-  const realized = totalRealizedPnl(ledger);
-  const unrealized = marketValue.minus(costBasis);
-  const cashIncome = ledger.cashIncomeEur;
-  const totalAssets = marketValue.plus(cash).plus(alternativesEur).plus(employeeSavingsEur);
-
-  return {
-    portfolioPlusCashEur: toFixed(totalAssets, 8),
-    totalCashEur: toFixed(cash, 8),
-    realizedPnlEur: toFixed(realized, 8),
-    unrealizedPnlEur: toFixed(unrealized, 8),
-    cashIncomeEur: toFixed(cashIncome, 8),
-    totalCostBasisEur: toFixed(costBasis, 8),
-  };
+  return measured ? (factor - 1) * 100 : null;
 }
 
-/** Snapshots + reconstruction `occurredAt` + point live pour l’Évolution. */
 /**
- * Fusionne les deux sources de la courbe de patrimoine : la reconstruction jour
- * par jour depuis le ledger (`fromTx`) et les `PortfolioSnapshot` (`fromSnaps`).
+ * Courbe d'évolution du patrimoine — **une seule** source de vérité.
  *
- * **La reconstruction prime partout où elle existe.** Les deux séries ne
- * mesurent pas le même patrimoine : un snapshot ne couvre que le périmètre
- * « titres » — son `cashTotalEur` ignore les poches explicites (banques,
- * livrets, AV, enveloppes) et son `totalCostEur` ignore les actifs alternatifs.
- * Les écraser point par point injectait donc un périmètre plus étroit sur des
- * jours isolés, encadrés de jours complets : la courbe plongeait de plusieurs
- * centaines de milliers d'euros puis remontait le lendemain — un faux krach par
- * snapshot, et 37 sur le jeu de démonstration.
+ * Toute la série, point du jour compris, sort du moteur de valorisation
+ * historique (`historical/engine.ts`). Il n'y a plus de fusion entre une
+ * reconstruction, des snapshots et un point « live » calculé autrement : ces
+ * trois définitions produisaient trois valeurs différentes, et la marche entre
+ * la dernière et les autres se lisait comme un mouvement de marché.
  *
- * Aucun mark-to-market rétroactif n'est perdu au passage : la reconstruction est
- * volontairement valorisée au coût (cf. `buildHistoryFromOccurredAt`), et la
- * valeur de marché du jour est ajoutée séparément en point « live » en fin de
- * courbe. Les snapshots ne servent donc plus qu'à couvrir les jours que la
- * reconstruction n'atteint pas.
+ * Les `PortfolioSnapshot` ne sont **plus** injectés dans la courbe. Ils restent
+ * en base comme points de contrôle — ils ne couvrent que le périmètre
+ * « titres » et les mélanger réintroduirait l'incohérence de périmètre que ce
+ * chantier corrige.
  */
-export function mergeHistorySources(
-  fromTx: PortfolioHistoryPoint[],
-  fromSnaps: PortfolioHistoryPoint[]
-): Map<string, PortfolioHistoryPoint> {
-  const byDay = new Map<string, PortfolioHistoryPoint>();
-  for (const p of fromTx) {
-    byDay.set(parisDayKey(p.date), p);
-  }
-  const firstTxDay = fromTx.length > 0 ? parisDayKey(fromTx[0]!.date) : null;
-
-  for (const p of fromSnaps) {
-    const day = parisDayKey(p.date);
-    // Ne pas injecter de snapshot antérieur au 1er occurredAt (artefacts)
-    if (firstTxDay && day < firstTxDay) continue;
-    /*
-      Le rejeu prime, sauf quand il n'a pas su valoriser la journée.
-
-      Il produit un point pour *chaque* jour civil : écarter systématiquement
-      les snapshots revenait à ne jamais en lire un seul, alors qu'ils sont
-      écrits à chaque rafraîchissement de cours. Un snapshot est une mesure au
-      marché réellement constatée ce jour-là — il vaut mieux qu'une position
-      retenue à son coût faute de cours connu.
-    */
-    const existing = byDay.get(day);
-    if (existing && !existing.estimated) continue;
-    byDay.set(day, p);
-  }
-
-  return byDay;
-}
-
 export async function getPortfolioHistory(
   userId: string,
   baseCurrency = "EUR",
-  /**
-   * Filtre optionnel des snapshots mark-to-market (date >= sinceDate).
-   * Omis = comportement actuel (take:2200, pas de filtre de date — export
-   * complet). Passer une date limite la fenêtre glissante pour un historique
-   * très long ; l'unique appelant actuel (api/portfolio) ne le passe pas
-   * pour préserver le comportement existant sans régression silencieuse.
-   */
   sinceDate?: Date
 ): Promise<PortfolioHistoryPoint[]> {
-  const [snapshots, rates, live, incomeRows, allTxRows] = await Promise.all([
-    prisma.portfolioSnapshot.findMany({
-      where: sinceDate ? { userId, date: { gte: sinceDate } } : { userId },
-      orderBy: { date: "desc" },
-      take: 2200,
-    }),
+  const [rates, inputs, incomeRows] = await Promise.all([
     getEurRates(),
-    getPortfolioLiveSummary(userId, baseCurrency),
+    loadHistoricalInputs(userId),
     prisma.transaction.findMany({
-      where: {
-        userId,
-        type: { in: ["DIVIDENDE", "COUPON", "LOYER"] },
-      },
+      where: { userId, type: { in: ["DIVIDENDE", "COUPON", "LOYER"] } },
       orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
-      select: {
-        type: true,
-        occurredAt: true,
-        netCashImpactEur: true,
-      },
-    }),
-    // Toutes les tx pour reconstruire l’historique sur occurredAt (pas createdAt)
-    prisma.transaction.findMany({
-      where: { userId },
-      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+      select: { type: true, occurredAt: true, netCashImpactEur: true },
     }),
   ]);
 
   const toBase = (eur: ReturnType<typeof d>) =>
     Number(convertFromEurSync(eur, baseCurrency, rates));
 
-  const ledgerTxs = allTxRows.map(mapDbTx);
-  // Jusqu’à aujourd’hui (Paris) : l’historique suit les occurredAt même si
-  // l’import a été fait le même jour (createdAt / snapshot bootstrap).
+  const engine = new PortfolioValuationEngine(inputs);
+  const earliest = engine.earliestDay();
+  if (!earliest) return [];
+
   const todayParis = parisDayKey(new Date());
+  const from =
+    sinceDate && parisDayKey(sinceDate) > earliest ? parisDayKey(sinceDate) : earliest;
+
+  const full = engine.buildSeries(from, todayParis);
+  if (full.length === 0) return [];
+
+  const shown = downsampleSeries(full);
 
   /*
-    Cours de clôture pour valoriser l'historique au marché.
+    L'horodatage n'est calculé que pour les points réellement rendus.
 
-    Lecture seule du cache : afficher un tableau de bord ne doit pas déclencher
-    le téléchargement de trois ans d'historique. Le cache se remplit par
-    ailleurs — P&L par classe, vignettes de tendance, fiche d'un actif — et la
-    courbe s'affine à mesure. Sans lui, la reconstruction retombe sur le prix
-    de revient et le signale.
+    `endOfParisDay` et `Intl.DateTimeFormat` passent par la base de fuseaux :
+    les appeler sur chaque jour de la série complète coûtait plusieurs secondes
+    sur un historique long, pour des points qui n'atteignaient jamais l'écran.
   */
-  const firstTxDayKey =
-    ledgerTxs.length > 0
-      ? parisDayKey(
-          ledgerTxs.reduce(
-            (min, t) => (t.occurredAt < min ? t.occurredAt : min),
-            ledgerTxs[0]!.occurredAt
-          )
-        )
-      : todayParis;
-  const assetIds = [
-    ...new Set(ledgerTxs.map((t) => t.assetId).filter((x): x is string => !!x)),
-  ];
-  let closes: DailyCloseIndex = new Map();
-  try {
-    closes = await readDailyCloses(assetIds, firstTxDayKey, todayParis);
-  } catch (e) {
-    // La courbe au coût vaut mieux qu'une page en erreur.
-    console.error("[portfolio-history] clôtures illisibles", e);
-  }
-
-  const fromTx = buildHistoryFromOccurredAt(ledgerTxs, toBase, {
-    untilDayKey: todayParis,
-    closes,
+  const labelFmt = new Intl.DateTimeFormat("fr-FR", {
+    timeZone: "Europe/Paris",
+    day: "2-digit",
+    month: "short",
+    year: "2-digit",
   });
 
-  // Snapshots marché (mark-to-market) — utile pour les jours récents post-import
-  const snapshotsAsc = [...snapshots].reverse();
-  const fromSnaps: PortfolioHistoryPoint[] = snapshotsAsc.map((s) => {
-    const totalEur = d(s.totalValueEur.toString());
-    const cashEur = d(s.cashTotalEur.toString());
-    const realizedEur = d(s.realizedPnlEur.toString());
-    const unrealizedEur = d(s.unrealizedPnlEur.toString());
-    const incomeEur = d(s.cashIncomeEur.toString());
-    const costEur = d(s.totalCostEur.toString());
-    const totalBase = toBase(totalEur);
-    const cashBase = toBase(cashEur);
+  const points: PortfolioHistoryPoint[] = shown.map((p, i) => {
+    const grossBase = toBase(d(p.grossAssets));
+    const cashBase = toBase(d(p.cash));
+    const at = endOfParisDay(p.day);
     return {
-      date: s.date.toISOString(),
-      label: new Intl.DateTimeFormat("fr-FR", {
-        timeZone: "Europe/Paris",
-        day: "2-digit",
-        month: "short",
-      }).format(s.date),
-      totalValueEur: totalEur.toNumber(),
-      cashTotalEur: cashEur.toNumber(),
-      totalValueBase: totalBase,
+      date: at.toISOString(),
+      label: labelFmt.format(at),
+
+      // Champs historiques conservés : la valeur affichée par défaut est la
+      // valeur brute des actifs (cf. §3 du chantier).
+      totalValueEur: p.grossAssets,
+      cashTotalEur: p.cash,
+      totalValueBase: grossBase,
       cashTotalBase: cashBase,
-      positionsBase: totalBase - cashBase,
-      realizedPnlBase: toBase(realizedEur),
-      unrealizedPnlBase: toBase(unrealizedEur),
-      cashIncomeBase: toBase(incomeEur),
-      totalCostBase: toBase(costEur),
+      positionsBase: grossBase - cashBase,
+
+      grossAssetsBase: grossBase,
+      netWorthBase: toBase(d(p.netWorth)),
+      liabilitiesBase: toBase(d(p.liabilities)),
+      externalFlowsBase: toBase(d(p.externalFlows)),
+      investmentPerformanceBase: toBase(d(p.investmentPerformance)),
+
+      securitiesBase: toBase(d(p.securities)),
+      cryptoBase: toBase(d(p.crypto)),
+      realEstateBase: toBase(d(p.realEstate)),
+      lifeInsuranceBase: toBase(d(p.lifeInsurance)),
+      alternativesBase: toBase(d(p.alternatives)),
+      employeeSavingsBase: toBase(d(p.employeeSavings)),
+      otherAssetsBase: toBase(d(p.otherAssets)),
+
+      status: p.status,
+      estimatedComponents: p.estimatedComponents,
+      estimated: p.status === "ESTIMATED" || undefined,
+      isLive: i === shown.length - 1 && p.day === todayParis ? true : undefined,
     };
   });
-
-  // Fusion : points ledger (occurredAt) + snapshots (jour civil).
-  // Source de vérité temporelle = occurredAt des transactions (jamais createdAt).
-  // Snapshots mark-to-market : utiles en fin de courbe, mais ne doivent pas
-  // « collapser » l’historique sur la date d’import seule.
-  const byDay = mergeHistorySources(fromTx, fromSnaps);
-
-  const points = [...byDay.values()].sort(
-    (a, b) => Date.parse(a.date) - Date.parse(b.date)
-  );
-
-  // Always append current live valuation so the chart is never empty / stale
-  const liveTotal = d(live.portfolioPlusCashEur);
-  const liveCash = d(live.totalCashEur);
-  const liveRealized = d(String(live.realizedPnlEur ?? 0));
-  const liveUnrealized = d(String(live.unrealizedPnlEur ?? 0));
-  const liveIncome = d(String(live.cashIncomeEur ?? 0));
-  const liveCost = d(String(live.totalCostBasisEur ?? 0));
-  const todayKey = parisDayKey(new Date());
-  const last = points[points.length - 1];
-  const lastKey = last ? parisDayKey(last.date) : null;
-
-  const liveTotalBase = toBase(liveTotal);
-  const liveCashBase = toBase(liveCash);
-
-  const livePoint: PortfolioHistoryPoint = {
-    date: new Date().toISOString(),
-    label: "Aujourd'hui",
-    totalValueEur: liveTotal.toNumber(),
-    cashTotalEur: liveCash.toNumber(),
-    totalValueBase: liveTotalBase,
-    cashTotalBase: liveCashBase,
-    positionsBase: liveTotalBase - liveCashBase,
-    realizedPnlBase: toBase(liveRealized),
-    unrealizedPnlBase: toBase(liveUnrealized),
-    cashIncomeBase: toBase(liveIncome),
-    totalCostBase: toBase(liveCost),
-    isLive: true,
-  };
-
-  if (!last || lastKey !== todayKey) {
-    points.push(livePoint);
-  } else {
-    // Replace today's point with freshest live market value
-    points[points.length - 1] = {
-      ...livePoint,
-      label: last.label || "Aujourd'hui",
-    };
-  }
 
   attachIncomeSplit(points, incomeRows, toBase);
 
   return points;
+}
+
+/**
+ * Valeur du patrimoine aujourd'hui, par le moteur historique.
+ *
+ * Le dashboard et le dernier point de la courbe passent tous deux par ici : il
+ * n'existe plus de chemin « live » qui additionnerait les compartiments dans un
+ * ordre ou un périmètre différents.
+ */
+export async function getPortfolioValuationToday(
+  userId: string
+): Promise<PortfolioValuationPoint> {
+  const inputs = await loadHistoricalInputs(userId);
+  const engine = new PortfolioValuationEngine(inputs);
+  return engine.calculateAt(parisDayKey(new Date()));
 }
 
 export async function getAssetDetail(userId: string, assetId: string) {

@@ -1,0 +1,347 @@
+/**
+ * Adaptateur Prisma du moteur historique.
+ *
+ * Seule pièce du moteur à connaître le schéma. Elle charge **en une passe**
+ * tout ce que la reconstruction consommera ensuite en mémoire : c'est la
+ * contrainte de performance du chantier — reconstruire cinq ans ne doit pas
+ * coûter plus de requêtes qu'une seule journée.
+ *
+ * Chaque conversion vers EUR est faite ici, au chargement, pour que le moteur
+ * n'ait plus à connaître ni les devises ni les taux.
+ */
+
+import { prisma } from "../../prisma";
+import { d, zero, type Decimal } from "../../money/decimal";
+import { convertToEurSync, getEurRates } from "../../market/fx";
+import { readDailyCloses } from "../../market/daily-closes";
+import { parisDayKey } from "../../dates/paris";
+import {
+  savingsDisplayBalance,
+  type PayoutFrequency,
+  type RateType,
+} from "../../money/savings";
+import { mapDbTx } from "../tx-mapper";
+import type { DailyCloseIndex } from "../class-history";
+import type { HistoricalInputs } from "./engine";
+
+type Rates = Record<string, number>;
+
+const eur = (
+  value: { toString(): string } | null | undefined,
+  currency: string | null | undefined,
+  rates: Rates
+): Decimal =>
+  value == null
+    ? zero()
+    : d(convertToEurSync(value.toString(), currency || "EUR", rates));
+
+/**
+ * Charge l'intégralité des sources historiques d'un utilisateur.
+ *
+ * `closes` est lu **sans** déclencher d'appel fournisseur : afficher un tableau
+ * de bord ne doit pas provoquer le téléchargement de cinq ans de cours. Le
+ * cache se remplit par ailleurs, et la courbe se précise à mesure ; là où il est
+ * muet, la position est retenue à son coût et la journée se déclare estimée.
+ */
+export async function loadHistoricalInputs(
+  userId: string
+): Promise<HistoricalInputs> {
+  const rates = await getEurRates();
+
+  const [
+    txRows,
+    assets,
+    banks,
+    bankEvents,
+    savings,
+    savingsEvents,
+    envelopes,
+    metals,
+    peRows,
+    clRows,
+    tangibles,
+    employeeSavings,
+    liabilities,
+  ] = await Promise.all([
+    prisma.transaction.findMany({
+      where: { userId },
+      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+    }),
+    prisma.asset.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        assetClass: true,
+        accountType: true,
+        currency: true,
+        manualPrice: true,
+        priceQuote: { select: { priceEur: true } },
+      },
+    }),
+    prisma.bankAccount.findMany({ where: { userId } }),
+    prisma.bankAccountEvent.findMany({
+      where: { bankAccount: { userId } },
+      orderBy: { occurredAt: "asc" },
+    }),
+    prisma.savingsAccount.findMany({ where: { userId } }),
+    prisma.savingsAccountEvent.findMany({
+      where: { savingsAccount: { userId } },
+      orderBy: { occurredAt: "asc" },
+    }),
+    prisma.envelopeCash.findMany({ where: { userId } }),
+    prisma.preciousMetalPosition.findMany({ where: { userId } }),
+    prisma.privateEquityPosition.findMany({
+      where: { userId },
+      include: { valuations: { orderBy: { valuedAt: "asc" } } },
+    }),
+    prisma.crowdlendingPosition.findMany({ where: { userId } }),
+    prisma.tangibleAsset.findMany({
+      where: { userId },
+      include: { valuations: { orderBy: { valuedAt: "asc" } } },
+    }),
+    prisma.employeeSavingsLine.findMany({ where: { userId } }),
+    prisma.liability.findMany({
+      where: { userId },
+      include: { events: { orderBy: { eventDate: "asc" } } },
+    }),
+  ]);
+
+  const transactions = txRows.map(mapDbTx);
+
+  const assetClassById = new Map<string, string>();
+  for (const a of assets) {
+    // Un contrat d'assurance-vie est porté par `accountType`, pas par la classe
+    // de l'actif : ses supports restent des actions ou des obligations.
+    assetClassById.set(a.id, a.accountType === "AV" ? "ASSURANCE_VIE" : a.assetClass);
+  }
+
+  const closes = await loadCloses(transactions, assets.map((a) => a.id));
+
+  /*
+    Le cours du jour complète le cache de clôtures.
+
+    `AssetDailyClose` n'est alimenté que par les écrans qui le remplissent au
+    fil de l'eau : il peut être vide, et l'était sur une base fraîchement
+    initialisée. Sans ce complément, la journée d'aujourd'hui retombait sur le
+    prix de revient — le dernier point de la courbe s'écartait alors de la carte
+    du dashboard, qui lit bien le cours courant, et l'écart se lisait comme une
+    perte.
+
+    Le cours n'est inscrit **que** sur le jour courant : il ne descend jamais
+    dans le passé, où seules les clôtures réellement observées font foi.
+  */
+  const today = parisDayKey(new Date());
+  for (const a of assets) {
+    const priceEur = a.priceQuote
+      ? d(a.priceQuote.priceEur.toString())
+      : a.manualPrice
+        ? d(convertToEurSync(a.manualPrice.toString(), a.currency || "EUR", rates))
+        : null;
+    if (!priceEur || priceEur.lte(0)) continue;
+    const byDay = closes.get(a.id) ?? new Map<string, number>();
+    byDay.set(today, priceEur.toNumber());
+    closes.set(a.id, byDay);
+  }
+
+  // ── Cash : comptes, livrets, enveloppes ────────────────────────────────────
+  const cashAccounts = [
+    ...banks.map((b) => ({
+      id: b.id,
+      balanceEur: eur(b.balance, b.currency, rates),
+      createdAt: b.createdAt,
+    })),
+    ...savings.map((s) => ({
+      id: s.id,
+      balanceEur: eur(s.balance, s.currency, rates),
+      createdAt: s.createdAt,
+      // Le solde affiché inclut les intérêts courus non encore versés : c'est
+      // ce que la carte du dashboard additionne, donc ce que la courbe doit
+      // rejoindre aujourd'hui.
+      currentEur: eur(displayBalanceOf(s), s.currency, rates),
+    })),
+    ...envelopes.map((e) => ({
+      id: e.id,
+      balanceEur: eur(e.balance, e.currency, rates),
+      createdAt: e.createdAt,
+    })),
+  ];
+
+  const bankCurrencyById = new Map(banks.map((b) => [b.id, b.currency]));
+  const savingsCurrencyById = new Map(savings.map((s) => [s.id, s.currency]));
+
+  const cashEvents = [
+    ...bankEvents.map((e) => ({
+      accountId: e.bankAccountId,
+      occurredAt: e.occurredAt,
+      amountEur: eur(e.amount, bankCurrencyById.get(e.bankAccountId), rates),
+      balanceAfterEur: eur(
+        e.balanceAfter,
+        bankCurrencyById.get(e.bankAccountId),
+        rates
+      ),
+      type: e.type,
+    })),
+    ...savingsEvents.map((e) => ({
+      accountId: e.savingsAccountId,
+      occurredAt: e.occurredAt,
+      amountEur: eur(e.amount, savingsCurrencyById.get(e.savingsAccountId), rates),
+      balanceAfterEur: eur(
+        e.balanceAfter,
+        savingsCurrencyById.get(e.savingsAccountId),
+        rates
+      ),
+      type: e.type,
+    })),
+  ];
+
+  return {
+    transactions,
+    assetClassById,
+    closes,
+    cashAccounts,
+    cashEvents,
+
+    metals: metals.map((m) => ({
+      id: m.id,
+      acquiredAt: m.acquiredAt,
+      createdAt: m.createdAt,
+      updatedAt: m.updatedAt,
+      // Prix de revient du lot : quantité × PRU, frais d'acquisition compris.
+      costEur: eur(
+        d(m.quantity.toString()).times(d(m.purchasePriceUnit.toString())).toString(),
+        m.currency,
+        rates
+      ).plus(eur(m.acquisitionFees, m.currency, rates)),
+      currentValueEur: eur(m.currentValue, m.currency, rates),
+    })),
+
+    privateEquity: peRows.map((p) => ({
+      id: p.id,
+      investmentDate: p.investmentDate,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+      // Le capital appelé n'est pas toujours saisi sur les lignes anciennes :
+      // à défaut, `parts × prix d'acquisition` est le prix réellement payé.
+      calledCapitalEur: d(p.calledCapital.toString()).gt(0)
+        ? eur(p.calledCapital, p.currency, rates)
+        : eur(
+            d(p.shares.toString())
+              .times(d(p.acquisitionPricePerShare.toString()))
+              .toString(),
+            p.currency,
+            rates
+          ),
+      currentNavEur: eur(p.currentNav, p.currency, rates),
+      valuations: p.valuations.map((v) => ({
+        valuedAt: v.valuedAt,
+        navEur: eur(v.nav, p.currency, rates),
+      })),
+    })),
+
+    crowdlending: clRows.map((c) => ({
+      id: c.id,
+      startDate: c.startDate,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+      capitalInvestedEur: eur(c.capitalInvested, c.currency, rates),
+      remainingCapitalEur: eur(c.remainingCapital, c.currency, rates),
+      status: c.status,
+    })),
+
+    tangibles: tangibles.map((t) => ({
+      id: t.id,
+      purchaseDate: t.purchaseDate,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+      costEur: eur(t.purchasePrice, t.currency, rates).plus(
+        eur(t.acquisitionFees, t.currency, rates)
+      ),
+      estimatedValueEur: eur(t.estimatedValue, t.currency, rates),
+      valuations: t.valuations.map((v) => ({
+        valuedAt: v.valuedAt,
+        // `TangibleValuation.valueEur` est déjà en euro par construction.
+        valueEur: d(v.valueEur.toString()),
+      })),
+    })),
+
+    employeeSavings: employeeSavings.map((l) => ({
+      id: l.id,
+      contributionDate: l.contributionDate,
+      createdAt: l.createdAt,
+      updatedAt: l.updatedAt,
+      contributedEur:
+        l.contributedAmount == null
+          ? null
+          : eur(l.contributedAmount, l.currency, rates),
+      currentEur: eur(
+        d(l.units.toString()).times(d(l.nav.toString())).toString(),
+        l.currency,
+        rates
+      ),
+    })),
+
+    liabilities: liabilities.map((l) => ({
+      id: l.id,
+      startDate: l.startDate,
+      createdAt: l.createdAt,
+      updatedAt: l.updatedAt,
+      initialAmountEur: eur(l.initialAmount, l.currency, rates),
+      remainingAmountEur: eur(l.remainingAmount, l.currency, rates),
+      events: l.events.map((e) => ({
+        eventDate: e.eventDate,
+        remainingAfterEur:
+          e.remainingAfter == null ? null : eur(e.remainingAfter, l.currency, rates),
+      })),
+    })),
+  };
+}
+
+/** Solde d'affichage d'un livret, intérêts courus compris. */
+function displayBalanceOf(s: {
+  balance: { toString(): string };
+  apyPercent: { toString(): string };
+  rateType: string;
+  payoutFrequency: string | null;
+  lastPayoutAt: Date | null;
+  lastAccruedAt: Date;
+}): string {
+  const rateType = (s.rateType === "APR" ? "APR" : "APY") as RateType;
+  const freq = (
+    ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"].includes(s.payoutFrequency || "")
+      ? s.payoutFrequency
+      : "DAILY"
+  ) as PayoutFrequency;
+  const { displayBalance } = savingsDisplayBalance(
+    s.balance.toString(),
+    s.apyPercent.toString(),
+    s.lastPayoutAt || s.lastAccruedAt,
+    new Date(),
+    rateType,
+    freq
+  );
+  return displayBalance;
+}
+
+async function loadCloses(
+  transactions: Array<{ occurredAt: Date }>,
+  assetIds: string[]
+): Promise<DailyCloseIndex> {
+  if (assetIds.length === 0) return new Map();
+  const today = parisDayKey(new Date());
+  const first =
+    transactions.length > 0
+      ? parisDayKey(
+          transactions.reduce(
+            (min, t) => (t.occurredAt < min ? t.occurredAt : min),
+            transactions[0]!.occurredAt
+          )
+        )
+      : today;
+  try {
+    return await readDailyCloses(assetIds, first, today);
+  } catch (e) {
+    // Une courbe au coût vaut mieux qu'une page en erreur.
+    console.error("[portfolio-history] clôtures illisibles", e);
+    return new Map();
+  }
+}
