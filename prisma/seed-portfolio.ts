@@ -1093,6 +1093,11 @@ export async function seedUserPortfolio(
       {
         userId,
         name: "Livret A",
+        // Sans banque de détention, le livret se range sous « établissement non
+        // renseigné » dans la synthèse par établissement — ce qui est exact,
+        // mais ne démontre rien.
+        bankName: "BoursoBank",
+        productType: "LIVRET_A",
         balance: D("22950"),
         apyPercent: D("2.4"),
         rateType: "APY",
@@ -1105,6 +1110,11 @@ export async function seedUserPortfolio(
       {
         userId,
         name: "LDDS",
+        // Sans banque de détention, le livret se range sous « établissement non
+        // renseigné » dans la synthèse par établissement — ce qui est exact,
+        // mais ne démontre rien.
+        bankName: "Crédit Agricole",
+        productType: "LDDS",
         balance: D("12000"),
         apyPercent: D("2.4"),
         rateType: "APY",
@@ -1117,6 +1127,11 @@ export async function seedUserPortfolio(
       {
         userId,
         name: "PEL",
+        // Sans banque de détention, le livret se range sous « établissement non
+        // renseigné » dans la synthèse par établissement — ce qui est exact,
+        // mais ne démontre rien.
+        bankName: "Crédit Agricole",
+        productType: "PEL",
         balance: D("18500"),
         apyPercent: D("2.25"),
         rateType: "APY",

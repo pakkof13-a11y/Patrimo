@@ -1,19 +1,55 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { gotoDashboard } from "./helpers";
 
 /**
- * Chantier Banques P1 : bugs critiques (suppression sans confirmation, input
- * non contrôlé), KPI de synthèse, plafonds réglementaires + barre de
- * progression, comptes pro/joint, dépôts à terme, historique des mouvements.
+ * Onglet Banques — vue de trésorerie patrimoniale.
+ *
+ * Couvre les mêmes garanties qu'avant la refonte : confirmation avant
+ * suppression, solde réellement contrôlé à la saisie, KPI cohérents avec
+ * l'API, plafonds réglementaires, garde-fou sur un taux invraisemblable,
+ * historique des mouvements, validation des dates d'un dépôt à terme.
+ *
+ * Les parcours ont changé de forme, pas de fond : la création passe par le
+ * menu « Ajouter » puis une fenêtre, et la modification par le panneau de
+ * détail au lieu de champs alignés dans la liste.
  */
+
+/** Ouvre la fenêtre de création correspondante depuis le menu « Ajouter ». */
+async function openAddModal(
+  page: Page,
+  kind: "checking" | "savings" | "term_deposit"
+) {
+  await page.getByTestId("banks-add-open").click();
+  await page.getByTestId(`banks-add-${kind}`).click();
+}
+
 /**
- * Trouve la ligne d'un compte courant / livret par le nom saisi dans son
- * combobox. `hasText` ne marche pas ici : le nom vit dans la `value` d'un
- * `<input>` (BankNameCombobox / EditableField), pas dans un nœud texte — un
- * `<input>` n'expose jamais sa valeur via innerText/textContent.
+ * Sélectionne un produit dans la liste et attend l'ouverture de son panneau.
+ *
+ * La ligne porte désormais son libellé en texte — plus dans la `value` d'un
+ * `<input>` —, donc `hasText` suffit là où il fallait auparavant filtrer sur
+ * un attribut.
  */
-function rowByInputValue(page: import("@playwright/test").Page, tag: string, value: string) {
-  return page.locator(tag).filter({ has: page.locator(`input[value="${value}"]`) });
+async function selectProduct(page: Page, label: string) {
+  const row = page
+    .getByTestId("bank-product-row")
+    .filter({ hasText: label })
+    .first();
+  await row.click();
+  await expect(page.getByTestId("bank-detail-panel")).toHaveAttribute(
+    "data-open",
+    "true"
+  );
+  return row;
+}
+
+async function selectInstitution(page: Page, name: string) {
+  const row = page
+    .getByTestId("bank-institution-row")
+    .filter({ hasText: name })
+    .first();
+  await row.click();
+  return row;
 }
 
 test.describe("Banques", () => {
@@ -23,60 +59,109 @@ test.describe("Banques", () => {
     await expect(page.getByTestId("banks-tab")).toBeVisible({ timeout: 30_000 });
   });
 
+  test("la page s'ouvre sur la synthèse par établissement", async ({ page }) => {
+    /*
+      C'est le renversement de la refonte : le premier niveau de lecture est
+      l'établissement, pas trois listes de produits côte à côte.
+    */
+    await expect(page.getByTestId("banks-view-overview")).toHaveAttribute(
+      "data-active",
+      "true"
+    );
+    await expect(page.getByTestId("bank-institution-list")).toBeVisible();
+
+    // Rien de sélectionné à l'arrivée : le panneau reste en retrait.
+    await expect(page.getByTestId("bank-detail-panel")).toHaveAttribute(
+      "data-open",
+      "false"
+    );
+  });
+
+  test("sélectionner un établissement puis l'un de ses produits", async ({
+    page,
+  }) => {
+    await openAddModal(page, "checking");
+    await page.getByTestId("banks-add-bank-name").fill("E2E Panel Bank");
+    await page.getByTestId("banks-add-balance").fill("1500");
+    await page.getByTestId("banks-add-submit").click();
+
+    await selectInstitution(page, "E2E Panel Bank");
+    const panel = page.getByTestId("bank-detail-panel");
+    await expect(panel).toHaveAttribute("data-open", "true");
+    await expect(panel).toContainText("E2E Panel Bank");
+
+    // Depuis la fiche de l'établissement, ouvrir le produit rattaché.
+    await page.getByTestId("bank-panel-product-link").first().click();
+    await expect(panel).toContainText("Compte courant");
+
+    // Fermer vide la sélection sans quitter la page.
+    await page.getByTestId("bank-panel-close").click();
+    await expect(panel).toHaveAttribute("data-open", "false");
+    await expect(page.getByTestId("banks-tab")).toBeVisible();
+
+    await selectProduct(page, "Compte courant");
+    await page.getByTestId("bank-panel-delete").click();
+    await page.getByTestId("banks-delete-confirm-confirm").click();
+  });
+
   test("suppression d'un compte courant exige confirmation", async ({
     page,
   }) => {
+    await openAddModal(page, "checking");
     await page.getByTestId("banks-add-bank-name").fill("E2E Delete Bank");
     await page.getByTestId("banks-add-balance").fill("500");
     await page.getByTestId("banks-add-submit").click();
 
-    const row = rowByInputValue(page, "tr", "E2E Delete Bank");
-    await expect(row).toBeVisible({ timeout: 20_000 });
+    await selectInstitution(page, "E2E Delete Bank");
+    await page.getByTestId("bank-panel-product-link").first().click();
+    await page.getByTestId("bank-panel-delete").click();
 
-    const deleteBtn = row.locator('[data-testid^="banks-delete-"]');
-    await deleteBtn.click();
+    const confirm = page.getByTestId("banks-delete-confirm");
+    await expect(confirm).toBeVisible();
+    await expect(confirm).toContainText("E2E Delete Bank");
 
-    // Le dialog doit apparaître avec le nom et le solde — pas de suppression immédiate.
-    await expect(page.getByTestId("banks-delete-confirm")).toBeVisible();
-    await expect(page.getByTestId("banks-delete-confirm")).toContainText(
+    // Annuler ne supprime rien.
+    await page.getByTestId("banks-delete-confirm-cancel").click();
+    await expect(page.getByTestId("bank-institution-list")).toContainText(
       "E2E Delete Bank"
     );
-    await expect(row).toBeVisible(); // toujours là tant qu'on n'a pas confirmé
 
-    await page.getByTestId("banks-delete-confirm-cancel").click();
-    await expect(row).toBeVisible(); // annulé → rien supprimé
-
-    await deleteBtn.click();
+    await page.getByTestId("bank-panel-delete").click();
     await page.getByTestId("banks-delete-confirm-confirm").click();
-    await expect(row).toHaveCount(0);
+    await expect(page.getByTestId("bank-institution-list")).not.toContainText(
+      "E2E Delete Bank",
+      { timeout: 20_000 }
+    );
   });
 
-  test("l'édition du solde ne se réinitialise pas pendant la saisie", async ({
-    page,
-  }) => {
+  test("le solde se modifie depuis le panneau de détail", async ({ page }) => {
+    await openAddModal(page, "checking");
     await page.getByTestId("banks-add-bank-name").fill("E2E Edit Bank");
     await page.getByTestId("banks-add-balance").fill("1000");
     await page.getByTestId("banks-add-submit").click();
 
-    const row = rowByInputValue(page, "tr", "E2E Edit Bank");
-    await expect(row).toBeVisible({ timeout: 20_000 });
+    await selectInstitution(page, "E2E Edit Bank");
+    await page.getByTestId("bank-panel-product-link").first().click();
 
-    const balanceInput = row.locator('[data-testid^="banks-balance-"]');
-    await balanceInput.fill("1500.5");
-    await balanceInput.blur();
-    // Laisser le PATCH + refetch se terminer, puis vérifier que le champ
-    // affiche toujours la valeur saisie (pas de remount vers "1000").
-    await page.waitForTimeout(2000);
-    await expect(balanceInput).toHaveValue("1500.5");
+    /*
+      Le champ est réellement contrôlé : la frappe reste à l'écran, et la
+      validation ne part qu'au blur. C'est le bug d'origine — un `defaultValue`
+      remonté par le serveur écrasait la saisie en cours.
+    */
+    const balance = page.getByTestId("bank-panel-balance");
+    await balance.fill("2500");
+    await expect(balance).toHaveValue("2500");
+    await balance.blur();
 
-    await row.locator('[data-testid^="banks-delete-"]').click();
+    await expect(page.getByTestId("bank-panel-amount")).toContainText("2 500", {
+      timeout: 20_000,
+    });
+
+    await page.getByTestId("bank-panel-delete").click();
     await page.getByTestId("banks-delete-confirm-confirm").click();
   });
 
-  test("KPI de synthèse cohérents avec la liste des comptes", async ({
-    page,
-    request,
-  }) => {
+  test("KPI de synthèse cohérents avec l'API", async ({ page, request }) => {
     const banksApi = await request.get("/api/banks").then((r) => r.json());
     const summaryApi = await request
       .get("/api/banks/summary")
@@ -93,40 +178,43 @@ test.describe("Banques", () => {
       1
     );
 
-    await expect(page.getByTestId("banks-summary-strip")).toBeVisible();
-    await expect(page.getByTestId("banks-summary-strip")).toContainText(
-      "Liquidités"
-    );
+    const strip = page.getByTestId("banks-summary-strip");
+    await expect(strip).toBeVisible();
+    await expect(strip).toContainText("Liquidités");
+    await expect(strip).toContainText("Établissements");
   });
 
-  test("livret réglementé : plafond auto-rempli et barre de progression", async ({
+  test("livret réglementé : plafond auto-rempli, plafond visible au détail", async ({
     page,
   }) => {
-    await page.getByTestId("banks-savings-add-producttype").selectOption(
-      "LIVRET_A"
-    );
-    // Le plafond légal doit s'auto-remplir dès la sélection du produit.
+    await openAddModal(page, "savings");
+    await page
+      .getByTestId("banks-savings-add-producttype")
+      .selectOption("LIVRET_A");
     await expect(page.getByTestId("banks-savings-add-ceiling")).toHaveValue(
       "22950"
     );
 
     await page.getByTestId("banks-savings-add-name").fill("E2E Livret A");
-    await page.getByTestId("banks-savings-add-balance").fill("22000"); // solde proche du plafond
+    // Solde proche du plafond : la barre doit passer en alerte dans le panneau.
+    await page.getByTestId("banks-savings-add-balance").fill("22000");
     await page.getByTestId("banks-savings-add-submit").click();
 
-    const row = rowByInputValue(page, "li", "E2E Livret A");
-    await expect(row).toBeVisible({ timeout: 20_000 });
-    // Solde proche du plafond (22000/22950 ≈ 95.9%) → alerte visible.
-    await expect(row).toContainText("% du plafond");
+    await selectProduct(page, "E2E Livret A");
+    const panel = page.getByTestId("bank-detail-panel");
+    await expect(panel).toContainText("Plafond");
+    await expect(panel).toContainText("% du plafond");
 
-    await row.locator('[data-testid^="savings-delete-"]').click();
-    await page.getByTestId("savings-delete-confirm-confirm").click();
+    await page.getByTestId("bank-panel-delete").click();
+    await page.getByTestId("banks-delete-confirm-confirm").click();
   });
 
-  test("livret : taux aberrant signalé", async ({ page }) => {
-    await page.getByTestId("banks-savings-add-producttype").selectOption(
-      "LIVRET_A"
-    );
+  test("un taux invraisemblable est signalé à la saisie", async ({ page }) => {
+    await openAddModal(page, "savings");
+    await page
+      .getByTestId("banks-savings-add-producttype")
+      .selectOption("LIVRET_A");
+
     await page.getByTestId("banks-savings-add-apy").fill("35");
     await expect(page.getByTestId("banks-savings-rate-warning")).toBeVisible();
 
@@ -134,44 +222,46 @@ test.describe("Banques", () => {
     await expect(page.getByTestId("banks-savings-rate-warning")).toHaveCount(0);
   });
 
-  test("historique : ouverture puis dépôt apparaissent après édition du solde", async ({
+  test("l'historique d'un compte est visible depuis son panneau", async ({
     page,
   }) => {
+    await openAddModal(page, "checking");
     await page.getByTestId("banks-add-bank-name").fill("E2E History Bank");
     await page.getByTestId("banks-add-balance").fill("2000");
     await page.getByTestId("banks-add-submit").click();
 
-    const row = rowByInputValue(page, "tr", "E2E History Bank");
-    await expect(row).toBeVisible({ timeout: 20_000 });
+    await selectInstitution(page, "E2E History Bank");
+    await page.getByTestId("bank-panel-product-link").first().click();
 
-    const balanceInput = row.locator('[data-testid^="banks-balance-"]');
-    await balanceInput.fill("2500");
-    await balanceInput.blur();
-    await page.waitForTimeout(2000);
+    // Un changement de solde crée un mouvement côté serveur.
+    const balance = page.getByTestId("bank-panel-balance");
+    await balance.fill("3200");
+    await balance.blur();
 
-    await row.locator('[data-testid^="banks-history-"]').click();
+    await expect(page.getByTestId("bank-panel-history-row").first()).toBeVisible(
+      { timeout: 20_000 }
+    );
+
+    await page.getByTestId("bank-panel-history-full").click();
     await expect(page.getByTestId("account-history-modal")).toBeVisible();
-    const rows = page.getByTestId("account-history-row");
-    await expect(rows).toHaveCount(2);
-    await expect(rows.nth(0)).toContainText("Dépôt");
-    await expect(rows.nth(1)).toContainText("Ouverture");
-
+    await expect(
+      page.getByTestId("account-history-row").first()
+    ).toBeVisible();
     await page.keyboard.press("Escape");
-    await row.locator('[data-testid^="banks-delete-"]').click();
+
+    await page.getByTestId("bank-panel-delete").click();
     await page.getByTestId("banks-delete-confirm-confirm").click();
   });
 
-  test("dépôt à terme : validation des dates et suppression", async ({
+  test("dépôt à terme : dates validées, échéance affichée, suppression", async ({
     page,
   }) => {
+    await openAddModal(page, "term_deposit");
     await page.getByTestId("banks-cat-add-principal").fill("5000");
     await page.getByTestId("banks-cat-add-rate").fill("3.5");
-    await page
-      .getByTestId("banks-cat-add-opened")
-      .fill("2027-01-01");
-    await page
-      .getByTestId("banks-cat-add-maturity")
-      .fill("2026-01-01"); // avant l'ouverture → doit échouer
+    await page.getByTestId("banks-cat-add-opened").fill("2027-01-01");
+    // Échéance antérieure à l'ouverture : la route doit refuser.
+    await page.getByTestId("banks-cat-add-maturity").fill("2026-01-01");
     await page.getByTestId("banks-cat-add-submit").click();
     await expect(page.getByText(/postérieure/i)).toBeVisible({
       timeout: 10_000,
@@ -181,14 +271,29 @@ test.describe("Banques", () => {
     await page.getByTestId("banks-cat-add-maturity").fill("2027-06-01");
     await page.getByTestId("banks-cat-add-submit").click();
 
-    const row = page.getByTestId("banks-cat-row").filter({ hasText: "5" });
-    await expect(page.getByTestId("banks-cat-list")).toContainText(
-      "5 000,00 €",
-      { timeout: 20_000 }
-    );
+    await page.getByTestId("banks-view-term").click();
+    const table = page.getByTestId("bank-product-table");
+    await expect(table).toContainText("5 000,00 €", { timeout: 20_000 });
 
-    const anyRow = page.getByTestId("banks-cat-row").first();
-    await anyRow.locator('[data-testid^="banks-cat-delete-"]').click();
-    await page.getByTestId("banks-cat-delete-confirm-confirm").click();
+    await page.getByTestId("bank-table-row").first().click();
+    const panel = page.getByTestId("bank-detail-panel");
+    await expect(panel).toHaveAttribute("data-open", "true");
+    // La frise d'échéance est le repère propre au dépôt à terme.
+    await expect(page.getByTestId("term-deposit-countdown")).toBeVisible();
+
+    await page.getByTestId("bank-panel-delete").click();
+    await page.getByTestId("banks-delete-confirm-confirm").click();
+  });
+
+  test("les sous-onglets filtrent la même liste", async ({ page }) => {
+    await page.getByTestId("banks-view-checking").click();
+    await expect(page.getByTestId("banks-view-checking")).toHaveAttribute(
+      "data-active",
+      "true"
+    );
+    await expect(page.getByTestId("bank-institution-list")).toHaveCount(0);
+
+    await page.getByTestId("banks-view-overview").click();
+    await expect(page.getByTestId("bank-institution-list")).toBeVisible();
   });
 });

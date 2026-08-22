@@ -2509,3 +2509,105 @@ textarea:focus-visible,
     transform: none;
   }
 }
+
+/* ── Onglet Banques : synthèse par établissement ──────────────────── */
+
+/*
+  L'établissement est le premier niveau de lecture, ses produits le second.
+  La hiérarchie est portée par le retrait et le poids typographique plutôt que
+  par des cartes imbriquées : trois encadrés dans trois encadrés auraient
+  ajouté du bruit là où la lecture demande de la densité.
+*/
+.bank-institution + .bank-institution {
+  border-top: var(--border-width) solid var(--border);
+}
+
+.bank-institution-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.bank-institution-head:hover {
+  background: var(--surface-hover);
+}
+
+.bank-institution-head:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/*
+  Ligne d'un produit rattaché.
+
+  Le filet vertical à gauche matérialise le rattachement à l'établissement :
+  sans lui, une liste de produits à plat se confond avec la liste des banques
+  dès que l'on fait défiler.
+*/
+.bank-product-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4) var(--space-2) var(--space-10);
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.bank-product-row::before {
+  content: "";
+  position: absolute;
+  left: var(--space-7);
+  width: var(--border-width);
+  height: var(--space-5);
+  background: var(--border);
+  transform: translateX(-50%);
+}
+
+.bank-product-row {
+  position: relative;
+}
+
+.bank-product-row:hover {
+  background: var(--surface-hover);
+}
+
+.bank-product-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/*
+  Sélection.
+
+  Un liseré doré à gauche et un fond légèrement surélevé — la même grammaire
+  que la ligne sélectionnée du portefeuille. Assez pour retrouver sa ligne d'un
+  coup d'œil quand le panneau de droite change, jamais assez pour crier.
+*/
+.bank-institution-head.is-selected,
+.bank-product-row.is-selected,
+.bank-table-row.is-selected > td {
+  background: var(--surface-hover);
+}
+
+.bank-institution-head.is-selected,
+.bank-product-row.is-selected {
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.bank-table-row {
+  cursor: pointer;
+}
+
+.bank-table-row.is-selected > td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.bank-table-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
