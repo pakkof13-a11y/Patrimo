@@ -2681,3 +2681,22 @@ textarea:focus-visible,
     align-items: start;
   }
 }
+
+/* ── Immobilier : ligne d'un bien ─────────────────────────────────── */
+
+.property-row {
+  cursor: pointer;
+}
+
+.property-row.is-selected > td {
+  background: var(--surface-hover);
+}
+
+.property-row.is-selected > td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.property-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

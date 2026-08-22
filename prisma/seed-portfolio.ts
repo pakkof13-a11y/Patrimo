@@ -1188,6 +1188,65 @@ export async function seedUserPortfolio(
   });
 
   /*
+    Fiche immobilière des biens détenus en direct.
+
+    Le journal sait qu'un appartement vaut 312 000 €, il ne sait rien du reste :
+    ni la ville, ni la surface, ni le loyer, ni le DPE, ni le prêt qui le
+    finance. Sans `RealEstateDetail`, l'onglet Immobilier n'avait donc aucun
+    bien à montrer — la valeur remontait bien au patrimoine, mais le module
+    restait vide.
+
+    Seuls les biens détenus en direct en reçoivent une : une SCPI est une part
+    de société, elle n'a ni étage ni taxe foncière propre, et lui inventer une
+    adresse serait faux.
+  */
+  const directProperties = await prisma.asset.findMany({
+    where: { userId, accountType: "IMMOBILIER", category: "REAL_ESTATE_DIRECT" },
+    select: { id: true, name: true },
+  });
+
+  for (const a of directProperties) {
+    await prisma.realEstateDetail.create({
+      data: {
+        assetId: a.id,
+        propertyType: "APPARTEMENT",
+        usage: "LOCATIF_NU",
+        rooms: 3,
+        livingAreaM2: 68,
+        addressLine: "12 rue de la République",
+        postalCode: "69003",
+        city: "Lyon",
+        valuationMode: "MANUAL",
+        lastValuedAt: daysAgo(45),
+        monthlyRentEur: D("1250"),
+        monthlyChargesEur: D("180"),
+        annualPropertyTaxEur: D("1420"),
+        occupancyRatePct: D("100"),
+        rentDay: 5,
+        rentalStartDate: daysAgo(900),
+        rentalRegime: "MICRO_FONCIER",
+        taxScheme: "AUCUN",
+        constructionYear: 2010,
+        energyRating: "C",
+        gesRating: "C",
+        dpeKwhM2Year: 145,
+        heatingType: "COLLECTIF_GAZ",
+        floor: 3,
+        totalFloors: 6,
+        hasElevator: true,
+        orientation: "SUD",
+        hasBalcony: true,
+        balconyAreaM2: 6,
+        hasCellar: true,
+        parkingSpots: 1,
+        bathroomCount: 1,
+        isCopropriete: true,
+        annualCoproChargesEur: D("1200"),
+      },
+    });
+  }
+
+  /*
     Rattachement des supports aux contrats.
 
     Sans lui, les trois lignes AV du journal restent orphelines : elles

@@ -1,12 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, X } from "lucide-react";
 import { toast } from "sonner";
 import { fetchJson } from "@/app/lib/api-client";
-import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   ENERGY_RATINGS,
   GES_RATINGS,
@@ -39,7 +37,14 @@ import {
 import { cn, formatCurrency } from "@/app/lib/utils";
 import type { Holding } from "@/app/lib/types/ui";
 
-type PropertyRow = {
+/**
+ * Ligne renvoyée par `/api/real-estate/properties`.
+ *
+ * Exportée parce que l'écran la charge et la passe déjà sélectionnée : le
+ * panneau reste la seule pièce à connaître la totalité des champs, mais le
+ * contrat doit être partagé plutôt que redéclaré en plus lâche à côté.
+ */
+export type PropertyRow = {
   assetId: string;
   name: string;
   propertyType: string;
@@ -246,15 +251,33 @@ function num(v: string | null | undefined): number {
  * les rendements. Ce sont les chiffres qu'on regarde pour décider de garder ou
  * de vendre, et ils n'ont de sens que rapprochés.
  */
-export function PropertyPanel({
+/** Sections de la fiche d'un bien. */
+const PROPERTY_SECTIONS = [
+  { id: "summary", label: "Résumé" },
+  { id: "financing", label: "Financement" },
+  { id: "rents", label: "Loyers" },
+  { id: "valuation", label: "Valorisation" },
+  { id: "fiscal", label: "Fiscalité" },
+  { id: "characteristics", label: "Caractéristiques" },
+] as const;
+
+type PropertySectionId = (typeof PROPERTY_SECTIONS)[number]["id"];
+
+export function PropertyDetailPanel({
+  property,
   holdings,
+  onClose,
   className,
 }: {
+  /** Bien sélectionné, ou `null` quand la liste n'a rien de choisi. */
+  property: PropertyRow | null;
   /** Positions déjà chargées — évite un second calcul de valorisation. */
   holdings: Holding[];
+  onClose: () => void;
   className?: string;
 }) {
   const qc = useQueryClient();
+  const [section, setSection] = useState<PropertySectionId>("summary");
   /** Bien dont la valeur est en cours de saisie, et le montant tapé. */
   const [editing, setEditing] = useState<{ assetId: string; value: string } | null>(
     null
@@ -270,17 +293,33 @@ export function PropertyPanel({
     new Set(["physique"])
   );
 
-  const propsQ = useQuery({
-    queryKey: ["real-estate-properties"],
-    staleTime: 60_000,
-    queryFn: () =>
-      fetchJson<{ properties: PropertyRow[] }>("/api/real-estate/properties"),
-  });
+  /*
+    Changer de bien ramène au résumé et referme les saisies en cours.
 
-  const properties = useMemo(
-    () => propsQ.data?.properties ?? [],
-    [propsQ.data?.properties]
-  );
+    Rester sur « Caractéristiques » parce que c'est là qu'on avait laissé le
+    bien précédent n'aide personne, et un formulaire ouvert sur l'ancien bien
+    afficherait ses valeurs sous le nom du nouveau. Recalage pendant le rendu,
+    comme le fait le panneau d'actif.
+  */
+  const propertyId = property?.assetId ?? null;
+  const [seenProperty, setSeenProperty] = useState(propertyId);
+  if (propertyId !== seenProperty) {
+    setSeenProperty(propertyId);
+    setSection("summary");
+    setEditing(null);
+    setFiscalAssetId(null);
+    setFiscalForm(null);
+    setCharAssetId(null);
+    setCharForm(null);
+  }
+
+  /*
+    Le panneau ne charge plus la liste des biens : elle appartient à l'écran,
+    qui la passe déjà sélectionnée. Les rafraîchissements passent donc par le
+    cache React Query partagé, sous la même clé.
+  */
+  const refetchProperties = () =>
+    qc.invalidateQueries({ queryKey: ["real-estate-properties"] });
 
   /** Position correspondante, pour la quote-part et le coût de revient réels. */
   const byAsset = useMemo(() => {
@@ -289,18 +328,6 @@ export function PropertyPanel({
     return map;
   }, [holdings]);
 
-  const totals = useMemo(() => {
-    let value = 0;
-    let debt = 0;
-    let cost = 0;
-    for (const p of properties) {
-      const pos = byAsset.get(p.assetId);
-      value += num(pos?.marketValueEur);
-      cost += num(pos?.costBasisEur);
-      for (const l of p.loans) debt += num(l.remainingAmountEur);
-    }
-    return { value, debt, cost, net: value - debt };
-  }, [properties, byAsset]);
 
   /**
    * Une revalorisation change la valeur de la position, donc le patrimoine
@@ -308,7 +335,7 @@ export function PropertyPanel({
    * l'ancien chiffre.
    */
   function refreshAfterValuation() {
-    void propsQ.refetch();
+    void refetchProperties();
     void qc.invalidateQueries({ queryKey: ["holdings"] });
     void qc.invalidateQueries({ queryKey: ["portfolio"] });
   }
@@ -408,7 +435,7 @@ export function PropertyPanel({
       toast.success(`Régime fiscal de ${name} mis à jour`);
       setFiscalAssetId(null);
       setFiscalForm(null);
-      void propsQ.refetch();
+      void refetchProperties();
       void qc.invalidateQueries({ queryKey: ["real-estate-tax"] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Mise à jour impossible");
@@ -473,7 +500,7 @@ export function PropertyPanel({
       toast.success(`Caractéristiques de ${name} mises à jour`);
       setCharAssetId(null);
       setCharForm(null);
-      void propsQ.refetch();
+      void refetchProperties();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Mise à jour impossible");
     } finally {
@@ -481,67 +508,94 @@ export function PropertyPanel({
     }
   }
 
-  if (propsQ.isPending) {
-    return <Skeleton className={cn("h-48 w-full", className)} />;
-  }
+  /*
+    Colonne de détail du bien sélectionné.
 
-  if (properties.length === 0) {
+    Le panneau listait tous les biens, chacun avec ses formulaires de
+    valorisation, de fiscalité et de caractéristiques dépliables : quatre biens
+    ouverts et l'écran devenait un formulaire de six cents champs. Il ne montre
+    plus qu'un bien — celui qu'on a choisi dans la liste — et partage la
+    géométrie du panneau d'actif du Portefeuille (`.asset-panel`), comme les
+    Banques et l'Assurance-vie.
+
+    Rien n'a été retiré : valorisation manuelle, estimation DVF, régime fiscal,
+    caractéristiques physiques, énergie, copropriété et risques Géorisques sont
+    tous là, répartis dans les sections du panneau.
+  */
+  if (!property) {
     return (
-      <div className={cn("card p-3.5 sm:p-4", className)}>
-        <PanelHeader
-          title="Patrimoine immobilier"
-          subtitle="Valeur, dette et rendement de vos biens"
-        />
-        <EmptyPlaceholder
-          compact
-          title="Aucun bien enregistré"
-          description="Ajoutez un bien depuis une plateforme « Notaire / immobilier »."
-        />
-      </div>
+      <aside
+        className={cn("asset-panel", className)}
+        data-testid="property-detail-panel"
+        data-open="false"
+        aria-label="Détail du bien"
+      >
+        <div className="asset-panel-empty">
+          <p className="text-[length:var(--text-sm)] text-[var(--foreground-secondary)]">
+            Aucun bien sélectionné
+          </p>
+          <p className="text-meta max-w-[16rem]">
+            Cliquez un bien pour afficher son détail ici. La liste reste en
+            place.
+          </p>
+        </div>
+      </aside>
     );
   }
 
   return (
-    <div
-      className={cn("card p-3.5 sm:p-4", className)}
-      data-testid="property-panel"
+    <aside
+      className={cn("asset-panel", className)}
+      data-testid="property-detail-panel"
+      data-open="true"
+      aria-label={`Bien — ${property.name}`}
     >
-      <PanelHeader
-        title="Patrimoine immobilier"
-        subtitle={`${properties.length} bien${properties.length > 1 ? "s" : ""} · valeur, dette et rendement`}
-      />
-
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {[
-          { label: "Valeur (vos parts)", value: totals.value },
-          { label: "Capital restant dû", value: -totals.debt },
-          { label: "Net immobilier", value: totals.net, strong: true },
-          { label: "Coût de revient", value: totals.cost },
-        ].map((k) => (
-          <div
-            key={k.label}
-            className={cn(
-              "rounded-[var(--radius-md)] border border-[var(--border)] px-2.5 py-2",
-              k.strong && "bg-[var(--muted)]/40"
-            )}
-          >
-            <p className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
-              {k.label}
-            </p>
-            <p
-              className={cn(
-                "mt-0.5 tabular-nums",
-                k.strong ? "text-sm font-semibold" : "text-xs font-medium"
-              )}
-            >
-              {formatCurrency(String(k.value), "EUR")}
-            </p>
-          </div>
-        ))}
+      <div className="asset-panel-bar">
+        <div className="min-w-0">
+          <p className="truncate text-[length:var(--text-sm)] font-semibold text-[var(--foreground)]">
+            {property.name}
+          </p>
+          <p className="text-meta truncate">
+            {propertyTypeLabel(property.propertyType)} ·{" "}
+            {propertyUsageLabel(property.usage)}
+            {property.city ? ` · ${property.city}` : ""}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="asset-panel-close"
+          onClick={onClose}
+          aria-label="Fermer le détail"
+          data-testid="property-panel-close"
+        >
+          <X className="h-3.5 w-3.5" aria-hidden />
+        </button>
       </div>
 
-      <div className="mt-3 space-y-2.5">
-        {properties.map((p) => {
+      <nav
+        className="workspace-tabs"
+        role="tablist"
+        aria-label="Sections du bien"
+      >
+        {PROPERTY_SECTIONS.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            role="tab"
+            aria-selected={section === s.id}
+            className="workspace-tab"
+            data-active={section === s.id ? "true" : "false"}
+            data-testid={`property-tab-${s.id}`}
+            onClick={() => setSection(s.id)}
+          >
+            {s.label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="asset-panel-body">
+        {(() => {
+          const p = property;
           const pos = byAsset.get(p.assetId);
           const shareValue = num(pos?.marketValueEur);
           const cost = num(pos?.costBasisEur);
@@ -578,31 +632,25 @@ export function PropertyPanel({
           });
 
           return (
-            <div
-              key={p.assetId}
-              className="rounded-[var(--radius-md)] border border-[var(--border)] p-2.5"
-              data-testid="property-card"
-            >
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium" title={p.name}>
-                    {p.name}
-                  </p>
-                  <p className="text-meta">
-                    {propertyTypeLabel(p.propertyType)} ·{" "}
-                    {propertyUsageLabel(p.usage)}
-                    {p.livingAreaM2 ? ` · ${p.livingAreaM2} m²` : ""}
-                    {pos ? ` · ${formatOwnershipShare(pos.quantity)}` : ""}
-                    {p.city ? ` · ${p.city}` : ""}
-                  </p>
-                </div>
-                <p className="tabular-nums text-sm font-semibold">
+            <div key={p.assetId} data-testid="property-card">
+              {/*
+                Chiffre de tête : la valeur de la part, et l'equity dessous.
+                C'est l'ordre dans lequel on lit un bien financé — ce qu'il
+                vaut, puis ce qu'il en reste une fois la dette retirée.
+              */}
+              <p className="num text-[length:var(--text-2xl)] font-semibold tracking-tight text-[var(--foreground)]">
+                {formatCurrency(String(shareValue), "EUR")}
+              </p>
+              <p className="text-meta">
+                Equity{" "}
+                <span className="num">
                   {formatCurrency(String(shareValue - debt), "EUR")}
-                  <span className="text-meta ml-1 font-normal">net</span>
-                </p>
-              </div>
+                </span>
+                {pos ? ` · votre part ${formatOwnershipShare(pos.quantity)}` : ""}
+                {p.livingAreaM2 ? ` · ${p.livingAreaM2} m²` : ""}
+              </p>
 
-              {p.georisquesFetched && (
+              {section === "characteristics" && p.georisquesFetched && (
                 <RiskBadgeRow
                   risks={{
                     flood: p.riskFlood,
@@ -613,7 +661,8 @@ export function PropertyPanel({
                 />
               )}
 
-              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4">
+              {section === "summary" && (
+              <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
                 <div>
                   <dt className="text-[var(--muted-foreground)]">
                     Valeur de votre part
@@ -651,8 +700,128 @@ export function PropertyPanel({
                   </dd>
                 </div>
               </dl>
+              )}
 
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              {/* ── Financement ─────────────────────────────────────── */}
+              {section === "financing" && (
+                <div className="mt-3">
+                  <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
+                    <div>
+                      <dt className="text-[var(--muted-foreground)]">Valeur de votre part</dt>
+                      <dd className="num font-medium">
+                        {formatCurrency(String(shareValue), "EUR")}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[var(--muted-foreground)]">Capital restant dû</dt>
+                      <dd className="num font-medium">
+                        {debt > 0 ? formatCurrency(String(debt), "EUR") : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[var(--muted-foreground)]">Equity</dt>
+                      <dd className="num font-medium">
+                        {formatCurrency(String(shareValue - debt), "EUR")}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[var(--muted-foreground)]">Dette / valeur</dt>
+                      <dd className="num font-medium">
+                        {shareValue > 0
+                          ? `${((debt / shareValue) * 100).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`
+                          : "—"}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <h4 className="text-label mt-4">Emprunts adossés</h4>
+                  {p.loans.length === 0 ? (
+                    <p className="text-meta mt-1">
+                      Aucun emprunt rattaché à ce bien.
+                    </p>
+                  ) : (
+                    <ul
+                      className="mt-1 divide-y divide-[var(--border)] border-y border-[var(--border)]"
+                      data-testid="property-loans"
+                    >
+                      {p.loans.map((l) => (
+                        <li
+                          key={l.id}
+                          className="flex items-baseline justify-between gap-3 py-2"
+                        >
+                          <span className="min-w-0 truncate text-[11px] text-[var(--foreground)]">
+                            {l.name}
+                          </span>
+                          <span className="num shrink-0 text-[11px] font-medium">
+                            {formatCurrency(l.remainingAmountEur, "EUR")}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="text-meta mt-2">
+                    Le capital restant dû est celui que vous devez réellement :
+                    il n&apos;est pas réduit à votre quote-part de propriété.
+                  </p>
+                </div>
+              )}
+
+              {/* ── Loyers & charges ────────────────────────────────── */}
+              {section === "rents" && (
+                <dl
+                  className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]"
+                  data-testid="property-rents"
+                >
+                  <div>
+                    <dt className="text-[var(--muted-foreground)]">Loyer mensuel</dt>
+                    <dd className="num font-medium">
+                      {p.monthlyRentEur
+                        ? formatCurrency(p.monthlyRentEur, "EUR")
+                        : "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[var(--muted-foreground)]">Charges mensuelles</dt>
+                    <dd className="num font-medium">
+                      {p.monthlyChargesEur
+                        ? formatCurrency(p.monthlyChargesEur, "EUR")
+                        : "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[var(--muted-foreground)]">Taux d&apos;occupation</dt>
+                    <dd className="num font-medium">
+                      {p.occupancyRatePct ? `${p.occupancyRatePct} %` : "100 %"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[var(--muted-foreground)]">Taxe foncière</dt>
+                    <dd className="num font-medium">
+                      {p.annualPropertyTaxEur
+                        ? formatCurrency(p.annualPropertyTaxEur, "EUR")
+                        : "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[var(--muted-foreground)]">Charges annuelles totales</dt>
+                    <dd className="num font-medium">
+                      {formatCurrency(String(fiscalBurden), "EUR")}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[var(--muted-foreground)]">Rendement net</dt>
+                    <dd className="num font-medium">
+                      {net != null
+                        ? `${net.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} %`
+                        : "—"}
+                    </dd>
+                  </div>
+                </dl>
+              )}
+
+              {/* ── Valorisation ────────────────────────────────────── */}
+              {section === "valuation" && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="text-meta" data-testid="property-estimate-source">
                     {p.valuationMode === "DVF_AUTO"
@@ -717,6 +886,12 @@ export function PropertyPanel({
                       Estimer depuis les ventes réelles
                     </button>
                   )}
+                </div>
+              </div>
+              )}
+
+              {section === "fiscal" && (
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
                   {rental && (
                     <button
                       type="button"
@@ -736,27 +911,10 @@ export function PropertyPanel({
                       Régime &amp; dispositif fiscal
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="btn btn-ghost text-[11px]"
-                    data-testid="property-characteristics-toggle"
-                    onClick={() =>
-                      setCharAssetId((cur) => {
-                        if (cur === p.assetId) {
-                          setCharForm(null);
-                          return null;
-                        }
-                        setCharForm(characteristicsFormFrom(p));
-                        return p.assetId;
-                      })
-                    }
-                  >
-                    Caractéristiques du bien
-                  </button>
                 </div>
-              </div>
+              )}
 
-              {rental && (p.rentalRegime || p.taxScheme) && fiscalAssetId !== p.assetId && (
+              {section === "fiscal" && rental && (p.rentalRegime || p.taxScheme) && fiscalAssetId !== p.assetId && (
                 <p className="text-meta mt-1">
                   {p.rentalRegime ? rentalRegimeLabel(p.rentalRegime) : "Régime non renseigné"}
                   {p.taxScheme && p.taxScheme !== "AUCUN"
@@ -765,7 +923,7 @@ export function PropertyPanel({
                 </p>
               )}
 
-              {rental && fiscalAssetId === p.assetId && fiscalForm && (
+              {section === "fiscal" && rental && fiscalAssetId === p.assetId && fiscalForm && (
                 <form
                   className="mt-2 space-y-2 rounded-[var(--radius-md)] border border-[var(--border)] p-2.5"
                   data-testid="property-fiscal-form"
@@ -932,7 +1090,29 @@ export function PropertyPanel({
                 </form>
               )}
 
-              {charAssetId === p.assetId && charForm && (
+              {section === "characteristics" && (
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    className="btn btn-ghost text-[11px]"
+                    data-testid="property-characteristics-toggle"
+                    onClick={() =>
+                      setCharAssetId((cur) => {
+                        if (cur === p.assetId) {
+                          setCharForm(null);
+                          return null;
+                        }
+                        setCharForm(characteristicsFormFrom(p));
+                        return p.assetId;
+                      })
+                    }
+                  >
+                    Caractéristiques du bien
+                  </button>
+                </div>
+              )}
+
+              {section === "characteristics" && charAssetId === p.assetId && charForm && (
                 <form
                   className="mt-2 space-y-2"
                   data-testid="property-characteristics-form"
@@ -1370,7 +1550,7 @@ export function PropertyPanel({
                 </form>
               )}
 
-              {editing?.assetId === p.assetId && (
+              {section === "valuation" && editing?.assetId === p.assetId && (
                 <form
                   className="mt-2 flex flex-wrap items-center gap-2"
                   onSubmit={(e) => {
@@ -1412,21 +1592,16 @@ export function PropertyPanel({
                 </form>
               )}
 
-              {rental && !p.monthlyRentEur && (
+              {section === "rents" && rental && !p.monthlyRentEur && (
                 <p className="text-meta mt-1">
                   Loyer non renseigné — le rendement ne peut pas être calculé.
                 </p>
               )}
             </div>
           );
-        })}
+        })()}
       </div>
-
-      <p className="text-meta mt-3">
-        Le capital restant dû est celui que vous devez réellement : il n&apos;est
-        pas réduit à votre quote-part de propriété.
-      </p>
-    </div>
+    </aside>
   );
 }
 
