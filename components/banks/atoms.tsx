@@ -268,10 +268,27 @@ export function BankNameCombobox({
             setQuery(e.target.value);
             setOpen(true);
           }}
-          onBlur={() => {
+          onBlur={(e) => {
             if (query.trim() && query.trim() !== value) {
               onChange(query.trim());
             }
+            /*
+              Quitter le champ referme la liste.
+
+              Elle est rendue en portail et positionnée en `fixed` : tant
+              qu'elle reste ouverte, elle intercepte les clics sur ce qui se
+              trouve dessous. Dans une page large cela ne se voyait pas ; dans
+              une fenêtre de création, elle recouvrait le bouton « Ajouter »,
+              qui devenait inatteignable — le champ ayant pris le focus à
+              l'ouverture, la liste s'affichait sans que personne l'ait
+              demandée.
+
+              Le `relatedTarget` distingue un départ vers la liste elle-même
+              (choix d'une option) d'un départ vers le reste du formulaire.
+            */
+            const next = e.relatedTarget as Node | null;
+            if (next && menuRef.current?.contains(next)) return;
+            setOpen(false);
           }}
         />
         <ChevronDown
