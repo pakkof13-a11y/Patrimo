@@ -22,6 +22,26 @@ const roundQty = (n: number, dec = 4) => {
 
 const THREE_YEARS = 1825;
 
+/** Jour civil parisien `YYYY-MM-DD` — clé des clôtures journalières. */
+function dayKeyOf(date: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+/** Graine stable dérivée d'une chaîne : la démo doit être reproductible. */
+function hashSeed(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
 type AssetSeed = {
   name: string;
   ticker: string;
@@ -984,6 +1004,57 @@ export async function seedUserPortfolio(
     }),
   });
 
+  /*
+    Clôtures journalières.
+
+    Sans elles, le moteur de valorisation historique retient chaque position à
+    son prix de revient : la courbe est une suite de paliers qui ne bougent
+    qu'aux transactions. Un jeu de démonstration doit porter une vraie
+    chronologie de cours, sinon il ne démontre rien — et surtout pas que la
+    courbe sait suivre le marché entre deux opérations.
+
+    La marche est déterministe (générateur ensemencé par l'actif) : deux seeds
+    successifs produisent la même histoire, ce dont les tests e2e dépendent.
+  */
+  const closeRows: Array<{
+    assetId: string;
+    day: string;
+    closeEur: Prisma.Decimal;
+    source: string;
+  }> = [];
+
+  for (const p of positions) {
+    const fx = fxNum(p.currency);
+    const days = Math.min(p.openDaysAgo, THREE_YEARS);
+    // Interpole la tendance achat → marché, puis y superpose une volatilité
+    // journalière bornée : le prix final retombe exactement sur le cours coté.
+    let rnd = hashSeed(p.ticker);
+    const drift = (p.marketPrice - p.buyPrice) / Math.max(days, 1);
+    let wobble = 0;
+    for (let k = days; k >= 0; k--) {
+      rnd = (rnd * 1664525 + 1013904223) >>> 0;
+      const shock = (rnd / 0xffffffff - 0.5) * 0.02;
+      // Retour à la moyenne : l'écart ne dérive pas indéfiniment.
+      wobble = wobble * 0.9 + shock;
+      const trend = p.buyPrice + drift * (days - k);
+      const native = k === 0 ? p.marketPrice : Math.max(trend * (1 + wobble), 0.0001);
+      const dt = daysAgo(k);
+      closeRows.push({
+        assetId: p.id,
+        day: dayKeyOf(dt),
+        closeEur: D(String(moneyN(native * fx))),
+        source: "seed",
+      });
+    }
+  }
+
+  for (let i = 0; i < closeRows.length; i += 500) {
+    await prisma.assetDailyClose.createMany({
+      data: closeRows.slice(i, i + 500),
+      skipDuplicates: true,
+    });
+  }
+
   // ── Cash / banques / livrets ────────────────────────────────────────────────
   await prisma.envelopeCash.createMany({
     data: [
@@ -1567,6 +1638,166 @@ export async function seedUserPortfolio(
       },
     ],
   });
+
+  /*
+    Historique daté des poches de cash, des tangibles et du private equity.
+
+    Le moteur de valorisation historique ne sait remonter le temps que par des
+    constats datés : sans eux, il rattache le solde courant à la date de
+    création du compte et signale la journée comme estimée. Ces écritures
+    donnent au jeu de démonstration ce que porte un vrai patrimoine — un relevé
+    par mouvement, une expertise par revalorisation.
+  */
+  const bankRows = await prisma.bankAccount.findMany({ where: { userId } });
+  const savingsRows = await prisma.savingsAccount.findMany({ where: { userId } });
+
+  for (const [idx, b] of bankRows.entries()) {
+    const finalBalance = Number(b.balance.toString());
+    const openDay = THREE_YEARS - 10 - idx * 20;
+    // Le solde d'ouverture représente environ la moitié du solde actuel ; le
+    // reste arrive par versements, de sorte que la somme retombe au centime.
+    let running = moneyN(finalBalance * 0.45);
+    const events: Array<{
+      bankAccountId: string;
+      type: string;
+      amount: Prisma.Decimal;
+      balanceAfter: Prisma.Decimal;
+      occurredAt: Date;
+    }> = [
+      {
+        bankAccountId: b.id,
+        type: "OPENING",
+        amount: D(String(running)),
+        balanceAfter: D(String(running)),
+        occurredAt: daysAgo(openDay),
+      },
+    ];
+
+    const steps = 14;
+    const remainder = finalBalance - running;
+    for (let k = 1; k <= steps; k++) {
+      const day = Math.max(5, Math.round(openDay - (openDay * k) / steps));
+      // Alternance dépôt / retrait : un compte courant ne monte pas en ligne
+      // droite, et la courbe doit pouvoir descendre.
+      const share = remainder / steps;
+      const delta = moneyN(k % 4 === 0 ? -Math.abs(share) * 1.5 : share * 1.5);
+      const isLast = k === steps;
+      const after = isLast ? finalBalance : moneyN(running + delta);
+      const amount = moneyN(after - running);
+      running = after;
+      events.push({
+        bankAccountId: b.id,
+        type: amount >= 0 ? "DEPOSIT" : "WITHDRAWAL",
+        amount: D(String(amount)),
+        balanceAfter: D(String(after)),
+        occurredAt: daysAgo(day),
+      });
+    }
+    await prisma.bankAccountEvent.createMany({ data: events });
+  }
+
+  for (const [idx, sv] of savingsRows.entries()) {
+    const finalBalance = Number(sv.balance.toString());
+    const openDay = THREE_YEARS - 30 - idx * 40;
+    let running = moneyN(finalBalance * 0.3);
+    const events: Array<{
+      savingsAccountId: string;
+      type: string;
+      amount: Prisma.Decimal;
+      balanceAfter: Prisma.Decimal;
+      occurredAt: Date;
+    }> = [
+      {
+        savingsAccountId: sv.id,
+        type: "OPENING",
+        amount: D(String(running)),
+        balanceAfter: D(String(running)),
+        occurredAt: daysAgo(openDay),
+      },
+    ];
+
+    const steps = 18;
+    const remainder = finalBalance - running;
+    for (let k = 1; k <= steps; k++) {
+      const day = Math.max(3, Math.round(openDay - (openDay * k) / steps));
+      const isLast = k === steps;
+      const after = isLast ? finalBalance : moneyN(running + remainder / steps);
+      const amount = moneyN(after - running);
+      running = after;
+      events.push({
+        savingsAccountId: sv.id,
+        // Un versement sur trois est un intérêt crédité : le moteur doit le
+        // compter en performance, pas en apport.
+        type: k % 3 === 0 ? "INTEREST" : "DEPOSIT",
+        amount: D(String(amount)),
+        balanceAfter: D(String(after)),
+        occurredAt: daysAgo(day),
+      });
+    }
+    await prisma.savingsAccountEvent.createMany({ data: events });
+  }
+
+  const tangibleRows = await prisma.tangibleAsset.findMany({ where: { userId } });
+  for (const t of tangibleRows) {
+    if (!t.purchaseDate) continue;
+    const purchase = Number(t.purchasePrice.toString());
+    const current = Number(t.estimatedValue.toString());
+    const heldDays = Math.round(
+      (Date.now() - t.purchaseDate.getTime()) / 86_400_000
+    );
+    if (heldDays < 400) continue;
+    // Une expertise tous les dix-huit mois environ : c'est le rythme réel d'un
+    // objet de collection, et cela suffit à dessiner une progression par
+    // paliers plutôt qu'un saut unique.
+    const steps = Math.min(5, Math.floor(heldDays / 400));
+    const rows = [];
+    for (let k = 1; k <= steps; k++) {
+      const day = Math.max(2, Math.round(heldDays - (heldDays * k) / (steps + 1)));
+      const ratio = k / (steps + 1);
+      rows.push({
+        tangibleId: t.id,
+        userId,
+        valuedAt: daysAgo(day),
+        valueEur: D(String(moneyN(purchase + (current - purchase) * ratio))),
+        source: k % 2 === 0 ? "APPRAISAL" : "MARKET",
+        note: note("Revalorisation périodique"),
+      });
+    }
+    rows.push({
+      tangibleId: t.id,
+      userId,
+      valuedAt: daysAgo(15),
+      valueEur: D(String(current)),
+      source: "APPRAISAL",
+      note: note("Dernière expertise"),
+    });
+    if (rows.length > 0) await prisma.tangibleValuation.createMany({ data: rows });
+  }
+
+  const peRows = await prisma.privateEquityPosition.findMany({ where: { userId } });
+  for (const pe of peRows) {
+    if (!pe.investmentDate) continue;
+    const invested = Number(pe.shares.toString()) * Number(pe.acquisitionPricePerShare.toString());
+    const current = Number(pe.currentNav.toString());
+    const heldDays = Math.round(
+      (Date.now() - pe.investmentDate.getTime()) / 86_400_000
+    );
+    if (heldDays < 200) continue;
+    // NAV semestrielle : le rythme auquel un fonds communique réellement.
+    const steps = Math.max(1, Math.floor(heldDays / 180));
+    const rows = [];
+    for (let k = 1; k <= steps; k++) {
+      const day = Math.max(2, heldDays - k * 180);
+      const ratio = 1 - day / heldDays;
+      rows.push({
+        privateEquityPositionId: pe.id,
+        valuedAt: daysAgo(day),
+        nav: D(String(moneyN(invested + (current - invested) * ratio))),
+        note: note("NAV semestrielle"),
+      });
+    }
+    await prisma.privateEquityValuation.createMany({ data: rows });
+  }
 
   // ── Snapshots dashboard (~36 mois) ─────────────────────────────────────────
   for (let m = 36; m >= 0; m--) {

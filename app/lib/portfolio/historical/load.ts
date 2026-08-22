@@ -194,6 +194,41 @@ export async function loadHistoricalInputs(
     })),
   ];
 
+  /*
+    Intérêts courus non encore versés.
+
+    Le solde d'un livret porte des intérêts que la base n'inscrit qu'à la date
+    de versement. Entre deux versements, la carte du dashboard affiche pourtant
+    le solde **augmenté** de ces intérêts : c'est ce que le livret vaut
+    aujourd'hui. Sans cette écriture, la courbe s'arrêtait au dernier solde
+    inscrit et le dernier point manquait de quelques centaines d'euros.
+
+    L'écriture est de type `INTEREST` : elle est donc comptée en performance et
+    non en apport — personne n'a versé cet argent.
+  */
+  const nowDate = new Date();
+  for (const sv of savings) {
+    const booked = eur(sv.balance, sv.currency, rates);
+    const display = eur(displayBalanceOf(sv), sv.currency, rates);
+    const accrued = display.minus(booked);
+    if (accrued.abs().lte(d("0.005"))) continue;
+    const lastBooked = savingsEvents
+      .filter((e) => e.savingsAccountId === sv.id)
+      .reduce<Decimal | null>(
+        (_, e) => eur(e.balanceAfter, sv.currency, rates),
+        null
+      );
+    // Sans événement, le compte est déjà porté par son solde d'affichage.
+    if (lastBooked == null) continue;
+    cashEvents.push({
+      accountId: sv.id,
+      occurredAt: nowDate,
+      amountEur: accrued,
+      balanceAfterEur: lastBooked.plus(accrued),
+      type: "INTEREST",
+    });
+  }
+
   return {
     transactions,
     assetClassById,

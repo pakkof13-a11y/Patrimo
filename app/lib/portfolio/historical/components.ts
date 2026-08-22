@@ -187,10 +187,14 @@ export function buildPrivateEquitySleeve(rows: PrivateEquityRow[]): SleeveBuild 
     rows.map((r) => ({
       acquiredAt: r.investmentDate ?? r.createdAt,
       costEur: r.calledCapitalEur,
-      valuations:
-        r.valuations.length > 0
-          ? r.valuations.map((v) => ({ day: dayOf(v.valuedAt), valueEur: v.navEur }))
-          : [{ day: dayOf(r.updatedAt), valueEur: r.currentNavEur }],
+      // La NAV courante est elle-même un constat daté — celui de sa dernière
+      // saisie. L'ajouter aux valorisations périodiques, plutôt que de choisir
+      // entre les deux, ferme la chronologie sur ce que le fonds vaut
+      // aujourd'hui sans écraser son histoire.
+      valuations: [
+        ...r.valuations.map((v) => ({ day: dayOf(v.valuedAt), valueEur: v.navEur })),
+        { day: dayOf(r.updatedAt), valueEur: r.currentNavEur },
+      ],
       datedByFallback: r.investmentDate == null,
     })),
     "alternatives"
@@ -272,12 +276,13 @@ export function buildTangiblesSleeve(rows: TangibleRow[]): SleeveBuild {
     rows.map((r) => ({
       acquiredAt: r.purchaseDate ?? r.createdAt,
       costEur: r.costEur,
-      valuations:
-        r.valuations.length > 0
-          ? r.valuations.map((v) => ({ day: dayOf(v.valuedAt), valueEur: v.valueEur }))
-          : // Sans expertise datée, la valeur estimée n'est constatée qu'au jour
-            // de sa saisie. Elle ne remonte pas jusqu'à l'achat.
-            [{ day: dayOf(r.updatedAt), valueEur: r.estimatedValueEur }],
+      // La valeur estimée n'est constatée qu'au jour de sa saisie — elle ne
+      // remonte jamais jusqu'à l'achat. Elle complète les expertises datées au
+      // lieu de les remplacer : c'est le dernier point connu de la chronologie.
+      valuations: [
+        ...r.valuations.map((v) => ({ day: dayOf(v.valuedAt), valueEur: v.valueEur })),
+        { day: dayOf(r.updatedAt), valueEur: r.estimatedValueEur },
+      ],
       datedByFallback: r.purchaseDate == null,
     })),
     "alternatives"
