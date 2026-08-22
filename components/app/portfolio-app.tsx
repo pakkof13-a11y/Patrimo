@@ -1496,7 +1496,22 @@ function PortfolioAppClient({
             )}
 
             {tab === "liabilities" && (
-              <LiabilitiesTab baseCurrency={baseCurrency} />
+              <LiabilitiesTab
+                /*
+                  Dénominateur du ratio dette / patrimoine. Il vient d'ici, où
+                  le portefeuille est déjà chargé — le module Passifs ne
+                  recalcule pas les actifs pour en rapporter la dette.
+                */
+                grossAssetsEur={
+                  summary?.totalGrossAssetsEur != null
+                    ? Number(summary.totalGrossAssetsEur)
+                    : null
+                }
+                onOpenAsset={(assetId) => {
+                  setDetailAssetId(assetId);
+                  setTab("holdings");
+                }}
+              />
             )}
 
             {tab === "fiscal" && <FiscalYearTab baseCurrency={baseCurrency} />}

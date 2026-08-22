@@ -1294,6 +1294,10 @@ export async function seedUserPortfolio(
       endDate: daysAgo(-(25 * 365)),
       paymentDay: 5,
       bankName: "Crédit Agricole",
+      // Sans catégorie, tous les crédits se rangent sous « Autre » et la
+      // répartition par type de l'onglet Passifs ne distingue plus rien.
+      category: "IMMOBILIER",
+      insuranceMonthly: D("28"),
       notes: note("Prêt 25 ans"),
     },
   });
@@ -1309,6 +1313,25 @@ export async function seedUserPortfolio(
       },
     });
   }
+  /*
+    Rattachement du prêt au bien qu'il finance.
+
+    C'est la lecture la plus parlante du module Passifs pour un particulier :
+    « ce prêt finance ce bien, le bien vaut X, il reste Y, donc mon equity est
+    Z ». Sans ce lien, le panneau d'un crédit immobilier n'affiche aucun bien,
+    et le rapprochement reste à faire de tête.
+  */
+  const financedProperty = await prisma.asset.findFirst({
+    where: { userId, accountType: "IMMOBILIER", category: "REAL_ESTATE_DIRECT" },
+    select: { id: true },
+  });
+  if (financedProperty) {
+    await prisma.liability.update({
+      where: { id: mortgage.id },
+      data: { assetId: financedProperty.id },
+    });
+  }
+
   await prisma.liability.create({
     data: {
       userId,
@@ -1322,6 +1345,7 @@ export async function seedUserPortfolio(
       endDate: daysAgo(-200),
       paymentDay: 12,
       bankName: "Cetelem",
+      category: "CONSOMMATION",
       notes: note("Voiture"),
     },
   });
