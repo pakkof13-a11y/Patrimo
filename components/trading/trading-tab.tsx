@@ -1,79 +1,109 @@
 "use client";
 
-import { useState } from "react";
+/**
+ * Onglet Trading — positions à levier et dérivés.
+ *
+ * ## Pourquoi ce module est séparé du patrimoine
+ *
+ * Une position à levier n'est pas un actif détenu : ce qu'elle pèse n'est ni
+ * sa taille ni son notionnel, mais la marge engagée plus le P&L latent — ce
+ * qu'on récupérerait en clôturant maintenant. Les montants affichés ici
+ * n'entrent donc pas dans les mêmes additions que le comptant.
+ *
+ * ## Ce que cet écran ne montrera pas
+ *
+ * **Pas de P&L du jour.** Aucune photographie quotidienne des positions
+ * n'existe : il n'y a rien à comparer à hier.
+ *
+ * **Pas d'exécutions.** Le modèle ne porte ni ordres ni fills.
+ *
+ * **Aucun ordre n'est transmis.** Aurea suit et analyse, il n'exécute pas :
+ * « clôturer » enregistre une sortie dans le suivi, rien de plus.
+ *
+ * Les sous-modules existants — comptes CFD, saisie et import de futures,
+ * journal fiscal — sont conservés intacts derrière la navigation secondaire.
+ */
+
+import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, LayoutDashboard, Landmark, TrendingUp } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import { FuturesPanel } from "@/components/trading/futures-panel";
 import { TradingAccountsPanel } from "@/components/trading/trading-accounts-panel";
 import { TradingJournalPanel } from "@/components/trading/trading-journal-panel";
-import { AltDashKpi } from "@/components/tabs/alternatives-shell";
+import { exchangeLabel } from "@/app/lib/crypto/futures-constants";
+import { UNDERLYING_TYPES } from "@/app/lib/trading/constants";
+import {
+  buildPositionViews,
+  computeTradingOverview,
+  filterPositions,
+  sortPositions,
+  EMPTY_FILTERS,
+  type PositionFilters,
+  type PositionSort,
+} from "@/app/lib/trading/positions-view";
+import type { TradingBundle } from "@/components/trading/types";
+import { PositionList } from "./position-list";
+import { PositionPanel } from "./position-panel";
 
-export type TradingSubTab = "dashboard" | "cfd" | "futures" | "journal";
+export type TradingSubTab = "positions" | "cfd" | "futures" | "journal";
 
 const TRADING_SUBS = new Set<string>([
-  "dashboard",
+  "positions",
   "cfd",
   "futures",
   "journal",
+  // Ancien identifiant de la vue d'accueil — les liens existants doivent
+  // continuer à ouvrir la bonne page.
+  "dashboard",
 ]);
 
-const SUB_NAV: {
-  id: TradingSubTab;
-  label: string;
-  short: string;
-  icon: React.ReactNode;
-}[] = [
-  {
-    id: "dashboard",
-    label: "Vue d’ensemble",
-    short: "Dashboard",
-    icon: <LayoutDashboard className="h-3.5 w-3.5" />,
-  },
-  {
-    id: "cfd",
-    label: "Comptes & CFD",
-    short: "CFD",
-    icon: <Landmark className="h-3.5 w-3.5" />,
-  },
-  {
-    id: "futures",
-    label: "Futures crypto",
-    short: "Futures",
-    icon: <TrendingUp className="h-3.5 w-3.5" />,
-  },
-  {
-    id: "journal",
-    label: "Journal",
-    short: "Journal",
-    icon: <BookOpen className="h-3.5 w-3.5" />,
-  },
+const SUB_NAV: Array<{ id: TradingSubTab; label: string }> = [
+  { id: "positions", label: "Positions" },
+  { id: "cfd", label: "Comptes" },
+  { id: "futures", label: "Saisie & import" },
+  { id: "journal", label: "Journal fiscal" },
 ];
 
-type FuturesSummaryResponse = {
-  summary: {
-    totalMarginEur: string;
-    netExposureEur: string;
-    unrealizedPnlEur: string;
-    positionCount: number;
-    liquidationAlerts: number;
-  };
-};
+const STATUS_TABS: Array<{ id: PositionFilters["status"]; label: string }> = [
+  { id: "OPEN", label: "Ouvertes" },
+  { id: "CLOSED", label: "Clôturées" },
+  { id: "ALL", label: "Toutes" },
+];
 
-/**
- * Onglet Trading — positions à levier et dérivés.
- *
- * Séparé des Cryptos parce qu'une position à levier ne se valorise pas comme
- * un actif détenu : elle ne pèse au patrimoine ni par sa taille ni par son
- * notionnel, mais par la marge engagée plus le P&L latent. Le total affiché
- * ici n'entre donc pas dans les mêmes additions que le comptant ou la DeFi.
- *
- * Pour l'instant un seul sous-module (futures crypto, déplacé depuis l'onglet
- * Crypto). Le shell est volontairement dimensionné pour en accueillir
- * d'autres (options, forex, CFD) sans réécriture.
- */
+function Kpi({
+  label,
+  value,
+  hint,
+  tone,
+  testId,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  tone?: number;
+  testId: string;
+}) {
+  return (
+    <div className="card p-[var(--space-3)]" data-testid={testId}>
+      <p className="text-label">{label}</p>
+      <p
+        className={cn(
+          "num mt-[var(--space-1)] text-[length:var(--text-lg)] font-semibold tracking-tight",
+          tone != null && tone > 0 && "val-positive",
+          tone != null && tone < 0 && "val-negative",
+          (tone == null || tone === 0) && "text-[var(--foreground)]"
+        )}
+      >
+        {value}
+      </p>
+      <p className="text-meta mt-[var(--space-px)]">{hint}</p>
+    </div>
+  );
+}
+
 export function TradingTab({
   baseCurrency = "EUR",
 }: {
@@ -82,154 +112,379 @@ export function TradingTab({
   const searchParams = useSearchParams();
   const [sub, setSub] = useState<TradingSubTab>(() => {
     const q = (searchParams.get("sub") || "").toLowerCase();
-    return TRADING_SUBS.has(q) ? (q as TradingSubTab) : "dashboard";
+    if (q === "dashboard") return "positions";
+    return TRADING_SUBS.has(q) ? (q as TradingSubTab) : "positions";
   });
 
-  // Sync depuis l'URL quand elle change (deep-link) — même motif que
-  // l'onglet Actifs alternatifs.
+  // Sync depuis l'URL quand elle change (deep-link).
   const subParamKey = searchParams.toString();
   const [prevSubParamKey, setPrevSubParamKey] = useState(subParamKey);
   if (subParamKey !== prevSubParamKey) {
     setPrevSubParamKey(subParamKey);
     const q = (searchParams.get("sub") || "").toLowerCase();
-    if (TRADING_SUBS.has(q)) setSub(q as TradingSubTab);
+    if (q === "dashboard") setSub("positions");
+    else if (TRADING_SUBS.has(q)) setSub(q as TradingSubTab);
   }
 
+  const [filters, setFilters] = useState<PositionFilters>(EMPTY_FILTERS);
+  const [sort, setSort] = useState<PositionSort>("pnl");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
   const q = useQuery({
-    queryKey: ["crypto-futures"],
-    queryFn: () => fetchJson<FuturesSummaryResponse>("/api/crypto/futures"),
-    enabled: sub === "dashboard",
+    queryKey: ["trading-bundle"],
+    queryFn: () => fetchJson<TradingBundle>("/api/trading"),
     staleTime: 60_000,
   });
 
-  const s = q.data?.summary;
-  const margin = Number(s?.totalMarginEur ?? 0);
-  const pnl = Number(s?.unrealizedPnlEur ?? 0);
-  const count = s?.positionCount ?? 0;
+  const views = useMemo(
+    () => buildPositionViews(q.data?.positions ?? []),
+    [q.data?.positions]
+  );
+
+  /*
+    La synthèse porte sur **toutes** les positions, jamais sur la sélection
+    filtrée : un compteur d'alertes qui tomberait à zéro parce qu'on a filtré
+    sur « clôturées » ne signalerait plus rien.
+  */
+  const overview = useMemo(() => computeTradingOverview(views), [views]);
+
+  const visible = useMemo(
+    () => sortPositions(filterPositions(views, filters), sort),
+    [views, filters, sort]
+  );
+
+  /*
+    La sélection est cherchée parmi les lignes visibles : changer de filtre ne
+    peut pas laisser le panneau détailler une position que la table ne porte
+    plus.
+  */
+  const selected = visible.find((v) => v.id === selectedId) ?? null;
+
+  const exchanges = useMemo(
+    () => [...new Set(views.map((v) => v.exchange))].sort(),
+    [views]
+  );
+
+  const showSkeleton = q.isPending && !q.data;
+  const hasPositions = views.length > 0;
+
+  function patch(next: Partial<PositionFilters>) {
+    setFilters((f) => ({ ...f, ...next }));
+    setSelectedId(null);
+  }
 
   return (
-    <div className="space-y-5" data-testid="trading-tab">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold leading-snug">Trading</h1>
-          <p className="module-intro max-w-xl text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-            Positions à levier et dérivés. Contrairement aux poches
-            patrimoniales, ce qui compte ici n’est pas la taille de la position
-            mais la marge engagée et le P&amp;L latent — ces montants n’entrent
-            donc pas dans le patrimoine net comme un actif détenu.
+    <section className="space-y-[var(--space-4)]" data-testid="trading-tab">
+      <header className="flex flex-wrap items-end justify-between gap-[var(--space-3)]">
+        <div>
+          <h1 className="text-title">Trading</h1>
+          <p className="text-meta mt-[var(--space-1)] max-w-2xl leading-relaxed">
+            Suivi de vos positions et opérations à levier. Ce qui compte ici
+            n&apos;est pas la taille de la position mais la marge engagée et le
+            P&amp;L latent — ces montants n&apos;entrent pas dans le patrimoine
+            net comme un actif détenu.
           </p>
         </div>
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)]/20 px-4 py-2 text-right">
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-            Marge engagée
-          </div>
-          <div className="text-xl font-semibold tabular-nums tracking-tight text-teal-700 dark:text-teal-300">
-            {formatCurrency(String(margin), baseCurrency)}
-          </div>
-        </div>
-      </div>
+      </header>
 
       <nav
-        className="flex flex-wrap gap-1 border-b border-[var(--border)] pb-2"
+        className="term-seg"
+        role="tablist"
         aria-label="Sous-modules trading"
+        data-testid="trading-subnav"
       >
-        {SUB_NAV.map((item) => {
-          const active = sub === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              data-testid={`trading-sub-${item.id}`}
-              onClick={() => setSub(item.id)}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition",
-                "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-                active
-                  ? "bg-teal-50 text-teal-900 ring-1 ring-teal-500/25 dark:bg-teal-950/60 dark:text-teal-100"
-                  : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-              )}
-            >
-              {item.icon}
-              <span className="hidden sm:inline">{item.label}</span>
-              <span className="sm:hidden">{item.short}</span>
-            </button>
-          );
-        })}
+        {SUB_NAV.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={sub === item.id}
+            className="term-seg-item"
+            data-active={sub === item.id ? "true" : "false"}
+            data-testid={`trading-sub-${item.id}`}
+            onClick={() => setSub(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
       </nav>
 
-      {sub === "dashboard" && (
-        <section className="space-y-4" data-testid="trading-dashboard">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <AltDashKpi
-              label="Futures crypto"
-              value={formatCurrency(String(margin), baseCurrency)}
-              hint={
-                count > 0
-                  ? `${count} position(s) ouverte(s)`
-                  : "Perpétuels et contrats à terme — non renseigné"
-              }
-              onClick={() => setSub("futures")}
-            />
-            <AltDashKpi
-              label="P&L latent"
-              value={formatCurrency(String(pnl), baseCurrency)}
-              hint="Positions ouvertes, funding et commissions exclus"
-              tone={pnl}
-            />
-            <AltDashKpi
-              label="Exposition nette"
-              value={formatCurrency(
-                String(Number(s?.netExposureEur ?? 0)),
-                baseCurrency
-              )}
-              hint="Notionnel long − notionnel short"
-            />
-            <AltDashKpi
-              label="Alertes liquidation"
-              value={String(s?.liquidationAlerts ?? 0)}
-              hint={
-                (s?.liquidationAlerts ?? 0) > 0
-                  ? "Position(s) proche(s) du prix de liquidation"
-                  : "Aucune position à risque immédiat"
-              }
-              tone={(s?.liquidationAlerts ?? 0) > 0 ? -1 : 0}
-              onClick={() => setSub("futures")}
-            />
-          </div>
+      {sub === "positions" ? (
+        <>
+          {/*
+            Cinq indicateurs, tous adossés au moteur `crypto/futures.ts`.
 
-          <div className="card p-4">
-            <h2 className="mb-0.5 text-sm font-semibold">
-              {count > 0 ? "Modules de trading" : "Démarrer le suivi trading"}
-            </h2>
-            <p className="mb-3 text-[11px] leading-relaxed text-slate-400">
-              {count > 0
-                ? "Chaque module gère ses positions et ses imports de relevés."
-                : "Un seul module pour l’instant : les futures crypto. D’autres instruments (options, forex) viendront s’ajouter ici."}
-            </p>
-            <button
-              type="button"
-              onClick={() => setSub("futures")}
-              className={cn(
-                "w-full rounded-xl border border-[var(--border)] bg-[var(--muted)]/20 p-3 text-left transition sm:w-1/2",
-                "hover:border-teal-500/30 hover:bg-teal-500/[0.04]",
-                "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-              )}
-              data-testid="trading-goto-futures"
+            Pas de « P&L du jour » : rien n'historise le prix de marque, donc
+            rien ne permet de comparer à hier. Pas de Sharpe ni de VaR : ils
+            demanderaient une série de rendements qui n'existe pas.
+          */}
+          {showSkeleton ? (
+            <div
+              className="grid grid-cols-2 gap-[var(--space-2)] lg:grid-cols-5"
+              data-testid="trading-skeleton"
             >
-              <div className="text-sm font-semibold">Futures crypto</div>
-              <p className="mt-1 text-[11px] leading-snug text-slate-400">
-                Perpétuels et contrats à terme — levier, marge, prix de
-                liquidation et import de relevés exchange.
-              </p>
-            </button>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="h-[4.5rem] animate-pulse rounded-[var(--radius-md)] bg-[var(--surface-hover)]"
+                />
+              ))}
+            </div>
+          ) : (
+            <div
+              className="grid grid-cols-2 gap-[var(--space-2)] lg:grid-cols-5"
+              data-testid="trading-kpis"
+            >
+              <Kpi
+                label="P&L latent"
+                value={formatCurrency(
+                  String(overview.unrealizedPnlEur),
+                  baseCurrency
+                )}
+                hint={`${overview.openCount} position${overview.openCount > 1 ? "s" : ""} ouverte${overview.openCount > 1 ? "s" : ""}`}
+                tone={overview.unrealizedPnlEur}
+                testId="trading-kpi-unrealized"
+              />
+              <Kpi
+                label="P&L réalisé"
+                value={formatCurrency(
+                  String(overview.realizedPnlEur),
+                  baseCurrency
+                )}
+                hint={`${overview.closedCount} clôturée${overview.closedCount > 1 ? "s" : ""} · frais déduits`}
+                tone={overview.realizedPnlEur}
+                testId="trading-kpi-realized"
+              />
+              <Kpi
+                label="Exposition nette"
+                value={formatCurrency(
+                  String(overview.netExposureEur),
+                  baseCurrency
+                )}
+                hint={`brute ${formatCurrency(String(overview.grossExposureEur), baseCurrency)}`}
+                testId="trading-kpi-exposure"
+              />
+              <Kpi
+                label="Marge engagée"
+                value={formatCurrency(String(overview.marginEur), baseCurrency)}
+                hint={
+                  overview.exchangeCount > 0
+                    ? `sur ${overview.exchangeCount} plateforme${overview.exchangeCount > 1 ? "s" : ""}`
+                    : "capital immobilisé"
+                }
+                testId="trading-kpi-margin"
+              />
+              <Kpi
+                label="Alertes liquidation"
+                value={String(overview.liquidationAlerts)}
+                hint={
+                  overview.liquidationAlerts > 0
+                    ? "position(s) proche(s) du seuil"
+                    : "aucune position à risque immédiat"
+                }
+                tone={overview.liquidationAlerts > 0 ? -1 : 0}
+                testId="trading-kpi-alerts"
+              />
+            </div>
+          )}
+
+          {/*
+            Avertissement global de fraîcheur : sans prix de marque actualisé,
+            le P&L latent affiché plus haut ne vaut rien. Le taire serait la
+            pire des omissions de cet écran.
+          */}
+          {overview.unmarkedCount > 0 ? (
+            <div
+              className="panel flex gap-[var(--space-3)] p-[var(--space-3)]"
+              data-testid="trading-unmarked-warning"
+            >
+              <AlertTriangle
+                className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]"
+                aria-hidden
+              />
+              <div className="min-w-0">
+                <p className="text-[length:var(--text-xs)] font-medium text-[var(--foreground)]">
+                  {overview.unmarkedCount} position
+                  {overview.unmarkedCount > 1 ? "s" : ""} sans prix de marque
+                  actualisé
+                </p>
+                <p className="text-meta mt-[var(--space-px)]">
+                  Aurea ne rafraîchit pas le prix des contrats à levier depuis
+                  le marché : il reste celui que vous avez saisi ou importé. Le
+                  P&amp;L latent de ces positions est donc à prendre pour ce
+                  qu&apos;il est.
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="panel">
+            <div
+              className="flex flex-wrap items-center gap-[var(--space-2)] border-b border-[var(--border)] p-[var(--space-3)]"
+              data-testid="trading-toolbar"
+            >
+              <input
+                className="input min-w-[13rem] flex-1"
+                placeholder="Rechercher un instrument, une plateforme…"
+                value={filters.search}
+                onChange={(e) => patch({ search: e.target.value })}
+                data-testid="trading-search"
+                aria-label="Rechercher une position"
+              />
+
+              <div className="term-seg" role="group" aria-label="Statut">
+                {STATUS_TABS.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className="term-seg-item"
+                    data-active={filters.status === s.id ? "true" : "false"}
+                    onClick={() => patch({ status: s.id })}
+                    data-testid={`trading-status-${s.id.toLowerCase()}`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+
+              <select
+                className="input w-auto"
+                value={filters.direction}
+                onChange={(e) =>
+                  patch({
+                    direction: e.target.value as PositionFilters["direction"],
+                  })
+                }
+                data-testid="trading-direction-filter"
+                aria-label="Filtrer par sens"
+              >
+                <option value="ALL">Tous sens</option>
+                <option value="LONG">Long</option>
+                <option value="SHORT">Short</option>
+              </select>
+
+              {exchanges.length > 1 ? (
+                <select
+                  className="input w-auto"
+                  value={filters.exchange}
+                  onChange={(e) => patch({ exchange: e.target.value })}
+                  data-testid="trading-exchange-filter"
+                  aria-label="Filtrer par plateforme"
+                >
+                  <option value="ALL">Toutes plateformes</option>
+                  {exchanges.map((x) => (
+                    <option key={x} value={x}>
+                      {exchangeLabel(x)}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+
+              <select
+                className="input w-auto"
+                value={filters.underlyingType}
+                onChange={(e) => patch({ underlyingType: e.target.value })}
+                data-testid="trading-underlying-filter"
+                aria-label="Filtrer par sous-jacent"
+              >
+                <option value="ALL">Tous sous-jacents</option>
+                {Object.entries(UNDERLYING_TYPES).map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                className="input w-auto"
+                value={sort}
+                onChange={(e) => setSort(e.target.value as PositionSort)}
+                data-testid="trading-sort"
+                aria-label="Trier"
+              >
+                <option value="pnl">P&amp;L</option>
+                <option value="exposure">Exposition</option>
+                <option value="instrument">Instrument</option>
+                <option value="date">Date</option>
+              </select>
+            </div>
+
+            <div className="grid gap-[var(--space-4)] p-[var(--space-3)] xl:grid-cols-[minmax(0,1fr)_25rem]">
+              <div className="min-w-0">
+                {showSkeleton ? (
+                  <div className="space-y-[var(--space-2)]">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <div
+                        key={i}
+                        className="h-[3rem] animate-pulse rounded-[var(--radius-sm)] bg-[var(--surface-hover)]"
+                      />
+                    ))}
+                  </div>
+                ) : !hasPositions ? (
+                  /*
+                    État vide **local** : ne pas faire de trading à levier est
+                    parfaitement normal pour un patrimoine, et n'a rien à voir
+                    avec un compte vierge. Le cockpit d'accueil n'a pas sa
+                    place ici.
+                  */
+                  <div
+                    className="asset-panel-empty py-[var(--space-8)]"
+                    data-testid="trading-empty"
+                  >
+                    <p className="text-[length:var(--text-sm)] font-medium text-[var(--foreground)]">
+                      Aucune position de trading
+                    </p>
+                    <p className="text-meta max-w-[24rem]">
+                      Saisissez une position ou importez un relevé de trades
+                      pour suivre votre activité à levier.
+                    </p>
+                    <button
+                      type="button"
+                      className="term-seg-item mt-[var(--space-3)]"
+                      data-active="true"
+                      onClick={() => setSub("futures")}
+                      data-testid="trading-empty-cta"
+                    >
+                      Saisir ou importer
+                    </button>
+                  </div>
+                ) : visible.length === 0 ? (
+                  <div
+                    className="asset-panel-empty py-[var(--space-8)]"
+                    data-testid="trading-no-match"
+                  >
+                    <p className="text-[length:var(--text-sm)] text-[var(--foreground-secondary)]">
+                      Aucune position ne correspond
+                    </p>
+                    <p className="text-meta">
+                      Ajustez la recherche ou les filtres.
+                    </p>
+                  </div>
+                ) : (
+                  <PositionList
+                    views={visible}
+                    selectedId={selectedId}
+                    onSelect={setSelectedId}
+                    baseCurrency={baseCurrency}
+                  />
+                )}
+              </div>
+
+              <PositionPanel
+                view={selected}
+                baseCurrency={baseCurrency}
+                onClose={() => setSelectedId(null)}
+                onEdit={() => setSub("futures")}
+                onClosePosition={() => setSub("futures")}
+              />
+            </div>
           </div>
-        </section>
-      )}
+        </>
+      ) : null}
 
       {sub === "cfd" && <TradingAccountsPanel />}
       {sub === "futures" && <FuturesPanel />}
       {sub === "journal" && <TradingJournalPanel />}
-    </div>
+    </section>
   );
 }

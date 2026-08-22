@@ -98,10 +98,29 @@ export async function resetUserData(userId: string): Promise<ResetUserDataResult
       /* models may be missing in older DBs */
     }
 
+    /*
+      Positions à levier. Rattachées à `User` et non à `Asset` — un contrat
+      n'est pas un actif détenu — elles survivaient donc à l'effacement des
+      données, qui prétendait pourtant tout supprimer.
+    */
+    let tradingDeleted = 0;
+    try {
+      const positions = await tx.tradingPosition.deleteMany({
+        where: { userId },
+      });
+      const accounts = await tx.tradingAccount.deleteMany({
+        where: { userId },
+      });
+      tradingDeleted = positions.count + accounts.count;
+    } catch {
+      /* models may be missing in older DBs */
+    }
+
     // Platforms after assets/transactions
     const platforms = await tx.platform.deleteMany({ where: { userId } });
 
     return {
+      tradingDeleted,
       transactionsDeleted: txDel.count,
       assetsDeleted: assetDel.count,
       platformsDeleted: platforms.count,

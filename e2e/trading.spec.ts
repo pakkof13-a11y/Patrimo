@@ -49,9 +49,11 @@ test.describe("Trading", () => {
 
     await link.click();
     await expect(page).toHaveURL(/\/trading\?sub=futures/);
+    // La navigation secondaire suit désormais le pattern `term-seg` commun aux
+    // modules refondus : onglet ARIA actif marqué par `data-active`.
     await expect(page.getByTestId("trading-sub-futures")).toHaveAttribute(
-      "aria-current",
-      "page"
+      "data-active",
+      "true"
     );
   });
 
@@ -61,9 +63,11 @@ test.describe("Trading", () => {
       timeout: 20_000,
     });
 
-    // Vue d'ensemble et futures crypto existaient avant ce chantier : les
-    // nouveaux sous-onglets ne doivent pas les avoir remplacés.
-    await expect(page.getByTestId("trading-sub-dashboard")).toBeVisible();
+    // La vue d'accueil s'appelle désormais « Positions » — elle montre les
+    // positions elles-mêmes plutôt qu'un sommaire de modules. Les autres
+    // sous-onglets existaient avant ce chantier et ne doivent pas avoir
+    // disparu.
+    await expect(page.getByTestId("trading-sub-positions")).toBeVisible();
     await expect(page.getByTestId("trading-sub-futures")).toBeVisible();
     await expect(page.getByTestId("trading-sub-cfd")).toBeVisible();
     await expect(page.getByTestId("trading-sub-journal")).toBeVisible();

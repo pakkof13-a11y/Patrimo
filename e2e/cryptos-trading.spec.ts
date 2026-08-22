@@ -102,7 +102,7 @@ test.describe("Cryptos & Trading", () => {
     await expect(page.getByTestId("trading-tab")).toBeVisible({
       timeout: 20_000,
     });
-    await expect(page.getByTestId("trading-dashboard")).toBeVisible();
+    await expect(page.getByTestId("trading-kpis")).toBeVisible();
 
     await page.getByTestId("trading-sub-futures").click();
     await expect(page.getByTestId("crypto-futures-panel")).toBeVisible({

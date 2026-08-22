@@ -17,9 +17,20 @@ const EMPTY: PatrimonyPresence = {
   employeeSavings: false,
   alternatives: false,
   realEstate: false,
+  trading: false,
 };
 
 describe("état patrimonial du compte", () => {
+  it("une position à levier suffit à rendre le compte actif", () => {
+    /*
+      Une position à levier est rattachée à l'utilisateur, pas à un actif : un
+      compte dont c'est la seule activité échappait au recensement et voyait
+      le cockpit d'accueil s'afficher par-dessus des positions bien réelles.
+    */
+    expect(patrimonyIsEmpty({ ...EMPTY, trading: true })).toBe(false);
+    expect(presentFamilies({ ...EMPTY, trading: true })).toEqual(["trading"]);
+  });
+
   it("un compte sans aucune donnée est vierge", () => {
     expect(patrimonyIsEmpty(EMPTY)).toBe(true);
     expect(presentFamilies(EMPTY)).toEqual([]);

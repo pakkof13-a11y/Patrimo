@@ -32,6 +32,15 @@ export type PatrimonyPresence = {
   employeeSavings: boolean;
   alternatives: boolean;
   realEstate: boolean;
+  /**
+   * Positions à levier.
+   *
+   * Rattachées à `User` et non à `Asset` — un contrat n'est pas un actif
+   * détenu — elles échappaient au recensement : un compte dont c'était la
+   * seule activité était présenté comme vierge, et le cockpit d'accueil
+   * s'affichait par-dessus des positions bien réelles.
+   */
+  trading: boolean;
 };
 
 /**
@@ -102,6 +111,7 @@ export async function loadPatrimonyPresence(
     crowdlending,
     tangibles,
     realEstate,
+    trading,
   ] = await Promise.all([
     exists((a) => prisma.transaction.findFirst(a)),
     exists((a) => prisma.asset.findFirst(a)),
@@ -130,6 +140,7 @@ export async function loadPatrimonyPresence(
         ? 1
         : 0
     ),
+    exists((a) => prisma.tradingPosition.findFirst(a)),
   ]);
 
   return {
@@ -144,6 +155,7 @@ export async function loadPatrimonyPresence(
     employeeSavings,
     alternatives: metals || privateEquity || crowdlending || tangibles,
     realEstate,
+    trading,
   };
 }
 

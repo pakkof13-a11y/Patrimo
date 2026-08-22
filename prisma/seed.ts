@@ -55,6 +55,15 @@ async function wipeUserData(userId: string) {
   await prisma.defiProtocolRef.deleteMany({ where: { userId } }).catch(() => undefined);
   await prisma.defiStrategy.deleteMany({ where: { userId } }).catch(() => undefined);
   await prisma.defiSyncCursor.deleteMany({ where: { userId } }).catch(() => undefined);
+  // Positions à levier : rattachées à `User`, pas à `Asset` — la suppression
+  // des actifs ne les emporte pas. Sans ce nettoyage, un second run bute sur
+  // la contrainte d'unicité `(userId, exchangeTradeId)` des lignes importées.
+  await prisma.tradingPosition
+    .deleteMany({ where: { userId } })
+    .catch(() => undefined);
+  await prisma.tradingAccount
+    .deleteMany({ where: { userId } })
+    .catch(() => undefined);
   await prisma.platform.deleteMany({ where: { userId } });
   await prisma.portfolioSnapshot.deleteMany({ where: { userId } });
 }

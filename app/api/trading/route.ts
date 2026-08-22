@@ -5,6 +5,7 @@ import { prisma } from "@/app/lib/prisma";
 import { d } from "@/app/lib/money/decimal";
 import { listTradingAccounts } from "@/app/lib/trading/account-service";
 import { computeTradingAnalytics } from "@/app/lib/trading/analytics";
+import { toFuturesView, type FuturesDirection } from "@/app/lib/crypto/futures";
 import {
   compareTradingTax,
   computeTradingYear,
@@ -110,7 +111,29 @@ export async function GET(req: Request) {
           createdAt: a.createdAt.toISOString(),
           updatedAt: a.updatedAt.toISOString(),
         })),
-        positions: positions.map((p) => ({
+        positions: positions.map((p) => {
+          /*
+            Les valeurs dérivées viennent du moteur `crypto/futures.ts`, pas
+            d'un second calcul côté client : notionnel, marge et prix de
+            liquidation estimé y sont déjà définis, et deux implémentations
+            finiraient par diverger sur le signe d'un short.
+          */
+          const view = toFuturesView({
+            id: p.id,
+            exchange: p.exchange,
+            pair: p.pair,
+            direction: p.direction as FuturesDirection,
+            leverage: d(p.leverage.toString()),
+            sizeContracts: d(p.sizeContracts.toString()),
+            entryPrice: d(p.entryPrice.toString()),
+            markPrice: p.markPrice ? d(p.markPrice.toString()) : null,
+            marginUsed: p.marginUsed ? d(p.marginUsed.toString()) : null,
+            fundingPaid: p.fundingPaid ? d(p.fundingPaid.toString()) : null,
+            commissionPaid: p.commissionPaid
+              ? d(p.commissionPaid.toString())
+              : null,
+          });
+          return {
           id: p.id,
           tradingAccountId: p.tradingAccountId,
           underlyingType: p.underlyingType,
@@ -133,7 +156,31 @@ export async function GET(req: Request) {
           isOpen: p.isOpen,
           openedAt: p.openedAt?.toISOString() ?? null,
           closedAt: p.closedAt?.toISOString() ?? null,
-        })),
+
+          // Champs déjà stockés, jusqu'ici absents de la réponse.
+          marginType: p.marginType,
+          baseCurrency: p.baseCurrency,
+          quoteCurrency: p.quoteCurrency,
+          subAccountLabel: p.subAccountLabel,
+          exchangeTradeId: p.exchangeTradeId,
+          notes: p.notes,
+          /** Prix de liquidation renvoyé par l'exchange, s'il en a fourni un. */
+          liquidationPriceReported: p.liquidationPrice?.toString() ?? null,
+
+          derived: {
+            notionalEur: view.notionalUsd.toFixed(2),
+            marginUsedEur: view.marginUsed.toFixed(2),
+            /** Estimation Aurea — barème de maintenance approché, pas contractuel. */
+            liquidationPriceEstimated:
+              view.liquidationPrice?.toFixed(8) ?? null,
+            distanceToLiquidationPct: view.distanceToLiquidationPct,
+            unrealizedPnlEur: view.unrealizedPnlEur.toFixed(2),
+            signedNotionalEur: view.signedNotional.toFixed(2),
+            liquidationAlert: view.liquidationAlert,
+            fundingAlert: view.fundingAlert,
+          },
+          };
+        }),
         analytics: {
           tradeCount: analytics.tradeCount,
           winCount: analytics.winCount,

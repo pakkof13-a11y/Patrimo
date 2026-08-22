@@ -1988,6 +1988,133 @@ export async function seedUserPortfolio(
     });
   }
 
+  // ── Trading à levier ───────────────────────────────────────────────────────
+  //
+  // Le module Trading n'avait aucune donnée de démonstration : l'écran ne
+  // pouvait ni être vu ni être testé. Cinq positions couvrent les cas qui
+  // changent l'affichage — long et short, ouverte et clôturée, crypto et CFD,
+  // avec et sans prix de marque actualisé, avec et sans stop.
+  const tradingAccount = await prisma.tradingAccount.create({
+    data: {
+      userId,
+      brokerName: "IG Markets",
+      accountType: "CFD",
+      currency: "EUR",
+      balance: D("12500"),
+      marginAvailable: D("8200"),
+      openDate: daysAgo(600),
+      notes: note("Compte CFD indices et forex"),
+    },
+  });
+
+  await prisma.tradingPosition.createMany({
+    data: [
+      {
+        userId,
+        underlyingType: "CRYPTO",
+        exchange: "HYPERLIQUID",
+        pair: "BTC/USD-PERP",
+        contractType: "PERPETUAL",
+        marginType: "USDT_M",
+        baseCurrency: "BTC",
+        quoteCurrency: "USD",
+        direction: "LONG",
+        leverage: D("5"),
+        sizeContracts: D("0.42"),
+        entryPrice: D("61200"),
+        markPrice: D("63480"),
+        fundingPaid: D("2.35"),
+        commissionPaid: D("15.80"),
+        stopLoss: D("58000"),
+        takeProfit: D("72000"),
+        isOpen: true,
+        openedAt: daysAgo(35),
+      },
+      {
+        userId,
+        underlyingType: "CRYPTO",
+        exchange: "BYBIT",
+        pair: "SOL/USD-PERP",
+        contractType: "PERPETUAL",
+        marginType: "USDT_M",
+        baseCurrency: "SOL",
+        quoteCurrency: "USD",
+        // Un short ouvert : c'est lui qui vérifie le signe de l'exposition
+        // nette et la symétrie du P&L latent.
+        direction: "SHORT",
+        leverage: D("3"),
+        sizeContracts: D("25"),
+        entryPrice: D("168.30"),
+        markPrice: D("162.45"),
+        fundingPaid: D("-4.10"),
+        commissionPaid: D("6.20"),
+        isOpen: true,
+        openedAt: daysAgo(12),
+      },
+      {
+        userId,
+        underlyingType: "FOREX",
+        exchange: "IG",
+        tradingAccountId: tradingAccount.id,
+        pair: "EUR/USD",
+        contractType: "CFD",
+        baseCurrency: "EUR",
+        quoteCurrency: "USD",
+        direction: "LONG",
+        leverage: D("10"),
+        sizeContracts: D("50000"),
+        entryPrice: D("1.08120"),
+        // Prix de marque laissé au prix d'entrée : le cas « jamais actualisé »,
+        // que l'écran doit signaler au lieu d'afficher un P&L nul crédible.
+        markPrice: D("1.08120"),
+        commissionPaid: D("4.50"),
+        isOpen: true,
+        openedAt: daysAgo(5),
+      },
+      {
+        userId,
+        underlyingType: "INDEX",
+        exchange: "IG",
+        tradingAccountId: tradingAccount.id,
+        pair: "NAS100",
+        contractType: "CFD",
+        baseCurrency: "USD",
+        quoteCurrency: "USD",
+        direction: "LONG",
+        leverage: D("20"),
+        sizeContracts: D("1"),
+        entryPrice: D("18520"),
+        markPrice: D("18735.50"),
+        tickValue: D("1"),
+        commissionPaid: D("3.20"),
+        isOpen: true,
+        openedAt: daysAgo(3),
+      },
+      {
+        userId,
+        underlyingType: "CRYPTO",
+        exchange: "BINANCE",
+        pair: "ETH/USDT-PERP",
+        contractType: "PERPETUAL",
+        marginType: "USDT_M",
+        baseCurrency: "ETH",
+        quoteCurrency: "USDT",
+        direction: "LONG",
+        leverage: D("4"),
+        sizeContracts: D("3.25"),
+        entryPrice: D("2480.50"),
+        markPrice: D("2712.00"),
+        realizedPnl: D("752.38"),
+        fundingPaid: D("11.20"),
+        commissionPaid: D("18.40"),
+        exchangeTradeId: "BNB-DEMO-772109",
+        isOpen: false,
+        openedAt: daysAgo(90),
+        closedAt: daysAgo(48),
+      },
+    ],
+  });
+
   return {
     platforms: allPlatforms.length,
     assets: positions.length,
