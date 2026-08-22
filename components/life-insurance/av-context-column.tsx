@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRightLeft, Plus, Settings2, Shield } from "lucide-react";
+import { Shield } from "lucide-react";
 import { PendingControl } from "@/components/ui/pending-backend";
 import { cn, formatCurrency, formatDate } from "@/app/lib/utils";
 import type { OverviewTotals } from "@/app/lib/life-insurance/overview";
@@ -74,8 +74,6 @@ export function AvContextColumn({
   matureCount,
   operations,
   operationsLoading,
-  onAddSupport,
-  onManage,
   className,
 }: {
   totals: OverviewTotals;
@@ -84,8 +82,6 @@ export function AvContextColumn({
   matureCount: number;
   operations: TxRow[];
   operationsLoading: boolean;
-  onAddSupport: () => void;
-  onManage: () => void;
   className?: string;
 }) {
   const premiums = totals.totalPremiumsEur;
@@ -238,39 +234,15 @@ export function AvContextColumn({
         )}
       </Panel>
 
-      <Panel title="Actions rapides" testId="av-context-actions">
-        <div className="flex flex-col gap-[var(--space-2)]">
-          <button
-            type="button"
-            onClick={onAddSupport}
-            className="flex items-center gap-[var(--space-2)] rounded-[var(--radius-md)] px-[var(--space-2)] py-[var(--space-2)] text-left text-[length:var(--text-xs)] text-[var(--foreground-secondary)] transition-colors duration-[var(--duration-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
-            data-testid="av-action-add-support"
-          >
-            <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            Verser sur un contrat
-          </button>
-          <button
-            type="button"
-            onClick={onManage}
-            className="flex items-center gap-[var(--space-2)] rounded-[var(--radius-md)] px-[var(--space-2)] py-[var(--space-2)] text-left text-[length:var(--text-xs)] text-[var(--foreground-secondary)] transition-colors duration-[var(--duration-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
-            data-testid="av-action-manage"
-          >
-            <Settings2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            Gérer les contrats
-          </button>
-          <PendingControl
-            label="Effectuer un arbitrage"
-            hint="Réallouer entre supports — sans opération dédiée au journal"
-          />
-          <p className="text-meta mt-[var(--space-1)] flex items-start gap-[var(--space-2)]">
-            <ArrowRightLeft className="mt-[0.15rem] h-3 w-3 shrink-0" aria-hidden />
-            <span>
-              Un arbitrage se saisit aujourd&apos;hui en deux transactions — une
-              vente, un achat — sans lien entre elles.
-            </span>
-          </p>
-        </div>
-      </Panel>
+      {/*
+        Le bloc « Actions rapides » a disparu d'ici.
+
+        Ouvrir un contrat, verser, ajouter un support : ces trois entrées sont
+        désormais dans le menu « Ajouter » de l'en-tête, avec les mêmes cibles.
+        Les garder aussi dans la colonne les faisait exister à deux endroits,
+        et c'est le genre de doublon dont on finit par ne plus savoir lequel
+        fait foi.
+      */}
     </aside>
   );
 }

@@ -2611,3 +2611,73 @@ textarea:focus-visible,
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* ── Assurance-vie : ligne d'un contrat ───────────────────────────── */
+
+/*
+  Cinq colonnes alignées d'une ligne à l'autre — identité, valeur, performance,
+  versements, répartition. C'est ce qui rend deux contrats comparables sans
+  faire défiler, ce que les cartes de treize centimètres empêchaient.
+
+  Sous 1100 px, la grille se replie en deux colonnes : à cette largeur, cinq
+  colonnes rendraient chaque nombre illisible avant de le rendre comparable.
+*/
+.av-contract-row {
+  display: grid;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-4);
+  grid-template-columns:
+    minmax(0, 2.4fr) minmax(0, 1fr) minmax(0, 1fr)
+    minmax(0, 1fr) minmax(0, 1.2fr);
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.av-contract-row:hover {
+  background: var(--surface-hover);
+}
+
+.av-contract-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Sélection : la même grammaire que la ligne choisie du Portefeuille. */
+.av-contract-row.is-selected {
+  background: var(--surface-hover);
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.av-contract-list > li + li {
+  border-top: var(--border-width) solid var(--border);
+}
+
+@media (max-width: 1100px) {
+  .av-contract-row {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: var(--space-2) var(--space-3);
+  }
+}
+
+/*
+  Contexte global de l'assurance-vie, sous la liste.
+
+  Il occupait une colonne de droite, à côté du panneau de détail : deux
+  colonnes latérales pour un écran, et le contrat sélectionné se retrouvait
+  décrit à deux endroits. Ce qui relève de l'enveloppe entière — synthèse,
+  statut fiscal, opérations récentes — descend donc sous la liste, en bande
+  horizontale, et laisse la droite au seul contrat choisi.
+*/
+.av-context-inline {
+  display: grid;
+  gap: var(--gap-card);
+}
+
+@media (min-width: 900px) {
+  .av-context-inline {
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    align-items: start;
+  }
+}

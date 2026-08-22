@@ -487,32 +487,57 @@ export function ContractWorkspace({
     return () => document.removeEventListener("keydown", onKey);
   }, [view, onClose]);
 
-  useEffect(() => {
-    if (view) panelRef.current?.focus();
-  }, [view]);
+  /*
+    Pas de prise de focus à l'ouverture.
 
-  if (!view) return null;
+    La colonne n'est plus une modale : lui donner le focus ferait sauter le
+    défilement de la liste au moment même où l'on vient d'y cliquer. La
+    fermeture par Échap reste, elle, utile en tablette et en mobile, où le
+    panneau se superpose encore.
+  */
+
+  /*
+    Colonne ancrée, plus une surimpression.
+
+    Le panneau était une modale : voile, piège à focus, et le reste de
+    l'assurance-vie masqué au moment précis où l'on voulait y situer un contrat.
+    Il partage désormais la géométrie du panneau d'actif du Portefeuille et de
+    celui des Banques (`.asset-panel`) — ancré dans la grille en grand écran,
+    superposé en tablette, plein écran en mobile. La liste reste visible, et
+    passer d'un contrat à l'autre ne demande rien à refermer.
+  */
+  if (!view) {
+    return (
+      <aside
+        className="asset-panel"
+        data-testid="av-contract-workspace"
+        data-open="false"
+        aria-label="Détail du contrat"
+      >
+        <div className="asset-panel-empty">
+          <p className="text-[length:var(--text-sm)] text-[var(--foreground-secondary)]">
+            Aucun contrat sélectionné
+          </p>
+          <p className="text-meta max-w-[16rem]">
+            Cliquez un contrat pour afficher son détail ici. La liste reste en
+            place.
+          </p>
+        </div>
+      </aside>
+    );
+  }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex justify-end"
+    <aside
+      className="asset-panel"
       data-testid="av-contract-workspace"
+      data-open="true"
+      aria-label={`Contrat — ${view.title}`}
     >
-      <button
-        type="button"
-        aria-label="Fermer le panneau du contrat"
-        className="absolute inset-0 bg-[var(--overlay)]"
-        onClick={onClose}
-        data-testid="av-workspace-scrim"
-      />
-
       <div
         ref={panelRef}
         tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Contrat — ${view.title}`}
-        className="workspace-panel"
+        className="flex min-h-0 flex-1 flex-col"
         data-testid="av-workspace-panel"
       >
         <header className="workspace-head">
@@ -662,6 +687,6 @@ export function ContractWorkspace({
           )}
         </div>
       </div>
-    </div>
+    </aside>
   );
 }

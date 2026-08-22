@@ -378,6 +378,15 @@ export type SupportRow = {
   supportId: string;
   lifeInsuranceId: string | null;
   name: string;
+  /**
+   * Classe d'actif du journal — actions, obligations, monétaire…
+   *
+   * Distincte de `kind`, qui dit la **nature du support** au sens du contrat
+   * (fonds euro, unité de compte, produit structuré). Un contrat entièrement
+   * en UC peut être intégralement obligataire : les deux répartitions
+   * répondent à deux questions, et l'écran d'allocation les montre côte à côte.
+   */
+  assetClass: string | null;
   kind: string;
   isin: string | null;
   issuer: string | null;
@@ -471,6 +480,7 @@ export async function listSupports(userId: string): Promise<SupportRow[]> {
       supportId: s?.id ?? "",
       lifeInsuranceId: s?.lifeInsuranceId ?? null,
       name: a.name,
+      assetClass: a.assetClass ?? null,
       kind: s?.kind ?? kindFromAssetClass(a.assetClass),
       isin: s?.isin ?? a.isin,
       issuer: s?.issuer ?? null,

@@ -1145,7 +1145,7 @@ export async function seedUserPortfolio(
   });
 
   // ── Assurance-vie (onglet AV dédié) ─────────────────────────────────────────
-  await prisma.lifeInsurance.create({
+  const avLinxea = await prisma.lifeInsurance.create({
     data: {
       userId,
       insurer: "Spirica / Linxea Spirit 2",
@@ -1166,7 +1166,7 @@ export async function seedUserPortfolio(
       },
     },
   });
-  await prisma.lifeInsurance.create({
+  const avGenerali = await prisma.lifeInsurance.create({
     data: {
       userId,
       insurer: "Generali / Boursorama Vie",
@@ -1186,6 +1186,40 @@ export async function seedUserPortfolio(
       },
     },
   });
+
+  /*
+    Rattachement des supports aux contrats.
+
+    Sans lui, les trois lignes AV du journal restent orphelines : elles
+    comptent bien dans l'encours du patrimoine, mais chaque contrat s'affiche à
+    zéro euro et zéro support, et ni la répartition fonds euro / UC ni
+    l'antériorité fiscale ne peuvent se calculer. Un jeu de démonstration qui
+    montre deux contrats vides ne démontre rien.
+  */
+  const avAssets = await prisma.asset.findMany({
+    where: { userId, accountType: "AV" },
+    select: { id: true, name: true, assetClass: true },
+  });
+
+  for (const a of avAssets) {
+    const isEuroFund = a.name.toLowerCase().includes("fonds euro");
+    await prisma.lifeInsuranceSupport.create({
+      data: {
+        assetId: a.id,
+        // Le fonds euro et le tracker monde sur le contrat Linxea, le reste
+        // sur le contrat Generali : deux contrats réellement garnis, avec des
+        // répartitions différentes à lire.
+        lifeInsuranceId: isEuroFund || a.name.includes("MSCI World")
+          ? avLinxea.id
+          : avGenerali.id,
+        kind: isEuroFund ? "FONDS_EURO" : "UC",
+        issuer: isEuroFund ? "Spirica" : "Amundi",
+        // Frais de gestion : sans eux, la vue « Frais » n'a rien à pondérer.
+        managementFeePct: D(isEuroFund ? "0.60" : "0.85"),
+        entryFeePct: D("0"),
+      },
+    });
+  }
 
   // ── Passifs / crédits ──────────────────────────────────────────────────────
   const mortgage = await prisma.liability.create({

@@ -37,6 +37,8 @@ export type OverviewSupport = {
   lifeInsuranceId: string | null;
   name: string;
   kind: string;
+  /** Classe d'actif du journal — vue « par classe » de l'allocation. */
+  assetClass?: string | null;
   currentValueEur: string | null;
   costBasisEur?: string | null;
   unrealizedPnlEur?: string | null;

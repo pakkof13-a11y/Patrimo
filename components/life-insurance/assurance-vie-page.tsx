@@ -31,6 +31,7 @@ const MANAGE_HASH = "#gestion";
 
 export function AssuranceVieTab({ className }: { className?: string }) {
   const [manageOpen, setManageOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   // Le compte des contrats appartient au titre — la même requête sert la vue
   // d'ensemble juste en dessous, React Query ne la lance donc qu'une fois.
@@ -86,42 +87,80 @@ export function AssuranceVieTab({ className }: { className?: string }) {
           </p>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-[var(--space-2)]">
+        <div className="relative flex shrink-0 flex-wrap items-center gap-[var(--space-2)]">
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             onClick={() => openManage()}
             data-testid="av-manage-open"
           >
             <Settings2 className="h-3.5 w-3.5" />
-            Gérer les contrats
+            Gérer
           </Button>
+
           <Button
             type="button"
-            onClick={() => openManage("av-support-form")}
-            data-testid="av-add-support"
+            onClick={() => setAddOpen((o) => !o)}
+            aria-expanded={addOpen}
+            aria-haspopup="menu"
+            data-testid="av-add-open"
           >
             <Plus className="h-3.5 w-3.5" />
-            Verser
+            Ajouter
+            <ChevronDown className="ml-1 h-3.5 w-3.5" aria-hidden />
           </Button>
+
+          {addOpen ? (
+            <>
+              {/* Cliquer ailleurs referme — moins coûteux qu'un écouteur global. */}
+              <button
+                type="button"
+                className="fixed inset-0 z-40 cursor-default"
+                aria-label="Fermer le menu"
+                onClick={() => setAddOpen(false)}
+              />
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-50 mt-[var(--space-1)] min-w-[13rem] overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--card)] py-[var(--space-1)] shadow-[var(--shadow-lg)]"
+                data-testid="av-add-menu"
+              >
+                {(
+                  [
+                    ["av-contract-form", "Ouvrir un contrat"],
+                    ["av-support-form", "Verser / ajouter un support"],
+                    ["av-redemption-form", "Simuler un rachat"],
+                  ] as const
+                ).map(([target, label]) => (
+                  <button
+                    key={target}
+                    type="button"
+                    role="menuitem"
+                    className="block w-full px-[var(--space-3)] py-[var(--space-2)] text-left text-[length:var(--text-xs)] text-[var(--foreground)] transition-[background-color] hover:bg-[var(--surface-hover)]"
+                    onClick={() => {
+                      setAddOpen(false);
+                      openManage(target);
+                    }}
+                    data-testid={`av-add-${target}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
         </div>
       </header>
 
-      {/* Onglet unique — conservé pour la lisibilité de la page, pas pour
-          naviguer : il n'y a rien d'autre à atteindre. */}
-      <div
-        className="mb-[var(--gap-card)] border-b border-[var(--border)]"
-        data-testid="av-tabs"
-      >
-        <span className="inline-block border-b-2 border-[var(--primary)] px-[var(--space-1)] pb-[var(--space-2)] text-[length:var(--text-sm)] font-medium text-[var(--primary-text)]">
-          Vue d&apos;ensemble
-        </span>
-      </div>
+      {/*
+        Plus d'onglet unique décoratif.
 
-      <AvOverview
-        onManage={() => openManage()}
-        onAddSupport={() => openManage("av-support-form")}
-      />
+        La page affichait un « Vue d'ensemble » souligné qui ne menait nulle
+        part : une navigation à un seul élément n'est pas une navigation. Les
+        vues réelles — allocation, performances, versements, frais — sont
+        portées par la barre segmentée de `AvOverview`, où elles changent
+        effectivement le contenu.
+      */}
+      <AvOverview />
 
       {/* ── Gestion des contrats (repliée) ──────────────────────── */}
       <section id="av-manage" className="mt-[var(--gap-card)]">
