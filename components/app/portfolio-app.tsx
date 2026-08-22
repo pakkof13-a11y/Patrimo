@@ -165,10 +165,10 @@ const AlternativesTab = dynamic(
     })),
   { loading: () => <TabChunkFallback />, ssr: false }
 );
-const FiscalYearTab = dynamic(
+const FiscalTab = dynamic(
   () =>
-    import("@/components/tabs/fiscal-year-tab").then((m) => ({
-      default: m.FiscalYearTab,
+    import("@/components/fiscal/fiscal-tab").then((m) => ({
+      default: m.FiscalTab,
     })),
   { loading: () => <TabChunkFallback />, ssr: false }
 );
@@ -1525,7 +1525,7 @@ function PortfolioAppClient({
               />
             )}
 
-            {tab === "fiscal" && <FiscalYearTab baseCurrency={baseCurrency} />}
+            {tab === "fiscal" && <FiscalTab baseCurrency={baseCurrency} />}
           </div>
         </div>
         </Shell>

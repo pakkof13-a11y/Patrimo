@@ -44,6 +44,16 @@ export type FiscalYearReport = {
     /** Estimation PFU (31,4 % depuis 2026) sur réalisé + dividendes nets hors PEA/AV — indicative */
     estimatedPfuEur: number;
     /**
+     * Assiette du PFU estimé.
+     *
+     * Exposée parce que l'UI l'affichait en divisant l'impôt par un taux
+     * réécrit à la main — resté à 30 % après la hausse de 2026, ce qui
+     * gonflait la base affichée et rendait fausse l'égalité « base × taux =
+     * impôt ». Une valeur déjà calculée ici n'a pas à être reconstituée
+     * ailleurs.
+     */
+    pfuBaseEur: number;
+    /**
      * Total des ventes sans prix de revient connu, toutes enveloppes.
      * > 0 ⇒ le réalisé (et donc le PFU estimé) est sous-évalué : l'UI doit le
      * signaler explicitement plutôt que d'afficher un chiffre faussement net.
@@ -228,6 +238,7 @@ export function buildFiscalYearReport(
       // Taux lu depuis `tax/rates.ts` : écrit en dur, il serait resté à 30 %
       // après la hausse des prélèvements sociaux de 2026.
       estimatedPfuEur: pfuBase * Number(PFU_TOTAL_RATE),
+      pfuBaseEur: pfuBase,
       unresolvedSellCount,
     },
   };

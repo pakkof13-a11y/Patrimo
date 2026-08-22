@@ -6,84 +6,12 @@ import { fetchJson } from "@/app/lib/api-client";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatCurrency } from "@/app/lib/utils";
-
-type IfiLine = {
-  id: string;
-  label: string;
-  grossValueEur: string;
-  allowanceEur: string;
-  taxableValueEur: string;
-  deductibleDebtEur: string;
-  netValueEur: string;
-  excluded: boolean;
-};
-
-type RegimeOutcome = {
-  regime: string;
-  eligible: boolean;
-  ineligibilityReason: string | null;
-  deductionEur: string;
-  taxableIncomeEur: string;
-  deficitOffsetGlobalEur: string;
-  deficitCarriedForwardEur: string;
-  incomeTaxEur: string;
-  socialTaxEur: string;
-  totalTaxEur: string;
-  netAfterTaxEur: string;
-};
-
-type SchemeRow = {
-  assetId: string;
-  label: string;
-  scheme: string;
-  eligibleBaseEur: string;
-  totalReductionEur: string;
-  annualReductionEur: string;
-  yearsElapsed: number;
-  yearsRemaining: number;
-  finished: boolean;
-  subjectToGlobalCap: boolean;
-  baseWasCapped: boolean;
-  note: string | null;
-};
-
-type SchemesBlock = {
-  rows: SchemeRow[];
-  summary: {
-    totalAnnualEur: string;
-    cappedAnnualEur: string;
-    uncappedAnnualEur: string;
-    cappedAwayEur: string;
-    effectiveAnnualEur: string;
-  };
-};
-
-type TaxBundle = {
-  schemes: SchemesBlock;
-  properties: Array<{ assetId: string; label: string; isRental: boolean }>;
-  ifi: {
-    lines: IfiLine[];
-    grossTaxableEur: string;
-    totalDeductibleDebtEur: string;
-    netTaxableEur: string;
-    liable: boolean;
-    grossTaxEur: string;
-    discountEur: string;
-    taxEur: string;
-    effectiveRatePct: string;
-  };
-  marginalTaxRatePct: number;
-  rental: { bare: RentalSection; furnished: RentalSection };
-};
-
-type RentalSection = {
-  count: number;
-  grossRentEur: string;
-  deductibleChargesEur: string;
-  outcomes: RegimeOutcome[];
-  bestRegime: string | null;
-  savingVsNextEur: string;
-};
+import {
+  IFI_THRESHOLD_EUR,
+  type RealEstateTaxBundlePayload as TaxBundle,
+  type RentalSection,
+  type SchemesBlock,
+} from "@/app/lib/real-estate/tax/payload";
 
 const REGIME_LABELS: Record<string, string> = {
   MICRO_FONCIER: "Micro-foncier",
@@ -103,9 +31,6 @@ const SCHEME_LABELS: Record<string, string> = {
 };
 
 const TMI_OPTIONS = [0, 11, 30, 41, 45];
-
-/** Seuil d'assujettissement à l'IFI — sert au message d'écart au seuil. */
-const IFI_THRESHOLD_EUR = 1_300_000;
 
 function num(v: string | null | undefined): number {
   const n = Number(v ?? 0);
