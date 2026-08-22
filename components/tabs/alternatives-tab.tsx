@@ -11,31 +11,24 @@ import {
   Handshake,
   LayoutDashboard,
   Palette,
-  PieChart as PieChartIcon,
-  Plus,
 } from "lucide-react";
-import {
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-} from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import {
   type AlternativesDashboardPayload,
-  type AlternativesPortfolioSlice,
   type AlternativesSubTab,
-  crowdlendingAlertCounts,
 } from "@/app/lib/alternatives/types";
-import { CHART_COLORS } from "@/app/lib/types/ui";
 import { AlternativesMetals } from "@/components/tabs/alternatives-metals";
 import { AlternativesPrivateEquity } from "@/components/tabs/alternatives-private-equity";
 import { AlternativesCrowdlending } from "@/components/tabs/alternatives-crowdlending";
 import { AlternativesTangibles } from "@/components/tabs/alternatives-tangibles";
-import { AltDashKpi } from "@/components/tabs/alternatives-shell";
+import {
+  CATEGORY_LABEL,
+  CATEGORY_SUB,
+  computeAlternativesTotals,
+  type AlternativeCategory,
+} from "@/app/lib/alternatives/consolidated";
+import { AlternativeDetailPanel } from "@/components/tabs/alternatives-panel";
 
 const SUB_NAV: {
   id: AlternativesSubTab;
@@ -83,41 +76,63 @@ const ALT_SUBS = new Set<string>([
   "tangibles",
 ]);
 
-function fmtMultipleShort(v: number | null | undefined): string {
-  if (v == null) return "—";
-  return `${v.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
-}
-
 function fmtPctShort(v: number | null | undefined): string {
   if (v == null) return "—";
   return `${v.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} %`;
 }
 
-const MODULE_GUIDES: Record<
-  Exclude<AlternativesSubTab, "dashboard">,
-  { title: string; blurb: string; cta: string }
-> = {
-  metals: {
-    title: "Métaux précieux",
-    blurb: "Or, argent, platine — physique ou papier, PRU et valorisation manuelle.",
-    cta: "Ajouter un métal",
-  },
-  "private-equity": {
-    title: "Private Equity",
-    blurb: "Participations non cotées — NAV manuelle, P&L et MOIC.",
-    cta: "Ajouter une position PE",
-  },
-  crowdlending: {
-    title: "Crowdlending",
-    blurb: "Prêts participatifs — capital, échéance et compte à rebours.",
-    cta: "Ajouter un prêt",
-  },
-  tangibles: {
-    title: "Tangibles & collection",
-    blurb: "Montres, vins, art… — achat vs estimation manuelle.",
-    cta: "Ajouter un objet",
-  },
+/** Teinte par famille — la même dans la barre, la légende et la liste. */
+const CATEGORY_TONE: Record<AlternativeCategory, string> = {
+  METAL: "var(--chart-gold)",
+  PRIVATE_EQUITY: "var(--chart-cyan)",
+  CROWDLENDING: "var(--chart-positive)",
+  TANGIBLE: "var(--chart-neutral)",
 };
+
+/** Tuile de tête — même grammaire que les autres modules patrimoniaux. */
+function AltKpi({
+  label,
+  value,
+  secondary,
+  tone,
+  loading,
+  testId,
+}: {
+  label: string;
+  value: string;
+  secondary?: string;
+  tone?: "positive" | "negative";
+  loading?: boolean;
+  testId: string;
+}) {
+  return (
+    <div
+      className="min-w-0 px-[var(--space-4)] py-[var(--space-3)]"
+      data-testid={testId}
+    >
+      {loading ? (
+        <Skeleton className="h-6 w-24" />
+      ) : (
+        <p
+          className={cn(
+            "num truncate text-[length:var(--text-lg)] font-semibold tracking-tight",
+            tone === "positive" && "val-positive",
+            tone === "negative" && "val-negative",
+            !tone && "text-[var(--foreground)]"
+          )}
+        >
+          {value}
+        </p>
+      )}
+      <p className="text-label mt-[var(--space-1)]">{label}</p>
+      {secondary && !loading ? (
+        <p className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
+          {secondary}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 export function AlternativesTab({
   baseCurrency = "EUR",
@@ -154,382 +169,376 @@ export function AlternativesTab({
     staleTime: 60_000,
   });
 
-  const summary = dashQ.data?.metals;
-  const peSummary = dashQ.data?.privateEquity;
-  const clSummary = dashQ.data?.crowdlending;
-  const tangSummary = dashQ.data?.tangibles;
-  const altAgg: AlternativesPortfolioSlice | undefined = dashQ.data?.summary;
+  /*
+    Positions consolidées et agrégats de la poche.
 
-  const pieData = useMemo(() => {
-    const slices = (altAgg?.slices ?? []).filter((s) => s.value > 0);
-    return slices.map((s, i) => ({
-      ...s,
-      fill: CHART_COLORS[i % CHART_COLORS.length],
-    }));
-  }, [altAgg]);
+    Le payload porte désormais les lignes des quatre familles — déjà chargées
+    côté serveur pour en tirer les summaries, puis jetées jusqu'ici. Les
+    consolider ne coûte donc aucune requête, et évite quatre appels réseau au
+    montage de la vue d'ensemble.
+  */
+  const investments = useMemo(
+    () => dashQ.data?.investments ?? [],
+    [dashQ.data?.investments]
+  );
+  const totals = useMemo(
+    () => computeAlternativesTotals(investments),
+    [investments]
+  );
 
-  const totalAlt = Number(altAgg?.totalEur ?? 0);
-  const hasAnyAlt =
-    (summary?.lineCount ?? 0) +
-      (peSummary?.lineCount ?? 0) +
-      (clSummary?.lineCount ?? 0) +
-      (tangSummary?.lineCount ?? 0) >
-    0;
+  /*
+    Alertes — construites côté métier (`buildAlternativesShortAlerts`) à partir
+    des summaries : retards et défauts de crowdlending, échéances proches, NAV
+    de private equity non rafraîchies. Aucun compteur n'est recalculé ici.
+  */
+  const shortAlerts = useMemo(
+    () => dashQ.data?.shortAlerts ?? [],
+    [dashQ.data?.shortAlerts]
+  );
 
-  /**
-   * Alertes CL/PE — dérivées des summaries déjà présents dans le payload
-   * agrégé (aucun fetch ni champ de saisie supplémentaire) : `byStatus`
-   * pour late/défaut, `soonCount` (prêts ACTIVE à échéance ≤ 3 mois) et
-   * `staleNavCount` (positions PE dont la NAV n'a pas été mise à jour
-   * depuis > 6 mois, cf. app/lib/alternatives/private-equity.ts::isNavStale).
-   * Logique testée dans crowdlendingAlertCounts (tests/unit/alternatives-cl-alerts.test.ts)
-   * et dans tests/unit/alternatives.test.ts (soonCount, staleNavCount).
-   */
-  const {
-    lateCount: clLateCount,
-    defaultCount: clDefaultCount,
-    hasAlerts: hasClLateOrDefaultAlerts,
-  } = crowdlendingAlertCounts(clSummary?.byStatus);
-  const clSoonCount = clSummary?.soonCount ?? 0;
-  const peStaleNavCount = peSummary?.staleNavCount ?? 0;
-  const hasAlerts =
-    hasClLateOrDefaultAlerts || clSoonCount > 0 || peStaleNavCount > 0;
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selectedInvestment = useMemo(
+    () =>
+      investments.find((i) => `${i.category}:${i.id}` === selectedKey) ?? null,
+    [investments, selectedKey]
+  );
 
   function goModule(id: AlternativesSubTab) {
     setSub(id);
   }
 
   return (
-    <div className="space-y-5" data-testid="alternatives-tab">
-      {/* ── Header section ── */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="min-w-0 space-y-[var(--space-4)]" data-testid="alternatives-tab">
+      {/* ── En-tête ──────────────────────────────────────────────── */}
+      <header className="module-page-header flex flex-wrap items-start justify-between gap-[var(--space-3)] px-0.5">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold leading-snug">
-            Actifs alternatifs
-          </h1>
-          <p className="module-intro max-w-xl text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-            Poche hors marchés cotés — métaux, private equity, crowdlending et
-            tangibles. La vue d’ensemble synthétise ; chaque sous-module gère
-            sa saisie experte.
+          <h1 className="text-title">Actifs alternatifs</h1>
+          <p className="text-meta">
+            Diversification hors marchés cotés
+            {totals.count > 0 ? (
+              <>
+                <span className="mx-1 opacity-40">·</span>
+                {totals.count} investissement{totals.count > 1 ? "s" : ""}
+                <span className="mx-1 opacity-40">·</span>
+                {totals.byCategory.length} famille
+                {totals.byCategory.length > 1 ? "s" : ""}
+              </>
+            ) : null}
           </p>
         </div>
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)]/20 px-4 py-2 text-right">
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-            Total poche alternative
-          </div>
-          <div className="text-xl font-semibold tabular-nums tracking-tight text-teal-700 dark:text-teal-300">
-            {formatCurrency(String(totalAlt), baseCurrency)}
-          </div>
-        </div>
+      </header>
+
+      {/* ── KPI consolidés ───────────────────────────────────────── */}
+      <div
+        className="card grid grid-cols-2 divide-x divide-y divide-[var(--border)] overflow-hidden sm:grid-cols-3 sm:divide-y-0 lg:grid-cols-5"
+        data-testid="alt-kpi-strip"
+      >
+        <AltKpi
+          testId="alt-kpi-value"
+          label="Valeur totale"
+          value={formatCurrency(String(totals.valueEur), baseCurrency)}
+          secondary="Poche alternative"
+          loading={dashQ.isPending}
+        />
+        <AltKpi
+          testId="alt-kpi-invested"
+          label="Investi"
+          value={formatCurrency(String(totals.investedEur), baseCurrency)}
+          secondary="Capital engagé"
+          loading={dashQ.isPending}
+        />
+        <AltKpi
+          testId="alt-kpi-pnl"
+          label="Résultat"
+          value={formatCurrency(String(totals.pnlEur), baseCurrency)}
+          secondary={fmtPctShort(totals.pnlPct)}
+          tone={totals.pnlEur >= 0 ? "positive" : "negative"}
+          loading={dashQ.isPending}
+        />
+        <AltKpi
+          testId="alt-kpi-count"
+          label="Investissements"
+          value={String(totals.count)}
+          secondary={`${totals.byCategory.length} famille${totals.byCategory.length > 1 ? "s" : ""}`}
+          loading={dashQ.isPending}
+        />
+        <AltKpi
+          testId="alt-kpi-alerts"
+          label="Alertes"
+          value={String(shortAlerts.reduce((s, a) => s + a.count, 0))}
+          secondary={
+            shortAlerts.length > 0 ? "À examiner" : "Rien à signaler"
+          }
+          tone={shortAlerts.length > 0 ? "negative" : undefined}
+          loading={dashQ.isPending}
+        />
       </div>
 
-      {/* ── Sub-nav ── */}
-      <nav
-        className="flex flex-wrap gap-1 border-b border-[var(--border)] pb-2"
-        aria-label="Sous-modules actifs alternatifs"
-      >
-        {SUB_NAV.map((item) => {
-          const active = sub === item.id;
-          return (
+      {/* ── Sous-navigation ──────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-[var(--space-2)]">
+        <div
+          className="term-seg"
+          role="tablist"
+          aria-label="Sous-modules actifs alternatifs"
+        >
+          {SUB_NAV.map((item) => (
             <button
               key={item.id}
               type="button"
+              role="tab"
+              aria-selected={sub === item.id}
+              data-active={sub === item.id}
+              className="term-seg-item"
               data-testid={`alt-sub-${item.id}`}
               onClick={() => setSub(item.id)}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition",
-                "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-                active
-                  ? "bg-teal-50 text-teal-900 ring-1 ring-teal-500/25 dark:bg-teal-950/60 dark:text-teal-100"
-                  : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-              )}
             >
-              {item.icon}
               <span className="hidden sm:inline">{item.label}</span>
               <span className="sm:hidden">{item.short}</span>
             </button>
-          );
-        })}
-      </nav>
+          ))}
+        </div>
+      </div>
 
-      {/* ── Dashboard ── */}
+      {/* ── Vue d'ensemble ───────────────────────────────────────── */}
       {sub === "dashboard" && (
-        <section className="space-y-4" data-testid="alt-dashboard">
-          {dashQ.isPending ? (
-            <div
-              className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
-              data-testid="alt-dash-kpi-skeleton"
-              aria-busy="true"
-            >
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="card p-4">
-                  <Skeleton className="h-2.5 w-24" />
-                  <Skeleton className="mt-2 h-6 w-28" />
-                  <Skeleton className="mt-1.5 h-2 w-36" />
+        <div
+          className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-start"
+          data-testid="alt-dashboard"
+        >
+          <div className="flex min-w-0 flex-col gap-[var(--gap-card)]">
+            {/* Répartition de la poche */}
+            {totals.byCategory.length > 0 && (
+              <section
+                className="card min-w-0 p-[var(--space-4)]"
+                data-testid="alt-split"
+              >
+                <h2 className="text-label mb-[var(--space-2)]">Répartition</h2>
+                <div
+                  className="flex h-2 w-full overflow-hidden rounded-full bg-[var(--muted)]"
+                  role="img"
+                  aria-label={totals.byCategory
+                    .map((c) => `${c.label} ${Math.round(c.sharePct ?? 0)} %`)
+                    .join(", ")}
+                >
+                  {totals.byCategory.map((c) => (
+                    <span
+                      key={c.category}
+                      style={{
+                        width: `${c.sharePct ?? 0}%`,
+                        background: CATEGORY_TONE[c.category],
+                      }}
+                    />
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <AltDashKpi
-                label="Métaux précieux"
-                value={formatCurrency(summary?.totalValue || "0", baseCurrency)}
-                hint={
-                  (summary?.lineCount ?? 0) > 0
-                    ? `${summary?.lineCount} pos. · P&L ${formatCurrency(summary?.totalPnl || "0", baseCurrency)}`
-                    : "Lingots, pièces, papier — non renseigné"
-                }
-                tone={Number(summary?.totalPnl || 0)}
-                onClick={() => goModule("metals")}
-              />
-              <AltDashKpi
-                label="Private Equity (appelé)"
-                value={formatCurrency(
-                  peSummary?.totalCalledCapital || "0",
-                  baseCurrency
-                )}
-                hint={
-                  (peSummary?.lineCount ?? 0) > 0
-                    ? `${peSummary?.lineCount} pos. · TVPI moy. ${fmtMultipleShort(peSummary?.avgTvpi)} · Distrib. ${formatCurrency(peSummary?.totalDistributions || "0", baseCurrency)}`
-                    : "Participations non cotées — non renseigné"
-                }
-                tone={Number(peSummary?.totalPnl || 0)}
-                onClick={() => goModule("private-equity")}
-              />
-              <AltDashKpi
-                label="Crowdlending (en cours)"
-                value={formatCurrency(
-                  clSummary?.activeCapital || "0",
-                  baseCurrency
-                )}
-                hint={
-                  (clSummary?.lineCount ?? 0) > 0
-                    ? `${clSummary?.lineCount} prêt(s) · Rendement moy. ${fmtPctShort(clSummary?.weightedAverageYield)} · Revenu ${formatCurrency(clSummary?.projectedAnnualIncome || "0", baseCurrency)}`
-                    : "Prêts participatifs — non renseigné"
-                }
-                onClick={() => goModule("crowdlending")}
-              />
-              <AltDashKpi
-                label="Tangibles & collection"
-                value={formatCurrency(
-                  tangSummary?.totalValue || "0",
-                  baseCurrency
-                )}
-                hint={
-                  (tangSummary?.lineCount ?? 0) > 0
-                    ? `${tangSummary?.lineCount} objet(s) · P&L ${formatCurrency(tangSummary?.totalPnl || "0", baseCurrency)}`
-                    : "Collection — non renseigné"
-                }
-                tone={Number(tangSummary?.totalPnl || 0)}
-                onClick={() => goModule("tangibles")}
-              />
-            </div>
-          )}
-
-          {hasAlerts && (
-            <div
-              className="space-y-1 rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
-              data-testid="alt-dashboard-alerts"
-            >
-              {(clLateCount > 0 || clDefaultCount > 0) && (
-                <button
-                  type="button"
-                  onClick={() => goModule("crowdlending")}
-                  className="flex w-full items-start gap-2 text-left transition hover:text-amber-950 dark:hover:text-amber-100"
-                  data-testid="alt-alert-cl-late-default"
-                >
-                  <AlertTriangle
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0"
-                    aria-hidden
-                  />
-                  <span>
-                    {clLateCount > 0 && (
-                      <>
-                        <strong>{clLateCount}</strong> prêt
-                        {clLateCount > 1 ? "s" : ""} en retard
-                      </>
-                    )}
-                    {clLateCount > 0 && clDefaultCount > 0 && " · "}
-                    {clDefaultCount > 0 && (
-                      <>
-                        <strong>{clDefaultCount}</strong> prêt
-                        {clDefaultCount > 1 ? "s" : ""} en défaut
-                      </>
-                    )}
-                    {" — "}Crowdlending
-                  </span>
-                </button>
-              )}
-
-              {clSoonCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => goModule("crowdlending")}
-                  className="flex w-full items-start gap-2 text-left transition hover:text-amber-950 dark:hover:text-amber-100"
-                  data-testid="alt-alert-cl-soon"
-                >
-                  <AlertTriangle
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0"
-                    aria-hidden
-                  />
-                  <span>
-                    <strong>{clSoonCount}</strong> prêt
-                    {clSoonCount > 1 ? "s" : ""} à échéance ≤ 3 mois
-                    {" — "}Crowdlending
-                  </span>
-                </button>
-              )}
-
-              {peStaleNavCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => goModule("private-equity")}
-                  className="flex w-full items-start gap-2 text-left transition hover:text-amber-950 dark:hover:text-amber-100"
-                  data-testid="alt-alert-pe-stale-nav"
-                >
-                  <AlertTriangle
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0"
-                    aria-hidden
-                  />
-                  <span>
-                    <strong>{peStaleNavCount}</strong> position
-                    {peStaleNavCount > 1 ? "s" : ""} PE avec NAV non mise à
-                    jour depuis {"> 6 mois"}
-                    {" — "}Private Equity
-                  </span>
-                </button>
-              )}
-            </div>
-          )}
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="card overflow-hidden p-4">
-              <h2 className="mb-0.5 text-sm font-semibold">
-                Répartition de la poche
-              </h2>
-              <p className="mb-3 text-[11px] text-slate-400">
-                Poids de chaque sous-catégorie dans les actifs alternatifs
-              </p>
-              {pieData.length === 0 ? (
-                <div className="flex min-h-[14rem] flex-col items-center justify-center gap-2 px-2 py-6 text-center">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--muted)] text-slate-400">
-                    <PieChartIcon className="h-4 w-4" />
-                  </div>
-                  <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                    La répartition apparaîtra ici
-                  </p>
-                  <p className="max-w-xs text-[11px] leading-relaxed text-slate-400">
-                    Ajoutez une première position dans un sous-module pour
-                    visualiser le poids de chaque poche.
-                  </p>
-                </div>
-              ) : (
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={pieData}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius={55}
-                        outerRadius={90}
-                        paddingAngle={2}
-                      >
-                        {pieData.map((e) => (
-                          <Cell key={e.id} fill={e.fill} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(v) =>
-                          formatCurrency(String(v ?? 0), baseCurrency)
+                <ul className="mt-[var(--space-3)] grid gap-[var(--space-1)] sm:grid-cols-2">
+                  {totals.byCategory.map((c) => (
+                    <li key={c.category}>
+                      <button
+                        type="button"
+                        className="flex w-full items-baseline justify-between gap-[var(--space-3)] py-[var(--space-1)] text-left transition-[color] hover:text-[var(--primary-text)]"
+                        onClick={() =>
+                          goModule(CATEGORY_SUB[c.category] as AlternativesSubTab)
                         }
-                      />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-            </div>
-
-            <div className="card p-4">
-              <h2 className="mb-0.5 text-sm font-semibold">
-                {hasAnyAlt ? "Détail par module" : "Démarrer la poche alternative"}
-              </h2>
-              <p className="mb-3 text-[11px] leading-relaxed text-slate-400">
-                {hasAnyAlt
-                  ? "Total intégré au patrimoine net global. Cliquez une carte ou un module pour saisir."
-                  : "Choisissez le type d’actif à suivre. Chaque module ouvre un formulaire à la demande — pas de saisie bloquante ici."}
-              </p>
-
-              {hasAnyAlt ? (
-                <ul className="space-y-2 text-sm">
-                  {pieData.map((s) => {
-                    const pct =
-                      totalAlt > 0
-                        ? Math.round((s.value / totalAlt) * 1000) / 10
-                        : 0;
-                    return (
-                      <li
-                        key={s.id}
-                        className="flex items-center justify-between border-t border-[var(--border)] pt-2"
+                        data-testid="alt-split-row"
                       >
-                        <button
-                          type="button"
-                          className="text-left font-medium text-slate-700 hover:text-teal-700 dark:text-slate-200 dark:hover:text-teal-300"
-                          onClick={() =>
-                            goModule(
-                              (s.id as AlternativesSubTab) || "dashboard"
-                            )
-                          }
-                        >
-                          {s.name}
-                        </button>
-                        <span className="tabular-nums font-medium">
-                          {formatCurrency(String(s.value), baseCurrency)}
-                          <span className="ml-2 text-xs text-slate-400">
-                            {pct} %
+                        <span className="flex min-w-0 items-center gap-[var(--space-2)] text-[length:var(--text-xs)] text-[var(--foreground-secondary)]">
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{ background: CATEGORY_TONE[c.category] }}
+                            aria-hidden
+                          />
+                          {c.label}
+                        </span>
+                        <span className="num shrink-0 text-[length:var(--text-xs)]">
+                          {formatCurrency(String(c.valueEur), baseCurrency)}
+                          <span className="text-meta ml-[var(--space-2)]">
+                            {fmtPctShort(c.sharePct)}
                           </span>
                         </span>
-                      </li>
-                    );
-                  })}
+                      </button>
+                    </li>
+                  ))}
                 </ul>
-              ) : (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {(
-                    Object.keys(MODULE_GUIDES) as Array<
-                      keyof typeof MODULE_GUIDES
-                    >
-                  ).map((id) => {
-                    const g = MODULE_GUIDES[id];
-                    return (
+              </section>
+            )}
+
+            {/*
+              Alertes.
+
+              Elles viennent de `shortAlerts`, déjà construit côté métier à
+              partir des summaries — aucun compteur n'est recalculé ici. Une
+              ligne compacte et cliquable plutôt qu'une bannière : ce sont des
+              faits à examiner, pas une urgence à crier.
+            */}
+            {shortAlerts.length > 0 && (
+              <section
+                className="card min-w-0 p-[var(--space-4)]"
+                data-testid="alt-alerts"
+              >
+                <h2 className="text-label mb-[var(--space-2)]">Alertes</h2>
+                <ul className="divide-y divide-[var(--border)]">
+                  {shortAlerts.map((a) => (
+                    <li key={a.type}>
                       <button
-                        key={id}
                         type="button"
-                        onClick={() => goModule(id)}
-                        className={cn(
-                          "rounded-xl border border-[var(--border)] bg-[var(--muted)]/20 p-3 text-left transition",
-                          "hover:border-teal-500/30 hover:bg-teal-500/[0.04]",
-                          "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-                        )}
+                        className="flex w-full items-center justify-between gap-[var(--space-3)] py-[var(--space-2)] text-left transition-[color] hover:text-[var(--foreground)]"
+                        onClick={() => goModule(a.sub)}
+                        data-testid={`alt-alert-${a.type}`}
                       >
-                        <div className="text-sm font-semibold">{g.title}</div>
-                        <p className="mt-1 text-[11px] leading-snug text-slate-400">
-                          {g.blurb}
-                        </p>
-                        <span className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-teal-700 dark:text-teal-300">
-                          <Plus className="h-3 w-3" />
-                          {g.cta}
+                        <span className="flex min-w-0 items-center gap-[var(--space-2)] text-[length:var(--text-xs)] text-[var(--foreground-secondary)]">
+                          <AlertTriangle
+                            className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]"
+                            aria-hidden
+                          />
+                          {a.label}
+                        </span>
+                        <span className="num shrink-0 text-[length:var(--text-xs)] font-medium text-[var(--foreground)]">
+                          {a.count}
                         </span>
                       </button>
-                    );
-                  })}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {/* Liste consolidée */}
+            <section
+              className="card min-w-0 overflow-hidden"
+              data-testid="alt-investments"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-[var(--space-2)] border-b border-[var(--border)] px-[var(--space-4)] py-[var(--space-3)]">
+                <h2 className="text-label">Investissements</h2>
+                <span className="text-meta num">
+                  {formatCurrency(String(totals.valueEur), baseCurrency)}
+                </span>
+              </div>
+
+              {dashQ.isPending ? (
+                <div className="space-y-[var(--space-2)] p-[var(--space-4)]">
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                </div>
+              ) : investments.length === 0 ? (
+                <div className="p-[var(--space-4)]" data-testid="alt-empty">
+                  <p className="text-[length:var(--text-sm)] text-[var(--foreground-secondary)]">
+                    Aucun investissement alternatif
+                  </p>
+                  <p className="text-meta mt-[var(--space-1)] max-w-prose">
+                    Métaux, private equity, crowdlending et tangibles se
+                    saisissent depuis leur sous-module. Chacun garde ses
+                    indicateurs propres : un lingot n&apos;a pas de TVPI, un
+                    prêt n&apos;a pas de prime.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="term-table" data-testid="alt-investments-table">
+                    <thead>
+                      <tr>
+                        <th>Investissement</th>
+                        <th>Catégorie</th>
+                        <th>Plateforme</th>
+                        <th className="text-right">Valeur</th>
+                        <th className="text-right">Investi</th>
+                        <th className="text-right">Perf.</th>
+                        <th>Statut</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {investments.map((i) => {
+                        const key = `${i.category}:${i.id}`;
+                        return (
+                          <tr
+                            key={key}
+                            className={cn(
+                              "alt-row",
+                              selectedKey === key && "is-selected"
+                            )}
+                            onClick={() => setSelectedKey(key)}
+                            aria-current={
+                              selectedKey === key ? "true" : undefined
+                            }
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                setSelectedKey(key);
+                              }
+                            }}
+                            data-testid="alt-investment-row"
+                          >
+                            <td>
+                              <span className="block truncate font-medium text-[var(--foreground)]">
+                                {i.name}
+                              </span>
+                              {i.subtitle ? (
+                                <span className="text-meta block truncate">
+                                  {i.subtitle}
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="text-[var(--foreground-secondary)]">
+                              {CATEGORY_LABEL[i.category]}
+                            </td>
+                            <td className="text-[var(--foreground-secondary)]">
+                              {i.platform?.trim() || "—"}
+                            </td>
+                            <td className="num text-right font-medium">
+                              {formatCurrency(String(i.valueEur), i.currency)}
+                            </td>
+                            <td className="num text-right">
+                              {formatCurrency(String(i.investedEur), i.currency)}
+                            </td>
+                            <td
+                              className={cn(
+                                "num text-right",
+                                i.pnlPct != null &&
+                                  i.pnlPct >= 0 &&
+                                  "val-positive",
+                                i.pnlPct != null && i.pnlPct < 0 && "val-negative"
+                              )}
+                            >
+                              {i.pnlPct != null
+                                ? `${i.pnlPct >= 0 ? "+" : "−"}${Math.abs(i.pnlPct).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} %`
+                                : "—"}
+                            </td>
+                            <td>
+                              <span
+                                className={cn(
+                                  "inline-flex items-center gap-[var(--space-2)] text-[length:var(--text-2xs)]",
+                                  i.statusIsAlert
+                                    ? "text-[var(--danger)]"
+                                    : "text-[var(--foreground-secondary)]"
+                                )}
+                              >
+                                <span
+                                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                                  style={{
+                                    background: i.statusIsAlert
+                                      ? "var(--danger)"
+                                      : "var(--success)",
+                                  }}
+                                  aria-hidden
+                                />
+                                {i.status}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
-            </div>
+            </section>
           </div>
-        </section>
+
+          <AlternativeDetailPanel
+            investment={selectedInvestment}
+            onClose={() => setSelectedKey(null)}
+          />
+        </div>
       )}
 
       {sub === "metals" && <AlternativesMetals baseCurrency={baseCurrency} />}

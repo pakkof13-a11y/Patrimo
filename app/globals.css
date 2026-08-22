@@ -2736,3 +2736,22 @@ textarea:focus-visible,
     align-items: start;
   }
 }
+
+/* ── Alternatifs : ligne d'un investissement ──────────────────────── */
+
+.alt-row {
+  cursor: pointer;
+}
+
+.alt-row.is-selected > td {
+  background: var(--surface-hover);
+}
+
+.alt-row.is-selected > td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.alt-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
