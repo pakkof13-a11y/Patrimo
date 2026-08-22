@@ -1,18 +1,12 @@
 import { prisma } from "../prisma";
 import { d, toFixed, zero } from "../money/decimal";
 import {
-  applyTransaction,
-  createEmptyLedger,
   replayTransactions,
-  totalCash,
   totalCostBasis,
   totalRealizedPnl,
-  type LedgerTx,
-  type TxType,
 } from "../accounting";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
 import { endOfParisDay, parisDayKey, parisDayStart } from "../dates/paris";
-import { marketValueOfPositions } from "./class-history";
 import { PortfolioValuationEngine } from "./historical/engine";
 import { loadHistoricalInputs } from "./historical/load";
 import type {
@@ -20,8 +14,6 @@ import type {
   PortfolioValuationPoint,
   ValuationComponent,
 } from "./historical/types";
-import type { DailyCloseIndex } from "./class-history";
-import { readDailyCloses } from "../market/daily-closes";
 import { resolvePlatformLogo } from "../platforms/presets";
 import { resolveAssetLogo } from "../assets/logos";
 import {

@@ -62,7 +62,6 @@ import {
 import {
   enumerateDays,
   indexFlowsByDay,
-  previousDay,
   sumTimelinesAt,
   ValueTimeline,
 } from "./timeline";
@@ -257,7 +256,6 @@ export class PortfolioValuationEngine {
 
     // ── Journal : valeur de marché ventilée par classe ───────────────────────
     const byComponent = new Map<ValuationComponent, Decimal>();
-    let unpricedAssets = 0;
 
     const positionsByComponent = new Map<
       ValuationComponent,
@@ -278,10 +276,9 @@ export class PortfolioValuationEngine {
         day
       );
       byComponent.set(comp, marketEur);
-      if (unpriced > 0) {
-        unpricedAssets += unpriced;
-        estimated.add(comp);
-      }
+      // Au moins une position sans cours connu ce jour-là : retenue au coût,
+      // donc le compartiment n'est pas exact.
+      if (unpriced > 0) estimated.add(comp);
     }
 
     // ── Poches de cash, alternatifs, épargne salariale ───────────────────────
