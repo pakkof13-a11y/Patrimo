@@ -113,8 +113,13 @@ function ValueTooltip({
 /**
  * Courbe de valeur — mode par défaut (Versus = Aucun). Ligne unique, teinte
  * dérivée du sens global de la période (hausse/baisse), aire dégradée en
- * dessous. Aucun lissage des données : `monotone` ne fait qu'incurver le
- * tracé entre points réels, les pics et creux restent exacts.
+ * dessous.
+ *
+ * Tracé **linéaire**, jamais incurvé : la courbe porte une valeur quotidienne
+ * réelle par point, et une interpolation en spline dessinerait entre deux jours
+ * des valeurs que le patrimoine n'a jamais prises. Sur une série dense c'est
+ * imperceptible ; sur une série creuse, cela invente exactement ce que le
+ * moteur s'interdit de fabriquer.
  */
 export function PortfolioValueChart({
   data,
@@ -163,10 +168,12 @@ export function PortfolioValueChart({
           )}
         />
         <Area
-          type="monotone"
+          type="linear"
           dataKey="total"
           stroke={stroke}
-          strokeWidth={2.25}
+          // Trait fin : une série quotidienne compte des centaines de points,
+          // un tracé épais les empâte en un ruban.
+          strokeWidth={1.75}
           fill="url(#evolution-value-fill)"
           dot={false}
           activeDot={{ r: 4, strokeWidth: 0 }}
@@ -284,11 +291,11 @@ export function PortfolioPercentChart({
           />
         )}
         <Area
-          type="monotone"
+          type="linear"
           dataKey="portfolioPct"
           name="Portefeuille"
           stroke={stroke}
-          strokeWidth={2.25}
+          strokeWidth={1.75}
           fill="url(#evolution-percent-fill)"
           dot={false}
           activeDot={{ r: 4, strokeWidth: 0 }}
@@ -296,7 +303,7 @@ export function PortfolioPercentChart({
         />
         {hasBenchmark && (
           <Line
-            type="monotone"
+            type="linear"
             dataKey="benchmarkPct"
             name={benchmarkName}
             stroke="var(--muted-foreground)"

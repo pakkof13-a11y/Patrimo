@@ -1055,6 +1055,20 @@ export function downsampleSeries<T extends { grossAssets: number; externalFlows:
 
   const keep = new Set<number>([0, series.length - 1]);
 
+  /*
+    La fenêtre récente reste au jour le jour.
+
+    Les plages courtes — 7J, 1M, 3M, 6M, YTD, 1A — filtrent cette même série :
+    si l'échantillonnage y retirait des jours, « 7J » afficherait trois points
+    au lieu de sept et la granularité annoncée serait fausse. Seul le passé
+    lointain, que l'écran ne montre qu'écrasé sur quelques pixels, est
+    échantillonné.
+  */
+  const DAILY_TAIL_DAYS = 400;
+  for (let i = Math.max(0, series.length - DAILY_TAIL_DAYS); i < series.length; i++) {
+    keep.add(i);
+  }
+
   // Amplitude de référence : un mouvement compte s'il pèse dans la courbe.
   let min = Infinity;
   let max = -Infinity;

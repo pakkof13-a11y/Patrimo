@@ -234,6 +234,31 @@ export type HistoryPoint = {
   /** Coût de revient positions (base) */
   totalCostBase?: number;
   isLive?: boolean;
+
+  /** Valeur brute des actifs — métrique par défaut de la courbe. */
+  grossAssetsBase?: number;
+  /** `grossAssets - liabilities`. */
+  netWorthBase?: number;
+  liabilitiesBase?: number;
+  /** Capital externe entré (net) ce jour-là — jamais compté en performance. */
+  externalFlowsBase?: number;
+  /** Résultat du jour, flux neutralisés. */
+  investmentPerformanceBase?: number;
+
+  securitiesBase?: number;
+  cryptoBase?: number;
+  realEstateBase?: number;
+  lifeInsuranceBase?: number;
+  alternativesBase?: number;
+  employeeSavingsBase?: number;
+  otherAssetsBase?: number;
+
+  /** `EXACT` | `ESTIMATED` | `MISSING`. */
+  status?: "EXACT" | "ESTIMATED" | "MISSING";
+  /** Compartiments non exacts ce jour-là. */
+  estimatedComponents?: string[];
+  /** Au moins un compartiment estimé ce jour-là. */
+  estimated?: boolean;
 };
 
 export type HoldingsResponse = {

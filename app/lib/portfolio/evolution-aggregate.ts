@@ -30,6 +30,8 @@ export type EvolutionSeriesPoint = {
   periodLabel: string;
   /** Valeur totale (stock) en fin de bucket */
   total: number;
+  /** Capital externe entré (net) sur le bucket — jamais de la performance. */
+  flows: number;
   cash: number;
   positions: number;
   realized: number;
@@ -288,6 +290,15 @@ function formatPeriodLabel(iso: string, interval: EvolutionInterval): string {
 type StockAcc = {
   date: string;
   total: number;
+  /**
+   * Capital externe entré (net) sur le bucket.
+   *
+   * Contrairement aux autres champs, qui sont des **stocks** relevés en fin de
+   * bucket, celui-ci est un **flux** : il s'additionne. Prendre la dernière
+   * valeur du bucket perdrait tous les versements du mois sauf le dernier, et
+   * le rendement pondéré par le temps les recompterait en performance.
+   */
+  flows: number;
   cash: number;
   positions: number;
   realized: number;
@@ -346,6 +357,10 @@ function densifyDailyCalendar(
       out.push({
         ...carry,
         date: new Date(Date.UTC(y, m - 1, d, 12, 0, 0)).toISOString(),
+        // Le report reconduit un **stock**, jamais un flux : sans cette remise
+        // à zéro, le versement du dernier jour connu serait recompté à chaque
+        // journée sans observation.
+        flows: 0,
         isLive: false,
       });
     }
@@ -358,6 +373,7 @@ function densifyDailyCalendar(
 function normalizePoint(p: HistoryPoint): {
   date: string;
   total: number;
+  flows: number;
   cash: number;
   positions: number;
   realized: number;
@@ -380,6 +396,7 @@ function normalizePoint(p: HistoryPoint): {
   return {
     date: p.date,
     total,
+    flows: Number(p.externalFlowsBase) || 0,
     cash,
     positions,
     realized: Number(p.realizedPnlBase) || 0,
@@ -434,11 +451,13 @@ export function buildEvolutionSeries(
 
   for (const p of filtered) {
     const key = bucketKey(p.date, interval);
-    if (!buckets.has(key)) {
+    const prev = buckets.get(key);
+    if (!prev) {
       order.push(key);
       buckets.set(key, { ...p });
     } else {
-      buckets.set(key, { ...p });
+      // Stocks : dernière observation du bucket. Flux : somme du bucket.
+      buckets.set(key, { ...p, flows: prev.flows + p.flows });
     }
   }
 
@@ -467,6 +486,7 @@ export function buildEvolutionSeries(
       label: formatAxisLabel(labelIso, interval),
       periodLabel: formatPeriodLabel(labelIso, interval),
       total: s.total,
+      flows: s.flows,
       cash: s.cash,
       positions: s.positions,
       realized: s.realized,
@@ -504,18 +524,49 @@ export function buildEvolutionSeries(
   return { points: display, interval };
 }
 
+/**
+ * Variation de la période, et **rendement** de la période.
+ *
+ * Les deux chiffres ne mesurent pas la même chose et le libellé doit les
+ * distinguer : `delta` est la variation du patrimoine, versements compris ;
+ * `pct` est le rendement pondéré par le temps, versements neutralisés.
+ *
+ * Le calcul naïf `(fin − début) / début` affichait « +382 430 % » sur la plage
+ * complète du jeu de démonstration — non parce que le portefeuille avait été
+ * multiplié par quatre mille, mais parce qu'il avait commencé à 240 € et reçu
+ * des apports pendant vingt-huit ans. Un versement n'est pas une performance.
+ */
 export function evolutionDeltaSummary(points: EvolutionSeriesPoint[]): {
   first: number;
   last: number;
   delta: number;
   pct: number;
+  /** Capital externe net apporté sur la période, hors valeur de départ. */
+  flows: number;
 } | null {
   if (points.length < 1) return null;
   const first = points[0]!.total;
   const last = points[points.length - 1]!.total;
   const delta = last - first;
-  const pct = first > 0 ? (delta / first) * 100 : 0;
-  return { first, last, delta, pct };
+
+  let flows = 0;
+  let factor = 1;
+  let measured = false;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1]!.total;
+    const curr = points[i]!.total;
+    const flow = points[i]!.flows;
+    flows += flow;
+    // Le capital exposé sur le sous-période inclut le flux : sans lui, un
+    // versement compterait comme un gain sur la base de la veille.
+    const base = prev + flow;
+    if (base <= 0) continue;
+    factor *= curr / base;
+    measured = true;
+  }
+
+  const pct = measured ? (factor - 1) * 100 : first > 0 ? (delta / first) * 100 : 0;
+  return { first, last, delta, pct, flows };
 }
 
 /** Périodes activables selon profondeur d’historique disponible. */

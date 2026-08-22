@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildEvolutionSeries,
   bucketKey,
+  evolutionDeltaSummary,
   resolveEvolutionInterval,
   startOfIsoWeekMonday,
   toPercentSeries,
@@ -122,6 +123,7 @@ describe("toPercentSeries", () => {
       label: "1 janv.",
       periodLabel: "1 janv.",
       total,
+      flows: 0,
       cash: 0,
       positions: total,
       realized: 0,
@@ -173,5 +175,78 @@ describe("toPercentSeries", () => {
 
   it("empty input yields empty output", () => {
     expect(toPercentSeries([])).toEqual([]);
+  });
+});
+
+describe("evolutionDeltaSummary — les apports ne sont pas du rendement", () => {
+  const pt = (
+    date: string,
+    total: number,
+    flows = 0
+  ): EvolutionSeriesPoint => ({
+    date,
+    label: date.slice(0, 10),
+    periodLabel: date.slice(0, 10),
+    total,
+    flows,
+    cash: 0,
+    positions: total,
+    realized: 0,
+    unrealized: 0,
+    income: 0,
+    dividends: 0,
+    coupons: 0,
+    rents: 0,
+    chartValue: total,
+    pos: 0,
+    neg: 0,
+    dPositions: 0,
+    dCash: 0,
+    dRealized: 0,
+    dIncome: 0,
+    dUnrealized: 0,
+    dDividends: 0,
+    dCoupons: 0,
+    dRents: 0,
+    intervalType: "day",
+  });
+
+  it("un versement fait monter la valeur sans créer de rendement", () => {
+    /*
+      100 k€ le 1er, +50 k€ versés le 2, 150 k€ le 3 : le patrimoine a gagné
+      50 k€ et rapporté 0 %. Le calcul naïf annonçait +50 %.
+    */
+    const s = evolutionDeltaSummary([
+      pt("2026-01-01T00:00:00.000Z", 100_000),
+      pt("2026-01-02T00:00:00.000Z", 150_000, 50_000),
+      pt("2026-01-03T00:00:00.000Z", 150_000),
+    ])!;
+
+    expect(s.delta).toBeCloseTo(50_000, 6);
+    expect(s.flows).toBeCloseTo(50_000, 6);
+    expect(s.pct).toBeCloseTo(0, 6);
+  });
+
+  it("mesure la performance réelle malgré un versement", () => {
+    // 100 k€ → +100 k€ versés → 220 k€ : 10 % gagnés sur 200 k€ exposés.
+    const s = evolutionDeltaSummary([
+      pt("2026-01-01T00:00:00.000Z", 100_000),
+      pt("2026-01-02T00:00:00.000Z", 200_000, 100_000),
+      pt("2026-01-03T00:00:00.000Z", 220_000),
+    ])!;
+
+    expect(s.delta).toBeCloseTo(120_000, 6);
+    expect(s.pct).toBeCloseTo(10, 6);
+  });
+
+  it("une acquisition massive ne fabrique pas de rendement", () => {
+    // Le cas de la capture : un actif alternatif de 2 M€ entre au bilan.
+    const s = evolutionDeltaSummary([
+      pt("2026-01-01T00:00:00.000Z", 1_000_000),
+      pt("2026-01-02T00:00:00.000Z", 3_000_000, 2_000_000),
+    ])!;
+
+    expect(s.delta).toBeCloseTo(2_000_000, 6);
+    expect(s.pct).toBeCloseTo(0, 6);
   });
 });

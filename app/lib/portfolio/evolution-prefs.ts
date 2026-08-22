@@ -23,6 +23,18 @@ export const EVOLUTION_PREFS_KEY = "evolutionPrefs.v5";
 /** "cash" retiré (jugé inutile) — jamais réintroduit. */
 export type EvolutionBenchmark = "none" | "inflation" | "index";
 
+/**
+ * Périmètre tracé par la courbe.
+ *
+ * `gross` — valeur brute des actifs, le défaut : c'est ce que « portefeuille »
+ * désigne, et ce qui se compare à un indice.
+ * `net` — patrimoine net, actifs moins passifs.
+ *
+ * Les deux ne doivent jamais se mélanger dans une même courbe : leur écart est
+ * l'encours des dettes, pas un mouvement de marché.
+ */
+export type EvolutionScope = "gross" | "net";
+
 export type EvolutionPrefsV5 = {
   v: 5;
   range: EvolutionRange;
@@ -30,6 +42,8 @@ export type EvolutionPrefsV5 = {
   versus: EvolutionBenchmark;
   /** Indice choisi quand versus = "index". */
   indexKey: MarketIndexKey;
+  /** Périmètre tracé : actifs bruts (défaut) ou patrimoine net. */
+  scope: EvolutionScope;
 };
 
 export const DEFAULT_EVOLUTION_PREFS: EvolutionPrefsV5 = {
@@ -37,10 +51,12 @@ export const DEFAULT_EVOLUTION_PREFS: EvolutionPrefsV5 = {
   range: "3m",
   versus: "none",
   indexKey: "cac40",
+  scope: "gross",
 };
 
 const RANGES = new Set<string>(EVOLUTION_RANGES);
 const VERSUS = new Set(["none", "inflation", "index"]);
+const SCOPES = new Set(["gross", "net"]);
 
 function isEvolutionPrefsV5(raw: unknown): raw is EvolutionPrefsV5 {
   if (!raw || typeof raw !== "object") return false;
@@ -49,6 +65,11 @@ function isEvolutionPrefsV5(raw: unknown): raw is EvolutionPrefsV5 {
   if (typeof o.range !== "string" || !RANGES.has(o.range)) return false;
   if (typeof o.versus !== "string" || !VERSUS.has(o.versus)) return false;
   if (!isMarketIndexKey(o.indexKey)) return false;
+  // `scope` est arrivé après v5 : une préférence enregistrée avant reste
+  // valide et retombe sur le périmètre brut plutôt que d'être effacée.
+  if (o.scope !== undefined && (typeof o.scope !== "string" || !SCOPES.has(o.scope))) {
+    return false;
+  }
   return true;
 }
 
@@ -59,7 +80,7 @@ function isEvolutionPrefsV5(raw: unknown): raw is EvolutionPrefsV5 {
  */
 export function loadEvolutionPrefs(): EvolutionPrefsV5 {
   const raw = loadUiPref<unknown>(EVOLUTION_PREFS_KEY, null);
-  if (isEvolutionPrefsV5(raw)) return raw;
+  if (isEvolutionPrefsV5(raw)) return { ...raw, scope: raw.scope ?? "gross" };
   return { ...DEFAULT_EVOLUTION_PREFS, versus: loadDefaultBenchmark() };
 }
 
@@ -69,6 +90,7 @@ export function saveEvolutionPrefs(prefs: EvolutionPrefsV5): void {
     range: prefs.range,
     versus: VERSUS.has(prefs.versus) ? prefs.versus : "none",
     indexKey: isMarketIndexKey(prefs.indexKey) ? prefs.indexKey : "cac40",
+    scope: SCOPES.has(prefs.scope) ? prefs.scope : "gross",
   };
   saveUiPref(EVOLUTION_PREFS_KEY, payload);
 }

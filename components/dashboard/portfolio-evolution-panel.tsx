@@ -26,6 +26,7 @@ import {
   saveEvolutionPrefs,
   type EvolutionBenchmark,
   type EvolutionPrefsV5,
+  type EvolutionScope,
 } from "@/app/lib/portfolio/evolution-prefs";
 import {
   MARKET_INDICES,
@@ -52,6 +53,23 @@ const RANGES: { id: EvolutionRange; label: string }[] = [
   { id: "1y", label: "1A" },
   { id: "5y", label: "5A" },
   { id: "all", label: "Tout" },
+];
+
+const SCOPE_CHOICES: {
+  id: EvolutionScope;
+  label: string;
+  title: string;
+}[] = [
+  {
+    id: "gross",
+    label: "Portefeuille",
+    title: "Valeur brute des actifs — titres, cash, alternatifs, épargne salariale",
+  },
+  {
+    id: "net",
+    label: "Patrimoine net",
+    title: "Valeur brute des actifs moins le capital restant dû",
+  },
 ];
 
 const VERSUS_CHOICES: {
@@ -148,7 +166,7 @@ export function PortfolioEvolutionPanel({
     setPrefs(loadEvolutionPrefs());
   }
 
-  const { range, versus, indexKey } = prefs;
+  const { range, versus, indexKey, scope } = prefs;
 
   const update = (patch: Partial<EvolutionPrefsV5>) => {
     setPrefs((p) => {
@@ -173,9 +191,26 @@ export function PortfolioEvolutionPanel({
     setPrefs((p) => ({ ...p, range: "7d", v: 5 as const }));
   }
 
+  /*
+    Le périmètre est choisi **avant** l'agrégation, pas après.
+
+    Actifs bruts et patrimoine net diffèrent de l'encours des dettes : les
+    mélanger dans une même série ferait passer un remboursement d'emprunt pour
+    un mouvement de marché. Réécrire le total en amont garantit qu'une seule
+    des deux métriques circule dans toute la chaîne d'affichage.
+  */
+  const scopedHistory = useMemo(() => {
+    if (scope !== "net") return history;
+    return history.map((p) =>
+      p.netWorthBase == null
+        ? p
+        : { ...p, totalValueBase: p.netWorthBase, totalValueEur: p.netWorthBase }
+    );
+  }, [history, scope]);
+
   const { points: rawPoints, interval } = useMemo(
-    () => buildEvolutionSeries(history, range, "cumul"),
-    [history, range]
+    () => buildEvolutionSeries(scopedHistory, range, "cumul"),
+    [scopedHistory, range]
   );
 
   // Mode "index" : récupère les clôtures réelles de l'indice choisi sur la
@@ -241,7 +276,7 @@ export function PortfolioEvolutionPanel({
         title="Évolution du portefeuille"
         subtitle={
           <>
-            Positions et liquidités
+            {scope === "net" ? "Patrimoine net" : "Actifs bruts"}
             <span className="mx-1 opacity-40">·</span>
             {evolutionIntervalLabel(interval)}
             <span className="sr-only"> ({evolutionIntervalHint(interval)})</span>
@@ -278,7 +313,17 @@ export function PortfolioEvolutionPanel({
               </div>
               <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
                 {versus === "none"
-                  ? `${summary.pct >= 0 ? "+" : ""}${summary.pct.toFixed(1)} % sur la période`
+                  ? /*
+                       Deux chiffres, deux significations.
+
+                       Le montant au-dessus est la variation du patrimoine,
+                       versements compris. Le pourcentage est le rendement des
+                       investissements, versements neutralisés — c'est pourquoi
+                       il ne vaut pas « montant / valeur de départ ». Le dire
+                       explicitement évite de lire l'un comme le ratio de
+                       l'autre.
+                    */
+                    `${summary.pct >= 0 ? "+" : ""}${summary.pct.toFixed(1)} % de rendement`
                   : `Vs ${benchmarkDisplayName}`}
               </div>
             </div>
@@ -331,6 +376,13 @@ export function PortfolioEvolutionPanel({
         </div>
 
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+          <Segmented
+            items={SCOPE_CHOICES}
+            value={scope}
+            onChange={(v) => update({ scope: v })}
+            ariaLabel="Périmètre"
+            testIdPrefix="evolution-scope"
+          />
           <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
             Vs
           </span>
