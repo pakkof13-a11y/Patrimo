@@ -28,6 +28,7 @@ import { useGlobalShortcuts } from "@/app/hooks/use-global-shortcuts";
 import {
   useAssetDetailQuery,
   useHoldingsQuery,
+  usePatrimonyStateQuery,
   usePlatformsQuery,
   usePortfolioHistoryQuery,
   useTransactionsMetaQuery,
@@ -73,6 +74,8 @@ import { Modal } from "@/components/ui/modal";
 import { Shell } from "@/components/layout/display-provider";
 import { KpiStrip } from "@/components/dashboard/kpi-strip";
 import { DashboardTab } from "@/components/dashboard/dashboard-tab";
+import { EmptyPatrimonyCockpit } from "@/components/dashboard/empty-patrimony-cockpit";
+import { Skeleton } from "@/components/ui/skeleton";
 import { HoldingsSection } from "@/components/holdings/holdings-section";
 import { TransactionModal } from "@/components/modals/transaction-modal";
 import { PlatformModal } from "@/components/modals/platform-modal";
@@ -432,6 +435,16 @@ function PortfolioAppClient({
   const holdingsQ = useHoldingsQuery(baseCurrency);
   const historyQ = usePortfolioHistoryQuery(baseCurrency);
   const platformsQ = usePlatformsQuery(baseCurrency);
+  /*
+    Compte vierge ou compte actif ?
+
+    C'est cette réponse — et non une préférence d'affichage — qui décide entre
+    le cockpit d'accueil et le tableau de bord. Elle porte sur les données
+    réelles de toutes les familles patrimoniales, pas sur les seules positions :
+    une dette, un compte bancaire ou un contrat d'assurance-vie suffisent à
+    rendre un compte actif, même sans la moindre position calculée.
+  */
+  const patrimonyQ = usePatrimonyStateQuery();
   const detailQ = useAssetDetailQuery(detailAssetId);
   /** Compte total léger (maturité dashboard) — pas le journal paginé. */
   const txMetaQ = useTransactionsMetaQuery();
@@ -816,6 +829,25 @@ function PortfolioAppClient({
   // il reste la lecture comptable transverse, accessible depuis son onglet.
   const positionsView = isPositionsTab(tab) && tab !== "crypto";
   const isDashboard = tab === "dashboard";
+
+  /*
+    Le compte est-il vierge, ici et maintenant ?
+
+    La réponse du serveur fait foi, mais elle peut dater de quelques instants :
+    créer une plateforme ou une transaction rend le compte actif avant que la
+    requête n'ait été rejouée. Toute donnée déjà connue du client force donc le
+    tableau de bord.
+
+    Le raccourci ne joue que dans ce sens. Il ne peut jamais déclarer un compte
+    vierge — c'est précisément l'erreur que le chantier corrige : une absence
+    de positions n'est pas une absence de patrimoine, un compte peut ne porter
+    qu'une dette ou qu'un contrat d'assurance-vie.
+  */
+  const hasLocalPatrimonyEvidence =
+    platforms.length > 0 || txCount > 0 || allHoldings.length > 0;
+  const patrimonyIsEmptyNow =
+    patrimonyQ.data?.isEmpty === true && !hasLocalPatrimonyEvidence;
+  const patrimonyResolved = Boolean(patrimonyQ.data) || hasLocalPatrimonyEvidence;
 
   /** Maturité du compte → densité du dashboard + KPI strip */
   const dashboardMaturity = resolveDashboardMaturity({
@@ -1321,7 +1353,42 @@ function PortfolioAppClient({
               <AlternativesTab baseCurrency={baseCurrency} />
             )}
 
-            {tab === "dashboard" && (
+            {/*
+              Cockpit ou tableau de bord.
+
+              Le choix se fait après que l'état patrimonial a répondu : tant
+              qu'il est inconnu, on n'affiche ni l'un ni l'autre. Trancher plus
+              tôt produirait un aller-retour visible — cockpit puis tableau de
+              bord, ou l'inverse — à chaque ouverture de l'application.
+            */}
+            {tab === "dashboard" && !patrimonyResolved && (
+              <div
+                className="flex min-h-[50vh] flex-col gap-[var(--gap-section)] py-[var(--space-8)]"
+                data-testid="dashboard-resolving"
+                aria-busy="true"
+              >
+                <Skeleton className="mx-auto h-8 w-64" />
+                <Skeleton className="mx-auto h-4 w-96" />
+                <div className="mx-auto grid w-full max-w-3xl gap-[var(--gap-card)] sm:grid-cols-2">
+                  <Skeleton className="h-44 w-full" />
+                  <Skeleton className="h-44 w-full" />
+                </div>
+              </div>
+            )}
+
+            {tab === "dashboard" && patrimonyResolved && patrimonyIsEmptyNow && (
+              <EmptyPatrimonyCockpit
+                onAddPlatform={() => {
+                  setQuickPlatformTarget("standalone");
+                  setQuickPlatformPrefill("");
+                  setShowQuickPlatform(true);
+                }}
+                onAddTransaction={() => openNewTransaction("ACHAT")}
+                onImport={() => setShowImport(true)}
+              />
+            )}
+
+            {tab === "dashboard" && patrimonyResolved && !patrimonyIsEmptyNow && (
               <DashboardTab
                 baseCurrency={baseCurrency}
                 summary={summary}

@@ -14,7 +14,6 @@ import {
   RecentActivityCard,
   WatchlistCard,
 } from "@/components/dashboard/terminal-panels";
-import { DashboardActivation } from "@/components/dashboard/dashboard-activation";
 import type { DashboardNavTarget } from "@/components/dashboard/dashboard-quick-actions";
 import { getAssetClassLabel, cn } from "@/app/lib/utils";
 import type {
@@ -25,7 +24,6 @@ import type {
 import {
   dashboardBlocksFor,
   resolveDashboardMaturity,
-  toOnboardingSignals,
   type DashboardMaturity,
   type DashboardMaturityInput,
 } from "@/app/lib/dashboard/maturity";
@@ -115,8 +113,6 @@ export function DashboardTab({
   onAddTransaction,
   onUnwatch,
   onNavigate,
-  showEveryStart,
-  onShowEveryStartChange,
 }: DashboardTabProps) {
   const resolvedInput: DashboardMaturityInput = maturityInput ?? {
     platformCount: 0,
@@ -127,7 +123,6 @@ export function DashboardTab({
 
   const maturity = maturityOverride ?? resolveDashboardMaturity(resolvedInput);
   const blocks = dashboardBlocksFor(maturity);
-  const signals = toOnboardingSignals(resolvedInput);
 
   function handleNav(target: DashboardNavTarget) {
     if (onNavigate) {
@@ -261,9 +256,16 @@ export function DashboardTab({
     ? num(summary.netWorthBase ?? summary.netWorthEur)
     : null;
 
-  const canActivate =
-    Boolean(onAddPlatform) && Boolean(onImport) && Boolean(onAddTransaction);
-  const onboardingAlone = blocks.showOnboardingHero && canActivate;
+  /*
+    Le tableau de bord ne porte plus l'accueil.
+
+    Un compte réellement vierge n'arrive plus ici : `portfolio-app` affiche le
+    cockpit à sa place, sur la foi de l'état patrimonial réel. Ce qui reste —
+    un compte qui possède des données mais pas encore de positions calculées —
+    doit voir son tableau de bord, pas une checklist « 0 / 3 étapes » qui
+    l'inviterait à recommencer ce qu'il a déjà fait.
+  */
+  const onboardingAlone = false;
 
   return (
     <div
@@ -274,19 +276,6 @@ export function DashboardTab({
       data-testid="dashboard-tab"
       data-maturity={maturity}
     >
-      {/* —— Activation (compte vierge ou en cours de constitution) —— */}
-      {blocks.showOnboardingHero && canActivate && (
-        <DashboardActivation
-          maturity={maturity === "active" ? "setup" : maturity}
-          signals={signals}
-          onAddPlatform={onAddPlatform!}
-          onImport={onImport!}
-          onAddTransaction={onAddTransaction!}
-          showEveryStart={showEveryStart}
-          onShowEveryStartChange={onShowEveryStartChange}
-        />
-      )}
-
       {/* —— 1. Patrimoine net —— */}
       {blocks.showEvolutionChart && (
         <TerminalHero

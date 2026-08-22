@@ -251,3 +251,28 @@ export function useClassPnlQuery(range: string, enabled: boolean) {
     refetchOnWindowFocus: false,
   });
 }
+
+/**
+ * Le compte porte-t-il la moindre donnée patrimoniale ?
+ *
+ * Seule cette réponse décide entre le cockpit d'accueil et le tableau de bord.
+ * Elle n'est jamais servie depuis le cache : après une remise à zéro ou la
+ * création d'une première ligne, l'écran doit basculer immédiatement, et une
+ * valeur gardée quelques secondes montrerait le mauvais des deux.
+ */
+export function usePatrimonyStateQuery() {
+  return useQuery({
+    queryKey: PATRIMONY_STATE_KEY,
+    queryFn: () =>
+      fetchJson<{ isEmpty: boolean; families: string[] }>(
+        "/api/patrimony-state"
+      ),
+    staleTime: 0,
+    gcTime: 60_000,
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/** Clé partagée — l'invalidation vit chez les écrans qui créent des données. */
+export const PATRIMONY_STATE_KEY = ["patrimony-state"] as const;

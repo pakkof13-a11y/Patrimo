@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/app/lib/utils";
 import { fetchJson } from "@/app/lib/api-client";
+import { PATRIMONY_STATE_KEY } from "@/app/hooks/use-portfolio-queries";
 import { AdminUsersPanel } from "@/components/layout/admin-users-panel";
 import {
   BASE_CURRENCY_OPTIONS,
@@ -233,6 +234,12 @@ export function PreferencesPanel({
         qc.invalidateQueries({ queryKey: ["crowdlending"] }),
         qc.invalidateQueries({ queryKey: ["tangibles"] }),
         qc.invalidateQueries({ queryKey: ["envelopes"] }),
+        /*
+          Le compte redevient vierge : c'est cette clé qui fait réapparaître le
+          cockpit d'accueil. L'oublier laisserait un tableau de bord vide,
+          toutes cartes à zéro, sans expliquer quoi faire ensuite.
+        */
+        qc.invalidateQueries({ queryKey: PATRIMONY_STATE_KEY }),
       ]);
       setConfirmChecked(false);
       setConfirmText("");
