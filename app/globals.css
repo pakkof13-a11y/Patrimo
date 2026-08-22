@@ -2774,3 +2774,28 @@ textarea:focus-visible,
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* ── Transactions : ligne sélectionnée ────────────────────────────── */
+
+/*
+  Le journal est plus dense que les autres modules — c'est voulu. La sélection
+  s'y marque donc plus discrètement encore : un liseré doré et une surface à
+  peine relevée, jamais une ligne colorée en entier, qui ferait perdre la
+  lecture des montants (vert crédit, rouge débit).
+*/
+.tx-row {
+  cursor: pointer;
+}
+
+.tx-row.is-selected > td {
+  background: var(--surface-hover);
+}
+
+.tx-row.is-selected > td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.tx-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

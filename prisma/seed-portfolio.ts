@@ -691,6 +691,8 @@ export async function seedUserPortfolio(
     occurredAt: Date;
     notes: string;
     whtRate?: number;
+    /** Plateforme de destination — transferts uniquement. */
+    toPlatformId?: string | null;
   }) {
     const currency = (partial.currency || "EUR").toUpperCase();
     const fx = fxNum(currency);
@@ -707,6 +709,15 @@ export async function seedUserPortfolio(
     } else if (type === "APPORT") {
       grossEur = moneyN((partial.cashAmount ?? 0) * fx);
       net = grossEur;
+    } else if (type === "TRANSFERT_CASH") {
+      /*
+        Un transfert déplace de l'argent sans en créer ni en détruire : son
+        impact net sur le patrimoine est nul, mais son montant brut doit être
+        renseigné — le rejeu du journal le refuse à zéro, et le compte de
+        départ resterait crédité de ce qu'il a envoyé.
+      */
+      grossEur = moneyN((partial.cashAmount ?? 0) * fx);
+      net = 0;
     } else if (type === "RETRAIT" || type === "FRAIS") {
       grossEur = moneyN((partial.cashAmount ?? 0) * fx);
       net = -moneyN(grossEur + feesEur);
@@ -731,7 +742,7 @@ export async function seedUserPortfolio(
       userId,
       type,
       platformId: partial.platformId,
-      toPlatformId: null,
+      toPlatformId: partial.toPlatformId ?? null,
       assetId: partial.assetId ?? null,
       quantity:
         partial.quantity != null ? D(String(partial.quantity)) : null,
@@ -800,6 +811,33 @@ export async function seedUserPortfolio(
       notes: note(`Ouverture ${p.name}`),
     });
   }
+
+  /*
+    Transfert interne entre deux plateformes du patrimoine.
+
+    Ni gain ni perte : l'argent change de place sans changer de propriétaire.
+    Sans une opération de ce type dans le jeu de démonstration, le module
+    Transactions n'a rien à montrer sous son filtre « Transferts », et la fiche
+    à deux plateformes reste invisible.
+  */
+  pushTx({
+      type: "TRANSFERT_CASH",
+      platformId: boursorama.id,
+      toPlatformId: fortuneo.id,
+      cashAmount: 3000,
+      currency: "EUR",
+      occurredAt: daysAgo(120),
+      notes: note("Transfert CTO → PEA"),
+  });
+  pushTx({
+      type: "TRANSFERT_CASH",
+      platformId: binance.id,
+      toPlatformId: boursorama.id,
+      cashAmount: 1500,
+      currency: "EUR",
+      occurredAt: daysAgo(210),
+      notes: note("Transfert crypto → CTO"),
+  });
 
   const lastDay = new Map(positions.map((p) => [p.id, p.openDaysAgo]));
   const activityPlan: Array<() => void> = [];

@@ -173,51 +173,53 @@ export function TxTypeFilters({
 }) {
   return (
     <div
-      className={cn(
-        "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5",
-        className
-      )}
+      className={cn("flex min-w-0 flex-wrap items-center gap-[var(--space-2)]", className)}
       role="group"
       aria-label="Filtrer par type de transaction"
       data-testid="tx-type-filters"
     >
-      {!compact && (
-        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-          Type
-        </span>
-      )}
-      {TX_TYPE_FILTERS.map((f) => {
-        const active = value === f.id;
-        const count = counts?.[f.id];
-        return (
-          <button
-            key={f.id}
-            type="button"
-            aria-pressed={active}
-            data-testid={`tx-filter-${f.id}`}
-            onClick={() => onChange(f.id)}
-            className={cn(
-              "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition",
-              "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-              active
-                ? f.accent
-                : "bg-transparent text-slate-600 ring-1 ring-inset ring-slate-200/90 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:ring-slate-700 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
-            )}
-          >
-            {f.label}
-            {typeof count === "number" && (
-              <span
-                className={cn(
-                  "tabular-nums text-[10px]",
-                  active ? "opacity-80" : "text-slate-400 dark:text-slate-500"
-                )}
-              >
-                {count}
-              </span>
-            )}
-          </button>
-        );
-      })}
+      {!compact && <span className="text-label shrink-0">Type</span>}
+
+      {/*
+        Barre segmentée dorée, comme partout ailleurs dans Aurea.
+
+        Chaque groupe portait auparavant sa propre teinte à l'état actif : dix
+        couleurs pour dix filtres, qui entraient en concurrence avec le seul
+        code couleur qui compte dans ce module — vert pour ce qui entre, rouge
+        pour ce qui sort. Le compteur reste, lui : c'est l'information utile
+        avant même de cliquer.
+      */}
+      <div className="term-seg flex-wrap">
+        {TX_TYPE_FILTERS.map((f) => {
+          const active = value === f.id;
+          const count = counts?.[f.id];
+          return (
+            <button
+              key={f.id}
+              type="button"
+              aria-pressed={active}
+              data-active={active}
+              data-testid={`tx-filter-${f.id}`}
+              onClick={() => onChange(f.id)}
+              className="term-seg-item inline-flex items-center gap-[var(--space-2)]"
+            >
+              {f.label}
+              {typeof count === "number" && (
+                <span
+                  className={cn(
+                    "num text-[length:var(--text-2xs)]",
+                    active
+                      ? "opacity-80"
+                      : "text-[var(--foreground-faint)]"
+                  )}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

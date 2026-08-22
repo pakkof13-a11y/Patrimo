@@ -1449,6 +1449,7 @@ function PortfolioAppClient({
                 onDelete={(id) => deleteTx.mutate(id)}
                 onImport={() => setShowImport(true)}
                 onCreate={() => openNewTransaction("ACHAT")}
+                onOpenPlatform={() => setTab("platforms")}
                 platforms={platforms}
               />
             )}

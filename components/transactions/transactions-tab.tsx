@@ -52,6 +52,8 @@ import {
   shouldShowPaginationNav,
 } from "@/app/lib/ui/pagination";
 import { EmptyPlaceholder } from "@/components/ui/panel";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TransactionPanel } from "@/components/transactions/transaction-panel";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   ModuleCard,
@@ -157,13 +159,61 @@ function loadTxColumnOrder(): string[] {
  * (`useTransactionsListQuery` → GET /api/transactions paginé).
  * Tri serveur + réordonnancement colonnes (drag) comme Positions.
  */
+/** Tuile de tête — même grammaire que les autres modules patrimoniaux. */
+function TxKpi({
+  label,
+  value,
+  secondary,
+  tone,
+  loading,
+  testId,
+}: {
+  label: string;
+  value: string;
+  secondary?: string;
+  tone?: "positive" | "negative";
+  loading?: boolean;
+  testId: string;
+}) {
+  return (
+    <div
+      className="min-w-0 px-[var(--space-4)] py-[var(--space-3)]"
+      data-testid={testId}
+    >
+      {loading ? (
+        <Skeleton className="h-6 w-24" />
+      ) : (
+        <p
+          className={cn(
+            "num truncate text-[length:var(--text-lg)] font-semibold tracking-tight",
+            tone === "positive" && "val-positive",
+            tone === "negative" && "val-negative",
+            !tone && "text-[var(--foreground)]"
+          )}
+        >
+          {value}
+        </p>
+      )}
+      <p className="text-label mt-[var(--space-1)]">{label}</p>
+      {secondary && !loading ? (
+        <p className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
+          {secondary}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function TransactionsTab({
   onEdit,
   onDelete,
   onImport,
   onCreate,
+  onOpenPlatform,
   platforms,
 }: {
+  /** Ouvre la plateforme d'une opération depuis le panneau de détail. */
+  onOpenPlatform?: (platformId: string) => void;
   onEdit: (t: TxRow) => void;
   onDelete: (id: string) => void;
   onImport?: () => void;
@@ -198,6 +248,8 @@ export function TransactionsTab({
   const [draggingCol, setDraggingCol] = useState<string | null>(null);
   const skipSortRef = useRef(false);
   const [deleteTarget, setDeleteTarget] = useState<TxRow | null>(null);
+  /** Ligne ouverte dans la colonne de détail. */
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     saveColumnOrder(TX_TABLE_KEY, columnOrder);
@@ -210,7 +262,20 @@ export function TransactionsTab({
   // Reset page quand filtres / tri / pageSize changent
   useEffect(() => {
     setPageIndex(0);
+    /*
+      La sélection tombe avec le jeu de résultats.
+
+      Elle désigne une ligne de la page courante ; après un changement de
+      filtre ou de tri, cette ligne peut avoir disparu — le panneau restait
+      alors ouvert sur un vide, au lieu de se refermer franchement.
+    */
+    setSelectedId(null);
   }, [debouncedSearch, accountType, pageSize, typeFilter, platformFilter, dateFrom, dateTo, sorting]);
+
+  // Changer de page vide aussi la sélection : la ligne n'y est plus.
+  useEffect(() => {
+    setSelectedId(null);
+  }, [pageIndex]);
 
   const sortBy = sorting[0]?.id || "date";
   const sortDir = sorting[0]?.desc ? "desc" : "asc";
@@ -244,6 +309,18 @@ export function TransactionsTab({
   }, [pageIndex, pageCount]);
 
   const loading = listQ.isPending || listQ.isFetching;
+  /*
+    Squelette tant que rien n'est jamais arrivé.
+
+    Le rafraîchissement d'une page suivante ne doit pas le déclencher : la
+    table garderait ses lignes précédentes et n'aurait pas à clignoter. Ce qui
+    doit être couvert, c'est le tout premier chargement, où afficher
+    « 0 transaction » serait une affirmation fausse.
+  */
+  const showSkeleton = listQ.isPending && !listQ.data;
+  /** La ligne ouverte, résolue sur la page courante. */
+  const selectedTx =
+    (listQ.data?.transactions ?? []).find((t) => t.id === selectedId) ?? null;
   const hasLoadedOnce = Boolean(listQ.data) || listQ.isFetched;
   const errorMessage =
     listQ.error instanceof Error
@@ -518,25 +595,23 @@ export function TransactionsTab({
   }
 
   return (
+    <div
+      className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_25rem] xl:items-start"
+      data-testid="transactions-shell"
+    >
     <ModuleCard testId="transactions-tab">
-      <div className="flex min-w-0 flex-col gap-3.5 border-b border-[var(--border)] px-4 py-4 sm:gap-4 sm:px-5 sm:py-4">
-        <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+      <div className="flex min-w-0 flex-col gap-[var(--space-4)] border-b border-[var(--border)] px-[var(--space-4)] py-[var(--space-4)] sm:px-5">
+        {/* ── En-tête ──────────────────────────────────────────── */}
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-[var(--space-3)]">
           <div className="min-w-0">
-            <h2 className="break-words text-base font-semibold leading-snug tracking-tight text-[var(--foreground)]">
-              Journal des opérations
-            </h2>
-            <p className="module-intro text-meta">
-              Source de vérité pour positions, cash et fiscalité — édition,
-              filtres et import
-            </p>
-            <p
-              className="kpi-value mt-2 text-sm text-[var(--primary)]"
-              data-testid="tx-total-count"
-            >
-              {formatCountSummary()}
+            <h2 className="text-title">Transactions</h2>
+            <p className="text-meta">
+              Historique complet de vos opérations
+              <span className="mx-1 opacity-40">·</span>
+              <span data-testid="tx-total-count">{formatCountSummary()}</span>
             </p>
             {errorMessage && (
-              <p className="mt-1 text-xs text-[var(--danger)]">
+              <p className="mt-[var(--space-1)] text-[length:var(--text-xs)] text-[var(--danger)]">
                 Impossible de charger le journal —{" "}
                 <button
                   type="button"
@@ -548,59 +623,76 @@ export function TransactionsTab({
               </p>
             )}
           </div>
+
+          <div className="flex shrink-0 flex-wrap items-center gap-[var(--space-2)]">
+            {onImport && (
+              <Button
+                variant="ghost"
+                onClick={onImport}
+                data-testid="tx-import-open"
+              >
+                <Upload className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                Importer
+              </Button>
+            )}
+            {onCreate && (
+              <Button onClick={onCreate} data-testid="tx-create-open">
+                <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                Nouvelle transaction
+              </Button>
+            )}
+          </div>
         </div>
 
-        {kpis && (
-          <div
-            className="grid grid-cols-2 gap-2 sm:grid-cols-4"
-            data-testid="tx-kpis"
-          >
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 px-3 py-2">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                Achats
-              </div>
-              <div
-                className="text-sm font-semibold tabular-nums"
-                data-testid="tx-kpi-buys"
-              >
-                {formatCurrency(kpis.buysEur, "EUR")}
-              </div>
-            </div>
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 px-3 py-2">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                Ventes
-              </div>
-              <div
-                className="text-sm font-semibold tabular-nums"
-                data-testid="tx-kpi-sells"
-              >
-                {formatCurrency(kpis.sellsEur, "EUR")}
-              </div>
-            </div>
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 px-3 py-2">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                Frais
-              </div>
-              <div
-                className="text-sm font-semibold tabular-nums text-red-600 dark:text-red-400"
-                data-testid="tx-kpi-fees"
-              >
-                {formatCurrency(kpis.feesEur, "EUR")}
-              </div>
-            </div>
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 px-3 py-2">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                Revenus
-              </div>
-              <div
-                className="text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400"
-                data-testid="tx-kpi-income"
-              >
-                {formatCurrency(kpis.incomeEur, "EUR")}
-              </div>
-            </div>
-          </div>
-        )}
+        {/* ── KPI ──────────────────────────────────────────────── */}
+        {/*
+          Cinq tuiles, toutes issues des agrégats serveur : le frontend ne
+          recalcule aucun total. Elles portent sur le **périmètre filtré**,
+          pas sur le journal entier — c'est ce que compte déjà `computeTxKpis`.
+        */}
+        <div
+          className="grid grid-cols-2 divide-x divide-y divide-[var(--border)] overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] sm:grid-cols-3 sm:divide-y-0 lg:grid-cols-5"
+          data-testid="tx-kpis"
+        >
+          <TxKpi
+            testId="tx-kpi-count"
+            label="Transactions"
+            value={filteredTotal.toLocaleString("fr-FR")}
+            secondary="Opérations"
+            loading={showSkeleton}
+          />
+          <TxKpi
+            testId="tx-kpi-buys"
+            label="Achats"
+            value={formatCurrency(kpis?.buysEur ?? 0, "EUR")}
+            secondary="Sur la période"
+            loading={showSkeleton}
+          />
+          <TxKpi
+            testId="tx-kpi-sells"
+            label="Ventes"
+            value={formatCurrency(kpis?.sellsEur ?? 0, "EUR")}
+            secondary="Sur la période"
+            tone="positive"
+            loading={showSkeleton}
+          />
+          <TxKpi
+            testId="tx-kpi-income"
+            label="Revenus"
+            value={formatCurrency(kpis?.incomeEur ?? 0, "EUR")}
+            secondary="Dividendes, intérêts…"
+            tone="positive"
+            loading={showSkeleton}
+          />
+          <TxKpi
+            testId="tx-kpi-fees"
+            label="Frais"
+            value={formatCurrency(kpis?.feesEur ?? 0, "EUR")}
+            secondary="Total des frais"
+            tone="negative"
+            loading={showSkeleton}
+          />
+        </div>
 
         <div
           className={cn(
@@ -720,38 +812,28 @@ export function TransactionsTab({
             </div>
           </div>
 
+          {/*
+            Créer et importer ont rejoint l'en-tête : les garder aussi ici les
+            faisait exister à deux endroits à quinze pixels d'écart. Ne restent
+            que les deux commandes propres à la table — recharger, et choisir
+            les colonnes.
+          */}
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:shrink-0">
-            {onCreate && (
-              <Button
-                type="button"
-                size="sm"
-                onClick={onCreate}
-                data-testid="tx-add"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Nouvelle opération
-              </Button>
-            )}
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={() => void listQ.refetch()}
               disabled={listQ.isFetching}
               title="Recharger le journal"
               aria-label="Actualiser le journal"
+              data-testid="tx-refresh"
             >
               <RefreshCw
                 className={cn("h-3.5 w-3.5", listQ.isFetching && "animate-spin")}
               />
               <span className="hidden sm:inline">Actualiser</span>
             </Button>
-            {onImport && (
-              <Button variant="outline" size="sm" onClick={onImport}>
-                <Upload className="h-3.5 w-3.5" />
-                Import CSV
-              </Button>
-            )}
             <ColumnPicker
               columns={TX_COLUMN_META}
               visibility={columnVisibility}
@@ -976,10 +1058,26 @@ export function TransactionsTab({
                 key={row.id}
                 className={cn(
                   moduleTableRowClass,
-                  "cursor-pointer"
+                  "tx-row",
+                  selectedId === row.original.id && "is-selected"
                 )}
-                title="Double-clic pour modifier"
+                /*
+                  Un clic ouvre la fiche à droite ; le double-clic reste le
+                  raccourci d'édition qu'il a toujours été. Retirer ce dernier
+                  aurait cassé un geste acquis pour rien.
+                */
+                onClick={() => setSelectedId(row.original.id)}
                 onDoubleClick={() => onEdit(row.original)}
+                aria-current={
+                  selectedId === row.original.id ? "true" : undefined
+                }
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedId(row.original.id);
+                  }
+                }}
                 data-testid={`tx-row-${row.original.id}`}
               >
                 {row.getVisibleCells().map((cell) => {
@@ -1007,6 +1105,20 @@ export function TransactionsTab({
                 })}
               </tr>
             ))}
+            {/*
+              Squelette au tout premier chargement : afficher une table vide,
+              puis « 0 transaction », affirmerait quelque chose de faux le
+              temps d'un aller-retour réseau.
+            */}
+            {showSkeleton &&
+              Array.from({ length: 8 }).map((_, i) => (
+                <tr key={`sk-${i}`} data-testid="tx-skeleton-row">
+                  <td colSpan={visibleColumnCount} className="px-4 py-2">
+                    <Skeleton className="h-6 w-full" />
+                  </td>
+                </tr>
+              ))}
+
             {filteredTotal === 0 && !loading && (
               <tr>
                 <td colSpan={visibleColumnCount} className="px-4 py-6">
@@ -1014,17 +1126,36 @@ export function TransactionsTab({
                     <EmptyPlaceholder
                       title="Aucune transaction pour l’instant"
                       description="Importez un CSV courtier ou saisissez une opération (achat, vente, dividende…) pour démarrer le journal."
+                      /*
+                        Deux chemins, pas un. Le cockpit d'accueil ne concerne
+                        qu'un compte entièrement vierge : posséder du patrimoine
+                        sans aucune transaction est un cas normal, et il se
+                        traite ici.
+                      */
                       action={
-                        onImport ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={onImport}
-                          >
-                            <Upload className="h-3.5 w-3.5" />
-                            Importer un CSV
-                          </Button>
-                        ) : undefined
+                        <span className="flex flex-wrap items-center justify-center gap-[var(--space-2)]">
+                          {onCreate ? (
+                            <Button
+                              size="sm"
+                              onClick={onCreate}
+                              data-testid="tx-empty-create"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              Ajouter une transaction
+                            </Button>
+                          ) : null}
+                          {onImport ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={onImport}
+                              data-testid="tx-empty-import"
+                            >
+                              <Upload className="h-3.5 w-3.5" />
+                              Importer
+                            </Button>
+                          ) : null}
+                        </span>
                       }
                     />
                   ) : (
@@ -1110,19 +1241,46 @@ export function TransactionsTab({
 
       <ConfirmDialog
         open={deleteTarget != null}
+        danger
         title="Supprimer la transaction"
         message={
           deleteTarget
-            ? `${TRANSACTION_TYPES[deleteTarget.type as keyof typeof TRANSACTION_TYPES] || deleteTarget.type} · ${deleteTarget.asset?.name ?? deleteTarget.platform?.name ?? "—"} · ${formatDate(deleteTarget.occurredAt)}. Cette opération sera définitivement supprimée du journal. Cette action est irréversible.`
+            ? [
+                `${TRANSACTION_TYPES[deleteTarget.type as keyof typeof TRANSACTION_TYPES] || deleteTarget.type} · ${deleteTarget.asset?.name ?? deleteTarget.platform?.name ?? "—"} · ${formatDate(deleteTarget.occurredAt)}.`,
+                /*
+                  Une transaction est une source de vérité : les positions, le
+                  prix de revient et le cash en découlent par rejeu du journal.
+                  La supprimer ne retire donc pas qu'une ligne d'historique —
+                  et l'avertissement ne le dit que lorsque c'est réellement le
+                  cas, c'est-à-dire quand l'opération porte un actif ou une
+                  quantité.
+                */
+                deleteTarget.assetId || deleteTarget.quantity
+                  ? "Elle sert au calcul de vos positions et de votre prix de revient : les supprimer les recalculera."
+                  : "",
+                "Cette action est irréversible.",
+              ]
+                .filter(Boolean)
+                .join(" ")
             : ""
         }
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => {
           if (deleteTarget) onDelete(deleteTarget.id);
+          if (deleteTarget && selectedId === deleteTarget.id) setSelectedId(null);
           setDeleteTarget(null);
         }}
         testId="tx-delete-confirm"
       />
     </ModuleCard>
+
+    <TransactionPanel
+      tx={selectedTx}
+      onClose={() => setSelectedId(null)}
+      onEdit={(t) => onEdit(t)}
+      onDelete={(t) => setDeleteTarget(t)}
+      onOpenPlatform={onOpenPlatform}
+    />
+    </div>
   );
 }
