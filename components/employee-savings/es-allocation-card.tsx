@@ -17,7 +17,14 @@ import type { FundCategory } from "@/app/lib/employee-savings/fund-category";
  * quelque chose à corriger.
  */
 
-const TONE: Record<FundCategory, string> = {
+/**
+ * Teinte par famille de fonds.
+ *
+ * Exportée : le panneau d'un plan affiche la même répartition, et deux tables
+ * de couleurs pour une même donnée finiraient par diverger — c'est la couleur
+ * qu'on apprend à lire, elle doit être la même partout.
+ */
+export const FUND_CATEGORY_TONE: Record<FundCategory, string> = {
   EQUITY: "var(--chart-gold)",
   DIVERSIFIED: "var(--chart-cyan)",
   BOND: "var(--chart-neutral)",
@@ -69,7 +76,7 @@ export function EsAllocationCard({
                     endAngle={-270}
                   >
                     {drawable.map((slice) => (
-                      <Cell key={slice.category} fill={TONE[slice.category]} />
+                      <Cell key={slice.category} fill={FUND_CATEGORY_TONE[slice.category]} />
                     ))}
                   </Pie>
                 </PieChart>
@@ -90,7 +97,7 @@ export function EsAllocationCard({
                 >
                   <span
                     className="mt-[0.35rem] h-[0.5rem] w-[0.5rem] shrink-0 rounded-full"
-                    style={{ background: TONE[slice.category] }}
+                    style={{ background: FUND_CATEGORY_TONE[slice.category] }}
                     aria-hidden
                   />
                   <span className="min-w-0 flex-1 truncate text-[length:var(--text-sm)] text-[var(--foreground-secondary)]">

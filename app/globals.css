@@ -2700,3 +2700,39 @@ textarea:focus-visible,
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* ── Épargne salariale : ligne d'un plan ──────────────────────────── */
+
+.es-plan-row {
+  cursor: pointer;
+}
+
+.es-plan-row.is-selected > td {
+  background: var(--surface-hover);
+}
+
+.es-plan-row.is-selected > td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.es-plan-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/*
+  Contexte global, sous la liste plutôt qu'en colonne de droite : le panneau de
+  détail occupe désormais cette place, et le plan sélectionné n'a pas à être
+  décrit à deux endroits.
+*/
+.es-context-inline {
+  display: grid;
+  gap: var(--gap-card);
+}
+
+@media (min-width: 900px) {
+  .es-context-inline {
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    align-items: start;
+  }
+}

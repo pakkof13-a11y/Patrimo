@@ -1,7 +1,5 @@
 "use client";
 
-import { FileText, PiggyBank, Settings2, TrendingUp } from "lucide-react";
-import { PendingControl } from "@/components/ui/pending-backend";
 import { cn, formatCurrency, formatDate } from "@/app/lib/utils";
 import type {
   NextUnlock,
@@ -65,43 +63,16 @@ function Line({
   );
 }
 
-function QuickAction({
-  icon: Icon,
-  label,
-  onClick,
-  testId,
-}: {
-  icon: typeof PiggyBank;
-  label: string;
-  onClick: () => void;
-  testId: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex items-center gap-[var(--space-2)] rounded-[var(--radius-md)] px-[var(--space-2)] py-[var(--space-2)] text-left text-[length:var(--text-xs)] text-[var(--foreground-secondary)] transition-colors duration-[var(--duration-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
-      data-testid={testId}
-    >
-      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-      {label}
-    </button>
-  );
-}
 
 export function EsContextColumn({
   totals,
   unlock,
   operations,
-  onAddLine,
-  onManage,
   className,
 }: {
   totals: OverviewTotals;
   unlock: NextUnlock | null;
   operations: RecentContribution[];
-  onAddLine: () => void;
-  onManage: () => void;
   className?: string;
 }) {
   const availablePct = totals.availablePct ?? 0;
@@ -241,45 +212,13 @@ export function EsContextColumn({
         )}
       </Panel>
 
-      <Panel title="Actions rapides" testId="es-context-actions">
-        <div className="flex flex-col gap-[var(--space-2)]">
-          <QuickAction
-            icon={PiggyBank}
-            label="Effectuer un versement"
-            onClick={onAddLine}
-            testId="es-action-add"
-          />
-          <QuickAction
-            icon={Settings2}
-            label="Modifier l'épargne"
-            onClick={onManage}
-            testId="es-action-manage"
-          />
-          <PendingControl
-            label="Consulter mes bulletins"
-            hint="Aucun document n'est stocké par l'application"
-          />
-          <PendingControl
-            label="Simuler ma retraite"
-            hint="Demande un moteur de projection — âge, rente, fiscalité de sortie"
-          />
-          <p className="text-meta mt-[var(--space-1)] flex items-start gap-[var(--space-2)]">
-            <TrendingUp className="mt-[0.15rem] h-3 w-3 shrink-0" aria-hidden />
-            <span>
-              Une projection de retraite suppose des hypothèses de rendement et
-              d&apos;inflation : mieux vaut aucune estimation qu&apos;un chiffre
-              posé au hasard sur trente ans.
-            </span>
-          </p>
-          <p className="text-meta flex items-start gap-[var(--space-2)]">
-            <FileText className="mt-[0.15rem] h-3 w-3 shrink-0" aria-hidden />
-            <span>
-              Les relevés de votre gestionnaire restent la référence en cas
-              d&apos;écart.
-            </span>
-          </p>
-        </div>
-      </Panel>
+      {/*
+        Le bloc « Actions rapides » a disparu d'ici.
+
+        Verser, ajouter un support, importer un relevé : ces entrées sont
+        désormais dans le menu « Ajouter » de l'en-tête, avec les mêmes cibles.
+        Les garder aussi dans la colonne les faisait exister à deux endroits.
+      */}
     </aside>
   );
 }

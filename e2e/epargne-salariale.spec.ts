@@ -22,11 +22,18 @@ test.describe("Épargne salariale", () => {
   test("la vue d'ensemble mène la page, la saisie reste repliée", async ({
     page,
   }) => {
-    await expect(page.getByTestId("es-kpi-cards")).toBeVisible();
+    await expect(page.getByTestId("es-kpi-strip")).toBeVisible();
+    await expect(page.getByTestId("es-liquidity-summary")).toBeVisible();
     await expect(page.getByTestId("es-allocation-card")).toBeVisible();
     await expect(page.getByTestId("es-evolution-card")).toBeVisible();
     await expect(page.getByTestId("es-plans")).toBeVisible();
     await expect(page.getByTestId("es-context-column")).toBeVisible();
+
+    // Rien de sélectionné : la colonne de droite reste en retrait.
+    await expect(page.getByTestId("es-plan-panel")).toHaveAttribute(
+      "data-open",
+      "false"
+    );
 
     await expect(page.getByTestId("es-management")).toHaveCount(0);
     await page.getByTestId("es-manage-toggle").click();
@@ -52,8 +59,8 @@ test.describe("Épargne salariale", () => {
     const pill = page.getByTestId("es-plan-count");
     await expect(pill).toBeVisible({ timeout: 20_000 });
 
-    const cards = page.getByTestId("es-plan-card");
-    const shown = await cards.count();
+    const rows = page.getByTestId("es-plan-row");
+    const shown = await rows.count();
     if (shown === 0) return;
 
     // Un plan = un type d'enveloppe chez un gestionnaire. Le seed en compte
@@ -61,27 +68,31 @@ test.describe("Épargne salariale", () => {
     const label = await pill.innerText();
     const declared = Number(label.replace(/\D+/g, ""));
     expect(declared).toBeGreaterThanOrEqual(shown);
-    await expect(page.getByTestId("eskpi-value")).toContainText("support");
+    await expect(page.getByTestId("es-kpi-value")).toContainText("support");
   });
 
   test("aucun gain n'est annoncé sans montants versés", async ({ page }) => {
-    const contributed = page.getByTestId("eskpi-contributed");
-    const gain = page.getByTestId("eskpi-gain");
-    await expect(contributed).toBeVisible();
+    const perf = page.getByTestId("es-kpi-gain");
+    await expect(perf).toBeVisible();
+    // Attendre que les données aient répondu : pendant le squelette, tous les
+    // totaux valent zéro et la tuile ne dit encore rien de vrai.
+    await expect(page.getByTestId("es-plans")).toBeVisible({ timeout: 20_000 });
+    await expect(perf).not.toContainText("Plans", { timeout: 20_000 });
 
-    if ((await contributed.innerText()).includes("À renseigner")) {
-      // Sans versements, « gain » vaudrait l'encours entier — un capital qui
-      // aurait tout rapporté et rien coûté.
-      await expect(gain).toContainText("—");
-      await expect(page.getByTestId("eskpi-performance")).toContainText("—");
-    } else {
-      await expect(gain).not.toContainText("À renseigner");
+    /*
+      Sans montants versés, « gain » vaudrait l'encours entier — un capital
+      qui aurait tout rapporté et rien coûté. L'écran doit alors le dire au
+      lieu d'afficher un pourcentage.
+    */
+    if ((await perf.innerText()).includes("non renseignés")) {
+      await expect(perf).toContainText("—");
     }
   });
 
   test("la courbe dit qu'elle trace des versements, pas une valorisation", async ({
     page,
   }) => {
+    await page.getByTestId("es-view-contributions").click();
     const card = page.getByTestId("es-evolution-card");
     await expect(card).toBeVisible();
     await expect(card).toContainText(/versements cumulés/i);
@@ -103,6 +114,7 @@ test.describe("Épargne salariale", () => {
   test("les familles de supports se lisent en texte et distinguent le monétaire", async ({
     page,
   }) => {
+    await page.getByTestId("es-view-allocation").click();
     const legend = page.getByTestId("es-allocation-legend");
     if ((await legend.count()) === 0) return;
 
@@ -117,19 +129,26 @@ test.describe("Épargne salariale", () => {
     }
   });
 
-  test("chaque plan affiche sa répartition et son horizon de déblocage", async ({
+  test("la fiche d'un plan porte sa répartition et son horizon de déblocage", async ({
     page,
   }) => {
-    const cards = page.getByTestId("es-plan-card");
-    const empty = page.getByTestId("es-no-plan");
-    await expect(cards.first().or(empty)).toBeVisible({ timeout: 20_000 });
-    if ((await cards.count()) === 0) return;
+    /*
+      Ces deux informations vivaient sur la carte du plan. La carte a disparu
+      au profit d'une ligne comparable ; elles doivent donc se retrouver dans
+      la fiche, pas s'être évaporées.
+    */
+    await expect(page.getByTestId("es-plans")).toBeVisible({ timeout: 20_000 });
+    const rows = page.getByTestId("es-plan-row");
+    if ((await rows.count()) === 0) return;
 
-    const first = cards.first();
-    await expect(first.getByTestId("es-plan-type")).toBeVisible();
-    await expect(first.getByTestId("es-plan-status")).toContainText("Ouvert");
-    await expect(first).toContainText("Répartition");
-    await expect(first).toContainText("Prochain déblocage");
+    await rows.first().click();
+
+    await page.getByTestId("es-panel-tab-allocation").click();
+    await expect(page.getByTestId("es-panel-allocation")).toBeVisible();
+
+    await page.getByTestId("es-panel-tab-liquidity").click();
+    const panel = page.getByTestId("es-plan-panel");
+    await expect(panel).toContainText("Prochain déblocage");
   });
 
   test("la colonne contextuelle sépare disponible et bloqué", async ({
@@ -142,5 +161,48 @@ test.describe("Épargne salariale", () => {
     // L'épargne salariale est bloquée par défaut : l'écran le rappelle plutôt
     // que de laisser croire à des fonds mobilisables.
     await expect(liquidity).toContainText(/bloquée par défaut/i);
+  });
+
+  test("sélectionner un plan ouvre sa fiche sans emporter la liste", async ({
+    page,
+  }) => {
+    const rows = page.getByTestId("es-plan-row");
+    await expect(page.getByTestId("es-plans")).toBeVisible({ timeout: 20_000 });
+    test.skip((await rows.count()) === 0, "Aucun plan dans le jeu de démonstration");
+
+    await rows.first().click();
+    const panel = page.getByTestId("es-plan-panel");
+    await expect(panel).toHaveAttribute("data-open", "true");
+
+    // Disponible / bloqué : la question centrale, visible dès l'ouverture.
+    await expect(panel.getByTestId("es-liquidity-bar")).toBeVisible();
+    await expect(page.getByTestId("es-panel-value")).toBeVisible();
+
+    // La liste reste en place : c'est l'intérêt d'une colonne ancrée.
+    await expect(page.getByTestId("es-plan-table")).toBeVisible();
+
+    await page.getByTestId("es-panel-tab-liquidity").click();
+    await expect(page.getByTestId("es-panel-unlocks")).toBeVisible();
+
+    await page.getByTestId("es-panel-tab-supports").click();
+    await expect(page.getByTestId("es-panel-supports")).toBeVisible();
+
+    await page.getByTestId("es-panel-close").click();
+    await expect(panel).toHaveAttribute("data-open", "false");
+  });
+
+  test("les vues secondaires changent réellement le contenu", async ({
+    page,
+  }) => {
+    await page.getByTestId("es-view-allocation").click();
+    await expect(page.getByTestId("es-allocation-card")).toBeVisible();
+    await expect(page.getByTestId("es-evolution-card")).toHaveCount(0);
+
+    await page.getByTestId("es-view-liquidity").click();
+    await expect(page.getByTestId("es-liquidity-summary")).toBeVisible();
+    await expect(page.getByTestId("es-allocation-card")).toHaveCount(0);
+
+    await page.getByTestId("es-view-overview").click();
+    await expect(page.getByTestId("es-context-column")).toBeVisible();
   });
 });

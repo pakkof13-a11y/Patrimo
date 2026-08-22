@@ -32,6 +32,7 @@ export function EmployeeSavingsTab({
   className?: string;
 }) {
   const [manageOpen, setManageOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   // Le compte des plans appartient au titre. La même requête sert la vue
   // d'ensemble juste en dessous : React Query ne la lance qu'une fois.
@@ -82,45 +83,81 @@ export function EmployeeSavingsTab({
             )}
           </h1>
           <p className="text-meta mt-[var(--space-1)]">
-            Vue d&apos;ensemble de votre épargne salariale
+            Vue d&apos;ensemble de vos plans et de vos droits
           </p>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-[var(--space-2)]">
+        <div className="relative flex shrink-0 flex-wrap items-center gap-[var(--space-2)]">
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             onClick={() => openManage()}
             data-testid="es-manage-open"
           >
             <Settings2 className="h-3.5 w-3.5" />
             Gérer les supports
           </Button>
+
           <Button
             type="button"
-            onClick={() => openManage("es-add-line")}
+            onClick={() => setAddOpen((o) => !o)}
+            aria-expanded={addOpen}
+            aria-haspopup="menu"
             data-testid="es-add-open"
           >
             <ListPlus className="h-3.5 w-3.5" />
-            Effectuer un versement
+            Ajouter
+            <ChevronDown className="ml-1 h-3.5 w-3.5" aria-hidden />
           </Button>
+
+          {addOpen ? (
+            <>
+              {/* Cliquer ailleurs referme — moins coûteux qu'un écouteur global. */}
+              <button
+                type="button"
+                className="fixed inset-0 z-40 cursor-default"
+                aria-label="Fermer le menu"
+                onClick={() => setAddOpen(false)}
+              />
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-50 mt-[var(--space-1)] min-w-[14rem] overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--card)] py-[var(--space-1)] shadow-[var(--shadow-lg)]"
+                data-testid="es-add-menu"
+              >
+                {(
+                  [
+                    ["es-add-line", "Ajouter un support / verser"],
+                    ["es-csv-import", "Importer un relevé CSV"],
+                    ["es-unlock-form", "Dates de déblocage"],
+                  ] as const
+                ).map(([target, label]) => (
+                  <button
+                    key={target}
+                    type="button"
+                    role="menuitem"
+                    className="block w-full px-[var(--space-3)] py-[var(--space-2)] text-left text-[length:var(--text-xs)] text-[var(--foreground)] transition-[background-color] hover:bg-[var(--surface-hover)]"
+                    onClick={() => {
+                      setAddOpen(false);
+                      openManage(target);
+                    }}
+                    data-testid={`es-add-${target}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
         </div>
       </header>
 
-      {/* Onglet unique — pour la lisibilité de la page, pas pour naviguer. */}
-      <div
-        className="mb-[var(--gap-card)] border-b border-[var(--border)]"
-        data-testid="es-tabs"
-      >
-        <span className="inline-block border-b-2 border-[var(--primary)] px-[var(--space-1)] pb-[var(--space-2)] text-[length:var(--text-sm)] font-medium text-[var(--primary-text)]">
-          Vue d&apos;ensemble
-        </span>
-      </div>
-
-      <EsOverview
-        onManage={() => openManage()}
-        onAddLine={() => openManage("es-add-line")}
-      />
+      {/*
+        Plus d'onglet unique décoratif : un « Vue d'ensemble » souligné qui ne
+        menait nulle part n'est pas une navigation. Les vues réelles sont
+        portées par la barre segmentée d'`EsOverview`, où elles changent
+        effectivement le contenu.
+      */}
+      <EsOverview onManage={openManage} />
 
       {/* ── Gestion des supports (repliée) ──────────────────────── */}
       <section id="es-manage" className="mt-[var(--gap-card)]">

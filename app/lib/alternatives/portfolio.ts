@@ -18,6 +18,7 @@ import { listPreciousMetals } from "./precious-metals";
 import { listPrivateEquity } from "./private-equity";
 import { listCrowdlending } from "./crowdlending";
 import { listTangibles } from "./tangibles";
+import { buildConsolidatedInvestments } from "./consolidated";
 
 function sumFieldEur(
   rows: Array<{ currency: string; value: string }>,
@@ -205,5 +206,16 @@ export async function getAlternativesDashboardBundle(
     crowdlending: cl.summary,
     tangibles: tangibles.summary,
     shortAlerts: buildAlternativesShortAlerts(cl.summary, pe.summary),
+    /*
+      Les quatre listes étaient déjà chargées pour en tirer les summaries, puis
+      jetées. Les consolider ici ne coûte aucune requête de plus et donne à la
+      vue d'ensemble sa liste unique sans quatre appels réseau supplémentaires.
+    */
+    investments: buildConsolidatedInvestments({
+      metals: metals.lines,
+      privateEquity: pe.lines,
+      crowdlending: cl.lines,
+      tangibles: tangibles.lines,
+    }),
   };
 }

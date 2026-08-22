@@ -325,7 +325,18 @@ export type AlternativesDashboardPayload = {
    * simplifier un futur consommateur front ; le widget actuel du dashboard
    * lit directement `byStatus`/`soonCount`/`staleNavCount`. */
   shortAlerts: AlternativesShortAlert[];
+  /**
+   * Positions consolidées de la poche, toutes familles confondues.
+   *
+   * Le bundle appelait déjà les quatre listes pour en tirer les summaries,
+   * puis jetait les lignes. Les renvoyer ne coûte donc **aucune requête
+   * supplémentaire**, et évite à la vue d'ensemble quatre appels réseau
+   * qu'elle aurait sinon dû émettre pour dresser une liste unique.
+   */
+  investments: AlternativeInvestment[];
 };
+
+import type { AlternativeInvestment } from "./consolidated";
 
 // ─── Private equity ───────────────────────────────────────────────────────────
 
