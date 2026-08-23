@@ -1481,8 +1481,11 @@ export function HoldingsSection({
 
   return (
     <section className="space-y-3 sm:space-y-4" data-testid="holdings-section">
-      {tab === "cto" && <EnvelopeCashPanel envelope="CTO" />}
-      {tab === "pea" && <EnvelopeCashPanel envelope="PEA" lockCurrencyToEur />}
+      {/*
+        Plus de branche `cto` / `pea` : leurs poches d'espèces sont éditées
+        dans l'onglet « PEA & CTO », qui porte désormais ces enveloppes. `av`
+        reste ici, son onglet étant bien une vue filtrée de ce tableau.
+      */}
       {tab === "av" && (
         <>
           <EnvelopeCashPanel envelope="AV" />

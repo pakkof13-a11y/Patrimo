@@ -53,7 +53,10 @@ describe("nav groups", () => {
 
   it("isPositionsTab", () => {
     expect(isPositionsTab("holdings")).toBe(true);
-    expect(isPositionsTab("pea")).toBe(true);
+    // `av` reste une vue filtrée du tableau Positions ; `pea` et `cto` n'en
+    // sont plus — ils ont leur propre écran, « PEA & CTO ».
+    expect(isPositionsTab("av")).toBe(true);
+    expect(isPositionsTab("securities")).toBe(false);
     expect(isPositionsTab("dashboard")).toBe(false);
   });
 

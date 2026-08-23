@@ -96,8 +96,13 @@ export type MainTab =
   | "liabilities"
   | "banques"
   | "av"
-  | "cto"
-  | "pea"
+  /*
+    Ni `cto` ni `pea` : les deux ont été fusionnés dans `securities`, qui porte
+    la date d'ouverture, le plafond de versement et le régime propre à chaque
+    enveloppe. Les garder comme onglets laissait deux états qu'aucune
+    navigation ne produisait, dont l'URL canonique renvoyait ailleurs. Les
+    anciennes URL continuent de fonctionner — voir `tab-routes.ts`.
+  */
   | "crypto"
   | "immobilier"
   | "cfd"
@@ -287,8 +292,8 @@ export type HoldingsResponse = {
 
 /** Map main tabs that are filtered clones of Positions */
 export const TAB_TO_ACCOUNT_TYPE: Partial<Record<MainTab, AccountType>> = {
-  cto: "CTO",
-  pea: "PEA",
+  // Pas de `cto` ni `pea` : ces enveloppes ont leur onglet dédié
+  // (`securities`), qui ne passe pas par le tableau Positions filtré.
   av: "AV",
   crypto: "CRYPTO",
   immobilier: "IMMOBILIER",
@@ -298,8 +303,9 @@ export const TAB_TO_ACCOUNT_TYPE: Partial<Record<MainTab, AccountType>> = {
 /** Tabs that show the holdings table (with optional envelope filter). */
 export const POSITIONS_TABS: readonly MainTab[] = [
   "holdings",
-  "cto",
-  "pea",
+  // Ni `cto` ni `pea` : « PEA & CTO » rend son propre écran, pas le tableau
+  // Positions filtré. Les y laisser faisait surligner « Portefeuille » dans la
+  // barre latérale pour une URL qui n'appartenait plus à ce module.
   "av",
   // `immobilier` n'est plus un clone filtré de Positions : l'onglet dédié
   // rend sa propre vue. Le mapping vers l'enveloppe IMMOBILIER est conservé
@@ -380,8 +386,6 @@ export const MAIN_TAB_IDS: readonly MainTab[] = [
   "liabilities",
   "banques",
   "av",
-  "cto",
-  "pea",
   "crypto",
   "immobilier",
   "cfd",
@@ -389,6 +393,13 @@ export const MAIN_TAB_IDS: readonly MainTab[] = [
   "alternatifs",
   "trading",
   "securities",
+  /*
+    `assurance-vie` manquait à cette liste alors qu'il appartient à `MainTab` :
+    `isMainTab("assurance-vie")` répondait faux. Sans conséquence visible — la
+    route a sa branche explicite — mais c'est exactement l'écart qui a laissé
+    `cto` et `pea` pourrir.
+  */
+  "assurance-vie",
   "fiscal",
 ] as const;
 

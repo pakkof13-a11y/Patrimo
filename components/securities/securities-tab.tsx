@@ -28,6 +28,7 @@ import {
   peaWithdrawalTax,
 } from "@/app/lib/securities/pea";
 import { ratePct } from "@/app/lib/tax/rates";
+import { EnvelopeCashPanel } from "@/components/tabs/envelope-cash-panel";
 
 type RoomRow = {
   ownCapEur: string;
@@ -1016,6 +1017,25 @@ export function SecuritiesTab({ className }: { className?: string }) {
               </table>
             </div>
           )}
+
+          {/*
+            Poches d'espèces des enveloppes titres.
+
+            Elles vivaient dans le tableau Positions, sous les onglets `cto` et
+            `pea` — deux onglets qu'aucune navigation ne produisait plus depuis
+            la fusion des enveloppes titres dans cet écran, et dont seule une
+            URL orpheline donnait encore l'accès. Cet écran affichait déjà le
+            montant par compte, en lecture seule ; il porte désormais aussi sa
+            saisie, au niveau de l'enveloppe — qui est le niveau auquel la
+            poche est réellement tenue.
+          */}
+          <div
+            className="mt-4 grid gap-3 sm:grid-cols-2"
+            data-testid="securities-envelope-cash"
+          >
+            <EnvelopeCashPanel envelope="CTO" />
+            <EnvelopeCashPanel envelope="PEA" lockCurrencyToEur />
+          </div>
 
           <p className="text-meta mt-3">
             Estimations à titre indicatif. Un PEA ne s&apos;impose pas ligne par

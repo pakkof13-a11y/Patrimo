@@ -12,10 +12,6 @@ export function tabToPath(tab: MainTab): string {
       return "/dashboard";
     case "holdings":
       return "/positions";
-    case "cto":
-      return "/positions/cto";
-    case "pea":
-      return "/positions/pea";
     case "av":
       return "/positions/av";
     case "crypto":
@@ -51,7 +47,7 @@ export function tabToPath(tab: MainTab): string {
 
 /**
  * Parse un slug catch-all Next.js → MainTab.
- * ex. undefined → dashboard, ["positions","pea"] → pea, ["dashboard"] → dashboard
+ * ex. undefined → dashboard, ["positions","pea"] → securities, ["dashboard"] → dashboard
  */
 export function pathToTab(slug?: string[] | null): MainTab {
   if (!slug || slug.length === 0) return "dashboard";
@@ -109,7 +105,19 @@ export function pathToTab(slug?: string[] | null): MainTab {
     return "holdings";
   }
 
-  // Anciens / liens directs type /pea
+  /*
+    Anciennes URL de premier niveau des enveloppes titres.
+    `/cto` et `/pea` menaient à des onglets qui n'existent plus depuis leur
+    fusion dans « PEA & CTO » : sans cette branche, le repli `isMainTab`
+    ci-dessous les laissait résoudre vers eux-mêmes, produisant un état dont
+    l'URL canonique renvoyait ailleurs. Les liens et favoris existants
+    continuent de fonctionner, ils aboutissent simplement au bon écran.
+  */
+  if (head === "cto" || head === "compte-titres" || head === "pea") {
+    return "securities";
+  }
+
+  // Anciens / liens directs type /alternatifs
   if (isMainTab(head)) return head;
 
   return "dashboard";

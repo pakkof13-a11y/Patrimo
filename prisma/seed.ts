@@ -55,6 +55,18 @@ async function wipeUserData(userId: string) {
   await prisma.defiProtocolRef.deleteMany({ where: { userId } }).catch(() => undefined);
   await prisma.defiStrategy.deleteMany({ where: { userId } }).catch(() => undefined);
   await prisma.defiSyncCursor.deleteMany({ where: { userId } }).catch(() => undefined);
+  /*
+    Comptes titres : `SecuritiesAccount.platform` est en `onDelete: Restrict`,
+    pour qu'un courtier encore rattaché ne puisse pas être supprimé en laissant
+    le compte orphelin. La suppression des plateformes, plus bas, échouait donc
+    dès qu'un compte titres existait — le seed devenait irrejouable.
+  */
+  await prisma.securitiesAccountContribution
+    .deleteMany({ where: { account: { userId } } })
+    .catch(() => undefined);
+  await prisma.securitiesAccount
+    .deleteMany({ where: { userId } })
+    .catch(() => undefined);
   // Positions à levier : rattachées à `User`, pas à `Asset` — la suppression
   // des actifs ne les emporte pas. Sans ce nettoyage, un second run bute sur
   // la contrainte d'unicité `(userId, exchangeTradeId)` des lignes importées.
