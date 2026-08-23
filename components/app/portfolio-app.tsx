@@ -1189,6 +1189,14 @@ function PortfolioAppClient({
                   baseCurrency={baseCurrency}
                   history={historyQ.data?.history}
                   smartFilter={isDashboard && dashBlocks.kpiSmartFilter}
+                  /*
+                    Même garde que les modules refondus : `isPending && !data`.
+                    `useHoldingsQuery` conserve les données précédentes
+                    (`keepPreviousData`), donc un changement de devise ne
+                    repasse pas le bandeau en chargement — seul le tout premier
+                    chargement, sans cache, l'active.
+                  */
+                  loading={holdingsQ.isPending && !holdingsQ.data}
                 />
               </div>
             </div>

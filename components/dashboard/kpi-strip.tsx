@@ -70,12 +70,25 @@ export function KpiStrip({
   history,
   /** Masque alternatifs / épargne / passifs à zéro pour alléger le bandeau */
   smartFilter = false,
+  loading = false,
 }: {
   summary?: Record<string, string | number | unknown>;
   baseCurrency: string;
   /** Points d’évolution pour P&L latent de période */
   history?: HistoryPoint[];
   smartFilter?: boolean;
+  /**
+   * Données du bandeau pas encore arrivées.
+   *
+   * Sans cette information, `summary` absent produisait `0,00 €` sur les dix
+   * tuiles — dont le patrimoine net — parce que le formatage retombait sur
+   * zéro. Un montant nul affiché comme un fait alors que la requête est encore
+   * en vol est faux, et c'est le chiffre que l'on vient lire en premier.
+   *
+   * Distinct d'un zéro réel : une fois les données arrivées, un patrimoine
+   * réellement nul s'affiche bien `0,00 €`.
+   */
+  loading?: boolean;
 }) {
   /** true = afficher les KPI (défaut) — seed client via lazy + sync event */
   const [visible, setVisible] = useState(() =>
@@ -93,8 +106,29 @@ export function KpiStrip({
    * substitution garde une longueur fixe, sinon la largeur de la tuile
    * laisserait deviner l'ordre de grandeur qu'on cherche à cacher.
    */
+  /** Placeholder d'un montant inconnu — déjà employé par les tuiles estompées. */
+  const zeroValue = "— €";
+
+  /**
+   * Absence de données, une fois le chargement terminé.
+   *
+   * Ce n'est pas la même chose qu'un zéro : si `summary` manque encore après
+   * la requête — erreur réseau, réponse vide — aucun montant n'est connu, et
+   * l'afficher à zéro serait une affirmation. On reprend le placeholder que le
+   * bandeau utilise déjà pour ses tuiles sans contenu.
+   */
+  const hasSummary = summary != null;
+
+  /*
+    `?? 0` reste, mais n'est plus jamais atteint avec une donnée manquante :
+    les deux gardes ci-dessus interceptent le cas avant le formatage. Il ne
+    couvre plus qu'un champ absent d'un `summary` par ailleurs présent, où
+    zéro est la bonne réponse.
+  */
   const money = (value: unknown) =>
-    maskAmount(formatCurrency(String(value ?? 0), baseCurrency), amountsHidden);
+    hasSummary
+      ? maskAmount(formatCurrency(String(value ?? 0), baseCurrency), amountsHidden)
+      : zeroValue;
 
   // Écoute changements de préférence (autres onglets / settings) — pas de setState sync init
   useEffect(() => {
@@ -149,12 +183,17 @@ export function KpiStrip({
   // smartFilter n'unmount plus les tuiles à ~0 (évite le va-et-vient de la
   // grille au fil des chargements) — elles restent visibles, effacées via
   // `muted` sur la tuile (voir Kpi).
-  const mutedAlt = smartFilter && Math.abs(alt) <= 1e-6;
-  const mutedEs = smartFilter && Math.abs(es) <= 1e-6;
-  const mutedLiab = smartFilter && Math.abs(liab) <= 1e-6;
-  const mutedRealEstate = smartFilter && Math.abs(realEstate) <= 1e-6;
-  const mutedLifeInsurance = smartFilter && Math.abs(lifeInsurance) <= 1e-6;
-  const zeroValue = "— €";
+  /*
+    `smartFilter` estompe les tuiles à ~0. Pendant le chargement, toutes les
+    valeurs valent 0 : sans cette garde, la moitié du bandeau apparaîtrait
+    effacée avant de reprendre vie — exactement le va-et-vient que le maintien
+    des tuiles montées cherche à éviter.
+  */
+  const mutedAlt = !loading && smartFilter && Math.abs(alt) <= 1e-6;
+  const mutedEs = !loading && smartFilter && Math.abs(es) <= 1e-6;
+  const mutedLiab = !loading && smartFilter && Math.abs(liab) <= 1e-6;
+  const mutedRealEstate = !loading && smartFilter && Math.abs(realEstate) <= 1e-6;
+  const mutedLifeInsurance = !loading && smartFilter && Math.abs(lifeInsurance) <= 1e-6;
 
   return (
     <div
@@ -236,6 +275,7 @@ export function KpiStrip({
             value={money(
               summary?.totalMarketValueBase ?? summary?.totalMarketValueEur
             )}
+            loading={loading}
           />
           <Kpi
             icon={<TrendingUp className="h-4 w-4" />}
@@ -248,6 +288,7 @@ export function KpiStrip({
             value={money(latentValue)}
             tone={latentValue >= 0 ? "up" : "down"}
             testId="kpi-latent"
+            loading={loading}
           />
           <Kpi
             icon={<TrendingUp className="h-4 w-4" />}
@@ -262,12 +303,14 @@ export function KpiStrip({
                 num(summary?.cashIncomeBase ?? summary?.cashIncomeEur)
             )}
             testId="kpi-realized"
+            loading={loading}
           />
           <Kpi
             icon={<Landmark className="h-4 w-4" />}
             label="Cash"
             value={money(summary?.totalCashBase ?? summary?.totalCashEur)}
             testId="kpi-cash"
+            loading={loading}
           />
           <Kpi
             icon={<Gem className="h-4 w-4" />}
@@ -275,6 +318,7 @@ export function KpiStrip({
             value={mutedAlt ? zeroValue : money(alt)}
             muted={mutedAlt}
             testId="kpi-alternatives"
+            loading={loading}
           />
           <Kpi
             icon={<PiggyBank className="h-4 w-4" />}
@@ -282,6 +326,7 @@ export function KpiStrip({
             value={mutedEs ? zeroValue : money(es)}
             muted={mutedEs}
             testId="kpi-employee-savings"
+            loading={loading}
           />
           <Kpi
             icon={<Building2 className="h-4 w-4" />}
@@ -293,6 +338,7 @@ export function KpiStrip({
             }
             muted={mutedRealEstate}
             testId="kpi-real-estate"
+            loading={loading}
           />
           <Kpi
             icon={<ShieldCheck className="h-4 w-4" />}
@@ -304,6 +350,7 @@ export function KpiStrip({
             }
             muted={mutedLifeInsurance}
             testId="kpi-life-insurance"
+            loading={loading}
           />
           <Kpi
             icon={<Scale className="h-4 w-4" />}
@@ -311,6 +358,7 @@ export function KpiStrip({
             value={mutedLiab ? zeroValue : money(liab)}
             muted={mutedLiab}
             testId="kpi-liabilities"
+            loading={loading}
           />
           <Kpi
             icon={<Coins className="h-4 w-4" />}
@@ -323,6 +371,7 @@ export function KpiStrip({
             }
             accent
             testId="kpi-net-worth"
+            loading={loading}
           />
         </div>
       )}
