@@ -57,7 +57,7 @@ export function HoldingsEmptyState({
         testId="holdings-empty"
         emptyKind="envelope"
         title={`Aucune position en ${envelopeLabel || "cette enveloppe"}`}
-        description="Changez d’enveloppe ou enregistrez un achat sur ce type de compte."
+        description="Changez d’enveloppe, ou enregistrez un achat dans celle-ci."
       />
     );
   }

@@ -1953,7 +1953,7 @@ export function ImportCsvModal({
                 "TRADE_REPUBLIC",
                 "REVOLUT",
               ].includes(platformId) && (
-                <Field label="Type de compte (enveloppe fiscale)">
+                <Field label="Enveloppe fiscale">
                   <select
                     className="input w-full"
                     value={accountEnvelopeType}

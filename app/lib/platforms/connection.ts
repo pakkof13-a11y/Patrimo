@@ -25,9 +25,19 @@
  *     n'est pas comparable au patrimoine net.
  */
 
-import { PLATFORM_TYPES, ACCOUNT_TYPES } from "@/app/lib/constants";
+import { PLATFORM_TYPES } from "@/app/lib/constants";
+import { envelopeLabel } from "@/app/lib/terminology";
 import { resolveChainSyncForPlatform } from "@/app/lib/market/chain-wallet-sync";
 import type { PlatformRow } from "@/app/lib/types/ui";
+
+/**
+ * Ré-export du glossaire.
+ *
+ * Ce module définissait sa propre copie d'`envelopeLabel`. Une seule
+ * définition existe désormais, dans `terminology.ts` ; le ré-export évite de
+ * toucher les appelants pour un déplacement de fichier.
+ */
+export { envelopeLabel };
 
 /** Au-delà, une synchronisation on-chain est considérée comme dépassée. */
 export const STALE_SYNC_DAYS = 14;
@@ -103,12 +113,6 @@ const num = (v: string | number | null | undefined): number => {
 
 export function platformTypeLabel(type: string): string {
   return PLATFORM_TYPES[type as keyof typeof PLATFORM_TYPES] || type;
-}
-
-export function envelopeLabel(accountType: string): string {
-  return (
-    ACCOUNT_TYPES[accountType as keyof typeof ACCOUNT_TYPES] || accountType
-  );
 }
 
 /** Valeur d'une plateforme — repli identique à celui du tri et des KPI. */

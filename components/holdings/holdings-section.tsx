@@ -1508,7 +1508,7 @@ export function HoldingsSection({
           onExportCsv={downloadSelectionCsv}
           subtitle={
             envelopeFilters.length === allEnvelopesCount
-              ? "Positions calculées depuis le journal · CUMP multi-compte"
+              ? "Positions calculées depuis le journal · CUMP multi-plateforme"
               : envelopeFilters.length === 0
                 ? "Sélectionnez au moins une enveloppe pour afficher les positions"
                 : `${envelopeFilters.map((e) => ACCOUNT_TYPES[e]).join(" · ")} · journal`

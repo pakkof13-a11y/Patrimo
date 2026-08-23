@@ -110,7 +110,7 @@ export function TradingAccountsPanel({ className }: { className?: string }) {
       data-testid="trading-accounts-panel"
     >
       <PanelHeader
-        title="Comptes & CFD"
+        title="Comptes de courtage"
         subtitle="Comptes chez vos courtiers, et positions sur indices, forex ou matières premières"
         actions={
           <Button

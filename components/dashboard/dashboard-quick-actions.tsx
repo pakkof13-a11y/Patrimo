@@ -66,7 +66,7 @@ export function DashboardQuickActions({
     {
       id: "platforms",
       label: "Plateformes",
-      hint: "Comptes & sources",
+      hint: "Établissements connectés",
       icon: Wallet,
     },
   ];
