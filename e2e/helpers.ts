@@ -218,10 +218,10 @@ const NAV_PATH: Record<string, string> = {
   Transactions: "/transactions",
   Fiscalité: "/fiscalite",
   /** Libellé produit actuel */
-  "Mes plateformes": "/comptes",
+  "Mes plateformes": "/plateformes",
   /** Alias historiques — même destination */
-  "Mes comptes": "/comptes",
-  Plateformes: "/comptes",
+  "Mes comptes": "/plateformes",
+  Plateformes: "/plateformes",
   Passifs: "/passifs",
   Banques: "/banques",
   "Épargne Salariale": "/epargne-salariale",
@@ -298,25 +298,28 @@ export async function clickNav(page: Page, label: string) {
   const fallbackPath = NAV_PATH[label];
 
   /**
-   * Entrées rangées derrière l'un des trois groupes patrimoniaux de la
-   * sidebar (Enveloppes, Actifs détenus, Positions & engagements).
+   * Entrées rangées derrière l'une des trois familles de la barre latérale
+   * (Avoirs, Engagements, Suivi).
    *
-   * Chaque groupe est son propre dépliant depuis le retrait du bouton
-   * générique « Patrimoine » : il faut savoir lequel ouvrir avant de pouvoir
-   * cliquer l'entrée visée. Sans cette table, le helper tombait
-   * systématiquement sur le repli par URL et ne testait plus la navigation
-   * réelle.
+   * Chaque famille est son propre dépliant : il faut savoir lequel ouvrir
+   * avant de pouvoir cliquer l'entrée visée. Sans cette table, le helper
+   * tombait systématiquement sur le repli par URL et ne testait plus la
+   * navigation réelle.
    */
   const WEALTH_GROUP_OF: Record<string, string> = {
-    "nav-securities": "nav-group-enveloppes",
-    "nav-assurance-vie": "nav-group-enveloppes",
-    "nav-banques": "nav-group-enveloppes",
-    "nav-epargne-salariale": "nav-group-enveloppes",
-    "nav-immobilier": "nav-group-actifs",
-    "nav-crypto": "nav-group-actifs",
-    "nav-alternatifs": "nav-group-actifs",
-    "nav-trading": "nav-group-positions",
-    "nav-liabilities": "nav-group-positions",
+    "nav-holdings": "nav-group-avoirs",
+    "nav-securities": "nav-group-avoirs",
+    "nav-banques": "nav-group-avoirs",
+    "nav-assurance-vie": "nav-group-avoirs",
+    "nav-immobilier": "nav-group-avoirs",
+    "nav-crypto": "nav-group-avoirs",
+    "nav-epargne-salariale": "nav-group-avoirs",
+    "nav-alternatifs": "nav-group-avoirs",
+    "nav-liabilities": "nav-group-engagements",
+    "nav-trading": "nav-group-engagements",
+    "nav-transactions": "nav-group-suivi",
+    "nav-platforms": "nav-group-suivi",
+    "nav-fiscal": "nav-group-suivi",
   };
 
   async function ensureUrl() {

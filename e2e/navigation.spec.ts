@@ -28,9 +28,9 @@ test.describe("Navigation & shell", () => {
     // la bande d'indicateurs, stable quel que soit le wording.
     await expect(page.getByTestId("tx-kpis")).toBeVisible({ timeout: 15_000 });
 
-    // Produit : « Mes plateformes » (groupe Sources) → /comptes
+    // « Plateformes » vit désormais sous Suivi, à l'URL /plateformes.
     await clickNav(page, "Mes plateformes");
-    await expect(page).toHaveURL(/\/comptes/);
+    await expect(page).toHaveURL(/\/plateformes/);
     await expect(page.getByTestId("platforms-tab")).toBeVisible({
       timeout: 10_000,
     });

@@ -2,12 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  ArrowLeftRight,
-  FileText,
-  Gem,
+  Activity,
   LayoutGrid,
-  Landmark,
-  Layers,
   Scale,
   Settings,
   Wallet,
@@ -17,19 +13,28 @@ import { cn } from "@/app/lib/utils";
 import { isPositionsTab, type MainTab } from "@/app/lib/types/ui";
 
 /**
- * Groupes patrimoniaux — chacun est désormais une entrée de premier niveau.
+ * Architecture de navigation — quatre familles.
  *
- * Le mockup ne prévoit que sept entrées quand l'application en compte
- * quatorze ; l'écart tenait auparavant dans un unique dépliant « Patrimoine »,
- * générique au point de ne rien dire de ce qu'il contenait. Trois entrées
- * portant chacune son propre nom et sa propre icône disent immédiatement où
- * chercher, sans perdre la compacité qui justifiait le dépliant.
+ * Le critère de regroupement est **ce que la chose fait au patrimoine net**,
+ * qui est la question à laquelle l'application existe pour répondre :
  *
- * Le classement suit la nature comptable, pas l'ordre historique : ce qu'on
- * détient via un contrat (l'enveloppe), ce qu'on détient en direct, ce qu'on
- * doit ou risque.
+ *   Avoirs        s'ajoutent au patrimoine net ;
+ *   Engagements   ne s'y ajoutent pas — une dette s'en retranche, une position
+ *                 à levier n'y pèse que par sa marge et son P&L latent ;
+ *   Suivi         n'est pas du patrimoine mais son instrumentation : le
+ *                 journal, la couche de connexion, l'imposition.
+ *
+ * Les groupes précédents — « Enveloppes », « Actifs détenus », « Positions &
+ * engagements » — classaient par **forme de détention**. C'était défendable,
+ * mais cela séparait un PEA d'un bien immobilier alors que les deux
+ * s'additionnent de la même façon, et cela rangeait Trading avec les avoirs
+ * alors qu'une position à levier n'en est pas un.
+ *
+ * Le mécanisme de dépliant est conservé tel quel : la barre est un rail étroit
+ * à icônes et micro-libellés (voir `.term-sidebar`), qui ne peut pas afficher
+ * treize entrées à plat sans être élargie — ce qui serait un autre chantier.
  */
-type WealthGroup = {
+type NavSection = {
   id: string;
   title: string;
   icon: LucideIcon;
@@ -37,54 +42,57 @@ type WealthGroup = {
   items: { id: MainTab; label: string; testId: string }[];
 };
 
-const WEALTH_GROUPS: WealthGroup[] = [
+export const NAV_SECTIONS: NavSection[] = [
   {
-    id: "enveloppes",
-    title: "Enveloppes",
-    // Une enveloppe se reçoit et se garde : le pli scellé porté par une
-    // institution, plutôt qu'un actif choisi au coup par coup.
-    icon: Landmark,
-    testId: "group-enveloppes",
+    id: "avoirs",
+    title: "Avoirs",
+    // Ce qu'on possède : le portefeuille au sens propre.
+    icon: Wallet,
+    testId: "group-avoirs",
     items: [
+      { id: "holdings", label: "Portefeuille", testId: "holdings" },
+      // Sous-vue du portefeuille : PEA et CTO y ont été consolidés, et
+      // l'éditeur de leurs poches d'espèces y vit désormais.
       { id: "securities", label: "PEA & CTO", testId: "securities" },
-      { id: "assurance-vie", label: "Assurance-vie", testId: "assurance-vie" },
       { id: "banques", label: "Banques", testId: "banques" },
+      { id: "assurance-vie", label: "Assurance-vie", testId: "assurance-vie" },
+      { id: "immobilier", label: "Immobilier", testId: "immobilier" },
+      { id: "crypto", label: "Cryptos", testId: "crypto" },
       {
         id: "epargne-salariale",
         label: "Épargne salariale",
         testId: "epargne-salariale",
       },
-    ],
-  },
-  {
-    id: "actifs",
-    title: "Actifs détenus",
-    // Un actif détenu en direct — la pierre précieuse plutôt que le contrat
-    // qui la couvre.
-    icon: Gem,
-    testId: "group-actifs",
-    items: [
-      { id: "immobilier", label: "Immobilier", testId: "immobilier" },
-      { id: "crypto", label: "Cryptos", testId: "crypto" },
       { id: "alternatifs", label: "Actifs alternatifs", testId: "alternatifs" },
     ],
   },
   {
-    id: "positions",
-    title: "Positions & engagements",
-    // La balance : un effet de levier ou une dette déplacent l'équilibre
-    // dans un sens ou dans l'autre, ce qu'un actif détenu ne fait pas.
+    id: "engagements",
+    title: "Engagements",
+    // La balance : une dette et un levier déplacent l'équilibre, un avoir non.
     icon: Scale,
-    testId: "group-positions",
+    testId: "group-engagements",
     items: [
+      { id: "liabilities", label: "Passifs / Crédits", testId: "liabilities" },
       { id: "trading", label: "Trading", testId: "trading" },
-      { id: "liabilities", label: "Passifs", testId: "liabilities" },
+    ],
+  },
+  {
+    id: "suivi",
+    title: "Suivi",
+    // L'instrumentation : d'où viennent les données et ce qu'elles produisent.
+    icon: Activity,
+    testId: "group-suivi",
+    items: [
+      { id: "transactions", label: "Transactions", testId: "transactions" },
+      { id: "platforms", label: "Plateformes", testId: "platforms" },
+      { id: "fiscal", label: "Fiscalité", testId: "fiscal" },
     ],
   },
 ];
 
-const WEALTH_TABS_BY_GROUP = new Map<string, Set<MainTab>>(
-  WEALTH_GROUPS.map((g) => [g.id, new Set(g.items.map((i) => i.id))])
+const SECTION_TABS = new Map<string, Set<MainTab>>(
+  NAV_SECTIONS.map((g) => [g.id, new Set(g.items.map((i) => i.id))])
 );
 
 type DirectEntry = {
@@ -94,16 +102,9 @@ type DirectEntry = {
   testId: string;
 };
 
-/** Les quatre entrées qui mènent directement à un écran. */
-const DIRECT_TOP: DirectEntry[] = [
+/** Vue — la seule entrée qui n'appartient à aucune famille patrimoniale. */
+export const DIRECT_TOP: DirectEntry[] = [
   { id: "dashboard", label: "Tableau de bord", icon: LayoutGrid, testId: "dashboard" },
-  { id: "holdings", label: "Portefeuille", icon: Wallet, testId: "holdings" },
-  { id: "transactions", label: "Transactions", icon: ArrowLeftRight, testId: "transactions" },
-  { id: "platforms", label: "Plateformes", icon: Layers, testId: "platforms" },
-];
-
-const DIRECT_BOTTOM: DirectEntry[] = [
-  { id: "fiscal", label: "Fiscalité", icon: FileText, testId: "fiscal" },
 ];
 
 function NavButton({
@@ -154,8 +155,14 @@ export function AppSidebar({
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  // `crypto` appartient à la famille Positions côté données mais possède sa
-  // propre entrée : sans l'exclure, deux éléments seraient actifs à la fois.
+  /*
+    `av` et `cfd` sont des vues filtrées du tableau Positions : ce sont des
+    onglets à part entière, mais aucune entrée de la barre ne les porte. Sans
+    ce repli, `/positions/av` n'allumait rien du tout.
+
+    `crypto` est exclu bien qu'appartenant à la même famille : il a sa propre
+    entrée, et sans l'exclure deux éléments seraient actifs à la fois.
+  */
   const positionsActive = isPositionsTab(tab) && tab !== "crypto";
 
   useEffect(() => {
@@ -192,13 +199,17 @@ export function AppSidebar({
             label={e.label}
             icon={e.icon}
             testId={e.testId}
-            active={e.id === "holdings" ? positionsActive : tab === e.id}
+            active={tab === e.id}
             onClick={() => go(e.id)}
           />
         ))}
 
-        {WEALTH_GROUPS.map((group) => {
-          const active = WEALTH_TABS_BY_GROUP.get(group.id)!.has(tab);
+        {NAV_SECTIONS.map((group) => {
+          const active =
+            SECTION_TABS.get(group.id)!.has(tab) ||
+            // Les vues filtrées de Positions appartiennent à Avoirs, via
+            // l'entrée Portefeuille qui les héberge.
+            (group.id === "avoirs" && positionsActive);
           const isOpen = openGroupId === group.id;
           return (
             // Chaque groupe porte son propre menu, ancré sur son propre
@@ -230,7 +241,8 @@ export function AppSidebar({
                   )}
                 >
                   {group.items.map((item) => {
-                    const itemActive = tab === item.id;
+                    const itemActive =
+                      item.id === "holdings" ? positionsActive : tab === item.id;
                     return (
                       <button
                         key={item.id}
@@ -258,17 +270,6 @@ export function AppSidebar({
             </div>
           );
         })}
-
-        {DIRECT_BOTTOM.map((e) => (
-          <NavButton
-            key={e.id}
-            label={e.label}
-            icon={e.icon}
-            testId={e.testId}
-            active={tab === e.id}
-            onClick={() => go(e.id)}
-          />
-        ))}
 
         {/* Repoussé en pied de colonne : réglages, jamais une destination métier. */}
         <div className="mt-auto max-[900px]:mt-0" />

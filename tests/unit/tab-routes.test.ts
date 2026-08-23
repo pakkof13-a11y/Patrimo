@@ -15,7 +15,7 @@ describe("tab-routes", () => {
     expect(tabToPath("securities")).toBe("/pea-cto");
     expect(tabToPath("transactions")).toBe("/transactions");
     expect(tabToPath("fiscal")).toBe("/fiscalite");
-    expect(tabToPath("platforms")).toBe("/comptes");
+    expect(tabToPath("platforms")).toBe("/plateformes");
     expect(tabToPath("liabilities")).toBe("/passifs");
   });
 
@@ -40,8 +40,12 @@ describe("tab-routes", () => {
     expect(pathToTab(["transactions"])).toBe("transactions");
     expect(pathToTab(["fiscalite"])).toBe("fiscal");
     expect(pathToTab(["plateformes"])).toBe("platforms");
+    // `/comptes` était l'URL canonique avant que le vocabulaire ne soit fixé :
+    // « compte » désigne une entité réelle, pas un établissement. L'ancienne
+    // forme continue de résoudre — les favoris ne cassent pas.
     expect(pathToTab(["comptes"])).toBe("platforms");
     expect(pathToTab(["mes-comptes"])).toBe("platforms");
+    expect(pathToTab(["platforms"])).toBe("platforms");
     expect(pathToTab(["passifs"])).toBe("liabilities");
   });
 

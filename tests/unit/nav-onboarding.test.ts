@@ -6,10 +6,10 @@ import {
 } from "@/app/lib/types/ui";
 import {
   ENVELOPE_SELECT_OPTIONS,
-  NAV_GROUPS,
   envelopeParamToTab,
   tabToEnvelopeParam,
 } from "@/app/lib/types/nav-groups";
+import { DIRECT_TOP, NAV_SECTIONS } from "@/components/layout/app-sidebar";
 import {
   isUserActivated,
   shouldShowOnboarding,
@@ -23,26 +23,82 @@ import {
   saveUiPref,
 } from "@/app/lib/ui-preferences";
 
-describe("nav groups", () => {
-  it("NAV_GROUPS covers core tabs without inventing pages", () => {
-    const ids = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id));
-    expect(ids).toContain("dashboard");
-    expect(ids).toContain("holdings");
-    expect(ids).toContain("transactions");
-    expect(ids).toContain("fiscal");
-    expect(ids).not.toContain("cto"); // enveloppe hors nav primaire
+describe("navigation", () => {
+  const allIds = [
+    ...DIRECT_TOP.map((e) => e.id),
+    ...NAV_SECTIONS.flatMap((g) => g.items.map((i) => i.id)),
+  ];
+
+  it("les quatre familles couvrent tous les modules, sans inventer de page", () => {
+    /*
+      Ces tests portent sur la structure **réellement rendue**. Ils visaient
+      auparavant `NAV_GROUPS`, une seconde description de la navigation que
+      rien n'affichait — elle a donc été retirée.
+    */
+    for (const id of [
+      "dashboard",
+      "holdings",
+      "securities",
+      "banques",
+      "assurance-vie",
+      "immobilier",
+      "crypto",
+      "epargne-salariale",
+      "alternatifs",
+      "liabilities",
+      "trading",
+      "transactions",
+      "platforms",
+      "fiscal",
+    ]) {
+      expect(allIds).toContain(id);
+    }
+    // Onglets retirés du modèle au chantier CTO/PEA : plus rien ne doit les
+    // proposer.
+    expect(allIds).not.toContain("cto");
+    expect(allIds).not.toContain("pea");
   });
 
-  it("le groupe des comptes reste multi-entrées (Banques + Mes plateformes)", () => {
-    const sources = NAV_GROUPS.find((g) => g.id === "sources");
-    expect(sources).toBeDefined();
-    // « Sources » ne nommait pas son contenu : le libellé dit désormais ce
-    // qu'on y trouve. L'identifiant, lui, ne bouge pas — il sert d'ancrage.
-    expect(sources!.label).toBe("Comptes & contrats");
-    expect(sources!.items.length).toBeGreaterThan(1);
-    expect(sources!.items.map((i) => i.id)).toEqual(
-      expect.arrayContaining(["banques", "platforms"])
+  it("aucune entrée n'apparaît deux fois", () => {
+    // Deux emplacements pour un même écran feraient s'allumer deux entrées.
+    expect(new Set(allIds).size).toBe(allIds.length);
+  });
+
+  it("le classement suit l'effet sur le patrimoine net", () => {
+    /*
+      C'est le critère du regroupement, et le seul qui rende la barre lisible :
+      un avoir s'ajoute, un engagement non. Trading est un engagement — une
+      position à levier ne pèse que par sa marge et son P&L latent.
+    */
+    const bySection = Object.fromEntries(
+      NAV_SECTIONS.map((g) => [g.id, g.items.map((i) => i.id)])
     );
+    expect(bySection.avoirs).toContain("holdings");
+    expect(bySection.avoirs).toContain("securities");
+    expect(bySection.engagements).toEqual(
+      expect.arrayContaining(["liabilities", "trading"])
+    );
+    expect(bySection.avoirs).not.toContain("trading");
+    expect(bySection.suivi).toEqual(
+      expect.arrayContaining(["transactions", "platforms", "fiscal"])
+    );
+  });
+
+  it("PEA & CTO reste une sous-vue du portefeuille", () => {
+    // Consolidé au chantier précédent : pas de retour aux onglets CTO / PEA.
+    const avoirs = NAV_SECTIONS.find((g) => g.id === "avoirs")!;
+    const ids = avoirs.items.map((i) => i.id);
+    expect(ids.indexOf("securities")).toBe(ids.indexOf("holdings") + 1);
+  });
+
+  it("la navigation ne parle jamais de « compte » pour une plateforme", () => {
+    // Vocabulaire fixé au chantier terminologie.
+    const labels = [
+      ...DIRECT_TOP.map((e) => e.label),
+      ...NAV_SECTIONS.flatMap((g) => [g.title, ...g.items.map((i) => i.label)]),
+    ];
+    expect(labels).toContain("Plateformes");
+    expect(labels.filter((l) => /compte/i.test(l))).toEqual([]);
   });
 
   it("PRIMARY_NAV still lists top items for compat", () => {

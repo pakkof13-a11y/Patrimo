@@ -39,7 +39,13 @@ export function tabToPath(tab: MainTab): string {
     case "liabilities":
       return "/passifs";
     case "platforms":
-      return "/comptes";
+      /*
+        `/plateformes` plutôt que `/comptes` : le vocabulaire fixé au chantier
+        précédent réserve « compte » à une entité réelle — bancaire, titres,
+        courtage — et une plateforme n'en est pas une. `/comptes` reste résolu
+        plus bas, aucun favori ne casse.
+      */
+      return "/plateformes";
     default:
       return "/dashboard";
   }

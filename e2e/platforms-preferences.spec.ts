@@ -13,7 +13,7 @@ test.describe("Mes plateformes & préférences", () => {
   }) => {
     await gotoDashboard(page);
     await clickNav(page, "Mes plateformes");
-    await expect(page).toHaveURL(/\/comptes/);
+    await expect(page).toHaveURL(/\/plateformes/);
     await expect(page.getByTestId("platforms-tab")).toBeVisible({
       timeout: 15_000,
     });

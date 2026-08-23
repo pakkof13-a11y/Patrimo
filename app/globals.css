@@ -1781,8 +1781,22 @@ textarea:focus-visible,
   display: flex;
   flex-direction: column;
   align-items: center;
+  /*
+    La colonne de navigation passe devant la zone de travail.
+
+    `.term-shell` est une grille : sans cette pile, la colonne de contenu —
+    déclarée après — recouvrait les dépliants, qui devenaient inutilisables dès
+    qu'ils descendaient à hauteur d'une barre d'outils. Le symptôme est apparu
+    en allongeant le menu « Avoirs » ; la cause, elle, était là depuis le
+    début.
+
+    Reste sous les panneaux ancrés (45) et les modales : un dépliant de
+    navigation ne doit jamais passer devant eux.
+  */
+  z-index: 20;
   gap: var(--space-1);
   padding-block: var(--space-3);
+  /* `sticky` suffit à porter le z-index — pas besoin d'un second `position`. */
   position: sticky;
   top: 0;
   align-self: start;
