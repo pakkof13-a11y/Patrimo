@@ -271,8 +271,19 @@ export function AppSidebar({
           );
         })}
 
-        {/* Repoussé en pied de colonne : réglages, jamais une destination métier. */}
-        <div className="mt-auto max-[900px]:mt-0" />
+        {/*
+          Séparé du reste par un filet, plus par un ressort.
+
+          `mt-auto` poussait Paramètres au bas d'une colonne haute de `100vh`
+          alors qu'elle commence sous l'en-tête : le bouton tombait sous la
+          ligne de flottaison, et restait inatteignable sur toute page trop
+          courte pour défiler. Le filet dit la même chose — « réglages, pas une
+          destination métier » — sans dépendre de la hauteur du viewport.
+        */}
+        <div
+          className="my-[var(--space-2)] h-px w-[60%] bg-[var(--border)] max-[900px]:hidden"
+          aria-hidden
+        />
         <NavButton
           label="Paramètres"
           icon={Settings}
