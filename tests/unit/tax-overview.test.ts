@@ -31,6 +31,7 @@ function bundle(over: Partial<RealEstateTaxBundlePayload> = {}): RealEstateTaxBu
   return {
     properties: [],
     marginalTaxRatePct: 30,
+    marginalTaxRateSource: "DEFAULT",
     ifi: {
       lines: [],
       grossTaxableEur: "0",

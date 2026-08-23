@@ -26,6 +26,16 @@ model User {
   baseCurrency  String    @default("EUR")
   /// Situation fiscale du foyer pour l'abattement AV : SINGLE | COUPLE
   taxHousehold  String    @default("SINGLE")
+  /// Tranche marginale d'imposition du foyer — 0 | 11 | 30 | 41 | 45.
+  ///
+  /// Portée par l'utilisateur et non par un bien : un foyer a une tranche,
+  /// appliquée à l'ensemble de ses revenus fonciers agrégés. Même raisonnement
+  /// que `taxHousehold`, juste au-dessus.
+  ///
+  /// Nullable à dessein : « non renseigné » se distingue de « 30 % ». Aurea ne
+  /// calcule pas cette tranche — il ne connaît ni les salaires ni les parts du
+  /// foyer — donc elle reste déclarative, et son absence doit rester visible.
+  marginalTaxRatePct Int?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

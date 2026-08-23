@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/app/lib/api-client";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatCurrency } from "@/app/lib/utils";
+import {
+  DEFAULT_MARGINAL_RATE_PCT,
+  marginalRateNotice,
+  type MarginalRateSource,
+} from "@/app/lib/tax/marginal-rate";
 import {
   IFI_THRESHOLD_EUR,
   type RealEstateTaxBundlePayload as TaxBundle,
@@ -31,6 +35,11 @@ const SCHEME_LABELS: Record<string, string> = {
 };
 
 const TMI_OPTIONS = [0, 11, 30, 41, 45];
+
+type MarginalRatePayload = {
+  marginalTaxRatePct: number | null;
+  applied: { pct: number; source: MarginalRateSource };
+};
 
 function num(v: string | null | undefined): number {
   const n = Number(v ?? 0);
@@ -311,11 +320,47 @@ function SchemesView({ schemes }: { schemes: SchemesBlock }) {
  * montants ne peuvent pas diverger de l'onglet Positions.
  */
 export function RealEstateTaxPanel({ className }: { className?: string }) {
-  const [tmi, setTmi] = useState(30);
+  const qc = useQueryClient();
+
+  /*
+    La tranche n'est plus un état local de ce composant.
+
+    Elle vivait ici en `useState(30)`, donc elle disparaissait au changement
+    d'onglet et n'était connue de personne d'autre — Fiscalité calculait le
+    même bien à 30 % pendant que cet écran affichait 41 %. Elle est désormais
+    déclarée sur le profil, et ce sélecteur l'écrit.
+  */
+  const rateQ = useQuery({
+    queryKey: ["marginal-tax-rate"],
+    queryFn: () => fetchJson<MarginalRatePayload>("/api/tax/marginal-rate"),
+    staleTime: 60_000,
+  });
+
+  const saveRate = useMutation({
+    mutationFn: (pct: number | null) =>
+      fetchJson<MarginalRatePayload>("/api/tax/marginal-rate", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ marginalTaxRatePct: pct }),
+      }),
+    onSuccess: () => {
+      // Les deux écrans lisent le même taux : les deux doivent se rafraîchir.
+      void qc.invalidateQueries({ queryKey: ["marginal-tax-rate"] });
+      void qc.invalidateQueries({ queryKey: ["real-estate-tax"] });
+    },
+  });
+
+  const appliedPct = rateQ.data?.applied.pct ?? DEFAULT_MARGINAL_RATE_PCT;
+  const rateSource = rateQ.data?.applied.source ?? "DEFAULT";
 
   const q = useQuery({
-    queryKey: ["real-estate-tax", tmi],
-    queryFn: () => fetchJson<TaxBundle>(`/api/real-estate/tax?tmi=${tmi}`),
+    queryKey: ["real-estate-tax", "panel"],
+    /*
+      Sans `?tmi=`, la route résout elle-même la tranche depuis le profil.
+      La passer ici rendrait ce composant responsable d'une règle qui doit
+      rester au même endroit pour tous les appelants.
+    */
+    queryFn: () => fetchJson<TaxBundle>("/api/real-estate/tax"),
   });
 
   const ifi = q.data?.ifi;
@@ -478,11 +523,21 @@ export function RealEstateTaxPanel({ className }: { className?: string }) {
               TMI
               <select
                 className="input h-7 py-0 text-xs"
-                value={tmi}
-                onChange={(e) => setTmi(Number(e.target.value))}
+                value={rateQ.data?.marginalTaxRatePct ?? ""}
+                disabled={rateQ.isPending || saveRate.isPending}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  saveRate.mutate(v === "" ? null : Number(v));
+                }}
                 aria-label="Tranche marginale d'imposition"
                 data-testid="re-tax-tmi"
               >
+                {/*
+                  « Non renseignée » est une valeur choisissable, pas un trou :
+                  l'utilisateur doit pouvoir retirer une tranche saisie par
+                  erreur, et retomber explicitement sur le défaut.
+                */}
+                <option value="">Non renseignée</option>
                 {TMI_OPTIONS.map((t) => (
                   <option key={t} value={t}>
                     {t} %
@@ -491,6 +546,14 @@ export function RealEstateTaxPanel({ className }: { className?: string }) {
               </select>
             </label>
           </div>
+
+          {/*
+            Même phrase que dans Fiscalité, produite par la même fonction : les
+            deux écrans lisent le même taux et doivent le dire de la même façon.
+          */}
+          <p className="text-meta mt-1.5" data-testid="re-tax-tmi-notice">
+            {marginalRateNotice({ pct: appliedPct, source: rateSource })}
+          </p>
 
           <RentalSectionView
             title="Location nue — revenus fonciers"

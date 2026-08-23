@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
+import { prisma } from "@/app/lib/prisma";
+import { resolveMarginalRate } from "@/app/lib/tax/marginal-rate";
 import { getRealEstateTaxBundle } from "@/app/lib/real-estate/tax/service";
 import { clientErrorMessage } from "@/app/lib/api/error-response";
 
@@ -39,7 +41,16 @@ function serializeRentalSection(
  * Tout est recalculé à la demande depuis le journal — aucun agrégat n'est
  * stocké, donc rien ne peut diverger de l'onglet Positions.
  *
- * Paramètre : `tmi` — tranche marginale (0 · 11 · 30 · 41 · 45), défaut 30.
+ * Tranche marginale appliquée, par ordre de priorité :
+ *
+ *   1. `?tmi=` — simulation ponctuelle, sans écrire dans le profil ;
+ *   2. `User.marginalTaxRatePct` — la tranche déclarée par l'utilisateur ;
+ *   3. 30 % — défaut historique de cette route, conservé pour ne pas changer
+ *      le résultat des comptes qui n'ont jamais rien déclaré.
+ *
+ * La réponse expose `marginalTaxRateSource` : sans elle, un appelant ne peut
+ * pas distinguer une tranche déclarée d'un défaut, et présenterait les deux
+ * avec la même assurance.
  *
  * Le nu et le meublé sont renvoyés en deux sections distinctes : ils relèvent
  * de fiscalités différentes et ne s'additionnent pas.
@@ -51,10 +62,20 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const tmiRaw = Number(url.searchParams.get("tmi"));
-  const marginalTaxRatePct = Number.isFinite(tmiRaw) && tmiRaw >= 0 && tmiRaw <= 100
-    ? tmiRaw
-    : 30;
+  const tmiParam = url.searchParams.get("tmi");
+  const tmiRaw = tmiParam != null && tmiParam !== "" ? Number(tmiParam) : null;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { marginalTaxRatePct: true },
+  });
+
+  const resolved = resolveMarginalRate({
+    query: tmiRaw,
+    user: user?.marginalTaxRatePct ?? null,
+  });
+  const marginalTaxRatePct = resolved.pct;
+
   try {
     const bundle = await getRealEstateTaxBundle(userId, { marginalTaxRatePct });
 
@@ -109,6 +130,7 @@ export async function GET(req: Request) {
           },
         },
         marginalTaxRatePct,
+        marginalTaxRateSource: resolved.source,
         rental: {
           bare: serializeRentalSection(bundle.rental.bare),
           furnished: serializeRentalSection(bundle.rental.furnished),

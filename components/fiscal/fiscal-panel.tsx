@@ -19,6 +19,11 @@
 import { X } from "lucide-react";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import { REGIME_LABELS, type FiscalLine } from "@/app/lib/tax/overview";
+import {
+  DEFAULT_MARGINAL_RATE_PCT,
+  marginalRateNotice,
+  type MarginalRateSource,
+} from "@/app/lib/tax/marginal-rate";
 import type {
   FiscalEnvelopeBucket,
   FiscalYearReport,
@@ -193,10 +198,12 @@ function IfiDetail({
 function RentalDetail({
   section,
   marginalTaxRatePct,
+  marginalTaxRateSource,
   currency,
 }: {
   section: RealEstateTaxBundlePayload["rental"]["bare"];
   marginalTaxRatePct: number;
+  marginalTaxRateSource: MarginalRateSource;
   currency: string;
 }) {
   return (
@@ -249,11 +256,18 @@ function RentalDetail({
         </p>
       ) : null}
 
-      <p className="text-meta mt-[var(--space-3)]">
-        Calculé avec une tranche marginale de {marginalTaxRatePct} %, que vous
-        renseignez dans l&apos;onglet Immobilier. Aurea ne la déduit pas de vos
-        revenus : elle supposerait de connaître vos salaires et votre foyer
-        fiscal.
+      {/*
+        Le texte change selon la source : un taux déclaré engage l'utilisateur,
+        un défaut n'engage personne. Les présenter identiquement donnerait au
+        second la crédibilité du premier.
+      */}
+      <p className="text-meta mt-[var(--space-3)]" data-testid="fiscal-tmi-notice">
+        {marginalRateNotice({
+          pct: marginalTaxRatePct,
+          source: marginalTaxRateSource,
+        })}{" "}
+        Aurea ne la déduit pas de vos revenus : elle supposerait de connaître
+        vos salaires et votre foyer fiscal.
       </p>
     </>
   );
@@ -443,7 +457,8 @@ export function FiscalPanel({
         {rentalSection ? (
           <RentalDetail
             section={rentalSection}
-            marginalTaxRatePct={realEstate?.marginalTaxRatePct ?? 30}
+            marginalTaxRatePct={realEstate?.marginalTaxRatePct ?? DEFAULT_MARGINAL_RATE_PCT}
+            marginalTaxRateSource={realEstate?.marginalTaxRateSource ?? "DEFAULT"}
             currency={currency}
           />
         ) : null}

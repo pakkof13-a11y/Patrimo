@@ -137,11 +137,15 @@ export function RealEstateTab({
   // Chargé uniquement pour le simulateur, qui a besoin du prix de revient et
   // de la date d'acquisition — deux données que `holdings` ne porte pas.
   const taxQ = useQuery({
-    queryKey: ["real-estate-tax", 30, false],
+    queryKey: ["real-estate-tax", "simulator"],
+    /*
+      `?tmi=` a été retiré : cet appel ne lit que `properties`, dont le contenu
+      ne dépend pas de la tranche. Le paramètre laissait croire à une hypothèse
+      de calcul là où il n'y en avait aucune, et figeait 30 % dans un troisième
+      endroit.
+    */
     queryFn: () =>
-      fetchJson<{ properties: TaxProperty[] }>(
-        "/api/real-estate/tax?tmi=30&furnished=false"
-      ),
+      fetchJson<{ properties: TaxProperty[] }>("/api/real-estate/tax"),
     enabled: view === "fiscal",
   });
 

@@ -11,6 +11,8 @@
  * assiettes à sept chiffres.
  */
 
+import type { MarginalRateSource } from "@/app/lib/tax/marginal-rate";
+
 export type RegimeOutcome = {
   regime: string;
   eligible: boolean;
@@ -92,11 +94,15 @@ export type RealEstateTaxBundlePayload = {
   properties: Array<{ assetId: string; label: string; isRental: boolean }>;
   ifi: IfiBlock;
   /**
-   * Tranche marginale **fournie** par l'appelant, pas calculée : Aurea ne
-   * connaît ni les salaires ni la composition du foyer. C'est une hypothèse de
-   * lecture, et l'interface doit la présenter comme telle.
+   * Tranche marginale réellement appliquée au calcul.
+   *
+   * **Déclarée**, jamais calculée : Aurea ne connaît ni les salaires ni la
+   * composition du foyer. `marginalTaxRateSource` dit d'où elle vient, et
+   * l'interface doit s'en servir — un défaut et une tranche déclarée ne
+   * méritent pas la même assurance.
    */
   marginalTaxRatePct: number;
+  marginalTaxRateSource: MarginalRateSource;
   rental: { bare: RentalSection; furnished: RentalSection };
 };
 

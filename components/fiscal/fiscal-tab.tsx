@@ -127,7 +127,12 @@ export function FiscalTab({
   const realEstateQ = useQuery({
     queryKey: ["real-estate-tax", "fiscal-overview"],
     queryFn: () =>
-      fetchJson<RealEstateTaxBundlePayload>("/api/real-estate/tax?tmi=30"),
+      /*
+        Sans `?tmi=`, la route applique la tranche déclarée par l'utilisateur.
+        Passer une valeur en dur ici produisait un impôt foncier différent de
+        celui qu'affichait l'onglet Immobilier pour le même bien.
+      */
+      fetchJson<RealEstateTaxBundlePayload>("/api/real-estate/tax"),
     staleTime: 60_000,
     retry: false,
   });
