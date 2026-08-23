@@ -58,6 +58,18 @@
   --module-after-kpi-lg: var(--space-5);
   --module-intro-gap: var(--space-1);
 
+  /*
+    Largeur de la colonne de détail (`.asset-panel`) des onze modules qui
+    posent une liste à gauche et une fiche à droite au-delà de 1280 px.
+
+    Elle valait 23, 24 ou 25 rem selon la date de la refonte du module, jamais
+    selon son contenu : les fiches y sont bâties sur les mêmes blocs et le même
+    corps de texte. 25 rem — la valeur des six derniers modules refondus — les
+    aligne toutes. La colonne contextuelle de PEA & CTO (19 rem) n'en est pas
+    une : elle porte des repères de marché, pas la fiche d'un actif.
+  */
+  --panel-width: 25rem;
+
   /* ══ 2. TYPOGRAPHIE ══════════════════════════════════════════════════
      IBM Plex Sans porte les libellés, IBM Plex Mono TOUS les nombres —
      l'alignement vertical des chiffres est ce qui fait lire « terminal »
@@ -2083,6 +2095,36 @@ textarea:focus-visible,
 }
 
 
+/* ── Ligne d'une table de module ──────────────────────────────────── */
+
+/*
+  La ligne sélectionnable des huit tables patrimoniales — biens, plans,
+  investissements, crédits, opérations, plateformes, lignes fiscales,
+  positions. Chacune avait recopié ces quatre règles sous son propre nom de
+  classe ; aucune n'en avait dévié.
+
+  La sélection reste volontairement discrète : un liseré doré au bord gauche et
+  une surface à peine relevée, jamais une ligne colorée en entier. Le journal
+  des transactions, le plus dense, l'impose aux autres : une teinte de fond y
+  ferait perdre la lecture des montants, verts au crédit et rouges au débit.
+*/
+.data-row {
+  cursor: pointer;
+}
+
+.data-row.is-selected > td {
+  background: var(--surface-hover);
+}
+
+.data-row.is-selected > td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.data-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 /* ── Colonne de détail de l'actif sélectionné ─────────────────────── */
 
 /*
@@ -2696,44 +2738,6 @@ textarea:focus-visible,
   }
 }
 
-/* ── Immobilier : ligne d'un bien ─────────────────────────────────── */
-
-.property-row {
-  cursor: pointer;
-}
-
-.property-row.is-selected > td {
-  background: var(--surface-hover);
-}
-
-.property-row.is-selected > td:first-child {
-  box-shadow: inset 2px 0 0 0 var(--gold-border);
-}
-
-.property-row:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-/* ── Épargne salariale : ligne d'un plan ──────────────────────────── */
-
-.es-plan-row {
-  cursor: pointer;
-}
-
-.es-plan-row.is-selected > td {
-  background: var(--surface-hover);
-}
-
-.es-plan-row.is-selected > td:first-child {
-  box-shadow: inset 2px 0 0 0 var(--gold-border);
-}
-
-.es-plan-row:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 /*
   Contexte global, sous la liste plutôt qu'en colonne de droite : le panneau de
   détail occupe désormais cette place, et le plan sélectionné n'a pas à être
@@ -2751,122 +2755,3 @@ textarea:focus-visible,
   }
 }
 
-/* ── Alternatifs : ligne d'un investissement ──────────────────────── */
-
-.alt-row {
-  cursor: pointer;
-}
-
-.alt-row.is-selected > td {
-  background: var(--surface-hover);
-}
-
-.alt-row.is-selected > td:first-child {
-  box-shadow: inset 2px 0 0 0 var(--gold-border);
-}
-
-.alt-row:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-/* ── Passifs : ligne d'un crédit ──────────────────────────────────── */
-
-.liability-row {
-  cursor: pointer;
-}
-
-.liability-row.is-selected > td {
-  background: var(--surface-hover);
-}
-
-.liability-row.is-selected > td:first-child {
-  box-shadow: inset 2px 0 0 0 var(--gold-border);
-}
-
-.liability-row:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-/* ── Transactions : ligne sélectionnée ────────────────────────────── */
-
-/*
-  Le journal est plus dense que les autres modules — c'est voulu. La sélection
-  s'y marque donc plus discrètement encore : un liseré doré et une surface à
-  peine relevée, jamais une ligne colorée en entier, qui ferait perdre la
-  lecture des montants (vert crédit, rouge débit).
-*/
-.tx-row {
-  cursor: pointer;
-}
-
-.tx-row.is-selected > td {
-  background: var(--surface-hover);
-}
-
-.tx-row.is-selected > td:first-child {
-  box-shadow: inset 2px 0 0 0 var(--gold-border);
-}
-
-.tx-row:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-/* ── Plateformes : ligne de la table de connexions ────────────────── */
-
-.platform-row {
-  cursor: pointer;
-}
-
-.platform-row.is-selected > td {
-  background: var(--surface-hover);
-}
-
-.platform-row.is-selected > td:first-child {
-  box-shadow: inset 2px 0 0 0 var(--gold-border);
-}
-
-.platform-row:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-/* ── Fiscalité : ligne du registre fiscal ─────────────────────────── */
-
-.fiscal-row {
-  cursor: pointer;
-}
-
-.fiscal-row.is-selected > td {
-  background: var(--surface-hover);
-}
-
-.fiscal-row.is-selected > td:first-child {
-  box-shadow: inset 2px 0 0 0 var(--gold-border);
-}
-
-.fiscal-row:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-/* ── Trading : ligne d'une position à levier ──────────────────────── */
-
-.trade-row {
-  cursor: pointer;
-}
-
-.trade-row.is-selected > td {
-  background: var(--surface-hover);
-}
-
-.trade-row.is-selected > td:first-child {
-  box-shadow: inset 2px 0 0 0 var(--gold-border);
-}
-
-.trade-row:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}

@@ -14,6 +14,7 @@
  */
 
 import { formatCurrency, cn } from "@/app/lib/utils";
+import { DataRow } from "@/components/ui/data-row";
 import type { FiscalLine, FiscalValueStatus } from "@/app/lib/tax/overview";
 
 const KIND_LABEL: Record<FiscalLine["kind"], string> = {
@@ -88,18 +89,10 @@ export function FiscalLineList({
         </thead>
         <tbody>
           {lines.map((l) => (
-            <tr
+            <DataRow
               key={l.id}
-              className={cn("fiscal-row", selectedId === l.id && "is-selected")}
-              onClick={() => onSelect(l.id)}
-              aria-current={selectedId === l.id ? "true" : undefined}
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onSelect(l.id);
-                }
-              }}
+              selected={selectedId === l.id}
+              onSelect={() => onSelect(l.id)}
               data-testid="fiscal-row"
               data-fiscal-row={l.id}
             >
@@ -128,7 +121,7 @@ export function FiscalLineList({
               <td className="text-right">
                 <TaxCell line={l} />
               </td>
-            </tr>
+            </DataRow>
           ))}
         </tbody>
       </table>

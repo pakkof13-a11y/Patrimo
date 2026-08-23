@@ -15,6 +15,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { KpiBandTile } from "@/components/ui/kpi-tiles";
 import { cn, formatCurrency } from "@/app/lib/utils";
+import { DataRow } from "@/components/ui/data-row";
 import {
   type AlternativesDashboardPayload,
   type AlternativesSubTab,
@@ -258,7 +259,7 @@ export function AlternativesTab({
       {/* ── Vue d'ensemble ───────────────────────────────────────── */}
       {sub === "dashboard" && (
         <div
-          className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-start"
+          className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)] xl:items-start"
           data-testid="alt-dashboard"
         >
           <div className="flex min-w-0 flex-col gap-[var(--gap-card)]">
@@ -405,23 +406,10 @@ export function AlternativesTab({
                       {investments.map((i) => {
                         const key = `${i.category}:${i.id}`;
                         return (
-                          <tr
+                          <DataRow
                             key={key}
-                            className={cn(
-                              "alt-row",
-                              selectedKey === key && "is-selected"
-                            )}
-                            onClick={() => setSelectedKey(key)}
-                            aria-current={
-                              selectedKey === key ? "true" : undefined
-                            }
-                            tabIndex={0}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                setSelectedKey(key);
-                              }
-                            }}
+                            selected={selectedKey === key}
+                            onSelect={() => setSelectedKey(key)}
                             data-testid="alt-investment-row"
                           >
                             <td>
@@ -480,7 +468,7 @@ export function AlternativesTab({
                                 {i.status}
                               </span>
                             </td>
-                          </tr>
+                          </DataRow>
                         );
                       })}
                     </tbody>

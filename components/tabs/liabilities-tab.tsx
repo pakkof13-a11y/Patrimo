@@ -462,7 +462,7 @@ export function LiabilitiesTab({
       </div>
 
       {/* ── Corps : liste + panneau ──────────────────────────────── */}
-      <div className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_25rem] xl:items-start">
+      <div className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)] xl:items-start">
         <div className="flex min-w-0 flex-col gap-[var(--gap-card)]">
           {view === "schedule" && (
             <section

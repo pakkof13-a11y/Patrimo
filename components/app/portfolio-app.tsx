@@ -1242,7 +1242,7 @@ function PortfolioAppClient({
                   ligne ne masque donc jamais le portefeuille — c'était tout le
                   défaut du panneau modal qu'elle remplace.
                 */
-                <div className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_23rem] xl:items-start">
+                <div className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)] xl:items-start">
                   <HoldingsSection
                     tab={tab}
                     holdings={holdings}

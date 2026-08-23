@@ -45,6 +45,7 @@ import {
   formatQuantity,
   cn,
 } from "@/app/lib/utils";
+import { DataRow } from "@/components/ui/data-row";
 import type { TxRow } from "@/app/lib/types/ui";
 import {
   formatPageLabel,
@@ -570,7 +571,7 @@ export function TransactionsTab({
 
   return (
     <div
-      className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_25rem] xl:items-start"
+      className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)] xl:items-start"
       data-testid="transactions-shell"
     >
     <ModuleCard testId="transactions-tab">
@@ -1028,30 +1029,17 @@ export function TransactionsTab({
           </thead>
           <tbody>
             {table.getRowModel().rows.map((row) => (
-              <tr
+              <DataRow
                 key={row.id}
-                className={cn(
-                  moduleTableRowClass,
-                  "tx-row",
-                  selectedId === row.original.id && "is-selected"
-                )}
+                className={moduleTableRowClass}
+                selected={selectedId === row.original.id}
+                onSelect={() => setSelectedId(row.original.id)}
                 /*
                   Un clic ouvre la fiche à droite ; le double-clic reste le
                   raccourci d'édition qu'il a toujours été. Retirer ce dernier
                   aurait cassé un geste acquis pour rien.
                 */
-                onClick={() => setSelectedId(row.original.id)}
                 onDoubleClick={() => onEdit(row.original)}
-                aria-current={
-                  selectedId === row.original.id ? "true" : undefined
-                }
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setSelectedId(row.original.id);
-                  }
-                }}
                 data-testid={`tx-row-${row.original.id}`}
               >
                 {row.getVisibleCells().map((cell) => {
@@ -1077,7 +1065,7 @@ export function TransactionsTab({
                     </td>
                   );
                 })}
-              </tr>
+              </DataRow>
             ))}
             {/*
               Squelette au tout premier chargement : afficher une table vide,

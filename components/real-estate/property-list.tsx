@@ -14,6 +14,7 @@
 
 import { PlatformLogo } from "@/components/ui/platform-logo";
 import { formatCurrency, cn } from "@/app/lib/utils";
+import { DataRow } from "@/components/ui/data-row";
 import {
   propertyTypeLabel,
   propertyUsageLabel,
@@ -101,21 +102,10 @@ export function PropertyList({
         </thead>
         <tbody>
           {views.map((v) => (
-            <tr
+            <DataRow
               key={v.assetId}
-              className={cn(
-                "property-row",
-                selectedId === v.assetId && "is-selected"
-              )}
-              onClick={() => onSelect(v.assetId)}
-              aria-current={selectedId === v.assetId ? "true" : undefined}
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onSelect(v.assetId);
-                }
-              }}
+              selected={selectedId === v.assetId}
+              onSelect={() => onSelect(v.assetId)}
               data-testid="property-row"
             >
               <td>
@@ -168,7 +158,7 @@ export function PropertyList({
               <td>
                 <StatusDot status={v.status} />
               </td>
-            </tr>
+            </DataRow>
           ))}
         </tbody>
       </table>

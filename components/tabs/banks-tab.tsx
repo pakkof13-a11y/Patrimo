@@ -461,7 +461,7 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
       </div>
 
       {/* Liste + détail côte à côte — même grille que la page Portefeuille. */}
-      <div className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_23rem] xl:items-start">
+      <div className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)] xl:items-start">
         <section className="card min-w-0 overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-[var(--space-2)] border-b border-[var(--border)] px-[var(--space-4)] py-[var(--space-3)]">
             <div

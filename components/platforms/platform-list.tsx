@@ -14,7 +14,8 @@
  */
 
 import { PlatformLogo } from "@/components/ui/platform-logo";
-import { formatCurrency, cn } from "@/app/lib/utils";
+import { formatCurrency } from "@/app/lib/utils";
+import { DataRow } from "@/components/ui/data-row";
 import type {
   PlatformStatusTone,
   PlatformView,
@@ -111,18 +112,10 @@ export function PlatformList({
         </thead>
         <tbody>
           {views.map((v) => (
-            <tr
+            <DataRow
               key={v.id}
-              className={cn("platform-row", selectedId === v.id && "is-selected")}
-              onClick={() => onSelect(v.id)}
-              aria-current={selectedId === v.id ? "true" : undefined}
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onSelect(v.id);
-                }
-              }}
+              selected={selectedId === v.id}
+              onSelect={() => onSelect(v.id)}
               data-testid={`platform-${v.name}`}
               data-platform-row={v.id}
             >
@@ -160,7 +153,7 @@ export function PlatformList({
               <td>
                 <StatusPill view={v} />
               </td>
-            </tr>
+            </DataRow>
           ))}
         </tbody>
       </table>

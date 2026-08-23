@@ -15,6 +15,7 @@
 
 import { PlatformLogo } from "@/components/ui/platform-logo";
 import { formatCurrency, cn } from "@/app/lib/utils";
+import { DataRow } from "@/components/ui/data-row";
 import type { PlanView } from "@/app/lib/employee-savings/overview";
 
 const pctLabel = (v: number | null | undefined, digits = 2) =>
@@ -72,17 +73,9 @@ export function EsPlanRow({
     plan.value > 0 ? (plan.availableValue / plan.value) * 100 : null;
 
   return (
-    <tr
-      className={cn("es-plan-row", selected && "is-selected")}
-      onClick={() => onSelect(plan.key)}
-      aria-current={selected ? "true" : undefined}
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect(plan.key);
-        }
-      }}
+    <DataRow
+      selected={selected}
+      onSelect={() => onSelect(plan.key)}
       data-testid="es-plan-row"
     >
       <td>
@@ -126,6 +119,6 @@ export function EsPlanRow({
       <td>
         <LiquidityDot plan={plan} />
       </td>
-    </tr>
+    </DataRow>
   );
 }

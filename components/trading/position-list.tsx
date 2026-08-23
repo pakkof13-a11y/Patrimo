@@ -14,6 +14,7 @@
 
 import { AlertTriangle } from "lucide-react";
 import { formatCurrency, cn } from "@/app/lib/utils";
+import { DataRow } from "@/components/ui/data-row";
 import { exchangeLabel } from "@/app/lib/crypto/futures-constants";
 import {
   MARK_FRESHNESS_LABEL,
@@ -93,18 +94,10 @@ export function PositionList({
         </thead>
         <tbody>
           {views.map((v) => (
-            <tr
+            <DataRow
               key={v.id}
-              className={cn("trade-row", selectedId === v.id && "is-selected")}
-              onClick={() => onSelect(v.id)}
-              aria-current={selectedId === v.id ? "true" : undefined}
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onSelect(v.id);
-                }
-              }}
+              selected={selectedId === v.id}
+              onSelect={() => onSelect(v.id)}
               data-testid="trade-row"
               data-trade-row={v.id}
             >
@@ -191,7 +184,7 @@ export function PositionList({
               <td>
                 <StatusDot view={v} />
               </td>
-            </tr>
+            </DataRow>
           ))}
         </tbody>
       </table>

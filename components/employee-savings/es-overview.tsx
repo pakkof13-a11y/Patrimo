@@ -206,7 +206,7 @@ export function EsOverview({
       </div>
 
       {/* ── Corps : liste + panneau ──────────────────────────────── */}
-      <div className="mt-[var(--gap-card)] grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-start">
+      <div className="mt-[var(--gap-card)] grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)] xl:items-start">
         <div className="flex min-w-0 flex-col gap-[var(--gap-card)]">
           {/*
             Disponible / bloqué : la question centrale de cette poche, donc le

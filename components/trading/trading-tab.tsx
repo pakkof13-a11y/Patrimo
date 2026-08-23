@@ -392,7 +392,7 @@ export function TradingTab({
               </select>
             </div>
 
-            <div className="grid gap-[var(--space-4)] p-[var(--space-3)] xl:grid-cols-[minmax(0,1fr)_25rem]">
+            <div className="grid gap-[var(--space-4)] p-[var(--space-3)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)]">
               <div className="min-w-0">
                 {showSkeleton ? (
                   <div className="space-y-[var(--space-2)]">
