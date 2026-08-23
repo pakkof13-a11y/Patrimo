@@ -191,6 +191,133 @@ test.describe("Plateformes", () => {
     expect(body).not.toMatch(/zk_[A-Za-z0-9]/);
   });
 
+  test("les valeurs par défaut blockchain ne portent aucune clé en clair", async ({
+    request,
+  }) => {
+    /*
+      `/api/platforms/blockchain-defaults` renvoyait `evmApiKey` et
+      `solanaApiKey` **en clair**, à côté de leurs versions masquées, dans le
+      même objet — pour épargner une ressaisie à l'utilisateur. Le serveur
+      possédant déjà la clé, le navigateur n'avait aucune raison de la recevoir.
+
+      Ce test crée une plateforme portant réellement une clé : sans elle, la
+      réponse serait vide de partout et passerait sans rien vérifier.
+    */
+    const SECRET = "zk_prod_e2e_secret_0123456789";
+    const name = `E2E Zerion Secret ${Date.now()}`;
+
+    const created = await request.post("/api/platforms", {
+      data: {
+        name,
+        type: "BLOCKCHAIN",
+        logoKey: "ETHEREUM",
+        walletAddress: "0x1111111111111111111111111111111111111111",
+        walletApiKey: SECRET,
+        upsert: true,
+      },
+    });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    const platformId = (await created.json()).platform?.id as string | undefined;
+
+    try {
+      const res = await request.get("/api/platforms/blockchain-defaults");
+      expect(res.ok()).toBeTruthy();
+      const body = await res.json();
+      const raw = JSON.stringify(body);
+
+      // Le secret lui-même, sous aucune forme.
+      expect(raw).not.toContain(SECRET);
+      expect(Object.keys(body)).not.toContain("evmApiKey");
+      expect(Object.keys(body)).not.toContain("solanaApiKey");
+
+      // Ce qui reste est non secret et suffit à l'interface : le masque dit
+      // qu'une clé existe sans permettre de la reconstituer.
+      expect(body.hasEvmApiKey).toBe(true);
+      expect(body.evmApiKeyMasked).toBeTruthy();
+      expect(body.evmApiKeyMasked).toContain("…");
+      expect(body.evmApiKeyMasked.length).toBeLessThan(SECRET.length);
+      // L'adresse publique, elle, n'est pas un secret et reste préremplie.
+      expect(body.evmAddress).toBeTruthy();
+    } finally {
+      if (platformId) {
+        await request
+          .delete(`/api/platforms?id=${platformId}&force=1`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test("le serveur retrouve la clé stockée quand le client n'en envoie pas", async ({
+    request,
+  }) => {
+    /*
+      La contrepartie du correctif : puisque le navigateur ne reçoit plus la
+      clé, il ne peut plus la renvoyer — le serveur doit donc la retrouver seul.
+
+      `resolveZerionApiKey(apiKeyIn ?? platformApiKey)` : `??` ne retombe pas
+      sur une chaîne vide. Envoyer `apiKey: ""` ferait donc **ignorer** la clé
+      enregistrée. Le client omet désormais le champ ; ce test verrouille la
+      différence entre les deux.
+
+      Discriminateur : `NO_API_KEY` n'est renvoyé que si aucune clé n'a pu être
+      résolue. L'appel réseau vers Zerion échoue de toute façon en test — ce qui
+      compte est de savoir si on est allé jusque-là.
+    */
+    const name = `E2E Zerion Fallback ${Date.now()}`;
+    const created = await request.post("/api/platforms", {
+      data: {
+        name,
+        type: "BLOCKCHAIN",
+        logoKey: "ETHEREUM",
+        walletAddress: "0x2222222222222222222222222222222222222222",
+        walletApiKey: "zk_prod_e2e_fallback_0123456789",
+        upsert: true,
+      },
+    });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    const platformId = (await created.json()).platform?.id as string | undefined;
+    expect(platformId).toBeTruthy();
+
+    try {
+      // Champ vide côté interface → le client omet `apiKey`.
+      const omitted = await request.post("/api/wallets/zerion/sync", {
+        data: {
+          platformId,
+          address: "0x2222222222222222222222222222222222222222",
+          chainPreset: "ETHEREUM",
+          allChains: false,
+          writeLedger: false,
+        },
+      });
+      const omittedBody = await omitted.json();
+      expect(omittedBody.code).not.toBe("NO_API_KEY");
+
+      /*
+        À l'inverse, la chaîne vide écrase la clé enregistrée. Sans
+        `ZERION_API_KEY` en environnement, la résolution n'aboutit à rien —
+        c'est précisément le piège que le client évite désormais.
+      */
+      const emptyString = await request.post("/api/wallets/zerion/sync", {
+        data: {
+          platformId,
+          address: "0x2222222222222222222222222222222222222222",
+          apiKey: "",
+          chainPreset: "ETHEREUM",
+          allChains: false,
+          writeLedger: false,
+        },
+      });
+      const emptyBody = await emptyString.json();
+      expect(emptyBody.code).toBe("NO_API_KEY");
+    } finally {
+      if (platformId) {
+        await request
+          .delete(`/api/platforms?id=${platformId}&force=1`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
   test("la déconnexion énonce ce qu'elle supprime réellement", async ({
     page,
   }) => {

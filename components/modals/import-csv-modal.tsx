@@ -388,11 +388,17 @@ export function ImportCsvModal({
     /** Résumé générique (Zerion / multi) */
     summaryLine?: string | null;
   } | null>(null);
-  /** Adresse/clé réutilisées depuis une blockchain déjà configurée (pré-remplissage) */
+  /**
+   * Adresse réutilisée depuis une blockchain déjà configurée.
+   *
+   * La clé API, elle, ne descend plus jusqu'ici : le serveur la possède et ne
+   * la renvoie plus. Seuls son masque et sa présence arrivent, pour dire à
+   * l'utilisateur qu'il n'a rien à ressaisir.
+   */
   const [blockchainDefaults, setBlockchainDefaults] = useState<{
     evmAddress: string | null;
-    evmApiKey: string | null;
-    solanaApiKey: string | null;
+    evmApiKeyMasked: string | null;
+    hasEvmApiKey: boolean;
   } | null>(null);
 
   const chainPresets = useMemo(() => blockchainCatalogPresets(), []);
@@ -414,8 +420,8 @@ export function ImportCsvModal({
     let cancelled = false;
     fetchJson<{
       evmAddress: string | null;
-      evmApiKey: string | null;
-      solanaApiKey: string | null;
+      evmApiKeyMasked: string | null;
+      hasEvmApiKey: boolean;
     }>("/api/platforms/blockchain-defaults")
       .then((data) => {
         if (cancelled) return;
@@ -423,9 +429,12 @@ export function ImportCsvModal({
         const cap = getChainSyncCapability(walletPresetKey);
         if (cap?.provider === "zerion") {
           setWalletAddress((prev) => prev || data.evmAddress || "");
-          setWalletApiKey(
-            (prev) => prev || data.evmApiKey || cap.defaultApiKey || ""
-          );
+          /*
+            Le champ clé reste vide : le secret ne descend plus au navigateur.
+            `cap.defaultApiKey` est vide par construction — aucun secret n'est
+            embarqué dans le bundle — donc rien à préremplir. Champ vide =
+            le serveur résout lui-même la clé (voir `submitWalletPlatform`).
+          */
         }
       })
       .catch(() => {
@@ -1027,8 +1036,9 @@ export function ImportCsvModal({
     }
     const cap = getChainSyncCapability(preset.key);
     const addr = walletAddress.trim();
-    // Clé préremplie : l’utilisateur n’a PAS besoin de la saisir pour que ça marche
-    // Vide → le backend résout ZERION_API_KEY (env serveur)
+    // Champ vide = cas nominal : le serveur résout la clé lui-même (clé déjà
+    // enregistrée sur la plateforme, sinon ZERION_API_KEY). L'utilisateur ne
+    // saisit une clé que s'il en fournit une nouvelle.
     const apiKey = walletApiKey.trim();
 
     // ── Monero ────────────────────────────────────────────────────────────
@@ -1118,7 +1128,13 @@ export function ImportCsvModal({
           logoKey: preset.key,
           logoUrl: preset.logoUrl,
           walletAddress: addr,
-          walletApiKey: cap?.provider === "zerion" ? apiKey : null,
+          /*
+            Chaîne vide écrite telle quelle auparavant : la nouvelle plateforme
+            portait alors `""` au lieu de rien. `null` dit la même chose sans
+            ambiguïté, et le serveur résout la clé de son côté.
+          */
+          walletApiKey:
+            cap?.provider === "zerion" && apiKey.length > 0 ? apiKey : null,
           upsert: true,
         }),
       });
@@ -1182,7 +1198,14 @@ export function ImportCsvModal({
             body: JSON.stringify({
               platformId,
               address: addr,
-              apiKey,
+              /*
+                Omis, pas vide. Le serveur fait `apiKeyIn ?? platformApiKey` :
+                une chaîne vide n'étant pas nullish, elle l'emporterait sur la
+                clé enregistrée et ferait retomber la résolution sur la variable
+                d'environnement. Tant que le champ était prérempli le cas ne se
+                présentait pas ; il devient le cas nominal.
+              */
+              ...(apiKey.length > 0 ? { apiKey } : {}),
               chainPreset: preset.key,
               allChains: false,
               writeLedger: true,
@@ -1377,9 +1400,9 @@ export function ImportCsvModal({
                     const cap = getChainSyncCapability(key);
                     if (cap?.provider === "zerion") {
                       setWalletAddress(blockchainDefaults?.evmAddress || "");
-                      setWalletApiKey(
-                        blockchainDefaults?.evmApiKey || cap.defaultApiKey || ""
-                      );
+                      // Clé volontairement non préremplie — voir l'effet de
+                      // chargement plus haut.
+                      setWalletApiKey("");
                     }
                   }}
                   data-testid="import-wallet-chain"
@@ -1417,11 +1440,25 @@ export function ImportCsvModal({
                     className="input w-full font-mono text-sm"
                     value={walletApiKey}
                     onChange={(e) => setWalletApiKey(e.target.value)}
-                    placeholder="zk_…"
+                    /*
+                      Le masque sert d'indice, pas de valeur : un `placeholder`
+                      n'est jamais soumis. Le champ reste donc vide, et le
+                      serveur résout la clé lui-même.
+                    */
+                    placeholder={
+                      blockchainDefaults?.evmApiKeyMasked
+                        ? `Clé enregistrée · ${blockchainDefaults.evmApiKeyMasked}`
+                        : "zk_…"
+                    }
                     autoComplete="off"
                     spellCheck={false}
                     data-testid="import-wallet-api-key"
                   />
+                  <p className="text-meta mt-1" data-testid="import-wallet-api-key-hint">
+                    {blockchainDefaults?.hasEvmApiKey
+                      ? "Une clé est déjà enregistrée côté serveur : laissez vide pour la réutiliser."
+                      : "Laissez vide pour utiliser la clé du serveur, ou collez la vôtre."}
+                  </p>
                 </Field>
               )}
 
