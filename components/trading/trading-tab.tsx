@@ -136,9 +136,15 @@ export function TradingTab({
     staleTime: 60_000,
   });
 
+  /*
+    Horloge figée au montage : l'ancienneté d'une observation se compare à un
+    instant, et lire `Date.now()` pendant le rendu le rendrait impur.
+  */
+  const [clock] = useState(() => new Date());
+
   const views = useMemo(
-    () => buildPositionViews(q.data?.positions ?? []),
-    [q.data?.positions]
+    () => buildPositionViews(q.data?.positions ?? [], clock),
+    [q.data?.positions, clock]
   );
 
   /*
@@ -310,9 +316,9 @@ export function TradingTab({
                 </p>
                 <p className="text-meta mt-[var(--space-px)]">
                   Aurea ne rafraîchit pas le prix des contrats à levier depuis
-                  le marché : il reste celui que vous avez saisi ou importé. Le
-                  P&amp;L latent de ces positions est donc à prendre pour ce
-                  qu&apos;il est.
+                  le marché : aucune source de prix de marque n&apos;existe pour
+                  les plateformes suivies. Le prix reste celui que vous avez
+                  saisi ou importé, et sa date figure dans chaque fiche.
                 </p>
               </div>
             </div>

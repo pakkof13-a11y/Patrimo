@@ -2275,6 +2275,18 @@ model TradingPosition {
   stopLoss   Decimal? @db.Decimal(20, 8)
   takeProfit Decimal? @db.Decimal(20, 8)
 
+  /// Horodatage du dernier prix de marque **réellement observé**.
+  ///
+  /// Distinct d'`updatedAt`, qui bouge dès qu'un champ change — corriger une
+  /// note ferait passer un prix vieux d'un mois pour une cotation fraîche.
+  ///
+  /// Nul tant qu'aucun prix n'a été observé : à la création, `markPrice` vaut
+  /// le prix d'entrée faute de mieux, ce qui n'est pas une observation de
+  /// marché. Aurea ne dispose d'aucune source de mark price — ni les wallets
+  /// on-chain, ni les imports de relevés n'en fournissent — donc cette date ne
+  /// peut venir que d'une saisie ou d'un import.
+  markPriceUpdatedAt DateTime?
+
   isOpen   Boolean   @default(true)
   openedAt DateTime?
   closedAt DateTime?

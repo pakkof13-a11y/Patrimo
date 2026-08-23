@@ -31,6 +31,14 @@ export type TradingPositionRow = {
   sizeContracts: string;
   entryPrice: string;
   markPrice: string | null;
+  /**
+   * Date du dernier prix de marque **observé**.
+   *
+   * Nulle quand `markPrice` n'est qu'un repli sur le prix d'entrée. Distincte
+   * de la date de modification de la ligne, qui bouge pour n'importe quel
+   * champ.
+   */
+  markPriceUpdatedAt: string | null;
   expiryDate: string | null;
   fundingPaid: string | null;
   commissionPaid: string | null;

@@ -2023,6 +2023,8 @@ export async function seedUserPortfolio(
         sizeContracts: D("0.42"),
         entryPrice: D("61200"),
         markPrice: D("63480"),
+        // Observation récente : le P&L latent est crédible.
+        markPriceUpdatedAt: daysAgo(1),
         fundingPaid: D("2.35"),
         commissionPaid: D("15.80"),
         stopLoss: D("58000"),
@@ -2046,6 +2048,9 @@ export async function seedUserPortfolio(
         sizeContracts: D("25"),
         entryPrice: D("168.30"),
         markPrice: D("162.45"),
+        // Observation vieille de trois semaines : au-delà du seuil, l'écran
+        // doit le dire au lieu de présenter le latent comme actuel.
+        markPriceUpdatedAt: daysAgo(21),
         fundingPaid: D("-4.10"),
         commissionPaid: D("6.20"),
         isOpen: true,
@@ -2064,9 +2069,11 @@ export async function seedUserPortfolio(
         leverage: D("10"),
         sizeContracts: D("50000"),
         entryPrice: D("1.08120"),
-        // Prix de marque laissé au prix d'entrée : le cas « jamais actualisé »,
-        // que l'écran doit signaler au lieu d'afficher un P&L nul crédible.
+        // Prix de marque laissé au prix d'entrée et jamais horodaté : le cas
+        // « jamais observé », que l'écran doit signaler au lieu d'afficher un
+        // P&L nul crédible.
         markPrice: D("1.08120"),
+        markPriceUpdatedAt: null,
         commissionPaid: D("4.50"),
         isOpen: true,
         openedAt: daysAgo(5),
@@ -2085,6 +2092,7 @@ export async function seedUserPortfolio(
         sizeContracts: D("1"),
         entryPrice: D("18520"),
         markPrice: D("18735.50"),
+        markPriceUpdatedAt: daysAgo(2),
         tickValue: D("1"),
         commissionPaid: D("3.20"),
         isOpen: true,
@@ -2104,6 +2112,9 @@ export async function seedUserPortfolio(
         sizeContracts: D("3.25"),
         entryPrice: D("2480.50"),
         markPrice: D("2712.00"),
+        // Prix de sortie : définitif, pas périmé — une position close ne bouge
+        // plus, donc l'ancienneté ne la concerne pas.
+        markPriceUpdatedAt: daysAgo(48),
         realizedPnl: D("752.38"),
         fundingPaid: D("11.20"),
         commissionPaid: D("18.40"),

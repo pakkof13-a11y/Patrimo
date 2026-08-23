@@ -75,6 +75,11 @@ export async function applyFuturesImport(
         notionalUsd: notional.toFixed(2),
         entryPrice: entry.toFixed(8),
         markPrice: (row.exitPrice ? d(row.exitPrice) : entry).toFixed(8),
+        /*
+          Le relevé fournit un prix de sortie observé par l'exchange ; le repli
+          sur le prix d'entrée, lui, n'observe rien. On ne date que le premier.
+        */
+        markPriceUpdatedAt: row.exitPrice ? new Date() : null,
         realizedPnl: realized?.toFixed(2) ?? null,
         fundingPaid: row.fundingPaid ?? null,
         commissionPaid: row.commissionPaid ?? null,

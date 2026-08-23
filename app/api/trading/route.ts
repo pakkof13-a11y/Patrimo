@@ -145,6 +145,7 @@ export async function GET(req: Request) {
           sizeContracts: p.sizeContracts.toString(),
           entryPrice: p.entryPrice.toString(),
           markPrice: p.markPrice?.toString() ?? null,
+          markPriceUpdatedAt: p.markPriceUpdatedAt?.toISOString() ?? null,
           stopLoss: p.stopLoss?.toString() ?? null,
           takeProfit: p.takeProfit?.toString() ?? null,
           expiryDate: p.expiryDate?.toISOString() ?? null,

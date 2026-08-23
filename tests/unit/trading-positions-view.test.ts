@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  STALE_MARK_DAYS,
   buildPositionView,
   buildPositionViews,
   closedNetPnl,
+  markAgeDays,
+  markFreshnessNotice,
   computeTradingOverview,
   filterPositions,
   markFreshnessOf,
@@ -24,6 +27,7 @@ function pos(over: Partial<TradingPositionRow> = {}): TradingPositionRow {
     sizeContracts: "0.42",
     entryPrice: "61200",
     markPrice: "63480",
+    markPriceUpdatedAt: null,
     expiryDate: null,
     fundingPaid: null,
     commissionPaid: null,
@@ -122,24 +126,96 @@ describe("direction et P&L", () => {
 });
 
 describe("fraîcheur du prix de marque", () => {
-  it("un prix égal au prix d'entrée n'est pas une cotation", () => {
+  const NOW = new Date("2026-06-01T12:00:00Z");
+  const daysAgo = (n: number) =>
+    new Date(NOW.getTime() - n * 86_400_000).toISOString();
+
+  it("un horodatage vaut mieux qu'une présomption", () => {
     /*
-      `markPrice` vaut le prix d'entrée par défaut à la création. Présenter le
-      P&L nul qui en découle comme une observation de marché serait faux.
+      Aurea n'a aucune source de prix de marque : ni les wallets on-chain, ni
+      les imports n'en fournissent. `markPriceUpdatedAt` dit quand un prix a
+      été **observé** — un fait, là où la comparaison au prix d'entrée n'était
+      qu'une devinette.
+    */
+    expect(
+      markFreshnessOf(pos({ markPrice: "61200", markPriceUpdatedAt: daysAgo(1) }))
+    ).toBe("MARKED");
+    expect(markAgeDays(pos({ markPriceUpdatedAt: daysAgo(3) }), NOW)).toBe(3);
+    expect(markAgeDays(pos({ markPriceUpdatedAt: null }), NOW)).toBeNull();
+  });
+
+  it("les lignes antérieures à l'horodatage gardent l'ancienne présomption", () => {
+    /*
+      Sans ce repli, tout l'historique basculerait d'un coup en « prix non
+      actualisé », y compris des positions dont le prix avait bien été saisi.
     */
     expect(markFreshnessOf(pos({ markPrice: "61200" }))).toBe("UNMARKED");
     expect(markFreshnessOf(pos({ markPrice: null }))).toBe("MISSING");
     expect(markFreshnessOf(pos())).toBe("MARKED");
   });
 
-  it("la synthèse compte les positions ouvertes au prix non actualisé", () => {
-    const views = buildPositionViews([
-      pos(),
-      pos({ id: "p2", markPrice: "61200" }),
-      // Une position close n'a plus de prix à actualiser : elle ne compte pas.
-      pos({ id: "p3", isOpen: false, markPrice: "61200", realizedPnl: "0" }),
-    ]);
-    expect(computeTradingOverview(views).unmarkedCount).toBe(1);
+  it("une observation ancienne est signalée, une position close ne l'est pas", () => {
+    /*
+      Sur une position close, le prix de marque **est** le prix de sortie : il
+      est définitif, pas périmé.
+    */
+    const stale = buildPositionView(
+      pos({ markPriceUpdatedAt: daysAgo(STALE_MARK_DAYS + 1) }),
+      NOW
+    );
+    expect(stale.markIsStale).toBe(true);
+    expect(stale.markFreshness).toBe("MARKED");
+
+    const fresh = buildPositionView(pos({ markPriceUpdatedAt: daysAgo(1) }), NOW);
+    expect(fresh.markIsStale).toBe(false);
+
+    const closed = buildPositionView(
+      pos({
+        isOpen: false,
+        realizedPnl: "100",
+        markPriceUpdatedAt: daysAgo(90),
+      }),
+      NOW
+    );
+    expect(closed.markIsStale).toBe(false);
+  });
+
+  it("la phrase de fraîcheur ne prétend jamais au temps réel", () => {
+    const notice = markFreshnessNotice(
+      pos({ markPriceUpdatedAt: daysAgo(5) }),
+      NOW
+    );
+    expect(notice).toContain("il y a 5 jours");
+    expect(notice).not.toMatch(/temps réel|actuel|live/i);
+
+    expect(
+      markFreshnessNotice(pos({ markPrice: null }), NOW)
+    ).toMatch(/ne peut pas être calculé/i);
+    expect(
+      markFreshnessNotice(pos({ markPrice: "61200" }), NOW)
+    ).toMatch(/ne le rafraîchit pas/i);
+  });
+
+  it("la synthèse compte les prix non observés et les observations anciennes", () => {
+    const views = buildPositionViews(
+      [
+        // Observée hier : crédible.
+        pos({ markPriceUpdatedAt: daysAgo(1) }),
+        // Jamais observée.
+        pos({ id: "p2", markPrice: "61200" }),
+        // Observée, mais il y a un mois : le latent ne vaut plus rien.
+        pos({ id: "p3", markPriceUpdatedAt: daysAgo(30) }),
+        // Close : plus de prix à actualiser, elle ne compte pas.
+        pos({
+          id: "p4",
+          isOpen: false,
+          markPrice: "61200",
+          realizedPnl: "0",
+        }),
+      ],
+      NOW
+    );
+    expect(computeTradingOverview(views).unmarkedCount).toBe(2);
   });
 });
 

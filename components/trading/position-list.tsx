@@ -134,17 +134,31 @@ export function PositionList({
               </td>
               <td className="num text-right text-[var(--foreground-secondary)]">
                 {price(v.entryPrice, baseCurrency)}
+                {/*
+                  Le prix de marque n'est jamais rafraîchi par un flux : la
+                  colonne doit dire quand il a été observé, sinon un prix
+                  ancien se lit comme une cotation du jour.
+                */}
                 <span
                   className={cn(
                     "text-meta block",
-                    v.markFreshness !== "MARKED" &&
+                    (v.markFreshness !== "MARKED" || v.markIsStale) &&
                       "text-[var(--foreground-faint)] italic"
                   )}
-                  title={MARK_FRESHNESS_LABEL[v.markFreshness]}
+                  title={
+                    v.markAgeDays != null
+                      ? `Prix observé il y a ${v.markAgeDays} jour(s)`
+                      : MARK_FRESHNESS_LABEL[v.markFreshness]
+                  }
+                  data-mark-freshness={v.markFreshness}
+                  data-mark-stale={v.markIsStale ? "true" : "false"}
                 >
                   {v.markFreshness === "MARKED"
                     ? price(v.markPrice, baseCurrency)
                     : MARK_FRESHNESS_LABEL[v.markFreshness]}
+                  {v.markIsStale && v.markAgeDays != null ? (
+                    <span className="ml-1">· {v.markAgeDays} j</span>
+                  ) : null}
                 </span>
               </td>
               <td className="text-right">

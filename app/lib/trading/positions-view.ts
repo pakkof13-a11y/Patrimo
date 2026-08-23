@@ -18,10 +18,16 @@
  *
  * ── La fraîcheur du prix, qui conditionne tout le reste ──────────────────
  *
- * `markPrice` est **déclaratif** : saisi à la création, mis à jour à l'import,
- * égal au prix d'entrée par défaut. Aucun flux de marché ne le rafraîchit. Un
- * P&L latent adossé à un prix vieux d'une semaine n'est pas un P&L latent, et
- * l'écran doit le dire au lieu de parler de « temps réel ».
+ * `markPrice` est **déclaratif** : saisi à la création, lu dans un relevé à
+ * l'import, égal au prix d'entrée par défaut. Aucun flux de marché ne le
+ * rafraîchit, et il n'en existe aucun à réutiliser — ni les wallets on-chain
+ * ni les imports n'en fournissent, et le prix spot du sous-jacent n'est pas un
+ * prix de marque : sur un perpétuel, la base et le funding les séparent.
+ *
+ * `markPriceUpdatedAt` date chaque observation réelle. La fraîcheur affichée
+ * est donc un **fait**, là où la comparaison au prix d'entrée n'était qu'une
+ * présomption. Un P&L latent adossé à un prix vieux d'une semaine n'est pas un
+ * P&L latent, et l'écran le dit au lieu de parler de « temps réel ».
  */
 
 import type { TradingPositionRow } from "@/components/trading/types";
@@ -30,12 +36,21 @@ export type TradeDirection = "LONG" | "SHORT";
 
 /** Fraîcheur du prix de marque, seule chose qui rende le latent crédible. */
 export type MarkFreshness =
-  /** Prix distinct du prix d'entrée : quelqu'un l'a réellement mis à jour. */
+  /** Prix observé et daté. */
   | "MARKED"
-  /** Prix égal au prix d'entrée — valeur par défaut, jamais actualisée. */
+  /** Aucune observation datée : le prix n'est qu'un repli sur l'entrée. */
   | "UNMARKED"
   /** Aucun prix de marque du tout. */
   | "MISSING";
+
+/**
+ * Au-delà, un prix de marque est présenté comme ancien.
+ *
+ * Sept jours : sur un contrat à levier, une semaine suffit à rendre un P&L
+ * latent sans rapport avec la réalité. Le seuil ne masque rien — la date exacte
+ * reste affichée — il choisit seulement à partir de quand l'écran le signale.
+ */
+export const STALE_MARK_DAYS = 7;
 
 export type PositionView = {
   row: TradingPositionRow;
@@ -59,6 +74,10 @@ export type PositionView = {
   leverage: number;
 
   markFreshness: MarkFreshness;
+  /** Ancienneté de l'observation, en jours. `null` sans observation datée. */
+  markAgeDays: number | null;
+  /** Observation datée mais trop ancienne pour porter un P&L latent crédible. */
+  markIsStale: boolean;
   liquidationAlert: boolean;
   fundingAlert: boolean;
   hasRiskData: boolean;
@@ -75,20 +94,69 @@ const opt = (v: string | number | null | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+/**
+ * Fraîcheur du prix de marque.
+ *
+ * `markPriceUpdatedAt` est la source : il n'est posé que lorsqu'un prix a été
+ * réellement observé — saisi ou lu dans un relevé. C'est un fait, là où la
+ * comparaison au prix d'entrée n'était qu'une présomption.
+ *
+ * Cette présomption reste en repli pour les lignes créées avant l'ajout de
+ * l'horodatage : sans elle, tout l'historique basculerait d'un coup en « prix
+ * non actualisé », y compris des positions dont le prix avait bien été saisi.
+ */
 export function markFreshnessOf(row: TradingPositionRow): MarkFreshness {
   const mark = opt(row.markPrice);
   if (mark == null) return "MISSING";
+  if (row.markPriceUpdatedAt) return "MARKED";
+
   const entry = num(row.entryPrice);
-  /*
-    Un prix de marque strictement égal au prix d'entrée est presque toujours le
-    défaut posé à la création, pas une cotation. Le signaler évite de présenter
-    un P&L nul comme une observation de marché.
-  */
   return Math.abs(mark - entry) < 1e-9 ? "UNMARKED" : "MARKED";
 }
 
+/** Ancienneté de l'observation, en jours. `null` s'il n'y en a aucune. */
+export function markAgeDays(
+  row: TradingPositionRow,
+  now: Date
+): number | null {
+  if (!row.markPriceUpdatedAt) return null;
+  const t = new Date(row.markPriceUpdatedAt).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.floor((now.getTime() - t) / 86_400_000));
+}
+
+/**
+ * Phrase de fraîcheur à afficher sous un P&L latent.
+ *
+ * Elle ne prétend jamais au temps réel : Aurea n'a **aucune** source de mark
+ * price. Ni les wallets on-chain, ni les imports de relevés n'en fournissent,
+ * et le prix spot du sous-jacent n'en est pas un — sur un perpétuel, la base et
+ * le funding les séparent. L'écran dit donc quand le prix a été observé, et
+ * laisse l'utilisateur juger.
+ */
+export function markFreshnessNotice(
+  row: TradingPositionRow,
+  now: Date
+): string {
+  const freshness = markFreshnessOf(row);
+  if (freshness === "MISSING") {
+    return "Aucun prix de marque enregistré : le P&L latent ne peut pas être calculé.";
+  }
+  if (freshness === "UNMARKED") {
+    return "Le prix de marque est resté au prix d'entrée. Aurea ne le rafraîchit pas depuis le marché — mettez-le à jour pour obtenir un P&L latent significatif.";
+  }
+
+  const age = markAgeDays(row, now);
+  if (age == null) {
+    return "Prix de marque saisi. Aurea ne le rafraîchit pas depuis le marché.";
+  }
+  if (age === 0) return "Prix de marque observé aujourd'hui.";
+  if (age === 1) return "Prix de marque observé hier.";
+  return `Prix de marque observé il y a ${age} jours.`;
+}
+
 export const MARK_FRESHNESS_LABEL: Record<MarkFreshness, string> = {
-  MARKED: "Prix renseigné",
+  MARKED: "Prix observé",
   UNMARKED: "Prix non actualisé",
   MISSING: "Prix inconnu",
 };
@@ -104,7 +172,10 @@ export function closedNetPnl(row: TradingPositionRow): number {
   return realized - funding - commission;
 }
 
-export function buildPositionView(row: TradingPositionRow): PositionView {
+export function buildPositionView(
+  row: TradingPositionRow,
+  now: Date = new Date()
+): PositionView {
   const direction = (row.direction === "SHORT" ? "SHORT" : "LONG") as TradeDirection;
   const marginEur = num(row.derived.marginUsedEur);
   const pnlEur = row.isOpen
@@ -117,6 +188,7 @@ export function buildPositionView(row: TradingPositionRow): PositionView {
     ce second chiffre qui informe le trader sur ce qu'il risque réellement.
   */
   const pnlPct = marginEur > 0 ? (pnlEur / marginEur) * 100 : null;
+  const age = markAgeDays(row, now);
 
   return {
     row,
@@ -136,6 +208,13 @@ export function buildPositionView(row: TradingPositionRow): PositionView {
     marginEur,
     leverage: num(row.leverage),
     markFreshness: markFreshnessOf(row),
+    markAgeDays: age,
+    /*
+      « Ancien » ne concerne que les positions ouvertes : sur une position
+      close, le prix de marque est le prix de sortie — il est définitif, pas
+      périmé.
+    */
+    markIsStale: row.isOpen && age != null && age > STALE_MARK_DAYS,
     liquidationAlert: row.isOpen && row.derived.liquidationAlert,
     fundingAlert: row.derived.fundingAlert,
     hasRiskData:
@@ -146,9 +225,10 @@ export function buildPositionView(row: TradingPositionRow): PositionView {
 }
 
 export function buildPositionViews(
-  rows: TradingPositionRow[]
+  rows: TradingPositionRow[],
+  now: Date = new Date()
 ): PositionView[] {
-  return rows.map(buildPositionView);
+  return rows.map((r) => buildPositionView(r, now));
 }
 
 // ─── Synthèse ────────────────────────────────────────────────────────────────
@@ -167,7 +247,10 @@ export type TradingOverview = {
   /** Capital réellement immobilisé. */
   marginEur: number;
   liquidationAlerts: number;
-  /** Positions ouvertes dont le prix de marque n'a jamais été actualisé. */
+  /**
+   * Positions ouvertes dont le P&L latent ne peut pas être pris au sérieux :
+   * prix jamais observé, ou observation trop ancienne.
+   */
   unmarkedCount: number;
   exchangeCount: number;
 };
@@ -195,7 +278,7 @@ export function computeTradingOverview(
       gross += v.notionalEur;
       margin += v.marginEur;
       if (v.liquidationAlert) alerts += 1;
-      if (v.markFreshness !== "MARKED") unmarked += 1;
+      if (v.markFreshness !== "MARKED" || v.markIsStale) unmarked += 1;
     } else {
       closedCount += 1;
       realized += v.pnlEur;

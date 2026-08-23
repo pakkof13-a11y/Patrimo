@@ -1,0 +1,13 @@
+-- Horodatage du dernier prix de marque réellement observé.
+--
+-- `updatedAt` ne pouvait pas servir : il bouge dès qu'un champ change, donc
+-- corriger une note aurait fait passer un prix ancien pour une cotation
+-- fraîche.
+--
+-- Nullable, et volontairement non rétro-attribué : les lignes existantes n'ont
+-- jamais porté d'observation datée, et leur inventer une date reviendrait à
+-- affirmer une fraîcheur que personne ne peut constater.
+--
+-- NB : la table garde son nom d'origine `CryptoFuturesPosition` (voir @@map
+-- sur le modèle TradingPosition).
+ALTER TABLE "CryptoFuturesPosition" ADD COLUMN "markPriceUpdatedAt" TIMESTAMP(3);

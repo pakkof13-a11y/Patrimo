@@ -27,6 +27,7 @@ import {
 import { underlyingTypeLabel } from "@/app/lib/trading/constants";
 import {
   MARK_FRESHNESS_LABEL,
+  markFreshnessNotice,
   type PositionView,
 } from "@/app/lib/trading/positions-view";
 import { DirectionBadge, StatusDot } from "./position-list";
@@ -111,6 +112,11 @@ export function PositionPanel({
   className?: string;
 }) {
   const [section, setSection] = useState<Section>("summary");
+  /*
+    Horloge figée au montage : l'ancienneté d'une observation se compare à un
+    instant, et lire `Date.now()` pendant le rendu le rendrait impur.
+  */
+  const [clock] = useState(() => new Date());
 
   if (!view) {
     return (
@@ -236,14 +242,12 @@ export function PositionPanel({
           actualisé n'est pas un P&L latent — et Aurea ne rafraîchit pas le
           prix de marque depuis un flux de marché.
         */}
-        {view.isOpen && view.markFreshness !== "MARKED" ? (
+        {view.isOpen && (view.markFreshness !== "MARKED" || view.markIsStale) ? (
           <p
             className="mt-[var(--space-3)] rounded-[var(--radius-md)] border border-[var(--border)] p-[var(--space-3)] text-[length:var(--text-xs)] leading-relaxed text-[var(--foreground-secondary)]"
             data-testid="position-mark-warning"
           >
-            {view.markFreshness === "MISSING"
-              ? "Aucun prix de marque n'est enregistré : le P&L latent ne peut pas être calculé."
-              : "Le prix de marque est resté au prix d'entrée. Aurea ne le rafraîchit pas depuis le marché — mettez-le à jour pour obtenir un P&L latent significatif."}
+            {markFreshnessNotice(p, clock)}
           </p>
         ) : null}
 
@@ -269,6 +273,18 @@ export function PositionPanel({
                 }
                 tone={view.markFreshness === "MARKED" ? undefined : "muted"}
               />
+              {/*
+                La date de l'observation, quand elle existe. Aurea ne rafraîchit
+                aucun prix de marque : sans cette ligne, un prix vieux d'un mois
+                se lirait comme une cotation du jour.
+              */}
+              {p.markPriceUpdatedAt ? (
+                <Fact
+                  label="Observé le"
+                  value={dateTime(p.markPriceUpdatedAt)}
+                  tone={view.markIsStale ? "negative" : undefined}
+                />
+              ) : null}
               <Fact label="Levier" value={`×${view.leverage}`} />
             </Block>
 

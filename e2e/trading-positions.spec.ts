@@ -124,6 +124,70 @@ test.describe("Trading — positions", () => {
     await expect(warning).toContainText(/ne rafraîchit pas/i);
   });
 
+  test("la date d'observation du prix figure dans la fiche", async ({
+    page,
+  }) => {
+    /*
+      Le cœur de ce chantier. Sans date, un prix vieux d'un mois se lit comme
+      une cotation du jour — et Aurea n'a aucune source de prix de marque pour
+      les plateformes qu'il suit.
+    */
+    const observed = page.locator('[data-mark-freshness="MARKED"]').first();
+    test.skip((await observed.count()) === 0, "Aucun prix observé dans la démo");
+
+    await observed.locator("xpath=ancestor::tr").click();
+    const panel = page.getByTestId("position-panel");
+    await expect(panel).toContainText("Observé le");
+  });
+
+  test("une observation ancienne est signalée comme telle", async ({
+    page,
+  }) => {
+    const stale = page.locator('[data-mark-stale="true"]').first();
+    test.skip(
+      (await stale.count()) === 0,
+      "Aucune observation ancienne dans la démo"
+    );
+
+    // La colonne porte l'ancienneté, sans masquer le prix.
+    await expect(stale).toContainText(/\d+ j/);
+
+    await stale.locator("xpath=ancestor::tr").click();
+    const warning = page.getByTestId("position-mark-warning");
+    await expect(warning).toContainText(/il y a \d+ jours/i);
+    // Jamais de « temps réel » : la fraîcheur est dite, pas simulée.
+    await expect(warning).not.toContainText(/temps réel/i);
+  });
+
+  test("aucune requête de marché n'est émise par position", async ({
+    page,
+  }) => {
+    /*
+      Le chantier n'a ajouté aucun flux : rien ne doit partir vers un
+      fournisseur de prix quand on parcourt les positions, et surtout pas une
+      requête par ligne.
+    */
+    const market: string[] = [];
+    page.on("request", (r) => {
+      const u = r.url();
+      if (
+        u.includes("/api/market") ||
+        u.includes("binance.com") ||
+        u.includes("coingecko")
+      ) {
+        market.push(u);
+      }
+    });
+
+    const count = await rows(page).count();
+    test.skip(count === 0, "Aucune position");
+    for (let i = 0; i < Math.min(count, 4); i++) {
+      await rows(page).nth(i).click();
+    }
+    await page.waitForTimeout(1200);
+    expect(market).toEqual([]);
+  });
+
   test("sélectionner une position ouvre sa fiche sans emporter la table", async ({
     page,
   }) => {

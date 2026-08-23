@@ -106,7 +106,13 @@ export async function createFuturesPosition(
       sizeContracts: input.sizeContracts,
       notionalUsd: notional.toFixed(2),
       entryPrice: input.entryPrice,
+      /*
+        Repli sur le prix d'entrée quand rien n'est fourni : c'est ce que la
+        position vaut à l'ouverture, mais ce n'est **pas** une observation de
+        marché — d'où l'horodatage laissé nul dans ce cas.
+      */
       markPrice: dec(input.markPrice) ?? input.entryPrice,
+      markPriceUpdatedAt: dec(input.markPrice) != null ? new Date() : null,
       marginUsed: dec(input.marginUsed),
       stopLoss: dec(input.stopLoss),
       takeProfit: dec(input.takeProfit),
@@ -140,7 +146,15 @@ export async function updateFuturesPosition(
   return prisma.tradingPosition.update({
     where: { id },
     data: {
-      ...(input.markPrice !== undefined && { markPrice: dec(input.markPrice) }),
+      /*
+        La date ne suit que le prix. `updatedAt` bouge pour n'importe quel
+        champ : corriger une note ferait passer un prix vieux d'un mois pour
+        une cotation fraîche.
+      */
+      ...(input.markPrice !== undefined && {
+        markPrice: dec(input.markPrice),
+        markPriceUpdatedAt: dec(input.markPrice) != null ? new Date() : null,
+      }),
       ...(input.stopLoss !== undefined && { stopLoss: dec(input.stopLoss) }),
       ...(input.takeProfit !== undefined && { takeProfit: dec(input.takeProfit) }),
       ...(input.fundingPaid !== undefined && { fundingPaid: dec(input.fundingPaid) }),
@@ -181,6 +195,9 @@ export async function closeFuturesPosition(
       isOpen: false,
       closedAt: new Date(),
       markPrice: exit.toFixed(8),
+      // Le prix de sortie est une observation, et la dernière : une position
+      // close ne bougera plus.
+      markPriceUpdatedAt: new Date(),
       realizedPnl: realized.toFixed(2),
     },
   });
