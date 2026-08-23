@@ -939,7 +939,7 @@ export function PlatformsTab({
           </div>
 
           <select
-            className="input w-auto"
+            className="input !w-auto"
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
             data-testid="platforms-type-filter"
@@ -954,7 +954,7 @@ export function PlatformsTab({
           </select>
 
           <select
-            className="input w-auto"
+            className="input !w-auto"
             value={sortMode}
             onChange={(e) => setSortMode(parsePlatformSortMode(e.target.value))}
             data-testid="platforms-sort-mode"
