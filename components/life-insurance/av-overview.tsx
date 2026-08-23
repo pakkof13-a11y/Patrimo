@@ -10,6 +10,7 @@ import { ContractWorkspace } from "@/components/life-insurance/contract-workspac
 import { SavingsAllocationCard } from "@/components/life-insurance/savings-allocation-card";
 import { Sparkline } from "@/components/ui/sparkline";
 import { Skeleton } from "@/components/ui/skeleton";
+import { KpiBandTile } from "@/components/ui/kpi-tiles";
 import {
   buildContractViews,
   computeAllocation,
@@ -65,68 +66,6 @@ const pctLabel = (v: number | null | undefined, digits = 2) =>
         maximumFractionDigits: digits,
       })} %`;
 
-/**
- * Tuile de tête.
- *
- * Grand chiffre, intitulé discret, courbe fine facultative — la grammaire des
- * Banques et du tableau de bord. Les cartes hautes et encadrées d'avant
- * occupaient un tiers de l'écran pour cinq nombres.
- */
-function Kpi({
-  label,
-  value,
-  secondary,
-  tone,
-  spark,
-  loading,
-  testId,
-}: {
-  label: string;
-  value: string;
-  secondary?: string;
-  tone?: "positive" | "negative";
-  spark?: number[];
-  loading?: boolean;
-  testId: string;
-}) {
-  return (
-    <div
-      className="min-w-0 px-[var(--space-4)] py-[var(--space-3)]"
-      data-testid={testId}
-    >
-      {loading ? (
-        <Skeleton className="h-6 w-24" />
-      ) : (
-        <p
-          className={cn(
-            "num truncate text-[length:var(--text-lg)] font-semibold tracking-tight",
-            tone === "positive" && "val-positive",
-            tone === "negative" && "val-negative",
-            !tone && "text-[var(--foreground)]"
-          )}
-        >
-          {value}
-        </p>
-      )}
-      <p className="text-label mt-[var(--space-1)]">{label}</p>
-      {secondary ? (
-        <p className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
-          {secondary}
-        </p>
-      ) : null}
-      {spark && spark.length > 1 ? (
-        <div className="mt-[var(--space-2)]">
-          <Sparkline
-            values={spark}
-            width={92}
-            height={18}
-            stroke="var(--primary)"
-          />
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 /* ── Vues secondaires ────────────────────────────────────────────────── */
 
@@ -473,22 +412,32 @@ export function AvOverview({ className }: { className?: string }) {
         className="card grid grid-cols-2 divide-x divide-y divide-[var(--border)] overflow-hidden sm:grid-cols-3 sm:divide-y-0 lg:grid-cols-6"
         data-testid="av-kpi-strip"
       >
-        <Kpi
+        <KpiBandTile
           testId="av-kpi-value"
           label="Valeur totale"
           value={formatCurrency(totals.totalValueEur, "EUR")}
           secondary="Encours au marché"
-          spark={sparkPoints}
           loading={loading}
-        />
-        <Kpi
+        >
+          {sparkPoints.length > 1 ? (
+            <div className="mt-[var(--space-2)]">
+              <Sparkline
+                values={sparkPoints}
+                width={92}
+                height={18}
+                stroke="var(--primary)"
+              />
+            </div>
+          ) : null}
+        </KpiBandTile>
+        <KpiBandTile
           testId="av-kpi-premiums"
           label="Versements nets"
           value={formatCurrency(totals.totalPremiumsEur, "EUR")}
           secondary="Primes déclarées"
           loading={loading}
         />
-        <Kpi
+        <KpiBandTile
           testId="av-kpi-gain"
           label="Gain latent"
           value={formatCurrency(totals.unrealizedGainEur, "EUR")}
@@ -496,7 +445,7 @@ export function AvOverview({ className }: { className?: string }) {
           tone={totals.unrealizedGainEur >= 0 ? "positive" : "negative"}
           loading={loading}
         />
-        <Kpi
+        <KpiBandTile
           testId="av-kpi-perf"
           label="Performance"
           value={pctLabel(total?.performancePct ?? null)}
@@ -506,14 +455,14 @@ export function AvOverview({ className }: { className?: string }) {
           }
           loading={performanceQ.isLoading}
         />
-        <Kpi
+        <KpiBandTile
           testId="av-kpi-contracts"
           label="Contrats"
           value={String(totals.contractCount)}
           secondary={`${totals.supportCount} support${totals.supportCount > 1 ? "s" : ""}`}
           loading={loading}
         />
-        <Kpi
+        <KpiBandTile
           testId="av-kpi-insurers"
           label="Assureurs"
           value={String(insurerCount)}

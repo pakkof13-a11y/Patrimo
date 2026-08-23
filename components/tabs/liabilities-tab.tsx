@@ -26,6 +26,7 @@ import {
 import { LiabilityList } from "@/components/liabilities/liability-list";
 import { LiabilityPanel } from "@/components/liabilities/liability-panel";
 import { Skeleton } from "@/components/ui/skeleton";
+import { KpiBandTile } from "@/components/ui/kpi-tiles";
 
 
 type LiabilityRow = {
@@ -91,42 +92,6 @@ const LIABILITY_VIEWS = [
 ] as const;
 
 type LiabilityViewId = (typeof LIABILITY_VIEWS)[number]["id"];
-
-/** Tuile de tête — même grammaire que les autres modules patrimoniaux. */
-function LiabKpi({
-  label,
-  value,
-  secondary,
-  loading,
-  testId,
-}: {
-  label: string;
-  value: string;
-  secondary?: string;
-  loading?: boolean;
-  testId: string;
-}) {
-  return (
-    <div
-      className="min-w-0 px-[var(--space-4)] py-[var(--space-3)]"
-      data-testid={testId}
-    >
-      {loading ? (
-        <Skeleton className="h-6 w-24" />
-      ) : (
-        <p className="num truncate text-[length:var(--text-lg)] font-semibold tracking-tight text-[var(--foreground)]">
-          {value}
-        </p>
-      )}
-      <p className="text-label mt-[var(--space-1)]">{label}</p>
-      {secondary && !loading ? (
-        <p className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
-          {secondary}
-        </p>
-      ) : null}
-    </div>
-  );
-}
 
 export function LiabilitiesTab({
   grossAssetsEur,
@@ -379,14 +344,14 @@ export function LiabilitiesTab({
         className="card grid grid-cols-2 divide-x divide-y divide-[var(--border)] overflow-hidden sm:grid-cols-3 sm:divide-y-0 lg:grid-cols-5"
         data-testid="liability-kpi-strip"
       >
-        <LiabKpi
+        <KpiBandTile
           testId="liability-kpi-debt"
           label="Dette totale"
           value={formatCurrency(String(totals.totalDebtEur), "EUR")}
           secondary="Capital restant dû"
           loading={listQ.isPending && !listQ.data}
         />
-        <LiabKpi
+        <KpiBandTile
           testId="liability-kpi-monthly"
           label="Mensualités"
           value={
@@ -401,7 +366,7 @@ export function LiabilitiesTab({
           }
           loading={listQ.isPending && !listQ.data}
         />
-        <LiabKpi
+        <KpiBandTile
           testId="liability-kpi-rate"
           label="Taux moyen"
           value={
@@ -413,7 +378,7 @@ export function LiabilitiesTab({
           loading={listQ.isPending && !listQ.data}
         />
         <div data-testid="liability-kpi-interest-remaining">
-          <LiabKpi
+          <KpiBandTile
             testId="liability-kpi-interest"
             label="Intérêts restants"
             value={formatCurrency(
@@ -424,7 +389,7 @@ export function LiabilitiesTab({
             loading={listQ.isPending && !listQ.data}
           />
         </div>
-        <LiabKpi
+        <KpiBandTile
           testId="liability-kpi-count"
           label="Crédits actifs"
           value={String(totals.activeCount)}

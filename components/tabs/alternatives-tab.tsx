@@ -13,6 +13,7 @@ import {
   Palette,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { KpiBandTile } from "@/components/ui/kpi-tiles";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import {
   type AlternativesDashboardPayload,
@@ -88,51 +89,6 @@ const CATEGORY_TONE: Record<AlternativeCategory, string> = {
   CROWDLENDING: "var(--chart-positive)",
   TANGIBLE: "var(--chart-neutral)",
 };
-
-/** Tuile de tête — même grammaire que les autres modules patrimoniaux. */
-function AltKpi({
-  label,
-  value,
-  secondary,
-  tone,
-  loading,
-  testId,
-}: {
-  label: string;
-  value: string;
-  secondary?: string;
-  tone?: "positive" | "negative";
-  loading?: boolean;
-  testId: string;
-}) {
-  return (
-    <div
-      className="min-w-0 px-[var(--space-4)] py-[var(--space-3)]"
-      data-testid={testId}
-    >
-      {loading ? (
-        <Skeleton className="h-6 w-24" />
-      ) : (
-        <p
-          className={cn(
-            "num truncate text-[length:var(--text-lg)] font-semibold tracking-tight",
-            tone === "positive" && "val-positive",
-            tone === "negative" && "val-negative",
-            !tone && "text-[var(--foreground)]"
-          )}
-        >
-          {value}
-        </p>
-      )}
-      <p className="text-label mt-[var(--space-1)]">{label}</p>
-      {secondary && !loading ? (
-        <p className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
-          {secondary}
-        </p>
-      ) : null}
-    </div>
-  );
-}
 
 export function AlternativesTab({
   baseCurrency = "EUR",
@@ -233,21 +189,21 @@ export function AlternativesTab({
         className="card grid grid-cols-2 divide-x divide-y divide-[var(--border)] overflow-hidden sm:grid-cols-3 sm:divide-y-0 lg:grid-cols-5"
         data-testid="alt-kpi-strip"
       >
-        <AltKpi
+        <KpiBandTile
           testId="alt-kpi-value"
           label="Valeur totale"
           value={formatCurrency(String(totals.valueEur), baseCurrency)}
           secondary="Poche alternative"
           loading={dashQ.isPending}
         />
-        <AltKpi
+        <KpiBandTile
           testId="alt-kpi-invested"
           label="Investi"
           value={formatCurrency(String(totals.investedEur), baseCurrency)}
           secondary="Capital engagé"
           loading={dashQ.isPending}
         />
-        <AltKpi
+        <KpiBandTile
           testId="alt-kpi-pnl"
           label="Résultat"
           value={formatCurrency(String(totals.pnlEur), baseCurrency)}
@@ -255,14 +211,14 @@ export function AlternativesTab({
           tone={totals.pnlEur >= 0 ? "positive" : "negative"}
           loading={dashQ.isPending}
         />
-        <AltKpi
+        <KpiBandTile
           testId="alt-kpi-count"
           label="Investissements"
           value={String(totals.count)}
           secondary={`${totals.byCategory.length} famille${totals.byCategory.length > 1 ? "s" : ""}`}
           loading={dashQ.isPending}
         />
-        <AltKpi
+        <KpiBandTile
           testId="alt-kpi-alerts"
           label="Alertes"
           value={String(shortAlerts.reduce((s, a) => s + a.count, 0))}

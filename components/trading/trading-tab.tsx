@@ -29,7 +29,8 @@ import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
-import { cn, formatCurrency } from "@/app/lib/utils";
+import { formatCurrency } from "@/app/lib/utils";
+import { KpiCardTile } from "@/components/ui/kpi-tiles";
 import { FuturesPanel } from "@/components/trading/futures-panel";
 import { TradingAccountsPanel } from "@/components/trading/trading-accounts-panel";
 import { TradingJournalPanel } from "@/components/trading/trading-journal-panel";
@@ -73,35 +74,11 @@ const STATUS_TABS: Array<{ id: PositionFilters["status"]; label: string }> = [
   { id: "ALL", label: "Toutes" },
 ];
 
-function Kpi({
-  label,
-  value,
-  hint,
-  tone,
-  testId,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  tone?: number;
-  testId: string;
-}) {
-  return (
-    <div className="card p-[var(--space-3)]" data-testid={testId}>
-      <p className="text-label">{label}</p>
-      <p
-        className={cn(
-          "num mt-[var(--space-1)] text-[length:var(--text-lg)] font-semibold tracking-tight",
-          tone != null && tone > 0 && "val-positive",
-          tone != null && tone < 0 && "val-negative",
-          (tone == null || tone === 0) && "text-[var(--foreground)]"
-        )}
-      >
-        {value}
-      </p>
-      <p className="text-meta mt-[var(--space-px)]">{hint}</p>
-    </div>
-  );
+
+/** Un P&L n'est ni positif ni négatif par nature : c'est son signe qui l'est. */
+function pnlTone(v: number | null | undefined) {
+  if (v == null || v === 0) return undefined;
+  return v > 0 ? ("positive" as const) : ("negative" as const);
 }
 
 export function TradingTab({
@@ -241,27 +218,27 @@ export function TradingTab({
               className="grid grid-cols-2 gap-[var(--space-2)] lg:grid-cols-5"
               data-testid="trading-kpis"
             >
-              <Kpi
+              <KpiCardTile
                 label="P&L latent"
                 value={formatCurrency(
                   String(overview.unrealizedPnlEur),
                   baseCurrency
                 )}
                 hint={`${overview.openCount} position${overview.openCount > 1 ? "s" : ""} ouverte${overview.openCount > 1 ? "s" : ""}`}
-                tone={overview.unrealizedPnlEur}
+                tone={pnlTone(overview.unrealizedPnlEur)}
                 testId="trading-kpi-unrealized"
               />
-              <Kpi
+              <KpiCardTile
                 label="P&L réalisé"
                 value={formatCurrency(
                   String(overview.realizedPnlEur),
                   baseCurrency
                 )}
                 hint={`${overview.closedCount} clôturée${overview.closedCount > 1 ? "s" : ""} · frais déduits`}
-                tone={overview.realizedPnlEur}
+                tone={pnlTone(overview.realizedPnlEur)}
                 testId="trading-kpi-realized"
               />
-              <Kpi
+              <KpiCardTile
                 label="Exposition nette"
                 value={formatCurrency(
                   String(overview.netExposureEur),
@@ -270,7 +247,7 @@ export function TradingTab({
                 hint={`brute ${formatCurrency(String(overview.grossExposureEur), baseCurrency)}`}
                 testId="trading-kpi-exposure"
               />
-              <Kpi
+              <KpiCardTile
                 label="Marge engagée"
                 value={formatCurrency(String(overview.marginEur), baseCurrency)}
                 hint={
@@ -280,7 +257,7 @@ export function TradingTab({
                 }
                 testId="trading-kpi-margin"
               />
-              <Kpi
+              <KpiCardTile
                 label="Alertes liquidation"
                 value={String(overview.liquidationAlerts)}
                 hint={
@@ -288,7 +265,7 @@ export function TradingTab({
                     ? "position(s) proche(s) du seuil"
                     : "aucune position à risque immédiat"
                 }
-                tone={overview.liquidationAlerts > 0 ? -1 : 0}
+                tone={overview.liquidationAlerts > 0 ? "negative" : undefined}
                 testId="trading-kpi-alerts"
               />
             </div>

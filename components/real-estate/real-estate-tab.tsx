@@ -27,6 +27,7 @@ import { fetchJson } from "@/app/lib/api-client";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { KpiBandTile } from "@/components/ui/kpi-tiles";
 import { PropertyList } from "@/components/real-estate/property-list";
 import {
   PropertyDetailPanel,
@@ -65,51 +66,6 @@ type TaxProperty = {
   shareValueEur: string;
   isPrimaryResidence: boolean;
 };
-
-/** Tuile de tête — même grammaire que les Banques et l'Assurance-vie. */
-function Kpi({
-  label,
-  value,
-  secondary,
-  tone,
-  loading,
-  testId,
-}: {
-  label: string;
-  value: string;
-  secondary?: string;
-  tone?: "positive" | "negative";
-  loading?: boolean;
-  testId: string;
-}) {
-  return (
-    <div
-      className="min-w-0 px-[var(--space-4)] py-[var(--space-3)]"
-      data-testid={testId}
-    >
-      {loading ? (
-        <Skeleton className="h-6 w-24" />
-      ) : (
-        <p
-          className={cn(
-            "num truncate text-[length:var(--text-lg)] font-semibold tracking-tight",
-            tone === "positive" && "val-positive",
-            tone === "negative" && "val-negative",
-            !tone && "text-[var(--foreground)]"
-          )}
-        >
-          {value}
-        </p>
-      )}
-      <p className="text-label mt-[var(--space-1)]">{label}</p>
-      {secondary ? (
-        <p className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
-          {secondary}
-        </p>
-      ) : null}
-    </div>
-  );
-}
 
 const pctLabel = (v: number | null | undefined, digits = 2) =>
   v == null
@@ -265,14 +221,14 @@ export function RealEstateTab({
         className="card grid grid-cols-2 divide-x divide-y divide-[var(--border)] overflow-hidden sm:grid-cols-3 sm:divide-y-0 lg:grid-cols-6"
         data-testid="re-kpi-strip"
       >
-        <Kpi
+        <KpiBandTile
           testId="re-kpi-value"
           label="Valeur totale"
           value={formatCurrency(String(totals.valueEur), "EUR")}
           secondary="Vos parts"
           loading={loading}
         />
-        <Kpi
+        <KpiBandTile
           testId="re-kpi-debt"
           label="Capital restant dû"
           value={formatCurrency(String(totals.debtEur), "EUR")}
@@ -283,7 +239,7 @@ export function RealEstateTab({
           }
           loading={loading}
         />
-        <Kpi
+        <KpiBandTile
           testId="re-kpi-equity"
           label="Equity"
           value={formatCurrency(String(totals.equityEur), "EUR")}
@@ -291,14 +247,14 @@ export function RealEstateTab({
           tone={totals.equityEur >= 0 ? "positive" : "negative"}
           loading={loading}
         />
-        <Kpi
+        <KpiBandTile
           testId="re-kpi-yield"
           label="Rendement brut moy."
           value={pctLabel(totals.weightedGrossYieldPct)}
           secondary="Pondéré, biens loués"
           loading={loading}
         />
-        <Kpi
+        <KpiBandTile
           testId="re-kpi-cashflow"
           label="Cash-flow mensuel"
           value={
@@ -310,7 +266,7 @@ export function RealEstateTab({
           tone={totals.monthlyCashFlowEur >= 0 ? "positive" : "negative"}
           loading={loading}
         />
-        <Kpi
+        <KpiBandTile
           testId="re-kpi-count"
           label="Biens"
           value={String(totals.propertyCount)}

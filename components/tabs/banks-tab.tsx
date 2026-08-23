@@ -37,6 +37,7 @@ import { formatCurrency, cn } from "@/app/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { KpiBandTile } from "@/components/ui/kpi-tiles";
 import {
   groupByInstitution,
   institutionCount,
@@ -85,36 +86,6 @@ type ViewId = (typeof VIEWS)[number]["id"];
  * l'onglet Cryptos. Les valeurs viennent telles quelles de
  * `/api/banks/summary` — cet écran n'a pas de calcul propre à défendre.
  */
-function Kpi({
-  label,
-  value,
-  hint,
-  loading,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  loading?: boolean;
-}) {
-  return (
-    <div className="min-w-0 px-[var(--space-4)] py-[var(--space-3)]">
-      {loading ? (
-        <Skeleton className="h-6 w-24" />
-      ) : (
-        <p className="num truncate text-[length:var(--text-lg)] font-semibold tracking-tight text-[var(--foreground)]">
-          {value}
-        </p>
-      )}
-      <p className="text-label mt-[var(--space-1)]">{label}</p>
-      {hint ? (
-        <p className="mt-[var(--space-0)] text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
-          {hint}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
 export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
   const qc = useQueryClient();
 
@@ -451,41 +422,41 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
         className="card grid grid-cols-2 divide-x divide-y divide-[var(--border)] overflow-hidden sm:grid-cols-3 sm:divide-y-0 lg:grid-cols-5"
         data-testid="banks-summary-strip"
       >
-        <Kpi
+        <KpiBandTile
           label="Liquidités"
           value={formatCurrency(summary?.checkingTotalBase ?? "0", baseCurrency)}
-          hint="Comptes courants"
+          secondary="Comptes courants"
           loading={summaryLoading}
         />
-        <Kpi
+        <KpiBandTile
           label="Épargne"
           value={formatCurrency(summary?.savingsTotalBase ?? "0", baseCurrency)}
-          hint="Livrets + intérêts courus"
+          secondary="Livrets + intérêts courus"
           loading={summaryLoading}
         />
-        <Kpi
+        <KpiBandTile
           label="Rendement"
           value={
             summary?.weightedApyPct
               ? `${Number(summary.weightedApyPct).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} %`
               : "—"
           }
-          hint="Moyen pondéré, livrets"
+          secondary="Moyen pondéré, livrets"
           loading={summaryLoading}
         />
-        <Kpi
+        <KpiBandTile
           label="Intérêts projetés"
           value={formatCurrency(
             summary?.projectedAnnualInterestBase ?? "0",
             baseCurrency
           )}
-          hint="Projection 12 mois"
+          secondary="Projection 12 mois"
           loading={summaryLoading}
         />
-        <Kpi
+        <KpiBandTile
           label="Établissements"
           value={String(nbInstitutions)}
-          hint={`${accountCount} compte${accountCount > 1 ? "s" : ""}`}
+          secondary={`${accountCount} compte${accountCount > 1 ? "s" : ""}`}
         />
       </div>
 

@@ -10,6 +10,7 @@ import { Field } from "@/components/ui/field";
 import { PLATFORM_TYPES } from "@/app/lib/constants";
 import { useDebouncedValue } from "@/app/hooks/use-debounced-value";
 import { formatCurrency, cn } from "@/app/lib/utils";
+import { KpiCardTile } from "@/components/ui/kpi-tiles";
 import { fetchJson } from "@/app/lib/api-client";
 import type { PlatformRow } from "@/app/lib/types/ui";
 import type { SolanaPortfolioSnapshot } from "@/app/lib/solana";
@@ -45,36 +46,6 @@ const STATUS_FILTERS: Array<{ id: PlatformStatusFilter; label: string }> = [
   { id: "MANUAL", label: "Manuelles" },
 ];
 
-function PlatformKpi({
-  label,
-  value,
-  hint,
-  tone,
-  testId,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: "warning";
-  testId: string;
-}) {
-  return (
-    <div className="card p-[var(--space-3)]" data-testid={testId}>
-      <p className="text-label">{label}</p>
-      <p
-        className={cn(
-          "num mt-[var(--space-1)] text-[length:var(--text-lg)] font-semibold tracking-tight",
-          tone === "warning"
-            ? "text-[var(--warning)]"
-            : "text-[var(--foreground)]"
-        )}
-      >
-        {value}
-      </p>
-      {hint ? <p className="text-meta mt-[var(--space-px)]">{hint}</p> : null}
-    </div>
-  );
-}
 
 /** Base58 Solana (aligné côté serveur) — pas d’appel API si EVM. */
 function looksLikeSolanaAddress(addr: string | null | undefined): boolean {
@@ -860,7 +831,7 @@ export function PlatformsTab({
         className="grid grid-cols-2 gap-[var(--space-2)] sm:grid-cols-3 lg:grid-cols-5"
         data-testid="platforms-summary"
       >
-        <PlatformKpi
+        <KpiCardTile
           label="Plateformes"
           value={String(overview.platformCount)}
           hint={
@@ -870,19 +841,19 @@ export function PlatformsTab({
           }
           testId="platforms-kpi-count"
         />
-        <PlatformKpi
+        <KpiCardTile
           label="Enveloppes"
           value={String(overview.envelopeCount)}
           hint={`${overview.positionCount} position${overview.positionCount > 1 ? "s" : ""}`}
           testId="platforms-kpi-envelopes"
         />
-        <PlatformKpi
+        <KpiCardTile
           label="Valeur suivie"
           value={formatCurrency(String(overview.totalValue), baseCurrency)}
           hint="espèces et titres"
           testId="platforms-summary-total"
         />
-        <PlatformKpi
+        <KpiCardTile
           label="Synchronisées"
           value={
             overview.syncableCount > 0
@@ -896,7 +867,7 @@ export function PlatformsTab({
           }
           testId="platforms-kpi-synced"
         />
-        <PlatformKpi
+        <KpiCardTile
           label="À traiter"
           value={String(overview.attentionCount)}
           hint={
