@@ -23,6 +23,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DateInput } from "@/components/ui/date-input";
+import { EmptyPlaceholder } from "@/components/ui/panel";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import {
   COMMON_MANAGERS,
@@ -36,7 +37,6 @@ import {
 import { PEE_LOCK_YEARS } from "@/app/lib/employee-savings/logic";
 import { CHART_COLORS } from "@/app/lib/types/ui";
 import {
-  ModuleGuidedEmpty,
   ModuleCard,
   ModuleCardHeader,
   moduleTableHeadClass,
@@ -780,35 +780,54 @@ export function EmployeeSavingsManagement({
               {!q.isLoading && lines.length === 0 && (
                 <tr>
                   <td colSpan={11} className="px-2 py-4">
-                    <ModuleGuidedEmpty
+                    <EmptyPlaceholder
                       testId="es-empty"
+                      className="sm:py-12"
                       title="Aucune position FCPE pour l’instant"
                       description="Ajoutez une ligne manuellement pour alimenter les KPI et graphiques — ou importez un export gestionnaire via le modèle CSV."
-                      bullets={[
-                        "Plan (PEE / PER / PERCO) et gestionnaire",
-                        "Parts × VL pour la valorisation",
-                        "Origine des fonds et date de déblocage",
-                      ]}
-                      primaryLabel="Ajouter une position"
-                      onPrimary={startCreate}
-                      primaryTestId="es-empty-add"
-                      secondary={
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            window.open(
-                              "/api/employee-savings/template",
-                              "_blank"
-                            )
-                          }
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          Télécharger le modèle
-                        </Button>
+                      action={
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={startCreate}
+                            data-testid="es-empty-add"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Ajouter une position
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              window.open(
+                                "/api/employee-savings/template",
+                                "_blank"
+                              )
+                            }
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Télécharger le modèle
+                          </Button>
+                        </>
                       }
-                    />
+                    >
+                      {/* Les trois colonnes qu'une ligne FCPE demande — le
+                          guide de saisie propre à ce formulaire. */}
+                      <ul className="mx-auto max-w-sm space-y-1.5 text-left text-[11px] text-[var(--muted-foreground)]">
+                        {[
+                          "Plan (PEE / PER / PERCO) et gestionnaire",
+                          "Parts × VL pour la valorisation",
+                          "Origine des fonds et date de déblocage",
+                        ].map((b) => (
+                          <li key={b} className="flex gap-2">
+                            <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--primary)]/70" />
+                            <span>{b}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </EmptyPlaceholder>
                   </td>
                 </tr>
               )}

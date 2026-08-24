@@ -109,6 +109,7 @@ export function SegmentedItem({
 export function EmptyPlaceholder({
   title,
   description,
+  children,
   action,
   className,
   compact,
@@ -117,6 +118,15 @@ export function EmptyPlaceholder({
 }: {
   title: string;
   description?: React.ReactNode;
+  /**
+   * Contenu libre entre la description et les actions — une liste de repères
+   * de saisie, par exemple.
+   *
+   * Un emplacement plutôt qu'une prop `bullets` : la description est rendue
+   * dans un `<p>`, où une liste n'a pas sa place, et chaque module formule ses
+   * repères à sa façon.
+   */
+  children?: React.ReactNode;
   action?: React.ReactNode;
   className?: string;
   compact?: boolean;
@@ -138,6 +148,7 @@ export function EmptyPlaceholder({
       {description ? (
         <p className="empty-placeholder-desc">{description}</p>
       ) : null}
+      {children}
       {action ? (
         <div className="empty-placeholder-actions">{action}</div>
       ) : null}

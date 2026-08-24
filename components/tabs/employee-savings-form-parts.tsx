@@ -4,9 +4,10 @@
  * Sous-composants formulaire ES — extraits du tab pour réduire le monolithe.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronDown, Plus, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { EmptyPlaceholder } from "@/components/ui/panel";
 import { FinanceTip } from "@/components/ui/finance-tooltip";
-import { ModuleGuidedEmpty } from "@/components/ui/module-shell";
 import { cn } from "@/app/lib/utils";
 import {
   COMMON_MANAGERS,
@@ -241,13 +242,17 @@ export function EsChartEmptyState({
   onAdd: () => void;
 }) {
   return (
-    <ModuleGuidedEmpty
+    <EmptyPlaceholder
       compact
       title={title}
       description={description}
-      primaryLabel="Ajouter une position"
-      onPrimary={onAdd}
       className="min-h-[12rem] py-6"
+      action={
+        <Button type="button" size="sm" onClick={onAdd}>
+          <Plus className="h-3.5 w-3.5" />
+          Ajouter une position
+        </Button>
+      }
     />
   );
 }

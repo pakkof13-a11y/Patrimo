@@ -1,7 +1,5 @@
 "use client";
 
-import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/app/lib/utils";
 
 /**
@@ -129,73 +127,6 @@ export function ModuleKpi({
       </div>
       {hint != null && hint !== "" ? (
         <div className="text-meta mt-1 leading-snug">{hint}</div>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Empty guidé avec puces métier + CTA — pattern ES / Passifs / Alternatifs.
- */
-export function ModuleGuidedEmpty({
-  title,
-  description,
-  bullets,
-  primaryLabel,
-  onPrimary,
-  primaryTestId,
-  secondary,
-  className,
-  testId,
-  compact,
-}: {
-  title: string;
-  description: string;
-  bullets?: string[];
-  primaryLabel?: string;
-  onPrimary?: () => void;
-  primaryTestId?: string;
-  secondary?: React.ReactNode;
-  className?: string;
-  testId?: string;
-  compact?: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "empty-placeholder px-4",
-        compact ? "py-6" : "py-10 sm:py-12",
-        className
-      )}
-      data-testid={testId}
-    >
-      <p className="empty-placeholder-title">{title}</p>
-      <p className="empty-placeholder-desc">{description}</p>
-      {bullets && bullets.length > 0 ? (
-        <ul className="mx-auto max-w-sm space-y-1.5 text-left text-[11px] text-[var(--muted-foreground)]">
-          {bullets.map((b) => (
-            <li key={b} className="flex gap-2">
-              <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--primary)]/70" />
-              <span>{b}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {(primaryLabel && onPrimary) || secondary ? (
-        <div className="empty-placeholder-actions">
-          {primaryLabel && onPrimary ? (
-            <Button
-              type="button"
-              size="sm"
-              onClick={onPrimary}
-              data-testid={primaryTestId}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {primaryLabel}
-            </Button>
-          ) : null}
-          {secondary}
-        </div>
       ) : null}
     </div>
   );

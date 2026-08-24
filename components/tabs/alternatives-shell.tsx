@@ -1,9 +1,11 @@
 "use client";
 
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { EmptyPlaceholder } from "@/components/ui/panel";
 import {
   ModuleCard,
   ModuleCardHeader,
-  ModuleGuidedEmpty,
   ModuleKpiStrip,
 } from "@/components/ui/module-shell";
 import { cn, getChangeColor } from "@/app/lib/utils";
@@ -150,15 +152,36 @@ export function AltEmptyState({
   secondary?: React.ReactNode;
 }) {
   return (
-    <ModuleGuidedEmpty
+    <EmptyPlaceholder
+      /*
+        `sm:py-12` reprend la respiration que portait l'ancien enrobage :
+        `EmptyPlaceholder` s'arrête à `py-10`, et ces états vides guidés
+        occupent une carte entière plutôt qu'un coin de tableau.
+      */
+      className="sm:py-12"
       title={title}
       description={description}
-      bullets={bullets}
-      primaryLabel={primaryLabel}
-      onPrimary={onPrimary}
-      primaryTestId={primaryTestId}
-      secondary={secondary}
-    />
+      action={
+        <>
+          <Button type="button" size="sm" onClick={onPrimary} data-testid={primaryTestId}>
+            <Plus className="h-3.5 w-3.5" />
+            {primaryLabel}
+          </Button>
+          {secondary}
+        </>
+      }
+    >
+      {bullets && bullets.length > 0 ? (
+        <ul className="mx-auto max-w-sm space-y-1.5 text-left text-[11px] text-[var(--muted-foreground)]">
+          {bullets.map((b) => (
+            <li key={b} className="flex gap-2">
+              <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--primary)]/70" />
+              <span>{b}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </EmptyPlaceholder>
   );
 }
 
