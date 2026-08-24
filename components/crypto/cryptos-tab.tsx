@@ -185,14 +185,14 @@ export function CryptosTab({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold leading-snug">Cryptos</h1>
-          <p className="module-intro max-w-xl text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+          <p className="module-intro max-w-xl text-xs leading-relaxed text-[var(--muted-foreground)]">
             Poche crypto — comptant, DeFi et NFTs. La vue d’ensemble
             synthétise ; chaque sous-module gère sa lecture propre. Les
             positions à levier sont dans l’onglet Trading.
           </p>
         </div>
         <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)]/20 px-4 py-2 text-right">
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
             Total poche crypto
           </div>
           <div
@@ -239,7 +239,7 @@ export function CryptosTab({
                 "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
                 active
                   ? "bg-teal-50 text-teal-900 ring-1 ring-teal-500/25 dark:bg-teal-950/60 dark:text-teal-100"
-                  : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  : "text-[var(--muted-foreground)] hover:bg-[var(--surface-hover)]"
               )}
             >
               {item.icon}
@@ -297,18 +297,18 @@ export function CryptosTab({
               <h2 className="mb-0.5 text-sm font-semibold">
                 Répartition de la poche
               </h2>
-              <p className="mb-3 text-[11px] text-slate-400">
+              <p className="mb-3 text-[11px] text-[var(--muted-foreground)]">
                 Poids du comptant, de la DeFi et des NFTs
               </p>
               {pieData.length === 0 ? (
                 <div className="flex min-h-[14rem] flex-col items-center justify-center gap-2 px-2 py-6 text-center">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--muted)] text-slate-400">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--muted)] text-[var(--muted-foreground)]">
                     <PieChartIcon className="h-4 w-4" />
                   </div>
-                  <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                  <p className="text-sm font-medium text-[var(--foreground)]">
                     La répartition apparaîtra ici
                   </p>
-                  <p className="max-w-xs text-[11px] leading-relaxed text-slate-400">
+                  <p className="max-w-xs text-[11px] leading-relaxed text-[var(--muted-foreground)]">
                     Enregistrez un achat ou synchronisez un wallet pour
                     visualiser le poids de chaque poche.
                   </p>
@@ -345,7 +345,7 @@ export function CryptosTab({
               <h2 className="mb-0.5 text-sm font-semibold">
                 {hasAny ? "Détail par module" : "Démarrer la poche crypto"}
               </h2>
-              <p className="mb-3 text-[11px] leading-relaxed text-slate-400">
+              <p className="mb-3 text-[11px] leading-relaxed text-[var(--muted-foreground)]">
                 {hasAny
                   ? "Total intégré au patrimoine net global. Cliquez une carte ou un module pour explorer."
                   : "Choisissez la nature d’actif à consulter. Les positions viennent du journal — saisissez une opération ou synchronisez un wallet."}
@@ -365,14 +365,14 @@ export function CryptosTab({
                       >
                         <button
                           type="button"
-                          className="text-left font-medium text-slate-700 hover:text-teal-700 dark:text-slate-200 dark:hover:text-teal-300"
+                          className="text-left font-medium text-[var(--foreground)] hover:text-teal-700 dark:hover:text-teal-300"
                           onClick={() => onSubChange(s.id as CryptoSubTab)}
                         >
                           {s.name}
                         </button>
                         <span className="tabular-nums font-medium">
                           {formatCurrency(String(s.value), baseCurrency)}
-                          <span className="ml-2 text-xs text-slate-400">
+                          <span className="ml-2 text-xs text-[var(--muted-foreground)]">
                             {pct} %
                           </span>
                         </span>
@@ -400,7 +400,7 @@ export function CryptosTab({
                         )}
                       >
                         <div className="text-sm font-semibold">{g.title}</div>
-                        <p className="mt-1 text-[11px] leading-snug text-slate-400">
+                        <p className="mt-1 text-[11px] leading-snug text-[var(--muted-foreground)]">
                           {g.blurb}
                         </p>
                       </button>
