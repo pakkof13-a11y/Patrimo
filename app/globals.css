@@ -998,6 +998,20 @@ input:focus-visible {
   width: 100%;
   max-width: 100%;
   min-width: 0; /* allow shrink inside flex/grid parents */
+  /*
+    Bloc conteneur des descendants en position absolue.
+
+    Sans lui, un enfant absolument positionné se cale sur le document, pas sur
+    ce conteneur : le rognage ne l'atteint pas et il étire la page jusqu'à la
+    largeur du tableau. C'est ce que faisait le `sr-only` de la colonne
+    d'actions des Actifs alternatifs — un point de 1 px, invisible, qui
+    emportait la fenêtre entière de plus de 900 px sur mobile.
+
+    `relative` seul ne crée pas de contexte d'empilement et ne déplace rien :
+    il rend simplement vraie la promesse de ce conteneur, à savoir que rien de
+    ce qu'il contient ne déborde ailleurs que dans son propre défilement.
+  */
+  position: relative;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
@@ -1164,6 +1178,10 @@ input:focus-visible {
 
 /* Holdings scroll host — always allow horizontal scroll when content overflows */
 .holdings-table-scroll {
+  /* Même bloc conteneur que les deux autres hôtes de défilement — voir plus
+     haut : un descendant en position absolue ne doit pas pouvoir étirer la
+     page depuis l'intérieur d'un tableau. */
+  position: relative;
   overflow-x: auto;
   overflow-y: hidden;
   width: 100%;
