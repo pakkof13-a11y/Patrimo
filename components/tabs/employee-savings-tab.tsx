@@ -23,7 +23,6 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DateInput } from "@/components/ui/date-input";
-import { FinanceTip } from "@/components/ui/finance-tooltip";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import {
   COMMON_MANAGERS,
@@ -38,8 +37,6 @@ import { PEE_LOCK_YEARS } from "@/app/lib/employee-savings/logic";
 import { CHART_COLORS } from "@/app/lib/types/ui";
 import {
   ModuleGuidedEmpty,
-  ModuleKpi,
-  ModulePageHeader,
   ModuleCard,
   ModuleCardHeader,
   moduleTableHeadClass,
@@ -193,8 +190,6 @@ export function EmployeeSavingsManagement({
   const total = Number(summary?.totalValue || 0);
   const available = Number(summary?.availableValue || 0);
   const blocked = Number(summary?.blockedValue || 0);
-  const availPct = summary?.availablePct ?? 0;
-  const blockedPct = summary?.blockedPct ?? 0;
 
   function scrollToForm() {
     requestAnimationFrame(() => {
@@ -252,92 +247,12 @@ export function EmployeeSavingsManagement({
 
   return (
     <div className="section-stack" data-testid="es-management">
-      <ModulePageHeader
-        title="Épargne salariale"
-        subtitle={
-          <>
-            Positions{" "}
-            <span className="inline-flex items-center gap-0.5 font-medium text-[var(--foreground)]/80">
-              FCPE
-              <FinanceTip term="FCPE" />
-            </span>{" "}
-            (PEE, PER, PERCO) — valorisation (parts ×{" "}
-            <span className="inline-flex items-center gap-0.5">
-              VL
-              <FinanceTip term="VL" />
-            </span>
-            ), origine des fonds et calendrier de déblocage théorique.
-          </>
-        }
-      />
-
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <ModuleKpi
-          label="Valeur totale"
-          value={formatCurrency(summary?.totalValue || "0", baseCurrency)}
-          hint={
-            hasLines
-              ? `${summary?.lineCount ?? 0} position${(summary?.lineCount ?? 0) !== 1 ? "s" : ""} FCPE`
-              : "Somme des positions (parts × VL)"
-          }
-        />
-        <ModuleKpi
-          label={
-            <span className="inline-flex items-center gap-1.5 text-[var(--success)]">
-              <Unlock className="h-3.5 w-3.5" />
-              Disponible
-            </span>
-          }
-          tip={<FinanceTip term="Déblocage" />}
-          value={formatCurrency(summary?.availableValue || "0", baseCurrency)}
-          valueClassName="text-[var(--success)]"
-          hint={
-            hasLines
-              ? `${availPct} % du total`
-              : "Montant dont la date de déblocage est passée"
-          }
-        />
-        <ModuleKpi
-          label={
-            <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-              <Lock className="h-3.5 w-3.5" />
-              Bloqué
-            </span>
-          }
-          value={formatCurrency(summary?.blockedValue || "0", baseCurrency)}
-          valueClassName="text-amber-700 dark:text-amber-300"
-          hint={
-            hasLines
-              ? `${blockedPct} % du total`
-              : "Encore sous contrainte (date future ou retraite)"
-          }
-        />
-        <div className="card p-3.5 sm:p-4">
-          <div className="text-label">Liquidité</div>
-          {hasLines ? (
-            <>
-              <div className="mt-3 h-3 overflow-hidden rounded-full bg-[var(--muted)]">
-                <div
-                  className="h-full rounded-full bg-[var(--success)] transition-all"
-                  style={{ width: `${total > 0 ? availPct : 0}%` }}
-                  title="Disponible"
-                />
-              </div>
-              <div className="mt-2 flex justify-between text-[11px] text-[var(--muted-foreground)]">
-                <span className="text-[var(--success)]">Dispo {availPct}%</span>
-                <span className="text-amber-600 dark:text-amber-400">
-                  Bloqué {blockedPct}%
-                </span>
-              </div>
-            </>
-          ) : (
-            <p className="text-meta mt-2 leading-relaxed">
-              Barre disponible / bloqué une fois les positions renseignées.
-            </p>
-          )}
-        </div>
-      </section>
-
+      {/*
+        Ni titre ni indicateurs ici : la vue d'ensemble, juste au-dessus, porte
+        déjà les deux. Cette section est le prolongement de cet écran — la
+        saisie, l'import, les dates de déblocage — pas un second écran complet.
+        Elle en avait la forme tant qu'elle vivait seule, avant la refonte.
+      */}
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="card overflow-hidden p-4">
           <h3 className="text-title mb-0.5">Répartition par plan</h3>

@@ -134,37 +134,6 @@ export function ModuleKpi({
   );
 }
 
-/** Encadré pédagogique (aide module / PFU / prélèvement). */
-export function ModuleCallout({
-  children,
-  tone = "info",
-  className,
-  testId,
-}: {
-  children: React.ReactNode;
-  tone?: "info" | "warn" | "muted";
-  className?: string;
-  testId?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded-[var(--radius-xl)] px-4 py-3 text-[11px] leading-relaxed",
-        tone === "info" &&
-          "border border-stone-500/20 bg-stone-500/[0.05] text-[var(--foreground)]/85",
-        tone === "warn" &&
-          "border border-amber-500/25 bg-amber-500/[0.06] text-amber-950/90 dark:text-amber-50/90",
-        tone === "muted" &&
-          "border border-[var(--border)] bg-[var(--muted)]/40 text-[var(--muted-foreground)]",
-        className
-      )}
-      data-testid={testId}
-    >
-      {children}
-    </div>
-  );
-}
-
 /**
  * Empty guidé avec puces métier + CTA — pattern ES / Passifs / Alternatifs.
  */

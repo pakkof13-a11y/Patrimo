@@ -42,6 +42,47 @@ test.describe("Épargne salariale", () => {
     });
   });
 
+  test("le pli prolonge la vue d'ensemble, il ne la rejoue pas", async ({
+    page,
+  }) => {
+    /*
+      La section de gestion a longtemps été un écran complet : elle rouvrait
+      son propre titre « Épargne salariale » et ses propres indicateurs, sous
+      ceux de la vue d'ensemble qui disent déjà la même chose. Repliée par
+      défaut, la répétition ne se voyait qu'une fois le pli ouvert.
+
+      Le test porte sur ce que l'utilisateur lit, pas sur une classe : un titre
+      de module, une fois. Les indicateurs sont vérifiés au même endroit — la
+      bande de la vue d'ensemble reste seule à les porter.
+    */
+    await page.goto("/epargne-salariale#gestion", {
+      waitUntil: "domcontentloaded",
+    });
+    const management = page.getByTestId("es-management");
+    await expect(management).toBeVisible({ timeout: 20_000 });
+
+    /*
+      Correspondance par sous-chaîne : le titre de la page porte la pastille du
+      nombre de plans dans son nom accessible. Deux titres nommés « Épargne
+      salariale » signifieraient que le pli a rouvert le sien.
+    */
+    const titles = page.getByRole("heading", { name: "Épargne salariale" });
+    await expect(titles).toHaveCount(1);
+
+    // La bande d'indicateurs appartient à la vue d'ensemble, pas au pli.
+    await expect(page.getByTestId("es-kpi-strip")).toBeVisible();
+    for (const label of ["Valeur totale", "Disponible", "Bloqué", "Liquidité"]) {
+      await expect(
+        management.getByText(label, { exact: true }),
+        `« ${label} » est répété dans la section de gestion`
+      ).toHaveCount(0);
+    }
+
+    // Ce que le pli doit garder, lui, est toujours là.
+    await expect(management.getByTestId("es-add-line")).toHaveCount(1);
+    await expect(management.getByText("Positions FCPE")).toBeVisible();
+  });
+
   test("le repli de gestion survit au rechargement — l'état vit dans l'URL", async ({
     page,
   }) => {
