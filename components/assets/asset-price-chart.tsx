@@ -624,7 +624,7 @@ export function AssetPriceChart({
               >
                 <span className="hidden sm:inline">Vs</span>
                 <select
-                  className="input !w-auto !py-0.5 !text-[10px]"
+                  className="input w-auto py-0.5 text-[10px]"
                   value={benchmarkMode}
                   onChange={(e) =>
                     setBenchmarkMode(e.target.value as BenchmarkMode)

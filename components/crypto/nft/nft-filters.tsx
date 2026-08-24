@@ -141,7 +141,7 @@ export function NftFilters({
           <input
             id={searchId}
             type="search"
-            className="input w-full !py-1.5 !pl-9 text-sm"
+            className="input w-full py-1.5 pl-9 text-sm"
             placeholder="Nom, collection, chaîne…"
             value={value.search}
             onChange={(e) => set("search", e.target.value)}

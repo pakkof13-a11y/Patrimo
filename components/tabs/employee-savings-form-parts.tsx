@@ -220,7 +220,7 @@ export function ManagerCombobox({
       )}
       {value === "Autre" && (
         <input
-          className="input mt-2"
+          className="input mt-2 w-full"
           value={otherValue}
           onChange={(e) => onOtherChange(e.target.value)}
           placeholder="Nom exact du gestionnaire"

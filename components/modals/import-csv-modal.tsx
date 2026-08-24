@@ -1840,7 +1840,7 @@ export function ImportCsvModal({
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Format">
                 <select
-                  className="input"
+                  className="input w-full"
                   value={formatId}
                   data-testid="import-format-select"
                   onChange={(e) => {
@@ -2191,7 +2191,7 @@ export function ImportCsvModal({
                               </span>
                               <select
                                 className={cn(
-                                  "input py-1 text-xs",
+                                  "input w-full py-1 text-xs",
                                   isMissing && "ring-1 ring-red-500/50"
                                 )}
                                 value={currentHeader}
@@ -2307,7 +2307,7 @@ export function ImportCsvModal({
                       <label className="flex items-center gap-1.5">
                         Lignes / page
                         <select
-                          className="input !h-7 !w-auto !py-0 text-[11px]"
+                          className="input !h-7 w-auto py-0 text-[11px]"
                           value={pageSize}
                           onChange={(e) => {
                             setPageSize(

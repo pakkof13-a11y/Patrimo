@@ -62,7 +62,7 @@ export function EnvelopeCashPanel({
       <label className="text-xs">
         Solde
         <input
-          className="input mt-1 !w-36 tabular-nums"
+          className="input mt-1 w-36 tabular-nums"
           key={row?.balance ?? "0"}
           defaultValue={row?.balance ?? "0"}
           onBlur={(e) => {
@@ -75,10 +75,10 @@ export function EnvelopeCashPanel({
       <label className="text-xs">
         Devise
         {lockCurrencyToEur ? (
-          <input className="input mt-1 !w-24" value="EUR" disabled readOnly />
+          <input className="input mt-1 w-24" value="EUR" disabled readOnly />
         ) : (
           <select
-            className="input mt-1 !w-24"
+            className="input mt-1 w-24"
             key={row?.currency ?? "EUR"}
             defaultValue={row?.currency ?? "EUR"}
             onChange={(e) => void save({ currency: e.target.value, balance: row?.balance })}

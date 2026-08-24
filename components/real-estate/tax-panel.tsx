@@ -522,7 +522,7 @@ export function RealEstateTaxPanel({ className }: { className?: string }) {
             <label className="text-meta flex items-center gap-1.5">
               TMI
               <select
-                className="input h-7 py-0 text-xs"
+                className="input w-full h-7 py-0 text-xs"
                 value={rateQ.data?.marginalTaxRatePct ?? ""}
                 disabled={rateQ.isPending || saveRate.isPending}
                 onChange={(e) => {

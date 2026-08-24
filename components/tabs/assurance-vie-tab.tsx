@@ -707,7 +707,7 @@ function SupportRow({
 
         <div className="flex flex-col items-end">
           <input
-            className="input !w-32 text-right text-xs"
+            className="input w-32 text-right text-xs"
             defaultValue={
               support.currentValueEur
                 ? Number(support.currentValueEur).toFixed(2)
@@ -849,7 +849,7 @@ function SupportRow({
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <input
-              className="input !w-32 text-xs"
+              className="input w-32 text-xs"
               inputMode="decimal"
               placeholder={`Niveau actuel (${support.underlying ?? "sous-jacent"})`}
               value={level}
@@ -1077,7 +1077,7 @@ export function AssuranceVieManagement() {
         <div className="flex flex-wrap items-end gap-3">
           <Field label="Foyer fiscal">
             <select
-              className="input"
+              className="input w-full"
               value={taxHousehold}
               data-testid="av-tax-household"
               onChange={(e) =>
@@ -1125,7 +1125,7 @@ export function AssuranceVieManagement() {
           <Field label="Date d'ouverture">
             <input
               type="date"
-              className="input"
+              className="input w-full"
               value={openDate}
               onChange={(e) => setOpenDate(e.target.value)}
               data-testid="av-open-date"
@@ -1177,7 +1177,7 @@ export function AssuranceVieManagement() {
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
               <div className="min-w-0">
                 <input
-                  className="input !w-auto font-semibold"
+                  className="input w-auto font-semibold"
                   defaultValue={p.insurer}
                   aria-label="Assureur"
                   onBlur={(e) => {
@@ -1353,7 +1353,7 @@ export function AssuranceVieManagement() {
                   {formatCurrency(s.currentValueEur ?? "0", "EUR")}
                 </span>
                 <select
-                  className="input !w-auto text-xs"
+                  className="input w-auto text-xs"
                   defaultValue=""
                   aria-label={`Rattacher ${s.name}`}
                   onChange={(e) => {

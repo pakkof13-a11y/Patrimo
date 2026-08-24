@@ -253,7 +253,7 @@ export function PlatformModal({
         {/* 1. Type */}
         <Field label="Type de plateforme">
           <select
-            className="input"
+            className="input w-full"
             value={selectedType}
             onChange={(e) => handleTypeChange(e.target.value)}
             data-testid="platform-type-select"
@@ -430,7 +430,7 @@ export function PlatformModal({
               }
             >
               <input
-                className="input font-mono text-sm"
+                className="input w-full font-mono text-sm"
                 placeholder={
                   chainCap?.addressHint || "0x… ou adresse publique"
                 }
@@ -443,7 +443,7 @@ export function PlatformModal({
               (!chainCap && showWallet)) && (
               <Field label="Clé API Zerion">
                 <input
-                  className="input font-mono text-sm"
+                  className="input w-full font-mono text-sm"
                   placeholder="zk_…"
                   {...form.register("walletApiKey")}
                   data-testid="platform-wallet-api-key"

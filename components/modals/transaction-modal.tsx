@@ -477,7 +477,7 @@ export function TransactionModal({
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Type">
               <select
-                className="input"
+                className="input w-full"
                 data-testid="tx-type"
                 {...form.register("type")}
               >
@@ -600,7 +600,7 @@ export function TransactionModal({
             {vis.ticker && (
               <Field label="Ticker">
                 <input
-                  className="input font-mono uppercase"
+                  className="input w-full font-mono uppercase"
                   data-testid="tx-ticker"
                   placeholder="ex. MC.PA, AAPL, BTC"
                   autoComplete="off"
@@ -635,7 +635,7 @@ export function TransactionModal({
             {vis.quantity && (
               <Field label={vis.quantityLabel}>
                 <input
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-qty"
                   placeholder={
                     String(txType) === "SPLIT" ? "2" : undefined
@@ -647,7 +647,7 @@ export function TransactionModal({
             {vis.unitPrice && (
               <Field label="Prix unitaire">
                 <input
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-price"
                   {...form.register("unitPrice")}
                 />
@@ -660,7 +660,7 @@ export function TransactionModal({
                 }
               >
                 <input
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-cash"
                   {...form.register("cashAmount")}
                 />
@@ -669,7 +669,7 @@ export function TransactionModal({
             {vis.fees && (
               <Field label="Frais">
                 <input
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-fees"
                   {...form.register("fees")}
                 />
@@ -677,7 +677,7 @@ export function TransactionModal({
             )}
             <Field label="Devise">
               <select
-                className="input"
+                className="input w-full"
                 data-testid="tx-currency"
                 value={(currency || "EUR").toUpperCase()}
                 onChange={(e) => {
@@ -702,7 +702,7 @@ export function TransactionModal({
               }
             >
               <input
-                className="input"
+                className="input w-full"
                 data-testid="tx-fx"
                 {...form.register("fxRateToEur")}
               />
@@ -786,14 +786,14 @@ export function TransactionModal({
           <Field label={isIncome ? "Date (compta / défaut)" : "Date"}>
             <input
               type="datetime-local"
-              className="input"
+              className="input w-full"
               data-testid="tx-date"
               {...form.register("occurredAt")}
             />
           </Field>
           <Field label="Notes">
             <input
-              className="input"
+              className="input w-full"
               placeholder="Référence courtier, commentaire…"
               {...form.register("notes")}
             />
@@ -811,7 +811,7 @@ export function TransactionModal({
               <Field label="Ex-date (détachement)">
                 <input
                   type="date"
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-ex-date"
                   {...form.register("exDate")}
                 />
@@ -819,7 +819,7 @@ export function TransactionModal({
               <Field label="Date de paiement">
                 <input
                   type="date"
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-payment-date"
                   {...form.register("paymentDate")}
                 />
@@ -833,7 +833,7 @@ export function TransactionModal({
                 }
               >
                 <input
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-wht-rate"
                   placeholder="ex. 0.15 ou 15"
                   {...form.register("withholdingTaxRate")}

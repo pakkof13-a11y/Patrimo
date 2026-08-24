@@ -369,7 +369,7 @@ export function PreferencesPanel({
                   Devise de reporting
                 </span>
                 <select
-                  className="input !w-full !py-1.5 text-sm"
+                  className="input w-full py-1.5 text-sm"
                   value={baseCurrency}
                   onChange={(e) => onBaseCurrencyChange(e.target.value)}
                   aria-label="Devise de reporting"
@@ -678,7 +678,7 @@ export function PreferencesPanel({
                     type="text"
                     autoComplete="off"
                     spellCheck={false}
-                    className="input !border-red-200 !bg-white !py-1.5 text-sm dark:!border-red-900/50 dark:!bg-[var(--input-bg)]"
+                    className="input w-full border-red-200 bg-white py-1.5 text-sm dark:border-red-900/50 dark:bg-[var(--input-bg)]"
                     value={confirmText}
                     onChange={(e) => setConfirmText(e.target.value)}
                     placeholder={CLEAR_CONFIRM_WORD}

@@ -395,7 +395,7 @@ export function PortfolioEvolutionPanel({
           />
           {versus === "index" && (
             <select
-              className="input !h-7 !w-auto !min-w-0 !py-0 !pl-2 !pr-6 text-[11px]"
+              className="input !h-7 w-auto !min-w-0 py-0 pl-2 pr-6 text-[11px]"
               value={indexKey}
               onChange={(e) =>
                 update({ indexKey: e.target.value as MarketIndexKey })

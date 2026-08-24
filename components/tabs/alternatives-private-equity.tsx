@@ -407,7 +407,7 @@ export function AlternativesPrivateEquity({
           >
             <AltField label="Société">
               <input
-                className="input"
+                className="input w-full"
                 value={form.companyName}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, companyName: e.target.value }))
@@ -418,7 +418,7 @@ export function AlternativesPrivateEquity({
             </AltField>
             <AltField label="Secteur">
               <input
-                className="input"
+                className="input w-full"
                 value={form.sector}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, sector: e.target.value }))
@@ -428,7 +428,7 @@ export function AlternativesPrivateEquity({
             </AltField>
             <AltField label="Type">
               <select
-                className="input"
+                className="input w-full"
                 value={form.peType}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, peType: e.target.value }))
@@ -457,7 +457,7 @@ export function AlternativesPrivateEquity({
           >
             <AltField label="Nombre de parts">
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.shares}
                 onChange={(e) =>
@@ -475,7 +475,7 @@ export function AlternativesPrivateEquity({
               }
             >
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.acquisitionPricePerShare}
                 onChange={(e) =>
@@ -488,7 +488,7 @@ export function AlternativesPrivateEquity({
             </AltField>
             <AltField label="Devise">
               <input
-                className="input uppercase"
+                className="input w-full uppercase"
                 maxLength={3}
                 value={form.currency}
                 onChange={(e) =>
@@ -526,7 +526,7 @@ export function AlternativesPrivateEquity({
               }
             >
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.currentNav}
                 onChange={(e) =>
@@ -537,7 +537,7 @@ export function AlternativesPrivateEquity({
             </AltField>
             <AltField label="Notes" className="sm:col-span-2">
               <input
-                className="input"
+                className="input w-full"
                 value={form.notes}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, notes: e.target.value }))
@@ -606,7 +606,7 @@ export function AlternativesPrivateEquity({
                   hint="Montant total promis au véhicule, appelé ou non"
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     inputMode="decimal"
                     value={form.committedCapital}
                     onChange={(e) =>
@@ -624,7 +624,7 @@ export function AlternativesPrivateEquity({
                   }
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     inputMode="decimal"
                     placeholder={String(preview.invested || "")}
                     value={form.calledCapital}
@@ -639,7 +639,7 @@ export function AlternativesPrivateEquity({
                   hint="Cumul : dividendes, cessions partielles, retour de capital"
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     inputMode="decimal"
                     value={form.distributionsReceived}
                     onChange={(e) =>
@@ -662,7 +662,7 @@ export function AlternativesPrivateEquity({
                   hint="Pourcentage du capital de la société"
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     inputMode="decimal"
                     placeholder="12,5"
                     value={form.ownershipPercent}
@@ -677,7 +677,7 @@ export function AlternativesPrivateEquity({
                   hint="Fonds, holding, SPV portant la participation"
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     value={form.vehicleName}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, vehicleName: e.target.value }))
@@ -687,7 +687,7 @@ export function AlternativesPrivateEquity({
                 </AltField>
                 <AltField label="Tour de table">
                   <input
-                    className="input"
+                    className="input w-full"
                     value={form.round}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, round: e.target.value }))
@@ -736,7 +736,7 @@ export function AlternativesPrivateEquity({
               <label className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--muted-foreground)]">
                 Type
                 <select
-                  className="input !h-7 !py-0 text-[11px]"
+                  className="input w-full !h-7 py-0 text-[11px]"
                   value={typeFilter}
                   onChange={(e) =>
                     setTypeFilter(e.target.value as "ALL" | PeType)

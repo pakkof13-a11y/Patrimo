@@ -528,7 +528,7 @@ function CheckingBody({
             key={`bal-${row.id}`}
             initialValue={row.balance}
             isEqual={decimalEquals}
-            className="input w-full !py-1.5 text-right"
+            className="input w-full py-1.5 text-right"
             testId="bank-panel-balance"
             onCommit={(v) => onPatch({ id: row.id, balance: v || "0" })}
           />
@@ -547,7 +547,7 @@ function CheckingBody({
           <EditableField
             key={`own-${row.id}`}
             initialValue={row.ownershipPct ?? ""}
-            className="input w-full !py-1.5 text-right"
+            className="input w-full py-1.5 text-right"
             type="number"
             min={0}
             max={100}
@@ -693,7 +693,7 @@ function SavingsBody({
             key={`sbal-${row.id}`}
             initialValue={row.balance}
             isEqual={decimalEquals}
-            className="input w-full !py-1.5 text-right"
+            className="input w-full py-1.5 text-right"
             testId="savings-panel-balance"
             onCommit={(v) => onPatch({ id: row.id, balance: v || "0" })}
           />
@@ -703,7 +703,7 @@ function SavingsBody({
             key={`rate-${row.id}`}
             initialValue={row.apyPercent}
             isEqual={decimalEquals}
-            className="input w-full !py-1.5 text-right"
+            className="input w-full py-1.5 text-right"
             testId="savings-panel-rate"
             onCommit={(v) => onPatch({ id: row.id, apyPercent: v || "0" })}
           />
@@ -713,7 +713,7 @@ function SavingsBody({
           hint="APR : linéaire. APY : composé, rétro-calculé."
         >
           <select
-            className="input w-full !py-1.5"
+            className="input w-full py-1.5"
             value={row.rateType}
             onChange={(e) => onPatch({ id: row.id, rateType: e.target.value })}
             data-testid="savings-panel-ratetype"
@@ -724,7 +724,7 @@ function SavingsBody({
         </EditRow>
         <EditRow label="Périodicité de versement">
           <select
-            className="input w-full !py-1.5"
+            className="input w-full py-1.5"
             value={row.payoutFrequency}
             onChange={(e) =>
               onPatch({ id: row.id, payoutFrequency: e.target.value })
@@ -740,7 +740,7 @@ function SavingsBody({
         {row.payoutFrequency === "WEEKLY" && (
           <EditRow label="Jour de la semaine">
             <select
-              className="input w-full !py-1.5"
+              className="input w-full py-1.5"
               value={row.payoutDayOfWeek ?? 1}
               onChange={(e) =>
                 onPatch({ id: row.id, payoutDayOfWeek: e.target.value })
@@ -760,7 +760,7 @@ function SavingsBody({
             <EditableField
               key={`dom-${row.id}`}
               initialValue={String(row.payoutDayOfMonth ?? 1)}
-              className="input w-full !py-1.5 text-right"
+              className="input w-full py-1.5 text-right"
               type="number"
               min={1}
               max={31}
@@ -771,7 +771,7 @@ function SavingsBody({
         {row.payoutFrequency === "YEARLY" && (
           <EditRow label="Mois">
             <select
-              className="input w-full !py-1.5"
+              className="input w-full py-1.5"
               value={row.payoutMonth ?? 12}
               onChange={(e) =>
                 onPatch({ id: row.id, payoutMonth: e.target.value })
@@ -792,7 +792,7 @@ function SavingsBody({
           <EditableField
             key={`ceil-${row.id}`}
             initialValue={row.ceilingAmount ?? ""}
-            className="input w-full !py-1.5 text-right"
+            className="input w-full py-1.5 text-right"
             testId="savings-panel-ceiling"
             onCommit={(v) => onPatch({ id: row.id, ceilingAmount: v })}
           />
@@ -808,7 +808,7 @@ function SavingsBody({
           <EditableField
             key={`sown-${row.id}`}
             initialValue={row.ownershipPct ?? ""}
-            className="input w-full !py-1.5 text-right"
+            className="input w-full py-1.5 text-right"
             type="number"
             min={0}
             max={100}

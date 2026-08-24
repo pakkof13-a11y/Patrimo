@@ -615,7 +615,7 @@ export function EmployeeSavingsManagement({
               <label className="block min-w-0">
                 <FieldLabel tip={form.planType}>Type de plan</FieldLabel>
                 <select
-                  className="input"
+                  className="input w-full"
                   value={form.planType}
                   onChange={(e) => setPlanType(e.target.value)}
                   data-testid="es-plan-type"
@@ -645,7 +645,7 @@ export function EmployeeSavingsManagement({
               <label className="block min-w-0 sm:col-span-2">
                 <FieldLabel tip="FCPE">Fonds (FCPE)</FieldLabel>
                 <input
-                  className="input"
+                  className="input w-full"
                   value={form.fundName}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, fundName: e.target.value }))
@@ -657,7 +657,7 @@ export function EmployeeSavingsManagement({
               <label className="block min-w-0">
                 <FieldLabel>ISIN</FieldLabel>
                 <input
-                  className="input font-mono uppercase"
+                  className="input w-full font-mono uppercase"
                   value={form.isin}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, isin: e.target.value }))
@@ -668,7 +668,7 @@ export function EmployeeSavingsManagement({
               <label className="block min-w-0">
                 <FieldLabel>Nombre de parts</FieldLabel>
                 <input
-                  className="input"
+                  className="input w-full"
                   value={form.units}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, units: e.target.value }))
@@ -680,7 +680,7 @@ export function EmployeeSavingsManagement({
               <label className="block min-w-0">
                 <FieldLabel tip="VL">Valeur liquidative (VL)</FieldLabel>
                 <input
-                  className="input"
+                  className="input w-full"
                   value={form.nav}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, nav: e.target.value }))
@@ -692,7 +692,7 @@ export function EmployeeSavingsManagement({
               <label className="block min-w-0">
                 <FieldLabel>Devise</FieldLabel>
                 <input
-                  className="input uppercase"
+                  className="input w-full uppercase"
                   value={form.currency}
                   onChange={(e) =>
                     setForm((f) => ({
@@ -712,7 +712,7 @@ export function EmployeeSavingsManagement({
               <label className="block min-w-0 sm:col-span-2">
                 <FieldLabel tip="Abondement">Origine</FieldLabel>
                 <select
-                  className="input"
+                  className="input w-full"
                   value={form.sourceType}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, sourceType: e.target.value }))
@@ -746,7 +746,7 @@ export function EmployeeSavingsManagement({
               <label className="block min-w-0">
                 <FieldLabel tip="Déblocage">Mode de déblocage</FieldLabel>
                 <select
-                  className="input"
+                  className="input w-full"
                   value={form.unlockMode}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, unlockMode: e.target.value }))
@@ -787,7 +787,7 @@ export function EmployeeSavingsManagement({
               <label className="block min-w-0 sm:col-span-2 lg:col-span-3">
                 <FieldLabel>Commentaire (optionnel)</FieldLabel>
                 <input
-                  className="input"
+                  className="input w-full"
                   value={form.notes}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, notes: e.target.value }))

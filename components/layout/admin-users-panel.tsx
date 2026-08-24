@@ -121,7 +121,7 @@ export function AdminUsersPanel() {
           Nouvel utilisateur
         </div>
         <input
-          className="input w-full !py-1.5 text-xs"
+          className="input w-full py-1.5 text-xs"
           placeholder="Identifiant"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
@@ -129,7 +129,7 @@ export function AdminUsersPanel() {
           autoComplete="off"
         />
         <input
-          className="input w-full !py-1.5 text-xs"
+          className="input w-full py-1.5 text-xs"
           type="password"
           placeholder="Mot de passe"
           value={password}
@@ -138,7 +138,7 @@ export function AdminUsersPanel() {
           autoComplete="new-password"
         />
         <select
-          className="input w-full !py-1.5 text-xs"
+          className="input w-full py-1.5 text-xs"
           value={role}
           onChange={(e) => setRole(e.target.value as "USER" | "ADMIN")}
           data-testid="admin-create-role"

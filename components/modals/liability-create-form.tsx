@@ -143,7 +143,7 @@ function LenderCombobox({
           <div className="border-b border-[var(--border)] px-2 py-1.5">
             <input
               autoFocus
-              className="input !border-0 !bg-transparent !px-1 !py-1 !shadow-none"
+              className="input w-full border-0 bg-transparent px-1 py-1 !shadow-none"
               placeholder="Rechercher (BNP, Crédit Agricole…)"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -181,7 +181,7 @@ function LenderCombobox({
       )}
       {customMode && (
         <input
-          className="input mt-2"
+          className="input mt-2 w-full"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder="Nom exact du prêteur"
@@ -463,7 +463,7 @@ export function LiabilityCreateForm({
               <Field label="Intitulé du crédit" htmlFor="liability-name">
                 <input
                   id="liability-name"
-                  className="input"
+                  className="input w-full"
                   {...form.register("name")}
                   placeholder={LIABILITY_CATEGORY_PLACEHOLDERS[category]}
                   data-testid="liability-name"
@@ -486,7 +486,7 @@ export function LiabilityCreateForm({
             </div>
             <Field label="Bien immobilier lié (optionnel)">
               <select
-                className="input"
+                className="input w-full"
                 value={assetId}
                 onChange={(e) =>
                   form.setValue("assetId", e.target.value || null, {
@@ -517,7 +517,7 @@ export function LiabilityCreateForm({
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Montant initial emprunté">
                 <input
-                  className="input tabular-nums"
+                  className="input w-full tabular-nums"
                   inputMode="decimal"
                   {...form.register("initialAmount")}
                   placeholder="ex. 250000"
@@ -525,7 +525,7 @@ export function LiabilityCreateForm({
                 />
               </Field>
               <Field label="Devise">
-                <select className="input" {...form.register("currency")}>
+                <select className="input w-full" {...form.register("currency")}>
                   {["EUR", "USD", "CHF", "GBP"].map((c) => (
                     <option key={c} value={c}>
                       {currencyLabel(c)}
@@ -567,7 +567,7 @@ export function LiabilityCreateForm({
                 }
               >
                 <input
-                  className="input tabular-nums"
+                  className="input w-full tabular-nums"
                   inputMode="decimal"
                   {...form.register("remainingAmount")}
                   data-testid="liability-remaining"
@@ -589,7 +589,7 @@ export function LiabilityCreateForm({
                 }
               >
                 <input
-                  className="input tabular-nums"
+                  className="input w-full tabular-nums"
                   inputMode="decimal"
                   {...form.register("monthlyPayment")}
                   placeholder="ex. 1250"
@@ -598,7 +598,7 @@ export function LiabilityCreateForm({
               </Field>
               <Field label="Taux d’intérêt annuel (%)">
                 <input
-                  className="input tabular-nums"
+                  className="input w-full tabular-nums"
                   inputMode="decimal"
                   {...form.register("interestRate")}
                   placeholder="ex. 3,45"
@@ -614,7 +614,7 @@ export function LiabilityCreateForm({
               }
             >
               <input
-                className="input tabular-nums"
+                className="input w-full tabular-nums"
                 inputMode="decimal"
                 {...form.register("insuranceMonthly")}
                 placeholder="ex. 25 (optionnel)"
@@ -629,7 +629,7 @@ export function LiabilityCreateForm({
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Jour de prélèvement">
                 <select
-                  className="input"
+                  className="input w-full"
                   value={
                     paymentDay == null || !Number.isFinite(Number(paymentDay))
                       ? ""
@@ -691,7 +691,7 @@ export function LiabilityCreateForm({
             </div>
             <Field label="Notes">
               <input
-                className="input"
+                className="input w-full"
                 {...form.register("notes")}
                 placeholder="Réf. contrat, assurance emprunteur…"
               />

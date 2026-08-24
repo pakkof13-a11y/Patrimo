@@ -190,7 +190,7 @@ export function CouponSchedulePanel({ className }: { className?: string }) {
 
               {choice === "paid" ? (
                 <input
-                  className="input !w-24 text-right text-xs"
+                  className="input w-24 text-right text-xs"
                   inputMode="decimal"
                   aria-label={`Montant reçu pour ${p.supportName}`}
                   data-testid="coupon-amount"

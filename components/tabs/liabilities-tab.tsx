@@ -738,7 +738,7 @@ export function LiabilitiesTab({
             })()}
             <Field label="Type">
               <select
-                className="input"
+                className="input w-full"
                 value={earlyKind}
                 onChange={(e) =>
                   setEarlyKind(e.target.value as "PARTIAL" | "TOTAL")
@@ -752,7 +752,7 @@ export function LiabilitiesTab({
             {earlyKind === "PARTIAL" && (
               <Field label="Montant remboursé">
                 <input
-                  className="input"
+                  className="input w-full"
                   value={earlyAmount}
                   onChange={(e) => setEarlyAmount(e.target.value)}
                   placeholder="Montant"
@@ -803,7 +803,7 @@ export function LiabilitiesTab({
             </p>
             <Field label="Nouvelle mensualité">
               <input
-                className="input"
+                className="input w-full"
                 value={amendPayment}
                 onChange={(e) => setAmendPayment(e.target.value)}
                 inputMode="decimal"
@@ -847,7 +847,7 @@ export function LiabilitiesTab({
             </p>
             <Field label="Nouveau taux annuel (%)">
               <input
-                className="input"
+                className="input w-full"
                 value={rateValue}
                 onChange={(e) => setRateValue(e.target.value)}
                 inputMode="decimal"
@@ -929,7 +929,7 @@ export function LiabilitiesTab({
                 type="text"
                 autoComplete="off"
                 spellCheck={false}
-                className="input !border-red-200 !bg-white !py-1.5 text-sm dark:!border-red-900/50 dark:!bg-[var(--input-bg)]"
+                className="input w-full border-red-200 bg-white py-1.5 text-sm dark:border-red-900/50 dark:bg-[var(--input-bg)]"
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
                 placeholder={DELETE_CONFIRM_WORD}

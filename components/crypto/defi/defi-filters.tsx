@@ -138,7 +138,7 @@ export function DefiFilters({
           <input
             id={searchId}
             type="search"
-            className="input w-full !py-1.5 !pl-9 text-sm"
+            className="input w-full py-1.5 pl-9 text-sm"
             placeholder="Protocole, actif, chaîne…"
             value={value.search}
             onChange={(e) => set("search", e.target.value)}

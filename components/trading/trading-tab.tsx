@@ -331,7 +331,7 @@ export function TradingTab({
               </div>
 
               <select
-                className="input !w-auto"
+                className="input w-auto"
                 value={filters.direction}
                 onChange={(e) =>
                   patch({
@@ -348,7 +348,7 @@ export function TradingTab({
 
               {exchanges.length > 1 ? (
                 <select
-                  className="input !w-auto"
+                  className="input w-auto"
                   value={filters.exchange}
                   onChange={(e) => patch({ exchange: e.target.value })}
                   data-testid="trading-exchange-filter"
@@ -364,7 +364,7 @@ export function TradingTab({
               ) : null}
 
               <select
-                className="input !w-auto"
+                className="input w-auto"
                 value={filters.underlyingType}
                 onChange={(e) => patch({ underlyingType: e.target.value })}
                 data-testid="trading-underlying-filter"
@@ -379,7 +379,7 @@ export function TradingTab({
               </select>
 
               <select
-                className="input !w-auto"
+                className="input w-auto"
                 value={sort}
                 onChange={(e) => setSort(e.target.value as PositionSort)}
                 data-testid="trading-sort"

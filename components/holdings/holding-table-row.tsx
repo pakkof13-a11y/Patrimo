@@ -68,7 +68,7 @@ export function TriggerLevelInput({
       <input
         type="text"
         inputMode="decimal"
-        className="input !w-full min-w-[4.5rem] !px-1.5 !py-1 text-right text-xs tabular-nums"
+        className="input w-full min-w-[4.5rem] px-1.5 py-1 text-right text-xs tabular-nums"
         placeholder="—"
         value={draft}
         title="Seuil en devise native · vide = désactivé · exécution auto au refresh des prix"

@@ -654,7 +654,7 @@ export function AlternativesTangibles({
               <div className="grid gap-3 sm:grid-cols-2">
                 <AltField label="Catégorie">
                   <select
-                    className="input"
+                    className="input w-full"
                     value={form.category}
                     onChange={(e) => set("category", e.target.value)}
                     data-testid="tangible-category"
@@ -668,14 +668,14 @@ export function AlternativesTangibles({
                 </AltField>
                 <AltField label="Année / Millésime / Référence">
                   <input
-                    className="input"
+                    className="input w-full"
                     value={form.yearOrVintage}
                     onChange={(e) => set("yearOrVintage", e.target.value)}
                   />
                 </AltField>
                 <AltField label="Marque / Artiste / Maison">
                   <input
-                    className="input"
+                    className="input w-full"
                     value={form.brandOrArtist}
                     onChange={(e) => set("brandOrArtist", e.target.value)}
                     data-testid="tangible-brand"
@@ -683,7 +683,7 @@ export function AlternativesTangibles({
                 </AltField>
                 <AltField label="Modèle / Nom / Description">
                   <input
-                    className="input"
+                    className="input w-full"
                     value={form.modelName}
                     onChange={(e) => set("modelName", e.target.value)}
                     data-testid="tangible-model"
@@ -706,7 +706,7 @@ export function AlternativesTangibles({
                   <div className="grid gap-3 sm:grid-cols-2" data-testid="tangible-jewelry-fields">
                     <AltField label="Type de bijou">
                       <select
-                        className="input"
+                        className="input w-full"
                         value={form.jewelryType}
                         onChange={(e) => set("jewelryType", e.target.value)}
                       >
@@ -720,7 +720,7 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Métal de base">
                       <select
-                        className="input"
+                        className="input w-full"
                         value={form.metalBase}
                         onChange={(e) => set("metalBase", e.target.value)}
                       >
@@ -734,7 +734,7 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Poids du métal (g)">
                       <input
-                        className="input"
+                        className="input w-full"
                         inputMode="decimal"
                         value={form.metalWeightG}
                         onChange={(e) => set("metalWeightG", e.target.value)}
@@ -757,7 +757,7 @@ export function AlternativesTangibles({
                   <div className="grid gap-3 sm:grid-cols-2" data-testid="tangible-gem-fields">
                     <AltField label="Type de pierre">
                       <select
-                        className="input"
+                        className="input w-full"
                         value={form.gemType}
                         onChange={(e) => set("gemType", e.target.value)}
                         data-testid="tangible-gem-type"
@@ -772,7 +772,7 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Poids (carats)">
                       <input
-                        className="input"
+                        className="input w-full"
                         inputMode="decimal"
                         value={form.caratWeight}
                         onChange={(e) => set("caratWeight", e.target.value)}
@@ -781,7 +781,7 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Pureté">
                       <select
-                        className="input"
+                        className="input w-full"
                         value={form.gemClarity}
                         onChange={(e) => set("gemClarity", e.target.value)}
                       >
@@ -795,14 +795,14 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Couleur" hint="D à Z pour un diamant">
                       <input
-                        className="input"
+                        className="input w-full"
                         value={form.gemColor}
                         onChange={(e) => set("gemColor", e.target.value)}
                       />
                     </AltField>
                     <AltField label="Taille">
                       <select
-                        className="input"
+                        className="input w-full"
                         value={form.gemCut}
                         onChange={(e) => set("gemCut", e.target.value)}
                       >
@@ -819,7 +819,7 @@ export function AlternativesTangibles({
                       hint="Une pierre chauffée ou synthétique vaut une fraction de l’équivalent naturel."
                     >
                       <select
-                        className="input"
+                        className="input w-full"
                         value={form.gemTreatment}
                         onChange={(e) => set("gemTreatment", e.target.value)}
                       >
@@ -833,7 +833,7 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Origine" hint="Cachemire, Myanmar, Colombie…">
                       <input
-                        className="input"
+                        className="input w-full"
                         value={form.gemOrigin}
                         onChange={(e) => set("gemOrigin", e.target.value)}
                       />
@@ -845,7 +845,7 @@ export function AlternativesTangibles({
                   <div className="grid gap-3 sm:grid-cols-2" data-testid="tangible-watch-fields">
                     <AltField label="Référence fabricant" hint="Ex. 126610LN">
                       <input
-                        className="input"
+                        className="input w-full"
                         value={form.watchReference}
                         onChange={(e) => set("watchReference", e.target.value)}
                         data-testid="tangible-watch-ref"
@@ -853,7 +853,7 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Mouvement">
                       <select
-                        className="input"
+                        className="input w-full"
                         value={form.watchMovement}
                         onChange={(e) => set("watchMovement", e.target.value)}
                       >
@@ -867,7 +867,7 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Diamètre (mm)">
                       <input
-                        className="input"
+                        className="input w-full"
                         inputMode="decimal"
                         value={form.watchDiameterMm}
                         onChange={(e) => set("watchDiameterMm", e.target.value)}
@@ -893,14 +893,14 @@ export function AlternativesTangibles({
                   <div className="grid gap-3 sm:grid-cols-2" data-testid="tangible-wine-fields">
                     <AltField label="Appellation">
                       <input
-                        className="input"
+                        className="input w-full"
                         value={form.wineAppellation}
                         onChange={(e) => set("wineAppellation", e.target.value)}
                       />
                     </AltField>
                     <AltField label="Nombre de bouteilles">
                       <input
-                        className="input"
+                        className="input w-full"
                         inputMode="numeric"
                         value={form.wineBottleCount}
                         onChange={(e) => set("wineBottleCount", e.target.value)}
@@ -908,7 +908,7 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Format">
                       <select
-                        className="input"
+                        className="input w-full"
                         value={form.wineBottleFormat}
                         onChange={(e) => set("wineBottleFormat", e.target.value)}
                       >
@@ -925,7 +925,7 @@ export function AlternativesTangibles({
                       hint="Précision œnologique. Le mode de garde qui pilote les alertes se saisit à l’étape suivante."
                     >
                       <select
-                        className="input"
+                        className="input w-full"
                         value={form.wineStorageType}
                         onChange={(e) => set("wineStorageType", e.target.value)}
                       >
@@ -944,7 +944,7 @@ export function AlternativesTangibles({
                   <div className="grid gap-3 sm:grid-cols-2" data-testid="tangible-auto-fields">
                     <AltField label="Kilométrage">
                       <input
-                        className="input"
+                        className="input w-full"
                         inputMode="numeric"
                         value={form.autoMileageKm}
                         onChange={(e) => set("autoMileageKm", e.target.value)}
@@ -952,14 +952,14 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Immatriculation">
                       <input
-                        className="input uppercase"
+                        className="input w-full uppercase"
                         value={form.autoRegistration}
                         onChange={(e) => set("autoRegistration", e.target.value)}
                       />
                     </AltField>
                     <AltField label="Nombre de propriétaires">
                       <input
-                        className="input"
+                        className="input w-full"
                         inputMode="numeric"
                         value={form.autoPreviousOwners}
                         onChange={(e) => set("autoPreviousOwners", e.target.value)}
@@ -1013,7 +1013,7 @@ export function AlternativesTangibles({
                 >
                   <input
                     type="date"
-                    className="input"
+                    className="input w-full"
                     value={form.purchaseDate}
                     onChange={(e) => set("purchaseDate", e.target.value)}
                     data-testid="tangible-purchase-date"
@@ -1021,14 +1021,14 @@ export function AlternativesTangibles({
                 </AltField>
                 <AltField label="Source d’achat" hint="Vendeur, maison de vente, succession…">
                   <input
-                    className="input"
+                    className="input w-full"
                     value={form.purchaseSource}
                     onChange={(e) => set("purchaseSource", e.target.value)}
                   />
                 </AltField>
                 <AltField label="Prix d’achat">
                   <input
-                    className="input"
+                    className="input w-full"
                     inputMode="decimal"
                     value={form.purchasePrice}
                     onChange={(e) => set("purchasePrice", e.target.value)}
@@ -1037,7 +1037,7 @@ export function AlternativesTangibles({
                 </AltField>
                 <AltField label="Devise">
                   <input
-                    className="input uppercase"
+                    className="input w-full uppercase"
                     maxLength={3}
                     value={form.currency}
                     onChange={(e) => set("currency", e.target.value.toUpperCase())}
@@ -1048,7 +1048,7 @@ export function AlternativesTangibles({
                   hint="Commissaire-priseur, expertise, transport — ils réduisent la plus-value taxable."
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     inputMode="decimal"
                     value={form.acquisitionFees}
                     onChange={(e) => set("acquisitionFees", e.target.value)}
@@ -1097,14 +1097,14 @@ export function AlternativesTangibles({
                   <>
                     <AltField label="Organisme certificateur" hint="GIA, IGI, LFG, manufacture…">
                       <input
-                        className="input"
+                        className="input w-full"
                         value={form.certificateIssuer}
                         onChange={(e) => set("certificateIssuer", e.target.value)}
                       />
                     </AltField>
                     <AltField label="Numéro de certificat">
                       <input
-                        className="input"
+                        className="input w-full"
                         value={form.certificateRef}
                         onChange={(e) => set("certificateRef", e.target.value)}
                       />
@@ -1132,7 +1132,7 @@ export function AlternativesTangibles({
                   }
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     inputMode="decimal"
                     value={form.estimatedValue}
                     onChange={(e) => set("estimatedValue", e.target.value)}
@@ -1144,7 +1144,7 @@ export function AlternativesTangibles({
                   hint="Notaire ou assureur — distincte de la valeur de revente."
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     inputMode="decimal"
                     value={form.appraisalValue}
                     onChange={(e) => set("appraisalValue", e.target.value)}
@@ -1154,7 +1154,7 @@ export function AlternativesTangibles({
                 <AltField label="Date d’expertise">
                   <input
                     type="date"
-                    className="input"
+                    className="input w-full"
                     value={form.appraisalDate}
                     onChange={(e) => set("appraisalDate", e.target.value)}
                   />
@@ -1164,14 +1164,14 @@ export function AlternativesTangibles({
                   hint="Notaire, assureur, expert indépendant, maison de vente."
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     value={form.appraisalProvider}
                     onChange={(e) => set("appraisalProvider", e.target.value)}
                   />
                 </AltField>
                 <AltField label="Lieu de conservation" hint="Coffre, domicile, cave…">
                   <input
-                    className="input"
+                    className="input w-full"
                     value={form.storageLocation}
                     onChange={(e) => set("storageLocation", e.target.value)}
                   />
@@ -1190,7 +1190,7 @@ export function AlternativesTangibles({
                       hint="Ce que verse l'assureur en cas de sinistre."
                     >
                       <input
-                        className="input"
+                        className="input w-full"
                         inputMode="decimal"
                         value={form.insuranceValue}
                         onChange={(e) => set("insuranceValue", e.target.value)}
@@ -1202,7 +1202,7 @@ export function AlternativesTangibles({
                       hint="Ce que vous payez chaque année — à ne pas confondre avec le capital."
                     >
                       <input
-                        className="input"
+                        className="input w-full"
                         inputMode="decimal"
                         value={form.insurancePremiumAnnual}
                         onChange={(e) =>
@@ -1213,14 +1213,14 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Assureur">
                       <input
-                        className="input"
+                        className="input w-full"
                         value={form.insuranceProvider}
                         onChange={(e) => set("insuranceProvider", e.target.value)}
                       />
                     </AltField>
                     <AltField label="N° de police">
                       <input
-                        className="input"
+                        className="input w-full"
                         value={form.insurancePolicyRef}
                         onChange={(e) => set("insurancePolicyRef", e.target.value)}
                       />
@@ -1230,7 +1230,7 @@ export function AlternativesTangibles({
                       hint="Une multirisque habitation plafonne les objets de valeur."
                     >
                       <select
-                        className="input"
+                        className="input w-full"
                         value={form.insuranceType}
                         onChange={(e) => set("insuranceType", e.target.value)}
                         data-testid="tangible-insurance-type"
@@ -1249,7 +1249,7 @@ export function AlternativesTangibles({
                     >
                       <input
                         type="date"
-                        className="input"
+                        className="input w-full"
                         value={form.insuranceExpiryDate}
                         onChange={(e) => set("insuranceExpiryDate", e.target.value)}
                         data-testid="tangible-insurance-expiry"
@@ -1316,7 +1316,7 @@ export function AlternativesTangibles({
                       hint="Un objet de valeur gardé au domicile sans assurance est signalé."
                     >
                       <select
-                        className="input"
+                        className="input w-full"
                         value={form.storageType}
                         onChange={(e) => set("storageType", e.target.value)}
                         data-testid="tangible-storage-type"
@@ -1331,7 +1331,7 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Coût annuel de garde">
                       <input
-                        className="input"
+                        className="input w-full"
                         inputMode="decimal"
                         value={form.storageCostAnnual}
                         onChange={(e) => set("storageCostAnnual", e.target.value)}
@@ -1340,14 +1340,14 @@ export function AlternativesTangibles({
                     </AltField>
                     <AltField label="Prestataire" hint="Banque, caviste, dépositaire…">
                       <input
-                        className="input"
+                        className="input w-full"
                         value={form.storageProvider}
                         onChange={(e) => set("storageProvider", e.target.value)}
                       />
                     </AltField>
                     <AltField label="Référence du contrat">
                       <input
-                        className="input"
+                        className="input w-full"
                         value={form.storageContractRef}
                         onChange={(e) => set("storageContractRef", e.target.value)}
                       />
@@ -1358,7 +1358,7 @@ export function AlternativesTangibles({
                     >
                       <input
                         type="date"
-                        className="input"
+                        className="input w-full"
                         value={form.storageRenewalDate}
                         onChange={(e) => set("storageRenewalDate", e.target.value)}
                         data-testid="tangible-storage-renewal"
@@ -1388,7 +1388,7 @@ export function AlternativesTangibles({
               <div className="space-y-3">
                 <AltField label="Notes">
                   <input
-                    className="input"
+                    className="input w-full"
                     value={form.notes}
                     onChange={(e) => set("notes", e.target.value)}
                     placeholder="Provenance, état, dimensions…"
@@ -1458,7 +1458,7 @@ export function AlternativesTangibles({
                   </label>
                   {!form.includeInEstate && (
                     <input
-                      className="input mt-2"
+                      className="input mt-2 w-full"
                       placeholder="Consigne notaire, donation déjà faite…"
                       value={form.estateNote}
                       onChange={(e) => set("estateNote", e.target.value)}
@@ -1508,7 +1508,7 @@ export function AlternativesTangibles({
                   }
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     inputMode="decimal"
                     placeholder={form.estimatedValue || "0"}
                     value={simulatedPrice}

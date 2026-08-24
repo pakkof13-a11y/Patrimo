@@ -112,7 +112,7 @@ export function AddCheckingModal({
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Solde">
             <input
-              className="input w-full !py-1.5 text-right"
+              className="input w-full py-1.5 text-right"
               value={balance}
               onChange={(e) => setBalance(e.target.value)}
               data-testid="banks-add-balance"
@@ -132,7 +132,7 @@ export function AddCheckingModal({
             hint="Vide = compte individuel, 100 % implicite."
           >
             <input
-              className="input w-full !py-1.5 text-right"
+              className="input w-full py-1.5 text-right"
               type="number"
               min={0}
               max={100}
@@ -224,7 +224,7 @@ export function AddSavingsModal({
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Type de produit">
             <select
-              className="input w-full !py-1.5"
+              className="input w-full py-1.5"
               value={productType}
               onChange={(e) =>
                 applyProductType(e.target.value as RegulatedProductType)
@@ -240,7 +240,7 @@ export function AddSavingsModal({
           </Field>
           <Field label="Nom du livret">
             <input
-              className="input w-full !py-1.5"
+              className="input w-full py-1.5"
               value={name}
               onChange={(e) => setName(e.target.value)}
               data-testid="banks-savings-add-name"
@@ -259,7 +259,7 @@ export function AddSavingsModal({
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Solde">
             <input
-              className="input w-full !py-1.5 text-right"
+              className="input w-full py-1.5 text-right"
               value={balance}
               onChange={(e) => setBalance(e.target.value)}
               data-testid="banks-savings-add-balance"
@@ -267,7 +267,7 @@ export function AddSavingsModal({
           </Field>
           <Field label="Taux (%)">
             <input
-              className="input w-full !py-1.5 text-right"
+              className="input w-full py-1.5 text-right"
               value={apy}
               onChange={(e) => setApy(e.target.value)}
               data-testid="banks-savings-add-apy"
@@ -275,7 +275,7 @@ export function AddSavingsModal({
           </Field>
           <Field label="Nature" hint="APR : linéaire. APY : composé.">
             <select
-              className="input w-full !py-1.5"
+              className="input w-full py-1.5"
               value={rateType}
               onChange={(e) => setRateType(e.target.value as "APR" | "APY")}
             >
@@ -301,7 +301,7 @@ export function AddSavingsModal({
             hint="Hors intérêts capitalisés. Vide = pas de plafond."
           >
             <input
-              className="input w-full !py-1.5 text-right"
+              className="input w-full py-1.5 text-right"
               value={ceiling}
               onChange={(e) => setCeiling(e.target.value)}
               data-testid="banks-savings-add-ceiling"
@@ -319,7 +319,7 @@ export function AddSavingsModal({
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Versement des intérêts">
             <select
-              className="input w-full !py-1.5"
+              className="input w-full py-1.5"
               value={freq}
               onChange={(e) => setFreq(e.target.value)}
               data-testid="savings-add-frequency"
@@ -333,7 +333,7 @@ export function AddSavingsModal({
           {freq === "WEEKLY" && (
             <Field label="Jour">
               <select
-                className="input w-full !py-1.5"
+                className="input w-full py-1.5"
                 value={dow}
                 onChange={(e) => setDow(Number(e.target.value))}
               >
@@ -348,7 +348,7 @@ export function AddSavingsModal({
           {(freq === "MONTHLY" || freq === "YEARLY") && (
             <Field label="Jour du mois">
               <input
-                className="input w-full !py-1.5 text-right"
+                className="input w-full py-1.5 text-right"
                 type="number"
                 min={1}
                 max={31}
@@ -360,7 +360,7 @@ export function AddSavingsModal({
           {freq === "YEARLY" && (
             <Field label="Mois">
               <select
-                className="input w-full !py-1.5"
+                className="input w-full py-1.5"
                 value={month}
                 onChange={(e) => setMonth(Number(e.target.value))}
               >
@@ -377,7 +377,7 @@ export function AddSavingsModal({
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Part détenue (%)">
             <input
-              className="input w-full !py-1.5 text-right"
+              className="input w-full py-1.5 text-right"
               type="number"
               min={0}
               max={100}
@@ -464,7 +464,7 @@ export function AddTermDepositModal({
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Principal">
             <input
-              className="input w-full !py-1.5 text-right"
+              className="input w-full py-1.5 text-right"
               value={principal}
               onChange={(e) => setPrincipal(e.target.value)}
               data-testid="banks-cat-add-principal"
@@ -472,7 +472,7 @@ export function AddTermDepositModal({
           </Field>
           <Field label="Taux (%)">
             <input
-              className="input w-full !py-1.5 text-right"
+              className="input w-full py-1.5 text-right"
               value={rate}
               onChange={(e) => setRate(e.target.value)}
               data-testid="banks-cat-add-rate"
@@ -490,7 +490,7 @@ export function AddTermDepositModal({
           <Field label="Ouverture">
             <input
               type="date"
-              className="input w-full !py-1.5"
+              className="input w-full py-1.5"
               value={openedAt}
               onChange={(e) => setOpenedAt(e.target.value)}
               data-testid="banks-cat-add-opened"
@@ -499,7 +499,7 @@ export function AddTermDepositModal({
           <Field label="Échéance">
             <input
               type="date"
-              className="input w-full !py-1.5"
+              className="input w-full py-1.5"
               value={maturityDate}
               onChange={(e) => setMaturityDate(e.target.value)}
               data-testid="banks-cat-add-maturity"
@@ -510,7 +510,7 @@ export function AddTermDepositModal({
             hint="Pénalité de retrait anticipé, en % du principal."
           >
             <input
-              className="input w-full !py-1.5 text-right"
+              className="input w-full py-1.5 text-right"
               value={penalty}
               onChange={(e) => setPenalty(e.target.value)}
             />

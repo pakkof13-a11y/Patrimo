@@ -184,7 +184,7 @@ export function FiscalTab({
         <label className="flex flex-col gap-[var(--space-px)] text-[length:var(--text-2xs)] text-[var(--foreground-secondary)]">
           Année civile
           <select
-            className="input !w-auto min-w-[6rem]"
+            className="input w-auto min-w-[6rem]"
             value={year}
             onChange={(e) => {
               setYear(Number(e.target.value));

@@ -483,7 +483,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
           >
             <AltField label="Métal">
               <select
-                className="input"
+                className="input w-full"
                 value={form.metal}
                 onChange={(e) => setForm((f) => ({ ...f, metal: e.target.value }))}
                 data-testid="metals-metal"
@@ -504,7 +504,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
               }
             >
               <select
-                className="input"
+                className="input w-full"
                 value={form.format}
                 onChange={(e) => setForm((f) => ({ ...f, format: e.target.value }))}
                 data-testid="metals-format"
@@ -518,7 +518,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
             </AltField>
             <AltField label="Type de produit">
               <select
-                className="input"
+                className="input w-full"
                 value={form.productType}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, productType: e.target.value }))
@@ -533,7 +533,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
             </AltField>
             <AltField label="Dénomination">
               <input
-                className="input"
+                className="input w-full"
                 placeholder="Napoléon 20F, Lingot 1 kg…"
                 value={form.denomination}
                 onChange={(e) =>
@@ -547,7 +547,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
               hint="900 pour un Napoléon, 999,9 pour un lingot, 750 pour un bijou 18 carats."
             >
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 list="metals-fineness-list"
                 value={form.fineness}
@@ -572,7 +572,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
           >
             <AltField label="Quantité">
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.quantity}
                 onChange={(e) =>
@@ -612,7 +612,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                   }
                 />
                 <select
-                  className="input !w-28"
+                  className="input w-28"
                   value={form.weightUnit}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, weightUnit: e.target.value }))
@@ -628,7 +628,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
             </AltField>
             <AltField label="Lieu de stockage">
               <input
-                className="input"
+                className="input w-full"
                 placeholder="Coffre, domicile…"
                 value={form.storageLocation}
                 onChange={(e) =>
@@ -648,7 +648,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
             >
               <input
                 type="date"
-                className="input"
+                className="input w-full"
                 value={form.acquiredAt}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, acquiredAt: e.target.value }))
@@ -658,7 +658,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
             </AltField>
             <AltField label="PRU (prix d'achat unitaire)">
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.purchasePriceUnit}
                 onChange={(e) =>
@@ -677,7 +677,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
               }
             >
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.acquisitionFees}
                 onChange={(e) =>
@@ -720,7 +720,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
               }
             >
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.currentValue}
                 onChange={(e) =>
@@ -731,7 +731,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
             </AltField>
             <AltField label="Devise">
               <input
-                className="input uppercase"
+                className="input w-full uppercase"
                 maxLength={3}
                 value={form.currency}
                 onChange={(e) =>
@@ -744,7 +744,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
             </AltField>
             <AltField label="Notes" className="sm:col-span-2 lg:col-span-3">
               <input
-                className="input"
+                className="input w-full"
                 value={form.notes}
                 onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
               />
@@ -1192,7 +1192,7 @@ function MetalsSalesView({
               hint="Le prix de revient et la date viennent du lot — ils ne se saisissent pas."
             >
               <select
-                className="input"
+                className="input w-full"
                 value={form.positionId}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, positionId: e.target.value }))
@@ -1213,7 +1213,7 @@ function MetalsSalesView({
             </AltField>
             <AltField label="Quantité cédée">
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.quantity}
                 onChange={(e) =>
@@ -1224,7 +1224,7 @@ function MetalsSalesView({
             </AltField>
             <AltField label="Prix de cession (brut)">
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.salePriceEur}
                 onChange={(e) =>
@@ -1235,7 +1235,7 @@ function MetalsSalesView({
             </AltField>
             <AltField label="Frais de vente">
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.saleFeesEur}
                 onChange={(e) =>
@@ -1246,7 +1246,7 @@ function MetalsSalesView({
             <AltField label="Date de cession">
               <input
                 type="date"
-                className="input"
+                className="input w-full"
                 value={form.soldAt}
                 onChange={(e) => setForm((f) => ({ ...f, soldAt: e.target.value }))}
                 data-testid="metals-sale-date"
@@ -1254,7 +1254,7 @@ function MetalsSalesView({
             </AltField>
             <AltField label="Régime déclaré">
               <select
-                className="input"
+                className="input w-full"
                 value={form.regime}
                 onChange={(e) =>
                   setForm((f) => ({

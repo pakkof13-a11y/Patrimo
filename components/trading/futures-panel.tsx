@@ -222,7 +222,7 @@ export function FuturesPanel({ className }: { className?: string }) {
         actions={
           <div className="flex flex-wrap items-center justify-end gap-1.5">
             <select
-              className="input h-8 text-xs"
+              className="input w-full h-8 text-xs"
               value={importExchange}
               onChange={(e) => setImportExchange(e.target.value)}
               data-testid="futures-import-exchange"

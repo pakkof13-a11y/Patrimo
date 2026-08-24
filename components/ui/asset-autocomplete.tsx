@@ -201,7 +201,7 @@ export function AssetAutocomplete({
   return (
     <div ref={wrapRef} className={cn("relative", className)}>
       <input
-        className="input"
+        className="input w-full"
         data-testid="tx-asset"
         placeholder="Rechercher un actif (LVMH, AAPL, Bitcoin…)"
         value={query}

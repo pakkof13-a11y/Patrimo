@@ -131,7 +131,7 @@ export function TradingJournalPanel({ className }: { className?: string }) {
                 <label className="text-meta block">
                   Année
                   <select
-                    className="input mt-1 h-8 py-0 text-xs"
+                    className="input mt-1 w-full h-8 py-0 text-xs"
                     value={year}
                     onChange={(e) => setYear(Number(e.target.value))}
                     data-testid="trading-fiscal-year"
@@ -146,7 +146,7 @@ export function TradingJournalPanel({ className }: { className?: string }) {
                 <label className="text-meta block">
                   Tranche marginale
                   <select
-                    className="input mt-1 h-8 py-0 text-xs"
+                    className="input mt-1 w-full h-8 py-0 text-xs"
                     value={tmi}
                     onChange={(e) => setTmi(e.target.value)}
                     data-testid="trading-fiscal-tmi"

@@ -278,7 +278,7 @@ export function LifeInsuranceTab({
           <label className="text-xs">
             Foyer fiscal
             <select
-              className="input mt-1"
+              className="input mt-1 w-full"
               value={taxHousehold}
               data-testid="av-tax-household"
               onChange={(e) =>
@@ -330,7 +330,7 @@ export function LifeInsuranceTab({
             Date d&apos;ouverture
             <input
               type="date"
-              className="input mt-1"
+              className="input mt-1 w-full"
               value={openDate}
               onChange={(e) => setOpenDate(e.target.value)}
               data-testid="av-open-date"
@@ -469,7 +469,7 @@ function PolicyCard({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
         <div className="min-w-0">
           <input
-            className="input !w-auto font-semibold"
+            className="input w-auto font-semibold"
             defaultValue={p.insurer}
             onBlur={(e) => {
               if (e.target.value !== p.insurer) {
@@ -489,7 +489,7 @@ function PolicyCard({
           Date d&apos;ouverture
           <input
             type="date"
-            className="input mt-1"
+            className="input mt-1 w-full"
             defaultValue={p.openDate ? p.openDate.slice(0, 10) : ""}
             onBlur={(e) => {
               const next = e.target.value || null;

@@ -728,7 +728,7 @@ export function TransactionsTab({
                   Plateforme
                 </span>
                 <select
-                  className="input !w-auto min-w-0 max-w-full !py-1.5 text-sm"
+                  className="input w-auto min-w-0 max-w-full py-1.5 text-sm"
                   value={platformFilter}
                   onChange={(e) => setPlatformFilter(e.target.value)}
                   data-testid="tx-filter-platform"
@@ -750,7 +750,7 @@ export function TransactionsTab({
               </span>
               <input
                 type="date"
-                className="input !w-auto !py-1.5 text-sm"
+                className="input w-auto py-1.5 text-sm"
                 value={dateFrom}
                 max={dateTo || undefined}
                 onChange={(e) => setDateFrom(e.target.value)}
@@ -762,7 +762,7 @@ export function TransactionsTab({
               </span>
               <input
                 type="date"
-                className="input !w-auto !py-1.5 text-sm"
+                className="input w-auto py-1.5 text-sm"
                 value={dateTo}
                 min={dateFrom || undefined}
                 onChange={(e) => setDateTo(e.target.value)}
@@ -846,7 +846,7 @@ export function TransactionsTab({
             <label className="flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
               <span className="sr-only sm:not-sr-only sm:inline">Par page</span>
               <select
-                className="input !h-7 !w-auto !min-w-0 !py-0 !pl-1.5 !pr-6 text-[11px] tabular-nums"
+                className="input !h-7 w-auto !min-w-0 py-0 pl-1.5 pr-6 text-[11px] tabular-nums"
                 value={pageSize}
                 onChange={(e) =>
                   setPageSize(Number(e.target.value) as PageSize)

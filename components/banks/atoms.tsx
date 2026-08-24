@@ -100,7 +100,12 @@ export function CurrencySelect({
   const options = codes.includes(value) ? codes : [value, ...codes];
   return (
     <select
-      className={cn("input !py-1.5", className)}
+      /*
+        Pas de largeur ici : les cinq appels de ce sélecteur la donnent déjà.
+        L'imposer depuis le composant reproduirait, un cran plus bas, ce qu'on
+        vient de retirer à `.input`.
+      */
+      className={cn("input py-1.5", className)}
       value={value}
       title={title}
       onChange={(e) => onChange(e.target.value)}
@@ -254,7 +259,7 @@ export function BankNameCombobox({
         <input
           ref={inputRef}
           role="combobox"
-          className="input w-full !py-1.5 !pl-8 !pr-8 text-sm"
+          className="input w-full py-1.5 pl-8 pr-8 text-sm"
           value={query}
           data-testid={testId}
           placeholder={placeholder}

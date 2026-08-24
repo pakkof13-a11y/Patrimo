@@ -406,7 +406,7 @@ export function AlternativesCrowdlending({
           <AltFormSection title="Projet" hint="Identité du prêt et plateforme.">
             <AltField label="Nom du projet">
               <input
-                className="input"
+                className="input w-full"
                 value={form.projectName}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, projectName: e.target.value }))
@@ -416,7 +416,7 @@ export function AlternativesCrowdlending({
             </AltField>
             <AltField label="Plateforme">
               <input
-                className="input"
+                className="input w-full"
                 placeholder="October, Bienprêter…"
                 value={form.platform}
                 onChange={(e) =>
@@ -426,7 +426,7 @@ export function AlternativesCrowdlending({
             </AltField>
             <AltField label="Statut">
               <select
-                className="input"
+                className="input w-full"
                 value={form.status}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, status: e.target.value }))
@@ -447,7 +447,7 @@ export function AlternativesCrowdlending({
           >
             <AltField label="Capital investi">
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.capitalInvested}
                 onChange={(e) =>
@@ -457,7 +457,7 @@ export function AlternativesCrowdlending({
             </AltField>
             <AltField label="Taux annuel (%)">
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.annualYieldPercent}
                 onChange={(e) =>
@@ -470,7 +470,7 @@ export function AlternativesCrowdlending({
             </AltField>
             <AltField label="Remboursement">
               <select
-                className="input"
+                className="input w-full"
                 value={form.repaymentType}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, repaymentType: e.target.value }))
@@ -485,7 +485,7 @@ export function AlternativesCrowdlending({
             </AltField>
             <AltField label="Devise">
               <input
-                className="input uppercase"
+                className="input w-full uppercase"
                 maxLength={3}
                 value={form.currency}
                 onChange={(e) =>
@@ -512,7 +512,7 @@ export function AlternativesCrowdlending({
             </AltField>
             <AltField label="Durée (mois)">
               <input
-                className="input"
+                className="input w-full"
                 inputMode="numeric"
                 value={form.durationMonths}
                 onChange={(e) =>
@@ -544,7 +544,7 @@ export function AlternativesCrowdlending({
             </AltField>
             <AltField label="Notes" className="sm:col-span-2 lg:col-span-3">
               <input
-                className="input"
+                className="input w-full"
                 value={form.notes}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, notes: e.target.value }))
@@ -578,7 +578,7 @@ export function AlternativesCrowdlending({
                   hint="0 ou vide = capital initial (sauf prêt remboursé)"
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     inputMode="decimal"
                     value={form.remainingCapital}
                     onChange={(e) =>
@@ -592,7 +592,7 @@ export function AlternativesCrowdlending({
                   hint="Cumul encaissé, hors capital remboursé"
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     inputMode="decimal"
                     value={form.interestReceivedToDate}
                     onChange={(e) =>
@@ -615,7 +615,7 @@ export function AlternativesCrowdlending({
                   hint="Porte sur les intérêts, indépendamment du type de remboursement du capital"
                 >
                   <select
-                    className="input"
+                    className="input w-full"
                     value={form.paymentFrequency}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, paymentFrequency: e.target.value }))
@@ -642,7 +642,7 @@ export function AlternativesCrowdlending({
                   hint="Grade plateforme : A, B, C… ou saisie libre"
                 >
                   <input
-                    className="input"
+                    className="input w-full"
                     maxLength={12}
                     placeholder="A, B+, C…"
                     value={form.riskGrade}

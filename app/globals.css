@@ -1337,32 +1337,56 @@ body.col-resizing {
   -webkit-text-fill-color: var(--gold-2);
 }
 
-.input {
-  width: 100%;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  padding: 0.45rem 0.7rem;
-  font-size: 0.8125rem;
-  line-height: 1.4;
-  outline: none;
-  background: var(--input-bg);
-  color: var(--foreground);
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
-}
+/*
+  Champ de saisie — la peau commune des `input`, `select` et `textarea`.
 
-.input:hover:not(:disabled):not(:focus) {
-  border-color: var(--border-strong);
-}
+  ## Pourquoi cette couche
 
-.input:focus {
-  border-color: var(--primary);
-  box-shadow: var(--focus-ring);
-}
+  Le reste de ce fichier est hors couche, et l'emporte donc sur les
+  utilitaires Tailwind quelle que soit la spécificité. Pour `.input`, dont les
+  appelants posent couramment une taille ou une largeur, cela signifiait qu'un
+  `text-xs` ou un `w-auto` écrit à côté n'avait aucun effet — d'où les `!`
+  semés dans le dépôt pour reprendre la main.
 
-.input:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-  background: var(--muted);
+  Rendue à `@layer components`, la classe repasse sous les utilitaires : ce
+  qu'un appelant écrit à côté d'elle s'applique. C'est l'ordre attendu d'un
+  primitif — il pose une base, l'appel l'ajuste.
+
+  ## Pourquoi la largeur n'y est plus
+
+  `width: 100%` a quitté cette déclaration. La largeur d'un champ appartient à
+  la mise en page qui l'accueille, jamais à sa peau : c'était la seule
+  propriété de `.input` dont la portée fût indéfendable, et à elle seule la
+  cause de la majorité des conflits. Les appels qui remplissaient leur
+  conteneur le disent maintenant eux-mêmes, avec `w-full`.
+*/
+@layer components {
+  .input {
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    padding: 0.45rem 0.7rem;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    outline: none;
+    background: var(--input-bg);
+    color: var(--foreground);
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+
+  .input:hover:not(:disabled):not(:focus) {
+    border-color: var(--border-strong);
+  }
+
+  .input:focus {
+    border-color: var(--primary);
+    box-shadow: var(--focus-ring);
+  }
+
+  .input:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+    background: var(--muted);
+  }
 }
 
 .table-head {

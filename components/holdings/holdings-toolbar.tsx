@@ -31,7 +31,7 @@ export type HoldingsPageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
 const CTRL_LABEL =
   "flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300";
-const CTRL_SELECT = "input !w-auto min-w-0 !py-1.5 text-sm";
+const CTRL_SELECT = "input w-auto min-w-0 py-1.5 text-sm";
 
 type ColumnPickerProps = {
   visibility: Record<string, boolean>;
