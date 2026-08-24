@@ -771,7 +771,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
               "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
               view === id
                 ? "bg-[var(--primary)] text-white"
-                : "bg-[var(--muted)]/50 text-slate-500 hover:text-slate-800"
+                : "bg-[var(--muted)]/50 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
             )}
           >
             {label}
@@ -836,13 +836,13 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                     key={m.metal}
                     className="rounded-md border border-[var(--border)] px-3 py-2"
                   >
-                    <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                    <div className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
                       {m.name}
                     </div>
                     <div className="text-sm font-semibold tabular-nums">
                       {formatCurrency(String(m.value), baseCurrency)}
                     </div>
-                    <div className="text-[11px] text-slate-500 tabular-nums">
+                    <div className="text-[11px] text-[var(--muted-foreground)] tabular-nums">
                       {grams(m.fineWeightG)} fin
                     </div>
                   </div>
@@ -910,7 +910,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                     <th className="px-3 py-2.5 text-right">Prix de revient</th>
                     <th className="px-3 py-2.5 text-right">
                       Valeur métal
-                      <div className="text-[9px] font-normal normal-case tracking-normal text-slate-400">
+                      <div className="text-[9px] font-normal normal-case tracking-normal text-[var(--muted-foreground)]">
                         au cours du jour
                       </div>
                     </th>
@@ -925,7 +925,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                 <tbody>
                   {q.isLoading && (
                     <tr>
-                      <td colSpan={13} className="px-4 py-10 text-center text-sm text-slate-400">
+                      <td colSpan={13} className="px-4 py-10 text-center text-sm text-[var(--muted-foreground)]">
                         Chargement…
                       </td>
                     </tr>
@@ -938,7 +938,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                     >
                       <td className="px-3 py-2 font-medium">
                         {l.denomination}
-                        <div className="text-[10px] font-normal text-slate-400">
+                        <div className="text-[10px] font-normal text-[var(--muted-foreground)]">
                           {PRODUCT_TYPE_LABELS[l.productType]}
                           {l.storageLocation ? ` · ${l.storageLocation}` : ""}
                         </div>
@@ -962,13 +962,13 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                             {new Date(l.acquiredAt).toLocaleDateString("fr-FR")}
                             {l.format === "PHYSICAL" && !l.hasInvoice && (
                               <AlertTriangle
-                                className="h-3 w-3 text-amber-500"
+                                className="h-3 w-3 text-[var(--warning)]"
                                 aria-label="Sans facture : option fiscale fermée"
                               />
                             )}
                           </span>
                         ) : (
-                          <span className="text-amber-600">non renseignée</span>
+                          <span className="text-[var(--warning)]">non renseignée</span>
                         )}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
@@ -992,7 +992,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                                 className={cn(
                                   "text-[10px]",
                                   Number(l.premiumPct) >= 0
-                                    ? "text-slate-400"
+                                    ? "text-[var(--muted-foreground)]"
                                     : "val-negative"
                                 )}
                                 title={`Prime sur le contenu métal — cours du ${l.spotDay ?? "jour"}`}
@@ -1006,7 +1006,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                             )}
                           </>
                         ) : (
-                          <span className="text-slate-400" title="Aucun cours connu pour ce métal">
+                          <span className="text-[var(--muted-foreground)]" title="Aucun cours connu pour ce métal">
                             —
                           </span>
                         )}
@@ -1040,7 +1040,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                             type="button"
                             size="sm"
                             variant="ghost"
-                            className="!h-7 !px-2 text-[11px] text-slate-500 hover:text-slate-900"
+                            className="!h-7 !px-2 text-[11px] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                             onClick={() => startSale(l)}
                             data-testid="metals-row-sell"
                           >
@@ -1050,7 +1050,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                             type="button"
                             size="sm"
                             variant="ghost"
-                            className="!h-7 !w-7 !px-0 text-slate-400 hover:text-slate-800"
+                            className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                             onClick={() => startEdit(l)}
                             aria-label="Modifier"
                           >
@@ -1060,7 +1060,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                             type="button"
                             size="sm"
                             variant="ghost"
-                            className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
+                            className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--danger)]"
                             onClick={() => setPendingLotDelete(l)}
                             aria-label="Supprimer"
                           >
@@ -1173,7 +1173,7 @@ function MetalsSalesView({
   return (
     <div className="space-y-4" data-testid="metals-sales-view">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-[var(--muted-foreground)]">
           Chaque cession se déclare et se paie dans le <strong>mois</strong> qui
           suit la vente — pas à la déclaration annuelle de revenus.
         </p>
@@ -1312,13 +1312,13 @@ function MetalsSalesView({
               key={y.year}
               className="rounded-md border border-[var(--border)] px-3 py-2"
             >
-              <div className="text-[10px] uppercase tracking-wide text-slate-500">
+              <div className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
                 Année {y.year} · {y.saleCount} cession(s)
               </div>
               <div className="text-sm font-semibold tabular-nums">
                 {formatCurrency(y.taxDueEur, baseCurrency)} d&apos;impôt
               </div>
-              <div className="text-[11px] text-slate-500 tabular-nums">
+              <div className="text-[11px] text-[var(--muted-foreground)] tabular-nums">
                 {formatCurrency(y.grossSalesEur, baseCurrency)} cédés ·{" "}
                 {y.byRegime.FORFAIT.count} au forfait,{" "}
                 {y.byRegime.PLUS_VALUE.count} au réel
@@ -1356,7 +1356,7 @@ function MetalsSalesView({
                   >
                     <td className="px-3 py-2 font-medium">
                       {s.denomination}
-                      <div className="text-[10px] font-normal text-slate-400">
+                      <div className="text-[10px] font-normal text-[var(--muted-foreground)]">
                         {Number(s.quantity).toLocaleString("fr-FR")} unité(s)
                       </div>
                     </td>
@@ -1382,12 +1382,12 @@ function MetalsSalesView({
                     </td>
                     <td className="px-3 py-2 text-xs">
                       {s.regime === "FORFAIT" ? "Forfaitaire" : "Plus-value"}
-                      <div className="text-[10px] text-slate-400">{line.form}</div>
+                      <div className="text-[10px] text-[var(--muted-foreground)]">{line.form}</div>
                     </td>
                     <td className="px-3 py-2 text-right font-medium tabular-nums">
                       {formatCurrency(line.taxEur, baseCurrency)}
                       {Number(s.tax.forgoneSavingsEur) > 0 && (
-                        <div className="text-[10px] font-normal text-amber-600">
+                        <div className="text-[10px] font-normal text-[var(--warning)]">
                           +{formatCurrency(s.tax.forgoneSavingsEur, baseCurrency)}{" "}
                           faute de justificatif
                         </div>
@@ -1398,7 +1398,7 @@ function MetalsSalesView({
                         type="button"
                         size="sm"
                         variant="ghost"
-                        className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
+                        className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--danger)]"
                         onClick={() => onDelete(s)}
                         aria-label="Supprimer"
                       >
@@ -1454,17 +1454,17 @@ function MetalTaxComparison({
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-medium">{REGIME_LABELS[key]}</span>
-                <span className="text-[10px] text-slate-500">{result.form}</span>
+                <span className="text-[10px] text-[var(--muted-foreground)]">{result.form}</span>
               </div>
               <div className="mt-1 text-lg font-semibold tabular-nums">
                 {formatCurrency(result.taxEur, baseCurrency)}
               </div>
-              <div className="text-[11px] text-slate-500 tabular-nums">
+              <div className="text-[11px] text-[var(--muted-foreground)] tabular-nums">
                 Assiette {formatCurrency(result.taxableBaseEur, baseCurrency)} ·
                 net perçu {formatCurrency(result.netProceedsEur, baseCurrency)}
               </div>
               {!result.available && result.unavailableReason && (
-                <div className="mt-1 text-[11px] text-amber-600">
+                <div className="mt-1 text-[11px] text-[var(--warning)]">
                   {result.unavailableReason}
                 </div>
               )}
@@ -1478,12 +1478,12 @@ function MetalTaxComparison({
         })}
       </div>
 
-      <p className="text-[11px] text-slate-500" data-testid="metals-tax-rationale">
+      <p className="text-[11px] text-[var(--muted-foreground)]" data-testid="metals-tax-rationale">
         {simulation.rationale}
       </p>
 
       {!simulation.exempt && simulation.holdingYears > 0 && (
-        <p className="text-[11px] text-slate-400">
+        <p className="text-[11px] text-[var(--muted-foreground)]">
           Abattement acquis :{" "}
           {(Number(simulation.allowanceRate) * 100).toLocaleString("fr-FR", {
             maximumFractionDigits: 0,
