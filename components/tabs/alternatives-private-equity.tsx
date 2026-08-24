@@ -766,7 +766,7 @@ export function AlternativesPrivateEquity({
                       "rounded px-2 py-1 text-[11px] font-medium transition",
                       perfFilter === key
                         ? "bg-teal-700 text-white"
-                        : "text-slate-500 hover:bg-[var(--muted)] hover:text-slate-800 dark:hover:text-slate-200"
+                        : "text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
                     )}
                     aria-pressed={perfFilter === key}
                     data-testid={`pe-filter-${key.toLowerCase()}`}
@@ -808,7 +808,7 @@ export function AlternativesPrivateEquity({
                   <tr>
                     <td
                       colSpan={11}
-                      className="px-4 py-10 text-center text-sm text-slate-400"
+                      className="px-4 py-10 text-center text-sm text-[var(--muted-foreground)]"
                     >
                       Chargement…
                     </td>
@@ -818,7 +818,7 @@ export function AlternativesPrivateEquity({
                   <tr>
                     <td
                       colSpan={11}
-                      className="px-4 py-10 text-center text-sm text-slate-400"
+                      className="px-4 py-10 text-center text-sm text-[var(--muted-foreground)]"
                       data-testid="pe-no-match"
                     >
                       Aucune position ne correspond aux filtres.
@@ -837,7 +837,7 @@ export function AlternativesPrivateEquity({
                       </div>
                       {l.ownershipPercent && (
                         <div
-                          className="text-[10px] font-normal text-slate-400"
+                          className="text-[10px] font-normal text-[var(--muted-foreground)]"
                           title="Quote-part détenue"
                         >
                           {Number(l.ownershipPercent).toLocaleString("fr-FR", {
@@ -847,13 +847,13 @@ export function AlternativesPrivateEquity({
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-xs text-slate-500">
+                    <td className="px-3 py-2 text-xs text-[var(--muted-foreground)]">
                       {l.sector || "—"}
                     </td>
                     <td className="px-3 py-2 text-xs">
                       {PE_TYPE_LABELS[l.peType] || l.peType}
                       {l.vehicleName && (
-                        <div className="text-[10px] text-slate-400">
+                        <div className="text-[10px] text-[var(--muted-foreground)]">
                           {l.vehicleName}
                         </div>
                       )}
@@ -861,7 +861,7 @@ export function AlternativesPrivateEquity({
                     <td className="px-3 py-2 text-right tabular-nums">
                       {formatCurrency(l.investedTotal, l.currency)}
                       <div
-                        className="text-[10px] font-normal text-slate-400"
+                        className="text-[10px] font-normal text-[var(--muted-foreground)]"
                         title={
                           l.calledCapitalIsDerived
                             ? "Capital appelé dérivé des parts × PRU — aucun appel saisi"
@@ -875,13 +875,13 @@ export function AlternativesPrivateEquity({
                           : `${formatCurrency(l.calledCapital, l.currency)} appelé`}
                       </div>
                     </td>
-                    <td className="px-3 py-2 text-xs text-slate-500">
+                    <td className="px-3 py-2 text-xs text-[var(--muted-foreground)]">
                       {l.investmentDate
                         ? new Date(l.investmentDate).toLocaleDateString("fr-FR")
                         : "—"}
                       {l.expectedExitDate && (
                         <div
-                          className="text-[10px] text-slate-400"
+                          className="text-[10px] text-[var(--muted-foreground)]"
                           title="Sortie envisagée"
                         >
                           →{" "}
@@ -896,11 +896,11 @@ export function AlternativesPrivateEquity({
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {Number(l.distributionsReceived) > 0 ? (
-                        <span className="font-medium text-emerald-700 dark:text-emerald-300">
+                        <span className="val-positive font-medium">
                           {formatCurrency(l.distributionsReceived, l.currency)}
                         </span>
                       ) : (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-[var(--muted-foreground)]">—</span>
                       )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-xs">
@@ -923,7 +923,7 @@ export function AlternativesPrivateEquity({
                           type="button"
                           size="sm"
                           variant="ghost"
-                          className="!h-7 !w-7 !px-0 text-slate-400 hover:text-slate-800"
+                          className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                           onClick={() => startEdit(l)}
                           aria-label="Modifier"
                         >
@@ -933,7 +933,7 @@ export function AlternativesPrivateEquity({
                           type="button"
                           size="sm"
                           variant="ghost"
-                          className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
+                          className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--danger)]"
                           onClick={() => setDeleteTarget(l)}
                           aria-label="Supprimer"
                         >
@@ -1002,7 +1002,7 @@ function MultiplePreview({
 function RoundBadge({ round }: { round: string }) {
   return (
     <span
-      className="inline-flex rounded px-1 py-0.5 text-[9px] font-semibold uppercase text-slate-600 ring-1 ring-inset ring-slate-300 dark:text-slate-300 dark:ring-slate-600"
+      className="inline-flex rounded px-1 py-0.5 text-[9px] font-semibold uppercase text-[var(--muted-foreground)] ring-1 ring-inset ring-[var(--border)]"
       title="Tour de table"
     >
       {round}
