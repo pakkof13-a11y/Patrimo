@@ -696,7 +696,7 @@ export function AlternativesTangibles({
             {wizStep === 1 && (
               <div className="space-y-3" data-testid="tangible-details-step">
                 {sections.length === 0 && (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-[var(--muted-foreground)]">
                     Cette catégorie n’a pas de champ spécifique. Décrivez
                     provenance, dimensions ou état dans les notes, à l’étape
                     finale.
@@ -1071,7 +1071,7 @@ export function AlternativesTangibles({
                   <span>
                     J’ai les justificatifs d’achat (facture, acte, bordereau
                     d’adjudication)
-                    <span className="block font-normal text-slate-500">
+                    <span className="block font-normal text-[var(--muted-foreground)]">
                       Seule pièce qui prouve le prix et la date — condition de
                       l’option pour le régime des plus-values.
                     </span>
@@ -1088,7 +1088,7 @@ export function AlternativesTangibles({
                   />
                   <span>
                     Certificat d’authenticité conservé
-                    <span className="block font-normal text-slate-500">
+                    <span className="block font-normal text-[var(--muted-foreground)]">
                       Atteste ce qu’est l’objet, pas ce qu’il a coûté : sans
                       effet fiscal.
                     </span>
@@ -1182,7 +1182,7 @@ export function AlternativesTangibles({
                     du même coût annuel, et les séparer inviterait à n'en
                     renseigner qu'une. */}
                 <fieldset className="sm:col-span-2 rounded-md border border-[var(--border)] p-3">
-                  <legend className="px-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                  <legend className="px-1 text-[11px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
                     Assurance
                   </legend>
                   <div className="grid gap-3 sm:grid-cols-3">
@@ -1263,7 +1263,7 @@ export function AlternativesTangibles({
                         data-testid="tangible-coverage-bar"
                       >
                         <div className="flex items-baseline justify-between text-[11px]">
-                          <span className="text-slate-500">
+                          <span className="text-[var(--muted-foreground)]">
                             Couverture — {COVERAGE_LABEL[coverageStatus]}
                           </span>
                           <span className="font-medium tabular-nums">
@@ -1308,7 +1308,7 @@ export function AlternativesTangibles({
                 </fieldset>
 
                 <fieldset className="sm:col-span-2 rounded-md border border-[var(--border)] p-3">
-                  <legend className="px-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                  <legend className="px-1 text-[11px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
                     Garde
                   </legend>
                   <div className="grid gap-3 sm:grid-cols-3">
@@ -1367,7 +1367,7 @@ export function AlternativesTangibles({
                     </AltField>
                     {annualOwnershipCost > 0 && (
                       <div className="self-end rounded-md bg-[var(--muted)]/40 px-2.5 py-2 text-[11px]">
-                        <div className="text-slate-500">Coût de possession</div>
+                        <div className="text-[var(--muted-foreground)]">Coût de possession</div>
                         <div
                           className="text-sm font-semibold tabular-nums"
                           data-testid="tangible-ownership-cost"
@@ -1473,7 +1473,7 @@ export function AlternativesTangibles({
                     className="rounded-md border border-[var(--border)] px-3 py-2.5"
                     data-testid="tangible-carry-preview"
                   >
-                    <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                    <div className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
                       Plus-value nette des frais de détention
                     </div>
                     <div className="mt-1 flex flex-wrap items-baseline gap-x-3">
@@ -1485,7 +1485,7 @@ export function AlternativesTangibles({
                       >
                         {formatCurrency(String(carryPreview.net), form.currency)}
                       </span>
-                      <span className="text-xs text-slate-500">
+                      <span className="text-xs text-[var(--muted-foreground)]">
                         contre {formatCurrency(String(pnlPreview), form.currency)}{" "}
                         brut — {formatCurrency(String(carryPreview.total), form.currency)}{" "}
                         de garde et d&apos;assurance sur {carryPreview.years} an(s)
@@ -1493,7 +1493,7 @@ export function AlternativesTangibles({
                     </div>
                     {/* Le rappel importe : ces frais ne réduisent pas l'assiette
                         imposable de l'article 150 VI. */}
-                    <p className="mt-1 text-[11px] text-slate-400">
+                    <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
                       Indicatif : les frais de garde et les primes ne sont pas
                       déductibles de la plus-value imposable.
                     </p>
@@ -1523,7 +1523,7 @@ export function AlternativesTangibles({
                     className="rounded-md border border-[var(--border)] px-3 py-2.5"
                     data-testid="tangible-tax-sim"
                   >
-                    <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                    <div className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
                       Si vous revendiez à ce prix aujourd’hui
                     </div>
                     <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -1535,7 +1535,7 @@ export function AlternativesTangibles({
                           form.currency
                         )}
                       </span>
-                      <span className="text-xs text-slate-500">
+                      <span className="text-xs text-[var(--muted-foreground)]">
                         {simulation.exempt
                           ? "aucun impôt dû"
                           : simulation.recommended === "FORFAIT"
@@ -1543,7 +1543,7 @@ export function AlternativesTangibles({
                             : "régime des plus-values · 2092-SD"}
                       </span>
                       {simulation.holdingYears > 0 && (
-                        <span className="text-xs text-slate-400">
+                        <span className="text-xs text-[var(--muted-foreground)]">
                           {simulation.holdingYears} an(s) de détention
                         </span>
                       )}
@@ -1558,13 +1558,13 @@ export function AlternativesTangibles({
                         )}
                         data-testid="tangible-card-forfait"
                       >
-                        <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                        <div className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
                           Taxe forfaitaire 6,5 %
                         </div>
                         <div className="text-sm font-semibold tabular-nums">
                           {formatCurrency(simulation.flat.taxEur, form.currency)}
                         </div>
-                        <div className="text-[10px] text-slate-500">
+                        <div className="text-[10px] text-[var(--muted-foreground)]">
                           sur le prix de vente · {simulation.flat.form}
                         </div>
                       </div>
@@ -1578,7 +1578,7 @@ export function AlternativesTangibles({
                         )}
                         data-testid="tangible-card-pv"
                       >
-                        <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                        <div className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
                           Plus-value 37,6 % abattue
                         </div>
                         <div className="text-sm font-semibold tabular-nums">
@@ -1587,7 +1587,7 @@ export function AlternativesTangibles({
                             form.currency
                           )}
                         </div>
-                        <div className="text-[10px] text-slate-500">
+                        <div className="text-[10px] text-[var(--muted-foreground)]">
                           abattement{" "}
                           {(Number(simulation.allowanceRate) * 100).toLocaleString(
                             "fr-FR",
@@ -1600,7 +1600,7 @@ export function AlternativesTangibles({
 
                     {Number(simulation.savingsEur) > 0 && (
                       <p
-                        className="mt-1.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400"
+                        className="val-positive mt-1.5 text-[11px] font-medium"
                         data-testid="tangible-tax-savings"
                       >
                         {formatCurrency(simulation.savingsEur, form.currency)}{" "}
@@ -1608,14 +1608,14 @@ export function AlternativesTangibles({
                       </p>
                     )}
 
-                    <p className="mt-1.5 text-[11px] text-slate-500">
+                    <p className="mt-1.5 text-[11px] text-[var(--muted-foreground)]">
                       {simulation.rationale}
                     </p>
 
                     {switchYear !== null &&
                       simulation.holdingYears < switchYear && (
                         <p
-                          className="mt-1 text-[11px] text-slate-500"
+                          className="mt-1 text-[11px] text-[var(--muted-foreground)]"
                           data-testid="tangible-break-even"
                         >
                           Le régime des plus-values devient moins cher à partir de{" "}
@@ -1639,7 +1639,7 @@ export function AlternativesTangibles({
                                 "rounded px-1.5 py-0.5 text-[10px] ring-1",
                                 reached
                                   ? "text-emerald-700 ring-emerald-400/50 dark:text-emerald-400"
-                                  : "text-slate-400 ring-[var(--border)]"
+                                  : "text-[var(--muted-foreground)] ring-[var(--border)]"
                               )}
                             >
                               {milestone} ans ·{" "}
@@ -1654,13 +1654,13 @@ export function AlternativesTangibles({
                       )}
                     </ol>
 
-                    <p className="mt-2 text-[10px] italic text-slate-400">
+                    <p className="mt-2 text-[10px] italic text-[var(--muted-foreground)]">
                       Simulation indicative, non opposable à l&apos;administration
                       fiscale.
                     </p>
                   </div>
                 ) : (
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] text-[var(--muted-foreground)]">
                     Renseignez une valeur estimée pour voir ce que coûterait une
                     revente.
                   </p>
@@ -1768,7 +1768,7 @@ export function AlternativesTangibles({
             <tbody>
               {q.isLoading && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-[var(--muted-foreground)]">
                     Chargement…
                   </td>
                 </tr>
@@ -1853,7 +1853,7 @@ function TangibleRow({
           <div className="flex items-center gap-1.5 font-medium">
             <ChevronDown
               className={cn(
-                "h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform",
+                "h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)] transition-transform",
                 expanded && "rotate-180"
               )}
               aria-hidden
@@ -1861,7 +1861,7 @@ function TangibleRow({
             {line.brandOrArtist} {line.modelName}
           </div>
           {line.yearOrVintage && (
-            <div className="pl-5 text-[10px] text-slate-400">{line.yearOrVintage}</div>
+            <div className="pl-5 text-[10px] text-[var(--muted-foreground)]">{line.yearOrVintage}</div>
           )}
         </td>
         <td className="px-3 py-2 text-right tabular-nums">
@@ -1888,22 +1888,22 @@ function TangibleRow({
           {line.tax.holdingYears !== null ? (
             `${line.tax.holdingYears} an(s)`
           ) : (
-            <span className="text-amber-600">non datée</span>
+            <span className="text-[var(--warning)]">non datée</span>
           )}
         </td>
-        <td className="px-3 py-2 text-center text-xs text-slate-500">
+        <td className="px-3 py-2 text-center text-xs text-[var(--muted-foreground)]">
           <span className="inline-flex items-center gap-1">
             {line.hasCertificate ? "Oui" : "—"}
             {Number(line.ownership.annualCostEur) > 0 && (
               <Vault
-                className="h-3 w-3 text-slate-400"
+                className="h-3 w-3 text-[var(--muted-foreground)]"
                 aria-label={`Coût de possession : ${line.ownership.annualCostEur} € par an`}
               />
             )}
             <InsuranceBadge line={line} />
             {line.ownership.alerts.length > 0 && (
               <AlertTriangle
-                className="h-3 w-3 text-amber-500"
+                className="h-3 w-3 text-[var(--warning)]"
                 aria-label="Alerte de possession"
               />
             )}
@@ -1918,7 +1918,7 @@ function TangibleRow({
               type="button"
               size="sm"
               variant="ghost"
-              className="!h-7 !w-7 !px-0 text-slate-400 hover:text-slate-800"
+              className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
               onClick={onEdit}
               aria-label="Modifier"
             >
@@ -1928,7 +1928,7 @@ function TangibleRow({
               type="button"
               size="sm"
               variant="ghost"
-              className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
+              className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--danger)]"
               onClick={onDelete}
               aria-label="Supprimer"
             >
@@ -1945,13 +1945,13 @@ function TangibleRow({
               <dl className="grid gap-2 text-[12px] sm:grid-cols-3 lg:grid-cols-4">
                 {details.map(([label, value]) => (
                   <div key={label}>
-                    <dt className="text-[10px] uppercase text-slate-500">{label}</dt>
+                    <dt className="text-[10px] uppercase text-[var(--muted-foreground)]">{label}</dt>
                     <dd className="font-medium">{value}</dd>
                   </div>
                 ))}
               </dl>
             ) : (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-[var(--muted-foreground)]">
                 Aucun détail spécifique renseigné pour cet objet.
               </p>
             )}
@@ -1963,7 +1963,7 @@ function TangibleRow({
                 {line.ownership.alerts.map((a) => (
                   <li
                     key={a.code}
-                    className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400"
+                    className="flex items-start gap-1.5 text-[11px] text-[var(--warning)]"
                   >
                     <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
                     {a.message}
@@ -1975,7 +1975,7 @@ function TangibleRow({
             {line.ownership.netPnlEur !== null &&
               Number(line.ownership.annualCostEur) > 0 && (
                 <p
-                  className="mt-2 text-[11px] text-slate-500"
+                  className="mt-2 text-[11px] text-[var(--muted-foreground)]"
                   data-testid="tangible-net-carry"
                 >
                   Après {formatCurrency(line.ownership.totalCarryCostEur ?? "0", line.currency)}{" "}
@@ -1996,9 +1996,9 @@ function TangibleRow({
                 </p>
               )}
 
-            <p className="mt-2 text-[11px] text-slate-500">{line.tax.rationale}</p>
+            <p className="mt-2 text-[11px] text-[var(--muted-foreground)]">{line.tax.rationale}</p>
             {line.notes && (
-              <p className="mt-1 text-[11px] text-slate-400">{line.notes}</p>
+              <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">{line.notes}</p>
             )}
           </td>
         </tr>
@@ -2060,19 +2060,19 @@ function TaxBadge({ line }: { line: TangibleAssetDto }) {
   if (!line.purchaseDate) {
     // Sans date d'achat, désigner un régime serait deviner : la durée de
     // détention manque, donc l'abattement aussi.
-    return <span className="text-[11px] text-slate-400">—</span>;
+    return <span className="text-[11px] text-[var(--muted-foreground)]">—</span>;
   }
   return (
     <span
       data-testid="tangible-tax-badge"
-      className="rounded px-1.5 py-0.5 text-[10px] font-medium text-slate-600 ring-1 ring-[var(--border)] dark:text-slate-300"
+      className="rounded px-1.5 py-0.5 text-[10px] font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)]"
       title={line.tax.rationale}
     >
       {line.tax.recommendedRegime === "FORFAIT" ? "Forfait 6,5 %" : "Plus-value"}
       {line.tax.breakEvenYear !== null &&
         line.tax.holdingYears !== null &&
         line.tax.holdingYears < line.tax.breakEvenYear && (
-          <span className="ml-1 font-normal text-slate-400">
+          <span className="ml-1 font-normal text-[var(--muted-foreground)]">
             → PV à {line.tax.breakEvenYear} ans
           </span>
         )}
