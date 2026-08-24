@@ -696,7 +696,7 @@ export function AlternativesCrowdlending({
                       "rounded px-2 py-1 text-[11px] font-medium transition",
                       filter === key
                         ? "bg-teal-700 text-white"
-                        : "text-slate-500 hover:bg-[var(--muted)] hover:text-slate-800 dark:hover:text-slate-200"
+                        : "text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
                     )}
                     aria-pressed={filter === key}
                     data-testid={`cl-filter-${key.toLowerCase()}`}
@@ -737,7 +737,7 @@ export function AlternativesCrowdlending({
                   <tr>
                     <td
                       colSpan={11}
-                      className="px-4 py-10 text-center text-sm text-slate-400"
+                      className="px-4 py-10 text-center text-sm text-[var(--muted-foreground)]"
                     >
                       Chargement…
                     </td>
@@ -747,7 +747,7 @@ export function AlternativesCrowdlending({
                   <tr>
                     <td
                       colSpan={11}
-                      className="px-4 py-10 text-center text-sm text-slate-400"
+                      className="px-4 py-10 text-center text-sm text-[var(--muted-foreground)]"
                       data-testid="cl-no-match"
                     >
                       Aucun prêt ne correspond au filtre «{" "}
@@ -768,7 +768,7 @@ export function AlternativesCrowdlending({
                           {l.riskGrade && <RiskBadge grade={l.riskGrade} />}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-xs text-slate-500">
+                      <td className="px-3 py-2 text-xs text-[var(--muted-foreground)]">
                         {l.platform || "—"}
                       </td>
                       <td className="px-3 py-2 text-right font-medium tabular-nums">
@@ -777,8 +777,8 @@ export function AlternativesCrowdlending({
                           className={cn(
                             "text-[10px] font-normal",
                             l.remainingCapitalIsDerived
-                              ? "text-slate-400"
-                              : "text-slate-500 dark:text-slate-400"
+                              ? "text-[var(--muted-foreground)]"
+                              : "text-[var(--muted-foreground)]"
                           )}
                           title={
                             l.remainingCapitalIsDerived
@@ -799,54 +799,54 @@ export function AlternativesCrowdlending({
                       </td>
                       <td className="px-3 py-2 text-xs">
                         {CL_REPAYMENT_LABELS[l.repaymentType]}
-                        <div className="text-[10px] text-slate-400">
+                        <div className="text-[10px] text-[var(--muted-foreground)]">
                           {CL_PAYMENT_FREQUENCY_LABELS[l.paymentFrequency]}
                         </div>
                       </td>
                       <td className="px-3 py-2 text-right text-xs tabular-nums">
-                        <span className="font-medium text-emerald-700 dark:text-emerald-300">
+                        <span className="val-positive font-medium">
                           {formatCurrency(l.interestReceivedToDate, l.currency)}
                         </span>
                         <div
-                          className="text-[10px] text-slate-400"
+                          className="text-[10px] text-[var(--muted-foreground)]"
                           title="Estimation des intérêts totaux sur la durée du prêt"
                         >
                           / {formatCurrency(l.expectedTotalInterest, l.currency)}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-xs tabular-nums text-slate-600 dark:text-slate-300">
+                      <td className="px-3 py-2 text-xs tabular-nums text-[var(--muted-foreground)]">
                         {l.maturityDate
                           ? new Date(l.maturityDate).toLocaleDateString("fr-FR")
                           : "—"}
-                        <div className="text-[10px] text-slate-400">
+                        <div className="text-[10px] text-[var(--muted-foreground)]">
                           {l.durationMonths} mois
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-xs tabular-nums text-slate-600 dark:text-slate-300">
+                      <td className="px-3 py-2 text-xs tabular-nums text-[var(--muted-foreground)]">
                         {fmtDate(l.nextPaymentDate)}
                       </td>
                       <td className="px-3 py-2">
                         <div
                           className={cn(
                             "text-xs font-medium",
-                            overdue && "text-red-600 dark:text-red-400",
-                            soon && "text-amber-600 dark:text-amber-400",
+                            overdue && "text-[var(--danger)]",
+                            soon && "text-[var(--warning)]",
                             !overdue &&
                               !soon &&
-                              "text-slate-600 dark:text-slate-300"
+                              "text-[var(--muted-foreground)]"
                           )}
                         >
                           {countdownLabel(l.monthsRemaining, l.status)}
                         </div>
                         {l.progressPct != null && l.status !== "REPAID" && (
-                          <div className="mt-1 h-1.5 w-full max-w-[8rem] overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                          <div className="mt-1 h-1.5 w-full max-w-[8rem] overflow-hidden rounded-full bg-[var(--muted)]">
                             <div
                               className={cn(
                                 "h-full rounded-full",
                                 overdue
-                                  ? "bg-red-500"
+                                  ? "bg-[var(--danger)]"
                                   : soon
-                                    ? "bg-amber-500"
+                                    ? "bg-[var(--warning)]"
                                     : "bg-teal-600"
                               )}
                               style={{ width: `${l.progressPct}%` }}
@@ -863,7 +863,7 @@ export function AlternativesCrowdlending({
                             type="button"
                             size="sm"
                             variant="ghost"
-                            className="!h-7 !w-7 !px-0 text-slate-400 hover:text-slate-800"
+                            className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                             onClick={() => startEdit(l)}
                             aria-label="Modifier"
                           >
@@ -873,7 +873,7 @@ export function AlternativesCrowdlending({
                             type="button"
                             size="sm"
                             variant="ghost"
-                            className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
+                            className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--danger)]"
                             onClick={() => setDeleteTarget(l)}
                             aria-label="Supprimer"
                           >
@@ -888,7 +888,7 @@ export function AlternativesCrowdlending({
             </table>
           </div>
           {visible.some((l) => l.remainingCapitalIsDerived) && (
-            <p className="px-4 py-2 text-[10px] text-slate-400 sm:px-5">
+            <p className="px-4 py-2 text-[10px] text-[var(--muted-foreground)] sm:px-5">
               * Capital restant dû déduit du capital initial — saisissez-le en
               mode expert pour suivre les remboursements partiels.
             </p>
@@ -918,7 +918,7 @@ export function AlternativesCrowdlending({
 function RiskBadge({ grade }: { grade: string }) {
   return (
     <span
-      className="inline-flex rounded px-1 py-0.5 text-[9px] font-semibold uppercase text-slate-600 ring-1 ring-inset ring-slate-300 dark:text-slate-300 dark:ring-slate-600"
+      className="inline-flex rounded px-1 py-0.5 text-[9px] font-semibold uppercase text-[var(--muted-foreground)] ring-1 ring-inset ring-[var(--border)]"
       title="Notation de risque plateforme"
     >
       {grade}
