@@ -707,7 +707,7 @@ function SupportRow({
 
         <div className="flex flex-col items-end">
           <input
-            className="input w-32 text-right text-xs"
+            className="input w-32 text-right"
             defaultValue={
               support.currentValueEur
                 ? Number(support.currentValueEur).toFixed(2)

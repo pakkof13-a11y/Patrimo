@@ -932,6 +932,21 @@ export function PropertyDetailPanel({
                     void saveFiscal(p.assetId, p.name);
                   }}
                 >
+                  {/*
+                    Grille compacte : libellé et champ à la même taille, 11 px.
+
+                    C'est ce que les `text-xs` de cette fiche demandaient depuis
+                    toujours, sans l'obtenir — `.input` étant hors couche, ils
+                    étaient écrasés et les champs sortaient à 13 px, plus gros
+                    que les libellés qui les nomment. La cascade corrigée, la
+                    paire tient : les valeurs y sont moins tronquées qu'à 13 px,
+                    la fiche du bien étant le formulaire le plus dense d'Aurea.
+
+                    Les saisies isolées de cette même fiche — la valeur du bien,
+                    par exemple — ne suivent pas cette règle : elles n'ont pas de
+                    libellé de 11 px à côté d'elles et gardent la taille du
+                    champ standard.
+                  */}
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <label className="text-[11px]">
                       <span className="text-[var(--muted-foreground)]">
@@ -1561,7 +1576,7 @@ export function PropertyDetailPanel({
                   <input
                     autoFocus
                     inputMode="decimal"
-                    className="input h-8 w-40 text-xs"
+                    className="input h-8 w-40"
                     placeholder="Valeur du bien entier"
                     aria-label={`Valeur de ${p.name}`}
                     data-testid="property-value-input"

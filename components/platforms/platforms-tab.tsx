@@ -1469,7 +1469,7 @@ export function PlatformsTab({
                 type="text"
                 autoComplete="off"
                 spellCheck={false}
-                className="input w-full border-red-200 bg-white py-1.5 text-sm dark:border-red-900/50 dark:bg-[var(--input-bg)]"
+                className="input w-full border-red-200 bg-white py-1.5 dark:border-red-900/50 dark:bg-[var(--input-bg)]"
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
                 placeholder={DELETE_CONFIRM_WORD}

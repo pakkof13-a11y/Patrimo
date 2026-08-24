@@ -678,7 +678,7 @@ export function PreferencesPanel({
                     type="text"
                     autoComplete="off"
                     spellCheck={false}
-                    className="input w-full border-red-200 bg-white py-1.5 text-sm dark:border-red-900/50 dark:bg-[var(--input-bg)]"
+                    className="input w-full border-red-200 bg-white py-1.5 dark:border-red-900/50 dark:bg-[var(--input-bg)]"
                     value={confirmText}
                     onChange={(e) => setConfirmText(e.target.value)}
                     placeholder={CLEAR_CONFIRM_WORD}

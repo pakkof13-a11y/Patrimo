@@ -66,7 +66,7 @@ export function ChangePasswordForm() {
       </p>
       <form onSubmit={onSubmit} className="space-y-2" data-testid="change-password-form">
         <input
-          className="input w-full py-1.5 text-xs"
+          className="input w-full py-1.5"
           type="password"
           placeholder="Mot de passe actuel"
           autoComplete="current-password"
@@ -76,7 +76,7 @@ export function ChangePasswordForm() {
           required
         />
         <input
-          className="input w-full py-1.5 text-xs"
+          className="input w-full py-1.5"
           type="password"
           placeholder="Nouveau mot de passe"
           autoComplete="new-password"
@@ -87,7 +87,7 @@ export function ChangePasswordForm() {
           minLength={6}
         />
         <input
-          className="input w-full py-1.5 text-xs"
+          className="input w-full py-1.5"
           type="password"
           placeholder="Confirmer le nouveau mot de passe"
           autoComplete="new-password"
