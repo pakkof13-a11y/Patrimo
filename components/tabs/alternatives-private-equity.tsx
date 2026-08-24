@@ -352,18 +352,21 @@ export function AlternativesPrivateEquity({
                 ? `Sur ${formatCurrency(summary?.totalInvested || "0", baseCurrency)} investis · ${peShareOfAlt.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} % de la poche alt.`
                 : `Sur ${formatCurrency(summary?.totalInvested || "0", baseCurrency)} investis`
             }
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="NAV totale"
             value={formatCurrency(summary?.totalNav || "0", baseCurrency)}
             hint="Somme des valorisations manuelles"
             tip={<FinanceTip term="NAV PE" />}
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="TVPI moyen"
             value={fmtMultiple(summary?.avgTvpi)}
             hint={`DPI ${fmtMultiple(summary?.avgDpi)} · RVPI ${fmtMultiple(summary?.avgRvpi)}`}
             tip={<FinanceTip term="MOIC" />}
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="Distributions"
@@ -373,6 +376,7 @@ export function AlternativesPrivateEquity({
             )}
             hint={`P&L latent : ${formatCurrency(summary?.totalPnl || "0", baseCurrency)}`}
             tone={Number(summary?.totalPnl || 0)}
+            loading={q.isPending}
           />
         </>
       }

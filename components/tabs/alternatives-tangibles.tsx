@@ -591,17 +591,20 @@ export function AlternativesTangibles({
             label="Valeur estimée"
             value={formatCurrency(summary?.totalValue ?? "0", baseCurrency)}
             hint="Somme des estimations"
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="Plus-value latente"
             value={formatCurrency(summary?.totalPnl ?? "0", baseCurrency)}
             tone={Number(summary?.totalPnl ?? 0)}
             hint="Estimé − achat (calculé)"
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="Impôt si tout était vendu"
             value={formatCurrency(summary?.estimatedTaxBurden ?? "0", baseCurrency)}
             hint={`Projection — ${summary?.exemptCount ?? 0} objet(s) exonéré(s)`}
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="Coût de possession / an"
@@ -610,6 +613,7 @@ export function AlternativesTangibles({
               baseCurrency
             )}
             hint={`Primes + garde · dont ${formatCurrency(summary?.totalAnnualCustodyCost ?? "0", baseCurrency)} de garde`}
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="Capital assuré"
@@ -621,6 +625,7 @@ export function AlternativesTangibles({
                 ? `${summary?.underInsuredCount ?? 0} sous-assuré(s) · ${summary?.uninsuredHighValueCount ?? 0} non assuré(s)`
                 : "Couverture déclarée"
             }
+            loading={q.isPending}
           />
         </>
       }

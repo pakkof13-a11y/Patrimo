@@ -3,6 +3,7 @@
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyPlaceholder } from "@/components/ui/panel";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   ModuleCard,
   ModuleCardHeader,
@@ -185,35 +186,85 @@ export function AltEmptyState({
   );
 }
 
+/**
+ * Tuile d'une bande d'indicateurs de famille.
+ *
+ * ## L'état de chargement
+ *
+ * Les appelants lisent leur donnée en `summary?.X ?? "0"` puis la formatent :
+ * l'absence devient un montant nul *avant* d'atteindre cette tuile, qui n'a
+ * donc aucun moyen de faire la différence. Elle a besoin qu'on le lui dise —
+ * d'où `loading`, alimenté par la requête elle-même et non déduit de la
+ * valeur reçue.
+ *
+ * Pendant le chargement, seuls le libellé et son infobulle restent : le
+ * squelette prend la place de la valeur, la tonalité s'efface — affirmer une
+ * tendance sur une donnée inconnue est faux — et la précision aussi, car
+ * elle est calculée sur cette même donnée absente et dirait « Sur 0,00 €
+ * investis » sous un squelette.
+ *
+ * Un zéro réel, lui, s'affiche comme un montant : c'en est un.
+ */
 export function AltMiniKpi({
   label,
   value,
   hint,
   tone,
   tip,
+  loading = false,
 }: {
   label: React.ReactNode;
   value: string;
   hint?: string;
   tone?: number;
   tip?: React.ReactNode;
+  loading?: boolean;
 }) {
   return (
-    <div className="min-w-0">
+    <div
+      className="min-w-0"
+      data-loading={loading ? "true" : undefined}
+      aria-busy={loading || undefined}
+    >
       <div className="text-label flex items-center gap-1 normal-case tracking-wide">
         {label}
         {tip}
       </div>
-      <div
-        className={cn(
-          "mt-0.5 text-sm font-semibold tabular-nums tracking-tight",
-          tone != null && tone !== 0 && getChangeColor(String(tone))
-        )}
-      >
-        {value}
-      </div>
+      {loading ? (
+        <Skeleton
+          /*
+            Au gabarit exact de la valeur — `text-sm` à l'échelle Aurea, soit
+            17 px de hauteur de ligne. Un squelette plus haut de trois pixels
+            suffit à faire descendre tout ce qui suit à l'arrivée des données.
+          */
+          className="mt-0.5 h-[1.0625rem] w-24"
+        />
+      ) : (
+        <div
+          className={cn(
+            "mt-0.5 text-sm font-semibold tabular-nums tracking-tight",
+            tone != null && tone !== 0 && getChangeColor(String(tone))
+          )}
+        >
+          {value}
+        </div>
+      )}
       {hint ? (
-        <div className="mt-0.5 text-[10px] text-[var(--muted-foreground)]">
+        /*
+          La précision est masquée pendant le chargement, mais garde sa place.
+
+          `visibility: hidden` plutôt qu'un squelette : ces précisions tiennent
+          sur une ou deux lignes selon leur longueur, et un squelette de
+          hauteur fixe réserverait la mauvaise — les tuiles de Métaux
+          gagnaient quinze pixels à l'arrivée des données. Le texte occupe
+          exactement la place qu'il prendra, sans être lu ni annoncé.
+        */
+        <div
+          className={cn(
+            "mt-0.5 text-[10px] text-[var(--muted-foreground)]",
+            loading && "invisible"
+          )}
+        >
           {hint}
         </div>
       ) : null}

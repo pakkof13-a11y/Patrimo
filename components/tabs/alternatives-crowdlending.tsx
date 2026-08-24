@@ -354,11 +354,13 @@ export function AlternativesCrowdlending({
                 : `Sur ${formatCurrency(summary?.totalCapital || "0", baseCurrency)} engagés`
             }
             tip={<FinanceTip term="Capital en cours" />}
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="Rendement moyen pondéré"
             value={fmtPct(summary?.weightedAverageYield)}
             hint="Pondéré par le capital restant dû"
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="Revenu annuel projeté"
@@ -367,6 +369,7 @@ export function AlternativesCrowdlending({
               baseCurrency
             )}
             hint="Au taux nominal, sur l’encours actif"
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="Projets"
@@ -375,6 +378,7 @@ export function AlternativesCrowdlending({
               summary?.interestReceivedTotal || "0",
               baseCurrency
             )}`}
+            loading={q.isPending}
           />
         </>
       }

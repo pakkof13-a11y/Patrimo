@@ -424,16 +424,19 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
           <AltMiniKpi
             label="Valeur actuelle"
             value={formatCurrency(summary?.totalValue ?? "0", baseCurrency)}
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="Or fin & métal fin"
             value={grams(summary?.totalFineWeightG ?? "0")}
             hint="Poids brut × titre — le seul comparable d'un produit à l'autre"
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="P&L latent"
             value={formatCurrency(summary?.totalPnl ?? "0", baseCurrency)}
             tone={Number(summary?.totalPnl ?? 0)}
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="Impôt de l'année"
@@ -443,6 +446,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                 ? `${currentYear.saleCount} cession(s) en ${currentYear.year}`
                 : "Aucune cession déclarée"
             }
+            loading={q.isPending}
           />
         </>
       }
