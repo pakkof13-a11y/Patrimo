@@ -115,20 +115,22 @@
   --radius-xl: 0.75rem;    /* 12 */
   --radius-full: 9999px;
 
-  /* ══ 4. BORDURES ═════════════════════════════════════════════════════ */
+  /* ══ 4. BORDURES ═════════════════════════════════════════════════════
+     Encre légèrement chaude plutôt que grise : sur un fond ivoire, un trait
+     neutre tire au bleu et rend la page plus froide qu'elle ne devrait. */
   --border-width: 1px;
-  --border: rgba(16, 17, 20, 0.09);
-  --border-strong: rgba(16, 17, 20, 0.16);
-  --border-subtle: rgba(16, 17, 20, 0.05);
+  --border: rgba(32, 27, 20, 0.10);
+  --border-strong: rgba(32, 27, 20, 0.17);
+  --border-subtle: rgba(32, 27, 20, 0.055);
 
   /* ══ 5. OMBRES — quasi absentes, la profondeur vient des bordures ════ */
-  --shadow-xs: 0 1px 0 rgba(16, 17, 20, 0.03);
-  --shadow-sm: 0 1px 2px rgba(16, 17, 20, 0.05);
-  --shadow-md: 0 4px 16px rgba(16, 17, 20, 0.07);
-  --shadow-lg: 0 12px 32px rgba(16, 17, 20, 0.1);
+  --shadow-xs: 0 1px 0 rgba(32, 27, 20, 0.03);
+  --shadow-sm: 0 1px 2px rgba(32, 27, 20, 0.05);
+  --shadow-md: 0 4px 16px rgba(32, 27, 20, 0.07);
+  --shadow-lg: 0 12px 32px rgba(32, 27, 20, 0.1);
   /* Voile des surfaces plein écran (panneaux, modales). */
-  --overlay: rgba(16, 17, 20, 0.32);
-  --shadow-lift: 0 6px 20px rgba(16, 17, 20, 0.09);
+  --overlay: rgba(24, 20, 15, 0.32);
+  --shadow-lift: 0 6px 20px rgba(32, 27, 20, 0.09);
 
   /* ══ 6. MOUVEMENT ════════════════════════════════════════════════════
      150 ms ease-out par défaut. Aucun rebond : un terminal financier ne
@@ -170,20 +172,36 @@
      Transposition du mockup sombre : papier chaud plutôt que blanc pur,
      pour que l'or reste un accent et non une alerte. */
 
-  /* Surfaces, de la plus profonde à la plus élevée */
-  --background: #f5f4f1;
-  --background-gradient: none;
-  --surface: #ffffff;
+  /*
+    Surfaces, de la plus profonde à la plus élevée.
+
+    Ivoire plutôt que blanc : #ffffff partout donnait une page clinique où
+    l'or ne se posait sur rien. Chaque niveau garde un écart faible mais
+    lisible sans son trait de bordure — c'est la condition pour qu'une carte
+    reste une carte quand la bordure s'efface au survol.
+
+    Le blanc pur n'est pas abandonné : il devient le sommet de la pile, celui
+    des modales et des menus, et se distingue donc de tout ce qui est en
+    dessous au lieu de se confondre avec.
+  */
+  --background: #f4f2ed;
+  /*
+    Un dégradé de profondeur, pas un aplat décoratif : quelques niveaux de
+    clarté en plus vers le haut de la fenêtre, éteints avant la moitié. Vu de
+    face on ne le remarque pas ; masqué, la page paraît plate.
+  */
+  --background-gradient: linear-gradient(180deg, #f8f7f3 0%, #f4f2ed 46%);
+  --surface: #fcfbf8;
   --surface-raised: #ffffff;
-  --surface-sunken: #eceae5;
-  --surface-hover: #faf9f7;
+  --surface-sunken: #eae8e2;
+  --surface-hover: #f6f4f0;
   --card: var(--surface);
   --elevated: var(--surface-raised);
   --muted: var(--surface-sunken);
-  --input-bg: #ffffff;
-  --table-head: #f7f6f3;
-  --header-bg: rgba(245, 244, 241, 0.88);
-  --ticker-bg: #ecebe7;
+  --input-bg: #fdfdfb;
+  --table-head: #f7f5f1;
+  --header-bg: rgba(244, 242, 237, 0.88);
+  --ticker-bg: #ebe9e3;
 
   /* Texte — trois niveaux, jamais plus */
   --foreground: #14161a;
@@ -230,8 +248,8 @@
   --gold-muted: rgba(217, 166, 77, 0.1);
   --gold-border: rgba(217, 166, 77, 0.24);
   --nav-active-gold: var(--gold-ink-light);
-  --banner-fill: #f7f6f3;
-  --banner-edge: #f5f4f1;
+  --banner-fill: #f7f5f1;
+  --banner-edge: #f4f2ed;
 
   color-scheme: light;
 }
@@ -244,9 +262,11 @@
  * ─────────────────────────────────────────────────────────────────────────
  */
 .dark {
-  --border: rgba(255, 255, 255, 0.06);
-  --border-strong: rgba(255, 255, 255, 0.13);
-  --border-subtle: rgba(255, 255, 255, 0.035);
+  /* Trait légèrement chaud, comme les surfaces qu'il délimite : un blanc pur
+     sur un graphite chaud se voit comme un liseré bleuté. */
+  --border: rgba(255, 246, 232, 0.065);
+  --border-strong: rgba(255, 246, 232, 0.135);
+  --border-subtle: rgba(255, 246, 232, 0.038);
 
   /* Sur fond noir, une ombre portée ne se voit pas : la profondeur passe
      entièrement par la bordure et le niveau de surface. */
@@ -257,24 +277,41 @@
   --overlay: rgba(0, 0, 0, 0.55);
   --shadow-lift: 0 6px 20px rgba(0, 0, 0, 0.5);
 
-  --background: #090909;
-  --background-gradient: none;
-  --surface: #111214;
-  --surface-raised: #17181b;
-  --surface-sunken: #0d0e10;
-  --surface-hover: #17181b;
+  /*
+    Graphite chaud plutôt que noir bleuté.
+
+    Les surfaces d'avant tiraient au bleu (#111214 : bleu > rouge) sur un fond
+    presque pur noir. Deux défauts s'additionnaient : l'or de la marque y
+    paraissait plus jaune qu'il n'est, et l'écran devenait dur dès qu'il était
+    regardé longtemps. Les niveaux sont redéclinés vers le brun très sombre,
+    et l'écart entre eux légèrement creusé — les surfaces se distinguent
+    maintenant sans dépendre entièrement de leur bordure.
+  */
+  --background: #0c0b0a;
+  /*
+    Même geste qu'en clair : une remontée de quelques niveaux vers le haut de
+    la fenêtre, éteinte avant la moitié. Le noir plat lisait comme un trou ;
+    ceci lui donne un fond.
+  */
+  --background-gradient: linear-gradient(180deg, #131110 0%, #0c0b0a 46%);
+  --surface: #161513;
+  --surface-raised: #1c1b18;
+  --surface-sunken: #100f0e;
+  --surface-hover: #1c1b18;
   --card: var(--surface);
   --elevated: var(--surface-raised);
   --muted: var(--surface-raised);
-  --input-bg: #0d0e10;
-  --table-head: #131417;
-  --header-bg: rgba(9, 9, 9, 0.88);
-  --ticker-bg: #0c0d0f;
+  --input-bg: #100f0e;
+  --table-head: #181715;
+  --header-bg: rgba(12, 11, 10, 0.88);
+  --ticker-bg: #0f0e0d;
 
-  --foreground: #f3f2f0;
+  /* Encre adoucie d'un cran — 15:1 sur la carte reste très au-dessus du
+     seuil, et le blanc pur cesse de vibrer sur le graphite. */
+  --foreground: #ece9e3;
   --card-foreground: var(--foreground);
-  --foreground-secondary: #a0a3a8;
-  --foreground-faint: #6e7278;
+  --foreground-secondary: #a5a099;
+  --foreground-faint: #736e66;
   --muted-foreground: var(--foreground-secondary);
 
   --primary: var(--gold-base);
@@ -297,8 +334,8 @@
   --chart-negative: var(--red-base);
   --chart-cyan: var(--cyan-base);
   --chart-violet: #9d7fe0;
-  --chart-neutral: #6e7278;
-  --chart-grid: rgba(255, 255, 255, 0.05);
+  --chart-neutral: #736e66;
+  --chart-grid: rgba(255, 246, 232, 0.055);
   --chart-glow: rgba(217, 166, 77, 0.14);
 
   --ring: rgba(217, 166, 77, 0.45);
@@ -310,8 +347,8 @@
   --gold-muted: rgba(217, 166, 77, 0.12);
   --gold-border: rgba(217, 166, 77, 0.26);
   --nav-active-gold: var(--gold-base);
-  --banner-fill: #111214;
-  --banner-edge: #090909;
+  --banner-fill: #161513;
+  --banner-edge: #0c0b0a;
 
   color-scheme: dark;
 }
@@ -319,7 +356,17 @@
 body {
   font-family: var(--font-sans);
   background-color: var(--background);
-  background-image: none;
+  /*
+    Le dégradé ne couvre que la première hauteur de fenêtre et ne se répète
+    pas : au-delà, l'aplat de `--background` prend le relais. Comme le dégradé
+    s'éteint sur cette même couleur avant sa moitié, la jonction n'existe pas.
+    `scroll` plutôt que `fixed` : un fond ancré à la fenêtre scintille au
+    défilement sur mobile, pour un effet que personne ne cherchait.
+  */
+  background-image: var(--background-gradient);
+  background-repeat: no-repeat;
+  background-size: 100% 100vh;
+  background-attachment: scroll;
   color: var(--foreground);
   min-height: 100vh;
   max-width: 100%;

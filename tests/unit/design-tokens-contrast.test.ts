@@ -145,12 +145,55 @@ describe("design system — contraste des tokens", () => {
     }
   });
 
-  it("le thème sombre applique bien les surfaces du mockup", () => {
-    // Verrou anti-dérive : ces trois valeurs sont la référence visuelle
-    // validée. Les changer doit être un acte conscient, pas un effet de bord.
-    expect(resolveToken(DARK, "--background")).toBe("#090909");
-    expect(resolveToken(DARK, "--surface")).toBe("#111214");
-    expect(resolveToken(DARK, "--foreground")).toBe("#f3f2f0");
+  it("le thème sombre applique bien ses surfaces de référence", () => {
+    /*
+      Verrou anti-dérive : ces valeurs sont la référence visuelle validée.
+      Les changer doit être un acte conscient, pas un effet de bord.
+
+      Elles ont été révisées une fois, délibérément : le noir bleuté du mockup
+      (#090909 / #111214 / #f3f2f0) est devenu un graphite chaud, l'or de la
+      marque y paraissant moins jaune et l'écran moins dur à la longue. L'or
+      lui-même n'a pas bougé — c'est l'accent, pas la surface.
+    */
+    expect(resolveToken(DARK, "--background")).toBe("#0c0b0a");
+    expect(resolveToken(DARK, "--surface")).toBe("#161513");
+    expect(resolveToken(DARK, "--foreground")).toBe("#ece9e3");
     expect(resolveToken(DARK, "--gold-base")).toBe("#d9a64d");
+  });
+
+  it("le thème clair applique bien ses surfaces de référence", () => {
+    // Même verrou côté clair, où l'ivoire remplace le blanc pur : celui-ci
+    // reste employé, mais comme sommet de la pile (modales, menus).
+    expect(resolveToken(LIGHT, "--background")).toBe("#f4f2ed");
+    expect(resolveToken(LIGHT, "--surface")).toBe("#fcfbf8");
+    expect(resolveToken(LIGHT, "--surface-raised")).toBe("#ffffff");
+    expect(resolveToken(LIGHT, "--foreground")).toBe("#14161a");
+  });
+
+  it("chaque niveau de surface se distingue du précédent sans sa bordure", () => {
+    /*
+      La hiérarchie de profondeur ne doit pas reposer entièrement sur les
+      traits : une carte survolée dont la bordure s'éclaircit doit rester une
+      carte. Le seuil est bas — il s'agit de nuances, pas de contraste — mais
+      un écart nul signifierait deux niveaux confondus.
+    */
+    const MIN_STEP = 1.02;
+    for (const [theme, scope] of [
+      ["clair", LIGHT],
+      ["sombre", DARK],
+    ] as const) {
+      const steps: [string, string][] = [
+        ["--surface-sunken", "--background"],
+        ["--background", "--surface"],
+        ["--surface", "--surface-raised"],
+      ];
+      for (const [lower, upper] of steps) {
+        const ratio = contrast(resolveToken(scope, lower), resolveToken(scope, upper));
+        expect(
+          ratio,
+          `${theme} : ${lower} et ${upper} = ${ratio.toFixed(3)}:1`
+        ).toBeGreaterThanOrEqual(MIN_STEP);
+      }
+    }
   });
 });
