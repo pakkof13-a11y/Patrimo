@@ -3,45 +3,16 @@
 import { cn } from "@/app/lib/utils";
 
 /**
- * Shell métier transverse — Transactions, ES, Alternatifs, Passifs, Fiscalité.
- * Pattern : en-tête → KPI optionnels → barre d’outils / form → corps (table / empty).
+ * Ce qu'il reste du shell de module : la carte, son bandeau, sa bande
+ * d'indicateurs et les deux classes de table.
+ *
+ * Employé par le journal des Transactions, la gestion de l'Épargne salariale
+ * et `alternatives-shell`, qui le relaie aux cinq écrans Alternatifs. Ce n'est
+ * plus un patron d'écran complet : l'en-tête de page et la tuile d'indicateur
+ * qu'il portait ont disparu avec le dernier écran qui les employait, les
+ * modules refondus écrivant leur en-tête en clair et passant par
+ * `ui/kpi-tiles`.
  */
-
-export function ModulePageHeader({
-  title,
-  subtitle,
-  actions,
-  className,
-  testId,
-}: {
-  title: React.ReactNode;
-  subtitle?: React.ReactNode;
-  actions?: React.ReactNode;
-  className?: string;
-  testId?: string;
-}) {
-  return (
-    <header
-      className={cn(
-        "module-page-header flex flex-wrap items-start justify-between gap-3",
-        className
-      )}
-      data-testid={testId}
-    >
-      <div className="min-w-0 max-w-2xl">
-        <h2 className="text-base font-semibold tracking-tight leading-snug text-[var(--foreground)]">
-          {title}
-        </h2>
-        {subtitle != null && subtitle !== "" ? (
-          <div className="module-intro text-meta">{subtitle}</div>
-        ) : null}
-      </div>
-      {actions ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
-      ) : null}
-    </header>
-  );
-}
 
 /** Carte module (journal, liste crédits, détail enveloppes…). */
 export function ModuleCard({
@@ -90,43 +61,6 @@ export function ModuleCardHeader({
       </div>
       {actions ? (
         <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
-      ) : null}
-    </div>
-  );
-}
-
-/** KPI synthèse (grille 2–4). */
-export function ModuleKpi({
-  label,
-  value,
-  hint,
-  tip,
-  valueClassName,
-  className,
-}: {
-  label: React.ReactNode;
-  value: React.ReactNode;
-  hint?: React.ReactNode;
-  tip?: React.ReactNode;
-  valueClassName?: string;
-  className?: string;
-}) {
-  return (
-    <div className={cn("card p-3.5 sm:p-4", className)}>
-      <div className="text-label flex items-center gap-1 normal-case tracking-wide">
-        {label}
-        {tip}
-      </div>
-      <div
-        className={cn(
-          "kpi-value mt-1 text-xl tracking-tight sm:text-2xl",
-          valueClassName
-        )}
-      >
-        {value}
-      </div>
-      {hint != null && hint !== "" ? (
-        <div className="text-meta mt-1 leading-snug">{hint}</div>
       ) : null}
     </div>
   );
