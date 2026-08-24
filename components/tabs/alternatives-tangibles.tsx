@@ -70,6 +70,7 @@ import {
   AltField,
   AltMiniKpi,
   AltModuleShell,
+  pnlTone,
 } from "@/components/tabs/alternatives-shell";
 import { moduleTableHeadClass } from "@/components/ui/module-shell";
 import {
@@ -596,7 +597,7 @@ export function AlternativesTangibles({
           <AltMiniKpi
             label="Plus-value latente"
             value={formatCurrency(summary?.totalPnl ?? "0", baseCurrency)}
-            tone={Number(summary?.totalPnl ?? 0)}
+            tone={pnlTone(Number(summary?.totalPnl ?? 0))}
             hint="Estimé − achat (calculé)"
             loading={q.isPending}
           />

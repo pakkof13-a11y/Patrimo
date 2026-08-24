@@ -26,7 +26,7 @@ import { CHART_COLORS } from "@/app/lib/types/ui";
 import { DefiPanel } from "@/components/crypto/defi-panel";
 import { NftPanel } from "@/components/crypto/nft-panel";
 import { SpotOverviewPage } from "@/components/crypto/spot-overview-page";
-import { AltDashKpi } from "@/components/tabs/alternatives-shell";
+import { AltDashKpi, pnlTone } from "@/components/tabs/alternatives-shell";
 import type { CoinCardHolding } from "@/app/lib/crypto/coin-cards";
 
 /**
@@ -253,7 +253,10 @@ export function CryptosTab({
       {/* ── Vue d'ensemble ── */}
       {sub === "DASHBOARD" && (
         <section className="space-y-4" data-testid="crypto-dashboard">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div
+            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+            data-testid="crypto-dashboard-kpis"
+          >
             <AltDashKpi
               label="Comptant"
               value={formatCurrency(String(spot), baseCurrency)}
@@ -263,6 +266,7 @@ export function CryptosTab({
                   : "Exchange et self-custody — non renseigné"
               }
               onClick={() => onSubChange("SPOT")}
+              loading={q.isPending}
             />
             <AltDashKpi
               label="DeFi (net)"
@@ -273,6 +277,7 @@ export function CryptosTab({
                   : "Staking, pools, prêts — non renseigné"
               }
               onClick={() => onSubChange("DEFI")}
+              loading={q.isPending}
             />
             <AltDashKpi
               label="NFTs (floor)"
@@ -283,12 +288,14 @@ export function CryptosTab({
                   : "Collections — non renseigné"
               }
               onClick={() => onSubChange("NFT")}
+              loading={q.isPending}
             />
             <AltDashKpi
               label="P&L latent"
               value={formatCurrency(String(pnl), baseCurrency)}
               hint={`${data?.walletCount ?? 0} wallet(s) connecté(s)`}
-              tone={pnl}
+              tone={pnlTone(pnl)}
+              loading={q.isPending}
             />
           </div>
 

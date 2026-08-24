@@ -15,6 +15,7 @@ import {
   AltFormSection,
   AltMiniKpi,
   AltModuleShell,
+  pnlTone,
 } from "@/components/tabs/alternatives-shell";
 import { moduleTableHeadClass } from "@/components/ui/module-shell";
 import {
@@ -435,7 +436,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
           <AltMiniKpi
             label="P&L latent"
             value={formatCurrency(summary?.totalPnl ?? "0", baseCurrency)}
-            tone={Number(summary?.totalPnl ?? 0)}
+            tone={pnlTone(Number(summary?.totalPnl ?? 0))}
             loading={q.isPending}
           />
           <AltMiniKpi

@@ -25,6 +25,7 @@ import {
   AltFormSection,
   AltMiniKpi,
   AltModuleShell,
+  pnlTone,
 } from "@/components/tabs/alternatives-shell";
 import { moduleTableHeadClass } from "@/components/ui/module-shell";
 
@@ -375,7 +376,7 @@ export function AlternativesPrivateEquity({
               baseCurrency
             )}
             hint={`P&L latent : ${formatCurrency(summary?.totalPnl || "0", baseCurrency)}`}
-            tone={Number(summary?.totalPnl || 0)}
+            tone={pnlTone(Number(summary?.totalPnl || 0))}
             loading={q.isPending}
           />
         </>

@@ -9,7 +9,7 @@ import {
   ModuleCardHeader,
   ModuleKpiStrip,
 } from "@/components/ui/module-shell";
-import { cn, getChangeColor } from "@/app/lib/utils";
+import { cn } from "@/app/lib/utils";
 
 /**
  * Shell UX partagé pour la section Actifs alternatifs.
@@ -187,6 +187,20 @@ export function AltEmptyState({
 }
 
 /**
+ * Le sens d'un P&L, pas sa valeur.
+ *
+ * Un résultat latent n'est ni positif ni négatif par nature : c'est son signe
+ * qui l'est, et zéro n'est ni l'un ni l'autre. La même fonction existe dans
+ * Trading depuis la factorisation des KPI ; les deux tiennent en trois lignes
+ * et vivent chacune près de leurs appelants plutôt que dans un utilitaire
+ * commun que personne n'irait chercher.
+ */
+export function pnlTone(v: number | null | undefined) {
+  if (v == null || v === 0) return undefined;
+  return v > 0 ? ("positive" as const) : ("negative" as const);
+}
+
+/**
  * Tuile d'une bande d'indicateurs de famille.
  *
  * ## L'état de chargement
@@ -216,7 +230,15 @@ export function AltMiniKpi({
   label: React.ReactNode;
   value: string;
   hint?: string;
-  tone?: number;
+  /**
+   * Le sens de la valeur, pas sa valeur.
+   *
+   * L'appelant calcule le signe — il sait ce que son nombre veut dire — et la
+   * tuile ne fait que le rendre. Elle recevait auparavant le montant lui-même
+   * et en déduisait la couleur, ce qui la rendait comptable d'une décision
+   * qui ne la regarde pas.
+   */
+  tone?: "positive" | "negative";
   tip?: React.ReactNode;
   loading?: boolean;
 }) {
@@ -243,7 +265,8 @@ export function AltMiniKpi({
         <div
           className={cn(
             "mt-0.5 text-sm font-semibold tabular-nums tracking-tight",
-            tone != null && tone !== 0 && getChangeColor(String(tone))
+            tone === "positive" && "val-positive",
+            tone === "negative" && "val-negative"
           )}
         >
           {value}
@@ -272,44 +295,70 @@ export function AltMiniKpi({
   );
 }
 
+/**
+ * Tuile de tête de la vue d'ensemble Cryptos.
+ *
+ * Trois des quatre ouvrent leur sous-module et sont donc des boutons ; la
+ * quatrième porte un P&L et n'a pas de destination — elle reste une division,
+ * et le chargement ne change pas ce rôle.
+ *
+ * Le chargement y masque plus que la valeur : les précisions de cet écran
+ * sont conditionnées au montant, si bien qu'une tuile en cours de chargement
+ * annonçait à la fois un montant nul, « non renseigné » et « 0 wallet(s)
+ * connecté(s) ». La précision garde donc sa place sans être lue, comme dans
+ * `AltMiniKpi` — sa longueur varie avec son contenu, et un squelette de
+ * hauteur fixe réserverait la mauvaise.
+ */
 export function AltDashKpi({
   label,
   value,
   hint,
   tone,
   onClick,
-  active,
+  loading = false,
 }: {
   label: string;
   value: string;
   hint?: string;
-  tone?: number;
+  /** Le sens de la valeur — voir `AltMiniKpi`. */
+  tone?: "positive" | "negative";
   onClick?: () => void;
-  active?: boolean;
+  loading?: boolean;
 }) {
   const Comp = onClick ? "button" : "div";
   return (
     <Comp
       type={onClick ? "button" : undefined}
       onClick={onClick}
+      data-loading={loading ? "true" : undefined}
+      aria-busy={loading || undefined}
       className={cn(
         "card p-4 text-left transition",
         onClick &&
-          "cursor-pointer hover:border-[var(--primary)]/25 hover:bg-[var(--primary-soft)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-        active && "ring-1 ring-[var(--primary)]/35 bg-[var(--primary-soft)]"
+          "cursor-pointer hover:border-[var(--primary)]/25 hover:bg-[var(--primary-soft)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
       )}
     >
       <div className="text-label">{label}</div>
-      <div
-        className={cn(
-          "kpi-value mt-1 text-xl tracking-tight",
-          tone != null && tone !== 0 && getChangeColor(String(tone))
-        )}
-      >
-        {value}
-      </div>
+      {loading ? (
+        /*
+          Au gabarit exact de la valeur : `text-xl` à l'échelle Aurea occupe
+          28 px de hauteur de ligne. Huit pixels de moins par tuile suffisent
+          à faire remonter tout ce qui suit la bande pendant le chargement.
+        */
+        <Skeleton className="mt-1 h-7 w-28" />
+      ) : (
+        <div
+          className={cn(
+            "kpi-value mt-1 text-xl tracking-tight",
+            tone === "positive" && "val-positive",
+            tone === "negative" && "val-negative"
+          )}
+        >
+          {value}
+        </div>
+      )}
       {hint ? (
-        <div className="text-meta mt-1">{hint}</div>
+        <div className={cn("text-meta mt-1", loading && "invisible")}>{hint}</div>
       ) : null}
     </Comp>
   );
