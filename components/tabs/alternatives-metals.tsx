@@ -16,6 +16,7 @@ import {
   AltMiniKpi,
   AltModuleShell,
 } from "@/components/tabs/alternatives-shell";
+import { moduleTableHeadClass } from "@/components/ui/module-shell";
 import {
   COMMON_FINENESS,
   FORMAT_LABELS,
@@ -897,7 +898,7 @@ export function AlternativesMetals({ baseCurrency }: { baseCurrency: string }) {
                 className="table-fluid text-sm"
                 data-testid="precious-metals-table"
               >
-                <thead className="table-head text-[10px] uppercase tracking-wide text-slate-500">
+                <thead className={moduleTableHeadClass}>
                   <tr>
                     <th className="px-3 py-2.5 text-left">Dénomination</th>
                     <th className="px-3 py-2.5 text-left">Métal</th>
@@ -1330,7 +1331,7 @@ function MetalsSalesView({
       {sales.length > 0 && (
         <div className="table-container-responsive table-fluid-wrap">
           <table className="table-fluid text-sm" data-testid="metals-sales-table">
-            <thead className="table-head text-[10px] uppercase tracking-wide text-slate-500">
+            <thead className={moduleTableHeadClass}>
               <tr>
                 <th className="px-3 py-2.5 text-left">Produit</th>
                 <th className="px-3 py-2.5 text-left">Vendu le</th>

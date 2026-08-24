@@ -71,6 +71,7 @@ import {
   AltMiniKpi,
   AltModuleShell,
 } from "@/components/tabs/alternatives-shell";
+import { moduleTableHeadClass } from "@/components/ui/module-shell";
 import {
   FormWizard,
   clearWizardDraft,
@@ -1749,7 +1750,7 @@ export function AlternativesTangibles({
       ) : (
         <div className="table-container-responsive table-fluid-wrap">
           <table className="table-fluid text-sm" data-testid="tangibles-table">
-            <thead className="table-head text-[10px] uppercase tracking-wide text-slate-500">
+            <thead className={moduleTableHeadClass}>
               <tr>
                 <th className="px-3 py-2.5 text-left">Catégorie</th>
                 <th className="px-3 py-2.5 text-left">Désignation</th>
