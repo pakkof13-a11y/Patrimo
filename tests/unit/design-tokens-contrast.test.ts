@@ -150,13 +150,14 @@ describe("design system — contraste des tokens", () => {
       Verrou anti-dérive : ces valeurs sont la référence visuelle validée.
       Les changer doit être un acte conscient, pas un effet de bord.
 
-      Elles ont été révisées une fois, délibérément : le noir bleuté du mockup
-      (#090909 / #111214 / #f3f2f0) est devenu un graphite chaud, l'or de la
-      marque y paraissant moins jaune et l'écran moins dur à la longue. L'or
-      lui-même n'a pas bougé — c'est l'accent, pas la surface.
+      Elles ont été révisées deux fois, délibérément. Le noir bleuté du mockup
+      (#090909 / #111214) est d'abord devenu un graphite chaud, puis ce
+      midnight graphite : le fond remonte de quatre niveaux et se décale d'un
+      souffle vers l'indigo, pour que les cartes cessent de s'en découper.
+      L'or, lui, n'a jamais bougé — c'est l'accent, pas la surface.
     */
-    expect(resolveToken(DARK, "--background")).toBe("#0c0b0a");
-    expect(resolveToken(DARK, "--surface")).toBe("#161513");
+    expect(resolveToken(DARK, "--background")).toBe("#11131b");
+    expect(resolveToken(DARK, "--surface")).toBe("#15161c");
     expect(resolveToken(DARK, "--foreground")).toBe("#ece9e3");
     expect(resolveToken(DARK, "--gold-base")).toBe("#d9a64d");
   });

@@ -262,11 +262,10 @@
  * ─────────────────────────────────────────────────────────────────────────
  */
 .dark {
-  /* Trait légèrement chaud, comme les surfaces qu'il délimite : un blanc pur
-     sur un graphite chaud se voit comme un liseré bleuté. */
-  --border: rgba(255, 246, 232, 0.065);
-  --border-strong: rgba(255, 246, 232, 0.135);
-  --border-subtle: rgba(255, 246, 232, 0.038);
+  /* Trait à peine plus froid que blanc, comme les surfaces qu'il délimite. */
+  --border: rgba(232, 238, 255, 0.07);
+  --border-strong: rgba(232, 238, 255, 0.14);
+  --border-subtle: rgba(232, 238, 255, 0.04);
 
   /* Sur fond noir, une ombre portée ne se voit pas : la profondeur passe
      entièrement par la bordure et le niveau de surface. */
@@ -278,33 +277,42 @@
   --shadow-lift: 0 6px 20px rgba(0, 0, 0, 0.5);
 
   /*
-    Graphite chaud plutôt que noir bleuté.
+    Midnight graphite — noir profond très légèrement indigo.
 
-    Les surfaces d'avant tiraient au bleu (#111214 : bleu > rouge) sur un fond
-    presque pur noir. Deux défauts s'additionnaient : l'or de la marque y
-    paraissait plus jaune qu'il n'est, et l'écran devenait dur dès qu'il était
-    regardé longtemps. Les niveaux sont redéclinés vers le brun très sombre,
-    et l'écart entre eux légèrement creusé — les surfaces se distinguent
-    maintenant sans dépendre entièrement de leur bordure.
+    Deux passes ont mené ici. La première a quitté le noir presque pur du
+    mockup ; elle l'a fait vers le brun, ce qui adoucissait la matière mais
+    laissait le fond trop proche du noir : chaque carte s'en détachait comme
+    une découpe. La seconde remonte le fond de quatre niveaux et le décale
+    d'un souffle vers l'indigo.
+
+    Ce qui compte n'est pas la teinte mais l'écart : de fond à carte, le
+    rapport passe de 1,078 à 1,027. Les surfaces se distinguent encore —
+    aucun palier n'est confondu — mais elles cessent de se découper. L'or de
+    la marque, lui, ne bouge pas : il reste le seul accent.
+
+    Le bleu s'arrête là où il commencerait à se voir. #11131b tient six
+    points de bleu au-dessus du rouge, assez pour refroidir la matière, trop
+    peu pour lire comme une interface bleue. La variante #11151f, essayée,
+    ramenait l'écart fond/carte à 1,011 : deux paliers qui se confondent.
   */
-  --background: #0c0b0a;
+  --background: #11131b;
   /*
-    Même geste qu'en clair : une remontée de quelques niveaux vers le haut de
-    la fenêtre, éteinte avant la moitié. Le noir plat lisait comme un trou ;
-    ceci lui donne un fond.
+    Même geste que dans le thème clair : une remontée de quelques niveaux vers
+    le haut de la fenêtre, éteinte avant la moitié sur la couleur de fond.
+    Aucun halo, aucune tache colorée — six niveaux de clarté, pas davantage.
   */
-  --background-gradient: linear-gradient(180deg, #131110 0%, #0c0b0a 46%);
-  --surface: #161513;
-  --surface-raised: #1c1b18;
-  --surface-sunken: #100f0e;
-  --surface-hover: #1c1b18;
+  --background-gradient: linear-gradient(180deg, #171a25 0%, #11131b 46%);
+  --surface: #15161c;
+  --surface-raised: #181920;
+  --surface-sunken: #0e1017;
+  --surface-hover: #1c1d25;
   --card: var(--surface);
   --elevated: var(--surface-raised);
   --muted: var(--surface-raised);
-  --input-bg: #100f0e;
-  --table-head: #181715;
-  --header-bg: rgba(12, 11, 10, 0.88);
-  --ticker-bg: #0f0e0d;
+  --input-bg: #0e1017;
+  --table-head: #16181f;
+  --header-bg: rgba(17, 19, 27, 0.88);
+  --ticker-bg: #101219;
 
   /* Encre adoucie d'un cran — 15:1 sur la carte reste très au-dessus du
      seuil, et le blanc pur cesse de vibrer sur le graphite. */
@@ -335,7 +343,7 @@
   --chart-cyan: var(--cyan-base);
   --chart-violet: #9d7fe0;
   --chart-neutral: #736e66;
-  --chart-grid: rgba(255, 246, 232, 0.055);
+  --chart-grid: rgba(232, 238, 255, 0.06);
   --chart-glow: rgba(217, 166, 77, 0.14);
 
   --ring: rgba(217, 166, 77, 0.45);
@@ -347,8 +355,8 @@
   --gold-muted: rgba(217, 166, 77, 0.12);
   --gold-border: rgba(217, 166, 77, 0.26);
   --nav-active-gold: var(--gold-base);
-  --banner-fill: #161513;
-  --banner-edge: #0c0b0a;
+  --banner-fill: #15161c;
+  --banner-edge: #11131b;
 
   color-scheme: dark;
 }
