@@ -1285,6 +1285,65 @@ export async function seedUserPortfolio(
   }
 
   /*
+    Fiche des véhicules immobiliers indirects.
+
+    Le raisonnement ci-dessus — une SCPI n'a ni étage ni taxe foncière, lui
+    inventer une adresse serait faux — est juste, et il ne dit rien de la table
+    faite pour elle. `IndirectRealEstateDetail` ne demande aucune adresse : elle
+    porte la société de gestion, le taux de distribution, l'endettement du
+    véhicule et la part imposable à l'IFI.
+
+    Sans elle, deux SCPI comptaient 25 240 € au patrimoine sans apparaître dans
+    aucun onglet du module Immobilier, et échappaient à l'assiette IFI alors
+    qu'une part de SCPI y est assujettie comme un bien détenu en direct.
+
+    Cette fiche ne porte aucune valeur : la valorisation reste celle de la
+    position au journal, exactement comme le fait `createIndirectHolding()`
+    quand un utilisateur souscrit depuis l'onglet SCPI.
+  */
+  const INDIRECT_VEHICLES_SEED: Record<
+    string,
+    { manager: string; distributionRatePct: string; debtRatioPct: string }
+  > = {
+    "SCPI Primovie": {
+      manager: "Primonial REIM",
+      distributionRatePct: "4.52",
+      debtRatioPct: "18.400",
+    },
+    "SCPI Épargne Pierre": {
+      manager: "Atland Voisin",
+      distributionRatePct: "5.28",
+      debtRatioPct: "12.100",
+    },
+  };
+
+  const indirectProperties = await prisma.asset.findMany({
+    where: { userId, accountType: "IMMOBILIER", category: "SCPI" },
+    select: { id: true, name: true },
+  });
+
+  for (const a of indirectProperties) {
+    const preset = INDIRECT_VEHICLES_SEED[a.name];
+    if (!preset) continue;
+    await prisma.indirectRealEstateDetail.create({
+      data: {
+        assetId: a.id,
+        vehicle: "SCPI",
+        manager: preset.manager,
+        distributionRatePct: D(preset.distributionRatePct),
+        debtRatioPct: D(preset.debtRatioPct),
+        // Une SCPI de rendement classique est immobilière à 100 % : toute la
+        // part entre dans l'assiette IFI (art. 965 2°).
+        realEstateSharePct: D("100"),
+        // Société de personnes : les revenus sont imposés chez l'associé.
+        taxTransparency: "IR",
+        ifiExcluded: false,
+        notes: "[Admin seed] Véhicule immobilier indirect",
+      },
+    });
+  }
+
+  /*
     Rattachement des supports aux contrats.
 
     Sans lui, les trois lignes AV du journal restent orphelines : elles

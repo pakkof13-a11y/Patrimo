@@ -140,6 +140,56 @@ test.describe("Cohérence tableau de bord ↔ modules", () => {
     });
   });
 
+  test("Immobilier : une SCPI détenue figure dans le module et dans l'IFI", async ({
+    request,
+  }) => {
+    /*
+      Le test précédent compare deux totaux ; celui-ci nomme ce qui manquait.
+      Une part de SCPI est de l'immobilier détenu indirectement : elle compte au
+      patrimoine par le journal, elle doit se voir dans l'onglet « SCPI &
+      sociétés », et elle est imposable à l'IFI comme un bien détenu en direct.
+    */
+    const [bundle, indirect, tax] = await Promise.all([
+      getJson(request, "/api/holdings"),
+      getJson(request, "/api/real-estate/indirect"),
+      getJson(request, "/api/real-estate/tax"),
+    ]);
+
+    const scpiHoldings = (bundle.holdings ?? []).filter(
+      (h: { accountType: string; category: string | null }) =>
+        h.accountType === "IMMOBILIER" && h.category === "SCPI"
+    );
+
+    // Sans SCPI détenue, le scénario n'est pas couvert — on le dit plutôt que
+    // de laisser un test vert prouver le vide.
+    expect(
+      scpiHoldings.length,
+      "Aucune position SCPI au portefeuille : ce scénario n'est plus couvert par les données."
+    ).toBeGreaterThan(0);
+
+    const vehicules = indirect.vehicles ?? [];
+    const parAsset = new Set(vehicules.map((v: { assetId: string }) => v.assetId));
+
+    for (const h of scpiHoldings as Array<{ assetId: string; name: string }>) {
+      expect(
+        parAsset.has(h.assetId),
+        `« ${h.name} » compte au patrimoine immobilier mais n'apparaît dans aucun ` +
+          `onglet du module Immobilier : ${vehicules.length} véhicule(s) listé(s).`
+      ).toBe(true);
+    }
+
+    // Et la même valeur doit peser dans l'assiette IFI.
+    const lignesIfi = new Set(
+      (tax.ifi?.lines ?? []).map((l: { id: string }) => l.id)
+    );
+    for (const h of scpiHoldings as Array<{ assetId: string; name: string }>) {
+      expect(
+        lignesIfi.has(h.assetId),
+        `« ${h.name} » est un actif imposable à l'IFI, absent de l'assiette.`
+      ).toBe(true);
+    }
+  });
+
   test("Assurance-vie : l'encours affiché est celui qui entre au patrimoine", async ({
     request,
   }) => {
