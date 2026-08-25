@@ -87,6 +87,7 @@ export function KpiBandTile({
       aria-busy={loading || undefined}
     >
       {loading ? (
+        // 24 px : la hauteur qu'occupe réellement la ligne du montant, mesurée.
         <Skeleton className="h-6 w-24" />
       ) : (
         <p
@@ -101,9 +102,22 @@ export function KpiBandTile({
         </p>
       )}
       <p className="text-label mt-[var(--space-1)]">{label}</p>
-      {secondary && !loading ? (
-        <p className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
-          {secondary}
+      {secondary ? (
+        /*
+          La ligne secondaire garde sa place pendant le chargement.
+
+          Elle n'était rendue qu'une fois la donnée arrivée : la tuile
+          grandissait alors d'une ligne, et toute la bande avec elle — 15 px de
+          saut sur la bande Immobilier. `invisible` réserve l'espace exact du
+          texte final plutôt qu'une hauteur devinée.
+        */
+        <p
+          className={cn(
+            "text-[length:var(--text-2xs)] text-[var(--foreground-faint)]",
+            loading && "invisible"
+          )}
+        >
+          {loading ? "—" : secondary}
         </p>
       ) : null}
       {!loading ? children : null}

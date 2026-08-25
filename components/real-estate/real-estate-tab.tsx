@@ -74,9 +74,20 @@ const pctLabel = (v: number | null | undefined, digits = 2) =>
 
 export function RealEstateTab({
   holdings,
+  holdingsLoading = false,
   className,
 }: {
   holdings: Holding[];
+  /**
+   * Le portefeuille n'est pas encore arrivé.
+   *
+   * La valeur d'un bien vient de sa position, pas de sa fiche : les deux
+   * requêtes doivent donc avoir répondu avant que la bande d'indicateurs
+   * affiche un montant. Sans cette garde, elle annonçait 0 € le temps du
+   * chargement — un zéro qui se lit comme un fait alors qu'il ne dit que
+   * l'attente.
+   */
+  holdingsLoading?: boolean;
   className?: string;
 }) {
   const [view, setView] = useState<ViewId>("overview");
@@ -154,7 +165,7 @@ export function RealEstateTab({
     [properties, selectedId]
   );
 
-  const loading = propsQ.isPending && !propsQ.data;
+  const loading = (propsQ.isPending && !propsQ.data) || holdingsLoading;
 
   /** Les vues qui listent des biens partagent la liste et le panneau. */
   const showsPropertyList =

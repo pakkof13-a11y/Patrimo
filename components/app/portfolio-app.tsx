@@ -1211,7 +1211,18 @@ function PortfolioAppClient({
               panneau au-dessus du tableau.
             */}
             {tab === "immobilier" && (
-              <RealEstateTab holdings={allHoldings} className="mb-3" />
+              <RealEstateTab
+                holdings={allHoldings}
+                /*
+                  La valeur des biens vient des positions, pas de la fiche :
+                  sans cette garde, la bande d'indicateurs affichait 0 € le
+                  temps que le portefeuille arrive. Même formule qu'au-dessus,
+                  et même raison — une donnée qui n'est pas encore là ne vaut
+                  pas zéro.
+                */
+                holdingsLoading={holdingsQ.isPending && !holdingsQ.data}
+                className="mb-3"
+              />
             )}
 
             {tab === "securities" && <SecuritiesPage className="mb-3" />}
