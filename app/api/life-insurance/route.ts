@@ -6,7 +6,6 @@ import {
   lifeInsuranceSchema,
   lifeInsuranceTaxProfileSchema,
   lifeInsuranceUpdateSchema,
-  lifeProductSchema,
   lifeProductUpdateSchema,
 } from "@/app/lib/schemas";
 import {
@@ -38,12 +37,19 @@ export async function GET() {
   ]);
 
   /**
-   * Encours d'un contrat = supports du journal + reliquat de l'ancienne saisie.
+   * Encours d'un contrat = ses supports du journal. Rien d'autre.
    *
-   * `listLifeInsurances` ne connaît que les champs historiques (`cashEuro` et
-   * `products`), remis à zéro par la migration vers le journal. Sans cet ajout,
-   * un contrat portant 156 000 € de supports s'affichait « Encours 0 € », et
-   * chaque onglet rattrapait le chiffre de son côté.
+   * `listLifeInsurances` ne connaît que les champs historiques — `cashEuro` et
+   * `products` — que la migration vers le journal doit reprendre. Les ignorer
+   * affichait « Encours 0 € » sur un contrat portant 156 000 € de supports ;
+   * les additionner faisait diverger le module du patrimoine de 37 800 €, le
+   * patrimoine ne comptant que le journal. Aucune des deux n'était juste.
+   *
+   * Le journal fait foi, et ce qui l'attend est annoncé à part : le reliquat
+   * garde sa propre grandeur, `legacyOutstandingEur`, pour que l'écran puisse
+   * le nommer. Le fondre dans l'encours le rendrait invisible ; le taire
+   * ferait disparaître de l'argent réel — le script de migration classe ces
+   * montants « supports à migrer », jamais « doublons ».
    */
   const supportsByContract = new Map<string, ReturnType<typeof d>>();
   for (const s of supports) {
@@ -56,15 +62,19 @@ export async function GET() {
   }
   const policies = legacyPolicies.map((p) => ({
     ...p,
-    outstandingEur: d(p.outstandingEur)
-      .plus(supportsByContract.get(p.id) ?? d(0))
-      .toFixed(8),
+    outstandingEur: (supportsByContract.get(p.id) ?? d(0)).toFixed(8),
+    /** Saisie d'avant le journal, en attente de reprise. Hors encours. */
+    legacyOutstandingEur: d(p.outstandingEur).toFixed(8),
   }));
   const taxHousehold: TaxHousehold = isTaxHousehold(user?.taxHousehold)
     ? user!.taxHousehold
     : "SINGLE";
   const totalOutstandingEur = totalLifeInsuranceOutstandingEur(
     policies.map((p) => p.outstandingEur)
+  );
+  /** Ce que la migration vers le journal doit encore reprendre. */
+  const totalLegacyOutstandingEur = totalLifeInsuranceOutstandingEur(
+    policies.map((p) => p.legacyOutstandingEur)
   );
   // Le seuil fiscal de 150 000 € porte sur les PRIMES VERSÉES, jamais sur
   // l'encours : sinon la performance des marchés changerait le taux
@@ -79,6 +89,7 @@ export async function GET() {
     policies,
     taxHousehold,
     totalOutstandingEur,
+    totalLegacyOutstandingEur,
     totalPremiumsBefore2017Eur,
     totalPremiumsAfter2017Eur,
     exceedsPfuThreshold: exceedsPfuOutstandingThreshold(
@@ -92,26 +103,27 @@ export async function POST(req: Request) {
   if (!userId) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 401 });
   const body = await req.json();
 
-  // Product line under an existing policy
+  /*
+    Les lignes `LifeInsuranceProduct` précèdent le journal.
+
+    Un support d'assurance-vie est désormais une position comme une autre —
+    actif, transaction, valorisation — et c'est `POST /api/life-insurance/supports`
+    qui l'écrit. En créer une ici ajouterait un montant que le patrimoine ne
+    compte pas : la divergence même que ce chantier corrige, recréée à volonté.
+
+    Les lignes existantes restent lisibles et modifiables, et la migration sait
+    les reprendre. Seule la création est fermée.
+  */
   if (body?.kind === "product") {
-    const parsed = lifeProductSchema.safeParse(body);
-    if (!parsed.success) {
-      return validationErrorResponse(parsed.error);
-    }
-    const parent = await prisma.lifeInsurance.findFirst({
-      where: { id: parsed.data.lifeInsuranceId, userId },
-    });
-    if (!parent) return NextResponse.json({ error: "Contrat introuvable" }, { status: 404 });
-    const product = await prisma.lifeInsuranceProduct.create({
-      data: {
-        lifeInsuranceId: parsed.data.lifeInsuranceId,
-        name: parsed.data.name,
-        currentValue: new Prisma.Decimal(parsed.data.currentValue || "0"),
-        currency: (parsed.data.currency || "EUR").toUpperCase(),
-        notes: parsed.data.notes || null,
+    return NextResponse.json(
+      {
+        error:
+          "Les supports d'assurance-vie sont désormais des positions du journal. " +
+          "Ajoutez ce support depuis la gestion du contrat pour qu'il compte " +
+          "dans le patrimoine.",
       },
-    });
-    return NextResponse.json({ product }, { status: 201 });
+      { status: 409 }
+    );
   }
 
   const parsed = lifeInsuranceSchema.safeParse(body);
@@ -131,7 +143,13 @@ export async function POST(req: Request) {
       userId,
       insurer: parsed.data.insurer,
       openDate: parsed.data.openDate ? new Date(parsed.data.openDate) : null,
-      cashEuro: new Prisma.Decimal(parsed.data.cashEuro || "0"),
+      /*
+        Le fonds euro d'un contrat est un support du journal, pas un champ du
+        contrat. On accepte encore la clé pour ne pas casser les appelants — les
+        deux écrans envoient « 0 » — mais on n'écrit jamais autre chose que
+        zéro : une valeur non nulle créerait un montant hors patrimoine.
+      */
+      cashEuro: new Prisma.Decimal(0),
       currency: (parsed.data.currency || "EUR").toUpperCase(),
       notes: parsed.data.notes || null,
       premiumsBefore2017Eur: new Prisma.Decimal(split.premiumsBefore2017Eur),
@@ -201,7 +219,22 @@ export async function PUT(req: Request) {
   const data: Prisma.LifeInsuranceUpdateInput = {};
   if (f.insurer !== undefined) data.insurer = f.insurer;
   if (f.openDate !== undefined) data.openDate = f.openDate ? new Date(f.openDate) : null;
-  if (f.cashEuro !== undefined) data.cashEuro = new Prisma.Decimal(f.cashEuro || "0");
+  /*
+    `cashEuro` n'est plus modifiable à la hausse : seule la remise à zéro reste
+    permise, c'est ce que fait la migration une fois le montant repris au
+    journal. Refuser silencieusement induirait en erreur — on le dit.
+  */
+  if (f.cashEuro !== undefined && d(f.cashEuro || "0").gt(0)) {
+    return NextResponse.json(
+      {
+        error:
+          "Le fonds euro d'un contrat se saisit comme support au journal, " +
+          "plus comme un montant du contrat.",
+      },
+      { status: 409 }
+    );
+  }
+  if (f.cashEuro !== undefined) data.cashEuro = new Prisma.Decimal(0);
   if (f.currency !== undefined) data.currency = f.currency;
   if (f.notes !== undefined) data.notes = f.notes || null;
 

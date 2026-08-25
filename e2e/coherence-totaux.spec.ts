@@ -204,8 +204,55 @@ test.describe("Cohérence tableau de bord ↔ modules", () => {
       family: "Assurance-vie",
       dashboard,
       module: num(av.totalOutstandingEur),
-      moduleSource: `l'encours des ${(av.policies ?? []).length} contrat(s), supports du journal et reliquats compris`,
+      moduleSource: `l'encours des ${(av.policies ?? []).length} contrat(s)`,
     });
+  });
+
+  test("Assurance-vie : les reliquats hérités sont nommés, jamais fondus dans l'encours", async ({
+    request,
+  }) => {
+    /*
+      Les anciens champs `cashEuro` et `LifeInsuranceProduct` portent de l'argent
+      réel tant que la migration vers le journal n'a pas été lancée — le script
+      les classe « supports à migrer », pas « doublons ». Les additionner à
+      l'encours faisait diverger le module du patrimoine de 37 800 €.
+
+      La règle : le journal fait foi, et ce qui l'attend est annoncé à part.
+      Les fondre dans un total les rendrait invisibles ; les taire les perdrait.
+    */
+    const av = await getJson(request, "/api/life-insurance");
+    const policies = (av.policies ?? []) as Array<{
+      outstandingEur: string;
+      legacyOutstandingEur: string;
+    }>;
+
+    expect(policies.length, "Aucun contrat d'assurance-vie").toBeGreaterThan(0);
+
+    // Le total des contrats est la somme de leurs encours — rien d'autre.
+    const somme = policies.reduce((a, p) => a + num(p.outstandingEur), 0);
+    expect(
+      somme,
+      `La somme des encours (${somme}) doit faire le total annoncé (${av.totalOutstandingEur}).`
+    ).toBeCloseTo(num(av.totalOutstandingEur), 2);
+
+    // Le reliquat existe comme grandeur propre, hors encours.
+    const reliquats = policies.reduce((a, p) => a + num(p.legacyOutstandingEur), 0);
+    expect(reliquats).toBeCloseTo(num(av.totalLegacyOutstandingEur), 2);
+    for (const p of policies) {
+      expect(num(p.outstandingEur)).not.toBeNaN();
+      expect(num(p.legacyOutstandingEur)).not.toBeNaN();
+    }
+
+    // Et les supports du journal restent bien la matière de l'encours.
+    const supports = (await getJson(request, "/api/life-insurance/supports"))
+      .supports as Array<{ currentValueEur: string; lifeInsuranceId: string | null }>;
+    const rattaches = supports
+      .filter((s) => s.lifeInsuranceId)
+      .reduce((a, s) => a + num(s.currentValueEur), 0);
+    expect(
+      rattaches,
+      "L'encours des contrats doit être celui de leurs supports au journal."
+    ).toBeCloseTo(num(av.totalOutstandingEur), 2);
   });
 
   test("Passifs : le module et le patrimoine soustraient la même dette", async ({

@@ -48,6 +48,7 @@ type Policy = {
   premiumsAfter2017Eur?: string;
   premiumsTotalEur?: string;
   outstandingEur?: string;
+  legacyOutstandingEur?: string;
   products: Array<{ id: string; name: string; currentValue: string }>;
 };
 
@@ -55,6 +56,8 @@ type LifeInsuranceResponse = {
   policies: Policy[];
   taxHousehold?: TaxHousehold;
   totalOutstandingEur?: string;
+  /** Reliquats de l'ancienne saisie, hors encours. */
+  totalLegacyOutstandingEur?: string;
   /** Primes tous contrats — base du seuil de 150 k€ (pas l'encours). */
   totalPremiumsBefore2017Eur?: string;
   totalPremiumsAfter2017Eur?: string;
@@ -948,15 +951,29 @@ export function AssuranceVieManagement() {
     [supportsQ.data?.supports]
   );
 
-  /** Encours global = max(API legacy, somme des supports au marché). */
-  const totalOutstandingEur = useMemo(() => {
-    const fromSupports = supports.reduce(
-      (acc, s) => acc + (num(s.currentValueEur) ?? 0),
-      0
-    );
-    const fromApi = Number(policiesQ.data?.totalOutstandingEur ?? 0);
-    return String(Math.max(fromSupports, fromApi));
-  }, [supports, policiesQ.data?.totalOutstandingEur]);
+  /**
+   * Encours global : celui que l'API annonce, sans arbitrage local.
+   *
+   * Ce total prenait le maximum entre la somme des supports et le chiffre de
+   * l'API — un garde-fou posé quand l'API ignorait les supports et rendait
+   * « 0 € » sur un contrat qui en portait 156 000. L'API les compte depuis, et
+   * le maximum retenait alors toujours son chiffre, reliquats hérités inclus :
+   * le module annonçait 156 168 € là où le patrimoine en comptait 118 368.
+   *
+   * L'API est maintenant explicite — l'encours est celui du journal, et ce qui
+   * l'attend est rendu à part. Il n'y a plus deux candidats entre lesquels
+   * choisir, donc plus de maximum à prendre.
+   */
+  const totalOutstandingEur = useMemo(
+    () => String(Number(policiesQ.data?.totalOutstandingEur ?? 0)),
+    [policiesQ.data?.totalOutstandingEur]
+  );
+
+  /** Saisie d'avant le journal, en attente de reprise. Hors encours. */
+  const totalLegacyOutstandingEur = useMemo(
+    () => Number(policiesQ.data?.totalLegacyOutstandingEur ?? 0),
+    [policiesQ.data?.totalLegacyOutstandingEur]
+  );
 
   const newSplit = useMemo(
     () =>
@@ -1092,6 +1109,22 @@ export function AssuranceVieManagement() {
             Encours tous contrats :{" "}
             {formatCurrency(totalOutstandingEur, "EUR")}
           </p>
+          {totalLegacyOutstandingEur > 0 && (
+            /*
+              Ces montants ne sont plus fondus dans l'encours : ils précèdent le
+              journal et le patrimoine ne les compte pas. Les taire ferait
+              disparaître de l'argent réel de l'écran — on les nomme, avec le
+              moyen de les reprendre.
+            */
+            <p
+              className="text-meta mt-1 text-[var(--warning)]"
+              data-testid="av-legacy-outstanding"
+            >
+              Dont {formatCurrency(String(totalLegacyOutstandingEur), "EUR")}{" "}
+              saisis avant le journal, à reprendre pour compter dans le
+              patrimoine.
+            </p>
+          )}
         </div>
       </section>
 
