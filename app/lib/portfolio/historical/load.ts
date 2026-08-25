@@ -16,6 +16,7 @@ import { convertToEurSync, getEurRates } from "../../market/fx";
 import { readDailyCloses } from "../../market/daily-closes";
 import { parisDayKey } from "../../dates/paris";
 import { remainingAmountAt } from "../../liabilities/amortization";
+import { isNonOwnedStatus } from "../../crypto/nft-taxonomy";
 import {
   savingsDisplayBalance,
   type PayoutFrequency,
@@ -77,6 +78,10 @@ export async function loadHistoricalInputs(
         currency: true,
         manualPrice: true,
         priceQuote: { select: { priceEur: true } },
+        // Mêmes relations que `getPortfolioBundle` : sans elles, la courbe
+        // valoriserait des positions que le patrimoine du jour écarte.
+        defiPosition: { select: { isIgnoredInPortfolio: true } },
+        nftItem: { select: { isIgnoredInPortfolio: true, status: true } },
       },
     }),
     prisma.bankAccount.findMany({ where: { userId } }),
@@ -108,6 +113,30 @@ export async function loadHistoricalInputs(
   ]);
 
   const transactions = txRows.map(mapDbTx);
+
+  /*
+    Les trois exclusions du moteur du jour, reprises à l'identique.
+
+    Les dupliquer serait un risque ; c'est pourquoi elles tiennent en un seul
+    prédicat, et que `e2e/coherence-totaux` vérifie que la fin de courbe et la
+    tuile de patrimoine portent le même chiffre — l'assertion qui a révélé
+    l'écart de 42 € d'un NFT exclu que la courbe comptait encore.
+
+    Ce que la courbe fait *avant* la décision d'exclusion reste une question
+    ouverte : marche à la date de la décision, ou rétroactivité complète. La
+    rétroactivité est retenue ici parce qu'elle est ce que fait déjà le moteur
+    du jour, et parce qu'un dernier point faux était le défaut à corriger.
+  */
+  const excludedAssetIds = new Set(
+    assets
+      .filter(
+        (a) =>
+          a.defiPosition?.isIgnoredInPortfolio ||
+          a.nftItem?.isIgnoredInPortfolio ||
+          (a.nftItem != null && isNonOwnedStatus(a.nftItem.status))
+      )
+      .map((a) => a.id)
+  );
 
   const assetClassById = new Map<string, string>();
   for (const a of assets) {
@@ -233,6 +262,7 @@ export async function loadHistoricalInputs(
   return {
     transactions,
     assetClassById,
+    excludedAssetIds,
     closes,
     cashAccounts,
     cashEvents,

@@ -84,6 +84,19 @@ export type HistoricalInputs = {
   transactions: LedgerTx[];
   /** Classe d'actif par `assetId`, pour ventiler la valeur de marché. */
   assetClassById: Map<string, string>;
+  /**
+   * Actifs écartés du patrimoine — mêmes règles que le moteur du jour.
+   *
+   * Une position DeFi/NFT explicitement exclue, ou un NFT emprunté qui devra
+   * être restitué. `getPortfolioBundle` les saute déjà ; la courbe les comptait
+   * encore, si bien que son dernier point contredisait la tuile de patrimoine
+   * qui décrit pourtant le même instant.
+   *
+   * Leurs transactions restent au journal : le décaissement d'achat a bien eu
+   * lieu, seule la contrepartie disparaît des totaux. C'est exactement ce que
+   * fait le moteur du jour — l'argent est sorti et ne revient pas.
+   */
+  excludedAssetIds: Set<string>;
   closes: DailyCloseIndex;
   cashAccounts: CashAccountRow[];
   cashEvents: CashEventRow[];
@@ -263,6 +276,8 @@ export class PortfolioValuationEngine {
     >();
     for (const pos of state.positions.values()) {
       if (pos.quantity.isZero()) continue;
+      // Écarté du patrimoine : ni valorisé, ni ventilé — comme au jour le jour.
+      if (this.inputs.excludedAssetIds.has(pos.assetId)) continue;
       const comp = componentOfAssetClass(this.inputs.assetClassById.get(pos.assetId));
       const list = positionsByComponent.get(comp);
       if (list) list.push(pos);

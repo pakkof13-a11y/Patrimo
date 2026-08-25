@@ -20,6 +20,7 @@ function inputs(over: Partial<HistoricalInputs> = {}): HistoricalInputs {
   return {
     transactions: [],
     assetClassById: new Map(),
+    excludedAssetIds: new Set(),
     closes: new Map(),
     cashAccounts: [],
     cashEvents: [],
@@ -455,5 +456,58 @@ describe("moteur de valorisation historique", () => {
     expect(acq.alternatives).toBeCloseTo(20_000, 6);
     expect(acq.externalFlows).toBeCloseTo(20_000, 6);
     expect(acq.investmentPerformance).toBeCloseTo(0, 6);
+  });
+});
+
+describe("actifs écartés du patrimoine", () => {
+  /*
+    Le moteur du jour saute trois cas : position DeFi exclue, NFT exclu, NFT
+    emprunté. La courbe les comptait encore. Le dernier point valait alors
+    838 934,90 € quand la tuile affichait 838 892,90 € — l'écart de 42 € d'un
+    NFT que l'utilisateur venait d'écarter, mesuré sur la base e2e.
+
+    Les deux moteurs décrivent le même instant : leur dernier point doit porter
+    le même chiffre, sans quoi la courbe contredit la tuile qu'elle surmonte.
+  */
+
+  const scenario = (excluded: string[]) =>
+    new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t1", "garde", "2024-01-10", 1, 1000),
+          buy("t2", "ecarte", "2024-01-10", 1, 42),
+        ],
+        assetClassById: new Map([
+          ["garde", "ACTIONS"],
+          ["ecarte", "CRYPTO"],
+        ]),
+        excludedAssetIds: new Set(excluded),
+        closes: new Map([
+          ["garde", new Map([["2024-01-10", 1000]])],
+          ["ecarte", new Map([["2024-01-10", 42]])],
+        ]),
+      })
+    ).buildSeries("2024-01-10", "2024-01-10");
+
+  it("un actif écarté ne pèse plus dans le patrimoine net", () => {
+    const avec = last(scenario([]));
+    const sans = last(scenario(["ecarte"]));
+    expect(avec.netWorth - sans.netWorth).toBeCloseTo(42, 6);
+  });
+
+  it("son achat reste au journal : l'argent est sorti et ne revient pas", () => {
+    /*
+      Même sémantique que le moteur du jour. Retirer aussi la transaction
+      ferait réapparaître les 42 € en trésorerie, c'est-à-dire inventerait un
+      remboursement qui n'a pas eu lieu.
+    */
+    const sans = last(scenario(["ecarte"]));
+    expect(sans.netWorth).toBeCloseTo(1000, 6);
+  });
+
+  it("écarter n'affecte pas les autres positions", () => {
+    const sans = last(scenario(["ecarte"]));
+    const seul = last(scenario(["ecarte", "inconnu"]));
+    expect(seul.netWorth).toBeCloseTo(sans.netWorth, 6);
   });
 });
