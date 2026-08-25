@@ -194,4 +194,91 @@ test.describe("Fiscalité", () => {
     await expect(empty).toBeVisible();
     await expect(page.getByTestId("empty-patrimony-cockpit")).toHaveCount(0);
   });
+
+  /*
+    B2 — l'audit a mesuré la confusion exacte que ces deux tests verrouillent :
+    « Loyers bruts 15 000 € » se lisait comme un encaissement alors que c'est
+    le loyer contractuel annualisé (monthlyRentEur × 12), et l'enveloppe
+    Immobilier affichait ses loyers SCPI sous « Dividendes bruts ». Le calcul
+    et la source de vérité de chaque notion sont inchangés — seul le mot
+    change, donc ces tests comparent le texte à la valeur de l'API plutôt que
+    de figer un montant.
+  */
+  test("le loyer contractuel est nommé pour ce qu'il est, jamais un encaissement", async ({
+    page,
+    request,
+  }) => {
+    await page.getByTestId("fiscal-view-realestate").click();
+    const rental = page.locator('[data-fiscal-row="rental:bare"]');
+    test.skip((await rental.count()) === 0, "Aucun bien loué nu dans le jeu de démo");
+
+    // Le sous-titre de la ligne, visible sans même ouvrir la fiche, portait
+    // la même phrase ambiguë : « X € de loyers bruts ».
+    await expect(rental).toContainText("loyer contractuel annualisé");
+    await expect(rental).not.toContainText("loyers bruts");
+
+    await rental.click();
+    const panel = page.getByTestId("fiscal-panel");
+    await expect(panel).toHaveAttribute("data-open", "true");
+
+    // Le nouveau libellé, jamais l'ancien.
+    await expect(panel).toContainText("Loyer contractuel annualisé");
+    await expect(panel).not.toContainText("Loyers bruts");
+
+    // La phrase qui distingue la base de calcul d'un encaissement.
+    await expect(panel).toContainText(/pas un montant\s+encaissé/i);
+
+    // Le montant affiché reste exactement celui que l'API annonce : seul le
+    // mot autour du chiffre a changé.
+    const tax = await request
+      .get("/api/real-estate/tax")
+      .then((r) => r.json());
+    const grossRentEur = Number(tax.rental?.bare?.grossRentEur ?? NaN);
+    expect(Number.isFinite(grossRentEur)).toBe(true);
+    await expect(panel).toContainText(
+      grossRentEur.toLocaleString("fr-FR", { minimumFractionDigits: 2 })
+    );
+  });
+
+  test("les loyers de l'enveloppe Immobilier ne sont plus appelés « Dividendes »", async ({
+    page,
+    request,
+  }) => {
+    await page.getByTestId("fiscal-view-overview").click();
+    const immoRow = page.locator('[data-fiscal-row="envelope:IMMOBILIER"]');
+    test.skip(
+      (await immoRow.count()) === 0,
+      "Aucune enveloppe Immobilier dans le jeu de démo"
+    );
+
+    await immoRow.click();
+    const panel = page.getByTestId("fiscal-panel");
+    await expect(panel).toHaveAttribute("data-open", "true");
+    await expect(panel).toContainText("Loyers bruts encaissés");
+    await expect(panel).not.toContainText("Dividendes bruts");
+
+    // Le calcul agrégé n'a pas bougé : même valeur qu'avant, sous son
+    // nouveau nom.
+    const year = new Date().getFullYear();
+    const fy = await request
+      .get(`/api/tax/fiscal-year?year=${year}`)
+      .then((r) => r.json());
+    const immo = (fy.byEnvelope ?? []).find(
+      (b: { accountType: string }) => b.accountType === "IMMOBILIER"
+    );
+    if (immo) {
+      const gross = Number(immo.dividendsGrossEur);
+      await expect(panel).toContainText(
+        gross.toLocaleString("fr-FR", { minimumFractionDigits: 2 })
+      );
+    }
+
+    // Une enveloppe titres, elle, garde son vocabulaire : rien de générique
+    // n'a été imposé aux autres enveloppes.
+    const ctoRow = page.locator('[data-fiscal-row="envelope:CTO"]');
+    if ((await ctoRow.count()) > 0) {
+      await ctoRow.click();
+      await expect(panel).toContainText("Dividendes bruts");
+    }
+  });
 });

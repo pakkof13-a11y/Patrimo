@@ -310,7 +310,10 @@ export function buildFiscalLines(
         status: best ? "ESTIMATED" : "UNAVAILABLE",
         caveat:
           "Dépend de la tranche marginale, que vous renseignez : Aurea ne la déduit pas de vos revenus.",
-        detail: `${section.count} bien${section.count > 1 ? "s" : ""} · ${Math.round(num(section.grossRentEur)).toLocaleString("fr-FR")} € de loyers bruts`,
+        // « loyers bruts » se lisait comme un encaissement ; c'est le loyer
+        // contractuel annualisé (monthlyRentEur × 12) qui sert de base au
+        // comparateur de régimes, jamais le journal. Voir RentalDetail.
+        detail: `${section.count} bien${section.count > 1 ? "s" : ""} · ${Math.round(num(section.grossRentEur)).toLocaleString("fr-FR")} € de loyer contractuel annualisé`,
       });
     }
 

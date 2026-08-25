@@ -79,6 +79,22 @@ function Block({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Le libellé du revenu encaissé dépend de l'enveloppe.
+ *
+ * `dividendsGrossEur` / `dividendsNetEur` agrègent en réalité quatre natures
+ * (dividendes, coupons, loyers, intérêts) sous un nom hérité de la première.
+ * Le calcul reste unique et agrégé — B2 ne le change pas — mais l'enveloppe
+ * connue à cet endroit (`bucket.accountType`) suffit à ne pas appeler
+ * « dividendes » les 224 € de loyers SCPI encaissés sur l'enveloppe
+ * Immobilier.
+ */
+function envelopeIncomeLabel(accountType: FiscalEnvelopeBucket["accountType"]) {
+  return accountType === "IMMOBILIER"
+    ? { gross: "Loyers bruts encaissés", net: "Loyers nets encaissés" }
+    : { gross: "Dividendes bruts", net: "Dividendes nets" };
+}
+
 function EnvelopeDetail({
   bucket,
   currency,
@@ -86,6 +102,7 @@ function EnvelopeDetail({
   bucket: FiscalEnvelopeBucket;
   currency: string;
 }) {
+  const income = envelopeIncomeLabel(bucket.accountType);
   return (
     <>
       <SectionTitle>Opérations de l&apos;année</SectionTitle>
@@ -97,11 +114,11 @@ function EnvelopeDetail({
         />
         <Fact label="Ventes" value={bucket.sellCount || "—"} />
         <Fact
-          label="Dividendes bruts"
+          label={income.gross}
           value={formatCurrency(String(bucket.dividendsGrossEur), currency)}
         />
         <Fact
-          label="Dividendes nets"
+          label={income.net}
           value={formatCurrency(String(bucket.dividendsNetEur), currency)}
           tone="positive"
         />
@@ -208,10 +225,10 @@ function RentalDetail({
 }) {
   return (
     <>
-      <SectionTitle>Revenus</SectionTitle>
+      <SectionTitle>Base de calcul</SectionTitle>
       <Block>
         <Fact
-          label="Loyers bruts"
+          label="Loyer contractuel annualisé"
           value={formatCurrency(section.grossRentEur, currency)}
         />
         <Fact
@@ -219,6 +236,18 @@ function RentalDetail({
           value={formatCurrency(section.deductibleChargesEur, currency)}
         />
       </Block>
+      {/*
+        L'audit B2 a mesuré la confusion exacte que cette phrase corrige : ce
+        montant vient de `monthlyRentEur × 12`, pas du journal — un lecteur
+        pressé lisait « Loyers bruts 15 000 € » comme un encaissement. Le
+        calcul et sa raison d'être (arbitrer micro-foncier / réel sur une
+        année pleine, jamais sur un encaissement partiel) restent inchangés ;
+        seule la phrase qui l'accompagne change.
+      */}
+      <p className="text-meta mt-[var(--space-3)]">
+        Base annualisée issue du loyer déclaré sur le bien — pas un montant
+        encaissé. Elle sert à comparer les régimes sur une année pleine.
+      </p>
 
       {/*
         L'arbitrage est la vraie information : deux régimes, deux impôts, et
