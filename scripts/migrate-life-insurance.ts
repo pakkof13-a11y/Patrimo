@@ -95,21 +95,29 @@ async function main(): Promise<void> {
           console.log(`    à migrer : ${t.name} — ${eur(t.valueEur)}`);
         }
       }
+      /*
+        Ces trois blocs valent pour le compte entier, pas pour le dernier
+        contrat affiché — `ledgerOnly` est ce qu'aucun contrat n'a revendiqué,
+        et les deux totaux sont ceux de tous les contrats réunis. Ils étaient
+        indentés comme les lignes de contrat, si bien que la liste « déjà au
+        journal » semblait appartenir au contrat du dessus. C'est précisément
+        la lecture qu'un opérateur fait juste avant de lancer `--apply`.
+      */
       if (audit.ledgerOnly.length > 0) {
-        console.log("    déjà au journal (rien à faire) :");
+        console.log("\n  Positions AV déjà au journal, tous contrats confondus :");
         for (const l of audit.ledgerOnly) {
-          console.log(`      · ${l.name} — ${eur(l.marketValueEur)}`);
+          console.log(`    · ${l.name} — ${eur(l.marketValueEur)}`);
         }
       }
-      console.log(`    doublons à retirer : ${eur(audit.doubleCountedEur)}`);
-      console.log(`    supports à migrer  : ${eur(audit.toMigrateEur)}`);
+      console.log(`\n  Total du compte — doublons à retirer : ${eur(audit.doubleCountedEur)}`);
+      console.log(`  Total du compte — supports à migrer  : ${eur(audit.toMigrateEur)}`);
 
       const res = await migrateLifeInsuranceToLedger(u.id, { dryRun: !apply });
       console.log(
-        `    → ${apply ? "créé" : "créerait"} ${res.created} position(s), ` +
+        `  → ${apply ? "créé" : "créerait"} ${res.created} position(s), ` +
           `${apply ? "retiré" : "retirerait"} ${res.duplicatesRemoved} doublon(s)`
       );
-      for (const e of res.errors) console.log(`    ✗ ${e}`);
+      for (const e of res.errors) console.log(`  ✗ ${e}`);
     }
 
     if (!apply) {
