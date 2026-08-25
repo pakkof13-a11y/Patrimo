@@ -166,15 +166,17 @@ export function applyTransaction(
     case "COUPON":
     case "LOYER":
     case "INTERET": {
-      // Cash income net de WHT (prélèvement source) et frais courtier
-      const grossEur = toEur(cashAmountOriginal(tx), tx.fxRateToEur);
-      let whtEur = d(0);
-      if (tx.withholdingTaxEur != null && !d(tx.withholdingTaxEur).isZero()) {
-        whtEur = d(tx.withholdingTaxEur);
-      } else if (tx.withholdingTaxRate != null && d(tx.withholdingTaxRate).gt(0)) {
-        whtEur = grossEur.times(d(tx.withholdingTaxRate));
-      }
-      const amountEur = grossEur.minus(whtEur).minus(feesEur);
+      /*
+        Revenu net de retenue à la source et de frais.
+
+        Le calcul n'est pas refait ici : `computeNetCashImpactEur` est la
+        fonction qui produit le `netCashImpactEur` écrit en base à la création.
+        La même formule vivait aux deux endroits, à l'identique — mais rien ne
+        les tenait ensemble, et une correction appliquée d'un seul côté aurait
+        fait diverger la trésorerie du journal du montant stocké, sans qu'aucun
+        écran ne le dise.
+      */
+      const amountEur = computeNetCashImpactEur(tx).netCashImpactEur;
       if (amountEur.lt(0)) {
         throw new AccountingError("INVALID_AMOUNT", "Le revenu net ne peut pas être négatif");
       }
