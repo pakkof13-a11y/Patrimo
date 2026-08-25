@@ -3,6 +3,7 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { timingSafeEqualSecret } from "@/app/lib/env/runtime";
 import { applyDueInterestForUser } from "@/app/lib/money/savings-accrual";
 import { prisma } from "@/app/lib/prisma";
+import { readCronCredential } from "@/app/lib/auth/cron-credential";
 
 /**
  * POST /api/savings/accrue
@@ -10,15 +11,12 @@ import { prisma } from "@/app/lib/prisma";
  * Cron mode : Authorization: Bearer $CRON_SECRET ou header x-cron-secret.
  */
 export async function POST(req: Request) {
-  const authHeader = req.headers.get("authorization") || "";
-  const bearer =
-    authHeader.toLowerCase().startsWith("bearer ")
-      ? authHeader.slice(7).trim()
-      : null;
-  const headerSecret = req.headers.get("x-cron-secret");
-  const isCron =
-    timingSafeEqualSecret(bearer, "CRON_SECRET") ||
-    timingSafeEqualSecret(headerSecret, "CRON_SECRET");
+  // Le proxy laisse passer une requête qui *présente* une créance de cron ;
+  // c'est ici qu'elle est vérifiée, en temps constant.
+  const isCron = timingSafeEqualSecret(
+    readCronCredential(req),
+    "CRON_SECRET"
+  );
 
   if (isCron) {
     const users = await prisma.user.findMany({ select: { id: true } });

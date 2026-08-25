@@ -11,6 +11,7 @@ import {
   GENERIC_LOGIN_ERROR,
 } from "./app/lib/auth/login-rate-limit";
 import { normalizeRole } from "./app/lib/auth/role";
+import { hasCronCredential, isCronPath } from "./app/lib/auth/cron-credential";
 import { resolveAuthTrustHost } from "./app/lib/auth/trust-host";
 import { assertAuthSecretConfigured } from "./app/lib/auth/startup-check";
 
@@ -145,6 +146,32 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       ) {
         return true;
       }
+
+      /*
+        Couche 1 bis — tâches planifiées.
+
+        Le proxy couvre `/api/**`. Une tâche Vercel Cron n'a pas de session :
+        elle n'apporte qu'un `Authorization: Bearer $CRON_SECRET`. Elle était
+        donc redirigée vers `/login` avant d'atteindre son handler, et
+        `POST /api/savings/accrue` — documenté dans le README comme le cron des
+        intérêts de livrets — n'a jamais pu s'exécuter. Vérifié : 307 vers
+        `/login` avec le bon secret.
+
+        Le secret n'est **pas** comparé ici. `timingSafeEqualSecret` s'appuie
+        sur `node:crypto`, dont la disponibilité dans le proxy n'est pas
+        garantie ; et dupliquer la comparaison créerait deux autorités pour une
+        seule décision. Le proxy se contente donc de ne pas rediriger une
+        requête qui *présente* une créance de cron : le handler, lui, la vérifie
+        en temps constant et répond 401 si elle est fausse.
+
+        Le périmètre est étroit — `/api/cron/**`, réservé aux tâches planifiées,
+        et la route historique des livrets. Ailleurs, un en-tête inventé
+        n'ouvre rien.
+      */
+      if (isCronPath(path) && hasCronCredential(request)) {
+        return true;
+      }
+
       return !!session?.user;
     },
     async jwt({ token, user }) {
