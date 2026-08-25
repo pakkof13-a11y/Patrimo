@@ -71,6 +71,15 @@ export type ContractAudit = {
   openDate: string | null;
   /** Fonds euro porté par le contrat lui-même. */
   cashEuro: string;
+  /**
+   * Le champ ne sera ni repris ni soldé : un fonds euro existe déjà pour ce
+   * contrat, avec son propre montant.
+   *
+   * La migration ne peut pas trancher — l'égalité des deux montants n'est pas
+   * vérifiable, seul leur nom les rapproche. Le montant est donc conservé, et
+   * signalé ici pour qu'un relevé d'assureur l'arbitre.
+   */
+  cashEuroNeedsReview: boolean;
   /** Supports présents des deux côtés — comptés deux fois aujourd'hui. */
   duplicates: Array<{ tableName: string; ledgerName: string; valueEur: string }>;
   /** Supports à migrer vers le journal. */
@@ -228,14 +237,12 @@ export async function auditLifeInsurance(userId: string): Promise<AuditResult> {
       // Même règle que la migration, sans quoi le total annoncé ne
       // correspondrait pas à ce qui sera réellement créé.
       const cash = d(c.cashEuro.toString());
-      if (
-        cash.gt(0) &&
-        !euroFundAlreadyTaken({
-          contractId: c.id,
-          tableOnly,
-          contractsWithLedgerEuroFund: loaded.contractsWithLedgerEuroFund,
-        })
-      ) {
+      const alreadyTaken = euroFundAlreadyTaken({
+        contractId: c.id,
+        tableOnly,
+        contractsWithLedgerEuroFund: loaded.contractsWithLedgerEuroFund,
+      });
+      if (cash.gt(0) && !alreadyTaken) {
         toMigrateTotal = toMigrateTotal.plus(cash);
       }
 
@@ -244,6 +251,7 @@ export async function auditLifeInsurance(userId: string): Promise<AuditResult> {
         insurer: c.insurer,
         openDate: c.openDate?.toISOString() ?? null,
         cashEuro: c.cashEuro.toString(),
+        cashEuroNeedsReview: cash.gt(0) && alreadyTaken,
         duplicates: duplicates.map((dp) => ({
           tableName: dp.table.name,
           ledgerName: dp.ledger.name,
@@ -311,7 +319,16 @@ export async function migrateLifeInsuranceToLedger(
     // des supports à migrer, soit qu'il vive déjà au journal de ce contrat. La
     // saisie historique le répétait presque toujours (champ `cashEuro` +
     // support « Fonds euro X »), et reprendre les deux créerait deux positions
-    // pour les mêmes euros. Le support fait alors foi, et le champ est soldé.
+    // pour les mêmes euros. Le support fait alors foi, et rien n'est créé.
+    //
+    // Le champ n'est pas soldé pour autant. Il porte son propre montant, qui
+    // n'est pas celui du support : sur le contrat Spirica du compte de
+    // démonstration, 15 200 € d'un côté, 25 500 € de l'autre. Les rapprocher
+    // repose sur un nom, pas sur une égalité ; les solder reviendrait à
+    // décréter que ce sont les mêmes euros, et à en effacer 15 200 sans trace.
+    // Le montant reste donc en place, annoncé hors encours par l'API comme
+    // reliquat à reprendre — l'arbitrage appartient au relevé d'assureur, que
+    // la migration n'a pas.
     const cash = d(c.cashEuro.toString());
     const euroFundAlreadyListed = euroFundAlreadyTaken({
       contractId: c.id,
@@ -343,9 +360,11 @@ export async function migrateLifeInsuranceToLedger(
       continue;
     }
 
-    // Fonds euro déjà porté par un support de la liste : le champ est soldé sur
-    // la foi de ce support, sans créer de position supplémentaire.
-    let cashMigrated = cash.gt(0) && euroFundAlreadyListed;
+    // Le champ ne sera soldé que si SA position a été écrite — voir plus bas.
+    // Partir de `true` parce qu'un fonds euro existe ailleurs effaçait le
+    // montant sans qu'aucune position ne le porte : le seul cas de perte sèche
+    // que la migration pouvait produire.
+    let cashMigrated = false;
     for (const support of pending) {
       const isCash = support.id.startsWith("cash:");
       try {

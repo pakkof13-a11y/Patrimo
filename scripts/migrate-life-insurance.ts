@@ -85,6 +85,16 @@ async function main(): Promise<void> {
         );
         if (Number(c.cashEuro) > 0) {
           console.log(`    fonds euro du contrat : ${eur(c.cashEuro)}`);
+          if (c.cashEuroNeedsReview) {
+            // Ni repris ni soldé : le montant survit à la migration, et c'est
+            // un relevé d'assureur qui doit dire s'il fait double emploi.
+            console.log(
+              `    ⚠ à vérifier : ce contrat porte déjà un fonds euro au journal.`
+            );
+            console.log(
+              `      Le montant ci-dessus est conservé tel quel — ni migré, ni effacé.`
+            );
+          }
         }
         for (const dp of c.duplicates) {
           console.log(
