@@ -4,6 +4,7 @@ import { loadLedgerForUser } from "../portfolio/service";
 import { invalidateLedgerCache } from "../portfolio/ledger-cache";
 import { resolveAssetLogo } from "../assets/logos";
 import { assetReuseByTickerWhere } from "../assets/reuse";
+import { detailRequirementError } from "../assets/envelope-requirements";
 import { resolveCoingeckoId } from "../market/providers/coingecko";
 import { findOrCreatePlatform } from "../platforms/upsert";
 import { resolvePlatformLogo } from "../platforms/presets";
@@ -124,6 +125,27 @@ async function resolveOrCreateAsset(
     },
   });
   if (byName) return remember(byName.id);
+
+  /*
+    Passé les réutilisations ci-dessus, l'actif est neuf — il ne peut donc
+    porter aucune fiche métier. Le créer en IMMOBILIER le ferait peser au
+    patrimoine et dans l'assiette IFI sans figurer dans aucun onglet du module,
+    l'état dans lequel deux SCPI ont vécu.
+
+    Un relevé ne dit jamais s'il s'agit d'un bien détenu en direct ou d'une part
+    de société, et l'import n'a ni adresse ni société de gestion à inscrire :
+    inventer l'une des deux fiches serait faux. La ligne est donc rejetée, et
+    elle seule — la boucle d'appel collecte le message et poursuit le fichier.
+  */
+  const refus = detailRequirementError(accountType, {
+    hasRealEstate: false,
+    hasIndirectRealEstate: false,
+  });
+  if (refus) {
+    throw new Error(
+      `${refus} L'import ne peut pas créer « ${name} » : ajoutez-le d'abord depuis Immobilier, puis relancez l'import.`
+    );
+  }
 
   const logoUrl = resolveAssetLogo({
     ticker,
