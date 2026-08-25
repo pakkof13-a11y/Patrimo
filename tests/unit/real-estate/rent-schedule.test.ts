@@ -64,6 +64,71 @@ beforeEach(() => {
   createTx.mockReset().mockResolvedValue({ id: "tx-1" });
 });
 
+/**
+ * Les quatre notions de loyer, tenues séparées.
+ *
+ * L'audit B2 a établi qu'un loyer contractuel, une échéance due, un loyer
+ * confirmé et un loyer encaissé sont quatre faits différents. Le moteur les
+ * distingue déjà ; ces tests le figent, pour qu'aucune évolution ne fasse
+ * glisser l'un vers l'autre — et surtout pour qu'une échéance échue ne
+ * devienne jamais du cash sans confirmation.
+ */
+describe("échéance ≠ encaissement", () => {
+  it("une échéance à venir n'est pas proposée", async () => {
+    // Loyer du 5, on est le 20 avril : mai n'a pas à figurer.
+    detailFindMany.mockResolvedValue([detail()]);
+    const p = await listPendingEntries("u1", { now: NOW });
+    const dates = p.map((x) => x.dueDate.slice(0, 10));
+    expect(dates.every((d) => d <= "2026-04-20")).toBe(true);
+    expect(dates).not.toContain("2026-05-05");
+  });
+
+  it("une échéance échue et non confirmée n'écrit rien", async () => {
+    /*
+      Le point le plus important du module : proposer n'est pas encaisser.
+      `listPendingEntries` ne doit ni créer de transaction, ni avancer le
+      curseur, ni toucher au cash.
+    */
+    detailFindMany.mockResolvedValue([detail()]);
+    const p = await listPendingEntries("u1", { now: NOW });
+
+    expect(p.length).toBeGreaterThan(0);
+    expect(createTx).not.toHaveBeenCalled();
+    expect(detailUpdate).not.toHaveBeenCalled();
+  });
+
+  it("l'ancienneté ne change pas le traitement d'une échéance", async () => {
+    /*
+      Une échéance de 2024 reste une proposition, exactement comme celle du
+      mois dernier. Le moteur ne la requalifie pas en impayé — cette
+      distinction demande une décision métier qui n'est pas prise.
+    */
+    detailFindMany.mockResolvedValue([
+      detail({ rentalStartDate: new Date("2024-03-01T00:00:00.000Z") }),
+    ]);
+    const p = await listPendingEntries("u1", { now: NOW });
+    const loyers = p.filter((x) => x.kind === "RENT");
+
+    expect(loyers.length).toBeGreaterThan(20);
+    expect(createTx).not.toHaveBeenCalled();
+    // Toutes portent la même forme : aucun statut particulier n'apparaît.
+    for (const l of loyers) {
+      expect(Object.keys(l).sort()).toEqual(
+        ["amountEur", "assetId", "dueDate", "kind", "note", "propertyName"]
+      );
+    }
+  });
+
+  it("seule la confirmation écrit au journal", async () => {
+    detailFindFirst.mockResolvedValue(detail());
+    await confirmEntries("u1", [
+      { assetId: "asset-1", kind: "RENT", dueDate: "2026-03-05T12:00:00.000Z" },
+    ]);
+    expect(createTx).toHaveBeenCalledTimes(1);
+    expect(createTx.mock.calls[0]![0]).toMatchObject({ type: "LOYER" });
+  });
+});
+
 describe("listPendingEntries", () => {
   it("propose un loyer et une charge par mois échu", async () => {
     detailFindMany.mockResolvedValue([detail()]);

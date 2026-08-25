@@ -26,6 +26,29 @@ type PendingEntry = {
  * Le panneau disparaît quand il n'y a rien à confirmer, plutôt que d'occuper la
  * place avec un état vide qu'on finirait par ne plus voir.
  */
+/**
+ * Depuis combien de temps une échéance attend sa confirmation.
+ *
+ * Rendue à partir du mois entamé, pas du nombre de jours : « échue depuis
+ * 29 mois » se lit, « 887 jours » se calcule. Le mois courant ne renvoie rien
+ * — une échéance du 5 consultée le 20 n'est pas en retard, elle est simplement
+ * arrivée.
+ *
+ * Ce libellé est un fait dérivé de la date, jamais un statut : le module ne
+ * qualifie pas d'impayé, ce qui demanderait de savoir si le locataire a payé.
+ */
+function ageLabel(dueIso: string, now: Date = new Date()): string | null {
+  const due = new Date(dueIso);
+  if (Number.isNaN(due.getTime())) return null;
+  const mois =
+    (now.getFullYear() - due.getFullYear()) * 12 +
+    (now.getMonth() - due.getMonth());
+  if (mois < 1) return null;
+  if (mois < 12) return `échue depuis ${mois} mois`;
+  const ans = Math.floor(mois / 12);
+  return `échue depuis ${ans} an${ans > 1 ? "s" : ""}`;
+}
+
 export function RentSchedulePanel({ className }: { className?: string }) {
   const qc = useQueryClient();
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
@@ -147,6 +170,24 @@ export function RentSchedulePanel({ className }: { className?: string }) {
               <span className="tabular-nums text-[var(--muted-foreground)]">
                 {new Date(p.dueDate).toLocaleDateString("fr-FR")}
               </span>
+              {/*
+                Depuis combien de temps l'échéance attend.
+
+                Une échéance d'avril 2024 et une du mois dernier s'affichaient
+                à l'identique : seule la date les distinguait, et personne ne
+                fait la soustraction de tête sur cinquante-huit lignes. C'est
+                un fait dérivé de la date déjà montrée, pas un statut : le
+                module ne dit toujours pas « impayé », qualification qui
+                demande une décision que ce chantier ne prend pas.
+              */}
+              {ageLabel(p.dueDate) ? (
+                <span
+                  className="shrink-0 text-[10px] text-[var(--foreground-faint)]"
+                  data-testid="rent-age"
+                >
+                  {ageLabel(p.dueDate)}
+                </span>
+              ) : null}
               <span
                 className={cn(
                   "rounded px-1.5 py-0.5 text-[10px] font-medium",
