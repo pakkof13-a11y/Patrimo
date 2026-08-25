@@ -21,7 +21,20 @@ export async function GET(req: Request) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const base = searchParams.get("base") || user?.baseCurrency || "EUR";
 
-    // First visit: seed today's snapshot so the curve has a starting point
+    /*
+      Premier point de contrôle du compte.
+
+      Le commentaire d'origine disait « so the curve has a starting point » :
+      il ne décrit plus ce que fait ce code. La courbe est reconstruite par
+      `PortfolioValuationEngine` et ne lit pas cette table — `getPortfolioHistory`
+      explique pourquoi les mélanger réintroduirait une incohérence de
+      périmètre.
+
+      Ce que l'écriture fait réellement : poser le premier relevé daté d'un
+      compte qui n'en a aucun, au même titre que ceux du rafraîchissement des
+      cours et de la fin d'import. C'est un journal d'audit, pas une source
+      d'affichage.
+    */
     const snapshotCount = await prisma.portfolioSnapshot.count({ where: { userId } });
     if (snapshotCount === 0) {
       try {
