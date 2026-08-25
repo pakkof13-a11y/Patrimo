@@ -43,6 +43,7 @@ import { prisma } from "../prisma";
 import { d, zero } from "../money/decimal";
 import { createTransaction } from "../transactions/service";
 import {
+  euroFundAlreadyTaken,
   isEuroFundName,
   reconcileSupports,
   type LedgerSupport,
@@ -105,6 +106,15 @@ type Loaded = {
   contracts: LoadedContract[];
   /** Positions AV du journal, tous contrats confondus. */
   ledger: LedgerSupport[];
+  /**
+   * Contrats portant déjà un fonds euro au journal.
+   *
+   * Lu sur `LifeInsuranceSupport` : `lifeInsuranceId` dit à quel contrat la
+   * position appartient, `kind` dit ce qu'elle est. Le pool `ledger` étant
+   * commun à tous les contrats, c'est le seul moyen de répondre « ce
+   * contrat-ci » plutôt que « quelque part au journal ».
+   */
+  contractsWithLedgerEuroFund: Set<string>;
 };
 
 async function loadContracts(userId: string): Promise<Loaded> {
@@ -117,13 +127,21 @@ async function loadContracts(userId: string): Promise<Loaded> {
   // appeler le calcul qui fait déjà foi partout ailleurs.
   const { getHoldings } = await import("../portfolio/service");
 
-  const [rows, holdings] = await Promise.all([
+  const [rows, holdings, euroFundSupports] = await Promise.all([
     prisma.lifeInsurance.findMany({
       where: { userId },
       include: { products: true },
       orderBy: { insurer: "asc" },
     }),
     getHoldings(userId, "EUR"),
+    prisma.lifeInsuranceSupport.findMany({
+      where: {
+        kind: "FONDS_EURO",
+        lifeInsuranceId: { not: null },
+        asset: { is: { userId } },
+      },
+      select: { lifeInsuranceId: true },
+    }),
   ]);
 
   const ledger: LedgerSupport[] = holdings
@@ -136,6 +154,11 @@ async function loadContracts(userId: string): Promise<Loaded> {
 
   return {
     ledger,
+    contractsWithLedgerEuroFund: new Set(
+      euroFundSupports
+        .map((s) => s.lifeInsuranceId)
+        .filter((id): id is string => id != null)
+    ),
     contracts: rows.map((r) => ({
       id: r.id,
       insurer: r.insurer,
@@ -202,11 +225,17 @@ export async function auditLifeInsurance(userId: string): Promise<AuditResult> {
       for (const t of tableOnly) {
         toMigrateTotal = toMigrateTotal.plus(d(t.valueEur));
       }
-      // Le fonds euro n'est ajouté que s'il n'est pas déjà porté par un support
-      // de la liste — même règle que la migration, sans quoi le total annoncé
-      // ne correspondrait pas à ce qui sera réellement créé.
+      // Même règle que la migration, sans quoi le total annoncé ne
+      // correspondrait pas à ce qui sera réellement créé.
       const cash = d(c.cashEuro.toString());
-      if (cash.gt(0) && !tableOnly.some((t) => isEuroFundName(t.name))) {
+      if (
+        cash.gt(0) &&
+        !euroFundAlreadyTaken({
+          contractId: c.id,
+          tableOnly,
+          contractsWithLedgerEuroFund: loaded.contractsWithLedgerEuroFund,
+        })
+      ) {
         toMigrateTotal = toMigrateTotal.plus(cash);
       }
 
@@ -278,12 +307,17 @@ export async function migrateLifeInsuranceToLedger(
     // Le fonds euro du contrat devient un support comme un autre : sans cela,
     // il resterait dans un champ que le patrimoine ne lit plus.
     //
-    // Sauf s'il est **déjà** dans la liste des supports : la saisie historique
-    // le répétait presque toujours (champ `cashEuro` + support « Fonds euro X »),
-    // et migrer les deux créerait deux positions pour les mêmes euros. Le
-    // support de la liste fait alors foi, et le champ est simplement soldé.
+    // Sauf s'il a **déjà** été repris — soit qu'il figure encore dans la liste
+    // des supports à migrer, soit qu'il vive déjà au journal de ce contrat. La
+    // saisie historique le répétait presque toujours (champ `cashEuro` +
+    // support « Fonds euro X »), et reprendre les deux créerait deux positions
+    // pour les mêmes euros. Le support fait alors foi, et le champ est soldé.
     const cash = d(c.cashEuro.toString());
-    const euroFundAlreadyListed = tableOnly.some((t) => isEuroFundName(t.name));
+    const euroFundAlreadyListed = euroFundAlreadyTaken({
+      contractId: c.id,
+      tableOnly,
+      contractsWithLedgerEuroFund: loaded.contractsWithLedgerEuroFund,
+    });
     const pending = [...tableOnly];
     if (cash.gt(0) && !euroFundAlreadyListed) {
       pending.push({

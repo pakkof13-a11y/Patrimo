@@ -153,3 +153,38 @@ export function reconcileSupports(
 
   return { duplicates, tableOnly, ledgerOnly };
 }
+
+/**
+ * Le fonds euro de ce contrat a-t-il déjà été repris ?
+ *
+ * La migration posait cette question au seul panier `tableOnly` — les supports
+ * restant à migrer. Or un fonds euro déjà repris est par construction ailleurs :
+ * dans `duplicates` s'il figure des deux côtés, dans `ledgerOnly` s'il n'existe
+ * plus qu'au journal. Le panier interrogé était donc le seul où il ne pouvait
+ * pas se trouver, et le champ `cashEuro` du contrat créait une position en trop.
+ *
+ * ## Pourquoi un ensemble d'identifiants de contrat
+ *
+ * Les positions du journal sont rapprochées contre un pool commun à tous les
+ * contrats — il le faut, rien ne relie techniquement un contrat de la table à
+ * une plateforme du journal. Mais cela interdit de chercher « un fonds euro
+ * quelque part au journal » : la réponse serait vraie pour un contrat qui n'en
+ * a pas, et solderait un `cashEuro` légitime.
+ *
+ * L'appartenance se lit sur `LifeInsuranceSupport` — `lifeInsuranceId` dit à
+ * quel contrat, `kind` dit ce que c'est. Une clé étrangère et un champ typé,
+ * là où le nom n'est qu'une présomption et le montant un faux ami : 15 200 €
+ * de champ et 25 500 € de position désignent le même poste.
+ */
+export function euroFundAlreadyTaken(input: {
+  contractId: string;
+  /** Supports restant à migrer pour ce contrat. */
+  tableOnly: readonly TableSupport[];
+  /** Contrats portant déjà un support `FONDS_EURO` au journal. */
+  contractsWithLedgerEuroFund: ReadonlySet<string>;
+}): boolean {
+  if (input.contractsWithLedgerEuroFund.has(input.contractId)) return true;
+  // Repli historique : la liste de supports à migrer en porte souvent un, que
+  // la migration créera de toute façon — inutile d'en ajouter un second.
+  return input.tableOnly.some((t) => isEuroFundName(t.name));
+}
