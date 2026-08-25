@@ -69,8 +69,6 @@ import dynamic from "next/dynamic";
 import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { MarketTicker } from "@/components/layout/market-ticker";
-import { PreferencesPanel } from "@/components/layout/preferences-panel";
-import { Modal } from "@/components/ui/modal";
 import { Shell } from "@/components/layout/display-provider";
 import { KpiStrip } from "@/components/dashboard/kpi-strip";
 import { DashboardTab } from "@/components/dashboard/dashboard-tab";
@@ -292,8 +290,12 @@ function PortfolioAppClient({
   // Deep-link / e2e : ?import=1 → état d’import dérivé + manuel
   const importFromUrl = searchParams.get("import") === "1";
   const [showImportManual, setShowImportManual] = useState(false);
-  /** Préférences — ouvertes depuis la sidebar, en plus du menu Compte. */
-  const [showPreferences, setShowPreferences] = useState(false);
+  /*
+    Les préférences vivaient aussi dans une modale, ouverte par le raccourci
+    Paramètres du rail. Ce raccourci a disparu — le menu Compte y menait déjà —
+    et la modale n'était plus atteignable : elle rendait le même
+    `PreferencesPanel`, en moins complet, sans la devise de référence.
+  */
   const showImport = importFromUrl || showImportManual;
   const setShowImport = (v: boolean) => {
     setShowImportManual(v);
@@ -1156,7 +1158,6 @@ function PortfolioAppClient({
         <AppSidebar
           tab={tab}
           onTabChange={setTab}
-          onOpenPreferences={() => setShowPreferences(true)}
         />
 
         <Shell>
@@ -1538,16 +1539,6 @@ function PortfolioAppClient({
         </div>
         </Shell>
       </div>
-
-      {showPreferences && (
-        <Modal
-          title="Préférences"
-          onClose={() => setShowPreferences(false)}
-          testId="preferences-modal"
-        >
-          <PreferencesPanel embedded />
-        </Modal>
-      )}
 
       <TransactionModal
         open={showTx}

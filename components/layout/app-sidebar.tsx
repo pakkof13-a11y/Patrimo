@@ -3,9 +3,21 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
+  ArrowLeftRight,
+  Banknote,
+  Bitcoin,
+  Briefcase,
+  Building2,
+  CandlestickChart,
+  Gem,
+  Landmark,
   LayoutGrid,
+  CreditCard,
+  Plug,
+  PiggyBank,
+  Receipt,
   Scale,
-  Settings,
+  ShieldCheck,
   Wallet,
   type LucideIcon,
 } from "lucide-react";
@@ -39,7 +51,9 @@ type NavSection = {
   title: string;
   icon: LucideIcon;
   testId: string;
-  items: { id: MainTab; label: string; testId: string }[];
+  /* `icon` : repère de balayage dans le dépliant, jamais une décoration —
+     même gabarit pour toutes, plus discrètes que le libellé. */
+  items: { id: MainTab; label: string; testId: string; icon: LucideIcon }[];
 };
 
 export const NAV_SECTIONS: NavSection[] = [
@@ -50,20 +64,21 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: Wallet,
     testId: "group-avoirs",
     items: [
-      { id: "holdings", label: "Portefeuille", testId: "holdings" },
+      { id: "holdings", label: "Portefeuille", testId: "holdings", icon: Briefcase },
       // Sous-vue du portefeuille : PEA et CTO y ont été consolidés, et
       // l'éditeur de leurs poches d'espèces y vit désormais.
-      { id: "securities", label: "PEA & CTO", testId: "securities" },
-      { id: "banques", label: "Banques", testId: "banques" },
-      { id: "assurance-vie", label: "Assurance-vie", testId: "assurance-vie" },
-      { id: "immobilier", label: "Immobilier", testId: "immobilier" },
-      { id: "crypto", label: "Cryptos", testId: "crypto" },
+      { id: "securities", label: "PEA & CTO", testId: "securities", icon: Landmark },
+      { id: "banques", label: "Banques", testId: "banques", icon: Banknote },
+      { id: "assurance-vie", label: "Assurance-vie", testId: "assurance-vie", icon: ShieldCheck },
+      { id: "immobilier", label: "Immobilier", testId: "immobilier", icon: Building2 },
+      { id: "crypto", label: "Cryptos", testId: "crypto", icon: Bitcoin },
       {
         id: "epargne-salariale",
         label: "Épargne salariale",
         testId: "epargne-salariale",
+        icon: PiggyBank,
       },
-      { id: "alternatifs", label: "Actifs alternatifs", testId: "alternatifs" },
+      { id: "alternatifs", label: "Actifs alternatifs", testId: "alternatifs", icon: Gem },
     ],
   },
   {
@@ -73,8 +88,8 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: Scale,
     testId: "group-engagements",
     items: [
-      { id: "liabilities", label: "Passifs / Crédits", testId: "liabilities" },
-      { id: "trading", label: "Trading", testId: "trading" },
+      { id: "liabilities", label: "Passifs / Crédits", testId: "liabilities", icon: CreditCard },
+      { id: "trading", label: "Trading", testId: "trading", icon: CandlestickChart },
     ],
   },
   {
@@ -84,9 +99,9 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: Activity,
     testId: "group-suivi",
     items: [
-      { id: "transactions", label: "Transactions", testId: "transactions" },
-      { id: "platforms", label: "Plateformes", testId: "platforms" },
-      { id: "fiscal", label: "Fiscalité", testId: "fiscal" },
+      { id: "transactions", label: "Transactions", testId: "transactions", icon: ArrowLeftRight },
+      { id: "platforms", label: "Plateformes", testId: "platforms", icon: Plug },
+      { id: "fiscal", label: "Fiscalité", testId: "fiscal", icon: Receipt },
     ],
   },
 ];
@@ -145,11 +160,9 @@ function NavButton({
 export function AppSidebar({
   tab,
   onTabChange,
-  onOpenPreferences,
 }: {
   tab: MainTab;
   onTabChange: (tab: MainTab) => void;
-  onOpenPreferences: () => void;
 }) {
   /** Groupe dont le sous-menu est ouvert — un seul à la fois. */
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
@@ -252,7 +265,8 @@ export function AppSidebar({
                         aria-current={itemActive ? "page" : undefined}
                         onClick={() => go(item.id)}
                         className={cn(
-                          "block w-full rounded-[var(--radius-sm)] px-[var(--space-2)] py-[var(--space-2)]",
+                          "flex w-full items-center gap-[var(--space-2)]",
+                          "rounded-[var(--radius-sm)] px-[var(--space-2)] py-[var(--space-2)]",
                           "text-left text-[length:var(--text-base)] transition-colors",
                           "duration-[var(--duration-fast)] ease-[var(--ease-out)]",
                           "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
@@ -261,7 +275,21 @@ export function AppSidebar({
                             : "text-[var(--foreground-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
                         )}
                       >
-                        {item.label}
+                        {/*
+                          L'icône reste en retrait du libellé : trait fin, et
+                          une teinte en dessous quand la ligne n'est pas active.
+                          `shrink-0` fige la gouttière, de sorte que les
+                          libellés s'alignent quelle que soit la glyphe.
+                        */}
+                        <item.icon
+                          className={cn(
+                            "h-[0.875rem] w-[0.875rem] shrink-0",
+                            itemActive ? "opacity-100" : "text-[var(--foreground-faint)]"
+                          )}
+                          strokeWidth={1.5}
+                          aria-hidden
+                        />
+                        <span className="min-w-0 flex-1 truncate">{item.label}</span>
                       </button>
                     );
                   })}
@@ -272,25 +300,10 @@ export function AppSidebar({
         })}
 
         {/*
-          Séparé du reste par un filet, plus par un ressort.
-
-          `mt-auto` poussait Paramètres au bas d'une colonne haute de `100vh`
-          alors qu'elle commence sous l'en-tête : le bouton tombait sous la
-          ligne de flottaison, et restait inatteignable sur toute page trop
-          courte pour défiler. Le filet dit la même chose — « réglages, pas une
-          destination métier » — sans dépendre de la hauteur du viewport.
+          Paramètres ne figure plus ici : le menu utilisateur y mène déjà, et
+          le rail n'a pas à porter deux fois la même destination. La page, la
+          route et les réglages sont inchangés.
         */}
-        <div
-          className="my-[var(--space-2)] h-px w-[60%] bg-[var(--border)] max-[900px]:hidden"
-          aria-hidden
-        />
-        <NavButton
-          label="Paramètres"
-          icon={Settings}
-          testId="preferences"
-          active={false}
-          onClick={onOpenPreferences}
-        />
       </nav>
 
     </div>

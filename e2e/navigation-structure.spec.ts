@@ -50,13 +50,60 @@ test.describe("Barre latérale", () => {
     await expect(page.getByTestId("nav-group-avoirs")).toBeVisible();
     await expect(page.getByTestId("nav-group-engagements")).toBeVisible();
     await expect(page.getByTestId("nav-group-suivi")).toBeVisible();
-    await expect(page.getByTestId("nav-preferences")).toBeVisible();
+
+    /*
+      Paramètres n'est plus dans le rail : le menu Compte y menait déjà, et une
+      barre étroite n'a pas à porter deux fois la même destination. Les réglages
+      restent accessibles — le test suivant s'en assure.
+    */
+    await expect(page.getByTestId("nav-preferences")).toHaveCount(0);
 
     // Groupes retirés : ils classaient par forme de détention, ce qui séparait
     // un PEA d'un bien immobilier alors que les deux s'additionnent pareil.
     await expect(page.getByTestId("nav-group-enveloppes")).toHaveCount(0);
     await expect(page.getByTestId("nav-group-actifs")).toHaveCount(0);
     await expect(page.getByTestId("nav-group-positions")).toHaveCount(0);
+  });
+
+  test("les réglages restent atteignables par le menu Compte", async ({
+    page,
+  }) => {
+    /*
+      Le pendant du retrait : la destination disparaît du rail, pas de
+      l'application. Le menu Compte porte le panneau de préférences en entier —
+      thème, devise de reporting, période P&L — là où le raccourci du rail
+      ouvrait une modale qui en rendait une version plus pauvre.
+    */
+    await page.getByTestId("header-account-trigger").click();
+    await expect(page.getByTestId("header-account-dropdown")).toBeVisible();
+    await expect(page.getByTestId("header-preferences-slot")).toBeVisible();
+  });
+
+  test("chaque entrée de dépliant porte une icône de balayage", async ({
+    page,
+  }) => {
+    /*
+      Les icônes servent le repérage, pas la décoration : une par entrée, même
+      gabarit, et sans faire grandir la ligne. On vérifie la présence et
+      l'uniformité plutôt qu'un jeu de glyphes précis, qui n'a pas à être figé.
+    */
+    await openSection(page, "avoirs");
+    const menu = page.getByTestId("nav-group-avoirs-menu");
+    const entrees = menu.getByRole("menuitem");
+    const total = await entrees.count();
+    expect(total).toBeGreaterThan(0);
+
+    const tailles = new Set<string>();
+    for (let i = 0; i < total; i += 1) {
+      const svg = entrees.nth(i).locator("svg");
+      await expect(svg).toHaveCount(1);
+      const boite = await svg.boundingBox();
+      tailles.add(`${Math.round(boite?.width ?? 0)}x${Math.round(boite?.height ?? 0)}`);
+    }
+    expect(
+      tailles.size,
+      `Les icônes doivent partager un gabarit : ${[...tailles].join(", ")}`
+    ).toBe(1);
   });
 
   for (const [section, entries] of Object.entries(SECTIONS)) {
@@ -190,7 +237,6 @@ test.describe("Barre latérale", () => {
       "nav-group-avoirs",
       "nav-group-engagements",
       "nav-group-suivi",
-      "nav-preferences",
     ]) {
       await expect(page.getByTestId(id)).toBeInViewport();
     }
