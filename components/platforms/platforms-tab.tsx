@@ -160,6 +160,15 @@ export function PlatformsTab({
 
   /** Suppression plateforme (cascade txs/actifs) */
   const [deleteTarget, setDeleteTarget] = useState<PlatformRow | null>(null);
+  /** Crédits qui perdraient leur bien si la plateforme était supprimée. */
+  const [detachedLiabilities, setDetachedLiabilities] = useState<
+    Array<{
+      id: string;
+      name: string;
+      remainingAmountEur: string;
+      propertyName: string | null;
+    }>
+  >([]);
   const [deleteConfirmChecked, setDeleteConfirmChecked] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const DELETE_CONFIRM_WORD = "SUPPRIMER";
@@ -584,11 +593,35 @@ export function PlatformsTab({
     }
   }
 
-  function handleDelete(p: PlatformRow) {
+  /**
+   * Ouvre la confirmation, après avoir demandé ce que la suppression emporte.
+   *
+   * L'appel sans `force` ne supprime rien : il répond 409 avec l'inventaire.
+   * On s'en sert pour nommer les crédits qui perdraient leur bien — sans quoi
+   * la boîte annonçait « actifs et transactions » et taisait le détachement,
+   * qui change pourtant l'assiette IFI.
+   *
+   * L'échec de cette vérification n'empêche pas d'ouvrir la boîte : elle
+   * afficherait alors son avertissement habituel, jamais un avertissement faux.
+   */
+  async function handleDelete(p: PlatformRow) {
     if (!onDelete) return;
     setDeleteTarget(p);
     setDeleteConfirmChecked(false);
     setDeleteConfirmText("");
+    setDetachedLiabilities([]);
+    try {
+      const res = await fetch(
+        `/api/platforms?id=${encodeURIComponent(p.id)}`,
+        { method: "DELETE" }
+      );
+      const body = await res.json();
+      if (Array.isArray(body?.detachedLiabilities)) {
+        setDetachedLiabilities(body.detachedLiabilities);
+      }
+    } catch {
+      /* la boîte reste utilisable sans l'inventaire */
+    }
   }
 
   async function syncSolanaWallet(p: PlatformRow) {
@@ -1443,6 +1476,40 @@ export function PlatformsTab({
                 possible.
               </p>
             </div>
+
+            {detachedLiabilities.length > 0 && (
+              /*
+                Le crédit survit à son bien : il reste au passif, et le
+                patrimoine net ne bouge pas. Ce qu'il perd, c'est le bien
+                auquel il était adossé — donc sa déductibilité de l'assiette
+                IFI. Dire les deux, puisque l'un se voit et l'autre pas.
+              */
+              <div
+                className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-[12px] leading-relaxed text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-50"
+                data-testid="platform-delete-liabilities"
+              >
+                <p className="font-semibold">
+                  {detachedLiabilities.length} crédit
+                  {detachedLiabilities.length > 1 ? "s" : ""} perdra
+                  {detachedLiabilities.length > 1 ? "ont" : ""} son bien
+                </p>
+                <ul className="mt-1 space-y-0.5">
+                  {detachedLiabilities.map((l) => (
+                    <li key={l.id}>
+                      <strong>{l.name}</strong>
+                      {l.propertyName ? ` — adossé à ${l.propertyName}` : null}
+                      {" · "}
+                      {formatCurrency(l.remainingAmountEur, "EUR")} restant dû
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1.5">
+                  {detachedLiabilities.length > 1
+                    ? "Ces dettes resteront au passif et votre patrimoine net ne changera pas. Mais elles ne seront plus déductibles de l’assiette IFI, qui augmentera d’autant."
+                    : "Cette dette restera au passif et votre patrimoine net ne changera pas. Mais elle ne sera plus déductible de l’assiette IFI, qui augmentera d’autant."}
+                </p>
+              </div>
+            )}
 
             <label className="flex cursor-pointer items-start gap-2 text-[12px] text-[var(--foreground)]">
               <input
