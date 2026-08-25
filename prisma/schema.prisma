@@ -240,6 +240,7 @@ model Asset {
   priceQuote         PriceQuote?
   priceHistory       PriceHistory[]
   dailyCloses        AssetDailyClose[]
+  intradayBars       AssetIntradayBar[]
   realEstate         RealEstateDetail?
   indirectRealEstate IndirectRealEstateDetail?
   defiPosition       DefiPositionDetail?
@@ -355,6 +356,60 @@ model AssetDailyClose {
 
   @@unique([assetId, day])
   @@index([assetId, day])
+}
+
+/// Barre intra-séance d'un actif, en EUR — observations réellement collectées.
+///
+/// ## Pourquoi une table de plus
+///
+/// `AssetDailyClose` porte une contrainte `@@unique([assetId, day])` : une
+/// valeur par jour, par construction. `PortfolioSnapshot` est un upsert
+/// quotidien — chaque écriture détruit la précédente. `PriceHistory` n'a ni
+/// intervalle ni clé de dédoublonnage, et alimente déjà la reconstruction
+/// `source: "db"` de `getAssetPriceHistory` : y écrire rendrait la collecte
+/// indiscernable des captures d'un rafraîchissement manuel, et circulaire.
+///
+/// Aucune des trois ne peut donc porter de l'intra-journalier.
+///
+/// ## Prix par actif, et non instantanés de portefeuille
+///
+/// La même base reconstruit le portefeuille, les catégories, les KPI et un
+/// actif isolé. Un instantané de portefeuille fige au contraire un découpage :
+/// il ne saurait pas répondre « que valait ma poche crypto à 14 h 37 » si la
+/// composition de cette poche a changé depuis, et rouvrirait l'historique
+/// concurrent que le chantier précédent a supprimé.
+///
+/// ## Ce que la table contient — et ne contient pas
+///
+/// Uniquement des barres **réellement observées** chez un fournisseur. Aucun
+/// report, aucune interpolation, aucune série `mock` : un trou reste un trou,
+/// et c'est au lecteur de décider s'il reporte la dernière valeur connue — en
+/// l'annonçant alors comme estimée. Écrire un point reporté ici le rendrait
+/// indiscernable d'une observation quelques semaines plus tard.
+model AssetIntradayBar {
+  id      String @id @default(cuid())
+  assetId String
+
+  /// Taille de la barre — cf. `PriceBarInterval` ("15m" | "1h" | "4h").
+  /// Stockée plutôt que déduite : deux résolutions peuvent coexister sans
+  /// qu'aucune n'écrase l'autre, et une granularité plus fine s'ajoute plus
+  /// tard sans migration.
+  interval String
+  /// Début de la barre, en UTC, aligné sur l'intervalle.
+  ///
+  /// C'est l'alignement qui rend la collecte idempotente : deux passages sur
+  /// la même barre visent la même ligne. Un horodatage de capture ne le
+  /// permettrait pas — c'est le défaut de `PriceHistory`.
+  barStart DateTime
+  closeEur Decimal  @db.Decimal(28, 12)
+  /// Fournisseur ayant réellement produit la barre — jamais "mock" ni "db".
+  source    String
+  fetchedAt DateTime @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, interval, barStart])
+  @@index([assetId, interval, barStart])
 }
 
 /// Caractéristiques d'un bien immobilier détenu en direct — extension 1:1 de
