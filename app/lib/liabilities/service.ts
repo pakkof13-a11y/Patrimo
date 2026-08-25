@@ -1,3 +1,46 @@
+/**
+ * Crédits : qui projette, qui matérialise.
+ *
+ * ## La règle
+ *
+ * **Lire projette. Écrire matérialise.** Un lecteur calcule le capital restant
+ * dû à la date demandée et n'écrit rien ; seule une mutation peut créer les
+ * `LiabilityEvent` correspondants.
+ *
+ * ## Pourquoi elle existe
+ *
+ * `listLiabilities` amortissait en base avant de répondre. Ouvrir le module
+ * Crédits écrivait 79 `LiabilityEvent` sur le compte de démonstration, et le
+ * patrimoine net changeait de 64 020 € selon qu'on avait consulté cet écran ou
+ * non. Le même montant n'était pas faux à un endroit et juste à l'autre : il
+ * dépendait de l'instant où quelqu'un avait regardé. Un affichage qui modifie
+ * ce qu'il affiche n'est pas un affichage.
+ *
+ * ## Ce que « matérialiser » veut dire
+ *
+ * Écrire les échéances passées comme événements, et avancer
+ * `lastPaymentAppliedAt`. C'est utile quand une opération doit **raisonner sur
+ * le solde** : `recordEarlyRepayment` impute un remboursement sur un capital
+ * restant dû, qui doit donc exister en base avant d'être touché.
+ *
+ * Les deux autres mutations ne matérialisent pas, et c'est volontaire :
+ * `changeMonthlyPayment` et `changeInterestRate` se contentent d'enregistrer un
+ * événement daté, que la projection sait déjà consommer. Matérialiser « par
+ * précaution » y ajouterait des écritures sans rien rendre plus juste.
+ *
+ * ## Les lecteurs
+ *
+ * Six chemins lisent une dette, tous par les fonctions pures de
+ * `./amortization` : le module Crédits (`listLiabilities`), le patrimoine
+ * (`portfolio/service`), l'historique (`portfolio/historical/load`), l'IFI
+ * (`real-estate/tax/service`), la fiche bien (`api/real-estate/properties`) et
+ * la suppression de plateforme (`api/platforms`). Aucun n'écrit.
+ *
+ * `tests/unit/liabilities-lecture-pure.test.ts` relit ces fichiers et refuse
+ * qu'un lecteur rappelle une fonction de matérialisation ; le parcours complet
+ * est vérifié de bout en bout par `e2e/passifs-lecture-pure.spec.ts`.
+ */
+
 import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "../prisma";
 import { owned } from "../db/tenant-scope";
