@@ -110,9 +110,12 @@ async function main() {
     process.env.SEED_ADMIN_ONLY === "1" && !LIGHT && !DEMO_ONLY;
   const SKIP_WIPE = process.env.SEED_SKIP_WIPE === "1";
 
+  const WIPE_ADMIN_BANNER = process.env.SEED_WIPE_ADMIN === "1";
   console.log(
     LIGHT
-      ? "Seeding Aurea — E2E/LIGHT → wipe+seed **demo uniquement** (admin préservé)…"
+      ? WIPE_ADMIN_BANNER
+        ? "Seeding Aurea — E2E/LIGHT → wipe+seed **demo**, admin vidé et laissé vierge…"
+        : "Seeding Aurea — E2E/LIGHT → wipe+seed **demo uniquement** (admin préservé)…"
       : DEMO_ONLY
         ? "Seeding Aurea — portfolio DEMO uniquement (admin non wipe)…"
         : ADMIN_ONLY
@@ -162,6 +165,22 @@ async function main() {
   });
   console.log(`  Démo USER : ${demoUsername} (${demo.id})`);
 
+  /*
+    Compte vidé sans être regarni.
+
+    Les specs « cockpit » décrivent l'écran d'un compte sans aucune donnée, et
+    se connectent en admin pour le voir. Or le mode E2E préserve admin — à
+    raison, puisque le patrimoine personnel du développeur y vit souvent. Sur
+    une base de test isolée, ce même égard rendait la fixture fausse : admin y
+    gardait les résidus d'un seed complet antérieur, et les deux specs
+    échouaient en permanence sur un compte qui n'était vierge que de nom.
+
+    L'appelant qui sait la base jetable le déclare. `global-setup` ne le fait
+    que lorsque `DATABASE_URL_E2E` est défini : sans ce garde-fou, une suite
+    lancée par mégarde sur la base de travail effacerait de vraies données.
+  */
+  const WIPE_ADMIN = WIPE_ADMIN_BANNER;
+
   // Ne wipe QUE les comptes qui vont être reseedés.
   // E2E / LIGHT : jamais admin → le patrimoine perso (souvent sur admin) reste intact.
   const targets: Array<{ id: string; tag: string; label: string }> = [];
@@ -180,6 +199,11 @@ async function main() {
     for (const t of targets) {
       console.log(`  wipe → ${t.label}`);
       await wipeUserData(t.id);
+    }
+    // Vidé, puis laissé vide : il ne figure pas dans `targets`.
+    if (WIPE_ADMIN && !targets.some((t) => t.id === admin.id)) {
+      console.log(`  wipe → ${adminUsername} (laissé vierge, non reseedé)`);
+      await wipeUserData(admin.id);
     }
   }
 

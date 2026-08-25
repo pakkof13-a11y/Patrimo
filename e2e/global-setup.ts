@@ -61,6 +61,7 @@ export default async function globalSetup() {
   dotenv.config({ path: path.join(root, ".env.e2e"), override: true });
 
   const e2eDb = (process.env.DATABASE_URL_E2E || "").trim();
+  const isolatedDb = Boolean(e2eDb);
   if (e2eDb) {
     process.env.DATABASE_URL = e2eDb;
     console.log(
@@ -69,7 +70,7 @@ export default async function globalSetup() {
     await assertServerIsE2E();
   } else {
     console.log(
-      "[e2e] Même DATABASE_URL que l’app. Seed E2E = wipe compte **demo** uniquement (admin préservé)."
+      "[e2e] Même DATABASE_URL que l’app. Seed E2E = wipe compte **demo** uniquement (admin préservé, donc non vierge : les specs cockpit seront ignorées)."
     );
     console.log(
       "[e2e] Astuce : définissez DATABASE_URL_E2E dans .env.e2e pour une base séparée."
@@ -94,6 +95,16 @@ export default async function globalSetup() {
       // Force : ne pas re-seed admin même si autre flag
       SEED_DEMO_ONLY: "1",
       SEED_ADMIN_ONLY: "0",
+      /*
+        Admin vidé, jamais regarni — et seulement sur base isolée.
+
+        Les specs « cockpit » se connectent en admin pour décrire l'écran d'un
+        compte sans données. Préserver admin gardait les résidus d'un seed
+        complet antérieur, et ces specs échouaient en permanence. La base
+        jetable est la seule où l'effacer est sans risque : c'est cette
+        certitude, établie plus haut, que le drapeau transporte.
+      */
+      ...(isolatedDb ? { SEED_WIPE_ADMIN: "1" } : {}),
     },
   });
   console.log("[e2e] Seed done (compte demo uniquement).");
