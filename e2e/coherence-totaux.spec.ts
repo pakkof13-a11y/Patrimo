@@ -140,6 +140,45 @@ test.describe("Cohérence tableau de bord ↔ modules", () => {
     });
   });
 
+  test("Immobilier : l'en-tête du module annonce le même total que la tuile", async ({
+    page,
+    request,
+  }) => {
+    /*
+      L'en-tête dit « Vue d'ensemble de votre patrimoine immobilier » et
+      affiche une « Valeur totale ». Il ne comptait que les biens détenus en
+      direct : 312 000 € face aux 337 240 € de la tuile, sur le même écran.
+      Une part de SCPI est de l'immobilier — elle appartient à ce total.
+    */
+    const bundle = await getJson(request, "/api/holdings");
+    const attendu = num(bundle.summary?.totalRealEstateEur);
+    expect(attendu).toBeGreaterThan(0);
+
+    await page.goto("/immobilier", { waitUntil: "domcontentloaded" });
+    const tuile = page.getByTestId("re-kpi-value");
+    await expect(tuile).toBeVisible({ timeout: 30_000 });
+
+    /*
+      La valeur vient des positions, qui arrivent après le rendu de la bande :
+      la tuile affiche brièvement 0 € avant de se remplir. L'assertion est
+      donc réessayée plutôt que lue une fois — un écart réel finit malgré
+      tout par échouer, avec les deux montants dans le message.
+    */
+    // Le montant seul : la ligne secondaire porte elle aussi un nombre, et
+    // lire toute la tuile les concaténerait.
+    const montant = tuile.locator("p.num").first();
+    await expect(async () => {
+      const affiche = await montant.innerText();
+      const chiffres = Number(
+        affiche.replace(/[^0-9,]/g, "").replace(",", ".")
+      );
+      expect(
+        chiffres,
+        `En-tête Immobilier « ${affiche.trim()} » contre tuile ${eur(attendu)}.`
+      ).toBeCloseTo(attendu, 2);
+    }).toPass({ timeout: 30_000 });
+  });
+
   test("Immobilier : une SCPI détenue figure dans le module et dans l'IFI", async ({
     request,
   }) => {

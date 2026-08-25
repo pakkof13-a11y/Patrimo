@@ -195,3 +195,79 @@ describe("agrégats du parc", () => {
     expect(splitByStatus([])).toEqual([]);
   });
 });
+
+describe("immobilier indirect dans les agrégats", () => {
+  /*
+    L'en-tête du module annonce « Vue d'ensemble de votre patrimoine
+    immobilier » et une « Valeur totale ». Il ne comptait que les biens
+    détenus en direct : le tableau de bord affichait 337 240 € pendant que
+    le module en montrait 312 000, sur le même écran.
+
+    Une part de SCPI est de l'immobilier, mais ce n'est pas un bien : elle
+    entre dans la valeur et dans l'equity, jamais dans le compte de biens,
+    le rendement locatif ou le cash-flow, qui décrivent l'exploitation d'un
+    parc bâti.
+  */
+  const parc = () =>
+    buildPropertyViews(
+      [
+        property({
+          assetId: "big",
+          name: "Immeuble",
+          propertyValueEur: "312000",
+          monthlyRentEur: "1250",
+          monthlyChargesEur: "180",
+          annualPropertyTaxEur: null,
+          loans: [{ id: "l", name: "Prêt", remainingAmountEur: "120680" }],
+        }),
+      ],
+      new Map([
+        ["big", holding({ marketValueEur: "312000", costBasisEur: "297000" })],
+      ])
+    );
+
+  it("ajoute les véhicules indirects à la valeur et à l'equity", () => {
+    const direct = computeRealEstateTotals(parc(), []);
+    const total = computeRealEstateTotals(parc(), [], 25_240);
+
+    expect(direct.valueEur).toBeCloseTo(312_000, 6);
+    expect(total.valueEur).toBeCloseTo(337_240, 6);
+    expect(total.equityEur).toBeCloseTo(337_240 - 120_680, 6);
+    // La part directe reste lisible à côté du total.
+    expect(total.directValueEur).toBeCloseTo(312_000, 6);
+    expect(total.indirectValueEur).toBeCloseTo(25_240, 6);
+  });
+
+  it("ne compte pas une part de société comme un bien", () => {
+    const total = computeRealEstateTotals(parc(), [], 25_240);
+    expect(total.propertyCount).toBe(1);
+    expect(total.rentedCount).toBe(1);
+    expect(total.loanCount).toBe(1);
+  });
+
+  it("laisse le rendement et le cash-flow au parc bâti", () => {
+    /*
+      Une SCPI distribue, elle ne « loue » pas : la faire entrer dans un
+      rendement pondéré par la valeur diluerait celui des biens loués avec
+      un revenu qui n'est pas un loyer, et son cash-flow n'a pas de
+      mensualité d'emprunt à retrancher.
+    */
+    const direct = computeRealEstateTotals(parc(), []);
+    const total = computeRealEstateTotals(parc(), [], 25_240);
+    expect(total.weightedGrossYieldPct).toBe(direct.weightedGrossYieldPct);
+    expect(total.monthlyCashFlowEur).toBe(direct.monthlyCashFlowEur);
+    expect(total.annualRentEur).toBe(direct.annualRentEur);
+  });
+
+  it("rapporte la dette à la valeur totale, pas à la seule part directe", () => {
+    const total = computeRealEstateTotals(parc(), [], 25_240);
+    expect(total.debtRatioPct).toBeCloseTo((120_680 / 337_240) * 100, 6);
+  });
+
+  it("sans véhicule indirect, rien ne change", () => {
+    const sans = computeRealEstateTotals(parc(), []);
+    const zero = computeRealEstateTotals(parc(), [], 0);
+    expect(zero).toEqual(sans);
+    expect(sans.indirectValueEur).toBe(0);
+  });
+});

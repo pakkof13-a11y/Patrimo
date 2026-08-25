@@ -126,9 +126,26 @@ export function RealEstateTab({
     () => buildPropertyViews(properties, holdingsById),
     [properties, holdingsById]
   );
+
+  /*
+    Immobilier détenu autrement qu'en direct : SCPI, SCI, foncières.
+
+    Ces positions sont déjà valorisées par le journal et déjà présentes dans
+    `holdings` — celles de l'enveloppe immobilière qui ne correspondent à
+    aucune fiche de bien. Les recompter depuis l'onglet SCPI demanderait un
+    second appel pour une valeur qu'on a sous la main, et ferait diverger
+    l'en-tête de la tuile du tableau de bord, qui les compte de cette façon.
+  */
+  const indirectValueEur = useMemo(() => {
+    const direct = new Set(properties.map((p) => p.assetId));
+    return holdings
+      .filter((h) => h.accountType === "IMMOBILIER" && !direct.has(h.assetId))
+      .reduce((acc, h) => acc + (Number(h.marketValueEur) || 0), 0);
+  }, [holdings, properties]);
+
   const totals = useMemo(
-    () => computeRealEstateTotals(views, properties),
-    [views, properties]
+    () => computeRealEstateTotals(views, properties, indirectValueEur),
+    [views, properties, indirectValueEur]
   );
   const statusSplit = useMemo(() => splitByStatus(views), [views]);
 
@@ -225,7 +242,16 @@ export function RealEstateTab({
           testId="re-kpi-value"
           label="Valeur totale"
           value={formatCurrency(String(totals.valueEur), "EUR")}
-          secondary="Vos parts"
+          /*
+            La ventilation n'apparaît que lorsqu'il y a deux choses à
+            distinguer : sur un parc entièrement détenu en direct, « dont
+            0 € indirect » n'apprendrait rien.
+          */
+          secondary={
+            totals.indirectValueEur > 0
+              ? `dont ${formatCurrency(String(totals.indirectValueEur), "EUR")} indirect`
+              : "Vos parts"
+          }
           loading={loading}
         />
         <KpiBandTile

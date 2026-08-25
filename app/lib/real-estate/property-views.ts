@@ -85,7 +85,12 @@ export type PropertyView = {
 };
 
 export type RealEstateTotals = {
+  /** Patrimoine immobilier entier : biens détenus en direct + véhicules. */
   valueEur: number;
+  /** Part détenue en direct, seule à porter loyers, dette et exploitation. */
+  directValueEur: number;
+  /** SCPI, SCI, OPCI, foncières — de la valeur, pas des biens. */
+  indirectValueEur: number;
   debtEur: number;
   equityEur: number;
   costBasisEur: number;
@@ -217,7 +222,21 @@ export function buildPropertyViews(
  */
 export function computeRealEstateTotals(
   views: PropertyView[],
-  properties: PropertyInput[]
+  properties: PropertyInput[],
+  /**
+   * Valeur des véhicules immobiliers indirects, déjà valorisée par le journal.
+   *
+   * L'en-tête du module annonce « votre patrimoine immobilier » et une
+   * « Valeur totale » : il ne comptait que les biens détenus en direct, si
+   * bien que le tableau de bord affichait 337 240 € pendant que le module en
+   * montrait 312 000, sur le même écran.
+   *
+   * Une part de SCPI est de l'immobilier sans être un bien. Elle entre donc
+   * dans la valeur, l'equity et le ratio d'endettement — des grandeurs de
+   * patrimoine — et reste hors du compte de biens, du rendement locatif et du
+   * cash-flow, qui décrivent l'exploitation d'un parc bâti.
+   */
+  indirectValueEur = 0
 ): RealEstateTotals {
   let valueEur = 0;
   let debtEur = 0;
@@ -261,10 +280,14 @@ export function computeRealEstateTotals(
     annualChargesEur += num(p.monthlyChargesEur) * 12 + v.annualFiscalBurdenEur;
   }
 
+  const totalValueEur = valueEur + indirectValueEur;
+
   return {
-    valueEur,
+    valueEur: totalValueEur,
+    directValueEur: valueEur,
+    indirectValueEur,
     debtEur,
-    equityEur: valueEur - debtEur,
+    equityEur: totalValueEur - debtEur,
     costBasisEur,
     weightedGrossYieldPct: yieldWeight > 0 ? yieldSum / yieldWeight : null,
     monthlyCashFlowEur,
@@ -273,7 +296,7 @@ export function computeRealEstateTotals(
     propertyCount: views.length,
     rentedCount,
     loanCount,
-    debtRatioPct: valueEur > 0 ? (debtEur / valueEur) * 100 : null,
+    debtRatioPct: totalValueEur > 0 ? (debtEur / totalValueEur) * 100 : null,
   };
 }
 
