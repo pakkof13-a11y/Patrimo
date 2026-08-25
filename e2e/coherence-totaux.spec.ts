@@ -294,6 +294,32 @@ test.describe("Cohérence tableau de bord ↔ modules", () => {
     ).toBeCloseTo(num(av.totalOutstandingEur), 2);
   });
 
+  test("Performance : la courbe se termine sur le patrimoine du jour", async ({
+    request,
+  }) => {
+    /*
+      Le dernier point de la courbe et la tuile de patrimoine décrivent le
+      même instant : ils doivent porter le même chiffre.
+
+      C'est aussi le garde-fou des `PortfolioSnapshot`. La courbe est
+      reconstruite par `PortfolioValuationEngine` et ne lit pas cette table —
+      qui ne couvre que le périmètre « titres ». Y réinjecter des points
+      ferait décrocher la fin de courbe du patrimoine, ce que cette assertion
+      attrape.
+    */
+    const portfolio = await getJson(request, "/api/portfolio");
+    const history = portfolio.history ?? [];
+    expect(history.length, "Aucun point d'historique").toBeGreaterThan(0);
+
+    const dernier = history[history.length - 1];
+    expectCoherent({
+      family: "Patrimoine net (fin de courbe)",
+      dashboard: num(portfolio.summary?.netWorthEur),
+      module: num(dernier.netWorthBase),
+      moduleSource: `le dernier des ${history.length} points, daté du ${String(dernier.date).slice(0, 10)}`,
+    });
+  });
+
   test("Passifs : le module et le patrimoine soustraient la même dette", async ({
     request,
   }) => {

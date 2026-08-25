@@ -2028,24 +2028,26 @@ export async function seedUserPortfolio(
     await prisma.privateEquityValuation.createMany({ data: rows });
   }
 
-  // ── Snapshots dashboard (~36 mois) ─────────────────────────────────────────
-  for (let m = 36; m >= 0; m--) {
-    const day = m * 30;
-    const base = 320000 + (36 - m) * 2200 + (m % 5) * 400;
-    await prisma.portfolioSnapshot.create({
-      data: {
-        userId,
-        date: daysAgo(day),
-        totalValueEur: D(base.toFixed(2)),
-        totalCostEur: D("340000"),
-        cashTotalEur: D(String(28000 + (36 - m) * 200)),
-        realizedPnlEur: D(String(2000 + (36 - m) * 80)),
-        unrealizedPnlEur: D((base - 340000).toFixed(2)),
-        cashIncomeEur: D(String(800 + (36 - m) * 40)),
-        assetCount: positions.length,
-      },
-    });
-  }
+  /*
+    Pas de série de snapshots fabriquée.
+
+    Trente-sept points étaient posés ici par une formule arithmétique — un
+    patrimoine partant de 320 000 € et progressant de 2 200 € par mois, avec
+    un prix de revient figé à 340 000 €. Ils ne décrivaient rien du
+    portefeuille effectivement semé, qui pèse près de 918 000 € bruts.
+
+    La courbe ne les lit pas : elle est reconstruite par
+    `PortfolioValuationEngine`, et `getPortfolioHistory` documente pourquoi
+    les mélanger réintroduirait une incohérence de périmètre. Ils étaient donc
+    invisibles — et c'est ce qui les rendait dangereux : une table peuplée,
+    cohérente de forme, aux noms de champs engageants, qu'un futur écran
+    lirait de bonne foi pour afficher une courbe plausible et fausse.
+
+    `PortfolioSnapshot` garde son rôle de point de contrôle : trois écritures
+    réelles l'alimentent — première visite, rafraîchissement des cours, import
+    terminé. La première visite du compte de démonstration en posera un, juste,
+    plutôt que d'en hériter trente-sept qui ne le sont pas.
+  */
 
   // ── Trading à levier ───────────────────────────────────────────────────────
   //
