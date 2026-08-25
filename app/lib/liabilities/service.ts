@@ -5,11 +5,11 @@ import { d, toFixed } from "../money/decimal";
 import { toEurAmount } from "../market/fx";
 import {
   applyEarlyRepayment,
-  applyMonthlyDebit,
-  duePaymentDates,
   estimateRemainingInterest,
   estimateRemainingMonths,
+  projectDuePayments,
   projectEndDate,
+  remainingAmountAt,
   startOfUtcDay,
 } from "./amortization";
 
@@ -41,42 +41,33 @@ export async function applyDuePaymentsForLiability(
   if (!liability.paymentDay || !liability.monthlyPayment) return liability;
 
   const payment = liability.monthlyPayment.toString();
-  if (d(payment).lte(0)) return liability;
-  if (d(liability.remainingAmount.toString()).lte(0)) return liability;
 
-  const dates = duePaymentDates({
+  /*
+    La règle d'amortissement n'est pas écrite ici : elle vit dans
+    `projectDuePayments`, que les lecteurs appellent aussi. Matérialiser, c'est
+    donc écrire ce que la projection annonce — jamais la recalculer autrement,
+    sans quoi le solde affiché et le solde stocké pourraient diverger, ce qui
+    était précisément le défaut corrigé.
+  */
+  const projection = projectDuePayments({
+    remainingAmount: liability.remainingAmount.toString(),
+    monthlyPayment: payment,
     paymentDay: liability.paymentDay,
     startDate: liability.startDate,
     endDate: liability.endDate,
     lastPaymentAppliedAt: liability.lastPaymentAppliedAt,
     now,
   });
-  if (dates.length === 0) return liability;
 
-  let remaining = liability.remainingAmount.toString();
-  let lastApplied: Date | null = liability.lastPaymentAppliedAt;
-  const events: Array<{
-    type: string;
-    amount: string;
-    remainingAfter: string;
-    eventDate: Date;
-    notes: string;
-  }> = [];
-
-  for (const pd of dates) {
-    if (d(remaining).lte(0)) break;
-    const { remaining: next, debited } = applyMonthlyDebit(remaining, payment);
-    if (d(debited).lte(0)) break;
-    remaining = next;
-    lastApplied = pd;
-    events.push({
-      type: LIABILITY_EVENT_TYPES.MONTHLY_DEBIT,
-      amount: debited,
-      remainingAfter: remaining,
-      eventDate: pd,
-      notes: `Prélèvement mensuel (jour ${liability.paymentDay})`,
-    });
-  }
+  const remaining = projection.remaining;
+  const lastApplied = projection.lastAppliedAt;
+  const events = projection.payments.map((p) => ({
+    type: LIABILITY_EVENT_TYPES.MONTHLY_DEBIT,
+    amount: p.debited,
+    remainingAfter: p.remainingAfter,
+    eventDate: p.eventDate,
+    notes: `Prélèvement mensuel (jour ${liability.paymentDay})`,
+  }));
 
   if (events.length === 0) return liability;
 
@@ -122,7 +113,18 @@ export async function applyDuePaymentsForLiability(
   });
 }
 
-/** Apply due payments for all user liabilities (called on list). */
+/**
+ * Matérialise les échéances dues de toutes les dettes d'un utilisateur.
+ *
+ * Elle était appelée par `listLiabilities`, donc par un GET — d'où le défaut
+ * corrigé. Elle n'a plus de déclencheur automatique : les lecteurs projettent,
+ * et `recordEarlyRepayment` matérialise sa propre dette avant d'y toucher.
+ *
+ * Elle reste le point d'entrée pour une matérialisation à l'échelle d'un
+ * compte, comme `/api/savings/accrue` le fait pour les intérêts des livrets.
+ * Les crédits n'ont pas encore d'équivalent planifié : la trace comptable ne
+ * s'écrit donc, aujourd'hui, qu'au moment d'un remboursement anticipé.
+ */
 export async function applyDuePaymentsForUser(userId: string, now: Date = new Date()) {
   const rows = await prisma.liability.findMany({
     where: { userId },
@@ -133,9 +135,15 @@ export async function applyDuePaymentsForUser(userId: string, now: Date = new Da
   }
 }
 
-export async function listLiabilities(userId: string) {
-  await applyDuePaymentsForUser(userId);
-
+/**
+ * Liste des dettes, capital restant dû projeté à aujourd'hui.
+ *
+ * Cette fonction amortissait en base avant de répondre : un simple GET du
+ * module Crédits écrivait 79 `LiabilityEvent` sur le compte de démonstration,
+ * et le patrimoine net changeait de 64 020 € selon qu'on avait ouvert cet
+ * écran ou non. Elle projette désormais, comme les trois autres lecteurs.
+ */
+export async function listLiabilities(userId: string, now: Date = new Date()) {
   const liabilities = await prisma.liability.findMany({
     where: { userId },
     orderBy: { name: "asc" },
@@ -159,11 +167,11 @@ export async function listLiabilities(userId: string) {
   let totalEur = d(0);
   const enriched = [];
   for (const l of liabilities) {
-    const eur = await toEurAmount(l.remainingAmount.toString(), l.currency);
+    const remaining = remainingAmountAt(l, now);
+    const eur = await toEurAmount(remaining, l.currency);
     totalEur = totalEur.plus(d(eur));
     const monthly = l.monthlyPayment?.toString() || "0";
     const rate = l.interestRate?.toString() || "0";
-    const remaining = l.remainingAmount.toString();
     const monthsLeft = estimateRemainingMonths(remaining, monthly, rate);
     const interestLeft = estimateRemainingInterest(remaining, monthly, rate);
 
@@ -225,6 +233,16 @@ export async function recordEarlyRepayment(opts: {
   eventDate?: string;
   notes?: string;
 }) {
+  /*
+    Matérialiser avant d'écrire, et non plus au moment de lire.
+
+    Un remboursement anticipé s'impute sur le capital réellement dû : si des
+    mensualités en retard n'ont pas encore été inscrites, les solder d'abord
+    évite d'amputer un solde périmé. C'est le déclencheur légitime de
+    `applyDuePaymentsForLiability` — une mutation, pas un affichage.
+  */
+  await applyDuePaymentsForLiability(opts.userId, opts.liabilityId);
+
   const liability = await prisma.liability.findFirst({
     where: owned(opts.liabilityId, opts.userId),
   });

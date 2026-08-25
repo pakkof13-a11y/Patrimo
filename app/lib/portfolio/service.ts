@@ -27,6 +27,7 @@ import {
   type HoldingPlatformSlice,
 } from "./holdings-platform-slice";
 import { asAccountType } from "../types/account-type";
+import { remainingAmountAt } from "../liabilities/amortization";
 import { isNonOwnedStatus } from "../crypto/nft-taxonomy";
 import {
   asBaseAmount,
@@ -767,7 +768,17 @@ export async function getLiabilitiesTotalEur(
   const items = await prisma.liability.findMany({ where: { userId } });
   let total = zero();
   for (const l of items) {
-    total = total.plus(d(convertToEurSync(l.remainingAmount.toString(), l.currency, fx)));
+    /*
+      Capital dû à aujourd'hui, mensualités en retard comprises.
+
+      Le solde stocké ne vieillit qu'à l'écriture ; s'en contenter faisait
+      dépendre le patrimoine net de l'écran ouvert en dernier — 64 020 € de
+      moins dès qu'on avait visité le module Crédits. La projection est pure :
+      elle ne matérialise rien, exactement comme les intérêts courus des
+      livrets quelques lignes plus haut dans le cash.
+    */
+    const remaining = remainingAmountAt(l);
+    total = total.plus(d(convertToEurSync(remaining, l.currency, fx)));
   }
   return total;
 }

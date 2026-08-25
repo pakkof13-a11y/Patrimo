@@ -10,6 +10,7 @@ import {
   RealEstateInputError,
 } from "@/app/lib/real-estate/property-service";
 import { refreshGeorisquesRisks } from "@/app/lib/real-estate/georisques";
+import { remainingAmountAt } from "@/app/lib/liabilities/amortization";
 import { AccountingError } from "@/app/lib/accounting";
 import { prisma } from "@/app/lib/prisma";
 import {
@@ -93,7 +94,19 @@ export async function GET() {
             acquisitionDate: true,
             platform: { select: { id: true, name: true, subtype: true } },
             liabilities: {
-              select: { id: true, name: true, remainingAmount: true },
+              // Même projection que le module Crédits et que l'IFI : le prêt
+              // affiché sur la fiche d'un bien ne doit pas dépendre de l'écran
+              // ouvert en dernier.
+              select: {
+                id: true,
+                name: true,
+                remainingAmount: true,
+                monthlyPayment: true,
+                paymentDay: true,
+                startDate: true,
+                endDate: true,
+                lastPaymentAppliedAt: true,
+              },
             },
           },
         },
@@ -170,7 +183,7 @@ export async function GET() {
         loans: r.asset.liabilities.map((l) => ({
           id: l.id,
           name: l.name,
-          remainingAmountEur: l.remainingAmount.toString(),
+          remainingAmountEur: remainingAmountAt(l),
         })),
       })),
     });

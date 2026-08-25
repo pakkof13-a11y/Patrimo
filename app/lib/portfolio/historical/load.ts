@@ -15,6 +15,7 @@ import { d, zero, type Decimal } from "../../money/decimal";
 import { convertToEurSync, getEurRates } from "../../market/fx";
 import { readDailyCloses } from "../../market/daily-closes";
 import { parisDayKey } from "../../dates/paris";
+import { remainingAmountAt } from "../../liabilities/amortization";
 import {
   savingsDisplayBalance,
   type PayoutFrequency,
@@ -321,7 +322,13 @@ export async function loadHistoricalInputs(
       createdAt: l.createdAt,
       updatedAt: l.updatedAt,
       initialAmountEur: eur(l.initialAmount, l.currency, rates),
-      remainingAmountEur: eur(l.remainingAmount, l.currency, rates),
+      /*
+        Le solde qui ferme la chronologie est projeté à aujourd'hui, comme
+        celui du tableau de bord. Rendre ici le solde stocké ferait terminer la
+        courbe sur une dette que le patrimoine net ne reconnaît plus — les deux
+        moteurs doivent s'accorder à la date du jour.
+      */
+      remainingAmountEur: eur(remainingAmountAt(l), l.currency, rates),
       events: l.events.map((e) => ({
         eventDate: e.eventDate,
         remainingAfterEur:

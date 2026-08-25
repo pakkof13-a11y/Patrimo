@@ -30,6 +30,7 @@ import {
   type SchemesSummary,
 } from "./schemes";
 import { computeIfi, type IfiAsset, type IfiResult } from "./ifi";
+import { remainingAmountAt } from "@/app/lib/liabilities/amortization";
 import {
   compareRentalRegimes,
   type RentalComparison,
@@ -139,7 +140,19 @@ export async function loadPropertyTaxRows(
             name: true,
             manualPrice: true,
             acquisitionDate: true,
-            liabilities: { select: { remainingAmount: true } },
+            liabilities: {
+              // Les champs d'amortissement viennent avec le solde : la dette
+              // déductible se projette à aujourd'hui comme partout ailleurs,
+              // sinon l'assiette IFI dépendrait de l'ordre de navigation.
+              select: {
+                remainingAmount: true,
+                monthlyPayment: true,
+                paymentDay: true,
+                startDate: true,
+                endDate: true,
+                lastPaymentAppliedAt: true,
+              },
+            },
           },
         },
       },
@@ -155,7 +168,7 @@ export async function loadPropertyTaxRows(
 
     let debt = zero();
     for (const l of detail.asset.liabilities) {
-      debt = debt.plus(d(l.remainingAmount.toString()));
+      debt = debt.plus(d(remainingAmountAt(l)));
     }
 
     return {
