@@ -15,8 +15,10 @@ import {
   evolutionIntervalHint,
   evolutionIntervalLabel,
   isEvolutionRangeEnabled,
+  isInflationComparisonAvailable,
   toPercentSeries,
   withBenchmarkSeries,
+  type CpiCumulativePointInput,
   type EvolutionRange,
   type IndexClosePoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
@@ -121,7 +123,7 @@ function Segmented<T extends string>({
   ariaLabel,
   testIdPrefix,
 }: {
-  items: { id: T; label: string; title?: string }[];
+  items: { id: T; label: string; title?: string; disabled?: boolean }[];
   value: T;
   onChange: (v: T) => void;
   ariaLabel: string;
@@ -142,13 +144,18 @@ function Segmented<T extends string>({
             role="tab"
             title={item.title}
             aria-selected={selected}
+            aria-disabled={item.disabled}
+            disabled={item.disabled}
             data-testid={
               testIdPrefix ? `${testIdPrefix}-${item.id}` : undefined
             }
-            onClick={() => onChange(item.id)}
+            onClick={() => !item.disabled && onChange(item.id)}
             className={cn(
               "rounded-[var(--radius-sm)] px-2.5 py-1 text-[11px] font-medium transition",
               "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+              // Même traitement que les périodes hors historique : le choix
+              // reste visible, mais on voit qu'il n'est pas disponible.
+              item.disabled && "cursor-not-allowed opacity-40",
               selected
                 ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]"
                 : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
@@ -272,10 +279,47 @@ export function PortfolioEvolutionPanel({
     [indexQ.data]
   );
 
-  const points = useMemo(
-    () => withBenchmarkSeries(rawPoints, versus, { indexCloses }),
-    [rawPoints, versus, indexCloses]
+  /*
+    Inflation : série mensuelle réelle, jamais une hypothèse.
+
+    La requête n'est lancée que si la comparaison est demandée **et** possible
+    sur la période — sous un mois, l'IPC n'a rien à dire. Le paramètre `days`
+    couvre la fenêtre affichée, arrondi au mois par le service.
+  */
+  const inflationPossible = isInflationComparisonAvailable(range);
+  const cpiQ = useQuery<{
+    available: boolean;
+    reason?: string;
+    points?: CpiCumulativePointInput[];
+  }>({
+    queryKey: ["macro-cpi", range],
+    enabled: versus === "inflation" && inflationPossible && rawPoints.length > 0,
+    staleTime: 12 * 60 * 60_000,
+    queryFn: () => {
+      const first = Date.parse(rawPoints[0]!.date);
+      const last = Date.parse(rawPoints[rawPoints.length - 1]!.date);
+      const days = Math.max(1, Math.ceil((last - first) / 86_400_000));
+      return fetchJson(`/api/macro/cpi?days=${days}`);
+    },
+  });
+
+  const cpiCumulative = useMemo<CpiCumulativePointInput[]>(
+    () => (cpiQ.data?.available ? cpiQ.data.points ?? [] : []),
+    [cpiQ.data]
   );
+
+  const points = useMemo(
+    () => withBenchmarkSeries(rawPoints, versus, { indexCloses, cpiCumulative }),
+    [rawPoints, versus, indexCloses, cpiCumulative]
+  );
+
+  /*
+    Trois situations distinctes, et elles ne se disent pas pareil :
+    la période est trop courte, la donnée manque, ou tout va bien.
+  */
+  const inflationUnavailable =
+    versus === "inflation" &&
+    (!inflationPossible || (cpiQ.data != null && !cpiQ.data.available));
 
   const percentPoints = useMemo(
     () => (versus === "none" ? [] : toPercentSeries(points)),
@@ -431,7 +475,16 @@ export function PortfolioEvolutionPanel({
             Vs
           </span>
           <Segmented
-            items={VERSUS_CHOICES}
+            items={VERSUS_CHOICES.map((c) =>
+              c.id === "inflation" && !inflationPossible
+                ? {
+                    ...c,
+                    title:
+                      "L'IPC est publié une fois par mois : la comparaison commence à 1 M",
+                    disabled: true,
+                  }
+                : c
+            )}
             value={versus}
             onChange={(v) => update({ versus: v })}
             ariaLabel="Comparaison"
@@ -511,7 +564,25 @@ export function PortfolioEvolutionPanel({
         </div>
       </div>
 
-      {versus !== "none" && !empty && !noPoints && points.length > 0 && (
+      {inflationUnavailable && !empty && !noPoints && (
+        <p
+          className="text-meta mt-1.5 shrink-0"
+          data-testid="evolution-inflation-unavailable"
+        >
+          {/*
+            Nommer la raison plutôt que laisser une courbe manquante sans
+            explication. Une ligne à zéro affirmerait une inflation nulle, ce
+            qui est une mesure — pas une absence de mesure.
+          */}
+          {!inflationPossible
+            ? "Inflation indisponible sur 7 J — l'IPC est publié une fois par mois."
+            : cpiQ.data?.reason === "incomplete"
+              ? "Inflation indisponible — un mois manque sur la période."
+              : "Inflation indisponible — aucune observation d'IPC enregistrée."}
+        </p>
+      )}
+
+      {versus !== "none" && !inflationUnavailable && !empty && !noPoints && points.length > 0 && (
         <p className="text-meta mt-1.5 shrink-0" data-testid="evolution-vs-note">
           Vs {benchmarkDisplayName}
           {gap ? (
@@ -528,7 +599,13 @@ export function PortfolioEvolutionPanel({
                 data-testid="evolution-vs-gap"
               >
                 {gap.gapPct >= 0 ? "+" : ""}
-                {gap.gapPct.toFixed(1)} pts
+                {/* Convention française, comme les montants juste à côté :
+                    « 13.9 pts » à côté de « 100 400,00 € » jure. */}
+                {gap.gapPct.toLocaleString("fr-FR", {
+                  minimumFractionDigits: 1,
+                  maximumFractionDigits: 1,
+                })}{" "}
+                pts
               </span>
             </>
           ) : wantIndex && indexQ.isLoading ? (

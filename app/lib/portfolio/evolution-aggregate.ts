@@ -600,26 +600,72 @@ export function isEvolutionRangeEnabled(
   }
 }
 
+
+/**
+ * L'inflation a-t-elle un sens sur cette période ?
+ *
+ * L'IPC est publié une fois par mois. Sur sept jours, il n'y a au mieux qu'une
+ * seule publication dans la fenêtre — donc aucune variation à montrer, et
+ * afficher une ligne laisserait croire à une mesure hebdomadaire de
+ * l'inflation, qui n'existe pas.
+ *
+ * La comparaison commence donc à 1 M. C'est une propriété de la donnée, pas un
+ * choix d'affichage : rien ne devient disponible en changeant de graphique.
+ */
+export function isInflationComparisonAvailable(range: EvolutionRange): boolean {
+  return range !== "7d";
+}
+
 export type EvolutionBenchmarkMode = "none" | "inflation" | "index";
 
 /** Clôture d'indice brute (rebasée ensuite sur le premier total du portefeuille). */
 export type IndexClosePoint = { date: string; close: number };
 
 /**
- * Inflation France — glissement annuel de l'IPC (indice des prix à la
- * consommation, INSEE). Constante documentée : moyenne annuelle 2024 ≈ 2,0 %.
- * À rafraîchir quand l'INSEE publie une nouvelle référence annuelle.
- * Utilisée comme taux annualisé et appliquée au prorata du temps écoulé, donc
- * automatiquement adaptée à la périodicité affichée (jour / semaine / mois…).
+ * Un point de la courbe d'inflation : cumul depuis le début de la fenêtre.
+ *
+ * Vient de `macro/cpi`, construit à partir d'observations mensuelles réelles.
+ * Il n'y a plus de taux par défaut : une constante annuelle appliquée au
+ * prorata du temps produisait une exponentielle lisse à 2 % l'an, sans
+ * saisonnalité ni mois de baisse. L'absence de donnée fait désormais
+ * disparaître la courbe, elle ne la remplace pas.
  */
-export const FRENCH_ANNUAL_CPI_RATE = 0.02;
+export type CpiCumulativePointInput = {
+  /** Mois décrit, `YYYY-MM`. */
+  period: string;
+  /** Cumul depuis le début de la fenêtre, en fraction (0,021 = +2,1 %). */
+  cumulative: number;
+};
 
 export type BenchmarkOptions = {
   /** Clôtures d'indice (mode "index"), brutes — rebasées sur baseTotal. */
   indexCloses?: IndexClosePoint[];
-  /** Taux d'inflation annuel (défaut : IPC France). */
-  annualInflationRate?: number;
+  /** Inflation cumulée mensuelle réelle. Absente ⇒ aucune courbe. */
+  cpiCumulative?: CpiCumulativePointInput[];
 };
+
+/**
+ * Cumul applicable à une date : celui du dernier mois **commencé**.
+ *
+ * Escalier mensuel, et non interpolation. L'IPC est publié une fois par mois ;
+ * répartir sa variation en un taux journalier donnerait une courbe douce dont
+ * chaque point serait une valeur que l'INSEE n'a jamais publiée. La marche est
+ * moins jolie, elle est vraie.
+ */
+function makeCpiPicker(cpi: CpiCumulativePointInput[]) {
+  const sorted = [...cpi].sort((a, b) => a.period.localeCompare(b.period));
+  return (iso: string): number | null => {
+    const t = new Date(iso);
+    if (Number.isNaN(t.getTime())) return null;
+    const period = `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}`;
+    let best: number | null = null;
+    for (const c of sorted) {
+      if (c.period <= period) best = c.cumulative;
+      else break;
+    }
+    return best;
+  };
+}
 
 /** Sélectionne la dernière clôture d'indice ≤ date de barre (tolérance 36 h). */
 function makeIndexPicker(indexCloses: IndexClosePoint[]) {
@@ -659,23 +705,22 @@ export function withBenchmarkSeries(
     return points.map((p) => ({ ...p, benchmark: undefined }));
   }
 
-  const t0 = Date.parse(points[0]!.date);
   const baseTotal = points[0]!.total;
   if (!Number.isFinite(baseTotal) || baseTotal <= 0) {
     return points.map((p) => ({ ...p, benchmark: undefined }));
   }
 
-  function yearsSince(iso: string): number {
-    const t = Date.parse(iso);
-    if (!Number.isFinite(t0) || !Number.isFinite(t)) return 0;
-    return Math.max(0, (t - t0) / (365.25 * 24 * 60 * 60 * 1000));
-  }
-
   let levelAt: (iso: string) => number;
 
   if (mode === "inflation") {
-    const rate = opts.annualInflationRate ?? FRENCH_ANNUAL_CPI_RATE;
-    levelAt = (iso) => baseTotal * Math.pow(1 + rate, yearsSince(iso));
+    const cpi = opts.cpiCumulative ?? [];
+    const pick = makeCpiPicker(cpi);
+    if (cpi.length === 0 || pick(points[0]!.date) == null) {
+      // Aucune observation exploitable sur la fenêtre : pas de courbe, plutôt
+      // qu'une ligne plate ou une hypothèse déguisée en mesure.
+      return points.map((p) => ({ ...p, benchmark: undefined }));
+    }
+    levelAt = (iso) => baseTotal * (1 + (pick(iso) ?? 0));
   } else {
     // index : rebasage des clôtures réelles sur baseTotal
     const closes = opts.indexCloses ?? [];
