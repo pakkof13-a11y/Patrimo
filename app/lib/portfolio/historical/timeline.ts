@@ -134,24 +134,36 @@ export class ValueTimeline {
 /**
  * Somme des chronologies d'un ensemble d'objets à une date.
  *
- * Renvoie aussi le nombre d'objets dont la valeur n'est qu'un report : c'est
- * ce compteur qui permet à la courbe de se déclarer estimée plutôt que de
- * laisser croire à une mesure.
+ * Trois compteurs, et ils disent trois choses différentes :
+ *
+ * - `observed` : un constat daté couvre ce jour ;
+ * - `carried`  : la valeur vient d'un constat antérieur ;
+ * - `unavailable` : l'objet existe, mais **aucun constat ne le précède** —
+ *   rien n'est donc su de lui ce jour-là.
+ *
+ * Le troisième manquait. Une chronologie sans valeur était simplement sautée,
+ * si bien qu'un compartiment entièrement inconnu se présentait comme exact :
+ * l'absence de donnée était indiscernable de l'absence d'objet. Compter ces
+ * cas permet à l'appelant de dire « je ne sais pas » au lieu de « zéro ».
  */
 export function sumTimelinesAt(
   timelines: Iterable<ValueTimeline>,
   day: DayKey
-): { totalEur: Decimal; carried: number; observed: number } {
+): { totalEur: Decimal; carried: number; observed: number; unavailable: number } {
   let totalEur = zero();
   let carried = 0;
   let observed = 0;
+  let unavailable = 0;
   for (const t of timelines) {
-    if (!t.hasValueAt(day)) continue;
+    if (!t.hasValueAt(day)) {
+      unavailable += 1;
+      continue;
+    }
     totalEur = totalEur.plus(t.valueAt(day));
     if (t.isObservedAt(day)) observed += 1;
     else carried += 1;
   }
-  return { totalEur, carried, observed };
+  return { totalEur, carried, observed, unavailable };
 }
 
 /** Jours civils inclusifs entre deux bornes, bornés par `cap`. */

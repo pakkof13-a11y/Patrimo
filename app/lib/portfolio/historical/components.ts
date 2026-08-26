@@ -43,6 +43,16 @@ export type CashAccountRow = {
   id: string;
   balanceEur: Decimal;
   createdAt: Date;
+  /**
+   * Date à laquelle le solde est **connu** — dernière écriture de la ligne.
+   *
+   * Distincte de `createdAt`, qui dit seulement quand le compte est entré dans
+   * l'application. Un compte ouvert en 2020 et saisi aujourd'hui a un solde
+   * connu d'aujourd'hui, pas de 2020 : sans cette date, la seule ancre
+   * disponible était la création, et le solde courant se retrouvait appliqué
+   * cinq ans en arrière.
+   */
+  knownAt?: Date;
   /** Solde d'affichage courant, intérêts courus inclus le cas échéant. */
   currentEur?: Decimal;
 };
@@ -90,29 +100,35 @@ export function buildCashSleeve(
 
     if (evts.length === 0) {
       /*
-        Le report le moins bien étayé du moteur — et il faut le dire.
+        Aucun événement : le seul fait connu est le solde, et la date à laquelle
+        il a été écrit.
 
-        Sans aucun événement, le seul fait connu est le solde d'aujourd'hui. Le
-        rattacher à la date de création l'applique **en arrière**, sur une durée
-        que rien ne borne : un compte ouvert en 2020 porte alors son solde
-        actuel depuis 2020, ce que rien ne démontre.
+        Il était auparavant rattaché à la **création** du compte, ce qui
+        l'appliquait en arrière sur une durée que rien ne bornait : un compte
+        ouvert en 2020 portait son solde d'aujourd'hui depuis 2020. La valeur
+        était réelle, son application au passé ne l'était pas.
 
-        Le point est marqué non observé, donc le compartiment se déclare estimé
-        et la courbe ne prétend pas mesurer. L'alternative — ne rien afficher
-        avant la première écriture — ferait disparaître toute la trésorerie du
-        passé, ce qui serait une autre forme de contre-vérité. Le choix est
-        assumé et documenté plutôt que silencieux ; le corriger demanderait une
-        décision produit, pas un correctif.
+        L'ancre est désormais `knownAt` — la dernière écriture de la ligne.
+        Avant cette date, la chronologie ne rend rien : le compte existe, mais
+        rien n'est su de lui, et `sumTimelinesAt` le compte comme indisponible
+        plutôt que comme zéro. Le trou est assumé au lieu d'être comblé par une
+        valeur que personne n'a observée.
       */
+      const knownDay = dayOf(acc.knownAt ?? acc.createdAt);
       timelines.push(
         ValueTimeline.from([
-          { day: dayOf(acc.createdAt), valueEur: current, observed: false },
+          { day: knownDay, valueEur: current, observed: false },
         ])
       );
-      // Le compte entre dans le périmètre avec son solde : c'est un apport,
-      // pas un gain — sans quoi l'ouverture d'un livret ferait une performance.
+      /*
+        Le flux suit la même date que la valeur.
+
+        Les dissocier ferait apparaître un apport un jour où la valeur ne bouge
+        pas — donc une perte de performance du même montant, purement
+        comptable.
+      */
       flows.push({
-        day: dayOf(acc.createdAt) ?? "",
+        day: knownDay ?? "",
         amountEur: current,
         component: "cash",
       });

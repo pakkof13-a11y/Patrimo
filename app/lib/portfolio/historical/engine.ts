@@ -381,7 +381,18 @@ export class PortfolioValuationEngine {
 
     // ── Poches de cash, alternatifs, épargne salariale ───────────────────────
     const cash = sumTimelinesAt(this.cash.timelines, day);
-    if (cash.carried > 0 || this.cash.undatable > 0) estimated.add("cash");
+    /*
+      `unavailable` compte les comptes dont **rien** n'est su ce jour-là :
+      ils existent, mais aucun constat ne précède la date demandée.
+
+      Sans ce test, une chronologie sans valeur était sautée en silence et le
+      compartiment se présentait comme exact alors qu'il ignorait tout d'une
+      partie de la trésorerie — une absence de donnée indiscernable d'une
+      absence de compte.
+    */
+    if (cash.carried > 0 || cash.unavailable > 0 || this.cash.undatable > 0) {
+      estimated.add("cash");
+    }
 
     const alternatives = sumTimelinesAt(this.alternatives.timelines, day);
     if (alternatives.carried > 0 || this.alternatives.undatable > 0) {

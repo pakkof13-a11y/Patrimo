@@ -179,11 +179,15 @@ export async function loadHistoricalInputs(
       id: b.id,
       balanceEur: eur(b.balance, b.currency, rates),
       createdAt: b.createdAt,
+      // Le solde est connu depuis sa dernière écriture, pas depuis l'ouverture
+      // du compte : c'est cette date qui borne son application au passé.
+      knownAt: b.updatedAt,
     })),
     ...savings.map((s) => ({
       id: s.id,
       balanceEur: eur(s.balance, s.currency, rates),
       createdAt: s.createdAt,
+      knownAt: s.updatedAt,
       // Le solde affiché inclut les intérêts courus non encore versés : c'est
       // ce que la carte du dashboard additionne, donc ce que la courbe doit
       // rejoindre aujourd'hui.
@@ -193,6 +197,7 @@ export async function loadHistoricalInputs(
       id: e.id,
       balanceEur: eur(e.balance, e.currency, rates),
       createdAt: e.createdAt,
+      knownAt: e.updatedAt,
     })),
   ];
 
