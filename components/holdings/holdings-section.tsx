@@ -1293,8 +1293,10 @@ export function HoldingsSection({
    * Courbe et variation du jour de chaque classe.
    *
    * Chargées seulement quand le tableau est effectivement regroupé par classe :
-   * ce calcul peut réveiller le cache de clôtures côté serveur, et le
-   * portefeuille n'a pas à le payer quand personne ne regarde les groupes.
+   * la série parcourt tout le ledger de la fenêtre, et le portefeuille n'a pas
+   * à payer ce calcul quand personne ne regarde les groupes. La lecture ne
+   * contacte aucun fournisseur — elle se sert du cache de clôtures tel qu'il
+   * est, sans le remplir.
    */
   const classPnlQ = useClassPnlQuery("1m", groupBy === "assetClass");
   const classSeries = useMemo(() => {
@@ -1354,6 +1356,23 @@ export function HoldingsSection({
     assetClassFilters.length > 0 ||
     currencyFilters.length > 0 ||
     envelopeFilters.length < allEnvelopesCount;
+
+  /**
+   * Série de classe des en-têtes de groupe — supprimée dès qu'un filtre agit.
+   *
+   * `/api/portfolio/class-pnl` calcule sur **tout** le portefeuille : il ne
+   * connaît ni la recherche, ni l'enveloppe, ni les classes cochées à l'écran.
+   * Filtrer sur le PEA laissait donc l'en-tête « Actions » afficher la courbe
+   * et le P&L de période de toutes les actions, CTO compris, juste au-dessus
+   * d'un décompte de lignes qui, lui, respectait le filtre : deux chiffres
+   * contradictoires sur la même ligne.
+   *
+   * Les tuiles KPI appliquaient déjà cette règle (`filtered`) ; les en-têtes de
+   * groupe l'ignoraient. Une sous-série filtrée n'est pas calculable ici — mieux
+   * vaut ne rien montrer que montrer le portefeuille entier sous une étiquette
+   * restreinte.
+   */
+  const groupClassSeries = hasActiveFilters ? null : classSeries;
 
   const resetFilters = useCallback(() => {
     setSearchInput("");
@@ -1892,14 +1911,14 @@ export function HoldingsSection({
                           totalUnrealizedPnl={group.totalUnrealizedPnl}
                           unrealizedPnlPct={group.unrealizedPnlPct}
                           weightPct={group.weightPct}
-                          spark={classSeries?.values.get(group.assetClass)}
+                          spark={groupClassSeries?.values.get(group.assetClass)}
                           periodPnl={
-                            classSeries?.periodPnl.get(group.assetClass) ?? null
+                            groupClassSeries?.periodPnl.get(group.assetClass) ?? null
                           }
                           periodPct={
-                            classSeries?.periodPct.get(group.assetClass) ?? null
+                            groupClassSeries?.periodPct.get(group.assetClass) ?? null
                           }
-                          estimated={classSeries?.incomplete.has(
+                          estimated={groupClassSeries?.incomplete.has(
                             group.assetClass
                           )}
                           totalCostBasis={group.totalCostBasis}
