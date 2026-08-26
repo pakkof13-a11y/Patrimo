@@ -35,7 +35,12 @@
  */
 
 import { prisma } from "../prisma";
+import { parisDayKey } from "../dates/paris";
 import { getAssetPriceHistory } from "./price-history";
+import {
+  collectDailyCloses,
+  type DailyCloseCollectionReport,
+} from "./daily-closes";
 import type {
   PriceBarInterval,
   PriceHistoryResult,
@@ -180,6 +185,86 @@ export async function listCollectableAssets(userId?: string) {
     },
     select: { id: true, userId: true, name: true },
   });
+}
+
+
+/**
+ * Profondeur demandée aux fournisseurs pour les clôtures quotidiennes.
+ *
+ * Un an : c'est déjà la fenêtre que `fillDailyCloses` réclame, et la remonter
+ * ne servirait qu'à demander ce qu'aucun fournisseur branché ne rend. La
+ * profondeur réelle reste celle du fournisseur — on ne promet pas mieux.
+ */
+export const DAILY_LOOKBACK_DAYS = 365;
+
+/**
+ * Entretien des clôtures quotidiennes, sur le même périmètre que l'intraday.
+ *
+ * ## Pourquoi c'est ici
+ *
+ * `AssetDailyClose` n'était alimentée qu'en marge d'une consultation : ouvrir
+ * un écran d'historique déclenchait le remplissage. Un compte qui n'ouvre
+ * jamais cet écran n'accumulait donc aucun historique quotidien — et comme
+ * c'est **cette table** qui rend le passé reconstructible, son historique
+ * restait vide sans que rien ne le signale.
+ *
+ * La collecte planifiée s'en charge désormais. La lecture, elle, ne déclenche
+ * plus rien de nouveau : elle lit ce que le cron a déposé.
+ *
+ * ## Aucune logique nouvelle
+ *
+ * `collectDailyCloses` est la fonction que `getDailyCloses` utilise déjà. Le
+ * cron ne fait qu'appeler la même chose avec le même périmètre d'actifs que
+ * l'intraday — relu à chaque passage, jamais figé.
+ */
+export async function collectDailyClosesForAssets(opts?: {
+  userId?: string;
+  now?: Date;
+  lookbackDays?: number;
+}): Promise<DailyCloseCollectionReport & { day: string }> {
+  const now = opts?.now ?? new Date();
+  const lookback = opts?.lookbackDays ?? DAILY_LOOKBACK_DAYS;
+
+  const assets = await listCollectableAssets(opts?.userId);
+  /*
+    Le jour de référence est le jour **parisien**, comme partout ailleurs dans
+    le moteur. Découper à minuit UTC ferait retomber une clôture prise entre
+    minuit et 2 h dans la journée de la veille — le défaut déjà corrigé sur les
+    instantanés.
+  */
+  const toDay = parisDayKey(now);
+  const fromDay = parisDayKey(new Date(now.getTime() - lookback * 86_400_000));
+
+  /*
+    Le remplissage est par utilisateur : `fillDailyCloses` résout le symbole
+    depuis l'actif, qui appartient à un compte. Les actifs sont donc regroupés,
+    et non passés en vrac.
+  */
+  const byUser = new Map<string, string[]>();
+  for (const a of assets) {
+    const list = byUser.get(a.userId);
+    if (list) list.push(a.id);
+    else byUser.set(a.userId, [a.id]);
+  }
+
+  const total: DailyCloseCollectionReport = {
+    assetsConsidered: 0,
+    assetsStale: 0,
+    assetsFilled: 0,
+    closesWritten: 0,
+    errors: [],
+  };
+
+  for (const [userId, assetIds] of byUser) {
+    const r = await collectDailyCloses({ userId, assetIds, fromDay, toDay, now });
+    total.assetsConsidered += r.assetsConsidered;
+    total.assetsStale += r.assetsStale;
+    total.assetsFilled += r.assetsFilled;
+    total.closesWritten += r.closesWritten;
+    total.errors.push(...r.errors);
+  }
+
+  return { ...total, day: toDay };
 }
 
 /** Ce que le collecteur consomme — injecté pour que les tests n'aient pas de réseau. */

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { timingSafeEqualSecret } from "@/app/lib/env/runtime";
 import {
+  collectDailyClosesForAssets,
   collectIntradayBars,
   DEFAULT_INTRADAY_INTERVAL,
   isIntradayInterval,
@@ -10,7 +11,13 @@ import { parseBarInterval } from "@/app/lib/market/price-history-types";
 import { readCronCredential } from "@/app/lib/auth/cron-credential";
 
 /**
- * Collecte planifiée des barres intra-séance.
+ * Collecte planifiée des données de marché.
+ *
+ * Deux entretiens en un passage : les barres intra-séance, et les clôtures
+ * quotidiennes. Cette seconde partie n'était alimentée qu'en marge d'une
+ * consultation — un compte qui n'ouvrait jamais d'écran d'historique
+ * n'accumulait donc rien, alors que c'est cette table qui rend le passé
+ * reconstructible. Une lecture, elle, ne déclenche plus rien de nouveau.
  *
  * ## Deux modes, comme `/api/savings/accrue`
  *
@@ -57,20 +64,60 @@ function intervalOf(req: Request) {
   return asked && isIntradayInterval(asked) ? asked : DEFAULT_INTRADAY_INTERVAL;
 }
 
+/**
+ * Les deux entretiens d'un passage.
+ *
+ * L'intraday d'abord — c'est lui qui a une fenêtre fournisseur courte, donc le
+ * plus à perdre en cas d'interruption. Les clôtures suivent : leur fenêtre est
+ * large et un passage manqué se rattrape.
+ *
+ * L'échec de l'un ne doit pas emporter l'autre : ils entretiennent deux caches
+ * distincts, et perdre les deux parce qu'un fournisseur est muet serait
+ * doublement coûteux.
+ */
+async function collectAll(opts: {
+  interval: ReturnType<typeof intervalOf>;
+  userId?: string;
+}) {
+  const intraday = await collectIntradayBars({
+    interval: opts.interval,
+    ...(opts.userId ? { userId: opts.userId } : {}),
+  });
+
+  let daily;
+  try {
+    daily = await collectDailyClosesForAssets(
+      opts.userId ? { userId: opts.userId } : undefined
+    );
+  } catch (e) {
+    daily = {
+      assetsConsidered: 0,
+      assetsStale: 0,
+      assetsFilled: 0,
+      closesWritten: 0,
+      errors: [{ assetId: "-", message: e instanceof Error ? e.message : "échec" }],
+      day: "",
+    };
+  }
+
+  return { intraday, daily };
+}
+
 export async function GET(req: Request) {
   if (!isCronRequest(req)) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   }
-  const report = await collectIntradayBars({ interval: intervalOf(req) });
-  return NextResponse.json({ mode: "cron", ...report });
+  return NextResponse.json({
+    mode: "cron",
+    ...(await collectAll({ interval: intervalOf(req) })),
+  });
 }
 
 export async function POST(req: Request) {
   const interval = intervalOf(req);
 
   if (isCronRequest(req)) {
-    const report = await collectIntradayBars({ interval });
-    return NextResponse.json({ mode: "cron", ...report });
+    return NextResponse.json({ mode: "cron", ...(await collectAll({ interval })) });
   }
 
   const userId = await requireUserId();
@@ -78,6 +125,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
 
-  const report = await collectIntradayBars({ userId, interval });
-  return NextResponse.json({ mode: "user", ...report });
+  return NextResponse.json({
+    mode: "user",
+    ...(await collectAll({ interval, userId })),
+  });
 }

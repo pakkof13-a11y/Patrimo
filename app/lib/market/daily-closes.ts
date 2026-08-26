@@ -182,6 +182,82 @@ async function mapWithConcurrency<T>(
  * fournisseur indisponible doit dégrader le graphique, jamais casser le
  * dashboard.
  */
+
+export type DailyCloseCollectionReport = {
+  /** Actifs examinés. */
+  assetsConsidered: number;
+  /** Actifs dont le cache méritait d'être complété. */
+  assetsStale: number;
+  /** Actifs ayant réellement reçu au moins une clôture. */
+  assetsFilled: number;
+  /** Clôtures écrites ou rafraîchies. */
+  closesWritten: number;
+  errors: Array<{ assetId: string; message: string }>;
+};
+
+/**
+ * Complète le cache de clôtures des actifs dont il a besoin.
+ *
+ * ## Une seule implémentation, deux appelants
+ *
+ * `getDailyCloses` s'en sert pour compléter ce qu'un écran vient de demander ;
+ * la tâche planifiée s'en sert pour entretenir l'historique sans qu'aucun écran
+ * n'ait été ouvert. Dupliquer cette boucle dans le cron aurait fait deux
+ * politiques de fraîcheur, deux gestions d'erreur et, tôt ou tard, deux
+ * comportements.
+ *
+ * ## Ce qui la rend sûre à répéter
+ *
+ * - `assetsNeedingFetch` écarte ce qui est déjà frais : deux passages
+ *   rapprochés ne rappellent pas les fournisseurs ;
+ * - `fillDailyCloses` fait un `upsert` sur `(assetId, day)` : une journée ne
+ *   peut pas exister en double, quel que soit le nombre de passages ;
+ * - une série `mock` est refusée en amont : un trou assumé plutôt qu'un
+ *   montant faux.
+ *
+ * L'échec d'un actif n'interrompt jamais les suivants : un fournisseur muet
+ * laisse un trou que le passage d'après comblera.
+ */
+export async function collectDailyCloses(opts: {
+  userId: string;
+  assetIds: string[];
+  fromDay: DayKey;
+  toDay: DayKey;
+  now?: Date;
+}): Promise<DailyCloseCollectionReport> {
+  const now = opts.now ?? new Date();
+  const unique = [...new Set(opts.assetIds)].filter(Boolean);
+  const report: DailyCloseCollectionReport = {
+    assetsConsidered: unique.length,
+    assetsStale: 0,
+    assetsFilled: 0,
+    closesWritten: 0,
+    errors: [],
+  };
+  if (unique.length === 0) return report;
+
+  const stale = await assetsNeedingFetch(unique, opts.toDay, now);
+  report.assetsStale = stale.length;
+  if (stale.length === 0) return report;
+
+  const from = new Date(`${opts.fromDay}T00:00:00Z`);
+  await mapWithConcurrency(stale, FETCH_CONCURRENCY, async (assetId) => {
+    try {
+      const written = await fillDailyCloses(opts.userId, assetId, from, now);
+      if (written > 0) {
+        report.assetsFilled++;
+        report.closesWritten += written;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "échec fournisseur";
+      report.errors.push({ assetId, message });
+      console.error(`[daily-closes] remplissage impossible pour ${assetId}:`, err);
+    }
+  });
+
+  return report;
+}
+
 export async function getDailyCloses(
   userId: string,
   assetIds: string[],
@@ -193,20 +269,7 @@ export async function getDailyCloses(
   const unique = [...new Set(assetIds)].filter(Boolean);
 
   if (opts?.refresh !== false && unique.length > 0) {
-    const stale = await assetsNeedingFetch(unique, toDay, now);
-    if (stale.length > 0) {
-      const from = new Date(`${fromDay}T00:00:00Z`);
-      await mapWithConcurrency(stale, FETCH_CONCURRENCY, async (assetId) => {
-        try {
-          await fillDailyCloses(userId, assetId, from, now);
-        } catch (err) {
-          console.error(
-            `[daily-closes] remplissage impossible pour ${assetId}:`,
-            err
-          );
-        }
-      });
-    }
+    await collectDailyCloses({ userId, assetIds: unique, fromDay, toDay, now });
   }
 
   const closes = await readDailyCloses(unique, fromDay, toDay);
