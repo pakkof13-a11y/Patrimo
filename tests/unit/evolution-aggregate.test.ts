@@ -250,3 +250,71 @@ describe("evolutionDeltaSummary — les apports ne sont pas du rendement", () =>
     expect(s.pct).toBeCloseTo(0, 6);
   });
 });
+
+describe("statut EXACT / ESTIMATED — l'agrégation ne le perd plus", () => {
+  /** Un point daté portant un statut de valorisation. */
+  function ptStatut(
+    date: string,
+    total: number,
+    status: "EXACT" | "ESTIMATED" | "MISSING"
+  ): HistoryPoint {
+    return { ...pt(date, total), status };
+  }
+
+  it("un point exact reste exact", () => {
+    const { points } = buildEvolutionSeries(
+      [ptStatut("2026-01-05T12:00:00Z", 100, "EXACT")],
+      "all",
+      "cumul"
+    );
+    expect(points.at(-1)?.status).toBe("EXACT");
+  });
+
+  it("un point estimé reste estimé", () => {
+    const { points } = buildEvolutionSeries(
+      [ptStatut("2026-01-05T12:00:00Z", 100, "ESTIMATED")],
+      "all",
+      "cumul"
+    );
+    expect(points.at(-1)?.status).toBe("ESTIMATED");
+  });
+
+  it("un jour sans donnée n'est jamais présenté comme mesuré", () => {
+    // `MISSING` n'a pas de représentation à cette couche : le ranger du côté
+    // du « mesuré » serait la seule erreur vraiment coûteuse.
+    const { points } = buildEvolutionSeries(
+      [ptStatut("2026-01-05T12:00:00Z", 100, "MISSING")],
+      "all",
+      "cumul"
+    );
+    expect(points.at(-1)?.status).toBe("ESTIMATED");
+  });
+
+  it("un seul jour estimé rend tout le bucket estimé", () => {
+    /*
+      Un mois dont un jour repose sur une valeur reportée ne peut pas être
+      annoncé comme observé : le total du bucket dépend de cette valeur.
+    */
+    const { points } = buildEvolutionSeries(
+      [
+        ptStatut("2026-01-05T12:00:00Z", 100, "EXACT"),
+        ptStatut("2026-01-12T12:00:00Z", 110, "ESTIMATED"),
+        ptStatut("2026-01-19T12:00:00Z", 120, "EXACT"),
+      ],
+      "all",
+      "cumul"
+    );
+    expect(points.every((p) => p.status === "ESTIMATED")).toBe(true);
+  });
+
+  it("un statut absent n'affirme rien", () => {
+    // Un appelant qui ne renseigne pas le statut ne doit pas se voir attribuer
+    // « exact » par défaut.
+    const { points } = buildEvolutionSeries(
+      [pt("2026-01-05T12:00:00Z", 100)],
+      "all",
+      "cumul"
+    );
+    expect(points.at(-1)?.status).toBeUndefined();
+  });
+});

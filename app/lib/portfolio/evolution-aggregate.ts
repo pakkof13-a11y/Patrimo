@@ -64,6 +64,13 @@ export type EvolutionSeriesPoint = {
   /** Δ période de la série comparative */
   benchmarkDelta?: number;
   intervalType: EvolutionInterval;
+  /**
+   * `ESTIMATED` dès qu'un jour du bucket repose sur une valeur reportée plutôt
+   * qu'observée. L'information vient de `PortfolioValuationEngine` et n'est
+   * plus perdue par l'agrégation : c'est ce qui permet à l'écran de dire d'où
+   * vient un point, au lieu de tout présenter comme mesuré.
+   */
+  status?: "EXACT" | "ESTIMATED";
   isLive?: boolean;
 };
 
@@ -307,6 +314,16 @@ type StockAcc = {
   dividends: number;
   coupons: number;
   rents: number;
+  /**
+   * Statut de valorisation du bucket, agrégé au plus faible.
+   *
+   * `PortfolioValuationEngine` marque chaque jour `EXACT` ou `ESTIMATED` ;
+   * cette couche laissait tomber l'information, si bien que la courbe
+   * quotidienne ne pouvait pas dire ce que le moteur savait. Un bucket qui
+   * contient un seul jour estimé est estimé : c'est le seul agrégat honnête,
+   * puisque le total du bucket repose alors sur une valeur non observée.
+   */
+  status?: "EXACT" | "ESTIMATED";
   isLive?: boolean;
 };
 
@@ -361,6 +378,9 @@ function densifyDailyCalendar(
         // à zéro, le versement du dernier jour connu serait recompté à chaque
         // journée sans observation.
         flows: 0,
+        // Une valeur reconduite depuis un jour antérieur n'a pas été observée
+        // ce jour-là : c'est la définition même d'`ESTIMATED`.
+        status: "ESTIMATED",
         isLive: false,
       });
     }
@@ -382,6 +402,7 @@ function normalizePoint(p: HistoryPoint): {
   dividends: number;
   coupons: number;
   rents: number;
+  status?: "EXACT" | "ESTIMATED";
   isLive?: boolean;
 } {
   const total = Number(p.totalValueBase) || 0;
@@ -405,6 +426,17 @@ function normalizePoint(p: HistoryPoint): {
     dividends,
     coupons,
     rents,
+    /*
+      Tout ce qui n'est pas `EXACT` est traité comme non observé.
+
+      Le moteur connaît un troisième état, `MISSING`. Le réduire à `ESTIMATED`
+      ici est délibéré : cette couche n'a que deux façons de présenter un point,
+      et ranger un jour sans donnée du côté du « mesuré » serait la seule
+      erreur vraiment coûteuse. Un statut absent — un appelant qui ne le fournit
+      pas — reste `undefined`, et n'affirme donc rien.
+    */
+    status:
+      p.status == null ? undefined : p.status === "EXACT" ? "EXACT" : "ESTIMATED",
     isLive: p.isLive,
   };
 }
@@ -457,7 +489,15 @@ export function buildEvolutionSeries(
       buckets.set(key, { ...p });
     } else {
       // Stocks : dernière observation du bucket. Flux : somme du bucket.
-      buckets.set(key, { ...p, flows: prev.flows + p.flows });
+      buckets.set(key, {
+        ...p,
+        flows: prev.flows + p.flows,
+        // Un seul jour estimé suffit à rendre le bucket estimé.
+        status:
+          prev.status === "ESTIMATED" || p.status === "ESTIMATED"
+            ? "ESTIMATED"
+            : (p.status ?? prev.status),
+      });
     }
   }
 
@@ -507,6 +547,7 @@ export function buildEvolutionSeries(
       dCoupons: prev ? s.coupons - prev.coupons : 0,
       dRents: prev ? s.rents - prev.rents : 0,
       intervalType: interval,
+      status: s.status,
       isLive: s.isLive,
     };
   });
