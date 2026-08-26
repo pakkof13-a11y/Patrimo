@@ -57,8 +57,14 @@ describe("observation contre report", () => {
     intradayPriceResolver(TROIS_HEURES, t(iso), H)("a1");
 
   it("une barre qui couvre l'instant est observée", () => {
-    expect(resolve("2026-08-25T11:00:00Z")).toEqual({ priceEur: 101, observed: true });
-    expect(resolve("2026-08-25T11:59:00Z")).toEqual({ priceEur: 101, observed: true });
+    expect(resolve("2026-08-25T11:00:00Z")).toMatchObject({
+      priceEur: 101,
+      origin: "MARKET_EXACT",
+    });
+    expect(resolve("2026-08-25T11:59:00Z")).toMatchObject({
+      priceEur: 101,
+      origin: "MARKET_EXACT",
+    });
   });
 
   it("un trou rend la dernière valeur connue, marquée non observée", () => {
@@ -67,7 +73,10 @@ describe("observation contre report", () => {
       On rend 101 à 12 h — une valeur qui a réellement existé — et jamais 100,
       qui serait une interpolation, c'est-à-dire un cours jamais coté.
     */
-    expect(resolve("2026-08-25T12:00:00Z")).toEqual({ priceEur: 101, observed: false });
+    expect(resolve("2026-08-25T12:00:00Z")).toMatchObject({
+      priceEur: 101,
+      origin: "MARKET_CARRIED",
+    });
   });
 
   it("ne fabrique jamais une valeur intermédiaire", () => {
@@ -89,16 +98,16 @@ describe("observation contre report", () => {
   it("juste avant la borne, le report tient encore", () => {
     const limite = t("2026-08-25T13:00:00Z") + MAX_CARRY_FORWARD_MS;
     const r = intradayPriceResolver(TROIS_HEURES, limite, H)("a1");
-    expect(r).toEqual({ priceEur: 99, observed: false });
+    expect(r).toMatchObject({ priceEur: 99, origin: "MARKET_CARRIED" });
   });
 
   it("un week-end reste couvert par la borne", () => {
     // Vendredi 17 h → mardi 9 h : le marché était fermé, le cours n'a pas bougé.
     const vendredi = index({ a1: [["2026-08-21T17:00:00Z", 50]] });
     const mardi = t("2026-08-25T09:00:00Z");
-    expect(intradayPriceResolver(vendredi, mardi, H)("a1")).toEqual({
+    expect(intradayPriceResolver(vendredi, mardi, H)("a1")).toMatchObject({
       priceEur: 50,
-      observed: false,
+      origin: "MARKET_CARRIED",
     });
   });
 });

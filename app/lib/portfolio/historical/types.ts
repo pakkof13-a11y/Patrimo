@@ -5,6 +5,7 @@
  * par la courbe, le point du jour et les KPI. Voir `engine.ts` pour le contrat.
  */
 
+import type { PriceOrigin } from "./price-resolver";
 import type { Decimal } from "../../money/decimal";
 
 /** Jour civil Europe/Paris, `YYYY-MM-DD` (tri lexicographique = chronologique). */
@@ -93,6 +94,24 @@ export type PortfolioValuationPoint = {
   status: HistoricalDataStatus;
   /** Compartiments qui n'étaient pas exacts ce jour-là. */
   estimatedComponents: ValuationComponent[];
+
+  /**
+   * D'où venaient les cours de ce point, la moins bien étayée d'abord.
+   *
+   * C'est la traçabilité que le chantier « historique reconstructible »
+   * demande : une valeur ne vaut rien sans le moyen de dire comment elle a été
+   * obtenue. `null` quand aucune position du journal n'était détenue.
+   */
+  weakestPriceOrigin: PriceOrigin | null;
+
+  /**
+   * Part de la valeur des positions qui a pu être réellement valorisée.
+   *
+   * 1 = tout le journal avait un cours ou une valeur constatée. En dessous, la
+   * différence est retenue au prix de revient faute de donnée — mieux vaut
+   * l'annoncer que laisser croire à une courbe complète.
+   */
+  priceCoverage: number;
 };
 
 /** Ce que l'appelant demande au moteur. */

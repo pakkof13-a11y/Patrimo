@@ -70,17 +70,39 @@ async function ouvrirIntraday(page: Page) {
 }
 
 test.describe("Restitution intraday", () => {
-  test("2 — sans collecte, un état vide honnête et jamais 0 €", async ({ page }) => {
+  test("2 — sans aucune donnée, un état vide honnête et jamais 0 €", async ({
+    page,
+  }) => {
     /*
       Le cas le plus important. Une courbe plate à zéro laisserait croire à un
       patrimoine nul ; c'est l'absence de donnée qu'il faut dire.
+
+      La réponse est interceptée : depuis le chantier « historique
+      reconstructible », le compte de démonstration produit une vraie série à
+      partir de ses clôtures quotidiennes, et l'état vide ne s'observe plus que
+      lorsqu'aucune donnée de prix n'existe.
     */
+    await page.route("**/api/portfolio/intraday**", (route) =>
+      route.fulfill({
+        json: {
+          from: "2026-08-19T00:00:00.000Z",
+          to: "2026-08-26T00:00:00.000Z",
+          days: 7,
+          interval: "1h",
+          stepMs: 3_600_000,
+          observedFrom: null,
+          points: [],
+          extremes: null,
+          coverage: 1,
+          origins: [],
+        },
+      })
+    );
     await ouvrirIntraday(page);
 
     const vide = page.getByTestId("intraday-empty");
     await expect(vide).toBeVisible({ timeout: 20_000 });
     await expect(vide).toContainText("Aucune donnée intraday");
-    await expect(vide).toContainText("prochaine collecte");
     await expect(vide).not.toContainText("0 €");
     await expect(page.getByTestId("intraday-section")).toHaveCount(0);
   });

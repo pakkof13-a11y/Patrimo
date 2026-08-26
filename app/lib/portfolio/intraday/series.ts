@@ -13,11 +13,18 @@
  *
  * ## Où commence la série
  *
- * À la première barre réellement collectée, jamais avant. Le passé n'a pas
- * d'intra-journalier et ne doit pas en recevoir : le fabriquer à partir des
- * clôtures quotidiennes serait exactement l'invention que ce chantier
- * s'interdit. Une fenêtre antérieure à toute collecte rend donc une série vide,
- * et c'est une réponse — pas un échec.
+ * Au premier instant où **une** donnée de prix existe — barre intra-séance ou
+ * clôture quotidienne. Avant cela, les positions n'auraient que leur prix de
+ * revient, et la courbe dessinerait une ligne plate qu'aucune observation ne
+ * soutient. Une fenêtre entièrement antérieure aux données rend donc une série
+ * vide : c'est une réponse, pas un échec.
+ *
+ * Ce qui change avec l'historique reconstructible : la série ne dépend plus de
+ * la seule collecte intraday. Un compte créé aujourd'hui, dont les transactions
+ * remontent à 2020, obtient une courbe dès que les clôtures quotidiennes de ses
+ * actifs sont connues — sans qu'aucun instantané n'ait été pris à l'époque.
+ * Chaque point porte alors `DAILY_EXACT`, qui ne se fait pas passer pour une
+ * observation de 14 h 37.
  */
 
 import { parisDayKey } from "../../dates/paris";
@@ -27,13 +34,14 @@ import type {
   HistoricalDataStatus,
   PortfolioValuationPoint,
 } from "../historical/types";
+import { PRICE_ORIGINS } from "../historical/price-resolver";
 import {
   firstObservationAt,
-  intradayPriceResolver,
   loadIntradayBars,
   MAX_CARRY_FORWARD_MS,
   type IntradayBarIndex,
 } from "./bar-index";
+import { resolverAt } from "../../market/market-data-repository";
 
 /** Pas de la restitution, aligné sur la granularité collectée. */
 export const INTRADAY_STEP_MS = 60 * 60 * 1000;
@@ -65,6 +73,10 @@ export type IntradayPoint = {
   externalFlows: number;
   status: HistoricalDataStatus;
   estimatedComponents: string[];
+  /** D'où venaient les cours — l'origine la moins bien étayée du point. */
+  priceOrigin: string | null;
+  /** Part des positions réellement valorisées, de 0 à 1. */
+  priceCoverage: number;
 };
 
 export type IntradayExtremes = {
@@ -83,10 +95,20 @@ export type IntradayExtremes = {
 export type IntradaySeries = {
   interval: string;
   stepMs: number;
-  /** Instant de la première observation disponible, ou null si aucune. */
+  /** Instant de la première observation **intraday**, ou null si aucune. */
   observedFrom: string | null;
   points: IntradayPoint[];
   extremes: IntradayExtremes | null;
+  /**
+   * Part du patrimoine historiquement valorisable sur la fenêtre, de 0 à 1.
+   *
+   * Mieux vaut annoncer « 82 % valorisable » qu'une courbe complète dont un
+   * cinquième repose sur des prix de revient. C'est la moyenne des couvertures
+   * de chaque point : une seule ligne muette pèse sur toute la fenêtre.
+   */
+  coverage: number;
+  /** Origines rencontrées sur la fenêtre, de la plus étayée à la moins. */
+  origins: string[];
 };
 
 const toPoint = (p: PortfolioValuationPoint & { at: Date }): IntradayPoint => ({
@@ -106,7 +128,66 @@ const toPoint = (p: PortfolioValuationPoint & { at: Date }): IntradayPoint => ({
   externalFlows: p.externalFlows,
   status: p.status,
   estimatedComponents: p.estimatedComponents,
+  priceOrigin: p.weakestPriceOrigin,
+  priceCoverage: p.priceCoverage,
 });
+
+
+/**
+ * Premier instant où une valorisation de marché est possible.
+ *
+ * Une barre intra-séance ou une clôture quotidienne suffisent. Sans l'une ni
+ * l'autre, il n'y a rien à tracer — et rien à inventer.
+ */
+export function earliestPricedAt(
+  bars: IntradayBarIndex,
+  daily: Map<string, Map<string, number>>
+): number | null {
+  let first = firstObservationAt(bars);
+  for (const byDay of daily.values()) {
+    for (const day of byDay.keys()) {
+      const at = Date.parse(`${day}T00:00:00Z`);
+      if (Number.isFinite(at) && (first == null || at < first)) first = at;
+    }
+  }
+  return first;
+}
+
+
+/** Couverture moyenne de la fenêtre — 1 quand tout a pu être valorisé. */
+function averageCoverage(points: IntradayPoint[]): number {
+  if (points.length === 0) return 1;
+  let sum = 0;
+  for (const p of points) sum += p.priceCoverage;
+  return sum / points.length;
+}
+
+/** Origines rencontrées, dans l'ordre de fiabilité décroissante. */
+function distinctOrigins(points: IntradayPoint[]): string[] {
+  const seen = new Set<string>();
+  for (const p of points) if (p.priceOrigin) seen.add(p.priceOrigin);
+  return PRICE_ORIGINS.filter((o) => seen.has(o));
+}
+
+
+/**
+ * Pas d'échantillonnage adapté à la fenêtre.
+ *
+ * Interroger le moteur toutes les heures sur un an fait 8 760 valorisations
+ * pour n'en afficher que quelques centaines — et quand les données sous-jacentes
+ * sont des clôtures quotidiennes, les 23 points d'une même journée portent de
+ * toute façon la même valeur.
+ *
+ * Le pas ne change ni les données ni leur origine : il change le nombre de
+ * questions posées. La finesse reste disponible là où elle a un sens, c'est-à-dire
+ * sur la fenêtre courte.
+ */
+export function stepForWindow(from: Date, to: Date): number {
+  const days = (to.getTime() - from.getTime()) / 86_400_000;
+  if (days <= 8) return INTRADAY_STEP_MS;
+  if (days <= 35) return 4 * INTRADAY_STEP_MS;
+  return 24 * INTRADAY_STEP_MS;
+}
 
 /** Instants d'échantillonnage, alignés sur le pas, bornes comprises. */
 export function enumerateInstants(
@@ -247,7 +328,7 @@ export async function buildIntradaySeries(opts: {
     buildEngine?: (userId: string) => Promise<PortfolioValuationEngine>;
   };
 }): Promise<IntradaySeries> {
-  const stepMs = opts.stepMs ?? INTRADAY_STEP_MS;
+  const stepMs = opts.stepMs ?? stepForWindow(opts.from, opts.to);
   const loadBars = opts.deps?.loadBars ?? loadIntradayBars;
   const buildEngine =
     opts.deps?.buildEngine ??
@@ -265,31 +346,64 @@ export async function buildIntradaySeries(opts: {
   ]);
 
   const observed = firstObservationAt(bars);
+  /*
+    Le début possible de la courbe, toutes sources confondues.
+
+    `observedFrom` garde son sens — la première observation *intraday* — mais ce
+    n'est plus lui qui borne la série : une clôture quotidienne suffit à
+    valoriser un point, et c'est ce qui rend le passé reconstructible.
+  */
+  const priced = earliestPricedAt(bars, engine.dailyCloses());
   const empty: IntradaySeries = {
     interval: INTRADAY_INTERVAL,
     stepMs,
     observedFrom: observed == null ? null : new Date(observed).toISOString(),
     points: [],
     extremes: null,
+    coverage: 1,
+    origins: [],
   };
-  if (observed == null) return empty;
+  if (priced == null) return empty;
 
   /*
     La série ne commence pas avant la première observation.
 
-    Valoriser 10 h alors que la première barre est à 14 h reviendrait à
-    reporter un cours *futur* vers le passé, ou à retenir les positions à leur
-    prix de revient et à afficher une marche à 14 h qu'aucun mouvement n'a
-    produite.
+    Valoriser avant toute donnée de prix reviendrait à reporter un cours
+    *futur* vers le passé, ou à retenir les positions à leur prix de revient et
+    à afficher une marche qu'aucun mouvement n'a produite.
   */
-  const start = new Date(Math.max(opts.from.getTime(), observed));
+  const start = new Date(Math.max(opts.from.getTime(), priced));
   if (start.getTime() > opts.to.getTime()) return empty;
 
   const instants = enumerateInstants(start, opts.to, stepMs);
   if (instants.length === 0) return empty;
 
+  /*
+    Le résolveur consulte les barres **puis** les clôtures quotidiennes.
+
+    C'est ce qui rend l'historique reconstructible : un actif sans barre à cet
+    instant, mais dont la clôture du jour est connue, est valorisé au marché et
+    non plus retenu à son prix de revient. Un utilisateur arrivant aujourd'hui
+    avec des transactions de 2020 obtient donc une courbe, sans qu'aucun
+    instantané n'ait jamais été pris à l'époque.
+
+    L'origine de chaque cours reste portée par le point : `DAILY_EXACT` ne se
+    fait pas passer pour une observation de 14 h 37.
+  */
+  /*
+    `intervalMs` est la durée d'une **barre**, pas le pas d'échantillonnage.
+
+    Les confondre ferait qu'une barre horaire « couvrirait » une journée entière
+    dès que le pas passe au jour, et un report de vingt-trois heures serait
+    annoncé comme une observation. La finesse de la donnée ne dépend pas de la
+    fréquence à laquelle on l'interroge.
+  */
   const raw = engine.buildInstantSeries(instants, (at) =>
-    intradayPriceResolver(bars, at.getTime(), stepMs, MAX_CARRY_FORWARD_MS)
+    resolverAt(
+      { intraday: bars, daily: engine.dailyCloses() },
+      at,
+      { intervalMs: INTRADAY_STEP_MS, maxCarryMs: MAX_CARRY_FORWARD_MS }
+    )
   );
 
   const all = raw.map(toPoint);
@@ -298,11 +412,14 @@ export async function buildIntradaySeries(opts: {
   return {
     interval: INTRADAY_INTERVAL,
     stepMs,
-    observedFrom: new Date(observed).toISOString(),
+    observedFrom: observed == null ? null : new Date(observed).toISOString(),
     points,
     // Les extrêmes sont mesurés sur la série **complète** : les calculer après
     // échantillonnage rendrait le creux dépendant du nombre de points affichés.
     extremes: computeExtremes(all),
+    // Couverture et origines aussi : elles décrivent la fenêtre, pas l'écran.
+    coverage: averageCoverage(all),
+    origins: distinctOrigins(all),
   };
 }
 

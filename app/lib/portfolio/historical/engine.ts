@@ -43,7 +43,11 @@ import type { LedgerState, LedgerTx } from "../../accounting/types";
 import { d, zero, type Decimal } from "../../money/decimal";
 import { closeAtOrBefore, type DailyCloseIndex } from "../class-history";
 import {
+  OBSERVED_AT_DAY,
+  OBSERVED_AT_INSTANT,
   valuePositions,
+  weakestOrigin,
+  type PriceOrigin,
   type PriceResolver,
 } from "./price-resolver";
 import {
@@ -111,6 +115,20 @@ export type HistoricalInputs = {
   employeeSavings: EmployeeSavingsRow[];
   liabilities: LiabilityRow[];
 };
+
+
+/**
+ * Part des positions valorisées autrement qu'au prix de revient.
+ *
+ * Un ratio de comptage plutôt que de valeur : à ce niveau, le montant retenu
+ * pour une position sans cours **est** son coût, si bien qu'un ratio en euros
+ * dirait « valorisé » d'un montant qui ne l'est pas. Compter les positions dit
+ * la vérité — « trois lignes sur quarante n'ont pas d'histoire ».
+ */
+function coverageOf(origins: PriceOrigin[], unavailable: number): number {
+  if (origins.length === 0) return 1;
+  return (origins.length - unavailable) / origins.length;
+}
 
 /** Ventilation d'une classe d'actif du journal vers un compartiment. */
 function componentOfAssetClass(assetClass: string | undefined): ValuationComponent {
@@ -275,7 +293,9 @@ export class PortfolioValuationEngine {
   private dailyPriceResolver(day: DayKey): PriceResolver {
     return (assetId) => {
       const close = closeAtOrBefore(this.inputs.closes.get(assetId), day);
-      return close == null ? null : { priceEur: close, observed: true };
+      return close == null
+        ? null
+        : { priceEur: close, origin: "DAILY_EXACT" as const };
     };
   }
 
@@ -314,9 +334,30 @@ export class PortfolioValuationEngine {
       else positionsByComponent.set(comp, [pos]);
     }
 
+    /*
+      Ce qui vaut observation dépend de l'échelle du point.
+
+      Une clôture quotidienne est la valeur exacte d'une journée ; sur un point
+      de 14 h 37, elle ne décrit pas l'instant demandé. L'origine relevée est la
+      même des deux côtés — seule sa lecture change.
+    */
+    const observedSet = priceAt ? OBSERVED_AT_INSTANT : OBSERVED_AT_DAY;
+    const originsSeen: PriceOrigin[] = [];
+    let unavailablePositions = 0;
+
     for (const [comp, positions] of positionsByComponent) {
-      const { marketEur, unpricedAssets: unpriced, carriedAssets: carried } =
-        valuePositions(positions, priceAt ?? this.dailyPriceResolver(day));
+      const {
+        marketEur,
+        unpricedAssets: unpriced,
+        carriedAssets: carried,
+        provenance,
+      } = valuePositions(
+        positions,
+        priceAt ?? this.dailyPriceResolver(day),
+        observedSet
+      );
+      for (const o of provenance.byOrigin.keys()) originsSeen.push(o);
+      unavailablePositions += provenance.unavailableAssets;
       byComponent.set(comp, marketEur);
       // Au moins une position sans cours connu ce jour-là : retenue au coût,
       // donc le compartiment n'est pas exact.
@@ -408,7 +449,20 @@ export class PortfolioValuationEngine {
       ledgerCash: totalLedgerCash(state).toNumber(),
       status,
       estimatedComponents: [...estimated].sort(),
+      weakestPriceOrigin: weakestOrigin(originsSeen),
+      priceCoverage: coverageOf(originsSeen, unavailablePositions),
     };
+  }
+
+  /**
+   * Clôtures quotidiennes chargées, pour un résolveur qui les consulterait.
+   *
+   * Exposées en lecture seule plutôt que copiées : la série horaire s'en sert
+   * comme repli, et charger une seconde fois le même cache serait à la fois
+   * coûteux et une occasion de divergence.
+   */
+  dailyCloses(): DailyCloseIndex {
+    return this.inputs.closes;
   }
 
   /**

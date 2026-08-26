@@ -142,7 +142,11 @@ export function intradayPriceResolver(
     if (!bar) return null;
     const age = at - bar.at;
     if (age > maxCarryMs) return null;
-    return { priceEur: bar.priceEur, observed: age < intervalMs };
+    return {
+      priceEur: bar.priceEur,
+      origin: age < intervalMs ? "MARKET_EXACT" : "MARKET_CARRIED",
+      appliesAt: new Date(bar.at),
+    };
   };
 }
 

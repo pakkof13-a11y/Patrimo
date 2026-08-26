@@ -324,16 +324,44 @@ model PriceQuote {
   asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 }
 
+/// Capture ponctuelle du cours d'un actif, au moment d'un rafraîchissement.
+///
+/// ## Deux temps, jamais confondus
+///
+/// - `capturedAt` : quand Patrimo a **relevé** la valeur ;
+/// - `marketAt` : le moment auquel le cours **s'applique** réellement.
+///
+/// Une barre de 14 h 35 récupérée dix-huit mois plus tard porte
+/// `marketAt = 2025-02-24 14:35` et `capturedAt = 2026-08-26 10:17`. Les
+/// confondre reviendrait à dater le passé du jour où on l'a lu.
+///
+/// ## Les lignes antérieures gardent leur sémantique
+///
+/// `marketAt` est **nullable**, et rien ne le remplit rétroactivement depuis
+/// `capturedAt`. Une capture faite au fil de l'eau valait bien le cours de
+/// l'instant, mais rien ne le démontre ligne à ligne — la migration ne réécrit
+/// donc pas le passé : elle se contente de rendre le futur exprimable. Une
+/// ligne sans `marketAt` reste ce qu'elle a toujours été, une observation de
+/// rafraîchissement.
 model PriceHistory {
   id         String   @id @default(cuid())
   assetId    String
   priceEur   Decimal  @db.Decimal(28, 12)
+  /// Cours dans sa devise d'origine, quand elle est connue.
+  priceNative    Decimal? @db.Decimal(28, 12)
+  nativeCurrency String?
   source     String
+  /// Moment auquel le cours s'applique. Null = capture historique non datée.
+  marketAt   DateTime?
+  /// Finesse de la donnée — "15m" | "1h" | "4h" | "1d" | "spot".
+  granularity String?
   capturedAt DateTime @default(now())
 
   asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
   @@index([assetId, capturedAt])
+  /// Recherche temporelle : « cours de cet actif à cet instant ».
+  @@index([assetId, marketAt])
 }
 
 /// Clôture journalière d'un actif, en EUR — cache alimenté depuis les

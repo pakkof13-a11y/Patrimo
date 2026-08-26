@@ -15,16 +15,51 @@ import { test, expect } from "@playwright/test";
 const num = (v: unknown) => Number(v ?? 0);
 
 test.describe("Restitution intraday", () => {
-  test("rend une série vide quand rien n'a été collecté", async ({ request }) => {
+  test("reconstruit l'historique à partir des clôtures, sans instantané", async ({
+    request,
+  }) => {
+    /*
+      Le critère du chantier « historique reconstructible ».
+
+      Aucune barre intra-séance n'a été collectée sur ce compte, et il n'existe
+      pas d'instantané historique. La série existe quand même : les clôtures
+      quotidiennes suffisent à valoriser les positions, et chaque point dit d'où
+      vient son cours.
+
+      Avant ce chantier, cette même requête rendait une série vide.
+    */
     const res = await request.get("/api/portfolio/intraday?days=7");
     expect(res.ok(), `${res.status()} ${await res.text()}`).toBeTruthy();
 
     const body = await res.json();
     expect(body.interval).toBe("1h");
     expect(body.days).toBe(7);
+    expect(body.points.length).toBeGreaterThan(0);
+
+    // Aucune barre intraday : la reconstruction passe par les clôtures.
     expect(body.observedFrom).toBeNull();
-    expect(body.points).toEqual([]);
-    expect(body.extremes).toBeNull();
+    expect(body.origins).toContain("DAILY_EXACT");
+    expect(body.points[0].priceOrigin).toBeTruthy();
+
+    // La couverture est annoncée plutôt que supposée complète.
+    expect(body.coverage).toBeGreaterThan(0);
+    expect(body.coverage).toBeLessThanOrEqual(1);
+    for (const p of body.points) {
+      expect(p.priceCoverage).toBeGreaterThanOrEqual(0);
+      expect(p.priceCoverage).toBeLessThanOrEqual(1);
+    }
+  });
+
+  test("une clôture ne se fait pas passer pour une observation de l'instant", async ({
+    request,
+  }) => {
+    const body = await (await request.get("/api/portfolio/intraday?days=7")).json();
+    const quotidiens = body.points.filter(
+      (p: { priceOrigin: string }) => p.priceOrigin === "DAILY_EXACT"
+    );
+    expect(quotidiens.length).toBeGreaterThan(0);
+    // Le statut du point le dit : la journée est connue, pas l'heure.
+    for (const p of quotidiens) expect(p.status).toBe("ESTIMATED");
   });
 
   test("la fenêtre demandée est bornée", async ({ request }) => {

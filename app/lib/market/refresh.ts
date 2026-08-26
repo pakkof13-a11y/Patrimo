@@ -279,7 +279,20 @@ export async function refreshEligiblePrices(userId: string): Promise<{
           data: {
             assetId: asset.id,
             priceEur: new Prisma.Decimal(quote.priceEur),
+            priceNative:
+              quote.priceNative != null
+                ? new Prisma.Decimal(quote.priceNative)
+                : null,
+            nativeCurrency: nativeCurrency || null,
             source: quote.source,
+            /*
+              Le cours vient d'être relevé : il s'applique à maintenant. C'est
+              le seul cas où les deux temps coïncident légitimement, et
+              l'écrire ici évite d'avoir un jour à le déduire de `capturedAt`
+              — ce qui reviendrait à dater le passé du jour où on l'a lu.
+            */
+            marketAt: now,
+            granularity: "spot",
           },
         }),
       });
