@@ -54,10 +54,18 @@ test.describe("Restitution intraday", () => {
     request,
   }) => {
     const body = await (await request.get("/api/portfolio/intraday?days=7")).json();
-    const quotidiens = body.points.filter(
-      (p: { priceOrigin: string }) => p.priceOrigin === "DAILY_EXACT"
+
+    /*
+      Le filtre porte sur **toutes** les origines du point, pas sur la plus
+      faible : une seule ligne sans historique — un actif créé par un autre test
+      — suffirait sinon à ce qu'aucun point ne soit reconnu comme quotidien,
+      alors que ses clôtures ont bien servi.
+    */
+    const quotidiens = body.points.filter((p: { priceOrigins: string[] }) =>
+      p.priceOrigins.includes("DAILY_EXACT")
     );
     expect(quotidiens.length).toBeGreaterThan(0);
+
     // Le statut du point le dit : la journée est connue, pas l'heure.
     for (const p of quotidiens) expect(p.status).toBe("ESTIMATED");
   });

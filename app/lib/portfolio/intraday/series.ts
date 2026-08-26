@@ -75,6 +75,8 @@ export type IntradayPoint = {
   estimatedComponents: string[];
   /** D'où venaient les cours — l'origine la moins bien étayée du point. */
   priceOrigin: string | null;
+  /** Toutes les origines du point, la mieux étayée d'abord. */
+  priceOrigins: string[];
   /** Part des positions réellement valorisées, de 0 à 1. */
   priceCoverage: number;
 };
@@ -129,6 +131,7 @@ const toPoint = (p: PortfolioValuationPoint & { at: Date }): IntradayPoint => ({
   status: p.status,
   estimatedComponents: p.estimatedComponents,
   priceOrigin: p.weakestPriceOrigin,
+  priceOrigins: p.priceOrigins,
   priceCoverage: p.priceCoverage,
 });
 
@@ -165,7 +168,7 @@ function averageCoverage(points: IntradayPoint[]): number {
 /** Origines rencontrées, dans l'ordre de fiabilité décroissante. */
 function distinctOrigins(points: IntradayPoint[]): string[] {
   const seen = new Set<string>();
-  for (const p of points) if (p.priceOrigin) seen.add(p.priceOrigin);
+  for (const p of points) for (const o of p.priceOrigins) seen.add(o);
   return PRICE_ORIGINS.filter((o) => seen.has(o));
 }
 

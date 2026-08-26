@@ -105,6 +105,15 @@ export type PortfolioValuationPoint = {
   weakestPriceOrigin: PriceOrigin | null;
 
   /**
+   * Toutes les origines ayant servi à ce point, la mieux étayée d'abord.
+   *
+   * Distinct de `weakestPriceOrigin` : une seule ligne sans histoire ferait
+   * sinon disparaître le fait que tout le reste vient bien du marché. Le point
+   * doit pouvoir dire « des clôtures, **et** une position sans données ».
+   */
+  priceOrigins: PriceOrigin[];
+
+  /**
    * Part de la valeur des positions qui a pu être réellement valorisée.
    *
    * 1 = tout le journal avait un cours ou une valeur constatée. En dessous, la

@@ -375,3 +375,113 @@ describe("L — deux temps distincts", () => {
     expect(r.appliesAt!.toISOString().slice(0, 10)).toBe("2026-08-24");
   });
 });
+
+// ── Couverture composite ─────────────────────────────────────────────────────
+describe("un point dit toutes ses sources, pas seulement la plus faible", () => {
+  it("marché et absence coexistent sans que l'un masque l'autre", async () => {
+    /*
+      Constaté en suite complète : une seule ligne sans historique — un actif
+      créé par un autre test — faisait rapporter `UNAVAILABLE` comme unique
+      origine, alors que tout le reste venait bien de clôtures. Le point doit
+      porter l'ensemble, sinon la couverture devient illisible.
+    */
+    const s = await serie({
+      inputs: {
+        transactions: [
+          buy("t1", "connu", "2020-01-01T10:00:00Z", 10, 100),
+          buy("t2", "muet", "2020-01-01T10:00:00Z", 1, 300),
+        ],
+        assetClassById: new Map([
+          ["connu", "ACTIONS"],
+          ["muet", "ACTIONS"],
+        ]),
+        closes: closes({ connu: { "2026-08-25": 110 } }),
+      },
+      from: "2026-08-25T10:00:00Z",
+      to: "2026-08-25T10:00:00Z",
+    });
+
+    const p = s.points[0]!;
+    expect(p.priceOrigins).toEqual(["DAILY_EXACT", "UNAVAILABLE"]);
+    // La plus faible qualifie toujours le point…
+    expect(p.priceOrigin).toBe("UNAVAILABLE");
+    // …mais elle n'efface plus le reste.
+    expect(s.origins).toContain("DAILY_EXACT");
+    expect(s.origins).toContain("UNAVAILABLE");
+  });
+});
+
+// ── Bornes de la couverture ──────────────────────────────────────────────────
+describe("la couverture reste une proportion", () => {
+  it("plusieurs compartiments et plusieurs lignes muettes : jamais négative", async () => {
+    /*
+      Le défaut que ce test ferme : la couverture comptait des **origines
+      distinctes** au numérateur et des **positions** au dénominateur. Trois
+      compartiments et cinq lignes sans données donnaient (3 − 5) / 3, soit
+      −0,67. Constaté en suite complète, sur une base où d'autres tests avaient
+      créé des actifs sans historique.
+    */
+    const muets = ["m1", "m2", "m3", "m4", "m5"];
+    const s = await serie({
+      inputs: {
+        transactions: [
+          buy("t1", "action", "2020-01-01T10:00:00Z", 10, 100),
+          buy("t2", "crypto", "2020-01-01T10:00:00Z", 1, 500),
+          ...muets.map((id, i) =>
+            buy(`tm${i}`, id, "2020-01-01T10:00:00Z", 1, 10)
+          ),
+        ],
+        assetClassById: new Map([
+          ["action", "ACTIONS"],
+          ["crypto", "CRYPTO"],
+          ...muets.map((id) => [id, "AUTRE"] as const),
+        ]),
+        closes: closes({
+          action: { "2026-08-25": 110 },
+          crypto: { "2026-08-25": 600 },
+        }),
+      },
+      from: "2026-08-25T10:00:00Z",
+      to: "2026-08-25T10:00:00Z",
+    });
+
+    const p = s.points[0]!;
+    expect(p.priceCoverage).toBeGreaterThanOrEqual(0);
+    expect(p.priceCoverage).toBeLessThanOrEqual(1);
+    // Deux lignes valorisées sur sept.
+    expect(p.priceCoverage).toBeCloseTo(2 / 7, 6);
+    expect(s.coverage).toBeGreaterThanOrEqual(0);
+    expect(s.coverage).toBeLessThanOrEqual(1);
+  });
+
+  it("tout valorisé donne exactement 1", async () => {
+    const s = await serie({
+      inputs: {
+        transactions: [buy("t1", "a1", "2020-01-01T10:00:00Z", 10, 100)],
+        assetClassById: new Map([["a1", "ACTIONS"]]),
+        closes: closes({ a1: { "2026-08-25": 110 } }),
+      },
+      from: "2026-08-25T10:00:00Z",
+      to: "2026-08-25T10:00:00Z",
+    });
+    expect(s.points[0]!.priceCoverage).toBe(1);
+    expect(s.coverage).toBe(1);
+  });
+
+  it("aucune position détenue : la couverture vaut 1, pas zéro", async () => {
+    // Rien à valoriser n'est pas « rien de valorisé » : un patrimoine sans
+    // position du journal est parfaitement connu.
+    const s = await serie({
+      inputs: {
+        cashAccounts: [
+          { id: "b1", balanceEur: d(1000), createdAt: t("2020-01-01T00:00:00Z") },
+        ],
+        closes: closes({ fantome: { "2026-08-25": 1 } }),
+      },
+      from: "2026-08-25T10:00:00Z",
+      to: "2026-08-25T10:00:00Z",
+    });
+    expect(s.points[0]!.priceCoverage).toBe(1);
+    expect(s.points[0]!.priceOrigins).toEqual([]);
+  });
+});

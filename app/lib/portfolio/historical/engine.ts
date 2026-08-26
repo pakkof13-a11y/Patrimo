@@ -45,6 +45,7 @@ import { closeAtOrBefore, type DailyCloseIndex } from "../class-history";
 import {
   OBSERVED_AT_DAY,
   OBSERVED_AT_INSTANT,
+  PRICE_ORIGINS,
   valuePositions,
   weakestOrigin,
   type PriceOrigin,
@@ -125,9 +126,10 @@ export type HistoricalInputs = {
  * dirait « valorisé » d'un montant qui ne l'est pas. Compter les positions dit
  * la vérité — « trois lignes sur quarante n'ont pas d'histoire ».
  */
-function coverageOf(origins: PriceOrigin[], unavailable: number): number {
-  if (origins.length === 0) return 1;
-  return (origins.length - unavailable) / origins.length;
+function coverageOf(totalPositions: number, unavailable: number): number {
+  if (totalPositions <= 0) return 1;
+  const valued = Math.max(0, totalPositions - unavailable);
+  return valued / totalPositions;
 }
 
 /** Ventilation d'une classe d'actif du journal vers un compartiment. */
@@ -342,7 +344,8 @@ export class PortfolioValuationEngine {
       même des deux côtés — seule sa lecture change.
     */
     const observedSet = priceAt ? OBSERVED_AT_INSTANT : OBSERVED_AT_DAY;
-    const originsSeen: PriceOrigin[] = [];
+    const originsSeen = new Set<PriceOrigin>();
+    let totalPositions = 0;
     let unavailablePositions = 0;
 
     for (const [comp, positions] of positionsByComponent) {
@@ -356,7 +359,16 @@ export class PortfolioValuationEngine {
         priceAt ?? this.dailyPriceResolver(day),
         observedSet
       );
-      for (const o of provenance.byOrigin.keys()) originsSeen.push(o);
+      /*
+        Deux unités à ne pas mélanger : les origines sont **distinctes**, les
+        compteurs sont des **positions**. Diviser les unes par les autres a
+        produit une couverture négative — un point à trois compartiments et cinq
+        lignes muettes donnait (3 − 5) / 3.
+      */
+      for (const [o, n] of provenance.byOrigin) {
+        originsSeen.add(o);
+        totalPositions += n;
+      }
       unavailablePositions += provenance.unavailableAssets;
       byComponent.set(comp, marketEur);
       // Au moins une position sans cours connu ce jour-là : retenue au coût,
@@ -450,7 +462,8 @@ export class PortfolioValuationEngine {
       status,
       estimatedComponents: [...estimated].sort(),
       weakestPriceOrigin: weakestOrigin(originsSeen),
-      priceCoverage: coverageOf(originsSeen, unavailablePositions),
+      priceOrigins: PRICE_ORIGINS.filter((o) => originsSeen.has(o)),
+      priceCoverage: coverageOf(totalPositions, unavailablePositions),
     };
   }
 
