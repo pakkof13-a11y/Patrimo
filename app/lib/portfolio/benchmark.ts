@@ -242,21 +242,20 @@ export function buildBenchmarkSeries(
   });
 }
 
-/** Fusionne benchmark dans les points agrégés pour Recharts (même index). */
-export function mergeBenchmarkIntoAggregated<
-  T extends { date: string; label: string }
->(
-  points: T[],
-  benchmark: BenchmarkPoint[]
-): Array<T & { benchmarkEur: number }> {
-  if (benchmark.length === 0) {
-    return points.map((p) => ({ ...p, benchmarkEur: 0 }));
-  }
-  // Index par date exacte puis par label
-  const byDate = new Map(benchmark.map((b) => [b.date, b.benchmarkEur]));
-  const byLabel = new Map(benchmark.map((b) => [b.label, b.benchmarkEur]));
-  return points.map((p) => ({
-    ...p,
-    benchmarkEur: byDate.get(p.date) ?? byLabel.get(p.label) ?? 0,
-  }));
-}
+/*
+  `mergeBenchmarkIntoAggregated` a été retirée ici.
+
+  Elle n'avait aucun appelant — ni écran, ni test — et transformait une absence
+  de donnée en `0` de deux façons : une série de benchmark vide donnait
+  `benchmarkEur: 0` sur *tous* les points, et une date sans correspondance
+  retombait sur `0` elle aussi.
+
+  `benchmarkEur` n'est pas un niveau mais un écart (`unités × cours − investi`).
+  Zéro y signifie donc « l'indice n'aurait rien rapporté » — une affirmation,
+  pas une absence. Le premier écran qui l'aurait branchée aurait tracé une
+  ligne plate à zéro là où la bonne réponse était « pas de courbe ».
+
+  La voie réellement utilisée est `withBenchmarkSeries` (`evolution-aggregate`),
+  qui rend `benchmark: undefined` quand l'indice manque — le comportement que
+  les écrans attendent, et celui que ce module aurait dû avoir.
+*/

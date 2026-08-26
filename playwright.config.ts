@@ -46,10 +46,30 @@ export default defineConfig({
       : undefined,
   },
   webServer: {
-    // Webpack plus stable que Turbopack pour e2e
-    command: isCI
-      ? "npm run start"
-      : "npx next dev --hostname 127.0.0.1 -p 3000 --webpack",
+    /*
+      Serveur de production pour les longues séries.
+
+      En local, la suite tourne par défaut contre `next dev`, pratique quand on
+      itère sur quelques specs. Sur la suite **complète**, ce choix se paie :
+      le serveur de développement conserve modules compilés, source maps et
+      état HMR de chaque route visitée, et après trois cents tests il atteint
+      son propre seuil mémoire — « Server is approaching the used memory
+      threshold, restarting... ». Le redémarrage tombe au milieu d'un test, qui
+      échoue sur une donnée jamais chargée : un faux négatif que rien dans le
+      code applicatif n'explique, et qu'un retry masquerait au lieu de le
+      supprimer.
+
+      `PLAYWRIGHT_PROD_SERVER=1` lance le serveur de production à la place — le
+      même que la CI, qui ne connaît pas ce problème. Il exige un `npm run
+      build` préalable, d'où le choix d'une option explicite plutôt que d'un
+      défaut.
+
+      Webpack plutôt que Turbopack en développement : plus stable pour l'e2e.
+    */
+    command:
+      isCI || process.env.PLAYWRIGHT_PROD_SERVER === "1"
+        ? "npm run start"
+        : "npx next dev --hostname 127.0.0.1 -p 3000 --webpack",
     url: baseURL,
     reuseExistingServer,
     timeout: 180_000,

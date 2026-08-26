@@ -12,7 +12,7 @@
  * chaud, c'est-à-dire presque toujours, et laisserait le défaut revenir.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -85,5 +85,58 @@ describe("PortfolioSnapshot n'est jamais une source de courbe", () => {
     ]) {
       expect(lire(chemin)).not.toMatch(/prisma\.portfolioSnapshot\.(find|groupBy|aggregate)/);
     }
+  });
+});
+
+describe("aucune quatrième porte", () => {
+  /**
+   * Le contrôle par liste ne protège que les chemins qu'on a pensé à y mettre.
+   * Celui-ci raisonne à l'envers : il balaie **toutes** les routes d'API et
+   * n'autorise la collecte que là où elle a sa place.
+   */
+  function toutesLesRoutes(): string[] {
+    const out: string[] = [];
+    const parcourir = (rel: string) => {
+      for (const e of readdirSync(join(racine, rel), { withFileTypes: true })) {
+        const enfant = `${rel}/${e.name}`;
+        if (e.isDirectory()) parcourir(enfant);
+        else if (e.name === "route.ts") out.push(enfant);
+      }
+    };
+    parcourir("app/api");
+    return out;
+  }
+
+  /** Le seul chemin autorisé à collecter : la tâche planifiée. */
+  const COLLECTE_AUTORISEE = ["app/api/cron/collect-intraday/route.ts"];
+
+  it("seule la tâche planifiée appelle un collecteur", () => {
+    const routes = toutesLesRoutes();
+    // Le balayage doit avoir trouvé quelque chose, sinon le test est vide.
+    expect(routes.length).toBeGreaterThan(20);
+
+    const fautives = routes.filter(
+      (r) =>
+        !COLLECTE_AUTORISEE.includes(r) &&
+        /collectDailyCloses(ForAssets)?\s*\(|collectIntradayBars\s*\(|fillDailyCloses\s*\(/.test(
+          lire(r)
+        )
+    );
+
+    expect(fautives).toEqual([]);
+  });
+
+  it("aucune route ne remplit le cache de clôtures par omission", () => {
+    /*
+      `getDailyCloses` collecte par défaut. Une route qui l'appellerait sans
+      `refresh: false` rouvrirait la porte sans qu'aucun nom de collecteur
+      n'apparaisse dans son code.
+    */
+    const fautives = toutesLesRoutes().filter((r) => {
+      const src = lire(r);
+      return /getDailyCloses\s*\(/.test(src) && !/refresh:\s*false/.test(src);
+    });
+
+    expect(fautives).toEqual([]);
   });
 });
