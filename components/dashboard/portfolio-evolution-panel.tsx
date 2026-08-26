@@ -37,6 +37,7 @@ import {
   PortfolioPercentChart,
   PortfolioValueChart,
 } from "@/components/dashboard/portfolio-evolution-charts";
+import { IntradaySection } from "@/components/dashboard/intraday-section";
 
 const emptySubscribe = () => () => undefined;
 
@@ -69,6 +70,29 @@ const SCOPE_CHOICES: {
     id: "net",
     label: "Patrimoine net",
     title: "Valeur brute des actifs moins le capital restant dû",
+  },
+];
+
+/**
+ * Échelle de lecture — quotidienne ou horaire.
+ *
+ * Proposée sur la seule fenêtre de sept jours : c'est là que l'heure a un sens,
+ * et la collecte horaire ne remonte de toute façon pas plus loin. Le choix est
+ * volontairement local et non mémorisé — c'est une façon de regarder, pas un
+ * réglage de compte, et le mémoriser ferait rouvrir l'écran sur une courbe que
+ * l'utilisateur n'a pas demandée.
+ *
+ * La courbe quotidienne reste le défaut : l'intraday s'ajoute au parcours, il
+ * ne le remplace pas.
+ */
+type EvolutionScale = "daily" | "intraday";
+
+const SCALE_CHOICES: { id: EvolutionScale; label: string; title: string }[] = [
+  { id: "daily", label: "Jour", title: "Un point par jour — historique complet" },
+  {
+    id: "intraday",
+    label: "Heure",
+    title: "Un point par heure, sur les observations réellement collectées",
   },
 ];
 
@@ -167,6 +191,17 @@ export function PortfolioEvolutionPanel({
   }
 
   const { range, versus, indexKey, scope } = prefs;
+
+  /*
+    L'échelle n'est pas mémorisée avec les autres préférences : c'est une façon
+    de regarder sur l'instant, pas un réglage de compte. Elle retombe donc sur
+    « Jour » — la courbe de référence — à chaque ouverture.
+  */
+  const [scale, setScale] = useState<EvolutionScale>("daily");
+  // L'heure n'a de sens que sur la fenêtre courte, la seule que la collecte
+  // horaire couvre. Ailleurs, le choix disparaît et la lecture reste quotidienne.
+  const scaleAvailable = range === "7d";
+  const showIntraday = scaleAvailable && scale === "intraday";
 
   const update = (patch: Partial<EvolutionPrefsV5>) => {
     setPrefs((p) => {
@@ -376,6 +411,15 @@ export function PortfolioEvolutionPanel({
         </div>
 
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+          {scaleAvailable && (
+            <Segmented
+              items={SCALE_CHOICES}
+              value={scale}
+              onChange={setScale}
+              ariaLabel="Échelle de lecture"
+              testIdPrefix="evolution-scale"
+            />
+          )}
           <Segmented
             items={SCOPE_CHOICES}
             value={scope}
@@ -420,7 +464,14 @@ export function PortfolioEvolutionPanel({
         data-testid="evolution-chart"
       >
         <div className="absolute inset-0">
-          {loading ? (
+          {/*
+            L'intraday court-circuite les états de la courbe quotidienne : il a
+            les siens, et « historique encore vide » ne décrirait pas la même
+            chose qu'« aucune donnée intraday collectée ».
+          */}
+          {showIntraday ? (
+            <IntradaySection baseCurrency={baseCurrency} />
+          ) : loading ? (
             <div
               className="flex h-full flex-col gap-3 px-2 py-2"
               data-testid="evolution-loading-skeleton"
