@@ -191,3 +191,104 @@ export function periodDelta(points: IntradayApiPoint[]): number | null {
   if (points.length < 2) return null;
   return points[points.length - 1]!.netWorth - points[0]!.netWorth;
 }
+
+/**
+ * Couleur d'un point selon sa position par rapport à la référence.
+ *
+ * ## Quelle métrique est colorée
+ *
+ * La courbe trace le patrimoine **en valeur absolue** : 800 000 € n'est jamais
+ * « négatif ». Colorer la valeur elle-même n'aurait donc aucun sens, et peindre
+ * toute la série en rouge parce que la journée finit en baisse en aurait encore
+ * moins.
+ *
+ * Ce qui est coloré est la **variation depuis le début de la période** — la
+ * seule lecture pour laquelle « au-dessus » et « en dessous » veulent dire
+ * quelque chose sur une courbe de patrimoine. Un patrimoine qui monte, passe
+ * sous son point de départ, puis repasse au-dessus se lit donc vert → rouge →
+ * vert, et la couleur ne dépend jamais de la valeur finale.
+ */
+export type SignTone = "positive" | "negative" | "neutral";
+
+export function toneAgainst(value: number, reference: number): SignTone {
+  if (value > reference) return "positive";
+  if (value < reference) return "negative";
+  return "neutral";
+}
+
+/** Tokens du design system — aucune couleur nouvelle n'est introduite. */
+export const TONE_COLOR: Record<SignTone, string> = {
+  positive: "var(--success)",
+  negative: "var(--danger)",
+  // Le design system n'a pas de token « neutre » dédié ; la teinte secondaire
+  // est ce qu'il emploie partout pour une valeur qui ne penche d'aucun côté.
+  neutral: "var(--muted-foreground)",
+};
+
+export type GradientStop = { offset: number; color: string };
+
+/**
+ * Arrêts de dégradé traduisant le passage au-dessus et en dessous de la
+ * référence, le long de l'axe du temps.
+ *
+ * Recharts ne sait pas colorer une ligne segment par segment ; un dégradé le
+ * fait, sans ajouter de série ni changer la primitive `Area` déjà en place.
+ *
+ * ## Ce que la transition n'est pas
+ *
+ * Le point de bascule est calculé là où le segment croise réellement la
+ * référence. C'est une position de **couleur**, pas une donnée : aucun point
+ * n'est ajouté à la série, aucune valeur n'est inventée, et le tooltip
+ * continue de ne montrer que des observations reçues de l'API.
+ */
+export function signGradientStops(
+  points: Array<{ t: number; netWorth: number }>,
+  reference: number
+): GradientStop[] {
+  if (points.length === 0) return [];
+  const first = points[0]!.t;
+  const last = points[points.length - 1]!.t;
+  const span = last - first;
+
+  const at = (t: number) => (span <= 0 ? 0 : (t - first) / span);
+  const colorOf = (v: number) => TONE_COLOR[toneAgainst(v, reference)];
+
+  const stops: GradientStop[] = [
+    { offset: 0, color: colorOf(points[0]!.netWorth) },
+  ];
+
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1]!;
+    const cur = points[i]!;
+    const prevTone = toneAgainst(prev.netWorth, reference);
+    const curTone = toneAgainst(cur.netWorth, reference);
+    if (prevTone === curTone) continue;
+
+    /*
+      Position du croisement sur le segment : la fraction du chemin où la
+      valeur atteint la référence. Sans elle, la bascule tomberait sur le point
+      suivant et la couleur mentirait sur une partie du segment.
+    */
+    const dv = cur.netWorth - prev.netWorth;
+    const ratio = dv === 0 ? 0 : (reference - prev.netWorth) / dv;
+    const crossT = prev.t + (cur.t - prev.t) * Math.min(1, Math.max(0, ratio));
+    const offset = at(crossT);
+
+    // Deux arrêts au même endroit : la transition est franche, jamais fondue.
+    stops.push({ offset, color: colorOf(prev.netWorth) });
+    stops.push({ offset, color: colorOf(cur.netWorth) });
+  }
+
+  stops.push({ offset: 1, color: colorOf(points[points.length - 1]!.netWorth) });
+  return stops;
+}
+
+/**
+ * Écart entre deux points d'observation suffisant pour parler de trou.
+ *
+ * Deux fois le pas : une barre manquante isolée est un trou, mais la marge
+ * évite de signaler un décalage de quelques secondes.
+ */
+export function isGap(previousT: number, currentT: number, stepMs: number): boolean {
+  return currentT - previousT > stepMs * 2;
+}

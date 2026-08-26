@@ -7,7 +7,11 @@ import {
   formatIntradayTime,
   hasEstimatedPoint,
   periodDelta,
+  isGap,
+  signGradientStops,
   toChartPoints,
+  toneAgainst,
+  TONE_COLOR,
   type IntradayApiExtremes,
   type IntradayApiPoint,
 } from "@/app/lib/portfolio/intraday-view";
@@ -171,5 +175,93 @@ describe("variation de la fenêtre", () => {
 
   it("série vide : rien", () => {
     expect(periodDelta([])).toBeNull();
+  });
+});
+
+describe("5 et 6 — couleur autour de la référence", () => {
+  /** Reprend l'exemple du chantier : +5 000, +2 000, −12 500, −8 000, +3 000. */
+  const REFERENCE = 800_000;
+  const parcours = [
+    { t: 0, netWorth: 805_000 },
+    { t: 1, netWorth: 802_000 },
+    { t: 2, netWorth: 787_500 },
+    { t: 3, netWorth: 792_000 },
+    { t: 4, netWorth: 803_000 },
+  ];
+
+  it("au-dessus, en dessous, à égalité", () => {
+    expect(toneAgainst(805_000, REFERENCE)).toBe("positive");
+    expect(toneAgainst(787_500, REFERENCE)).toBe("negative");
+    expect(toneAgainst(800_000, REFERENCE)).toBe("neutral");
+  });
+
+  it("une valeur exactement à la référence est neutre, ni verte ni rouge", () => {
+    expect(TONE_COLOR[toneAgainst(800_000, REFERENCE)]).toBe("var(--muted-foreground)");
+  });
+
+  it("vert → rouge → vert, et non une seule couleur de fin", () => {
+    /*
+      Le défaut que ce test ferme : colorer toute la série selon sa valeur
+      finale. Ici la série finit en hausse ; elle doit malgré tout être rouge
+      au milieu.
+    */
+    const stops = signGradientStops(parcours, REFERENCE);
+    const couleurs = stops.map((s) => s.color);
+    expect(couleurs[0]).toBe("var(--success)");
+    expect(couleurs).toContain("var(--danger)");
+    expect(couleurs[couleurs.length - 1]).toBe("var(--success)");
+
+    // Deux bascules : descente sous la référence, puis remontée.
+    const bascules = stops.filter(
+      (s, i) => i > 0 && stops[i - 1]!.offset === s.offset
+    );
+    expect(bascules).toHaveLength(2);
+  });
+
+  it("les bascules tombent entre les deux points concernés", () => {
+    const stops = signGradientStops(parcours, REFERENCE);
+    for (const s of stops) {
+      expect(s.offset).toBeGreaterThanOrEqual(0);
+      expect(s.offset).toBeLessThanOrEqual(1);
+    }
+    // Le croisement descendant est entre le 2e et le 3e point : offsets 0,25 et 0,5.
+    const premiere = stops.find((s) => s.color === "var(--danger)")!;
+    expect(premiere.offset).toBeGreaterThan(0.25);
+    expect(premiere.offset).toBeLessThan(0.5);
+  });
+
+  it("une série entièrement au-dessus reste verte de bout en bout", () => {
+    const stops = signGradientStops(
+      [
+        { t: 0, netWorth: 810_000 },
+        { t: 1, netWorth: 820_000 },
+      ],
+      REFERENCE
+    );
+    expect(new Set(stops.map((s) => s.color))).toEqual(new Set(["var(--success)"]));
+  });
+
+  it("une série vide ne produit aucun arrêt", () => {
+    expect(signGradientStops([], REFERENCE)).toEqual([]);
+  });
+
+  it("un seul point donne une couleur uniforme", () => {
+    const stops = signGradientStops([{ t: 0, netWorth: 790_000 }], REFERENCE);
+    expect(stops).toHaveLength(2);
+    expect(new Set(stops.map((s) => s.color))).toEqual(new Set(["var(--danger)"]));
+  });
+});
+
+describe("7 — détection des trous", () => {
+  it("un pas normal n'est pas un trou", () => {
+    const H = 3_600_000;
+    expect(isGap(0, H, H)).toBe(false);
+    expect(isGap(0, 2 * H, H)).toBe(false);
+  });
+
+  it("une absence prolongée en est un", () => {
+    const H = 3_600_000;
+    expect(isGap(0, 3 * H, H)).toBe(true);
+    expect(isGap(0, 12 * H, H)).toBe(true);
   });
 });

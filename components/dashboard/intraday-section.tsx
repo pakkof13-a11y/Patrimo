@@ -188,6 +188,9 @@ export function IntradaySection({
           points={points}
           extremes={series?.extremes ?? null}
           baseCurrency={baseCurrency}
+          // Le pas vient de l'API : c'est elle qui décide de la résolution,
+          // et lui qui permet de reconnaître un trou dans la série.
+          stepMs={series?.stepMs ?? 3_600_000}
         />
       </div>
     </div>
