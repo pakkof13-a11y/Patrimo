@@ -41,7 +41,11 @@ import { toEur } from "../../accounting/fx";
 import { applyTransaction, createEmptyLedger } from "../../accounting/ledger";
 import type { LedgerState, LedgerTx } from "../../accounting/types";
 import { d, zero, type Decimal } from "../../money/decimal";
-import { marketValueOfPositions, type DailyCloseIndex } from "../class-history";
+import { closeAtOrBefore, type DailyCloseIndex } from "../class-history";
+import {
+  valuePositions,
+  type PriceResolver,
+} from "./price-resolver";
 import {
   buildCashSleeve,
   buildCrowdlendingSleeve,
@@ -259,11 +263,37 @@ export class PortfolioValuationEngine {
    * garantie mécanique que le point du jour et un point d'historique sont
    * calculés par le même code.
    */
-  private valuationAt(
+  /**
+   * Résolveur du jour — le comportement historique, inchangé.
+   *
+   * `closeAtOrBefore` reporte déjà la dernière clôture connue et la courbe
+   * quotidienne l'annonce `EXACT`. C'est discutable pour un jour de marché
+   * fermé, mais c'est la sémantique en place : la modifier ferait bouger la
+   * courbe existante, ce qui n'est pas l'objet de ce chantier. Le résolveur
+   * quotidien déclare donc `observed: true`, comme avant.
+   */
+  private dailyPriceResolver(day: DayKey): PriceResolver {
+    return (assetId) => {
+      const close = closeAtOrBefore(this.inputs.closes.get(assetId), day);
+      return close == null ? null : { priceEur: close, observed: true };
+    };
+  }
+
+  /**
+   * Valorisation à un instant, à partir d'un état de journal déjà positionné.
+   *
+   * `priceAt` est la seule chose qui distingue un point horaire d'un point
+   * quotidien. Tout le reste — exclusions, poches non cotées, passifs, flux,
+   * statut — est partagé, et c'est la garantie mécanique que les deux courbes
+   * décrivent le même patrimoine.
+   */
+  valuationAt(
     day: DayKey,
     state: LedgerState,
     ledgerFlowToday: Decimal,
-    previousGross: Decimal | null
+    previousGross: Decimal | null,
+    priceAt?: PriceResolver,
+    countSleeveFlows = true
   ): PortfolioValuationPoint {
     const estimated = new Set<ValuationComponent>();
 
@@ -285,15 +315,15 @@ export class PortfolioValuationEngine {
     }
 
     for (const [comp, positions] of positionsByComponent) {
-      const { marketEur, unpricedAssets: unpriced } = marketValueOfPositions(
-        positions,
-        this.inputs.closes,
-        day
-      );
+      const { marketEur, unpricedAssets: unpriced, carriedAssets: carried } =
+        valuePositions(positions, priceAt ?? this.dailyPriceResolver(day));
       byComponent.set(comp, marketEur);
       // Au moins une position sans cours connu ce jour-là : retenue au coût,
       // donc le compartiment n'est pas exact.
       if (unpriced > 0) estimated.add(comp);
+      // Cours réel mais antérieur, reporté faute de mieux : la valeur est
+      // plausible, elle n'est pas observée à cet instant.
+      if (carried > 0) estimated.add(comp);
     }
 
     // ── Poches de cash, alternatifs, épargne salariale ───────────────────────
@@ -328,10 +358,25 @@ export class PortfolioValuationEngine {
       .plus(otherAssets);
 
     // ── Flux externes du jour ────────────────────────────────────────────────
-    const externalFlows = ledgerFlowToday
-      .plus(this.cash.flowsByDay.get(day) ?? zero())
-      .plus(this.alternatives.flowsByDay.get(day) ?? zero())
-      .plus(this.employeeSavings.flowsByDay.get(day) ?? zero());
+    /*
+      Les flux des poches ne sont datés qu'au jour.
+
+      Un versement sur un livret ou l'achat d'un lingot portent une date, pas
+      une heure. Les compter à chaque point d'une série horaire les
+      retrancherait vingt-quatre fois de la performance du même jour. Ils sont
+      donc rattachés au **premier point de leur journée**, faute d'en connaître
+      l'heure — la seule imputation que la donnée autorise.
+
+      Les flux du journal, eux, sont horodatés à la minute : `ledgerFlowToday`
+      porte ceux survenus depuis le point précédent, et n'a pas besoin de cette
+      précaution.
+    */
+    const sleeveFlows = countSleeveFlows
+      ? (this.cash.flowsByDay.get(day) ?? zero())
+          .plus(this.alternatives.flowsByDay.get(day) ?? zero())
+          .plus(this.employeeSavings.flowsByDay.get(day) ?? zero())
+      : zero();
+    const externalFlows = ledgerFlowToday.plus(sleeveFlows);
 
     /*
       Performance = ce que la journée a produit, une fois les mouvements de
@@ -364,6 +409,69 @@ export class PortfolioValuationEngine {
       status,
       estimatedComponents: [...estimated].sort(),
     };
+  }
+
+  /**
+   * Série valorisée à des **instants**, et non à des jours.
+   *
+   * Même rejeu incrémental, même arithmétique, même statut : seule la
+   * résolution des cours change, par `resolverAt`. C'est ce qui garantit qu'une
+   * courbe horaire et la courbe quotidienne décrivent le même patrimoine — il
+   * n'existe pas deux définitions.
+   *
+   * Le journal est rejoué à l'**horodatage** de la transaction, pas à son jour :
+   * un achat de 14 h 37 pèse à partir de 14 h 37, et pas depuis minuit. C'est ce
+   * que la minute stockée dans `occurredAt` permet, et ce qu'une clé
+   * journalière interdisait.
+   *
+   * Les instants doivent être fournis triés — c'est l'appelant qui décide du
+   * pas, et le rejeu suppose une progression monotone.
+   */
+  buildInstantSeries(
+    instants: Date[],
+    resolverAt: (at: Date) => PriceResolver
+  ): Array<PortfolioValuationPoint & { at: Date }> {
+    if (instants.length === 0) return [];
+
+    const state = createEmptyLedger();
+    let cursor = 0;
+    const out: Array<PortfolioValuationPoint & { at: Date }> = [];
+    let previousGross: Decimal | null = null;
+    let previousDay: DayKey | null = null;
+
+    for (const at of instants) {
+      const day = parisDayKey(at);
+      const ms = at.getTime();
+
+      // Flux du journal survenus depuis le point précédent : la fenêtre est
+      // l'intervalle entre deux points, pas la journée entière.
+      let ledgerFlowSincePrevious = zero();
+      while (cursor < this.sortedTxs.length) {
+        const tx = this.sortedTxs[cursor]!;
+        if (tx.occurredAt.getTime() > ms) break;
+        ledgerFlowSincePrevious = ledgerFlowSincePrevious.plus(ledgerExternalFlow(tx));
+        applyLedgerTx(state, tx);
+        cursor += 1;
+      }
+
+      // Les flux des poches ne sont datés qu'au jour : ils sont imputés au
+      // premier point de leur journée, jamais répétés aux suivants.
+      const firstPointOfDay = day !== previousDay;
+
+      const point = this.valuationAt(
+        day,
+        state,
+        ledgerFlowSincePrevious,
+        previousGross,
+        resolverAt(at),
+        firstPointOfDay
+      );
+      out.push({ ...point, at });
+      previousGross = d(point.grossAssets);
+      previousDay = day;
+    }
+
+    return out;
   }
 
   /**
