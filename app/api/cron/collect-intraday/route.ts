@@ -27,6 +27,20 @@ import { readCronCredential } from "@/app/lib/auth/cron-credential";
  *   ses actifs. Sert à amorcer un compte ou à diagnostiquer ; aucun écran ne
  *   l'appelle.
  *
+ * ## Cadence : une fois par jour, et c'est suffisant
+ *
+ * `vercel.json` planifie ce passage à 03 h 05, une seule fois par jour. Une
+ * cadence horaire a été essayée et **cassait le déploiement** : l'offre Hobby
+ * de Vercel refuse toute planification plus fréquente que quotidienne, et le
+ * déploiement échoue au lieu de se dégrader.
+ *
+ * La granularité n'en souffre pas. Le collecteur ne demande pas « la barre de
+ * maintenant » mais une **fenêtre** — dix jours en pas horaire — et persiste
+ * toutes celles qui sont closes. Un passage quotidien ramène donc les vingt-
+ * quatre barres de la veille d'un coup ; seule la fraîcheur change, pas la
+ * finesse. La clé `(assetId, interval, barStart)` rend les recouvrements
+ * inoffensifs.
+ *
  * ## Pourquoi une tâche planifiée, et pas une collecte à l'affichage
  *
  * Une lecture ne doit pas dépendre du réseau fournisseur. Brancher la collecte
