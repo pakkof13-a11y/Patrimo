@@ -104,11 +104,14 @@ export async function getClassPnlSeries(
     }
   }
 
+  // Lecture seule — voir `performance-service` : la collecte appartient à la
+  // tâche planifiée, pas à l'ouverture d'un écran.
   const { closes } = await getDailyCloses(
     userId,
     [...heldAssetIds],
     fromDay,
-    toDay
+    toDay,
+    { refresh: false }
   );
 
   const inputs: ClassDailyInput[] = days.map((day) => ({

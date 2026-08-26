@@ -22,6 +22,7 @@
 import { prisma } from "../prisma";
 import { parisDayKey } from "../dates/paris";
 import { getDailyCloses } from "../market/daily-closes";
+import { valueHeldAtDay } from "../market/daily-valuation";
 import {
   buildDailyQuantities,
   closeAtOrBefore,
@@ -179,25 +180,37 @@ export async function getSpotHistory(
     .slice(0, 10);
   const readFrom = sparkFrom < fromDay ? sparkFrom : fromDay;
 
-  const { closes } = await getDailyCloses(userId, [...heldIds], readFrom, toDay);
+  // Lecture seule — voir `performance-service` : la collecte appartient à la
+  // tâche planifiée, pas à l'ouverture d'un écran.
+  const { closes } = await getDailyCloses(userId, [...heldIds], readFrom, toDay, {
+    refresh: false,
+  });
 
   /* ── Courbe de la poche ─────────────────────────────────────────── */
 
   const points: SpotValuePoint[] = [];
   const lastDay = days[days.length - 1]!;
 
+  /*
+    Un jour n'entre dans la courbe que si **toutes** les lignes détenues y sont
+    valorisables.
+
+    La boucle précédente sautait la ligne sans clôture et publiait le total
+    quand même : un jour sans aucune cotation valait donc 0 €, et un jour à
+    moitié coté valait la moitié du portefeuille. La courbe décrochait puis
+    remontait sans qu'aucune position n'ait bougé.
+
+    `valueHeldAtDay` porte cette règle et le report depuis la dernière clôture
+    observée ; les jours incomplets sont simplement absents de la série.
+  */
   for (const day of days) {
-    let valueEur = 0;
-    for (const [assetId, qty] of Object.entries(quantities.get(day) ?? {})) {
-      if (!heldIds.has(assetId) || qty === 0) continue;
-      // Trou ponctuel dans une série connue : la clôture est reportée depuis le
-      // dernier jour coté, jamais devinée vers l'avenir. Sans aucune clôture,
-      // la ligne n'entre pas dans la courbe — elle est comptée à la couverture.
-      const close = closeAtOrBefore(closes.get(assetId), day);
-      if (close == null) continue;
-      valueEur += qty * close;
-    }
-    points.push({ day, valueEur });
+    const held = Object.entries(quantities.get(day) ?? {})
+      .filter(([assetId, qty]) => heldIds.has(assetId) && qty !== 0)
+      .map(([assetId, quantity]) => ({ assetId, quantity }));
+
+    const valuation = valueHeldAtDay(held, closes, day);
+    if (!valuation.complete) continue;
+    points.push({ day, valueEur: valuation.valueEur });
   }
 
   // Couverture : part des actifs encore détenus au dernier jour dont la série

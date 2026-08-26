@@ -2,11 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { parisDayKey } from "@/app/lib/dates/paris";
-import {
-  assetsNeedingFetch,
-  getDailyCloses,
-  readDailyCloses,
-} from "@/app/lib/market/daily-closes";
+import { readDailyCloses } from "@/app/lib/market/daily-closes";
 import {
   clientErrorMessage,
   clientErrorStatus,
@@ -19,14 +15,12 @@ import {
  * portefeuille de trente positions, la seconde solution ferait trente
  * aller-retours pour dessiner trente courbes de quelques pixels.
  *
- * **Le cache d'abord, quelques appels ensuite.** On lit `AssetDailyClose`, et
- * on ne complète que les actifs qu'il ignore encore — au plus une poignée par
- * requête. Tout remplir d'un coup ferait payer trente téléchargements
- * d'historique à l'ouverture du portefeuille ; ne rien remplir laisserait la
- * colonne vide jusqu'à ce qu'un autre écran passe par là, ce qui se lit comme
- * une panne. Un portefeuille froid se peuple donc en quelques visites, et
- * immédiatement dès que le P&L par classe tourne sur la même page — il remplit
- * le même cache pour les mêmes actifs.
+ * **Le cache, et rien que le cache.** On lit `AssetDailyClose` ; on ne le
+ * remplit pas. Une lecture ne contacte aucun fournisseur et n'écrit rien —
+ * l'entretien de cette table appartient à la tâche planifiée, seule à savoir
+ * quand et pour qui collecter. Un portefeuille froid n'a donc pas de vignettes
+ * avant le premier passage, et c'est préférable à un historique dont la
+ * profondeur dépendrait de la fréquence des visites.
  *
  * Un actif que les fournisseurs ignorent n'a pas de vignette, et c'est le
  * comportement voulu : une diagonale tracée entre deux points inventés aurait
@@ -47,15 +41,6 @@ const MAX_ASSETS = 120;
 
 /** En dessous, la « courbe » est un segment : on n'en dessine pas. */
 const MIN_POINTS = 2;
-
-/**
- * Actifs complétés depuis les fournisseurs au cours d'une même requête.
- *
- * Le chiffre est délibérément petit : il borne le coût du pire cas — un
- * portefeuille entier dont le cache est vide — à l'équivalent de quelques
- * fiches d'actif ouvertes. Le reste se remplit à la visite suivante.
- */
-const MAX_FILLS_PER_REQUEST = 8;
 
 export type SparklinesResponse = {
   /** Clôtures par actif, du plus ancien au plus récent. */
@@ -104,27 +89,21 @@ export async function GET(req: Request) {
     );
 
     /*
-      Complément best effort, jamais bloquant : un fournisseur muet laisse la
-      ligne sans vignette, il ne fait pas échouer la requête. Le tableau lui
-      est déjà affiché — ces courbes l'enrichissent, elles ne le portent pas.
+      Lecture pure : le cache est lu, jamais rempli.
 
-      Le remplissage est délégué au service partagé plutôt que refait ici : il
-      borne sa concurrence et avale les erreurs actif par actif. La boucle
-      séquentielle qui traînait à cette place attendait chaque fournisseur à
-      son tour — huit actifs froids, huit attentes bout à bout, pour une
-      colonne d'illustration.
+      Cette route appelait les fournisseurs et écrivait `AssetDailyClose` — au
+      plus huit actifs par requête, mais sur un **GET**. Ouvrir le portefeuille
+      déclenchait donc du réseau sortant et des écritures en base, si bien que
+      l'historique dépendait de qui regardait et à quel moment : c'est
+      exactement le défaut corrigé sur les passifs, où consulter un écran
+      écrivait.
 
-      `assetsNeedingFetch` est appelé ici pour décider *qui* compléter, parce
-      que le plafond doit porter sur les actifs à combler et non sur les huit
-      premiers de la liste : un portefeuille dont les huit premières lignes
-      sont déjà en cache ne comblerait jamais les suivantes.
+      Ce que ce remplissage à la volée cherchait à éviter — une colonne vide
+      sur un portefeuille froid — est désormais traité par la tâche planifiée,
+      qui entretient les mêmes clôtures pour les mêmes actifs sans qu'aucun
+      écran soit ouvert. Un compte tout neuf reste sans vignettes jusqu'au
+      premier passage : une absence honnête, le temps d'une nuit.
     */
-    const stale = await assetsNeedingFetch(ownedIds, toDay, now);
-    const toFill = stale.slice(0, MAX_FILLS_PER_REQUEST);
-    if (toFill.length > 0) {
-      await getDailyCloses(userId, toFill, fromDay, toDay, { now });
-    }
-
     const index = await readDailyCloses(ownedIds, fromDay, toDay);
 
     const series: Record<string, number[]> = {};

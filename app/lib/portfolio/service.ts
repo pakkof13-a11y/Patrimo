@@ -1103,10 +1103,9 @@ const HISTORY_DISPLAY_POINTS = 900;
  * exactement la valeur calculée : l'échantillonnage retire des points, il n'en
  * lisse aucun et n'en invente aucun.
  */
-export function downsampleSeries<T extends { grossAssets: number; externalFlows: number }>(
-  series: T[],
-  maxPoints = HISTORY_DISPLAY_POINTS
-): T[] {
+export function downsampleSeries<
+  T extends { grossAssets: number; externalFlows: number; status?: string },
+>(series: T[], maxPoints = HISTORY_DISPLAY_POINTS): T[] {
   if (series.length <= maxPoints) return series;
 
   const keep = new Set<number>([0, series.length - 1]);
@@ -1136,6 +1135,20 @@ export function downsampleSeries<T extends { grossAssets: number; externalFlows:
 
   for (let i = 1; i < series.length; i++) {
     const p = series[i]!;
+    /*
+      Un changement de statut est un mouvement notable, au même titre qu'un
+      flux.
+
+      L'échantillonnage régulier peut retirer précisément les deux points qui
+      encadrent le passage d'`ESTIMATED` à `EXACT`. Aucune valeur n'est alors
+      modifiée — mais l'écran ne sait plus dire où la mesure réelle a commencé,
+      et présente comme observé un passé qui ne l'était pas. C'est le seul
+      endroit où retirer un point change ce que la courbe affirme.
+    */
+    if (p.status !== series[i - 1]!.status) {
+      keep.add(i);
+      keep.add(i - 1);
+    }
     if (p.externalFlows !== 0) keep.add(i);
     else if (Math.abs(p.grossAssets - series[i - 1]!.grossAssets) >= threshold) {
       keep.add(i);

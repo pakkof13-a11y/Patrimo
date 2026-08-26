@@ -34,6 +34,7 @@ function KpiCard({
   tone,
   spark,
   sparkStroke,
+  sparkTitle,
   reserveSpark,
   testId,
 }: {
@@ -43,6 +44,8 @@ function KpiCard({
   tone?: "positive" | "negative" | "muted";
   spark?: number[];
   sparkStroke?: string;
+  /** Ce que la courbe représente — jamais déductible de la seule tuile. */
+  sparkTitle?: string;
   /**
    * Réserve la bande de courbe même sans série : quatre tuiles de hauteurs
    * différentes se lisent comme un défaut d'alignement. Inutile quand aucune
@@ -86,6 +89,7 @@ function KpiCard({
           "mt-auto w-full",
           reserveSpark && "h-[1.75rem] pt-[var(--space-1)]"
         )}
+        title={spark && spark.length >= 2 ? sparkTitle : undefined}
       >
         {spark && spark.length >= 2 && (
           <Sparkline
@@ -145,8 +149,6 @@ export function EsKpiCards({
         tone={
           totals.gainPct != null ? (gainUp ? "positive" : "negative") : "muted"
         }
-        spark={spark}
-        sparkStroke={gainUp ? "var(--chart-positive)" : "var(--chart-negative)"}
         reserveSpark={reserveSpark}
       />
 
@@ -163,8 +165,11 @@ export function EsKpiCards({
             ? "À renseigner support par support"
             : incomplete
               ? `${totals.linesMissingContribution} support${totals.linesMissingContribution > 1 ? "s" : ""} sans montant`
-              : "Depuis l'origine"
+              : "Cumul depuis l'origine"
         }
+        spark={spark}
+        sparkStroke="var(--chart-gold)"
+        sparkTitle="Versements cumulés — une somme d'apports, pas une valorisation"
         reserveSpark={reserveSpark}
       />
 

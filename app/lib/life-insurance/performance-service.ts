@@ -14,10 +14,10 @@
 import { prisma } from "../prisma";
 import { parisDayKey } from "../dates/paris";
 import { getDailyCloses } from "../market/daily-closes";
+import { valueHeldAtDay } from "../market/daily-valuation";
 import {
   buildDailyFlows,
   buildDailyQuantities,
-  closeAtOrBefore,
   type DayKey,
 } from "../portfolio/class-history";
 import { enumerateDays } from "../portfolio/class-pnl-service";
@@ -128,11 +128,21 @@ export async function getLifeInsurancePerformance(
     }
   }
 
+  /*
+    Lecture seule : `refresh: false`.
+
+    Cet appel remplissait le cache depuis les fournisseurs à chaque ouverture
+    de l'écran assurance-vie. Une consultation devenait donc une écriture, et
+    la courbe dépendait de la disponibilité de Yahoo au moment du regard. La
+    tâche planifiée entretient `AssetDailyClose` sans qu'aucun écran soit
+    ouvert ; il n'y a plus de raison qu'une lecture s'en charge.
+  */
   const { closes } = await getDailyCloses(
     userId,
     [...heldAssetIds],
     fromDay,
-    toDay
+    toDay,
+    { refresh: false }
   );
 
   /**
@@ -148,6 +158,16 @@ export async function getLifeInsurancePerformance(
   type Bucket = {
     values: Map<DayKey, number>;
     netFlows: Map<DayKey, number>;
+    /**
+     * Jours où au moins un support couvert n'avait aucune clôture à reporter.
+     *
+     * Ces jours sont retirés de la série au lieu d'être publiés amputés : la
+     * boucle précédente sautait le support sans cours mais gardait le total,
+     * si bien qu'un contrat de quatre supports dont un seul manquait affichait
+     * un décrochage — puis remontait dès que le cache se remplissait. Aucune
+     * position n'avait bougé.
+     */
+    incompleteDays: Set<DayKey>;
     /** Cumul des flux des supports sans historique — leur montant investi. */
     uncoveredBookValue: number;
   };
@@ -155,7 +175,12 @@ export async function getLifeInsurancePerformance(
   const bucketFor = (key: string | null): Bucket => {
     let b = buckets.get(key);
     if (!b) {
-      b = { values: new Map(), netFlows: new Map(), uncoveredBookValue: 0 };
+      b = {
+        values: new Map(),
+        netFlows: new Map(),
+        incompleteDays: new Set(),
+        uncoveredBookValue: 0,
+      };
       buckets.set(key, b);
     }
     return b;
@@ -172,17 +197,34 @@ export async function getLifeInsurancePerformance(
       if (!b.values.has(day)) b.values.set(day, 0);
     }
 
+    /*
+      Les supports du jour sont regroupés par contrat, puis valorisés d'un
+      bloc : `valueHeldAtDay` applique la règle « complet, ou absent » et le
+      report depuis la dernière clôture observée, partagée avec la poche crypto.
+    */
+    const heldByContract = new Map<string | null, Array<{ assetId: string; quantity: number }>>();
     for (const [assetId, qty] of Object.entries(qtyByAsset)) {
       if (!covered.has(assetId) || qty === 0) continue;
-      const b = bucketFor(contractByAsset.get(assetId) ?? null);
+      const key = contractByAsset.get(assetId) ?? null;
+      const list = heldByContract.get(key) ?? [];
+      list.push({ assetId, quantity: qty });
+      heldByContract.set(key, list);
+    }
+
+    for (const [key, held] of heldByContract) {
+      const b = bucketFor(key);
       if (!b.values.has(day)) b.values.set(day, 0);
-      const close = closeAtOrBefore(closes.get(assetId), day);
-      // Trou ponctuel dans une série par ailleurs connue : la clôture est
-      // reportée depuis le dernier jour coté, jamais devinée vers l'avenir.
-      if (close == null) continue;
-      const value = qty * close;
-      b.values.set(day, (b.values.get(day) ?? 0) + value);
-      total.values.set(day, (total.values.get(day) ?? 0) + value);
+
+      const valuation = valueHeldAtDay(held, closes, day);
+      if (!valuation.complete) {
+        // Le contrat *et* le total sont amputés ce jour-là : ni l'un ni l'autre
+        // ne peut publier un montant.
+        b.incompleteDays.add(day);
+        total.incompleteDays.add(day);
+        continue;
+      }
+      b.values.set(day, (b.values.get(day) ?? 0) + valuation.valueEur);
+      total.values.set(day, (total.values.get(day) ?? 0) + valuation.valueEur);
     }
 
     for (const [assetId, flow] of Object.entries(flowsOfDay)) {
@@ -216,7 +258,9 @@ export async function getLifeInsurancePerformance(
   const lastDay = days[days.length - 1]!;
 
   const toSeries = (key: string | null, b: Bucket): ContractSeries => {
-    const coveredValueEur = b.values.get(lastDay) ?? 0;
+    const coveredValueEur = b.incompleteDays.has(lastDay)
+      ? 0
+      : (b.values.get(lastDay) ?? 0);
     const uncoveredValueEur = Math.max(0, b.uncoveredBookValue);
     const base = coveredValueEur + uncoveredValueEur;
     const coveragePct = base > 0 ? (coveredValueEur / base) * 100 : 0;
@@ -236,11 +280,15 @@ export async function getLifeInsurancePerformance(
     }
 
     const points = buildPerformanceSeries(
-      days.map((day) => ({
-        day,
-        valueEur: b.values.get(day) ?? 0,
-        netFlowEur: b.netFlows.get(day) ?? 0,
-      }))
+      days
+        // Un jour incomplet n'a pas de valeur publiable : il sort de la série
+        // plutôt que d'y entrer amputé.
+        .filter((day) => !b.incompleteDays.has(day))
+        .map((day) => ({
+          day,
+          valueEur: b.values.get(day) ?? 0,
+          netFlowEur: b.netFlows.get(day) ?? 0,
+        }))
     );
     const first = points[0];
     const last = points[points.length - 1];
