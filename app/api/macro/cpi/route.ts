@@ -30,19 +30,27 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
 
-  const raw = Number(new URL(req.url).searchParams.get("days"));
+  const params = new URL(req.url).searchParams;
+  /*
+    La période prime sur la fenêtre en jours : c'est elle qui décide si l'on
+    compose des mensuels ou des glissements annuels. Deux fenêtres de même
+    durée n'appellent pas forcément la même règle.
+  */
+  const range = params.get("range") ?? undefined;
+  const raw = Number(params.get("days"));
   const days = Number.isFinite(raw)
     ? Math.min(MAX_DAYS, Math.max(1, Math.trunc(raw)))
     : DEFAULT_DAYS;
 
   const to = new Date();
   const from = new Date(to.getTime() - days * 86_400_000);
-  const series = await buildCpiSeries({ from, to });
+  const series = await buildCpiSeries({ from, to, range });
 
   return NextResponse.json({
     from: from.toISOString(),
     to: to.toISOString(),
     days,
+    range: range ?? null,
     minMonths: MIN_CPI_MONTHS,
     ...series,
   });

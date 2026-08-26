@@ -299,7 +299,7 @@ export function PortfolioEvolutionPanel({
       const first = Date.parse(rawPoints[0]!.date);
       const last = Date.parse(rawPoints[rawPoints.length - 1]!.date);
       const days = Math.max(1, Math.ceil((last - first) / 86_400_000));
-      return fetchJson(`/api/macro/cpi?days=${days}`);
+      return fetchJson(`/api/macro/cpi?days=${days}&range=${range}`);
     },
   });
 
