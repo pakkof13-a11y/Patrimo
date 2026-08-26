@@ -89,6 +89,21 @@ export function buildCashSleeve(
     const current = acc.currentEur ?? acc.balanceEur;
 
     if (evts.length === 0) {
+      /*
+        Le report le moins bien étayé du moteur — et il faut le dire.
+
+        Sans aucun événement, le seul fait connu est le solde d'aujourd'hui. Le
+        rattacher à la date de création l'applique **en arrière**, sur une durée
+        que rien ne borne : un compte ouvert en 2020 porte alors son solde
+        actuel depuis 2020, ce que rien ne démontre.
+
+        Le point est marqué non observé, donc le compartiment se déclare estimé
+        et la courbe ne prétend pas mesurer. L'alternative — ne rien afficher
+        avant la première écriture — ferait disparaître toute la trésorerie du
+        passé, ce qui serait une autre forme de contre-vérité. Le choix est
+        assumé et documenté plutôt que silencieux ; le corriger demanderait une
+        décision produit, pas un correctif.
+      */
       timelines.push(
         ValueTimeline.from([
           { day: dayOf(acc.createdAt), valueEur: current, observed: false },

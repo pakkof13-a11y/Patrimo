@@ -14,12 +14,45 @@ export type DayKey = string;
 /**
  * Qualité de la reconstruction d'un compartiment à une date.
  *
- * - `EXACT`    : une observation datée couvre la date demandée.
- * - `ESTIMATED`: la valeur est reportée depuis une observation antérieure, ou
- *                retenue au coût d'acquisition faute de valorisation connue.
- * - `MISSING`  : le compartiment détient quelque chose mais aucune date ne
- *                permet de le situer dans le temps — il est alors exclu, pas
- *                inventé.
+ * ## La convention, précisément
+ *
+ * - `EXACT` : une observation datée **couvre** l'instant demandé. Sur la courbe
+ *   quotidienne, une clôture du jour en est une ; sur un point horaire, seule
+ *   une barre couvrant cette heure en est une. L'échelle change ce qui compte
+ *   comme couverture, jamais la nature de la donnée.
+ *
+ * - `ESTIMATED` : la valeur **repose sur une donnée réelle connue**, mais qui
+ *   n'a pas été observée exactement à cet instant. Trois cas, tous adossés à un
+ *   fait :
+ *     1. report d'une observation antérieure (`MARKET_CARRIED`) ;
+ *     2. valeur constatée à une autre date (`VALUATION_EVENT`), ou saisie sans
+ *        historique (`STATIC`) ;
+ *     3. position retenue à son prix de revient faute de tout cours
+ *        (`UNAVAILABLE`) — le prix payé est un fait, pas une estimation de
+ *        marché, et il est compté comme non valorisé.
+ *
+ * - `MISSING` : le compartiment détient quelque chose mais aucune date ne
+ *   permet de le situer dans le temps — il est alors exclu, pas inventé.
+ *
+ * ## Ce que `ESTIMATED` ne veut jamais dire
+ *
+ * « Le moteur a deviné une valeur. » Aucun chemin ne calcule un nombre pour
+ * combler un vide : ni moyenne entre deux observations, ni interpolation, ni
+ * projection de tendance, ni lissage. Une valeur reportée est **identique** à
+ * l'observation dont elle vient et ne dérive pas avec le temps écoulé — c'est
+ * ce qui la distingue d'une extrapolation, et ce que les tests vérifient.
+ *
+ * L'origine exacte de chaque valeur est portée par `priceOrigins` : un point
+ * estimé sans origine identifiée serait un défaut, pas une imprécision.
+ *
+ * ## La limite connue
+ *
+ * Un compte de trésorerie sans aucun événement porte son solde **actuel**
+ * rattaché à sa date de création : la valeur est réelle, mais appliquée en
+ * arrière, sur une durée non bornée. C'est le report le moins bien étayé du
+ * moteur — voir `buildCashSleeve`. Il est marqué non observé, donc le point
+ * est `ESTIMATED`, mais l'appeler « report » est généreux : rien ne dit que ce
+ * solde valait déjà cela il y a cinq ans.
  */
 export type HistoricalDataStatus = "EXACT" | "ESTIMATED" | "MISSING";
 
