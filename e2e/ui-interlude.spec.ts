@@ -57,6 +57,14 @@ test.describe("Interlude UI", () => {
     await expect(page.getByTestId("recent-activity-card")).toBeVisible({
       timeout: 25_000,
     });
+    /*
+      La carte affiche son ossature avant que les opérations n'arrivent :
+      compter tout de suite reviendrait à mesurer un tableau vide et à conclure
+      qu'aucune teinte n'est posée. On attend donc une première ligne.
+    */
+    await expect(
+      page.locator("[data-testid^='activity-type-']").first()
+    ).toBeVisible({ timeout: 20_000 });
 
     /** Jeton attendu pour chaque type présent à l'écran. */
     const attendu: Record<string, string> = {
@@ -92,6 +100,14 @@ test.describe("Interlude UI", () => {
     await expect(page.getByTestId("recent-activity-card")).toBeVisible({
       timeout: 25_000,
     });
+    /*
+      La carte affiche son ossature avant que les opérations n'arrivent :
+      compter tout de suite reviendrait à mesurer un tableau vide et à conclure
+      qu'aucune teinte n'est posée. On attend donc une première ligne.
+    */
+    await expect(
+      page.locator("[data-testid^='activity-type-']").first()
+    ).toBeVisible({ timeout: 20_000 });
 
     /*
       La lecture est celle de la **position**, pas du cash : un achat fait
@@ -164,14 +180,26 @@ test.describe("Interlude UI", () => {
     const visuel = premiere.locator("img, svg, abbr, span[aria-hidden]").first();
     await expect(visuel).toBeVisible();
 
-    // Aucune image cassée : une source logo.dev absente doit replier sur le
-    // monogramme, pas laisser une icône brisée.
-    const images = premiere.locator("img");
-    for (let i = 0; i < (await images.count()); i++) {
-      const ok = await images
-        .nth(i)
-        .evaluate((el) => (el as HTMLImageElement).naturalWidth > 0);
-      expect(ok).toBe(true);
-    }
+    /*
+      Aucune image **stabilisée** cassée.
+
+      `PlatformLogo` essaie plusieurs sources avant de replier sur le
+      monogramme : une image en cours de cascade a transitoirement une largeur
+      nulle sans que rien ne soit en défaut. On attend donc que le repli ait
+      eu lieu, puis on vérifie qu'il ne reste aucune image chargée à vide —
+      c'est le symptôme d'une icône brisée, et lui seul.
+
+      Ici, logo.dev est injoignable (politique d'egress) : les lignes affichent
+      donc des monogrammes, exactement comme les contrats d'assurance-vie qui
+      utilisent le même composant.
+    */
+    await expect(async () => {
+      const casses = await page.evaluate(() =>
+        [...document.querySelectorAll("img")].filter(
+          (i) => i.complete && i.naturalWidth === 0
+        ).length
+      );
+      expect(casses).toBe(0);
+    }).toPass({ timeout: 15_000 });
   });
 });

@@ -57,13 +57,37 @@ export function AssuranceVieTab({ className }: { className?: string }) {
 
   function openManage(target?: string) {
     setManage(true);
-    // Laisser le repli s'ouvrir avant de viser l'ancre.
-    requestAnimationFrame(() => {
+
+    /*
+      Attendre que l'ancre existe, pas qu'une frame passe.
+
+      Le repli ne monte son contenu qu'après le rendu de React, et une seule
+      `requestAnimationFrame` ne le garantit pas : `querySelector` rendait
+      `null`, `scrollIntoView` s'appliquait à rien, et la page ne bougeait pas.
+      Le panneau s'ouvrait sans jamais être montré — le défaut se voyait sur le
+      simulateur de rachat, monté plus bas que le formulaire de contrat.
+
+      L'attente se compte en **temps**, pas en frames : le simulateur de rachat
+      ne se rend qu'une fois ses contrats et ses supports chargés, ce qui prend
+      bien plus que les quelques frames suffisantes à un formulaire statique.
+      Une demi-seconde d'attente expliquait pourquoi « un contrat » défilait et
+      « un rachat » non.
+
+      Le budget reste borné : mieux vaut ne pas défiler que de boucler
+      indéfiniment si la cible n'apparaît jamais.
+    */
+    const limite = Date.now() + 4_000;
+    const viser = () => {
       const el = target
         ? document.querySelector(`[data-testid="${target}"]`)
         : document.getElementById("av-manage");
-      el?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      if (Date.now() < limite) requestAnimationFrame(viser);
+    };
+    requestAnimationFrame(viser);
   }
 
   return (
