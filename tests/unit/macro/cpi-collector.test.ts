@@ -12,11 +12,17 @@ vi.mock("@/app/lib/prisma", () => ({
   },
 }));
 
+import { readFileSync } from "node:fs";
 import {
   collectCpiObservations,
   type CpiProvider,
 } from "@/app/lib/macro/cpi-collector";
-import { mergeSeries, parseSdmxSeries } from "@/app/lib/macro/providers/insee-cpi";
+import {
+  looksLikePercentSeries,
+  mergeSeries,
+  parseSdmxSeries,
+  parseSdmxXml,
+} from "@/app/lib/macro/providers/insee-cpi";
 
 /**
  * Ingestion de l'IPC.
@@ -159,6 +165,16 @@ describe("4 et 5 — rattrapage et panne", () => {
     expect(r.created).toBe(3);
   });
 
+  it("17 — une liste vide n'écrit aucune ligne à zéro", async () => {
+    const r = await collectCpiObservations({
+      provider: provider([]),
+      source: "TEST",
+    });
+    expect(r.fetched).toBe(0);
+    expect(r.created).toBe(0);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
   it("une source indisponible n'écrit rien et le dit", async () => {
     const r = await collectCpiObservations({
       provider: provider([], new Error("INSEE BDM 503")),
@@ -188,6 +204,45 @@ describe("format INSEE — analyse défensive", () => {
     expect(parseSdmxSeries({})).toEqual([]);
     expect(parseSdmxSeries(null)).toEqual([]);
     expect(parseSdmxSeries({ dataSets: [] })).toEqual([]);
+    expect(parseSdmxSeries("pas du xml")).toEqual([]);
+  });
+
+  it("14 — une réponse SDMX-XML réelle est parsée (MoM, YoY, vrai 0 %)", () => {
+    const mom = readFileSync(
+      "tests/unit/macro/fixtures/insee-sdmx-mom.xml",
+      "utf8"
+    );
+    const yoy = readFileSync(
+      "tests/unit/macro/fixtures/insee-sdmx-yoy.xml",
+      "utf8"
+    );
+    const parsedMom = parseSdmxXml(mom);
+    const parsedYoy = parseSdmxXml(yoy);
+    expect(parsedMom.find((o) => o.period === "2026-07")?.value).toBe(0.6);
+    expect(parsedMom.find((o) => o.period === "2026-06")?.value).toBe(-0.3);
+    expect(parsedMom.find((o) => o.period === "2026-02")?.value).toBe(0);
+    expect(parsedYoy.find((o) => o.period === "2026-07")?.value).toBe(2.1);
+
+    const fusion = mergeSeries(parsedMom, parsedYoy);
+    const juillet = fusion.find((o) => o.period === "2026-07")!;
+    expect(juillet.monthlyRate).toBeCloseTo(0.006, 12);
+    expect(juillet.yearlyRate).toBeCloseTo(0.021, 12);
+    const zero = fusion.find((o) => o.period === "2026-02")!;
+    expect(zero.monthlyRate).toBe(0);
+  });
+
+  it("15 — une réponse vide n'écrit aucune observation", () => {
+    expect(parseSdmxXml("<message:StructureSpecificData/>")).toEqual([]);
+  });
+
+  it("16 — un niveau d'indice n'est pas pris pour un taux", () => {
+    const index = parseSdmxSeries(
+      readFileSync("tests/unit/macro/fixtures/insee-sdmx-index.xml", "utf8")
+    );
+    expect(looksLikePercentSeries(index)).toBe(false);
+    expect(looksLikePercentSeries(parseSdmxXml(
+      readFileSync("tests/unit/macro/fixtures/insee-sdmx-mom.xml", "utf8")
+    ))).toBe(true);
   });
 
   it("les pourcentages publiés deviennent des fractions", () => {

@@ -227,6 +227,8 @@
 
   /* Graphiques — traits (seuil 3:1, pas 4,5:1) */
   --chart-gold: var(--gold-deep);
+  /* Inflation : or du design system, jamais vert/rouge de P&L. */
+  --chart-inflation: var(--chart-gold);
   --chart-positive: #2e9e63;
   --chart-negative: #d0453a;
   --chart-cyan: #0e8ba3;
@@ -345,6 +347,7 @@
   --danger: var(--negative);
 
   --chart-gold: var(--gold-base);
+  --chart-inflation: var(--chart-gold);
   --chart-positive: var(--green-base);
   --chart-negative: var(--red-base);
   --chart-cyan: var(--cyan-base);

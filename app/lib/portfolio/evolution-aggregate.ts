@@ -780,12 +780,17 @@ export function withBenchmarkSeries(
   if (mode === "inflation") {
     const cpi = opts.cpiCumulative ?? [];
     const pick = makeCpiPicker(cpi);
-    if (cpi.length === 0 || pick(points[0]!.date) == null) {
+    const firstCumul = pick(points[0]!.date);
+    if (cpi.length === 0 || firstCumul == null) {
       // Aucune observation exploitable sur la fenêtre : pas de courbe, plutôt
       // qu'une ligne plate ou une hypothèse déguisée en mesure.
       return points.map((p) => ({ ...p, benchmark: undefined }));
     }
-    levelAt = (iso) => baseTotal * (1 + (pick(iso) ?? 0));
+    levelAt = (iso) => {
+      const c = pick(iso);
+      // Un trou ne redevient pas 0 % : on conserve le dernier cumul connu.
+      return baseTotal * (1 + (c ?? firstCumul));
+    };
   } else {
     // index : rebasage des clôtures réelles sur baseTotal
     const closes = opts.indexCloses ?? [];

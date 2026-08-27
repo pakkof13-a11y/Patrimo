@@ -125,4 +125,62 @@ test.describe("Inflation — disponibilité", () => {
     const apres = await page.getByTestId("evolution-headline").innerText().catch(() => "");
     expect(apres).toBe(avant);
   });
+
+  test("courbe inflation : trait plein, teinte du design system", async ({
+    page,
+  }) => {
+    await page.route("**/api/macro/cpi**", (route) =>
+      route.fulfill({
+        json: {
+          available: true,
+          source: "TEST",
+          days: 180,
+          points: [
+            { period: "2026-03", cumulative: 0, monthlyRate: 0.002 },
+            { period: "2026-04", cumulative: 0.003, monthlyRate: 0.003 },
+            { period: "2026-05", cumulative: 0.005, monthlyRate: 0.002 },
+          ],
+        },
+      })
+    );
+    await ouvrir(page, "6m");
+    await page.getByTestId("evolution-versus-inflation").click();
+    await expect(page.getByTestId("evolution-vs-note")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    const line = page.locator(".recharts-line-curve").last();
+    await expect(line).toBeVisible();
+    const dash = await line.getAttribute("stroke-dasharray");
+    expect(dash === null || dash === "" || dash === "none").toBe(true);
+    const stroke = await line.getAttribute("stroke");
+    expect(stroke ?? "").toContain("chart-inflation");
+  });
+
+  for (const scheme of ["light", "dark"] as const) {
+    test(`21-22 — jeton inflation en ${scheme}`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.addInitScript((mode) => {
+        document.documentElement.classList.toggle("dark", mode === "dark");
+      }, scheme);
+      await page.route("**/api/macro/cpi**", (route) =>
+        route.fulfill({
+          json: {
+            available: true,
+            source: "TEST",
+            days: 90,
+            points: [
+              { period: "2026-03", cumulative: 0, monthlyRate: 0 },
+              { period: "2026-04", cumulative: 0.002, monthlyRate: 0.002 },
+            ],
+          },
+        })
+      );
+      await ouvrir(page, "3m");
+      await page.getByTestId("evolution-versus-inflation").click();
+      const line = page.locator(".recharts-line-curve").last();
+      await expect(line).toBeVisible({ timeout: 20_000 });
+      expect(await line.getAttribute("stroke")).toContain("chart-inflation");
+    });
+  }
 });

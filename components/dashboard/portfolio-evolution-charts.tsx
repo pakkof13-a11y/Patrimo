@@ -33,12 +33,32 @@ export function yTick(v: number) {
   }).format(v);
 }
 
-function formatSignedPct(v: number): string {
+export function formatSignedPct(v: number): string {
   const s = v.toLocaleString("fr-FR", {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
   });
   return `${v >= 0 ? "+" : ""}${s} %`;
+}
+
+/**
+ * `0` n'est affiché que s'il est une vraie valeur. Une absence se dit
+ * « indisponible », jamais « 0 % ».
+ */
+export function formatPctOrUnavailable(
+  value: unknown,
+  unavailableLabel: string
+): string {
+  if (value == null || value === "") return unavailableLabel;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return unavailableLabel;
+  return formatSignedPct(n);
+}
+
+export function inflationUnavailableLabel(benchmarkName: string): string {
+  return /inflation/i.test(benchmarkName)
+    ? "Inflation indisponible"
+    : `${benchmarkName} indisponible`;
 }
 
 const tooltipBoxStyle = {
@@ -194,14 +214,23 @@ type PercentTooltipEntry = {
 function PercentTooltip({
   active,
   payload,
+  benchmarkName,
 }: {
   active?: boolean;
   payload?: readonly PercentTooltipEntry[];
+  benchmarkName: string;
 }) {
   if (!active || !payload || payload.length === 0) return null;
   const point = payload[0]?.payload;
+  const missing = inflationUnavailableLabel(benchmarkName);
+  const portfolio = point?.portfolioPct;
+  const inflation = point?.benchmarkPct;
+  const gap =
+    Number.isFinite(portfolio) && Number.isFinite(inflation)
+      ? (portfolio as number) - (inflation as number)
+      : null;
   return (
-    <div style={tooltipBoxStyle}>
+    <div style={tooltipBoxStyle} data-testid="evolution-percent-tooltip">
       {point?.periodLabel ? (
         <div
           style={{ color: "var(--foreground)", fontWeight: 600, marginBottom: 2 }}
@@ -209,14 +238,23 @@ function PercentTooltip({
           {point.periodLabel}
         </div>
       ) : null}
-      {payload.map((entry, i) => (
+      <div style={{ color: "var(--foreground)", whiteSpace: "nowrap" }}>
+        Portefeuille : {formatPctOrUnavailable(portfolio, "indisponible")}
+      </div>
+      <div
+        style={{ color: "var(--chart-inflation)", whiteSpace: "nowrap" }}
+        data-testid="evolution-tooltip-inflation"
+      >
+        {benchmarkName} : {formatPctOrUnavailable(inflation, missing)}
+      </div>
+      {gap != null ? (
         <div
-          key={i}
-          style={{ color: entry.color ?? "var(--foreground)", whiteSpace: "nowrap" }}
+          style={{ color: "var(--muted-foreground)", whiteSpace: "nowrap" }}
+          data-testid="evolution-tooltip-gap"
         >
-          {String(entry.name ?? "")} : {formatSignedPct(Number(entry.value ?? 0))}
+          Écart : {formatSignedPct(gap)}
         </div>
-      ))}
+      ) : null}
     </div>
   );
 }
@@ -278,6 +316,7 @@ export function PortfolioPercentChart({
           content={(props: object) => (
             <PercentTooltip
               {...(props as { active?: boolean; payload?: readonly PercentTooltipEntry[] })}
+              benchmarkName={benchmarkName}
             />
           )}
         />
@@ -306,9 +345,10 @@ export function PortfolioPercentChart({
             type="linear"
             dataKey="benchmarkPct"
             name={benchmarkName}
-            stroke="var(--muted-foreground)"
-            strokeWidth={1.5}
-            strokeDasharray="5 4"
+            stroke="var(--chart-inflation)"
+            /* Plus fin que le portefeuille ; trait plein — les pointillés gris
+               le faisaient passer pour une grille, pas pour une série. */
+            strokeWidth={1.15}
             dot={false}
             isAnimationActive={false}
           />

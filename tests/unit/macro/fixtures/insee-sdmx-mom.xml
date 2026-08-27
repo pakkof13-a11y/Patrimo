@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<message:StructureSpecificData xmlns:message="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message" UNIT_MEASURE="SO">
+  <Obs TIME_PERIOD="2026-05" OBS_VALUE="0.1" OBS_STATUS="A" OBS_QUAL="DEF"/>
+  <Obs TIME_PERIOD="2026-06" OBS_VALUE="-0.3" OBS_STATUS="A" OBS_QUAL="DEF"/>
+  <Obs TIME_PERIOD="2026-07" OBS_VALUE="0.6" OBS_STATUS="A" OBS_QUAL="DEF"/>
+  <Obs TIME_PERIOD="2026-02" OBS_VALUE="0.0" OBS_STATUS="A" OBS_QUAL="DEF"/>
+</message:StructureSpecificData>

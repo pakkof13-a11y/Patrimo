@@ -6,6 +6,7 @@ vi.mock("@/app/lib/prisma", () => ({
 
 import {
   buildCpiSeries,
+  clipTrailingUnpublished,
   MIN_CPI_MONTHS,
   periodsBetween,
   ruleForRange,
@@ -261,11 +262,54 @@ describe("10, 11 et 12 — fenêtres longues : les glissements annuels font foi"
 describe("règle par période", () => {
   it("chaque fenêtre appelle le bon calcul", () => {
     expect(ruleForRange("7d")).toBe("none");
-    expect(ruleForRange("1m")).toBe("monthly");
+    expect(ruleForRange("1m")).toBe("last-month");
     expect(ruleForRange("3m")).toBe("monthly");
     expect(ruleForRange("6m")).toBe("monthly");
     expect(ruleForRange("ytd")).toBe("monthly");
     expect(ruleForRange("1y")).toBe("yearly");
     expect(ruleForRange("5y")).toBe("yearly");
+  });
+
+  it("le mois civil en cours, non publié, n'est pas exigé", () => {
+    expect(
+      clipTrailingUnpublished(
+        ["2026-05", "2026-06", "2026-07", "2026-08"],
+        "2026-07"
+      )
+    ).toEqual(["2026-05", "2026-06", "2026-07"]);
+  });
+});
+
+describe("mois non encore publié — la courbe reste constructible", () => {
+  it("3 M : le mois en cours manquant n'invalide pas les mois publiés", async () => {
+    const r = await buildCpiSeries({
+      from: t("2026-01-10T00:00:00Z"),
+      to: t("2026-05-10T00:00:00Z"),
+      range: "3m",
+      deps: { read: async () => SERIE },
+    });
+    expect(r.available).toBe(true);
+    if (!r.available) return;
+    expect(r.points.map((p) => p.period)).toEqual([
+      "2026-01",
+      "2026-02",
+      "2026-03",
+      "2026-04",
+    ]);
+  });
+
+  it("1 M : le dernier MoM publié, rebasé à 0 le mois précédent", async () => {
+    const r = await buildCpiSeries({
+      from: t("2026-04-01T00:00:00Z"),
+      to: t("2026-05-10T00:00:00Z"),
+      range: "1m",
+      deps: { read: async () => SERIE },
+    });
+    expect(r.available).toBe(true);
+    if (!r.available) return;
+    expect(r.points).toHaveLength(2);
+    expect(r.points[0]!.cumulative).toBe(0);
+    expect(r.points[1]!.period).toBe("2026-04");
+    expect(r.points[1]!.cumulative).toBeCloseTo(0.003, 12);
   });
 });

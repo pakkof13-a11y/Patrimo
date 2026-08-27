@@ -4,61 +4,90 @@
  * ## Ce qui est récupéré
  *
  * Deux séries mensuelles de l'ensemble des ménages, France entière, tous
- * articles :
+ * articles (COICOP 00 — Ensemble), **IPC national**, pas l'IPCH :
  *
  * - la variation **mensuelle** (glissement sur un mois) ;
  * - le glissement **annuel** publié pour le même mois.
  *
  * Les deux sont conservées telles quelles. Reconstruire l'une depuis l'autre
- * ferait diverger le chiffre affiché de celui que l'INSEE annonce, et c'est ce
- * chiffre-là que l'utilisateur reconnaîtra.
+ * ferait diverger le chiffre affiché de celui que l'INSEE annonce.
  *
- * ## Identifiants de séries
+ * ## Identifiants — base 2025
  *
- * Les `idBank` sont configurables : l'INSEE renumérote ses séries lors des
- * changements de base (base 2015 → base 2025, par exemple), et une constante
- * codée en dur se périmerait sans bruit. Les valeurs par défaut correspondent à
- * l'IPC ensemble des ménages, France, tous articles.
+ * Depuis janvier 2026 l'IPC est en base 2025. Les idBank de la base 2015
+ * (`001759970`, `001763852`) sont des **niveaux d'indice**, arrêtés en
+ * décembre 2025 : les traiter comme des taux produisait ~+120 % / mois, ou
+ * plus souvent rien du tout. Les défauts ci-dessous sont les séries de
+ * *variation* et de *glissement annuel* de l'ensemble, toujours surchargeables.
  *
- * ## Avertissement honnête
+ * ## Endpoint
  *
- * **Ce fournisseur n'a jamais été exécuté contre l'API réelle.** L'environnement
- * de développement n'a pas d'accès sortant vers `api.insee.fr` ni
- * `bdm.insee.fr` — vérifié, les deux répondent `000`. Le format de réponse est
- * donc implémenté d'après la documentation SDMX-JSON de l'INSEE, et non
- * d'après une réponse observée. La première exécution en environnement connecté
- * devra vérifier que les valeurs correspondent à celles publiées.
+ * L'URL historique `bdm.insee.fr/series/sdmx/.../jsondata` répond 400.
+ * L'API publique `api.insee.fr/series/BDM/V1/data/SERIES_BDM/{idBank}`
+ * rend du SDMX 2.1 XML (`<Obs TIME_PERIOD OBS_VALUE>`), sans clé.
  */
 
 import type { CpiFetchedObservation, CpiProvider } from "../cpi-collector";
 
-/** Série de la variation mensuelle de l'IPC — ensemble des ménages, France. */
-const IDBANK_MOM = process.env.INSEE_CPI_MOM_IDBANK?.trim() || "001759970";
-/** Série du glissement annuel de l'IPC — même champ. */
-const IDBANK_YOY = process.env.INSEE_CPI_YOY_IDBANK?.trim() || "001763852";
+/** Variation mensuelle — IPC ensemble des ménages, France, COICOP 00 Ensemble. */
+export const DEFAULT_INSEE_CPI_MOM_IDBANK = "011814631";
+/** Glissement annuel — même champ, même indice (pas l'IPCH). */
+export const DEFAULT_INSEE_CPI_YOY_IDBANK = "011814632";
+export const DEFAULT_INSEE_BDM_BASE =
+  "https://api.insee.fr/series/BDM/V1/data/SERIES_BDM";
 
+const IDBANK_MOM =
+  process.env.INSEE_CPI_MOM_IDBANK?.trim() || DEFAULT_INSEE_CPI_MOM_IDBANK;
+const IDBANK_YOY =
+  process.env.INSEE_CPI_YOY_IDBANK?.trim() || DEFAULT_INSEE_CPI_YOY_IDBANK;
 const BDM_BASE =
-  process.env.INSEE_BDM_BASE?.trim() || "https://bdm.insee.fr/series/sdmx/data/SERIES_BDM";
+  process.env.INSEE_BDM_BASE?.trim() || DEFAULT_INSEE_BDM_BASE;
 
-/**
- * Une observation SDMX telle que la BDM la rend.
- *
- * Le format est verbeux ; seuls la période et la valeur nous intéressent. Les
- * attributs de qualité (provisoire, révisé) ne sont pas exploités ici : une
- * révision se traduit par une nouvelle valeur, que le collecteur reprend.
- */
 type SdmxObservation = { period: string; value: number | null };
 
+const OBS_TAG = /<Obs\b([^>]*)\/?>/gi;
+const ATTR = /(\w+)="([^"]*)"/g;
+
+function normalizePeriod(raw: string): string {
+  if (/^\d{4}-\d{2}$/.test(raw)) return raw;
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 7);
+  return raw;
+}
+
+function parseNumber(raw: string | undefined): number | null {
+  if (raw == null || raw.trim() === "") return null;
+  const value = Number(raw.replace(",", "."));
+  return Number.isFinite(value) ? value : null;
+}
+
+/** Extraire les observations d'une réponse SDMX-XML 2.1 structure-specific. */
+export function parseSdmxXml(xml: string): SdmxObservation[] {
+  const out: SdmxObservation[] = [];
+  for (const match of xml.matchAll(OBS_TAG)) {
+    const attrs = match[1] ?? "";
+    let period: string | undefined;
+    let raw: string | undefined;
+    for (const attr of attrs.matchAll(ATTR)) {
+      if (attr[1] === "TIME_PERIOD") period = attr[2];
+      if (attr[1] === "OBS_VALUE") raw = attr[2];
+    }
+    if (!period) continue;
+    out.push({ period: normalizePeriod(period), value: parseNumber(raw) });
+  }
+  return out.sort((a, b) => a.period.localeCompare(b.period));
+}
+
 /**
- * Extrait les observations d'une réponse SDMX-JSON.
+ * Extraire les observations d'une réponse SDMX-JSON 1.0.
  *
- * Écrit défensivement : un format inattendu rend une liste vide plutôt qu'une
- * exception, et le collecteur enregistrera « rien reçu » — ce qui est vrai —
- * au lieu de tomber.
+ * Conservé : certains déploiements peuvent encore recevoir du JSON. Un format
+ * inattendu rend une liste vide — le collecteur enregistrera « rien reçu ».
  */
-export function parseSdmxSeries(payload: unknown): SdmxObservation[] {
+export function parseSdmxJson(payload: unknown): SdmxObservation[] {
   const root = payload as {
-    dataSets?: Array<{ series?: Record<string, { observations?: Record<string, unknown[]> }> }>;
+    dataSets?: Array<{
+      series?: Record<string, { observations?: Record<string, unknown[]> }>;
+    }>;
     structure?: {
       dimensions?: {
         observation?: Array<{ id?: string; values?: Array<{ id?: string }> }>;
@@ -80,9 +109,46 @@ export function parseSdmxSeries(payload: unknown): SdmxObservation[] {
     const raw = Array.isArray(cell) ? cell[0] : null;
     const value = typeof raw === "number" ? raw : Number(raw);
     if (!period) continue;
-    out.push({ period, value: Number.isFinite(value) ? value : null });
+    out.push({
+      period: normalizePeriod(period),
+      value: Number.isFinite(value) ? value : null,
+    });
   }
   return out.sort((a, b) => a.period.localeCompare(b.period));
+}
+
+/**
+ * Accepte XML, JSON parsé, ou texte JSON. Jamais d'exception : liste vide
+ * si le document n'est pas un SDMX d'observations.
+ */
+export function parseSdmxSeries(payload: unknown): SdmxObservation[] {
+  if (typeof payload === "string") {
+    const trimmed = payload.trim();
+    if (trimmed.startsWith("<") || /<Obs\b/i.test(trimmed)) {
+      return parseSdmxXml(trimmed);
+    }
+    try {
+      return parseSdmxJson(JSON.parse(trimmed));
+    } catch {
+      return [];
+    }
+  }
+  return parseSdmxJson(payload);
+}
+
+/**
+ * Un taux publié tient en quelques points de pourcentage. Un niveau d'indice
+ * (base 100) se situe autour de 100. Confondre les deux écrivait ~+120 % par
+ * mois — pire qu'une absence.
+ */
+export function looksLikePercentSeries(obs: SdmxObservation[]): boolean {
+  const values = obs
+    .map((o) => o.value)
+    .filter((v): v is number => v != null && Number.isFinite(v));
+  if (values.length === 0) return false;
+  const sorted = [...values.map(Math.abs)].sort((a, b) => a - b);
+  const mid = sorted[Math.floor(sorted.length / 2)]!;
+  return mid < 30;
 }
 
 /**
@@ -90,8 +156,7 @@ export function parseSdmxSeries(payload: unknown): SdmxObservation[] {
  *
  * Les deux séries n'ont pas nécessairement la même profondeur : le glissement
  * annuel manque sur les douze premiers mois d'une base. Un mois sans glissement
- * annuel garde sa variation mensuelle — la fenêtre courte reste calculable,
- * seule la fenêtre longue attendra.
+ * annuel garde sa variation mensuelle.
  */
 export function mergeSeries(
   mom: SdmxObservation[],
@@ -105,7 +170,6 @@ export function mergeSeries(
     const annuel = yoyByPeriod.get(o.period);
     out.push({
       period: o.period,
-      // L'INSEE publie des pourcentages ; le stockage est en fraction.
       monthlyRate: o.value / 100,
       yearlyRate: annuel == null ? null : annuel / 100,
     });
@@ -114,15 +178,25 @@ export function mergeSeries(
 }
 
 async function fetchSeries(idBank: string, signal: AbortSignal) {
-  const url = `${BDM_BASE}/${encodeURIComponent(idBank)}?format=jsondata`;
+  const url = `${BDM_BASE.replace(/\/$/, "")}/${encodeURIComponent(idBank)}`;
   const res = await fetch(url, {
     signal,
-    headers: { accept: "application/vnd.sdmx.data+json;version=1.0.0" },
+    headers: {
+      accept: "application/xml, application/json;q=0.8, */*;q=0.1",
+      "user-agent": "Patrimo/ipc-collector",
+    },
   });
   if (!res.ok) {
     throw new Error(`INSEE BDM ${idBank} → ${res.status}`);
   }
-  return parseSdmxSeries(await res.json());
+  const body = await res.text();
+  const parsed = parseSdmxSeries(body);
+  if (!looksLikePercentSeries(parsed)) {
+    throw new Error(
+      `INSEE BDM ${idBank} : la série ne ressemble pas à un taux (niveau d'indice ?)`
+    );
+  }
+  return parsed;
 }
 
 export const inseeCpiProvider: CpiProvider = {
@@ -137,10 +211,6 @@ export const inseeCpiProvider: CpiProvider = {
         fetchSeries(IDBANK_YOY, controller.signal),
       ]);
       const fused = mergeSeries(mom, yoy);
-      /*
-        La profondeur est bornée côté client : la BDM rend la série entière, et
-        rien ne justifie de réécrire trente ans de mois à chaque passage.
-      */
       return Number.isFinite(sinceMonths) ? fused.slice(-sinceMonths) : fused;
     } finally {
       clearTimeout(timer);

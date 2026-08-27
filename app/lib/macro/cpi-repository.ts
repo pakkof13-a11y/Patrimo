@@ -162,15 +162,43 @@ export async function buildCpiSeries(opts: {
     return { available: true, source: CPI_SOURCE, points };
   }
 
-  const periods = periodsBetween(opts.from, opts.to);
-  if (periods.length < MIN_CPI_MONTHS) {
-    return { available: false, reason: "window-too-short" };
-  }
-
   const read = opts.deps?.read ?? readCpiObservations;
   const observations = await read();
   if (observations.length === 0) {
     return { available: false, reason: "no-data" };
+  }
+
+  if (rule === "last-month") {
+    const last = [...observations].sort((a, b) =>
+      a.period.localeCompare(b.period)
+    ).at(-1)!;
+    return {
+      available: true,
+      source: CPI_SOURCE,
+      points: [
+        {
+          period: previousPeriod(last.period),
+          cumulative: 0,
+          monthlyRate: last.monthlyRate,
+        },
+        {
+          period: last.period,
+          cumulative: last.monthlyRate,
+          monthlyRate: last.monthlyRate,
+        },
+      ],
+    };
+  }
+
+  const lastPublished = [...observations].sort((a, b) =>
+    a.period.localeCompare(b.period)
+  ).at(-1)!.period;
+  const periods = clipTrailingUnpublished(
+    periodsBetween(opts.from, opts.to),
+    lastPublished
+  );
+  if (periods.length < MIN_CPI_MONTHS) {
+    return { available: false, reason: "window-too-short" };
   }
 
   const points = cumulativeSeries(observations, periods);
@@ -194,20 +222,40 @@ export async function buildCpiSeries(opts: {
  * mensuels approche le chiffre annuel sans le reproduire, et c'est le chiffre
  * officiel que l'utilisateur reconnaîtra.
  */
-export type CpiRangeRule = "none" | "monthly" | "yearly";
+export type CpiRangeRule = "none" | "last-month" | "monthly" | "yearly";
 
 export function ruleForRange(range: string): CpiRangeRule {
   switch (range) {
     case "7d":
       return "none";
+    case "1m":
+      // Un mois : le dernier MoM publié, pas la composition du mois civil en
+      // cours — ce mois n'est en général pas encore publié.
+      return "last-month";
     case "1y":
     case "5y":
     case "all":
       return "yearly";
     default:
-      // 1m, 3m, 6m, ytd — et toute fenêtre courte à venir.
+      // 3m, 6m, ytd — et toute fenêtre courte à venir.
       return "monthly";
   }
+}
+
+/**
+ * Retire de la fenêtre les mois **postérieurs** à la dernière publication.
+ *
+ * L'IPC d'un mois sort vers le 15 du mois suivant. Exiger le mois civil en
+ * cours faisait tomber toute la courbe en `incomplete` alors que les mois
+ * publiés étaient là. Un trou *au milieu* n'est pas retiré : ce n'est pas un
+ * mois non encore publié, c'est une donnée manquante.
+ */
+export function clipTrailingUnpublished(
+  periods: readonly string[],
+  lastPublished: string | undefined
+): string[] {
+  if (!lastPublished) return [];
+  return periods.filter((p) => p <= lastPublished);
 }
 
 /** Nombre d'années à composer pour une fenêtre annuelle. */
