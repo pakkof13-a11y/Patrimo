@@ -443,14 +443,36 @@ type TxRow = {
   } | null;
 };
 
-/** Type d'opération → libellé, icône, teinte. Table unique, pas de `switch`. */
+/**
+ * Type d'opération → libellé, icône, teinte. Table unique, pas de `switch`.
+ *
+ * ## Le sens des flèches
+ *
+ * Achat vers le haut, vente vers le bas : la lecture est celle de la
+ * **position**, pas celle de la trésorerie. Un achat fait entrer une ligne au
+ * portefeuille, une vente l'en fait sortir — c'est ce que l'œil cherche dans
+ * un journal d'activité. Les deux icônes étaient inversées, parce qu'elles
+ * décrivaient le mouvement du cash.
+ *
+ * ## Le sens des couleurs
+ *
+ * Vert et rouge disent un **sens** — ce qui entre, ce qui sort. Orange, cyan
+ * et violet distinguent des **natures** de revenu, qui n'ont pas de sens
+ * opposé : un dividende, un loyer et un coupon sont trois façons différentes
+ * d'encaisser. Les leur donner des teintes distinctes rend le journal lisible
+ * d'un coup d'œil sans rien affirmer sur leur signe.
+ *
+ * La couleur ne porte jamais seule l'information : le libellé reste affiché.
+ */
 const TX_PRESENTATION: Record<
   string,
   { label: string; icon: LucideIcon; tone: string }
 > = {
-  ACHAT: { label: "Achat", icon: ArrowDownLeft, tone: "val-neutral" },
-  VENTE: { label: "Vente", icon: ArrowUpRight, tone: "val-neutral" },
-  DIVIDENDE: { label: "Dividende", icon: Coins, tone: "val-positive" },
+  ACHAT: { label: "Achat", icon: ArrowUpRight, tone: "val-positive" },
+  VENTE: { label: "Vente", icon: ArrowDownLeft, tone: "val-negative" },
+  DIVIDENDE: { label: "Dividende", icon: Coins, tone: "val-warning" },
+  LOYER: { label: "Loyer", icon: Coins, tone: "val-info" },
+  COUPON: { label: "Coupon", icon: Coins, tone: "val-accent" },
   INTERET: { label: "Intérêts", icon: Coins, tone: "val-positive" },
   REWARD: { label: "Récompense", icon: Coins, tone: "val-positive" },
   AIRDROP: { label: "Airdrop", icon: Coins, tone: "val-positive" },
@@ -590,7 +612,17 @@ export function RecentActivityCard({
                             strokeWidth={1.75}
                             aria-hidden
                           />
-                          <span className="text-[var(--foreground-secondary)]">
+                          {/*
+                            La teinte porte sur le **libellé**, pas seulement
+                            sur l'icône : c'est le mot que l'œil lit, et une
+                            pastille colorée à côté d'un texte gris se remarque
+                            moins qu'un mot coloré. Le libellé reste écrit —
+                            la couleur ne porte jamais l'information seule.
+                          */}
+                          <span
+                            className={p.tone}
+                            data-testid={`activity-type-${tx.type}`}
+                          >
                             {p.label}
                           </span>
                         </span>

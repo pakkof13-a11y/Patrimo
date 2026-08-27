@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   ArrowLeftRight,
-  Banknote,
+  WalletCards,
   Bitcoin,
   Briefcase,
   Building2,
@@ -67,8 +67,18 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: "holdings", label: "Portefeuille", testId: "holdings", icon: Briefcase },
       // Sous-vue du portefeuille : PEA et CTO y ont été consolidés, et
       // l'éditeur de leurs poches d'espèces y vit désormais.
-      { id: "securities", label: "PEA & CTO", testId: "securities", icon: Landmark },
-      { id: "banques", label: "Banques", testId: "banques", icon: Banknote },
+      /*
+        Les deux icônes ont été échangées : `Landmark` — un fronton à colonnes —
+        dit « banque » et non « enveloppe fiscale », alors que `WalletCards`
+        montre un porte-cartes, soit exactement ce qu'est un PEA ou un CTO : un
+        contenant qui abrite des lignes.
+
+        `Wallet` et `Briefcase` étaient déjà pris par « Avoirs » et
+        « Portefeuille » ; `WalletCards` reste dans la même famille visuelle
+        sans les répéter.
+      */
+      { id: "securities", label: "PEA & CTO", testId: "securities", icon: WalletCards },
+      { id: "banques", label: "Banques", testId: "banques", icon: Landmark },
       { id: "assurance-vie", label: "Assurance-vie", testId: "assurance-vie", icon: ShieldCheck },
       { id: "immobilier", label: "Immobilier", testId: "immobilier", icon: Building2 },
       { id: "crypto", label: "Cryptos", testId: "crypto", icon: Bitcoin },

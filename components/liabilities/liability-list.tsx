@@ -16,6 +16,7 @@
 import { Building2, Car, CreditCard, Landmark, User, type LucideIcon } from "lucide-react";
 import { formatCurrency } from "@/app/lib/utils";
 import { DataRow } from "@/components/ui/data-row";
+import { PlatformLogo } from "@/components/ui/platform-logo";
 import { LIABILITY_CATEGORY_LABELS } from "@/app/lib/constants";
 import type { LiabilityView } from "@/app/lib/liabilities/overview";
 
@@ -109,12 +110,34 @@ export function LiabilityList({
               >
                 <td>
                   <span className="flex min-w-0 items-center gap-[var(--space-3)]">
-                    <span
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-sunken)] text-[var(--foreground-secondary)]"
-                      aria-hidden
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                    </span>
+                    {/*
+                      Le logo du prêteur quand il est identifié, l'icône de
+                      catégorie sinon.
+
+                      `PlatformLogo` est le composant déjà utilisé pour les
+                      assureurs et les courtiers : il porte le câblage
+                      logo.dev, la cascade de sources et le repli sur monogramme.
+                      Le refaire ici aurait donné deux résolutions de domaine à
+                      faire diverger.
+
+                      `bankName` est du texte libre : c'est la même entrée que
+                      pour un assureur d'assurance-vie, et la recherche par nom
+                      est précisément ce que le composant sait faire.
+                    */}
+                    {v.lender ? (
+                      <PlatformLogo
+                        name={v.lender}
+                        size={28}
+                        className="shrink-0"
+                      />
+                    ) : (
+                      <span
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-sunken)] text-[var(--foreground-secondary)]"
+                        aria-hidden
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                      </span>
+                    )}
                     <span className="min-w-0">
                       <span className="block truncate font-medium text-[var(--foreground)]">
                         {v.name}

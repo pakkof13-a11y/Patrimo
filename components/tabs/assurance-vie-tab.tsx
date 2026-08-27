@@ -1128,7 +1128,14 @@ export function AssuranceVieManagement() {
         </div>
       </section>
 
-      <section className="card p-4">
+      {/*
+        Ancre du raccourci « Ajouter › un contrat ».
+
+        Le menu visait déjà `av-contract-form`, mais aucun élément ne portait ce
+        nom : `scrollIntoView` s'appliquait à `null` et le repli s'ouvrait sans
+        que la page bouge. L'encadré était donc atteignable, jamais montré.
+      */}
+      <section className="card p-4" data-testid="av-contract-form">
         <h2 className="mb-1 text-base font-semibold">Nouveau contrat</h2>
         <p className="text-meta mb-3">
           Date d&apos;ouverture (antériorité 8 ans) et répartition des

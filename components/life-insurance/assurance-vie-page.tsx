@@ -126,9 +126,20 @@ export function AssuranceVieTab({ className }: { className?: string }) {
               >
                 {(
                   [
-                    ["av-contract-form", "Ouvrir un contrat"],
-                    ["av-support-form", "Verser / ajouter un support"],
-                    ["av-redemption-form", "Simuler un rachat"],
+                    /*
+                      Le verbe est déjà porté par le bouton « Ajouter » qui
+                      ouvre ce menu : le répéter dans chaque entrée donnait
+                      « Ajouter › Ouvrir un contrat ». Ne reste que le
+                      complément d'objet, et la phrase se lit d'un trait.
+                    */
+                    ["av-contract-form", "un contrat"],
+                    ["av-support-form", "un support"],
+                    /*
+                      Le simulateur porte déjà son identifiant : viser un nom
+                      inventé (`av-redemption-form`) ne trouvait rien, et le
+                      défilement ne se faisait pas.
+                    */
+                    ["av-redemption-simulator", "un rachat"],
                   ] as const
                 ).map(([target, label]) => (
                   <button

@@ -2672,6 +2672,25 @@ textarea:focus-visible,
 .val-neutral {
   color: var(--foreground-secondary);
 }
+/*
+  Trois teintes de plus, prises sur des jetons existants plutôt que sur des
+  couleurs Tailwind arbitraires : chacun a déjà sa variante claire et sombre,
+  calibrée pour rester lisible sur les deux fonds.
+
+  Elles servent à distinguer des **natures** d'opération — un revenu récurrent
+  n'est ni un achat ni une vente — là où `val-positive` et `val-negative`
+  disent un sens. La couleur n'est jamais seule à porter l'information : le
+  libellé (« Dividende », « Loyer », « Coupon ») reste affiché.
+*/
+.val-warning {
+  color: var(--warning);
+}
+.val-info {
+  color: var(--info);
+}
+.val-accent {
+  color: var(--chart-violet);
+}
 
 @media (prefers-reduced-motion: reduce) {
   .term-nav-item,
