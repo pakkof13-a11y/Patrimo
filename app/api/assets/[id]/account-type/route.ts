@@ -7,6 +7,7 @@ import {
   detailOrphanError,
   detailRequirementError,
 } from "@/app/lib/assets/envelope-requirements";
+import { envelopeChangeBreaksAttachment } from "@/app/lib/securities/constants";
 
 async function updateAccountType(req: Request, id: string) {
   const userId = await requireUserId();
@@ -29,6 +30,8 @@ async function updateAccountType(req: Request, id: string) {
     include: {
       realEstate: { select: { id: true } },
       indirectRealEstate: { select: { id: true } },
+      // Le compte de rattachement décide si celui-ci survit au changement.
+      securitiesAccount: { select: { envelopeType: true } },
     },
   });
   if (!asset) {
@@ -53,9 +56,34 @@ async function updateAccountType(req: Request, id: string) {
     return NextResponse.json({ error: refus }, { status: 409 });
   }
 
+  /*
+    Un rattachement à un compte titres ne survit pas à un changement de famille
+    fiscale.
+
+    `setAssetAccount` refuse déjà de créer un tel état ; cette route le créait
+    par omission, en n'écrivant que `accountType`. Une ligne devenue PEA
+    continuait alors de pointer vers un compte CTO : elle s'affichait dans la
+    carte de ce CTO, entrait dans sa valeur liquidative, dans sa simulation de
+    retrait et dans son rapport fiscal — tout en se déclarant PEA. Et elle
+    échappait au bandeau des lignes non rattachées, puisqu'elle avait bien un
+    compte. Une ligne mal attribuée est plus coûteuse qu'une ligne orpheline :
+    la seconde se voit.
+
+    Détacher, et rien de plus : choisir à sa place un compte de la nouvelle
+    enveloppe reviendrait à inventer une information que l'utilisateur seul
+    détient. La ligne redevient non rattachée — un état valide, et visible.
+  */
+  const detache = envelopeChangeBreaksAttachment(
+    asset.securitiesAccount?.envelopeType,
+    parsed.data.accountType
+  );
+
   const write = await prisma.asset.updateMany({
     where: { id, userId },
-    data: { accountType: parsed.data.accountType },
+    data: {
+      accountType: parsed.data.accountType,
+      ...(detache ? { securitiesAccountId: null } : {}),
+    },
   });
   if (write.count === 0) {
     return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });

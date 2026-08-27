@@ -215,6 +215,64 @@ test.describe("PEA & CTO", () => {
     );
   });
 
+  test("sans aucun compte, l'écran annonce les lignes non rattachées et leur valeur", async ({
+    page,
+  }) => {
+    /*
+      Le cas où l'omission est totale.
+
+      Le bandeau vivait dans la branche « au moins un compte existe ». Sans
+      compte déclaré — l'état par défaut — l'écran affichait « Aucun compte
+      titres » et rien d'autre, alors que *toutes* les positions titres sont
+      alors invisibles ici. L'avertissement n'apparaissait que lorsque l'écart
+      était plus petit.
+
+      Le contrôle est numérique : le nombre et le montant annoncés doivent
+      correspondre à ce que l'API rend, faute de quoi le bandeau rassurerait
+      sans informer.
+    */
+    const body = await (await page.request.get("/api/securities")).json();
+    expect(body.accounts ?? []).toHaveLength(0);
+
+    const unattached = (body.positions ?? []).filter(
+      (p: { securitiesAccountId: string | null }) => !p.securitiesAccountId
+    );
+    expect(unattached.length).toBeGreaterThan(0);
+
+    const totalEur = unattached.reduce(
+      (sum: number, p: { marketValueEur: string }) =>
+        sum + Number(p.marketValueEur),
+      0
+    );
+
+    const banner = page.getByTestId("securities-unattached-banner");
+    await expect(banner).toBeVisible({ timeout: 15_000 });
+
+    await expect(page.getByTestId("securities-unattached-count")).toHaveText(
+      `${unattached.length} ligne(s) non rattachée(s)`
+    );
+
+    /*
+      Le montant est comparé chiffre à chiffre, séparateurs de milliers et
+      décimales compris : « 84 407,40 € » et « 84407.4 » décrivent la même
+      valeur, mais seul le premier est ce que l'utilisateur lit.
+    */
+    const affiche = await page
+      .getByTestId("securities-unattached-value")
+      .innerText();
+    const lu = Number(
+      affiche.replace(/[^0-9,]/g, "").replace(",", ".")
+    );
+    expect(lu).toBeCloseTo(totalEur, 2);
+
+    // Sans compte, le rattachement groupé n'a pas de destination : l'action
+    // proposée doit être d'en déclarer un, jamais d'en inventer un.
+    await expect(page.getByTestId("securities-attach-all")).toHaveCount(0);
+    await expect(
+      page.getByTestId("securities-create-from-banner")
+    ).toBeVisible();
+  });
+
   test("rattacher les lignes fait entrer leur valeur dans le compte", async ({
     page,
   }) => {

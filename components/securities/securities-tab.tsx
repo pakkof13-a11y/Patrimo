@@ -542,6 +542,18 @@ export function SecuritiesTab({ className }: { className?: string }) {
     [positions]
   );
 
+  /**
+   * Valeur des lignes non rattachées.
+   *
+   * Le nombre seul ne dit pas l'enjeu : « 16 lignes » se lit comme un détail
+   * de rangement, « 84 407,40 € » comme un écart. C'est ce montant qui manque
+   * à la valeur liquidative affichée par ce module.
+   */
+  const unattachedValueEur = useMemo(
+    () => unattached.reduce((sum, p) => sum + Number(p.marketValueEur ?? 0), 0),
+    [unattached]
+  );
+
   const bulkTargets = useMemo(() => {
     const groups = new Map<string, { accountId: string; assetIds: string[] }>();
     for (const p of unattached) {
@@ -664,6 +676,70 @@ export function SecuritiesTab({ className }: { className?: string }) {
               {createAccount.isPending ? "Enregistrement…" : "Enregistrer"}
             </Button>
           </div>
+        </div>
+      )}
+
+      {/*
+        Le bandeau des lignes non rattachées, **avant** la bifurcation.
+
+        Il vivait dans la branche « au moins un compte existe ». Il restait
+        donc muet dans le seul cas où *toutes* les lignes sont invisibles :
+        aucun compte déclaré. L'écran affichait « Aucun compte titres » sans
+        dire qu'il existait par ailleurs des positions valorisées, que le
+        patrimoine global compte et que ce module ignore. L'avertissement
+        n'apparaissait que lorsque l'écart était plus petit.
+
+        Le rattachement groupé n'est proposé que si une destination existe et
+        ne fait aucun doute. Sans compte, l'action utile est d'en déclarer un —
+        d'où le bouton, qui ouvre le formulaire déjà présent. Aucun compte
+        n'est créé ni deviné.
+      */}
+      {unattached.length > 0 && (
+        <div
+          className="mt-3 flex flex-wrap items-start gap-2 rounded-[var(--radius-md)] border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-3 py-2 text-xs text-[var(--warning)]"
+          data-testid="securities-unattached-banner"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1">
+            <strong data-testid="securities-unattached-count">
+              {unattached.length} ligne(s) non rattachée(s)
+            </strong>{" "}
+            à un compte, soit{" "}
+            <strong data-testid="securities-unattached-value">
+              {formatCurrency(unattachedValueEur, "EUR")}
+            </strong>
+            . Elles ne comptent ni dans la valeur liquidative, ni dans la
+            simulation de retrait — qui serait donc sous-évaluée. Leur valeur
+            reste comptée dans le patrimoine global.
+          </span>
+          {bulkTargets.map((t) => (
+            <Button
+              key={t.accountId}
+              type="button"
+              variant="outline"
+              disabled={attachAll.isPending}
+              onClick={() =>
+                attachAll.mutate({
+                  assetIds: t.assetIds,
+                  accountId: t.accountId,
+                })
+              }
+              data-testid="securities-attach-all"
+            >
+              Rattacher {t.assetIds.length} ligne(s) au{" "}
+              {t.account.envelopeLabel}
+            </Button>
+          ))}
+          {accounts.length === 0 && !showForm && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowForm(true)}
+              data-testid="securities-create-from-banner"
+            >
+              Déclarer un compte
+            </Button>
+          )}
         </div>
       )}
 
@@ -882,37 +958,6 @@ export function SecuritiesTab({ className }: { className?: string }) {
             })}
           </div>
 
-          {unattached.length > 0 && (
-            <div
-              className="mt-3 flex flex-wrap items-start gap-2 rounded-[var(--radius-md)] border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-3 py-2 text-xs text-[var(--warning)]"
-              data-testid="securities-unattached-banner"
-            >
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span className="min-w-0 flex-1">
-                <strong>{unattached.length} ligne(s) non rattachée(s)</strong> à
-                un compte. Elles ne comptent ni dans la valeur liquidative, ni
-                dans la simulation de retrait — qui serait donc sous-évaluée.
-              </span>
-              {bulkTargets.map((t) => (
-                <Button
-                  key={t.accountId}
-                  type="button"
-                  variant="outline"
-                  disabled={attachAll.isPending}
-                  onClick={() =>
-                    attachAll.mutate({
-                      assetIds: t.assetIds,
-                      accountId: t.accountId,
-                    })
-                  }
-                  data-testid="securities-attach-all"
-                >
-                  Rattacher {t.assetIds.length} ligne(s) au{" "}
-                  {t.account.envelopeLabel}
-                </Button>
-              ))}
-            </div>
-          )}
 
           {positions.length > 0 && (
             <div className="mt-4 overflow-x-auto">

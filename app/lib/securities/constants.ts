@@ -68,6 +68,44 @@ export function accountTypeForEnvelope(
 }
 
 /**
+ * Le rattachement survit-il à un changement d'enveloppe fiscale ?
+ *
+ * `setAssetAccount` refuse déjà de **créer** un rattachement incohérent :
+ * déplacer une ligne d'un CTO vers un PEA est un transfert de titres, pas une
+ * correction de saisie. Mais changer l'`accountType` d'une ligne **déjà
+ * rattachée** contournait cette garde : la ligne devenait PEA tout en pointant
+ * vers un compte CTO.
+ *
+ * Le résultat n'était pas une ligne orpheline — c'eût été visible — mais une
+ * ligne **mal attribuée** : elle s'affichait dans la carte du CTO, entrait
+ * dans sa valeur liquidative, dans sa simulation de retrait et dans son
+ * rapport fiscal, tout en se déclarant PEA. Et elle échappait au bandeau des
+ * non rattachées, puisqu'elle avait bien un identifiant de compte.
+ *
+ * La règle tient en une comparaison de **familles fiscales**, pas de types de
+ * compte : un PEA-PME et un PEA portent tous deux des lignes `PEA`, et passer
+ * de l'un à l'autre ne casse rien. C'est `accountTypeForEnvelope` qui tranche,
+ * pour qu'il n'existe qu'une seule définition de cette équivalence.
+ *
+ * Rend `true` quand la ligne doit être **détachée**. Le rattachement n'est
+ * jamais reporté sur un autre compte : deviner lequel serait inventer une
+ * information que l'utilisateur seul détient.
+ */
+export function envelopeChangeBreaksAttachment(
+  currentEnvelopeType: string | null | undefined,
+  nextAccountType: string
+): boolean {
+  // Pas de rattachement : rien à défaire.
+  if (!currentEnvelopeType) return false;
+  /*
+    Type de compte inconnu : on ne peut pas affirmer que le rattachement reste
+    valide, et le conserver serait le pari risqué. On détache.
+  */
+  if (!isSecuritiesEnvelopeType(currentEnvelopeType)) return true;
+  return accountTypeForEnvelope(currentEnvelopeType) !== nextAccountType;
+}
+
+/**
  * Comptes auxquels une ligne peut être rattachée, compte tenu de son enveloppe.
  *
  * Le service refuse déjà un rattachement incohérent — déplacer une ligne d'un
