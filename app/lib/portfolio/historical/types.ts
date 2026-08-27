@@ -71,6 +71,31 @@ export const VALUATION_COMPONENTS = [
 export type ValuationComponent = (typeof VALUATION_COMPONENTS)[number];
 
 /**
+ * Classes d'actif de l'utilisateur — la seconde ventilation du même brut.
+ *
+ * Elle décrit ce que l'utilisateur *voit* dans son portefeuille, là où
+ * `VALUATION_COMPONENTS` décrit ce que le patrimoine *contient*. Les deux
+ * partitionnent exactement la même valeur brute, mais ne découpent pas au même
+ * endroit : « securities » fusionne actions et obligations et isole
+ * l'assurance-vie, tandis qu'une UC actions reste ici une action.
+ *
+ * Elle repose sur `Asset.assetClass`, seul champ de classification **sans
+ * chemin de mise à jour** : fixé à la création, il ne peut pas réécrire le
+ * passé. `category` et `accountType`, mutables et sans journal, ne le
+ * permettraient pas.
+ */
+export const VALUATION_ASSET_CLASSES = [
+  "ACTIONS",
+  "OBLIGATIONS",
+  "CRYPTO",
+  "IMMOBILIER",
+  "CASH",
+  "AUTRE",
+] as const;
+
+export type ValuationAssetClass = (typeof VALUATION_ASSET_CLASSES)[number];
+
+/**
  * Une valeur datée. Brique de base de toute chronologie : hors du journal,
  * aucun compartiment ne cote — ils ne connaissent que des constats datés.
  */
@@ -106,6 +131,17 @@ export type PortfolioValuationPoint = {
   alternatives: number;
   employeeSavings: number;
   otherAssets: number;
+
+  /**
+   * Le même brut, ventilé par classe d'actif.
+   *
+   * Seconde partition, pas un supplément : `sum(byAssetClass) === grossAssets`,
+   * exactement comme la somme des huit compartiments. Les poches sans position
+   * au journal y sont rattachées à la classe qui les décrit le mieux — la
+   * trésorerie à `CASH`, les alternatifs et l'épargne salariale à `AUTRE`,
+   * faute de classe dédiée dans cette taxonomie à six valeurs.
+   */
+  byAssetClass: Record<ValuationAssetClass, number>;
 
   /** Somme des huit compartiments ci-dessus. */
   grossAssets: number;

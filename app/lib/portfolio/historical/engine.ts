@@ -43,6 +43,10 @@ import type { LedgerState, LedgerTx } from "../../accounting/types";
 import { d, zero, type Decimal } from "../../money/decimal";
 import { closeAtOrBefore, type DailyCloseIndex } from "../class-history";
 import {
+  VALUATION_ASSET_CLASSES,
+  type ValuationAssetClass,
+} from "./types";
+import {
   OBSERVED_AT_DAY,
   OBSERVED_AT_INSTANT,
   PRICE_ORIGINS,
@@ -94,6 +98,12 @@ export type HistoricalInputs = {
   /** Classe d'actif par `assetId`, pour ventiler la valeur de marché. */
   assetClassById: Map<string, string>;
   /**
+   * Classe d'actif brute — sans la surcharge assurance-vie de `assetClassById`.
+   * C'est elle qui porte la ventilation par classe, parce qu'elle seule est
+   * fixée à la création et ne peut donc pas réécrire le passé.
+   */
+  rawAssetClassById: Map<string, string>;
+  /**
    * Actifs écartés du patrimoine — mêmes règles que le moteur du jour.
    *
    * Une position DeFi/NFT explicitement exclue, ou un NFT emprunté qui devra
@@ -130,6 +140,20 @@ function coverageOf(totalPositions: number, unavailable: number): number {
   if (totalPositions <= 0) return 1;
   const valued = Math.max(0, totalPositions - unavailable);
   return valued / totalPositions;
+}
+
+/**
+ * Normalise une classe d'actif vers la taxonomie à six valeurs.
+ *
+ * `Asset.assetClass` est contraint par un `z.enum` à la création, mais la
+ * colonne est une chaîne libre : une valeur héritée ou inconnue ne doit pas
+ * disparaître de la ventilation. Elle rejoint `AUTRE`, qui est précisément la
+ * classe des actifs que la taxonomie ne sait pas nommer.
+ */
+function assetClassOf(raw: string | undefined): ValuationAssetClass {
+  return (VALUATION_ASSET_CLASSES as readonly string[]).includes(raw ?? "")
+    ? (raw as ValuationAssetClass)
+    : "AUTRE";
 }
 
 /** Ventilation d'une classe d'actif du journal vers un compartiment. */
@@ -326,6 +350,10 @@ export class PortfolioValuationEngine {
       ValuationComponent,
       Array<{ assetId: string; quantity: Decimal; costBasisEur: Decimal }>
     >();
+    const positionsByClass = new Map<
+      ValuationAssetClass,
+      Array<{ assetId: string; quantity: Decimal; costBasisEur: Decimal }>
+    >();
     for (const pos of state.positions.values()) {
       if (pos.quantity.isZero()) continue;
       // Écarté du patrimoine : ni valorisé, ni ventilé — comme au jour le jour.
@@ -334,6 +362,20 @@ export class PortfolioValuationEngine {
       const list = positionsByComponent.get(comp);
       if (list) list.push(pos);
       else positionsByComponent.set(comp, [pos]);
+
+      /*
+        Même position, second regroupement.
+
+        Les deux ventilations lisent exactement les mêmes lignes aux mêmes
+        quantités : ce sont deux découpages d'un même total, pas deux calculs.
+        Les valoriser deux fois ferait deux arithmétiques à faire diverger — on
+        se contente donc de mémoriser à quelle classe chaque ligne appartient,
+        et la valeur sera reprise du même appel à `valuePositions`.
+      */
+      const cls = assetClassOf(this.inputs.rawAssetClassById.get(pos.assetId));
+      const byCls = positionsByClass.get(cls);
+      if (byCls) byCls.push(pos);
+      else positionsByClass.set(cls, [pos]);
     }
 
     /*
@@ -379,6 +421,21 @@ export class PortfolioValuationEngine {
       if (carried > 0) estimated.add(comp);
     }
 
+    /*
+      Valorisation par classe — même résolveur, mêmes lignes.
+
+      Le résolveur est construit une seule fois et partagé : deux instances
+      pourraient répondre différemment sur un cache partiellement rempli, et
+      les deux ventilations cesseraient de décrire le même patrimoine.
+    */
+    const resolve = priceAt ?? this.dailyPriceResolver(day);
+    const byClass = {} as Record<ValuationAssetClass, Decimal>;
+    for (const cls of VALUATION_ASSET_CLASSES) byClass[cls] = zero();
+    for (const [cls, positions] of positionsByClass) {
+      const { marketEur } = valuePositions(positions, resolve, observedSet);
+      byClass[cls] = byClass[cls].plus(marketEur);
+    }
+
     // ── Poches de cash, alternatifs, épargne salariale ───────────────────────
     const cash = sumTimelinesAt(this.cash.timelines, day);
     /*
@@ -411,6 +468,20 @@ export class PortfolioValuationEngine {
     const realEstate = byComponent.get("realEstate") ?? zero();
     const lifeInsurance = byComponent.get("lifeInsurance") ?? zero();
     const otherAssets = byComponent.get("otherAssets") ?? zero();
+
+    /*
+      Les poches sans position au journal rejoignent la classe qui les décrit.
+
+      La trésorerie est du cash — sans ambiguïté. Les alternatifs (métaux,
+      private equity, crowdlending, tangibles) et l'épargne salariale n'ont pas
+      de classe dédiée dans cette taxonomie à six valeurs : `AUTRE` est le seul
+      choix honnête. Les diluer dans `ACTIONS` au prétexte que certains fonds y
+      ressemblent serait une invention ; les omettre casserait la partition.
+    */
+    byClass.CASH = byClass.CASH.plus(cash.totalEur);
+    byClass.AUTRE = byClass.AUTRE.plus(alternatives.totalEur).plus(
+      employeeSavings.totalEur
+    );
 
     const grossAssets = securities
       .plus(crypto)
@@ -464,6 +535,10 @@ export class PortfolioValuationEngine {
       alternatives: alternatives.totalEur.toNumber(),
       employeeSavings: employeeSavings.totalEur.toNumber(),
       otherAssets: otherAssets.toNumber(),
+      byAssetClass: Object.fromEntries(
+        VALUATION_ASSET_CLASSES.map((c) => [c, byClass[c].toNumber()])
+      ) as Record<ValuationAssetClass, number>,
+
       grossAssets: grossAssets.toNumber(),
       liabilities: liabilities.totalEur.toNumber(),
       netWorth: grossAssets.minus(liabilities.totalEur).toNumber(),

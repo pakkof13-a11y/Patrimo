@@ -139,10 +139,30 @@ export async function loadHistoricalInputs(
   );
 
   const assetClassById = new Map<string, string>();
+  /**
+   * Classe d'actif **brute**, sans la surcharge assurance-vie.
+   *
+   * `assetClassById` mélange délibérément deux informations : la classe de
+   * l'actif, et le fait qu'il soit détenu dans un contrat d'assurance-vie.
+   * C'est ce qu'il faut pour la ventilation par compartiment, où l'AV forme
+   * une poche à part.
+   *
+   * Pour une ventilation par **classe d'actif**, c'est faux : une UC actions
+   * logée dans un contrat reste une action. Et surtout, la surcharge repose
+   * sur `accountType`, un champ **mutable sans journal** — un support qui
+   * change d'enveloppe verrait tout son passé changer de poche. La classe
+   * brute, elle, n'a aucun chemin de mise à jour : elle est fixée à la
+   * création et le reste.
+   *
+   * Les deux cartes coexistent donc, chacune pour la ventilation qu'elle sait
+   * décrire honnêtement.
+   */
+  const rawAssetClassById = new Map<string, string>();
   for (const a of assets) {
     // Un contrat d'assurance-vie est porté par `accountType`, pas par la classe
     // de l'actif : ses supports restent des actions ou des obligations.
     assetClassById.set(a.id, a.accountType === "AV" ? "ASSURANCE_VIE" : a.assetClass);
+    rawAssetClassById.set(a.id, a.assetClass);
   }
 
   const closes = await loadCloses(transactions, assets.map((a) => a.id));
@@ -267,6 +287,7 @@ export async function loadHistoricalInputs(
   return {
     transactions,
     assetClassById,
+    rawAssetClassById,
     excludedAssetIds,
     closes,
     cashAccounts,

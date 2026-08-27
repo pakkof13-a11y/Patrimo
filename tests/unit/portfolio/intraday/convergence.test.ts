@@ -22,6 +22,7 @@ function inputs(over: Partial<HistoricalInputs> = {}): HistoricalInputs {
   return {
     transactions: [],
     assetClassById: new Map(),
+    rawAssetClassById: new Map(),
     excludedAssetIds: new Set(),
     closes: new Map(),
     cashAccounts: [],
@@ -73,6 +74,7 @@ describe("12 — convergence avec la clôture quotidienne", () => {
     const position = {
       transactions: [buy("t1", "a1", "2026-08-20T10:00:00Z", 10, 100)],
       assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
     };
 
     const quotidien = new PortfolioValuationEngine(
@@ -109,6 +111,7 @@ describe("12 — convergence avec la clôture quotidienne", () => {
     const commun = {
       transactions: [buy("t1", "a1", "2026-08-20T10:00:00Z", 10, 100)],
       assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
       liabilities: [
         {
           id: "l1",
@@ -223,6 +226,7 @@ describe("3 — devises", () => {
                 ["dollar", "ACTIONS"],
                 ["crypto", "CRYPTO"],
               ]),
+    rawAssetClassById: new Map(),
             })
           ),
       },

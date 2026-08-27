@@ -21,6 +21,7 @@ function inputs(over: Partial<HistoricalInputs> = {}): HistoricalInputs {
   return {
     transactions: [],
     assetClassById: new Map(),
+    rawAssetClassById: new Map(),
     excludedAssetIds: new Set(),
     closes: new Map(),
     cashAccounts: [],
@@ -85,6 +86,7 @@ async function serie(opts: {
 const DIX_TITRES = {
   transactions: [buy("t1", "a1", "2026-08-20T10:00:00Z", 10, 100)],
   assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
 };
 
 describe("1 — série horaire simple", () => {
@@ -132,6 +134,7 @@ describe("2 — plusieurs actifs", () => {
           ["a1", "ACTIONS"],
           ["a2", "CRYPTO"],
         ]),
+    rawAssetClassById: new Map(),
       },
       bars: bars({
         a1: [["2026-08-25T10:00:00Z", 110]],
@@ -186,6 +189,7 @@ describe("7 — actif exclu du patrimoine", () => {
         ["a1", "ACTIONS"],
         ["nft", "CRYPTO"],
       ]),
+    rawAssetClassById: new Map(),
     };
     const b = bars({
       a1: [["2026-08-25T10:00:00Z", 100]],
@@ -211,6 +215,7 @@ describe("8 — transaction intraday", () => {
       inputs: {
         transactions: [buy("t1", "a1", "2026-08-25T14:37:00Z", 10, 100)],
         assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
       },
       bars: bars({
         a1: [
@@ -236,6 +241,7 @@ describe("8 — transaction intraday", () => {
       inputs: {
         transactions: [buy("t1", "a1", "2026-08-25T14:37:00Z", 10, 100)],
         assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
       },
       bars: bars({
         a1: [
@@ -293,6 +299,7 @@ describe("14 et 15 — composition variable", () => {
           ["a1", "ACTIONS"],
           ["a2", "ACTIONS"],
         ]),
+    rawAssetClassById: new Map(),
       },
       bars: bars({
         a1: [
@@ -320,6 +327,7 @@ describe("14 et 15 — composition variable", () => {
           ["a1", "ACTIONS"],
           ["muet", "ACTIONS"],
         ]),
+    rawAssetClassById: new Map(),
       },
       bars: bars({ a1: [["2026-08-25T10:00:00Z", 100]] }),
       from: "2026-08-25T10:00:00Z",
@@ -374,6 +382,7 @@ describe("17 — statut composé", () => {
           ["a1", "ACTIONS"],
           ["c1", "CRYPTO"],
         ]),
+    rawAssetClassById: new Map(),
       },
       bars: bars({
         a1: [
@@ -418,6 +427,7 @@ describe("10, 11, 13 — creux, extrêmes, échantillonnage", () => {
     inputs: {
       transactions: [buy("t1", "a1", "2026-08-20T10:00:00Z", 1000, 800)],
       assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
     },
     bars: bars({
       a1: [

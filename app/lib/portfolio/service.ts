@@ -1277,6 +1277,17 @@ export async function getPortfolioHistory(
       externalFlowsBase: toBase(d(p.externalFlows)),
       investmentPerformanceBase: toBase(d(p.investmentPerformance)),
 
+      /*
+        Seconde ventilation du même brut, par classe d'actif.
+
+        Convertie ici comme les autres montants : la base de restitution est
+        une décision d'affichage, et la faire deux fois à deux endroits ferait
+        deux arrondis.
+      */
+      byAssetClassBase: Object.fromEntries(
+        Object.entries(p.byAssetClass).map(([k, v]) => [k, toBase(d(v))])
+      ) as Record<string, number>,
+
       securitiesBase: toBase(d(p.securities)),
       cryptoBase: toBase(d(p.crypto)),
       realEstateBase: toBase(d(p.realEstate)),

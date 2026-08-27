@@ -20,7 +20,8 @@ const t = (iso: string) => new Date(iso);
 
 function inputs(over: Partial<HistoricalInputs> = {}): HistoricalInputs {
   return {
-    transactions: [], assetClassById: new Map(), excludedAssetIds: new Set(),
+    transactions: [], assetClassById: new Map(),
+    rawAssetClassById: new Map(), excludedAssetIds: new Set(),
     closes: new Map(), cashAccounts: [], cashEvents: [], metals: [],
     privateEquity: [], crowdlending: [], tangibles: [], employeeSavings: [],
     liabilities: [], ...over,

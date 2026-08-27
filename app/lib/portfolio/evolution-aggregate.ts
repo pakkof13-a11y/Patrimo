@@ -71,6 +71,18 @@ export type EvolutionSeriesPoint = {
    * vient un point, au lieu de tout présenter comme mesuré.
    */
   status?: "EXACT" | "ESTIMATED";
+  /**
+   * Le brut ventilé par classe d'actif, transporté tel quel.
+   *
+   * C'est un **stock**, comme `total` : la dernière observation du bucket
+   * gagne, jamais une somme. Additionner les valeurs de trente jours donnerait
+   * trente fois le patrimoine.
+   *
+   * Cette couche perdait la ventilation : le moteur la produisait, l'API la
+   * publiait, et le graphique ne pouvait en tracer aucune parce qu'elle
+   * s'arrêtait ici.
+   */
+  byAssetClass?: Record<string, number>;
   isLive?: boolean;
 };
 
@@ -324,6 +336,15 @@ type StockAcc = {
    * puisque le total du bucket repose alors sur une valeur non observée.
    */
   status?: "EXACT" | "ESTIMATED";
+  /**
+   * Valeur de chaque classe d'actif à ce point, en devise de base.
+   *
+   * `sum(byAssetClass) === total` quand `total` est la valeur brute — c'est la
+   * même partition que celle vérifiée dans le moteur, transportée sans
+   * recalcul. Absent quand la source ne l'a pas fourni : un graphique ne doit
+   * pas pouvoir confondre « classe à zéro » et « ventilation inconnue ».
+   */
+  byAssetClass?: Record<string, number>;
   isLive?: boolean;
 };
 
@@ -403,6 +424,7 @@ function normalizePoint(p: HistoryPoint): {
   coupons: number;
   rents: number;
   status?: "EXACT" | "ESTIMATED";
+  byAssetClass?: Record<string, number>;
   isLive?: boolean;
 } {
   const total = Number(p.totalValueBase) || 0;
@@ -437,6 +459,7 @@ function normalizePoint(p: HistoryPoint): {
     */
     status:
       p.status == null ? undefined : p.status === "EXACT" ? "EXACT" : "ESTIMATED",
+    byAssetClass: p.byAssetClassBase,
     isLive: p.isLive,
   };
 }
@@ -548,6 +571,7 @@ export function buildEvolutionSeries(
       dRents: prev ? s.rents - prev.rents : 0,
       intervalType: interval,
       status: s.status,
+      byAssetClass: s.byAssetClass,
       isLive: s.isLive,
     };
   });

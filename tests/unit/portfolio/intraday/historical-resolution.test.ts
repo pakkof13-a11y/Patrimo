@@ -24,6 +24,7 @@ function inputs(over: Partial<HistoricalInputs> = {}): HistoricalInputs {
   return {
     transactions: [],
     assetClassById: new Map(),
+    rawAssetClassById: new Map(),
     excludedAssetIds: new Set(),
     closes: new Map(),
     cashAccounts: [],
@@ -86,6 +87,7 @@ describe("A — reconstitution sans aucun instantané", () => {
       inputs: {
         transactions: [buy("t1", "a1", "2020-03-02T10:00:00Z", 10, 50)],
         assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
         closes: closes({ a1: { "2026-08-24": 100, "2026-08-25": 110 } }),
       },
       from: "2026-08-25T08:00:00Z",
@@ -108,6 +110,7 @@ describe("B — flash crash", () => {
       inputs: {
         transactions: [buy("t1", "a1", "2020-01-01T10:00:00Z", 100, 100)],
         assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
       },
       bars: bars({
         a1: [
@@ -136,6 +139,7 @@ describe("C — transaction à 14 h 37", () => {
       inputs: {
         transactions: [buy("t1", "a1", "2026-08-25T14:37:00Z", 10, 100)],
         assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
       },
       bars: bars({
         a1: [
@@ -263,6 +267,7 @@ describe("F — actif sans historique", () => {
           ["connu", "ACTIONS"],
           ["muet", "ACTIONS"],
         ]),
+    rawAssetClassById: new Map(),
         closes: closes({ connu: { "2026-08-25": 110 } }),
       },
       from: "2026-08-25T10:00:00Z",
@@ -322,6 +327,7 @@ describe("J et K — le cache est la seule source de lecture", () => {
             inputs({
               transactions: [buy("t1", "a1", "2020-01-01T10:00:00Z", 1, 100)],
               assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
             })
           ),
       },
@@ -395,6 +401,7 @@ describe("un point dit toutes ses sources, pas seulement la plus faible", () => 
           ["connu", "ACTIONS"],
           ["muet", "ACTIONS"],
         ]),
+    rawAssetClassById: new Map(),
         closes: closes({ connu: { "2026-08-25": 110 } }),
       },
       from: "2026-08-25T10:00:00Z",
@@ -436,6 +443,7 @@ describe("la couverture reste une proportion", () => {
           ["crypto", "CRYPTO"],
           ...muets.map((id) => [id, "AUTRE"] as const),
         ]),
+    rawAssetClassById: new Map(),
         closes: closes({
           action: { "2026-08-25": 110 },
           crypto: { "2026-08-25": 600 },
@@ -459,6 +467,7 @@ describe("la couverture reste une proportion", () => {
       inputs: {
         transactions: [buy("t1", "a1", "2020-01-01T10:00:00Z", 10, 100)],
         assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
         closes: closes({ a1: { "2026-08-25": 110 } }),
       },
       from: "2026-08-25T10:00:00Z",

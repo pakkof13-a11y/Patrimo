@@ -35,6 +35,23 @@ export type EvolutionBenchmark = "none" | "inflation" | "index";
  */
 export type EvolutionScope = "gross" | "net";
 
+/**
+ * Classe d'actif tracée, ou `null` pour le patrimoine entier.
+ *
+ * Séparée de `EvolutionScope` à dessein : « brut ou net » et « quelle classe »
+ * sont deux questions indépendantes. On peut vouloir la crypto en valeur brute
+ * comme le patrimoine entier en net, et les fondre en une seule liste aurait
+ * produit douze choix dont la moitié n'a pas de sens — une classe d'actif n'a
+ * pas de version « nette », les dettes n'appartenant à aucune classe.
+ */
+export type EvolutionAssetClass =
+  | "ACTIONS"
+  | "OBLIGATIONS"
+  | "CRYPTO"
+  | "IMMOBILIER"
+  | "CASH"
+  | "AUTRE";
+
 export type EvolutionPrefsV5 = {
   v: 5;
   range: EvolutionRange;
@@ -44,6 +61,13 @@ export type EvolutionPrefsV5 = {
   indexKey: MarketIndexKey;
   /** Périmètre tracé : actifs bruts (défaut) ou patrimoine net. */
   scope: EvolutionScope;
+  /**
+   * Classe d'actif isolée, ou `null` pour tout le patrimoine.
+   *
+   * Arrivée après v5, comme `scope` : une préférence enregistrée avant ne la
+   * porte pas, et retombe donc sur `null` — le comportement d'avant.
+   */
+  assetClass?: EvolutionAssetClass | null;
 };
 
 export const DEFAULT_EVOLUTION_PREFS: EvolutionPrefsV5 = {
@@ -52,11 +76,20 @@ export const DEFAULT_EVOLUTION_PREFS: EvolutionPrefsV5 = {
   versus: "none",
   indexKey: "cac40",
   scope: "gross",
+  assetClass: null,
 };
 
 const RANGES = new Set<string>(EVOLUTION_RANGES);
 const VERSUS = new Set(["none", "inflation", "index"]);
 const SCOPES = new Set(["gross", "net"]);
+const CLASSES = new Set([
+  "ACTIONS",
+  "OBLIGATIONS",
+  "CRYPTO",
+  "IMMOBILIER",
+  "CASH",
+  "AUTRE",
+]);
 
 function isEvolutionPrefsV5(raw: unknown): raw is EvolutionPrefsV5 {
   if (!raw || typeof raw !== "object") return false;
@@ -70,6 +103,18 @@ function isEvolutionPrefsV5(raw: unknown): raw is EvolutionPrefsV5 {
   if (o.scope !== undefined && (typeof o.scope !== "string" || !SCOPES.has(o.scope))) {
     return false;
   }
+  /*
+    `assetClass` est arrivée encore après. `null` est une valeur porteuse de
+    sens — « tout le patrimoine » — et doit donc être acceptée au même titre
+    qu'une classe, alors qu'`undefined` signale une préférence antérieure.
+  */
+  if (
+    o.assetClass !== undefined &&
+    o.assetClass !== null &&
+    (typeof o.assetClass !== "string" || !CLASSES.has(o.assetClass))
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -80,7 +125,9 @@ function isEvolutionPrefsV5(raw: unknown): raw is EvolutionPrefsV5 {
  */
 export function loadEvolutionPrefs(): EvolutionPrefsV5 {
   const raw = loadUiPref<unknown>(EVOLUTION_PREFS_KEY, null);
-  if (isEvolutionPrefsV5(raw)) return { ...raw, scope: raw.scope ?? "gross" };
+  if (isEvolutionPrefsV5(raw)) {
+    return { ...raw, scope: raw.scope ?? "gross", assetClass: raw.assetClass ?? null };
+  }
   return { ...DEFAULT_EVOLUTION_PREFS, versus: loadDefaultBenchmark() };
 }
 
@@ -91,6 +138,10 @@ export function saveEvolutionPrefs(prefs: EvolutionPrefsV5): void {
     versus: VERSUS.has(prefs.versus) ? prefs.versus : "none",
     indexKey: isMarketIndexKey(prefs.indexKey) ? prefs.indexKey : "cac40",
     scope: SCOPES.has(prefs.scope) ? prefs.scope : "gross",
+    assetClass:
+      prefs.assetClass != null && CLASSES.has(prefs.assetClass)
+        ? prefs.assetClass
+        : null,
   };
   saveUiPref(EVOLUTION_PREFS_KEY, payload);
 }

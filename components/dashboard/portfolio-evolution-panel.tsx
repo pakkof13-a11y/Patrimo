@@ -28,6 +28,7 @@ import {
   saveEvolutionPrefs,
   type EvolutionBenchmark,
   type EvolutionPrefsV5,
+  type EvolutionAssetClass,
   type EvolutionScope,
 } from "@/app/lib/portfolio/evolution-prefs";
 import {
@@ -56,6 +57,33 @@ const RANGES: { id: EvolutionRange; label: string }[] = [
   { id: "1y", label: "1A" },
   { id: "5y", label: "5A" },
   { id: "all", label: "Tout" },
+];
+
+/**
+ * Classes proposées au sélecteur.
+ *
+ * Les six valeurs de `Asset.assetClass`, plus « Tout ». Cette taxonomie est la
+ * seule reconstructible historiquement : `assetClass` n'a aucun chemin de mise
+ * à jour, là où `category` et `accountType` sont mutables sans journal — les
+ * utiliser ferait qu'un reclassement d'aujourd'hui réécrirait tout le passé.
+ */
+const CLASS_CHOICES: {
+  id: EvolutionAssetClass | "all";
+  label: string;
+  title: string;
+}[] = [
+  { id: "all", label: "Tout", title: "Patrimoine entier, toutes classes confondues" },
+  { id: "ACTIONS", label: "Actions", title: "Actions et ETF" },
+  { id: "OBLIGATIONS", label: "Obligations", title: "Obligations et fonds obligataires" },
+  { id: "CRYPTO", label: "Crypto", title: "Toutes les positions crypto détenues à chaque date" },
+  { id: "IMMOBILIER", label: "Immobilier", title: "Biens directs et véhicules indirects" },
+  { id: "CASH", label: "Cash", title: "Trésorerie — comptes, livrets, dépôts à terme" },
+  {
+    id: "AUTRE",
+    label: "Autre",
+    title:
+      "Alternatifs, épargne salariale et actifs sans classe dédiée dans cette taxonomie",
+  },
 ];
 
 const SCOPE_CHOICES: {
@@ -198,6 +226,7 @@ export function PortfolioEvolutionPanel({
   }
 
   const { range, versus, indexKey, scope } = prefs;
+  const assetClass = prefs.assetClass ?? null;
 
   /*
     L'échelle n'est pas mémorisée avec les autres préférences : c'est une façon
@@ -242,13 +271,33 @@ export function PortfolioEvolutionPanel({
     des deux métriques circule dans toute la chaîne d'affichage.
   */
   const scopedHistory = useMemo(() => {
+    /*
+      Une classe isolée passe par le même chemin que « patrimoine net » : le
+      total est réécrit **en amont**, et toute la chaîne d'affichage — deltas,
+      rebasage du comparatif, infobulles — travaille ensuite sur une seule
+      grandeur. Filtrer en aval aurait laissé les variations calculées sur le
+      patrimoine entier sous une étiquette de classe.
+
+      Les points dont la ventilation est absente sont **retirés**, jamais
+      ramenés à zéro : une ventilation inconnue n'est pas une classe vide, et
+      la courbe doit s'interrompre là où la donnée s'arrête.
+    */
+    if (assetClass) {
+      const out = [];
+      for (const p of history) {
+        const v = p.byAssetClassBase?.[assetClass];
+        if (v == null) continue;
+        out.push({ ...p, totalValueBase: v, totalValueEur: v, netWorthBase: v });
+      }
+      return out;
+    }
     if (scope !== "net") return history;
     return history.map((p) =>
       p.netWorthBase == null
         ? p
         : { ...p, totalValueBase: p.netWorthBase, totalValueEur: p.netWorthBase }
     );
-  }, [history, scope]);
+  }, [history, scope, assetClass]);
 
   const { points: rawPoints, interval } = useMemo(
     () => buildEvolutionSeries(scopedHistory, range, "cumul"),
@@ -355,7 +404,12 @@ export function PortfolioEvolutionPanel({
         title="Évolution du portefeuille"
         subtitle={
           <>
-            {scope === "net" ? "Patrimoine net" : "Actifs bruts"}
+            {assetClass
+              ? (CLASS_CHOICES.find((c) => c.id === assetClass)?.label ??
+                assetClass)
+              : scope === "net"
+                ? "Patrimoine net"
+                : "Actifs bruts"}
             <span className="mx-1 opacity-40">·</span>
             {evolutionIntervalLabel(interval)}
             <span className="sr-only"> ({evolutionIntervalHint(interval)})</span>
@@ -465,12 +519,28 @@ export function PortfolioEvolutionPanel({
             />
           )}
           <Segmented
-            items={SCOPE_CHOICES}
-            value={scope}
-            onChange={(v) => update({ scope: v })}
-            ariaLabel="Périmètre"
-            testIdPrefix="evolution-scope"
+            items={CLASS_CHOICES}
+            value={assetClass ?? "all"}
+            onChange={(v) =>
+              update({ assetClass: v === "all" ? null : (v as EvolutionAssetClass) })
+            }
+            ariaLabel="Classe d'actifs"
+            testIdPrefix="evolution-class"
           />
+          {/*
+            Brut ou net ne se pose que sur le patrimoine entier : les dettes
+            n'appartiennent à aucune classe, et proposer « Crypto nette »
+            n'aurait pas de sens.
+          */}
+          {!assetClass && (
+            <Segmented
+              items={SCOPE_CHOICES}
+              value={scope}
+              onChange={(v) => update({ scope: v })}
+              ariaLabel="Périmètre"
+              testIdPrefix="evolution-scope"
+            />
+          )}
           <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
             Vs
           </span>

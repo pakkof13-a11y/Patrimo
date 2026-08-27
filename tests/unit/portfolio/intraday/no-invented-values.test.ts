@@ -25,7 +25,8 @@ const H = 3_600_000;
 
 function inputs(over: Partial<HistoricalInputs> = {}): HistoricalInputs {
   return {
-    transactions: [], assetClassById: new Map(), excludedAssetIds: new Set(),
+    transactions: [], assetClassById: new Map(),
+    rawAssetClassById: new Map(), excludedAssetIds: new Set(),
     closes: new Map(), cashAccounts: [], cashEvents: [], metals: [],
     privateEquity: [], crowdlending: [], tangibles: [], employeeSavings: [],
     liabilities: [], ...over,
@@ -151,6 +152,7 @@ describe("7 et 9 — fournisseur muet, absence totale", () => {
             inputs({
               transactions: [buy("t1", "muet", "2020-01-01T10:00:00Z", 10, 100)],
               assetClassById: new Map([["muet", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
               closes: closes({ autre: { "2026-08-25": 1 } }),
             })
           ),
@@ -293,6 +295,7 @@ describe("14 — ESTIMATED ne veut jamais dire « deviné »", () => {
             inputs({
               transactions: [buy("t1", "a1", "2020-01-01T10:00:00Z", 10, 100)],
               assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
             })
           ),
       },
@@ -320,6 +323,7 @@ describe("14 — ESTIMATED ne veut jamais dire « deviné »", () => {
             inputs({
               transactions: [buy("t1", "a1", "2020-01-01T10:00:00Z", 10, 100)],
               assetClassById: new Map([["a1", "ACTIONS"]]),
+    rawAssetClassById: new Map(),
             })
           ),
       },

@@ -266,6 +266,11 @@ export type HistoryPoint = {
   /** Résultat du jour, flux neutralisés. */
   investmentPerformanceBase?: number;
 
+  /**
+   * Le brut ventilé par classe d'actif : ACTIONS, OBLIGATIONS, CRYPTO,
+   * IMMOBILIER, CASH, AUTRE. Somme exactement égale à `grossAssetsBase`.
+   */
+  byAssetClassBase?: Record<string, number>;
   securitiesBase?: number;
   cryptoBase?: number;
   realEstateBase?: number;
