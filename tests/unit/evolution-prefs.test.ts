@@ -52,8 +52,8 @@ describe("evolution prefs v5", () => {
   });
 
   it("seeds versus from the Préférences default benchmark on first load", () => {
-    saveDefaultBenchmark("inflation");
-    expect(loadEvolutionPrefs().versus).toBe("inflation");
+    saveDefaultBenchmark("index");
+    expect(loadEvolutionPrefs().versus).toBe("index");
   });
 
   it("round-trips valid prefs", () => {
@@ -69,10 +69,10 @@ describe("evolution prefs v5", () => {
 
   it("persists default benchmark prefs", () => {
     expect(loadDefaultBenchmark()).toBe("none");
-    saveDefaultBenchmark("inflation");
-    expect(loadDefaultBenchmark()).toBe("inflation");
+    saveDefaultBenchmark("index");
+    expect(loadDefaultBenchmark()).toBe("index");
     expect(localStorage.getItem(`patrimo.ui.${DEFAULT_BENCHMARK_KEY}`)).toBe(
-      JSON.stringify("inflation")
+      JSON.stringify("index")
     );
   });
 });
@@ -142,64 +142,21 @@ describe("withBenchmarkSeries", () => {
     expect(out[0]!.benchmark).toBeUndefined();
   });
 
-  it("sans observation d'IPC, aucune courbe d'inflation n'est tracée", () => {
-    /*
-      Ce test affirmait l'inverse : que l'inflation « croît d'environ 1 % sur
-      six mois ». C'était vrai d'une constante annuelle de 2 % appliquée au
-      prorata du temps — pas d'un IPC. Sans observation réelle, il n'y a rien à
-      tracer, et une ligne plausible vaut moins qu'une absence assumée.
-    */
-    const out = withBenchmarkSeries(base, "inflation");
-    expect(out[0]!.benchmark).toBeUndefined();
-    expect(out[1]!.benchmark).toBeUndefined();
-  });
-
-  it("avec des observations réelles, la courbe suit le cumul publié", () => {
-    const out = withBenchmarkSeries(base, "inflation", {
-      cpiCumulative: [
-        { period: "2026-01", cumulative: 0 },
-        { period: "2026-07", cumulative: 0.012 },
-      ],
-    });
-    // Base rebasée sur le premier total du portefeuille…
-    expect(out[0]!.benchmark).toBeCloseTo(100_000, 6);
-    // …puis +1,2 % au mois observé, exactement.
-    expect(out[1]!.benchmark).toBeCloseTo(101_200, 6);
-  });
-
-  it("l'escalier ne bouge qu'aux mois observés", () => {
-    /*
-      Entre deux publications, le cumul ne varie pas : l'IPC est mensuel, et
-      lisser sa variation en taux journalier fabriquerait des valeurs que
-      personne n'a publiées.
-    */
-    const points = [
-      { ...base[0]!, date: "2026-01-15T00:00:00.000Z" },
-      { ...base[0]!, date: "2026-01-28T00:00:00.000Z" },
-      { ...base[1]!, date: "2026-02-10T00:00:00.000Z" },
-    ];
-    const out = withBenchmarkSeries(points, "inflation", {
-      cpiCumulative: [
-        { period: "2026-01", cumulative: 0 },
-        { period: "2026-02", cumulative: 0.004 },
-      ],
-    });
-    expect(out[0]!.benchmark).toBeCloseTo(out[1]!.benchmark!, 9);
-    expect(out[2]!.benchmark).toBeGreaterThan(out[1]!.benchmark!);
-  });
 
 
-  it("20 — activer l'inflation ne touche pas la courbe du portefeuille", () => {
+
+
+  it("20 — activer le comparatif ne touche pas la courbe du portefeuille", () => {
     /*
       La régression à empêcher : que la seconde courbe modifie la première. Le
       benchmark n'ajoute qu'un champ ; totaux, flux et performance doivent
       rester au centime ce qu'ils étaient.
     */
     const sans = withBenchmarkSeries(base, "none");
-    const avec = withBenchmarkSeries(base, "inflation", {
-      cpiCumulative: [
-        { period: "2026-01", cumulative: 0 },
-        { period: "2026-07", cumulative: 0.004 },
+    const avec = withBenchmarkSeries(base, "index", {
+      indexCloses: [
+        { date: "2026-01-01T00:00:00.000Z", close: 100 },
+        { date: "2026-07-01T00:00:00.000Z", close: 104 },
       ],
     });
 
@@ -213,7 +170,7 @@ describe("withBenchmarkSeries", () => {
 
     // Seule la série comparative apparaît.
     expect(sans[1]!.benchmark).toBeUndefined();
-    expect(avec[1]!.benchmark).toBeCloseTo(100_400, 6);
+    expect(avec[1]!.benchmark).toBeCloseTo(104_000, 6);
   });
 
   it("index rebases real closes onto the first portfolio total", () => {

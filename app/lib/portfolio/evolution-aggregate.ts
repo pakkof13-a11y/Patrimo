@@ -666,71 +666,10 @@ export function isEvolutionRangeEnabled(
 }
 
 
-/**
- * L'inflation a-t-elle un sens sur cette période ?
- *
- * L'IPC est publié une fois par mois. Sur sept jours, il n'y a au mieux qu'une
- * seule publication dans la fenêtre — donc aucune variation à montrer, et
- * afficher une ligne laisserait croire à une mesure hebdomadaire de
- * l'inflation, qui n'existe pas.
- *
- * La comparaison commence donc à 1 M. C'est une propriété de la donnée, pas un
- * choix d'affichage : rien ne devient disponible en changeant de graphique.
- */
-export function isInflationComparisonAvailable(range: EvolutionRange): boolean {
-  return range !== "7d";
-}
-
-export type EvolutionBenchmarkMode = "none" | "inflation" | "index";
+export type EvolutionBenchmarkMode = "none" | "index";
 
 /** Clôture d'indice brute (rebasée ensuite sur le premier total du portefeuille). */
 export type IndexClosePoint = { date: string; close: number };
-
-/**
- * Un point de la courbe d'inflation : cumul depuis le début de la fenêtre.
- *
- * Vient de `macro/cpi`, construit à partir d'observations mensuelles réelles.
- * Il n'y a plus de taux par défaut : une constante annuelle appliquée au
- * prorata du temps produisait une exponentielle lisse à 2 % l'an, sans
- * saisonnalité ni mois de baisse. L'absence de donnée fait désormais
- * disparaître la courbe, elle ne la remplace pas.
- */
-export type CpiCumulativePointInput = {
-  /** Mois décrit, `YYYY-MM`. */
-  period: string;
-  /** Cumul depuis le début de la fenêtre, en fraction (0,021 = +2,1 %). */
-  cumulative: number;
-};
-
-export type BenchmarkOptions = {
-  /** Clôtures d'indice (mode "index"), brutes — rebasées sur baseTotal. */
-  indexCloses?: IndexClosePoint[];
-  /** Inflation cumulée mensuelle réelle. Absente ⇒ aucune courbe. */
-  cpiCumulative?: CpiCumulativePointInput[];
-};
-
-/**
- * Cumul applicable à une date : celui du dernier mois **commencé**.
- *
- * Escalier mensuel, et non interpolation. L'IPC est publié une fois par mois ;
- * répartir sa variation en un taux journalier donnerait une courbe douce dont
- * chaque point serait une valeur que l'INSEE n'a jamais publiée. La marche est
- * moins jolie, elle est vraie.
- */
-function makeCpiPicker(cpi: CpiCumulativePointInput[]) {
-  const sorted = [...cpi].sort((a, b) => a.period.localeCompare(b.period));
-  return (iso: string): number | null => {
-    const t = new Date(iso);
-    if (Number.isNaN(t.getTime())) return null;
-    const period = `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}`;
-    let best: number | null = null;
-    for (const c of sorted) {
-      if (c.period <= period) best = c.cumulative;
-      else break;
-    }
-    return best;
-  };
-}
 
 /** Sélectionne la dernière clôture d'indice ≤ date de barre (tolérance 36 h). */
 function makeIndexPicker(indexCloses: IndexClosePoint[]) {
@@ -749,14 +688,18 @@ function makeIndexPicker(indexCloses: IndexClosePoint[]) {
   };
 }
 
+export type BenchmarkOptions = {
+  /** Clôtures d'indice, brutes — rebasées sur `baseTotal`. */
+  indexCloses?: IndexClosePoint[];
+};
+
 /**
  * Attache une série comparative **rebasée** sur le premier total du portefeuille.
  * Alignement temporel : même dates que la série principale.
  *
- * - inflation : capital initial revalorisé au taux IPC France (pouvoir d'achat),
- *   appliqué au prorata du temps → s'adapte à la périodicité choisie.
- * - index : performance réelle de l'indice choisi (clôtures Yahoo), rebasée sur
- *   le premier total → directement comparable au portefeuille en €.
+ * Une seule comparaison possible : la performance réelle de l'indice choisi
+ * (clôtures Yahoo), rebasée sur le premier total du portefeuille → directement
+ * comparable en €.
  *
  * En mode périodique, `benchmark` reste le stock rebasé ; le graphe dérive le Δ
  * via le point précédent.
@@ -775,24 +718,9 @@ export function withBenchmarkSeries(
     return points.map((p) => ({ ...p, benchmark: undefined }));
   }
 
+  // index : rebasage des clôtures réelles sur baseTotal
   let levelAt: (iso: string) => number;
-
-  if (mode === "inflation") {
-    const cpi = opts.cpiCumulative ?? [];
-    const pick = makeCpiPicker(cpi);
-    const firstCumul = pick(points[0]!.date);
-    if (cpi.length === 0 || firstCumul == null) {
-      // Aucune observation exploitable sur la fenêtre : pas de courbe, plutôt
-      // qu'une ligne plate ou une hypothèse déguisée en mesure.
-      return points.map((p) => ({ ...p, benchmark: undefined }));
-    }
-    levelAt = (iso) => {
-      const c = pick(iso);
-      // Un trou ne redevient pas 0 % : on conserve le dernier cumul connu.
-      return baseTotal * (1 + (c ?? firstCumul));
-    };
-  } else {
-    // index : rebasage des clôtures réelles sur baseTotal
+  {
     const closes = opts.indexCloses ?? [];
     const pick = makeIndexPicker(closes);
     const baseClose = pick(points[0]!.date);
@@ -856,8 +784,6 @@ export function benchmarkLabel(mode: EvolutionBenchmarkMode): string {
   switch (mode) {
     case "none":
       return "Aucun";
-    case "inflation":
-      return "Inflation (IPC France)";
     case "index":
       return "Indice";
   }

@@ -15,10 +15,8 @@ import {
   evolutionIntervalHint,
   evolutionIntervalLabel,
   isEvolutionRangeEnabled,
-  isInflationComparisonAvailable,
   toPercentSeries,
   withBenchmarkSeries,
-  type CpiCumulativePointInput,
   type EvolutionRange,
   type IndexClosePoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
@@ -152,11 +150,6 @@ const VERSUS_CHOICES: {
   title: string;
 }[] = [
   { id: "none", label: "Aucun", title: "Valeur du portefeuille, en devise" },
-  {
-    id: "inflation",
-    label: "Inflation",
-    title: "Pouvoir d'achat — indice des prix INSEE (IPC France)",
-  },
   {
     id: "index",
     label: "Indice",
@@ -375,47 +368,15 @@ export function PortfolioEvolutionPanel({
     [indexQ.data]
   );
 
-  /*
-    Inflation : série mensuelle réelle, jamais une hypothèse.
-
-    La requête n'est lancée que si la comparaison est demandée **et** possible
-    sur la période — sous un mois, l'IPC n'a rien à dire. Le paramètre `days`
-    couvre la fenêtre affichée, arrondi au mois par le service.
-  */
-  const inflationPossible = isInflationComparisonAvailable(range);
-  const cpiQ = useQuery<{
-    available: boolean;
-    reason?: string;
-    points?: CpiCumulativePointInput[];
-  }>({
-    queryKey: ["macro-cpi", range],
-    enabled: versus === "inflation" && inflationPossible && rawPoints.length > 0,
-    staleTime: 12 * 60 * 60_000,
-    queryFn: () => {
-      const first = Date.parse(rawPoints[0]!.date);
-      const last = Date.parse(rawPoints[rawPoints.length - 1]!.date);
-      const days = Math.max(1, Math.ceil((last - first) / 86_400_000));
-      return fetchJson(`/api/macro/cpi?days=${days}&range=${range}`);
-    },
-  });
-
-  const cpiCumulative = useMemo<CpiCumulativePointInput[]>(
-    () => (cpiQ.data?.available ? cpiQ.data.points ?? [] : []),
-    [cpiQ.data]
-  );
-
   const points = useMemo(
-    () => withBenchmarkSeries(rawPoints, versus, { indexCloses, cpiCumulative }),
-    [rawPoints, versus, indexCloses, cpiCumulative]
+    () => withBenchmarkSeries(rawPoints, versus, { indexCloses }),
+    [rawPoints, versus, indexCloses]
   );
 
   /*
     Trois situations distinctes, et elles ne se disent pas pareil :
     la période est trop courte, la donnée manque, ou tout va bien.
   */
-  const inflationUnavailable =
-    versus === "inflation" &&
-    (!inflationPossible || (cpiQ.data != null && !cpiQ.data.available));
 
   const percentPoints = useMemo(
     () => (versus === "none" ? [] : toPercentSeries(points)),
@@ -604,16 +565,7 @@ export function PortfolioEvolutionPanel({
             Vs
           </span>
           <Segmented
-            items={VERSUS_CHOICES.map((c) =>
-              c.id === "inflation" && !inflationPossible
-                ? {
-                    ...c,
-                    title:
-                      "L'IPC est publié une fois par mois : la comparaison commence à 1 M",
-                    disabled: true,
-                  }
-                : c
-            )}
+            items={VERSUS_CHOICES}
             value={versus}
             onChange={(v) => update({ versus: v })}
             ariaLabel="Comparaison"
@@ -693,25 +645,7 @@ export function PortfolioEvolutionPanel({
         </div>
       </div>
 
-      {inflationUnavailable && !empty && !noPoints && (
-        <p
-          className="text-meta mt-1.5 shrink-0"
-          data-testid="evolution-inflation-unavailable"
-        >
-          {/*
-            Nommer la raison plutôt que laisser une courbe manquante sans
-            explication. Une ligne à zéro affirmerait une inflation nulle, ce
-            qui est une mesure — pas une absence de mesure.
-          */}
-          {!inflationPossible
-            ? "Inflation indisponible sur 7 J — l'IPC est publié une fois par mois."
-            : cpiQ.data?.reason === "incomplete"
-              ? "Inflation indisponible — un mois manque sur la période."
-              : "Inflation indisponible — aucune observation d'IPC enregistrée."}
-        </p>
-      )}
-
-      {versus !== "none" && !inflationUnavailable && !empty && !noPoints && points.length > 0 && (
+      {versus !== "none" && !empty && !noPoints && points.length > 0 && (
         <p className="text-meta mt-1.5 shrink-0" data-testid="evolution-vs-note">
           Vs {benchmarkDisplayName}
           {gap ? (

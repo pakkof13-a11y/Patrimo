@@ -21,7 +21,7 @@ import { loadDefaultBenchmark } from "@/app/lib/portfolio/benchmark-prefs";
 export const EVOLUTION_PREFS_KEY = "evolutionPrefs.v5";
 
 /** "cash" retiré (jugé inutile) — jamais réintroduit. */
-export type EvolutionBenchmark = "none" | "inflation" | "index";
+export type EvolutionBenchmark = "none" | "index";
 
 /**
  * Périmètre tracé par la courbe.
@@ -55,7 +55,7 @@ export type EvolutionAssetClass =
 export type EvolutionPrefsV5 = {
   v: 5;
   range: EvolutionRange;
-  /** Comparaison affichée : Aucun (valeur €) / Inflation / Indice (% rebasé à 0). */
+  /** Comparaison affichée : Aucun (valeur €) ou Indice (% rebasé à 0). */
   versus: EvolutionBenchmark;
   /** Indice choisi quand versus = "index". */
   indexKey: MarketIndexKey;
@@ -92,7 +92,7 @@ export const DEFAULT_EVOLUTION_PREFS: EvolutionPrefsV5 = {
 };
 
 const RANGES = new Set<string>(EVOLUTION_RANGES);
-const VERSUS = new Set(["none", "inflation", "index"]);
+const VERSUS = new Set(["none", "index"]);
 const SCOPES = new Set(["gross", "net"]);
 const METRICS = new Set(["value", "performance"]);
 const CLASSES = new Set([

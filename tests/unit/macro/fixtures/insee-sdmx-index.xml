@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<message:StructureSpecificData xmlns:message="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message">
-  <Obs TIME_PERIOD="2025-10" OBS_VALUE="121.02"/>
-  <Obs TIME_PERIOD="2025-11" OBS_VALUE="120.8"/>
-  <Obs TIME_PERIOD="2025-12" OBS_VALUE="120.9"/>
-</message:StructureSpecificData>

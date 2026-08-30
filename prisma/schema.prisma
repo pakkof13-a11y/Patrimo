@@ -386,53 +386,6 @@ model AssetDailyClose {
   @@index([assetId, day])
 }
 
-/// Observation mensuelle de l'indice des prix à la consommation.
-///
-/// ## Pourquoi une table plutôt qu'une constante
-///
-/// La comparaison « Portefeuille / Inflation » reposait sur
-/// `FRENCH_ANNUAL_CPI_RATE = 0.02`, appliquée au prorata du temps écoulé. Elle
-/// dessinait une exponentielle lisse à 2 % l'an : ni saisonnalité, ni mois de
-/// baisse, ni publication réelle. L'utilisateur lisait « inflation » là où il
-/// n'y avait qu'une hypothèse.
-///
-/// ## Deux temps, à ne pas confondre
-///
-/// - `period` : le **mois décrit**, `YYYY-MM`. L'IPC de janvier reste celui de
-///   janvier, qu'il ait été publié en février ou révisé en mars. C'est cette
-///   date qui aligne la courbe.
-/// - `publishedAt` : quand la source l'a diffusé. Utile pour tracer une
-///   révision, jamais pour situer la donnée sur l'axe du temps.
-///
-/// `fetchedAt` est un troisième temps encore : celui où Patrimo l'a lu.
-///
-/// ## Taux, pas indice
-///
-/// La variation est stockée telle que la source la publie, sans être
-/// reconstruite depuis un niveau d'indice. Deux chemins de calcul pour la même
-/// grandeur finissent toujours par diverger.
-model CpiObservation {
-  id String @id @default(cuid())
-
-  /// Mois économique décrit, `YYYY-MM` (tri lexicographique = chronologique).
-  period String
-  /// Variation mensuelle, en fraction : 0.002 = +0,2 %.
-  monthlyRate Decimal  @db.Decimal(12, 8)
-  /// Glissement annuel publié pour ce mois, quand la source le fournit.
-  yearlyRate  Decimal? @db.Decimal(12, 8)
-
-  /// Fournisseur identifiable — « INSEE-BDM », « EUROSTAT-HICP »…
-  source String
-  /// Diffusion par la source, distincte du mois décrit.
-  publishedAt DateTime?
-  fetchedAt   DateTime  @default(now())
-
-  /// Une seule observation par source et par mois : une révision met à jour la
-  /// ligne au lieu d'en créer une seconde qui la contredirait.
-  @@unique([source, period])
-  @@index([source, period])
-}
-
 /// Barre intra-séance d'un actif, en EUR — observations réellement collectées.
 ///
 /// ## Pourquoi une table de plus

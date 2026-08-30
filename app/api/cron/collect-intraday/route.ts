@@ -9,8 +9,6 @@ import {
 } from "@/app/lib/market/intraday-collector";
 import { parseBarInterval } from "@/app/lib/market/price-history-types";
 import { readCronCredential } from "@/app/lib/auth/cron-credential";
-import { collectCpiObservations } from "@/app/lib/macro/cpi-collector";
-import { inseeCpiProvider } from "@/app/lib/macro/providers/insee-cpi";
 
 /**
  * Collecte planifiée des données de marché.
@@ -116,30 +114,8 @@ async function collectAll(opts: {
     };
   }
 
-  /*
-    L'IPC suit le même passage, sans lui appartenir.
 
-    Il est publié une fois par mois : une collecte quotidienne est largement
-    suffisante, et réutiliser la tâche existante évite d'ajouter une seconde
-    infrastructure de planification pour une seule requête. Comme pour les
-    cours, l'échec n'emporte pas le reste — les trois caches sont
-    indépendants.
-  */
-  let cpi;
-  try {
-    cpi = await collectCpiObservations({ provider: inseeCpiProvider });
-  } catch (e) {
-    cpi = {
-      source: inseeCpiProvider.id,
-      fetched: 0,
-      created: 0,
-      revised: 0,
-      unchanged: 0,
-      errors: [e instanceof Error ? e.message : "échec"],
-    };
-  }
-
-  return { intraday, daily, cpi };
+  return { intraday, daily };
 }
 
 export async function GET(req: Request) {
