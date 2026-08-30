@@ -619,7 +619,19 @@ export async function seedUserPortfolio(
   const positions: Pos[] = [];
 
   for (const s of assetSeeds) {
-    const asset = await prisma.asset.create({
+    /*
+      Création et constat d'enveloppe dans la même transaction.
+
+      Les lignes du seed doivent porter le même niveau de vérité historique
+      que celles créées par l'application : sans événement, `resolveEnvelopeAt`
+      rend `UNKNOWN` sur tout leur passé, y compris sur des périodes où le seed
+      connaît parfaitement l'enveloppe qu'il vient d'établir.
+
+      La transaction évite le seul état incohérent possible : un actif créé
+      dont l'événement manquerait à cause d'une écriture partielle.
+    */
+    const asset = await prisma.$transaction(async (tx) => {
+      const cree = await tx.asset.create({
       data: {
         userId,
         platformId: s.platformId,
@@ -642,6 +654,39 @@ export async function seedUserPortfolio(
         // que comme une liste à composer.
         watchlistedAt: s.watched ? daysAgo(Math.min(s.openDaysAgo, 30)) : null,
       },
+      });
+
+      /*
+        Seules les enveloppes titres sont journalisées — le périmètre du
+        journal, inchangé, est celui de l'amorçage de sa migration. Inventer un
+        événement pour une ligne AV, CRYPTO ou IMMOBILIER élargirait ce
+        périmètre sans que rien ne le demande.
+
+        La date retenue est celle de **création de la ligne**, jamais sa date
+        d'acquisition. `acquisitionDate` remonte à plusieurs années : s'en
+        servir affirmerait que l'enveloppe était connue à cette date, alors que
+        le seed ne l'établit qu'à l'instant présent. Ce serait exactement la
+        rétro-projection que le journal existe pour interdire.
+
+        Aucun compte titres n'est rattaché : le seed n'en crée aucun, et les
+        supprime tous au nettoyage. `securitiesAccountId` à `null` enregistre
+        donc une absence de rattachement **constatée**, pas une ignorance.
+      */
+      if (cree.accountType === "CTO" || cree.accountType === "PEA") {
+        await tx.assetEnvelopeEvent.create({
+          data: {
+            assetId: cree.id,
+            userId,
+            occurredAt: cree.createdAt,
+            kind: "OBSERVED",
+            accountType: cree.accountType,
+            securitiesAccountId: null,
+            envelopeType: null,
+          },
+        });
+      }
+
+      return cree;
     });
     positions.push({ ...s, id: asset.id });
   }
