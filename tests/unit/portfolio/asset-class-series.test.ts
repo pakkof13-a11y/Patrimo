@@ -521,3 +521,262 @@ describe("§8 et §16 — l'absence de ventilation n'est pas une classe vide", (
     expect(isoler([{}, {}], "CRYPTO")).toEqual([]);
   });
 });
+
+describe("§1 — un actif exclu ne fabrique pas de contre-performance", () => {
+  /**
+   * Le défaut : `ledgerFlowToday` sommait **toutes** les transactions, sans
+   * écarter celles portant un actif exclu du patrimoine — alors que la
+   * valorisation, elle, les écarte.
+   *
+   * Acheter 5 000 € d'un NFT marqué « ignoré » ajoutait donc un flux de
+   * +5 000 € sans ajouter la moindre valeur. La performance du jour, définie
+   * comme `Δvaleur − flux`, plongeait de 5 000 € sans qu'aucun marché n'ait
+   * bougé.
+   */
+  function avecExclu() {
+    return new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t1", "act", "2024-01-01", 10, 100),
+          // Achat d'un actif hors patrimoine, le lendemain.
+          buy("t2", "nft", "2024-01-02", 1, 5_000),
+        ],
+        rawAssetClassById: new Map([
+          ["act", "ACTIONS"],
+          ["nft", "CRYPTO"],
+        ]),
+        assetClassById: new Map([
+          ["act", "ACTIONS"],
+          ["nft", "CRYPTO"],
+        ]),
+        excludedAssetIds: new Set(["nft"]),
+        closes: closes({
+          act: { "2024-01-01": 100, "2024-01-02": 100 },
+          nft: { "2024-01-02": 5_000 },
+        }),
+      })
+    ).buildSeries("2024-01-01", "2024-01-02");
+  }
+
+  it("l'achat d'un actif exclu ne compte pour aucun flux", () => {
+    expect(at(avecExclu(), "2024-01-02").externalFlows).toBeCloseTo(0, 6);
+  });
+
+  it("et ne produit donc aucune performance artificielle", () => {
+    /*
+      Rien n'a bougé : le cours de l'action est inchangé, l'actif exclu ne
+      compte pas. La performance du jour doit être nulle, et non −5 000 €.
+    */
+    expect(at(avecExclu(), "2024-01-02").investmentPerformance).toBeCloseTo(0, 6);
+  });
+
+  it("la valeur reste celle des seuls actifs du patrimoine", () => {
+    const s = avecExclu();
+    expect(at(s, "2024-01-02").grossAssets).toBeCloseTo(1_000, 6);
+    expect(at(s, "2024-01-02").byAssetClass.CRYPTO).toBeCloseTo(0, 6);
+  });
+
+  it("un actif non exclu garde exactement son flux", () => {
+    // Le témoin : la correction ne doit rien changer au cas normal.
+    const s = new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t1", "act", "2024-01-01", 10, 100),
+          buy("t2", "act", "2024-01-02", 5, 100),
+        ],
+        rawAssetClassById: new Map([["act", "ACTIONS"]]),
+        assetClassById: new Map([["act", "ACTIONS"]]),
+        closes: closes({ act: { "2024-01-01": 100, "2024-01-02": 100 } }),
+      })
+    ).buildSeries("2024-01-01", "2024-01-02");
+
+    expect(at(s, "2024-01-02").externalFlows).toBeCloseTo(500, 6);
+    expect(at(s, "2024-01-02").investmentPerformance).toBeCloseTo(0, 6);
+  });
+});
+
+describe("§8 — flux et performance par classe, le scénario Crypto", () => {
+  /**
+   * Le scénario du chantier, à trois temps.
+   *
+   * t1 : BTC 10 000 + ETH 5 000                → 15 000, aucun flux antérieur
+   * t2 : achat de 5 000 € de crypto            → 20 000, flux +5 000, perf 0
+   * t3 : le marché monte de 1 000 €            → 21 000, flux 0, perf +1 000
+   *
+   * Le piège serait d'annoncer +6 000 € de performance à t3 en comptant
+   * l'apport comme un gain.
+   */
+  function scenario() {
+    return new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t1", "btc", "2024-01-01", 1, 10_000),
+          buy("t2", "eth", "2024-01-01", 1, 5_000),
+          // t2 : un apport de 5 000 € investi en ETH.
+          buy("t3", "eth", "2024-01-02", 1, 5_000),
+        ],
+        rawAssetClassById: new Map([
+          ["btc", "CRYPTO"],
+          ["eth", "CRYPTO"],
+        ]),
+        assetClassById: new Map([
+          ["btc", "CRYPTO"],
+          ["eth", "CRYPTO"],
+        ]),
+        closes: closes({
+          btc: {
+            "2024-01-01": 10_000,
+            "2024-01-02": 10_000,
+            "2024-01-03": 11_000, // t3 : +1 000 € de marché
+          },
+          eth: { "2024-01-01": 5_000, "2024-01-02": 5_000, "2024-01-03": 5_000 },
+        }),
+      })
+    ).buildSeries("2024-01-01", "2024-01-03");
+  }
+
+  it("t2 : la valeur monte de 5 000 €, la performance reste nulle", () => {
+    const p = at(scenario(), "2024-01-02");
+
+    expect(p.byAssetClass.CRYPTO).toBeCloseTo(20_000, 6);
+    expect(p.flowsByAssetClass.CRYPTO).toBeCloseTo(5_000, 6);
+    expect(p.performanceByAssetClass!.CRYPTO).toBeCloseTo(0, 6);
+  });
+
+  it("t3 : +1 000 € de marché, et surtout pas +6 000 €", () => {
+    const p = at(scenario(), "2024-01-03");
+
+    expect(p.byAssetClass.CRYPTO).toBeCloseTo(21_000, 6);
+    expect(p.flowsByAssetClass.CRYPTO).toBeCloseTo(0, 6);
+    expect(p.performanceByAssetClass!.CRYPTO).toBeCloseTo(1_000, 6);
+    // L'erreur que ce chantier existe pour empêcher.
+    expect(p.performanceByAssetClass!.CRYPTO).not.toBeCloseTo(6_000, 6);
+  });
+
+  it("le premier point n'a pas de performance : rien à comparer", () => {
+    // Publier 0 laisserait croire à une classe stable, alors que la veille
+    // n'existe pas.
+    expect(at(scenario(), "2024-01-01").performanceByAssetClass).toBeNull();
+  });
+});
+
+describe("§13 — chaque nature de flux à sa place", () => {
+  /** Une opération sans actif : apport, retrait, transfert de trésorerie. */
+  function cashTx(id: string, type: string, day: string, montant: number): LedgerTx {
+    return {
+      id,
+      type,
+      platformId: "p1",
+      toPlatformId: type === "TRANSFERT_CASH" ? "p2" : null,
+      assetId: null,
+      occurredAt: new Date(`${day}T10:00:00Z`),
+      quantity: null,
+      unitPrice: null,
+      feesEur: d(0),
+      amountEur: d(montant),
+      netCashImpactEur: d(montant),
+      cashAmountOriginal: d(montant),
+      fxRateToEur: d(1),
+    } as unknown as LedgerTx;
+  }
+
+  /** Un revenu encaissé : dividende, coupon, loyer. */
+  function revenu(id: string, type: string, assetId: string, day: string, montant: number): LedgerTx {
+    return {
+      id,
+      type,
+      platformId: "p1",
+      toPlatformId: null,
+      assetId,
+      occurredAt: new Date(`${day}T10:00:00Z`),
+      quantity: null,
+      unitPrice: null,
+      feesEur: d(0),
+      amountEur: d(montant),
+      netCashImpactEur: d(montant),
+      fxRateToEur: d(1),
+    } as unknown as LedgerTx;
+  }
+
+  function avec(txs: LedgerTx[]) {
+    return new PortfolioValuationEngine(
+      inputs({
+        transactions: [buy("b0", "act", "2024-01-01", 10, 100), ...txs],
+        rawAssetClassById: new Map([["act", "ACTIONS"]]),
+        assetClassById: new Map([["act", "ACTIONS"]]),
+        closes: closes({
+          act: { "2024-01-01": 100, "2024-01-02": 100 },
+        }),
+      })
+    ).buildSeries("2024-01-01", "2024-01-02");
+  }
+
+  it("un achat entre dans la classe de son actif", () => {
+    const p = at(avec([buy("t1", "act", "2024-01-02", 5, 100)]), "2024-01-02");
+    expect(p.flowsByAssetClass.ACTIONS).toBeCloseTo(500, 6);
+    expect(p.performanceByAssetClass!.ACTIONS).toBeCloseTo(0, 6);
+  });
+
+  it("une vente en sort, du même montant", () => {
+    const p = at(avec([sell("t1", "act", "2024-01-02", 4, 100)]), "2024-01-02");
+    expect(p.flowsByAssetClass.ACTIONS).toBeCloseTo(-400, 6);
+    expect(p.performanceByAssetClass!.ACTIONS).toBeCloseTo(0, 6);
+  });
+
+  it.each(["APPORT", "RETRAIT", "TRANSFERT_CASH"])(
+    "%s n'est attribué à aucune classe",
+    (type) => {
+      /*
+        Ces opérations ne touchent que le cash du journal, hors périmètre du
+        moteur : elles valent zéro flux. Leur inventer une classe serait une
+        décision métier que la donnée ne porte pas.
+      */
+      const p = at(avec([cashTx("t1", type, "2024-01-02", 10_000)]), "2024-01-02");
+
+      for (const c of VALUATION_ASSET_CLASSES) {
+        expect(p.flowsByAssetClass[c]).toBeCloseTo(0, 6);
+      }
+      expect(p.externalFlows).toBeCloseTo(0, 6);
+    }
+  );
+
+  it.each([
+    ["DIVIDENDE", "dividende"],
+    ["COUPON", "coupon"],
+    ["LOYER", "loyer"],
+  ])("un %s reste hors de la performance", (type) => {
+    /*
+      Convention du moteur, inchangée par ce chantier : les revenus encaissés
+      atterrissent dans le cash du journal, hors périmètre. Ils ne sont ni un
+      flux, ni de la performance mesurable ici.
+
+      Conséquence à assumer : une action versant 5 % de dividende n'affiche que
+      sa variation de cours.
+    */
+    const p = at(avec([revenu("t1", type, "act", "2024-01-02", 300)]), "2024-01-02");
+
+    expect(p.flowsByAssetClass.ACTIONS).toBeCloseTo(0, 6);
+    expect(p.performanceByAssetClass!.ACTIONS).toBeCloseTo(0, 6);
+  });
+
+  it("les trois identités tiennent sur toute une série", () => {
+    const s = avec([
+      buy("t1", "act", "2024-01-02", 5, 100),
+      cashTx("t2", "APPORT", "2024-01-02", 9_000),
+      revenu("t3", "DIVIDENDE", "act", "2024-01-02", 42),
+    ]);
+    const somme = (r: Record<string, number>) =>
+      VALUATION_ASSET_CLASSES.reduce((a, c) => a + r[c]!, 0);
+
+    for (const p of s) {
+      expect(somme(p.byAssetClass)).toBeCloseTo(p.grossAssets, 6);
+      expect(somme(p.flowsByAssetClass)).toBeCloseTo(p.externalFlows, 6);
+      if (p.performanceByAssetClass) {
+        expect(somme(p.performanceByAssetClass)).toBeCloseTo(
+          p.investmentPerformance,
+          6
+        );
+      }
+    }
+  });
+});

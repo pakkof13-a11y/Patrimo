@@ -143,6 +143,31 @@ export type PortfolioValuationPoint = {
    */
   byAssetClass: Record<ValuationAssetClass, number>;
 
+  /**
+   * Capital externe entré ou sorti ce jour-là, par classe.
+   *
+   * Même décomposition que la valeur, sur les mêmes lignes : la somme égale
+   * `externalFlows`. Un achat entre dans la classe de l'actif acheté, une
+   * vente en sort ; un versement sur livret rejoint `CASH`. Les apports et
+   * retraits de trésorerie du journal valent zéro — ils ne touchent que du
+   * cash hors périmètre — et ne sont donc attribués à aucune classe.
+   */
+  flowsByAssetClass: Record<ValuationAssetClass, number>;
+
+  /**
+   * Ce que la classe a produit, une fois les mouvements de capitaux retirés :
+   * `valeur(D) − valeur(D−1) − flux(D)`.
+   *
+   * C'est la formule du portefeuille, appliquée terme à terme — pas une
+   * seconde définition. `null` au premier point d'une série : sans veille,
+   * rien n'est comparable, et publier 0 laisserait croire à une classe stable.
+   *
+   * **Les revenus encaissés en sont absents** : dividendes, coupons et loyers
+   * atterrissent dans le cash du journal, hors périmètre du moteur. Une action
+   * versant 5 % de dividende n'affiche donc que sa variation de cours.
+   */
+  performanceByAssetClass: Record<ValuationAssetClass, number> | null;
+
   /** Somme des huit compartiments ci-dessus. */
   grossAssets: number;
   liabilities: number;

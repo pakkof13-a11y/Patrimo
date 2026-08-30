@@ -68,6 +68,17 @@ export type EvolutionPrefsV5 = {
    * porte pas, et retombe donc sur `null` — le comportement d'avant.
    */
   assetClass?: EvolutionAssetClass | null;
+  /**
+   * Ce que la courbe trace pour la classe choisie.
+   *
+   * `value` : l'encours, apports compris. `performance` : ce que le marché a
+   * produit, une fois les mouvements de capitaux retirés — jamais l'un
+   * présenté comme l'autre.
+   *
+   * Sans classe sélectionnée, ce réglage n'a pas d'objet : le patrimoine
+   * entier reste en valeur.
+   */
+  classMetric?: "value" | "performance";
 };
 
 export const DEFAULT_EVOLUTION_PREFS: EvolutionPrefsV5 = {
@@ -77,11 +88,13 @@ export const DEFAULT_EVOLUTION_PREFS: EvolutionPrefsV5 = {
   indexKey: "cac40",
   scope: "gross",
   assetClass: null,
+  classMetric: "value",
 };
 
 const RANGES = new Set<string>(EVOLUTION_RANGES);
 const VERSUS = new Set(["none", "inflation", "index"]);
 const SCOPES = new Set(["gross", "net"]);
+const METRICS = new Set(["value", "performance"]);
 const CLASSES = new Set([
   "ACTIONS",
   "OBLIGATIONS",
@@ -109,6 +122,12 @@ function isEvolutionPrefsV5(raw: unknown): raw is EvolutionPrefsV5 {
     qu'une classe, alors qu'`undefined` signale une préférence antérieure.
   */
   if (
+    o.classMetric !== undefined &&
+    (typeof o.classMetric !== "string" || !METRICS.has(o.classMetric))
+  ) {
+    return false;
+  }
+  if (
     o.assetClass !== undefined &&
     o.assetClass !== null &&
     (typeof o.assetClass !== "string" || !CLASSES.has(o.assetClass))
@@ -126,7 +145,12 @@ function isEvolutionPrefsV5(raw: unknown): raw is EvolutionPrefsV5 {
 export function loadEvolutionPrefs(): EvolutionPrefsV5 {
   const raw = loadUiPref<unknown>(EVOLUTION_PREFS_KEY, null);
   if (isEvolutionPrefsV5(raw)) {
-    return { ...raw, scope: raw.scope ?? "gross", assetClass: raw.assetClass ?? null };
+      return {
+      ...raw,
+      scope: raw.scope ?? "gross",
+      assetClass: raw.assetClass ?? null,
+      classMetric: raw.classMetric ?? "value",
+    };
   }
   return { ...DEFAULT_EVOLUTION_PREFS, versus: loadDefaultBenchmark() };
 }
@@ -142,6 +166,7 @@ export function saveEvolutionPrefs(prefs: EvolutionPrefsV5): void {
       prefs.assetClass != null && CLASSES.has(prefs.assetClass)
         ? prefs.assetClass
         : null,
+    classMetric: METRICS.has(prefs.classMetric ?? "") ? prefs.classMetric : "value",
   };
   saveUiPref(EVOLUTION_PREFS_KEY, payload);
 }

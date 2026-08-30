@@ -156,6 +156,60 @@ function assetClassOf(raw: string | undefined): ValuationAssetClass {
     : "AUTRE";
 }
 
+/**
+ * Flux externes d'un point, ventilés par classe d'actif.
+ *
+ * Un `Record` complet plutôt qu'une `Map` partielle : toutes les classes
+ * existent toujours, à zéro par défaut. Une classe absente et une classe sans
+ * flux ne doivent pas se distinguer, sinon la somme des classes cesserait
+ * d'être comparable au total.
+ */
+export type FlowsByAssetClass = Record<ValuationAssetClass, Decimal>;
+
+function emptyFlows(): FlowsByAssetClass {
+  const out = {} as FlowsByAssetClass;
+  for (const c of VALUATION_ASSET_CLASSES) out[c] = zero();
+  return out;
+}
+
+function addFlow(
+  flows: FlowsByAssetClass,
+  cls: ValuationAssetClass,
+  amount: Decimal
+): void {
+  flows[cls] = flows[cls].plus(amount);
+}
+
+function totalFlows(flows: FlowsByAssetClass): Decimal {
+  let total = zero();
+  for (const c of VALUATION_ASSET_CLASSES) total = total.plus(flows[c]);
+  return total;
+}
+
+/**
+ * Compartiment d'une poche → classe d'actif.
+ *
+ * Les poches sans position au journal n'ont pas de `assetClass` : leur flux
+ * doit néanmoins rejoindre une classe, sous peine de casser l'identité
+ * `Σ flux de classe = flux externes`. La trésorerie est du cash sans
+ * ambiguïté ; les alternatifs et l'épargne salariale n'ont pas de classe
+ * dédiée dans cette taxonomie à six valeurs et rejoignent `AUTRE` — le même
+ * routage que celui déjà appliqué à leurs **valeurs**, pour que flux et valeur
+ * ne se retrouvent jamais dans deux classes différentes.
+ */
+function classOfComponent(comp: ValuationComponent): ValuationAssetClass {
+  switch (comp) {
+    case "cash":
+      return "CASH";
+    case "crypto":
+      return "CRYPTO";
+    case "realEstate":
+      return "IMMOBILIER";
+    default:
+      return "AUTRE";
+  }
+}
+
 /** Ventilation d'une classe d'actif du journal vers un compartiment. */
 function componentOfAssetClass(assetClass: string | undefined): ValuationComponent {
   switch (assetClass) {
@@ -276,22 +330,32 @@ export class PortfolioValuationEngine {
     let cursor = 0;
     // Flux du journal cumulés dans la journée courante — remis à zéro à chaque
     // jour, car un flux appartient au jour où il a eu lieu.
-    let ledgerFlowToday = zero();
+    let ledgerFlowToday = emptyFlows();
 
     const out: PortfolioValuationPoint[] = [];
     let previousGross: Decimal | null = null;
 
     for (const day of days) {
-      ledgerFlowToday = zero();
+      ledgerFlowToday = emptyFlows();
       while (cursor < this.sortedTxs.length) {
         const tx = this.sortedTxs[cursor]!;
         if (this.txDays[cursor]! > day) break;
-        ledgerFlowToday = ledgerFlowToday.plus(ledgerExternalFlow(tx));
+        this.accumulateLedgerFlow(ledgerFlowToday, tx);
         applyLedgerTx(state, tx);
         cursor += 1;
       }
 
-      const point = this.valuationAt(day, state, ledgerFlowToday, previousGross);
+      const point = this.valuationAt(
+        day,
+        state,
+        ledgerFlowToday,
+        previousGross,
+        undefined,
+        true,
+        // La ventilation de la veille — la seule référence qui rende la
+        // performance d'une classe mesurable.
+        out.length > 0 ? out[out.length - 1]!.byAssetClass : null
+      );
       out.push(point);
       previousGross = d(point.grossAssets);
     }
@@ -316,6 +380,30 @@ export class PortfolioValuationEngine {
    * courbe existante, ce qui n'est pas l'objet de ce chantier. Le résolveur
    * quotidien déclare donc `observed: true`, comme avant.
    */
+  /**
+   * Ajoute le flux d'une transaction à sa classe — ou l'écarte.
+   *
+   * Deux règles, dans cet ordre :
+   *
+   * 1. **Un actif exclu du patrimoine n'apporte aucun flux.** Sa valeur est
+   *    déjà écartée de la valorisation ; compter son achat comme un apport
+   *    faisait plonger la performance du montant exact de l'achat, sans
+   *    qu'aucun marché n'ait bougé. C'était le seul endroit du moteur où
+   *    valeur et flux ne parlaient pas du même périmètre.
+   * 2. **Un flux nul ne cherche pas de classe.** Apports, retraits et
+   *    transferts ne touchent que le cash du journal, hors périmètre : ils
+   *    rendent zéro, et il n'y a donc rien à attribuer. Leur inventer une
+   *    classe serait une décision métier que la donnée ne porte pas.
+   */
+  private accumulateLedgerFlow(flows: FlowsByAssetClass, tx: LedgerTx): void {
+    if (tx.assetId && this.inputs.excludedAssetIds.has(tx.assetId)) return;
+
+    const amount = ledgerExternalFlow(tx);
+    if (amount.isZero()) return;
+
+    addFlow(flows, assetClassOf(this.inputs.rawAssetClassById.get(tx.assetId ?? "")), amount);
+  }
+
   private dailyPriceResolver(day: DayKey): PriceResolver {
     return (assetId) => {
       const close = closeAtOrBefore(this.inputs.closes.get(assetId), day);
@@ -336,10 +424,17 @@ export class PortfolioValuationEngine {
   valuationAt(
     day: DayKey,
     state: LedgerState,
-    ledgerFlowToday: Decimal,
+    ledgerFlowToday: FlowsByAssetClass,
     previousGross: Decimal | null,
     priceAt?: PriceResolver,
-    countSleeveFlows = true
+    countSleeveFlows = true,
+    /**
+     * Ventilation du point précédent, pour la performance par classe.
+     *
+     * `null` au premier point d'une série : sans veille, une classe n'a pas de
+     * variation mesurable — et zéro serait une affirmation, pas une absence.
+     */
+    previousByClass: Record<ValuationAssetClass, number> | null = null
   ): PortfolioValuationPoint {
     const estimated = new Set<ValuationComponent>();
 
@@ -506,12 +601,31 @@ export class PortfolioValuationEngine {
       porte ceux survenus depuis le point précédent, et n'a pas besoin de cette
       précaution.
     */
-    const sleeveFlows = countSleeveFlows
-      ? (this.cash.flowsByDay.get(day) ?? zero())
-          .plus(this.alternatives.flowsByDay.get(day) ?? zero())
-          .plus(this.employeeSavings.flowsByDay.get(day) ?? zero())
-      : zero();
-    const externalFlows = ledgerFlowToday.plus(sleeveFlows);
+    /*
+      Les flux de poches rejoignent la même ventilation que leurs valeurs.
+
+      La trésorerie va à `CASH`, les alternatifs et l'épargne salariale à
+      `AUTRE` : exactement le routage appliqué plus haut à leurs montants. Les
+      séparer ferait qu'un versement sur livret apparaîtrait comme un flux
+      d'une classe dont la valeur n'a pas bougé — et la performance des deux
+      classes concernées serait fausse en sens contraire.
+    */
+    const flowsByClass = emptyFlows();
+    for (const c of VALUATION_ASSET_CLASSES) flowsByClass[c] = ledgerFlowToday[c];
+    if (countSleeveFlows) {
+      addFlow(flowsByClass, classOfComponent("cash"), this.cash.flowsByDay.get(day) ?? zero());
+      addFlow(
+        flowsByClass,
+        classOfComponent("alternatives"),
+        this.alternatives.flowsByDay.get(day) ?? zero()
+      );
+      addFlow(
+        flowsByClass,
+        classOfComponent("employeeSavings"),
+        this.employeeSavings.flowsByDay.get(day) ?? zero()
+      );
+    }
+    const externalFlows = totalFlows(flowsByClass);
 
     /*
       Performance = ce que la journée a produit, une fois les mouvements de
@@ -521,6 +635,25 @@ export class PortfolioValuationEngine {
     */
     const investmentPerformance =
       previousGross == null ? zero() : grossAssets.minus(previousGross).minus(externalFlows);
+
+    /*
+      Performance par classe — la même arithmétique, appliquée classe par
+      classe. Ce n'est pas un second calcul : c'est la décomposition du
+      premier, terme à terme.
+
+      `null` sans point précédent, pour la même raison que la performance
+      globale vaut zéro au premier point : il n'y a rien à comparer, et
+      publier 0 % laisserait croire à une classe stable.
+    */
+    const performanceByClass =
+      previousByClass == null
+        ? null
+        : (Object.fromEntries(
+            VALUATION_ASSET_CLASSES.map((c) => [
+              c,
+              byClass[c].minus(d(previousByClass[c])).minus(flowsByClass[c]).toNumber(),
+            ])
+          ) as Record<ValuationAssetClass, number>);
 
     const status: HistoricalDataStatus =
       estimated.size === 0 ? "EXACT" : "ESTIMATED";
@@ -538,6 +671,12 @@ export class PortfolioValuationEngine {
       byAssetClass: Object.fromEntries(
         VALUATION_ASSET_CLASSES.map((c) => [c, byClass[c].toNumber()])
       ) as Record<ValuationAssetClass, number>,
+
+      flowsByAssetClass: Object.fromEntries(
+        VALUATION_ASSET_CLASSES.map((c) => [c, flowsByClass[c].toNumber()])
+      ) as Record<ValuationAssetClass, number>,
+
+      performanceByAssetClass: performanceByClass,
 
       grossAssets: grossAssets.toNumber(),
       liabilities: liabilities.totalEur.toNumber(),
@@ -598,11 +737,11 @@ export class PortfolioValuationEngine {
 
       // Flux du journal survenus depuis le point précédent : la fenêtre est
       // l'intervalle entre deux points, pas la journée entière.
-      let ledgerFlowSincePrevious = zero();
+      const ledgerFlowSincePrevious = emptyFlows();
       while (cursor < this.sortedTxs.length) {
         const tx = this.sortedTxs[cursor]!;
         if (tx.occurredAt.getTime() > ms) break;
-        ledgerFlowSincePrevious = ledgerFlowSincePrevious.plus(ledgerExternalFlow(tx));
+        this.accumulateLedgerFlow(ledgerFlowSincePrevious, tx);
         applyLedgerTx(state, tx);
         cursor += 1;
       }
@@ -617,7 +756,10 @@ export class PortfolioValuationEngine {
         ledgerFlowSincePrevious,
         previousGross,
         resolverAt(at),
-        firstPointOfDay
+        firstPointOfDay,
+        // Même référence qu'en quotidien : le point précédent de la série,
+        // ici l'intervalle horaire d'avant et non la veille.
+        out.length > 0 ? out[out.length - 1]!.byAssetClass : null
       );
       out.push({ ...point, at });
       previousGross = d(point.grossAssets);
@@ -636,12 +778,12 @@ export class PortfolioValuationEngine {
    */
   calculateAt(day: DayKey): PortfolioValuationPoint {
     const state = createEmptyLedger();
-    let flowToday = zero();
+    const flowToday = emptyFlows();
     for (let i = 0; i < this.sortedTxs.length; i++) {
       const tx = this.sortedTxs[i]!;
       const txDay = this.txDays[i]!;
       if (txDay > day) break;
-      if (txDay === day) flowToday = flowToday.plus(ledgerExternalFlow(tx));
+      if (txDay === day) this.accumulateLedgerFlow(flowToday, tx);
       applyLedgerTx(state, tx);
     }
     return this.valuationAt(day, state, flowToday, null);

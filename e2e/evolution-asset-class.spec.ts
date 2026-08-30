@@ -61,6 +61,65 @@ test.describe("Évolution — par classe d'actif", () => {
     expect(somme).toBeCloseTo(Number(dernier.grossAssetsBase), 2);
   });
 
+  test("Valeur et Performance sont deux lectures distinctes", async ({ page }) => {
+    const panel = page.getByTestId("portfolio-evolution-panel");
+
+    // Sans classe, la distinction n'a pas d'objet : le sélecteur est absent.
+    await expect(page.getByTestId("evolution-metric-value")).toHaveCount(0);
+
+    await page.getByTestId("evolution-class-CRYPTO").click();
+    await expect(panel).toContainText("Crypto — valeur", { timeout: 15_000 });
+
+    await page.getByTestId("evolution-metric-performance").click();
+    await expect(panel).toContainText("Crypto — performance", { timeout: 15_000 });
+
+    /*
+      Les deux grandeurs ne coïncident pas : l'encours se compte en dizaines de
+      milliers, le résultat cumulé est d'un tout autre ordre. Vérifier
+      seulement que le libellé change laisserait passer une courbe identique
+      sous deux noms.
+    */
+    const body = await (await page.request.get("/api/portfolio?base=EUR")).json();
+    const dernier = [...(body.history ?? [])]
+      .reverse()
+      .find((p: { byAssetClassBase?: Record<string, number> }) => p.byAssetClassBase);
+
+    expect(dernier.flowsByAssetClassBase).toBeTruthy();
+    expect(Number(dernier.byAssetClassBase.CRYPTO)).toBeGreaterThan(0);
+    // La performance d'un jour calme est très inférieure à l'encours.
+    const perf = dernier.performanceByAssetClassBase?.CRYPTO;
+    if (perf != null) {
+      expect(Math.abs(Number(perf))).toBeLessThan(
+        Number(dernier.byAssetClassBase.CRYPTO)
+      );
+    }
+  });
+
+  test("les trois identités tiennent dans la réponse de l'API", async ({ page }) => {
+    const body = await (await page.request.get("/api/portfolio?base=EUR")).json();
+    const points = (body.history ?? []).filter(
+      (p: { byAssetClassBase?: unknown }) => p.byAssetClassBase
+    );
+    expect(points.length).toBeGreaterThan(0);
+
+    const somme = (r: Record<string, number>) =>
+      Object.values(r).reduce((a, b) => a + Number(b), 0);
+
+    for (const p of points) {
+      expect(somme(p.byAssetClassBase)).toBeCloseTo(Number(p.grossAssetsBase), 2);
+      expect(somme(p.flowsByAssetClassBase)).toBeCloseTo(
+        Number(p.externalFlowsBase),
+        2
+      );
+      if (p.performanceByAssetClassBase) {
+        expect(somme(p.performanceByAssetClassBase)).toBeCloseTo(
+          Number(p.investmentPerformanceBase),
+          2
+        );
+      }
+    }
+  });
+
   test("revenir à « Tout » restaure le patrimoine entier", async ({ page }) => {
     const panel = page.getByTestId("portfolio-evolution-panel");
 

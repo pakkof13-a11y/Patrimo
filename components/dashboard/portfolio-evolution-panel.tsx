@@ -86,6 +86,26 @@ const CLASS_CHOICES: {
   },
 ];
 
+/**
+ * Ce que la courbe trace pour une classe.
+ *
+ * Les deux libellés sont explicites, et jamais interchangés : une variation de
+ * valeur inclut les apports, une performance ne les compte pas.
+ */
+const METRIC_CHOICES: {
+  id: "value" | "performance";
+  label: string;
+  title: string;
+}[] = [
+  { id: "value", label: "Valeur", title: "Encours de la classe, apports compris" },
+  {
+    id: "performance",
+    label: "Performance",
+    title:
+      "Résultat cumulé de la classe, mouvements de capitaux retirés — hors revenus encaissés",
+  },
+];
+
 const SCOPE_CHOICES: {
   id: EvolutionScope;
   label: string;
@@ -227,6 +247,7 @@ export function PortfolioEvolutionPanel({
 
   const { range, versus, indexKey, scope } = prefs;
   const assetClass = prefs.assetClass ?? null;
+  const classMetric = prefs.classMetric ?? "value";
 
   /*
     L'échelle n'est pas mémorisée avec les autres préférences : c'est une façon
@@ -284,7 +305,33 @@ export function PortfolioEvolutionPanel({
     */
     if (assetClass) {
       const out = [];
+      /*
+        Deux lectures possibles de la même classe.
+
+        « Valeur » trace l'encours, apports compris. « Performance » trace ce
+        que le marché a produit, une fois les mouvements de capitaux retirés —
+        c'est un **cumul** de résultats quotidiens, pas un encours, d'où
+        l'accumulation ci-dessous. Les présenter sous le même nom ferait passer
+        un versement pour un gain.
+
+        La performance n'existe pas au premier point d'une série : sans veille,
+        rien n'est comparable. Ces points sont écartés plutôt que ramenés à
+        zéro.
+      */
+      let cumul = 0;
       for (const p of history) {
+        if (classMetric === "performance") {
+          const perf = p.performanceByAssetClassBase?.[assetClass];
+          if (perf == null) continue;
+          cumul += perf;
+          out.push({
+            ...p,
+            totalValueBase: cumul,
+            totalValueEur: cumul,
+            netWorthBase: cumul,
+          });
+          continue;
+        }
         const v = p.byAssetClassBase?.[assetClass];
         if (v == null) continue;
         out.push({ ...p, totalValueBase: v, totalValueEur: v, netWorthBase: v });
@@ -297,7 +344,7 @@ export function PortfolioEvolutionPanel({
         ? p
         : { ...p, totalValueBase: p.netWorthBase, totalValueEur: p.netWorthBase }
     );
-  }, [history, scope, assetClass]);
+  }, [history, scope, assetClass, classMetric]);
 
   const { points: rawPoints, interval } = useMemo(
     () => buildEvolutionSeries(scopedHistory, range, "cumul"),
@@ -405,8 +452,7 @@ export function PortfolioEvolutionPanel({
         subtitle={
           <>
             {assetClass
-              ? (CLASS_CHOICES.find((c) => c.id === assetClass)?.label ??
-                assetClass)
+              ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass} — ${classMetric === "performance" ? "performance" : "valeur"}`
               : scope === "net"
                 ? "Patrimoine net"
                 : "Actifs bruts"}
@@ -527,6 +573,19 @@ export function PortfolioEvolutionPanel({
             ariaLabel="Classe d'actifs"
             testIdPrefix="evolution-class"
           />
+          {/*
+            Valeur ou performance : la distinction n'a de sens que sur une
+            classe, la courbe globale ayant déjà sa propre lecture.
+          */}
+          {assetClass && (
+            <Segmented
+              items={METRIC_CHOICES}
+              value={classMetric}
+              onChange={(v) => update({ classMetric: v })}
+              ariaLabel="Grandeur tracée"
+              testIdPrefix="evolution-metric"
+            />
+          )}
           {/*
             Brut ou net ne se pose que sur le patrimoine entier : les dettes
             n'appartiennent à aucune classe, et proposer « Crypto nette »

@@ -271,6 +271,19 @@ export type HistoryPoint = {
    * IMMOBILIER, CASH, AUTRE. Somme exactement égale à `grossAssetsBase`.
    */
   byAssetClassBase?: Record<string, number>;
+  /**
+   * Capital externe entré ou sorti ce jour-là, par classe. Somme égale à
+   * `externalFlowsBase`.
+   */
+  flowsByAssetClassBase?: Record<string, number>;
+  /**
+   * `valeur(D) − valeur(D−1) − flux(D)` par classe. Absent au premier point
+   * d'une série : sans veille, rien n'est comparable.
+   *
+   * **Hors revenus encaissés** — dividendes, coupons et loyers restent hors
+   * périmètre, comme pour la performance globale.
+   */
+  performanceByAssetClassBase?: Record<string, number>;
   securitiesBase?: number;
   cryptoBase?: number;
   realEstateBase?: number;
