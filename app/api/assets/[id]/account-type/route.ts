@@ -8,6 +8,7 @@ import {
   detailRequirementError,
 } from "@/app/lib/assets/envelope-requirements";
 import { envelopeChangeBreaksAttachment } from "@/app/lib/securities/constants";
+import { recordEnvelopeEvent } from "@/app/lib/securities/envelope-history";
 
 async function updateAccountType(req: Request, id: string) {
   const userId = await requireUserId();
@@ -78,17 +79,43 @@ async function updateAccountType(req: Request, id: string) {
     parsed.data.accountType
   );
 
-  const write = await prisma.asset.updateMany({
-    where: { id, userId },
-    data: {
-      accountType: parsed.data.accountType,
-      ...(detache ? { securitiesAccountId: null } : {}),
-    },
+  /*
+    L'état courant et sa trace historique changent ensemble, ou pas du tout.
+
+    Sans transaction, une écriture réussie suivie d'une journalisation en échec
+    laisserait durablement un `accountType` que le journal contredit — et une
+    future courbe lirait alors une histoire que l'écran dément.
+  */
+  const updated = await prisma.$transaction(async (tx) => {
+    const write = await tx.asset.updateMany({
+      where: { id, userId },
+      data: {
+        accountType: parsed.data.accountType,
+        ...(detache ? { securitiesAccountId: null } : {}),
+      },
+    });
+    if (write.count === 0) return null;
+
+    const apres = await tx.asset.findFirst({
+      where: { id, userId },
+      include: { securitiesAccount: { select: { envelopeType: true } } },
+    });
+    if (!apres) return null;
+
+    await recordEnvelopeEvent(tx, {
+      assetId: apres.id,
+      userId,
+      kind: "CHANGED",
+      state: {
+        accountType: apres.accountType,
+        securitiesAccountId: apres.securitiesAccountId,
+        envelopeType: apres.securitiesAccount?.envelopeType ?? null,
+      },
+    });
+
+    return apres;
   });
-  if (write.count === 0) {
-    return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });
-  }
-  const updated = await prisma.asset.findFirst({ where: { id, userId } });
+
   if (!updated) {
     return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });
   }

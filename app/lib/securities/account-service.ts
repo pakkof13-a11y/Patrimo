@@ -11,6 +11,7 @@
 import { Prisma } from "../prisma-client/client";
 import { prisma } from "../prisma";
 import { owned, wroteOne } from "../db/tenant-scope";
+import { recordEnvelopeEvent } from "./envelope-history";
 import {
   accountTypeForEnvelope,
   isSecuritiesEnvelopeType,
@@ -233,16 +234,44 @@ export async function deleteAccount(
 ): Promise<{ deleted: boolean; detachedPositions: number }> {
   const account = await prisma.securitiesAccount.findFirst({
     where: owned(id, userId),
-    select: { _count: { select: { assets: true } } },
+    select: {
+      envelopeType: true,
+      // Les lignes détachées sont nommées avant la suppression : après, la
+      // base les aura déjà déliées et il n'y aurait plus rien à journaliser.
+      assets: { select: { id: true, accountType: true } },
+    },
   });
   if (!account) return { deleted: false, detachedPositions: 0 };
 
-  const result = await prisma.securitiesAccount.deleteMany({
-    where: owned(id, userId),
+  /*
+    Le détachement par suppression de compte n'a aucun code applicatif : il se
+    produit dans la base, par `SetNull`, à la seconde où le compte disparaît.
+    C'était donc la seule porte capable de changer le rattachement d'une ligne
+    sans laisser la moindre trace.
+
+    On journalise avant, dans la même transaction : chaque ligne enregistre
+    qu'elle devient non rattachée, puis le compte est supprimé. L'ordre
+    importe — après, on ne saurait plus quelles lignes il portait.
+  */
+  const result = await prisma.$transaction(async (tx) => {
+    for (const a of account.assets) {
+      await recordEnvelopeEvent(tx, {
+        assetId: a.id,
+        userId,
+        kind: "CHANGED",
+        state: {
+          accountType: a.accountType,
+          securitiesAccountId: null,
+          envelopeType: null,
+        },
+      });
+    }
+    return tx.securitiesAccount.deleteMany({ where: owned(id, userId) });
   });
+
   return {
     deleted: wroteOne(result),
-    detachedPositions: account._count.assets,
+    detachedPositions: account.assets.length,
   };
 }
 
@@ -266,6 +295,8 @@ export async function setAssetAccount(
   });
   if (!asset) throw new SecuritiesInputError("Position introuvable");
 
+  let envelopeType: string | null = null;
+
   if (securitiesAccountId) {
     const account = await prisma.securitiesAccount.findFirst({
       where: owned(securitiesAccountId, userId),
@@ -281,10 +312,31 @@ export async function setAssetAccount(
         `Cette position est en enveloppe ${asset.accountType}, elle ne peut pas être rattachée à un ${securitiesEnvelopeLabel(account.envelopeType)}.`
       );
     }
+    envelopeType = account.envelopeType;
   }
 
-  await prisma.asset.update({
-    where: { id: assetId },
-    data: { securitiesAccountId },
+  /*
+    Rattachement et journalisation dans la même transaction.
+
+    Un rattachement change ce qu'était la ligne à partir de cet instant : c'est
+    un événement historique au même titre qu'un changement d'enveloppe. Le
+    détachement en est un aussi — `securitiesAccountId` à `null` est un fait,
+    pas une absence de fait.
+  */
+  await prisma.$transaction(async (tx) => {
+    await tx.asset.update({
+      where: { id: assetId },
+      data: { securitiesAccountId },
+    });
+    await recordEnvelopeEvent(tx, {
+      assetId,
+      userId,
+      kind: "CHANGED",
+      state: {
+        accountType: asset.accountType,
+        securitiesAccountId,
+        envelopeType,
+      },
+    });
   });
 }

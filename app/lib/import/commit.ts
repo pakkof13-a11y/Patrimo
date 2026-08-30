@@ -1,3 +1,4 @@
+import { recordEnvelopeEvent } from "@/app/lib/securities/envelope-history";
 import { prisma } from "../prisma";
 import { createTransaction, createOwnershipCache } from "../transactions/service";
 import { loadLedgerForUser } from "../portfolio/service";
@@ -159,19 +160,49 @@ async function resolveOrCreateAsset(
       ? resolveCoingeckoId(ticker) || ticker
       : ticker || null;
 
-  const created = await prisma.asset.create({
-    data: {
+  /*
+    Création et constat d'enveloppe dans la même transaction.
+
+    La date retenue est celle de la **création de la ligne**, pas celle des
+    opérations importées. Un fichier peut porter des transactions de 2023 sans
+    rien dire de l'enveloppe qui les abritait alors : la déduire reviendrait à
+    fabriquer un passé. Ce que l'import démontre, c'est qu'à l'instant de
+    l'import la ligne est dans cette enveloppe — et c'est tout ce qui est
+    enregistré.
+
+    Limite assumée, et documentée : pour une ligne importée, les périodes
+    antérieures à l'import restent inconnues, même si ses opérations sont
+    anciennes.
+  */
+  const created = await prisma.$transaction(async (tx) => {
+    const asset = await tx.asset.create({
+      data: {
+        userId,
+        platformId,
+        name,
+        ticker: ticker || null,
+        assetClass,
+        currency: row.currency || "EUR",
+        accountType,
+        priceProvider,
+        providerSymbol,
+        logoUrl: logoUrl || null,
+      },
+    });
+
+    await recordEnvelopeEvent(tx, {
+      assetId: asset.id,
       userId,
-      platformId,
-      name,
-      ticker: ticker || null,
-      assetClass,
-      currency: row.currency || "EUR",
-      accountType,
-      priceProvider,
-      providerSymbol,
-      logoUrl: logoUrl || null,
-    },
+      kind: "OBSERVED",
+      state: {
+        accountType: asset.accountType,
+        securitiesAccountId: asset.securitiesAccountId,
+        envelopeType: null,
+      },
+      occurredAt: asset.createdAt,
+    });
+
+    return asset;
   });
 
   return remember(created.id);

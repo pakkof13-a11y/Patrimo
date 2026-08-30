@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/app/lib/prisma-client/client";
+import { recordEnvelopeEvent } from "@/app/lib/securities/envelope-history";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { addAssetSchema } from "@/app/lib/schemas";
@@ -149,6 +150,29 @@ export async function POST(req: Request) {
         },
       });
     }
+
+    /*
+      Constat d'entrée dans l'enveloppe, à la date de création.
+
+      C'est le seul cas où cette date est connue avec certitude : la ligne
+      naît ici, dans cette enveloppe, à cet instant. `OBSERVED` et non
+      `CHANGED` — rien n'a changé, on constate un point de départ.
+
+      Les enveloppes non titres sont journalisées elles aussi : une ligne
+      créée en CRYPTO puis reclassée en CTO aura ainsi un passé démontré au
+      lieu d'un trou.
+    */
+    await recordEnvelopeEvent(tx, {
+      assetId: created.id,
+      userId,
+      kind: "OBSERVED",
+      state: {
+        accountType: created.accountType,
+        securitiesAccountId: created.securitiesAccountId,
+        envelopeType: null,
+      },
+      occurredAt: created.createdAt,
+    });
 
     return created;
   });

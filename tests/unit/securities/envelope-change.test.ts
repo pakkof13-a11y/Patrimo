@@ -20,14 +20,35 @@ import { envelopeChangeBreaksAttachment } from "@/app/lib/securities/constants";
 const assetFindFirst = vi.fn();
 const assetUpdateMany = vi.fn();
 
+/**
+ * L'écriture passe désormais par une transaction : état courant et journal
+ * d'enveloppe changent ensemble ou pas du tout. Le mock exécute le rappel avec
+ * le client lui-même — ces tests portent sur ce que la route écrit, pas sur la
+ * sémantique transactionnelle de PostgreSQL.
+ */
+const envelopeEventCreate = vi.fn();
+
 vi.mock("@/app/lib/prisma", () => ({
   prisma: {
+    $transaction: (fn: (tx: unknown) => unknown) => fn(mockPrisma),
+    assetEnvelopeEvent: {
+      create: (...a: unknown[]) => envelopeEventCreate(...a),
+    },
     asset: {
       findFirst: (...a: unknown[]) => assetFindFirst(...a),
       updateMany: (...a: unknown[]) => assetUpdateMany(...a),
     },
   },
 }));
+
+/** Le même objet, pour que `$transaction` s'y branche. */
+const mockPrisma = {
+  assetEnvelopeEvent: { create: (...a: unknown[]) => envelopeEventCreate(...a) },
+  asset: {
+    findFirst: (...a: unknown[]) => assetFindFirst(...a),
+    updateMany: (...a: unknown[]) => assetUpdateMany(...a),
+  },
+};
 
 vi.mock("@/app/lib/auth-helpers", () => ({
   requireUserId: async () => "user-1",
@@ -42,8 +63,8 @@ function ligne(over: Record<string, unknown> = {}) {
     userId: "user-1",
     name: "Air Liquide",
     accountType: "PEA",
-    securitiesAccountId: null,
-    securitiesAccount: null,
+    securitiesAccountId: null as string | null,
+    securitiesAccount: null as { envelopeType: string } | null,
     realEstate: null,
     indirectRealEstate: null,
     ...over,
@@ -60,7 +81,17 @@ async function ecritureApresChangement(
   // 1er appel : la lecture ; 2nd : la relecture après écriture.
   assetFindFirst
     .mockResolvedValueOnce(asset)
-    .mockResolvedValueOnce({ ...asset, accountType: vers });
+    .mockResolvedValueOnce({
+      ...asset,
+      accountType: vers,
+      // La route relit la ligne avec son compte pour journaliser le type
+      // d'enveloppe : sans détachement, le rattachement d'origine survit.
+      ...(asset.securitiesAccountId &&
+      ((vers === "PEA" && asset.securitiesAccount?.envelopeType !== "CTO") ||
+        (vers === "CTO" && asset.securitiesAccount?.envelopeType === "CTO"))
+        ? {}
+        : { securitiesAccountId: null, securitiesAccount: null }),
+    });
   assetUpdateMany.mockResolvedValue({ count: 1 });
 
   const res = await PATCH(
@@ -246,5 +277,50 @@ describe("fiscalité — aucune ligne incompatible ne peut rester dans un compte
       { compte: "PEA_PME", ligne: "PEA" },
       { compte: "CTO", ligne: "CTO" },
     ]);
+  });
+});
+
+describe("le changement d'enveloppe laisse une trace historique", () => {
+  it("journalise l'état d'arrivée, pas celui de départ", async () => {
+    /*
+      Le journal enregistre ce qu'est devenue la ligne. Consigner l'état
+      d'avant produirait une histoire décalée d'un cran : chaque période
+      porterait l'enveloppe de la précédente.
+    */
+    envelopeEventCreate.mockReset();
+    await ecritureApresChangement(
+      ligne({
+        accountType: "CTO",
+        securitiesAccountId: "acc-cto",
+        securitiesAccount: { envelopeType: "CTO" },
+      }),
+      "PEA"
+    );
+
+    expect(envelopeEventCreate).toHaveBeenCalledTimes(1);
+    const data = envelopeEventCreate.mock.calls[0]?.[0]?.data;
+    expect(data.kind).toBe("CHANGED");
+    expect(data.accountType).toBe("PEA");
+    // Détachée par le passage CTO → PEA : le journal le reflète.
+    expect(data.securitiesAccountId).toBeNull();
+  });
+
+  it("un changement compatible journalise le compte conservé", async () => {
+    envelopeEventCreate.mockReset();
+    await ecritureApresChangement(
+      ligne({
+        accountType: "PEA",
+        securitiesAccountId: "acc-pea-pme",
+        securitiesAccount: { envelopeType: "PEA_PME" },
+      }),
+      "PEA"
+    );
+
+    const data = envelopeEventCreate.mock.calls[0]?.[0]?.data;
+    expect(data.accountType).toBe("PEA");
+    expect(data.securitiesAccountId).toBe("acc-pea-pme");
+    // Le type est copié dans l'événement : il doit survivre à la suppression
+    // du compte.
+    expect(data.envelopeType).toBe("PEA_PME");
   });
 });

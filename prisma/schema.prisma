@@ -248,6 +248,7 @@ model Asset {
   lifeSupport        LifeInsuranceSupport?
   liabilities        Liability[]
   securitiesAccount  SecuritiesAccount?        @relation(fields: [securitiesAccountId], references: [id], onDelete: SetNull)
+  envelopeEvents     AssetEnvelopeEvent[]
   defiLegs           DefiLeg[]
   defiEvents         DefiEvent[]
   defiRewards        DefiReward[]
@@ -384,6 +385,65 @@ model AssetDailyClose {
 
   @@unique([assetId, day])
   @@index([assetId, day])
+}
+
+/// Journal des enveloppes fiscales d'une ligne titre.
+///
+/// `Asset.accountType` et `Asset.securitiesAccountId` décrivent l'état
+/// **courant**. Ils sont mutables et ne gardent aucune trace : une ligne passée
+/// du CTO au PEA en 2026 paraissait, hier encore, avoir toujours été PEA. Une
+/// courbe historique par enveloppe construite là-dessus aurait réécrit le passé
+/// à chaque reclassement.
+///
+/// Ce journal enregistre ce qui s'est réellement produit, et rien d'autre. Il
+/// ne reconstruit pas le passé antérieur à sa mise en place : une date située
+/// avant le premier événement d'une ligne reste **inconnue**, ce qui est la
+/// réponse juste — `createdAt` mesure l'écriture en base, pas l'entrée dans
+/// l'enveloppe, et le compte de démonstration le montre : ses seize lignes ont
+/// été créées en 2026 alors que leurs opérations remontent à 2023.
+///
+/// `envelopeType` est **dénormalisé** volontairement. Le rattachement pointe
+/// vers un compte que l'utilisateur peut supprimer — `SetNull` détacherait
+/// alors la ligne et effacerait, avec le compte, la nature de l'enveloppe
+/// qu'elle occupait. Un journal dont le passé disparaît avec un compte ne
+/// serait pas un journal.
+model AssetEnvelopeEvent {
+  id      String @id @default(cuid())
+  assetId String
+  /// Redondant avec `asset.userId`, mais indispensable : le filtrage par
+  /// utilisateur ne doit pas dépendre d'une jointure sur une ligne qui pourrait
+  /// disparaître.
+  userId  String
+
+  /// Date **métier** de l'événement — celle où l'enveloppe a changé, distincte
+  /// de `createdAt` qui n'enregistre que le moment de l'écriture.
+  occurredAt DateTime
+
+  /// OBSERVED — constat de l'état à cette date, sans prétendre qu'il valait
+  ///            déjà avant. C'est le premier point de toute ligne existant
+  ///            avant la mise en place du journal.
+  /// CHANGED  — mutation réellement survenue et observée par l'application.
+  kind String
+
+  /// Enveloppe fiscale portée par la ligne à cet instant : CTO | PEA | AV |
+  /// CRYPTO | IMMOBILIER | CFD.
+  accountType String
+
+  /// Compte titres de rattachement à cet instant, `null` si détachée.
+  securitiesAccountId String?
+  /// Type du compte à cet instant — PEA | PEA_PME | CTO. Conservé même si le
+  /// compte est supprimé plus tard.
+  envelopeType        String?
+
+  createdAt DateTime @default(now())
+
+  /// Cascade : l'historique d'enveloppe d'un actif supprimé n'a plus d'objet.
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  /// L'ordre de lecture est chronologique par ligne : c'est exactement cet
+  /// index que `resolveEnvelopeAt` parcourt.
+  @@index([assetId, occurredAt])
+  @@index([userId, occurredAt])
 }
 
 /// Barre intra-séance d'un actif, en EUR — observations réellement collectées.

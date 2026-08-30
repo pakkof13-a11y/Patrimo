@@ -21,8 +21,21 @@ const platformFindFirst = vi.fn();
 const assetFindFirst = vi.fn();
 const assetUpdate = vi.fn();
 
+/**
+ * Journal d'enveloppe : les écritures passent désormais par une transaction.
+ *
+ * Le mock exécute le rappel avec le client lui-même — ces tests portent sur ce
+ * que le service **écrit**, pas sur la sémantique transactionnelle de
+ * PostgreSQL, qui n'est pas simulable ici et n'est pas ce qu'ils vérifient.
+ */
+const envelopeEventCreate = vi.fn();
+
 vi.mock("@/app/lib/prisma", () => ({
   prisma: {
+    $transaction: (fn: (tx: unknown) => unknown) => fn(mockPrisma),
+    assetEnvelopeEvent: {
+      create: (...a: unknown[]) => envelopeEventCreate(...a),
+    },
     securitiesAccount: {
       findFirst: (...a: unknown[]) => accountFindFirst(...a),
       findMany: (...a: unknown[]) => accountFindMany(...a),
@@ -38,6 +51,15 @@ vi.mock("@/app/lib/prisma", () => ({
     },
   },
 }));
+
+/** Le même objet que le mock ci-dessus, pour que `$transaction` s'y branche. */
+const mockPrisma = {
+  assetEnvelopeEvent: { create: (...a: unknown[]) => envelopeEventCreate(...a) },
+  securitiesAccount: {
+    deleteMany: (...a: unknown[]) => accountDeleteMany(...a),
+  },
+  asset: { update: (...a: unknown[]) => assetUpdate(...a) },
+};
 
 const {
   createAccount,
@@ -199,12 +221,55 @@ describe("updateAccount", () => {
 
 describe("deleteAccount", () => {
   it("rapporte le nombre de positions détachées, sans les supprimer", async () => {
-    accountFindFirst.mockResolvedValue({ _count: { assets: 3 } });
+    /*
+      Le service énumère désormais les lignes au lieu de les compter : c'est
+      ce qui lui permet de journaliser chaque détachement avant que la base ne
+      les délie par `SetNull`.
+    */
+    envelopeEventCreate.mockReset();
+    accountFindFirst.mockResolvedValue({
+      envelopeType: "CTO",
+      assets: [
+        { id: "a1", accountType: "CTO" },
+        { id: "a2", accountType: "CTO" },
+        { id: "a3", accountType: "CTO" },
+      ],
+    });
     accountDeleteMany.mockResolvedValue({ count: 1 });
+
     await expect(deleteAccount(USER, "acc-1")).resolves.toEqual({
       deleted: true,
       detachedPositions: 3,
     });
+  });
+
+  it("journalise le détachement de chaque ligne avant la suppression", async () => {
+    /*
+      La suppression détache par `SetNull`, sans code applicatif : c'était la
+      seule porte capable de changer un rattachement sans laisser de trace.
+      Chaque ligne doit donc enregistrer qu'elle devient non rattachée.
+    */
+    envelopeEventCreate.mockReset();
+    accountFindFirst.mockResolvedValue({
+      envelopeType: "PEA",
+      assets: [
+        { id: "a1", accountType: "PEA" },
+        { id: "a2", accountType: "PEA" },
+      ],
+    });
+    accountDeleteMany.mockResolvedValue({ count: 1 });
+
+    await deleteAccount(USER, "acc-1");
+
+    expect(envelopeEventCreate).toHaveBeenCalledTimes(2);
+    for (const appel of envelopeEventCreate.mock.calls) {
+      const data = appel[0]?.data;
+      expect(data.kind).toBe("CHANGED");
+      // Détachée : plus de compte, et le type d'enveloppe suit.
+      expect(data.securitiesAccountId).toBeNull();
+      expect(data.envelopeType).toBeNull();
+      expect(data.accountType).toBe("PEA");
+    }
   });
 
   it("compte inconnu ou d'autrui : rien de supprimé", async () => {
