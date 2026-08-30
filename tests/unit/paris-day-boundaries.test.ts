@@ -57,4 +57,24 @@ describe("journée civile Europe/Paris", () => {
     expect(Number.isNaN(parisDayStart("pas-une-date").getTime())).toBe(true);
     expect(Number.isNaN(endOfParisDay("").getTime())).toBe(true);
   });
+
+  it("tient la profondeur d'une série historique sans s'effondrer", () => {
+    /*
+      Ces fonctions sont appelées une fois par jour civil sur toute la
+      profondeur du portefeuille — plus de dix mille appels par série. Chacune
+      construisait auparavant ses propres formateurs `Intl` : le coût unitaire,
+      négligeable, devenait plusieurs secondes de boucle d'événements bloquée,
+      jusqu'à faire tomber des requêtes concurrentes.
+
+      Le budget est large — on garde une régression d'un ordre de grandeur, pas
+      une variation de machine.
+    */
+    const debut = Date.now();
+    for (let i = 0; i < 10_000; i++) {
+      endOfParisDay(
+        new Date(Date.UTC(2000, 0, 1) + i * 86_400_000).toISOString().slice(0, 10)
+      );
+    }
+    expect(Date.now() - debut).toBeLessThan(2_000);
+  });
 });

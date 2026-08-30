@@ -537,7 +537,8 @@ export class PortfolioValuationEngine {
       clôture. `at` est fourni par la série horaire, sinon la fin de journée
       parisienne fait foi.
     */
-    const resolutionAt = at ?? endOfParisDay(day);
+    const journalVide = this.inputs.envelopeEventsByAsset.size === 0;
+    const resolutionAt = journalVide ? null : (at ?? endOfParisDay(day));
     for (const pos of state.positions.values()) {
       if (pos.quantity.isZero()) continue;
       // Écarté du patrimoine : ni valorisé, ni ventilé — comme au jour le jour.
@@ -570,10 +571,12 @@ export class PortfolioValuationEngine {
         entière du point quotidien — c'est l'état de clôture que la courbe
         décrit — et seulement à partir de 13 h 55 en intraday.
       */
-      const seau = envelopeBucketOf(
-        this.inputs.envelopeEventsByAsset.get(pos.assetId),
-        resolutionAt
-      );
+      const seau = resolutionAt
+        ? envelopeBucketOf(
+            this.inputs.envelopeEventsByAsset.get(pos.assetId),
+            resolutionAt
+          )
+        : null;
       if (seau) {
         const byEnv = positionsByEnvelope.get(seau);
         if (byEnv) byEnv.push(pos);

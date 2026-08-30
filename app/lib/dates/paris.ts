@@ -5,17 +5,34 @@
  * les deux dates de bascule changent chaque année. Un décalage fixe ferait
  * dériver la journée civile deux fois par an.
  */
+/*
+  Formateurs construits une seule fois.
+
+  `new Intl.DateTimeFormat(...)` coûte plusieurs centaines de microsecondes —
+  négligeable à l'unité, décisif dans une série historique qui appelle ces
+  fonctions une fois par jour civil sur dix mille jours. Les instances sont
+  sans état : les réutiliser ne change aucun résultat.
+*/
+const PARIS_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Europe/Paris",
+  hour12: false,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+const PARIS_DAY = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Paris",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 function parisOffsetMs(at: Date): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Europe/Paris",
-    hour12: false,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(at);
+  const parts = PARIS_PARTS.formatToParts(at);
   const get = (type: string) =>
     Number(parts.find((p) => p.type === type)?.value ?? "0");
   const asIfUtc = Date.UTC(
@@ -67,10 +84,5 @@ export function endOfParisDay(day: string): Date {
 export function parisDayKey(isoOrDate: string | Date): string {
   const date = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Paris",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
+  return PARIS_DAY.format(date);
 }
