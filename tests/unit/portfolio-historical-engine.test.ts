@@ -21,6 +21,7 @@ function inputs(over: Partial<HistoricalInputs> = {}): HistoricalInputs {
     transactions: [],
     assetClassById: new Map(),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
     excludedAssetIds: new Set(),
     closes: new Map(),
     cashAccounts: [],
@@ -274,6 +275,7 @@ describe("moteur de valorisation historique", () => {
         transactions: [buy("t1", "a1", "2024-01-01", 10, 100)],
         assetClassById: new Map([["a1", "ACTIONS"]]),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
         closes,
       })
     );
@@ -350,6 +352,7 @@ describe("moteur de valorisation historique", () => {
         transactions: [buy("t1", "a1", "2024-01-01", 10, 100)],
         assetClassById: new Map([["a1", "ACTIONS"]]),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
         closes: new Map([["a1", new Map([["2024-01-01", 100]])]]),
         cashAccounts: [
           { id: "b1", balanceEur: d(5_000), createdAt: DAY("2024-01-01") },
@@ -485,6 +488,7 @@ describe("actifs écartés du patrimoine", () => {
           ["ecarte", "CRYPTO"],
         ]),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
         excludedAssetIds: new Set(excluded),
         closes: new Map([
           ["garde", new Map([["2024-01-10", 1000]])],

@@ -165,6 +165,33 @@ export async function loadHistoricalInputs(
     rawAssetClassById.set(a.id, a.assetClass);
   }
 
+  /*
+    Journal des enveloppes fiscales, chargé une fois pour toute la série.
+
+    Le moteur est synchrone : il ne peut pas interroger la base à chaque point
+    d'une série de dix mille jours. Les événements sont donc préchargés et
+    indexés par actif, exactement comme les clôtures et les classes — la
+    résolution se fait ensuite en mémoire, par `resolveEnvelopeFromEvents`.
+  */
+  const envelopeEvents = await prisma.assetEnvelopeEvent.findMany({
+    where: { userId },
+    orderBy: { occurredAt: "asc" },
+    select: {
+      assetId: true,
+      occurredAt: true,
+      accountType: true,
+      securitiesAccountId: true,
+      envelopeType: true,
+    },
+  });
+
+  const envelopeEventsByAsset = new Map<string, typeof envelopeEvents>();
+  for (const e of envelopeEvents) {
+    const liste = envelopeEventsByAsset.get(e.assetId);
+    if (liste) liste.push(e);
+    else envelopeEventsByAsset.set(e.assetId, [e]);
+  }
+
   const closes = await loadCloses(transactions, assets.map((a) => a.id));
 
   /*
@@ -288,6 +315,7 @@ export async function loadHistoricalInputs(
     transactions,
     assetClassById,
     rawAssetClassById,
+    envelopeEventsByAsset,
     excludedAssetIds,
     closes,
     cashAccounts,

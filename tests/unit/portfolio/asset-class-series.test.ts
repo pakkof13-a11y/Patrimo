@@ -42,6 +42,7 @@ function inputs(over: Partial<HistoricalInputs> = {}): HistoricalInputs {
     transactions: [],
     assetClassById: new Map(),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
     excludedAssetIds: new Set(),
     closes: new Map(),
     cashAccounts: [],
@@ -136,6 +137,7 @@ describe("§18 — le test critique : Crypto est la poche, pas Bitcoin", () => {
           ["eth", "CRYPTO"],
           ["sol", "CRYPTO"],
         ]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([
           ["btc", "CRYPTO"],
           ["eth", "CRYPTO"],
@@ -208,6 +210,7 @@ describe("classes séparées et périmètre daté", () => {
           ["act", "ACTIONS"],
           ["obl", "OBLIGATIONS"],
         ]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([
           ["act", "ACTIONS"],
           ["obl", "OBLIGATIONS"],
@@ -231,6 +234,7 @@ describe("classes séparées et périmètre daté", () => {
       inputs({
         transactions: [buy("t1", "act", "2024-01-01", 10, 100)],
         rawAssetClassById: new Map([["act", "ACTIONS"]]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([["act", "ACTIONS"]]),
         closes: closes({ act: { "2024-01-01": 100 } }),
       })
@@ -253,6 +257,7 @@ describe("classes séparées et périmètre daté", () => {
           ["btc", "CRYPTO"],
           ["nft", "CRYPTO"],
         ]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([
           ["btc", "CRYPTO"],
           ["nft", "CRYPTO"],
@@ -279,6 +284,7 @@ describe("classes séparées et périmètre daté", () => {
       inputs({
         transactions: [buy("t1", "x", "2024-01-01", 1, 700)],
         rawAssetClassById: new Map([["x", "CLASSE_HERITEE"]]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([["x", "CLASSE_HERITEE"]]),
         closes: closes({ x: { "2024-01-01": 700 } }),
       })
@@ -306,6 +312,7 @@ describe("§13 — la partition, vérifiée au centime", () => {
           ["btc", "CRYPTO"],
           ["imm", "IMMOBILIER"],
         ]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([
           ["act", "ACTIONS"],
           ["obl", "OBLIGATIONS"],
@@ -345,6 +352,7 @@ describe("§13 — la partition, vérifiée au centime", () => {
           ["act", "ACTIONS"],
           ["btc", "CRYPTO"],
         ]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([
           ["act", "ACTIONS"],
           ["btc", "CRYPTO"],
@@ -394,6 +402,7 @@ describe("§19 — un apport n'est pas une performance", () => {
           buy("t2", "btc", "2024-01-02", 0.5, 10_000),
         ],
         rawAssetClassById: new Map([["btc", "CRYPTO"]]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([["btc", "CRYPTO"]]),
         closes: closes({ btc: { "2024-01-01": 10_000, "2024-01-02": 10_000 } }),
       })
@@ -425,6 +434,7 @@ describe("§10 — le statut n'est pas dilué par la ventilation", () => {
       inputs({
         transactions: [buy("t1", "act", "2024-01-01", 10, 100)],
         rawAssetClassById: new Map([["act", "ACTIONS"]]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([["act", "ACTIONS"]]),
         closes: closes({ act: { "2024-01-01": 100 } }),
         cashAccounts: [
@@ -455,6 +465,7 @@ describe("§10 — le statut n'est pas dilué par la ventilation", () => {
       inputs({
         transactions: [buy("t1", "act", "2024-01-01", 10, 100)],
         rawAssetClassById: new Map([["act", "ACTIONS"]]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([["act", "ACTIONS"]]),
         closes: closes({ act: { "2024-01-01": 100 } }),
       })
@@ -545,6 +556,7 @@ describe("§1 — un actif exclu ne fabrique pas de contre-performance", () => {
           ["act", "ACTIONS"],
           ["nft", "CRYPTO"],
         ]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([
           ["act", "ACTIONS"],
           ["nft", "CRYPTO"],
@@ -585,6 +597,7 @@ describe("§1 — un actif exclu ne fabrique pas de contre-performance", () => {
           buy("t2", "act", "2024-01-02", 5, 100),
         ],
         rawAssetClassById: new Map([["act", "ACTIONS"]]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([["act", "ACTIONS"]]),
         closes: closes({ act: { "2024-01-01": 100, "2024-01-02": 100 } }),
       })
@@ -619,6 +632,7 @@ describe("§8 — flux et performance par classe, le scénario Crypto", () => {
           ["btc", "CRYPTO"],
           ["eth", "CRYPTO"],
         ]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([
           ["btc", "CRYPTO"],
           ["eth", "CRYPTO"],
@@ -703,6 +717,7 @@ describe("§13 — chaque nature de flux à sa place", () => {
       inputs({
         transactions: [buy("b0", "act", "2024-01-01", 10, 100), ...txs],
         rawAssetClassById: new Map([["act", "ACTIONS"]]),
+    envelopeEventsByAsset: new Map(),
         assetClassById: new Map([["act", "ACTIONS"]]),
         closes: closes({
           act: { "2024-01-01": 100, "2024-01-02": 100 },

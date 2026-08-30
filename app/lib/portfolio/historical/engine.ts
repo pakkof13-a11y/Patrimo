@@ -36,7 +36,7 @@
  * quoi chaque achat se lirait comme une plus-value instantanée.
  */
 
-import { parisDayKey } from "../../dates/paris";
+import { endOfParisDay, parisDayKey } from "../../dates/paris";
 import { toEur } from "../../accounting/fx";
 import { applyTransaction, createEmptyLedger } from "../../accounting/ledger";
 import type { LedgerState, LedgerTx } from "../../accounting/types";
@@ -44,8 +44,11 @@ import { d, zero, type Decimal } from "../../money/decimal";
 import { closeAtOrBefore, type DailyCloseIndex } from "../class-history";
 import {
   VALUATION_ASSET_CLASSES,
+  VALUATION_ENVELOPES,
   type ValuationAssetClass,
+  type ValuationEnvelope,
 } from "./types";
+import { resolveEnvelopeFromEvents } from "../../securities/envelope-history";
 import {
   OBSERVED_AT_DAY,
   OBSERVED_AT_INSTANT,
@@ -103,6 +106,22 @@ export type HistoricalInputs = {
    * fixée à la création et ne peut donc pas réécrire le passé.
    */
   rawAssetClassById: Map<string, string>;
+  /**
+   * Journal des enveloppes, indexé par actif et trié par date métier.
+   *
+   * Préchargé parce que le moteur est synchrone : interroger la base à chaque
+   * point d'une série de dix mille jours serait intenable. La résolution se
+   * fait en mémoire, par la même fonction que le service.
+   */
+  envelopeEventsByAsset: Map<
+    string,
+    Array<{
+      occurredAt: Date;
+      accountType: string;
+      securitiesAccountId: string | null;
+      envelopeType: string | null;
+    }>
+  >;
   /**
    * Actifs écartés du patrimoine — mêmes règles que le moteur du jour.
    *
@@ -208,6 +227,57 @@ function classOfComponent(comp: ValuationComponent): ValuationAssetClass {
     default:
       return "AUTRE";
   }
+}
+
+/**
+ * Seau d'enveloppe d'une ligne à une date — ou `null` si elle n'est pas une
+ * ligne titres.
+ *
+ * Trois règles, dans cet ordre.
+ *
+ * L'enveloppe résolue fait foi quand elle est connue : `PEA_PME` rejoint `PEA`,
+ * comme le fait déjà `accountTypeForEnvelope`. Une ligne sortie des enveloppes
+ * titres — devenue AV, crypto, immobilier — rend `UNATTACHED` et cesse de
+ * contribuer : elle n'est plus un titre, la compter fausserait la courbe.
+ *
+ * Reste `UNKNOWN`. Il ne suffit pas à faire entrer une ligne dans le seau des
+ * inconnues : une position crypto n'a aucun événement et rendrait `UNKNOWN`
+ * elle aussi. On n'y range donc que les lignes dont le journal démontre
+ * qu'elles **sont** des titres — au moins un événement portant `CTO` ou `PEA`.
+ *
+ * La nuance est celle du chantier : « on ne sait pas quelle enveloppe » n'est
+ * pas « on ne sait pas si c'est un titre ». La première appelle un seau
+ * `UNKNOWN` visible ; la seconde, une exclusion pure et simple.
+ */
+function envelopeBucketOf(
+  events:
+    | Array<{
+        occurredAt: Date;
+        accountType: string;
+        securitiesAccountId: string | null;
+        envelopeType: string | null;
+      }>
+    | undefined,
+  at: Date
+): ValuationEnvelope | null {
+  if (!events || events.length === 0) return null;
+
+  const resolu = resolveEnvelopeFromEvents(events, at);
+  if (resolu === "PEA" || resolu === "PEA_PME") return "PEA";
+  if (resolu === "CTO") return "CTO";
+  if (resolu === "UNATTACHED") return null;
+
+  // `UNKNOWN` : la ligne est-elle seulement un titre ?
+  const estUnTitre = events.some(
+    (e) => e.accountType === "CTO" || e.accountType === "PEA"
+  );
+  return estUnTitre ? "UNKNOWN" : null;
+}
+
+function emptyEnvelopes(): Record<ValuationEnvelope, Decimal> {
+  const out = {} as Record<ValuationEnvelope, Decimal>;
+  for (const e of VALUATION_ENVELOPES) out[e] = zero();
+  return out;
 }
 
 /** Ventilation d'une classe d'actif du journal vers un compartiment. */
@@ -434,7 +504,16 @@ export class PortfolioValuationEngine {
      * `null` au premier point d'une série : sans veille, une classe n'a pas de
      * variation mesurable — et zéro serait une affirmation, pas une absence.
      */
-    previousByClass: Record<ValuationAssetClass, number> | null = null
+    previousByClass: Record<ValuationAssetClass, number> | null = null,
+    /**
+     * Instant exact du point, pour un point intra-séance.
+     *
+     * Le journal des enveloppes se lit à une date : la fin de journée
+     * parisienne suffit pour un point quotidien, mais un point de 14 h 37 doit
+     * interroger le journal à 14 h 37 — sans quoi un changement survenu à
+     * 16 h vaudrait dès le matin.
+     */
+    at?: Date
   ): PortfolioValuationPoint {
     const estimated = new Set<ValuationComponent>();
 
@@ -449,6 +528,16 @@ export class PortfolioValuationEngine {
       ValuationAssetClass,
       Array<{ assetId: string; quantity: Decimal; costBasisEur: Decimal }>
     >();
+    const positionsByEnvelope = new Map<
+      ValuationEnvelope,
+      Array<{ assetId: string; quantity: Decimal; costBasisEur: Decimal }>
+    >();
+    /*
+      Un point intra-séance porte son heure ; un point quotidien décrit une
+      clôture. `at` est fourni par la série horaire, sinon la fin de journée
+      parisienne fait foi.
+    */
+    const resolutionAt = at ?? endOfParisDay(day);
     for (const pos of state.positions.values()) {
       if (pos.quantity.isZero()) continue;
       // Écarté du patrimoine : ni valorisé, ni ventilé — comme au jour le jour.
@@ -471,6 +560,25 @@ export class PortfolioValuationEngine {
       const byCls = positionsByClass.get(cls);
       if (byCls) byCls.push(pos);
       else positionsByClass.set(cls, [pos]);
+
+      /*
+        Troisième regroupement, par enveloppe fiscale.
+
+        `resolutionAt` est l'instant auquel le journal est interrogé : la fin
+        de la journée pour un point quotidien, l'heure exacte pour un point
+        intra-séance. Un changement survenu à 13 h 55 vaut donc pour la journée
+        entière du point quotidien — c'est l'état de clôture que la courbe
+        décrit — et seulement à partir de 13 h 55 en intraday.
+      */
+      const seau = envelopeBucketOf(
+        this.inputs.envelopeEventsByAsset.get(pos.assetId),
+        resolutionAt
+      );
+      if (seau) {
+        const byEnv = positionsByEnvelope.get(seau);
+        if (byEnv) byEnv.push(pos);
+        else positionsByEnvelope.set(seau, [pos]);
+      }
     }
 
     /*
@@ -529,6 +637,20 @@ export class PortfolioValuationEngine {
     for (const [cls, positions] of positionsByClass) {
       const { marketEur } = valuePositions(positions, resolve, observedSet);
       byClass[cls] = byClass[cls].plus(marketEur);
+    }
+
+    /*
+      Valorisation par enveloppe — mêmes lignes, même résolveur.
+
+      Troisième regroupement du même total, pas un troisième calcul : les
+      positions sont les mêmes objets, aux mêmes quantités, valorisés par le
+      résolveur déjà construit. Les valoriser à part ferait diverger les
+      arithmétiques.
+    */
+    const byEnv = emptyEnvelopes();
+    for (const [env, positions] of positionsByEnvelope) {
+      const { marketEur } = valuePositions(positions, resolve, observedSet);
+      byEnv[env] = byEnv[env].plus(marketEur);
     }
 
     // ── Poches de cash, alternatifs, épargne salariale ───────────────────────
@@ -672,6 +794,10 @@ export class PortfolioValuationEngine {
         VALUATION_ASSET_CLASSES.map((c) => [c, byClass[c].toNumber()])
       ) as Record<ValuationAssetClass, number>,
 
+      byEnvelope: Object.fromEntries(
+        VALUATION_ENVELOPES.map((e) => [e, byEnv[e].toNumber()])
+      ) as Record<ValuationEnvelope, number>,
+
       flowsByAssetClass: Object.fromEntries(
         VALUATION_ASSET_CLASSES.map((c) => [c, flowsByClass[c].toNumber()])
       ) as Record<ValuationAssetClass, number>,
@@ -759,7 +885,10 @@ export class PortfolioValuationEngine {
         firstPointOfDay,
         // Même référence qu'en quotidien : le point précédent de la série,
         // ici l'intervalle horaire d'avant et non la veille.
-        out.length > 0 ? out[out.length - 1]!.byAssetClass : null
+        out.length > 0 ? out[out.length - 1]!.byAssetClass : null,
+        // L'heure exacte du point : le journal des enveloppes se lit à cet
+        // instant, pas à la fin de la journée.
+        at
       );
       out.push({ ...point, at });
       previousGross = d(point.grossAssets);

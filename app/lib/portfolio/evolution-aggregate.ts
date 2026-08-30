@@ -83,6 +83,8 @@ export type EvolutionSeriesPoint = {
    * s'arrêtait ici.
    */
   byAssetClass?: Record<string, number>;
+  /** Valeur des titres par enveloppe fiscale — PEA, CTO, UNKNOWN. */
+  byEnvelope?: Record<string, number>;
   isLive?: boolean;
 };
 
@@ -345,6 +347,8 @@ type StockAcc = {
    * pas pouvoir confondre « classe à zéro » et « ventilation inconnue ».
    */
   byAssetClass?: Record<string, number>;
+  /** Valeur des titres par enveloppe fiscale — PEA, CTO, UNKNOWN. */
+  byEnvelope?: Record<string, number>;
   isLive?: boolean;
 };
 
@@ -425,6 +429,7 @@ function normalizePoint(p: HistoryPoint): {
   rents: number;
   status?: "EXACT" | "ESTIMATED";
   byAssetClass?: Record<string, number>;
+  byEnvelope?: Record<string, number>;
   isLive?: boolean;
 } {
   const total = Number(p.totalValueBase) || 0;
@@ -460,6 +465,7 @@ function normalizePoint(p: HistoryPoint): {
     status:
       p.status == null ? undefined : p.status === "EXACT" ? "EXACT" : "ESTIMATED",
     byAssetClass: p.byAssetClassBase,
+    byEnvelope: p.byEnvelopeBase,
     isLive: p.isLive,
   };
 }
@@ -572,6 +578,7 @@ export function buildEvolutionSeries(
       intervalType: interval,
       status: s.status,
       byAssetClass: s.byAssetClass,
+      byEnvelope: s.byEnvelope,
       isLive: s.isLive,
     };
   });

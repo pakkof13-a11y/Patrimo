@@ -275,6 +275,14 @@ export type HistoryPoint = {
    * Capital externe entré ou sorti ce jour-là, par classe. Somme égale à
    * `externalFlowsBase`.
    */
+  /**
+   * Valeur des titres par enveloppe fiscale : PEA, CTO, UNKNOWN.
+   *
+   * Résolue par le journal des enveloppes, jamais par l'état courant. `UNKNOWN`
+   * porte les lignes dont on sait qu'elles sont des titres mais dont
+   * l'enveloppe à cette date n'est pas démontrée — jamais zéro déguisé.
+   */
+  byEnvelopeBase?: Record<string, number>;
   flowsByAssetClassBase?: Record<string, number>;
   /**
    * `valeur(D) − valeur(D−1) − flux(D)` par classe. Absent au premier point

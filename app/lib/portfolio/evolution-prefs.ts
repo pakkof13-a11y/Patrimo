@@ -79,6 +79,15 @@ export type EvolutionPrefsV5 = {
    * entier reste en valeur.
    */
   classMetric?: "value" | "performance";
+  /**
+   * Enveloppe fiscale isolée, ou `null` pour tout le patrimoine.
+   *
+   * Distincte d'`assetClass` : une classe d'actif décrit **ce que** l'on
+   * détient, une enveloppe **où** on le détient. Les deux ne se composent pas —
+   * isoler « Crypto » et « PEA » ensemble n'aurait pas de sens — et le
+   * sélecteur ne propose donc qu'une seule des deux à la fois.
+   */
+  envelope?: "PEA" | "CTO" | null;
 };
 
 export const DEFAULT_EVOLUTION_PREFS: EvolutionPrefsV5 = {
@@ -89,12 +98,14 @@ export const DEFAULT_EVOLUTION_PREFS: EvolutionPrefsV5 = {
   scope: "gross",
   assetClass: null,
   classMetric: "value",
+  envelope: null,
 };
 
 const RANGES = new Set<string>(EVOLUTION_RANGES);
 const VERSUS = new Set(["none", "index"]);
 const SCOPES = new Set(["gross", "net"]);
 const METRICS = new Set(["value", "performance"]);
+const ENVELOPES = new Set(["PEA", "CTO"]);
 const CLASSES = new Set([
   "ACTIONS",
   "OBLIGATIONS",
@@ -121,6 +132,13 @@ function isEvolutionPrefsV5(raw: unknown): raw is EvolutionPrefsV5 {
     sens — « tout le patrimoine » — et doit donc être acceptée au même titre
     qu'une classe, alors qu'`undefined` signale une préférence antérieure.
   */
+  if (
+    o.envelope !== undefined &&
+    o.envelope !== null &&
+    (typeof o.envelope !== "string" || !ENVELOPES.has(o.envelope))
+  ) {
+    return false;
+  }
   if (
     o.classMetric !== undefined &&
     (typeof o.classMetric !== "string" || !METRICS.has(o.classMetric))
@@ -150,6 +168,7 @@ export function loadEvolutionPrefs(): EvolutionPrefsV5 {
       scope: raw.scope ?? "gross",
       assetClass: raw.assetClass ?? null,
       classMetric: raw.classMetric ?? "value",
+      envelope: raw.envelope ?? null,
     };
   }
   return { ...DEFAULT_EVOLUTION_PREFS, versus: loadDefaultBenchmark() };
@@ -167,6 +186,10 @@ export function saveEvolutionPrefs(prefs: EvolutionPrefsV5): void {
         ? prefs.assetClass
         : null,
     classMetric: METRICS.has(prefs.classMetric ?? "") ? prefs.classMetric : "value",
+    envelope:
+      prefs.envelope != null && ENVELOPES.has(prefs.envelope)
+        ? prefs.envelope
+        : null,
   };
   saveUiPref(EVOLUTION_PREFS_KEY, payload);
 }

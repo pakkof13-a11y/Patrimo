@@ -96,6 +96,22 @@ export const VALUATION_ASSET_CLASSES = [
 export type ValuationAssetClass = (typeof VALUATION_ASSET_CLASSES)[number];
 
 /**
+ * Enveloppes fiscales titres, telles que la courbe les distingue.
+ *
+ * Trois seaux, pas quatre. `PEA_PME` rejoint `PEA` : c'est ce que fait déjà
+ * `accountTypeForEnvelope`, les deux plans partageant la même famille fiscale.
+ * En créer un quatrième inventerait une taxonomie que le reste du dépôt ignore.
+ *
+ * `UNKNOWN` n'est pas un fourre-tout : il porte la valeur des lignes dont on
+ * sait qu'elles sont des titres — leur journal le dit — mais dont l'enveloppe à
+ * cette date n'est pas démontrée. Le confondre avec zéro laisserait croire que
+ * `PEA + CTO` couvre tous les titres, alors que l'historique ne le démontre pas.
+ */
+export const VALUATION_ENVELOPES = ["PEA", "CTO", "UNKNOWN"] as const;
+
+export type ValuationEnvelope = (typeof VALUATION_ENVELOPES)[number];
+
+/**
  * Une valeur datée. Brique de base de toute chronologie : hors du journal,
  * aucun compartiment ne cote — ils ne connaissent que des constats datés.
  */
@@ -153,6 +169,19 @@ export type PortfolioValuationPoint = {
    * cash hors périmètre — et ne sont donc attribués à aucune classe.
    */
   flowsByAssetClass: Record<ValuationAssetClass, number>;
+
+  /**
+   * Valeur des titres ventilée par enveloppe fiscale, à cette date.
+   *
+   * Résolue par le journal `AssetEnvelopeEvent`, jamais par l'`accountType`
+   * courant : une ligne aujourd'hui en PEA n'était pas PEA avant que le journal
+   * ne l'établisse, et cette période est comptée en `UNKNOWN`.
+   *
+   * `PEA + CTO + UNKNOWN` couvre les seules lignes titres. Ce n'est pas une
+   * partition du patrimoine : crypto, immobilier et assurance-vie n'y figurent
+   * pas, et une ligne sortie des enveloppes titres cesse d'y contribuer.
+   */
+  byEnvelope: Record<ValuationEnvelope, number>;
 
   /**
    * Ce que la classe a produit, une fois les mouvements de capitaux retirés :

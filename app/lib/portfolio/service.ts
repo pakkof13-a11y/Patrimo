@@ -1288,6 +1288,10 @@ export async function getPortfolioHistory(
         Object.entries(p.byAssetClass).map(([k, v]) => [k, toBase(d(v))])
       ) as Record<string, number>,
 
+      byEnvelopeBase: Object.fromEntries(
+        Object.entries(p.byEnvelope).map(([k, v]) => [k, toBase(d(v))])
+      ) as Record<string, number>,
+
       flowsByAssetClassBase: Object.fromEntries(
         Object.entries(p.flowsByAssetClass).map(([k, v]) => [k, toBase(d(v))])
       ) as Record<string, number>,

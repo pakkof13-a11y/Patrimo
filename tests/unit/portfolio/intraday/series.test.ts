@@ -22,6 +22,7 @@ function inputs(over: Partial<HistoricalInputs> = {}): HistoricalInputs {
     transactions: [],
     assetClassById: new Map(),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
     excludedAssetIds: new Set(),
     closes: new Map(),
     cashAccounts: [],
@@ -87,6 +88,7 @@ const DIX_TITRES = {
   transactions: [buy("t1", "a1", "2026-08-20T10:00:00Z", 10, 100)],
   assetClassById: new Map([["a1", "ACTIONS"]]),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
 };
 
 describe("1 — série horaire simple", () => {
@@ -135,6 +137,7 @@ describe("2 — plusieurs actifs", () => {
           ["a2", "CRYPTO"],
         ]),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
       },
       bars: bars({
         a1: [["2026-08-25T10:00:00Z", 110]],
@@ -190,6 +193,7 @@ describe("7 — actif exclu du patrimoine", () => {
         ["nft", "CRYPTO"],
       ]),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
     };
     const b = bars({
       a1: [["2026-08-25T10:00:00Z", 100]],
@@ -216,6 +220,7 @@ describe("8 — transaction intraday", () => {
         transactions: [buy("t1", "a1", "2026-08-25T14:37:00Z", 10, 100)],
         assetClassById: new Map([["a1", "ACTIONS"]]),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
       },
       bars: bars({
         a1: [
@@ -242,6 +247,7 @@ describe("8 — transaction intraday", () => {
         transactions: [buy("t1", "a1", "2026-08-25T14:37:00Z", 10, 100)],
         assetClassById: new Map([["a1", "ACTIONS"]]),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
       },
       bars: bars({
         a1: [
@@ -300,6 +306,7 @@ describe("14 et 15 — composition variable", () => {
           ["a2", "ACTIONS"],
         ]),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
       },
       bars: bars({
         a1: [
@@ -328,6 +335,7 @@ describe("14 et 15 — composition variable", () => {
           ["muet", "ACTIONS"],
         ]),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
       },
       bars: bars({ a1: [["2026-08-25T10:00:00Z", 100]] }),
       from: "2026-08-25T10:00:00Z",
@@ -383,6 +391,7 @@ describe("17 — statut composé", () => {
           ["c1", "CRYPTO"],
         ]),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
       },
       bars: bars({
         a1: [
@@ -428,6 +437,7 @@ describe("10, 11, 13 — creux, extrêmes, échantillonnage", () => {
       transactions: [buy("t1", "a1", "2026-08-20T10:00:00Z", 1000, 800)],
       assetClassById: new Map([["a1", "ACTIONS"]]),
     rawAssetClassById: new Map(),
+    envelopeEventsByAsset: new Map(),
     },
     bars: bars({
       a1: [

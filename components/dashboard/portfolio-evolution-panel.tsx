@@ -90,6 +90,32 @@ const CLASS_CHOICES: {
  * Les deux libellés sont explicites, et jamais interchangés : une variation de
  * valeur inclut les apports, une performance ne les compte pas.
  */
+/**
+ * Enveloppes fiscales proposées au sélecteur.
+ *
+ * `PEA-PME` n'a pas sa propre entrée : il rejoint `PEA`, comme le fait déjà
+ * `accountTypeForEnvelope` — les deux plans partagent la même famille fiscale.
+ * En faire une quatrième courbe inventerait une taxonomie que le reste du
+ * dépôt ignore.
+ */
+const ENVELOPE_CHOICES: {
+  id: "all" | "PEA" | "CTO";
+  label: string;
+  title: string;
+}[] = [
+  { id: "all", label: "Tout", title: "Patrimoine entier, toutes enveloppes confondues" },
+  {
+    id: "PEA",
+    label: "PEA",
+    title: "Titres détenus en PEA ou PEA-PME, sur les périodes où le journal le démontre",
+  },
+  {
+    id: "CTO",
+    label: "CTO",
+    title: "Titres détenus en compte-titres, sur les périodes où le journal le démontre",
+  },
+];
+
 const METRIC_CHOICES: {
   id: "value" | "performance";
   label: string;
@@ -241,6 +267,7 @@ export function PortfolioEvolutionPanel({
   const { range, versus, indexKey, scope } = prefs;
   const assetClass = prefs.assetClass ?? null;
   const classMetric = prefs.classMetric ?? "value";
+  const envelope = prefs.envelope ?? null;
 
   /*
     L'échelle n'est pas mémorisée avec les autres préférences : c'est une façon
@@ -296,6 +323,25 @@ export function PortfolioEvolutionPanel({
       ramenés à zéro : une ventilation inconnue n'est pas une classe vide, et
       la courbe doit s'interrompre là où la donnée s'arrête.
     */
+    /*
+      Enveloppe fiscale : même chemin que les classes, le total est réécrit en
+      amont pour que deltas, rebasage et infobulles travaillent tous sur la
+      grandeur affichée.
+
+      Les points sans ventilation d'enveloppe sont **retirés** : une source
+      antérieure au journal ne dit rien, et la ramener à zéro affirmerait une
+      enveloppe vide.
+    */
+    if (envelope) {
+      const out = [];
+      for (const p of history) {
+        const v = p.byEnvelopeBase?.[envelope];
+        if (v == null) continue;
+        out.push({ ...p, totalValueBase: v, totalValueEur: v, netWorthBase: v });
+      }
+      return out;
+    }
+
     if (assetClass) {
       const out = [];
       /*
@@ -337,7 +383,25 @@ export function PortfolioEvolutionPanel({
         ? p
         : { ...p, totalValueBase: p.netWorthBase, totalValueEur: p.netWorthBase }
     );
-  }, [history, scope, assetClass, classMetric]);
+  }, [history, scope, assetClass, classMetric, envelope]);
+
+  /**
+   * Part des titres dont l'enveloppe n'est pas démontrée, au dernier point.
+   *
+   * Le journal ne remonte qu'à sa mise en place : tout ce qui précède est
+   * inconnu, et le taire laisserait croire que `PEA + CTO` couvre tous les
+   * titres. Le chiffre est celui du point le plus récent de la fenêtre — c'est
+   * lui que l'œil lit, et un cumul sur la période n'aurait pas de sens pour un
+   * stock.
+   */
+  const unknownEnvelopeEur = useMemo(() => {
+    if (!envelope) return 0;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const v = history[i]?.byEnvelopeBase;
+      if (v) return Number(v.UNKNOWN ?? 0);
+    }
+    return 0;
+  }, [history, envelope]);
 
   const { points: rawPoints, interval } = useMemo(
     () => buildEvolutionSeries(scopedHistory, range, "cumul"),
@@ -412,7 +476,9 @@ export function PortfolioEvolutionPanel({
         title="Évolution du portefeuille"
         subtitle={
           <>
-            {assetClass
+            {envelope
+              ? `${envelope} — valeur des titres`
+              : assetClass
               ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass} — ${classMetric === "performance" ? "performance" : "valeur"}`
               : scope === "net"
                 ? "Patrimoine net"
@@ -525,20 +591,40 @@ export function PortfolioEvolutionPanel({
               testIdPrefix="evolution-scale"
             />
           )}
+          {/*
+            Classe et enveloppe décrivent deux questions différentes — **ce
+            que** l'on détient, et **où** — qui ne se composent pas. Choisir
+            l'une remet donc l'autre à « Tout ».
+          */}
           <Segmented
             items={CLASS_CHOICES}
             value={assetClass ?? "all"}
             onChange={(v) =>
-              update({ assetClass: v === "all" ? null : (v as EvolutionAssetClass) })
+              update({
+                assetClass: v === "all" ? null : (v as EvolutionAssetClass),
+                envelope: null,
+              })
             }
             ariaLabel="Classe d'actifs"
             testIdPrefix="evolution-class"
+          />
+          <Segmented
+            items={ENVELOPE_CHOICES}
+            value={envelope ?? "all"}
+            onChange={(v) =>
+              update({
+                envelope: v === "all" ? null : (v as "PEA" | "CTO"),
+                assetClass: null,
+              })
+            }
+            ariaLabel="Enveloppe fiscale"
+            testIdPrefix="evolution-envelope"
           />
           {/*
             Valeur ou performance : la distinction n'a de sens que sur une
             classe, la courbe globale ayant déjà sa propre lecture.
           */}
-          {assetClass && (
+          {assetClass && !envelope && (
             <Segmented
               items={METRIC_CHOICES}
               value={classMetric}
@@ -552,7 +638,7 @@ export function PortfolioEvolutionPanel({
             n'appartiennent à aucune classe, et proposer « Crypto nette »
             n'aurait pas de sens.
           */}
-          {!assetClass && (
+          {!assetClass && !envelope && (
             <Segmented
               items={SCOPE_CHOICES}
               value={scope}
@@ -644,6 +730,23 @@ export function PortfolioEvolutionPanel({
           )}
         </div>
       </div>
+
+      {envelope && unknownEnvelopeEur > 0 && !empty && !noPoints && (
+        <p
+          className="text-meta mt-1.5 shrink-0"
+          data-testid="evolution-envelope-unknown"
+        >
+          {/*
+            Nommer l'écart plutôt que le laisser deviner. Sans cette ligne, un
+            utilisateur lirait « PEA 40 800 € » en croyant y voir tous ses
+            titres de PEA, alors que le journal ne couvre qu'une partie de la
+            période.
+          */}
+          {formatCurrency(unknownEnvelopeEur, baseCurrency)} de titres dont
+          l&apos;enveloppe n&apos;est pas connue sur cette période — le journal
+          des enveloppes ne remonte pas plus loin.
+        </p>
+      )}
 
       {versus !== "none" && !empty && !noPoints && points.length > 0 && (
         <p className="text-meta mt-1.5 shrink-0" data-testid="evolution-vs-note">
