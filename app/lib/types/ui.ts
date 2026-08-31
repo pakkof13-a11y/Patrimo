@@ -276,7 +276,11 @@ export type HistoryPoint = {
    * `externalFlowsBase`.
    */
   /**
-   * Valeur des titres par enveloppe fiscale : PEA, CTO, UNKNOWN.
+   * Valeur des titres par classe **puis** par enveloppe fiscale.
+   *
+   * Deux niveaux parce que la question l'est : « où sont mes actions » n'est
+   * pas « où sont mes titres ». Seules les classes qu'une enveloppe peut
+   * qualifier y figurent — ACTIONS et OBLIGATIONS.
    *
    * Résolue par le journal des enveloppes, jamais par l'état courant. `UNKNOWN`
    * porte les lignes dont on sait qu'elles sont des titres mais dont
@@ -286,7 +290,7 @@ export type HistoryPoint = {
    * enveloppe à cette date. Le point n'est alors pas tracé, plutôt que d'être
    * posé à zéro sur la courbe. Zéro subsiste là où il est vrai.
    */
-  byEnvelopeBase?: Record<string, number | null>;
+  byAssetClassAndEnvelopeBase?: Record<string, Record<string, number | null>>;
   flowsByAssetClassBase?: Record<string, number>;
   /**
    * `valeur(D) − valeur(D−1) − flux(D)` par classe. Absent au premier point

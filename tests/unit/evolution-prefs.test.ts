@@ -2,7 +2,9 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   DEFAULT_EVOLUTION_PREFS,
   loadEvolutionPrefs,
+  normalizeEnvelopeFor,
   saveEvolutionPrefs,
+  EVOLUTION_PREFS_KEY,
 } from "@/app/lib/portfolio/evolution-prefs";
 import {
   DEFAULT_BENCHMARK_KEY,
@@ -201,5 +203,118 @@ describe("withBenchmarkSeries", () => {
     expect(gap!.portfolioPct).toBeCloseTo(10, 4);
     expect(gap!.benchmarkPct).toBeCloseTo(10, 4);
     expect(gap!.gapPct).toBeCloseTo(0, 4);
+  });
+});
+
+/**
+ * Accord entre la classe choisie et l'enveloppe.
+ *
+ * L'enveloppe est subordonnée à la classe : elle précise « où », dans un « quoi »
+ * déjà fixé. Une combinaison qui n'a pas de sens ne doit ni être stockée, ni
+ * survivre à un rechargement — sans quoi la courbe se retrouve filtrée sur un
+ * critère qu'aucun contrôle n'affiche plus, et paraît vide sans raison.
+ */
+describe("classe et enveloppe restent accordées", () => {
+  // Même stub que le bloc précédent : `loadUiPref` lit `window.localStorage`.
+  beforeEach(() => {
+    const store = new Map<string, string>();
+    const ls = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        store.set(k, v);
+      },
+      removeItem: (k: string) => {
+        store.delete(k);
+      },
+    };
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: globalThis,
+    });
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: ls,
+    });
+  });
+
+  afterEach(() => {
+    // @ts-expect-error cleanup
+    delete globalThis.localStorage;
+    // @ts-expect-error cleanup
+    delete globalThis.window;
+  });
+
+  it("les actions acceptent les deux enveloppes", () => {
+    expect(normalizeEnvelopeFor("ACTIONS", "PEA")).toBe("PEA");
+    expect(normalizeEnvelopeFor("ACTIONS", "CTO")).toBe("CTO");
+    expect(normalizeEnvelopeFor("ACTIONS", null)).toBeNull();
+  });
+
+  it("les obligations n'exposent aucun choix d'enveloppe", () => {
+    /*
+      Le produit ne connaît d'obligations qu'en compte-titres. Leur proposer
+      « PEA » offrirait un choix dont la série serait vide par convention
+      d'interface plutôt que par constat.
+    */
+    expect(normalizeEnvelopeFor("OBLIGATIONS", "PEA")).toBeNull();
+    expect(normalizeEnvelopeFor("OBLIGATIONS", "CTO")).toBeNull();
+  });
+
+  it("aucune classe hors titres n'accepte d'enveloppe", () => {
+    for (const cls of ["CRYPTO", "IMMOBILIER", "CASH", "AUTRE"] as const) {
+      expect(normalizeEnvelopeFor(cls, "PEA")).toBeNull();
+      expect(normalizeEnvelopeFor(cls, "CTO")).toBeNull();
+    }
+  });
+
+  it("sans classe, aucune enveloppe ne s'applique", () => {
+    // « Tout » ne porte pas de filtre d'enveloppe : la question est par classe.
+    expect(normalizeEnvelopeFor(null, "PEA")).toBeNull();
+    expect(normalizeEnvelopeFor(undefined, "CTO")).toBeNull();
+  });
+
+  it("une combinaison invalide n'atteint jamais le stockage", () => {
+    saveEvolutionPrefs({
+      ...DEFAULT_EVOLUTION_PREFS,
+      assetClass: "CRYPTO",
+      envelope: "PEA",
+    });
+    const relu = loadEvolutionPrefs();
+    // La classe est conservée — c'est le filtre principal — l'enveloppe tombe.
+    expect(relu.assetClass).toBe("CRYPTO");
+    expect(relu.envelope).toBeNull();
+  });
+
+  it("une préférence héritée devenue invalide est corrigée à la lecture", () => {
+    /*
+      Le sélecteur était global avant ce chantier : « Crypto + PEA » a pu être
+      écrit par une version antérieure. La relire telle quelle filtrerait la
+      crypto sur une enveloppe, et l'écran serait vide sans explication.
+    */
+    // `loadUiPref` préfixe ses clés — écrire sans le préfixe ne serait pas relu.
+    localStorage.setItem(
+      `patrimo.ui.${EVOLUTION_PREFS_KEY}`,
+      JSON.stringify({
+        v: 5,
+        range: "3m",
+        versus: "none",
+        indexKey: "cac40",
+        scope: "gross",
+        assetClass: "IMMOBILIER",
+        classMetric: "value",
+        envelope: "CTO",
+      })
+    );
+    const relu = loadEvolutionPrefs();
+    expect(relu.assetClass).toBe("IMMOBILIER");
+    expect(relu.envelope).toBeNull();
+  });
+
+  it("passer des actions en PEA à la crypto abandonne l'enveloppe", () => {
+    // Le parcours du §12 du chantier, joué sur le normaliseur.
+    expect(normalizeEnvelopeFor("ACTIONS", "PEA")).toBe("PEA");
+    expect(normalizeEnvelopeFor("CRYPTO", "PEA")).toBeNull();
+    // Et revenir aux actions ne ressuscite pas le filtre abandonné.
+    expect(normalizeEnvelopeFor("ACTIONS", null)).toBeNull();
   });
 });

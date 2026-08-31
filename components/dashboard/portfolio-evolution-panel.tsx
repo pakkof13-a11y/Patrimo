@@ -24,6 +24,7 @@ import {
 import {
   DEFAULT_EVOLUTION_PREFS,
   loadEvolutionPrefs,
+  normalizeEnvelopeFor,
   saveEvolutionPrefs,
   type EvolutionBenchmark,
   type EvolutionPrefsV5,
@@ -283,7 +284,19 @@ export function PortfolioEvolutionPanel({
 
   const update = (patch: Partial<EvolutionPrefsV5>) => {
     setPrefs((p) => {
-      const next = { ...p, ...patch, v: 5 as const };
+      const fusion = { ...p, ...patch, v: 5 as const };
+      /*
+        L'état en session passe par le même normaliseur que le stockage.
+
+        Sans lui, une combinaison invalide vivrait le temps d'une session sans
+        jamais être écrite : la courbe serait filtrée sur une enveloppe
+        qu'aucun contrôle n'affiche, et le rechargement « corrigerait » l'écran
+        sans que rien n'ait changé.
+      */
+      const next = {
+        ...fusion,
+        envelope: normalizeEnvelopeFor(fusion.assetClass, fusion.envelope),
+      };
       if (hydrated) saveEvolutionPrefs(next);
       return next;
     });
@@ -325,18 +338,21 @@ export function PortfolioEvolutionPanel({
       la courbe doit s'interrompre là où la donnée s'arrête.
     */
     /*
-      Enveloppe fiscale : même chemin que les classes, le total est réécrit en
-      amont pour que deltas, rebasage et infobulles travaillent tous sur la
-      grandeur affichée.
+      Croisement classe × enveloppe : même chemin que les classes, le total est
+      réécrit en amont pour que deltas, rebasage et infobulles travaillent tous
+      sur la grandeur affichée.
 
-      Les points sans ventilation d'enveloppe sont **retirés** : une source
-      antérieure au journal ne dit rien, et la ramener à zéro affirmerait une
-      enveloppe vide.
+      Le croisement est lu dans la série, jamais reconstruit ici : la valeur
+      d'une action en PEA à une date est celle que le moteur a calculée, avec le
+      même prix et le même statut que partout ailleurs.
+
+      Les points sans ventilation sont **retirés** : une période antérieure au
+      journal ne dit rien, et la ramener à zéro affirmerait une enveloppe vide.
     */
-    if (envelope) {
+    if (assetClass && envelope) {
       const out = [];
       for (const p of history) {
-        const v = p.byEnvelopeBase?.[envelope];
+        const v = p.byAssetClassAndEnvelopeBase?.[assetClass]?.[envelope];
         if (v == null) continue;
         out.push({ ...p, totalValueBase: v, totalValueEur: v, netWorthBase: v });
       }
@@ -404,19 +420,19 @@ export function PortfolioEvolutionPanel({
    * exactement ce que l'œil voit.
    */
   const unknownEnvelopeEur = useMemo(() => {
-    if (!envelope) return 0;
+    if (!assetClass || !envelope) return 0;
     const from = startOfRange(range);
     const fromT = from ? from.getTime() : -Infinity;
     let max = 0;
     for (const p of history) {
       if (Date.parse(p.date) < fromT) continue;
-      const v = p.byEnvelopeBase;
-      if (!v) continue;
-      const u = Number(v.UNKNOWN ?? 0);
+      const u = Number(
+        p.byAssetClassAndEnvelopeBase?.[assetClass]?.UNKNOWN ?? 0
+      );
       if (Number.isFinite(u) && u > max) max = u;
     }
     return max;
-  }, [history, envelope, range]);
+  }, [history, assetClass, envelope, range]);
 
   const { points: rawPoints, interval } = useMemo(
     () => buildEvolutionSeries(scopedHistory, range, "cumul"),
@@ -491,10 +507,10 @@ export function PortfolioEvolutionPanel({
         title="Évolution du portefeuille"
         subtitle={
           <>
-            {envelope
-              ? `${envelope} — valeur des titres`
+            {assetClass && envelope
+              ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass} en ${envelope} — valeur`
               : assetClass
-              ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass} — ${classMetric === "performance" ? "performance" : "valeur"}`
+              ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass}${assetClass === "OBLIGATIONS" ? " (CTO)" : ""} — ${classMetric === "performance" ? "performance" : "valeur"}`
               : scope === "net"
                 ? "Patrimoine net"
                 : "Actifs bruts"}
@@ -607,9 +623,16 @@ export function PortfolioEvolutionPanel({
             />
           )}
           {/*
-            Classe et enveloppe décrivent deux questions différentes — **ce
-            que** l'on détient, et **où** — qui ne se composent pas. Choisir
-            l'une remet donc l'autre à « Tout ».
+            La classe commande, l'enveloppe précise.
+
+            Les deux ne sont plus exclusives : « où sont mes actions » est une
+            question qui a un sens, et y répondre demandait de composer les deux
+            filtres. La hiérarchie est celle de la question — on choisit d'abord
+            ce que l'on détient, puis, quand cela s'y prête, où.
+
+            Changer de classe remet l'enveloppe à « Tout » : garder « PEA » en
+            passant sur la crypto laisserait un filtre actif qu'aucun contrôle
+            n'affiche plus.
           */}
           <Segmented
             items={CLASS_CHOICES}
@@ -623,21 +646,35 @@ export function PortfolioEvolutionPanel({
             ariaLabel="Classe d'actifs"
             testIdPrefix="evolution-class"
           />
-          <Segmented
-            items={ENVELOPE_CHOICES}
-            value={envelope ?? "all"}
-            onChange={(v) =>
-              update({
-                envelope: v === "all" ? null : (v as "PEA" | "CTO"),
-                assetClass: null,
-              })
-            }
-            ariaLabel="Enveloppe fiscale"
-            testIdPrefix="evolution-envelope"
-          />
+          {/*
+            Le sélecteur d'enveloppe n'existe que là où la question se pose.
+
+            Sur les actions seulement : ce sont les seules lignes dont le
+            portefeuille de démonstration comme le modèle admettent les deux
+            enveloppes. Les obligations reçoivent une indication plutôt qu'un
+            choix — voir le sous-titre — et la crypto, l'immobilier, le cash et
+            « Autre » n'ont aucun rapport avec un compte-titres.
+          */}
+          {assetClass === "ACTIONS" && (
+            <Segmented
+              items={ENVELOPE_CHOICES}
+              value={envelope ?? "all"}
+              onChange={(v) =>
+                update({ envelope: v === "all" ? null : (v as "PEA" | "CTO") })
+              }
+              ariaLabel="Enveloppe fiscale"
+              testIdPrefix="evolution-envelope"
+            />
+          )}
           {/*
             Valeur ou performance : la distinction n'a de sens que sur une
             classe, la courbe globale ayant déjà sa propre lecture.
+
+            Retirée dès qu'une enveloppe est choisie : la performance se calcule
+            en retirant les flux, et aucun flux historique n'est attribuable à
+            une enveloppe — l'enveloppe d'un achat de 2024 est précisément ce
+            que le journal ne dit pas. Proposer le choix produirait un chiffre
+            faux.
           */}
           {assetClass && !envelope && (
             <Segmented

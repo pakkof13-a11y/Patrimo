@@ -1293,12 +1293,17 @@ export async function getPortfolioHistory(
         zéro ici rendrait à l'affichage l'ignorance que le moteur vient
         précisément de distinguer.
       */
-      byEnvelopeBase: Object.fromEntries(
-        Object.entries(p.byEnvelope).map(([k, v]) => [
-          k,
-          v == null ? null : toBase(d(v)),
+      byAssetClassAndEnvelopeBase: Object.fromEntries(
+        Object.entries(p.byAssetClassAndEnvelope).map(([cls, parEnv]) => [
+          cls,
+          Object.fromEntries(
+            Object.entries(parEnv).map(([env, v]) => [
+              env,
+              v == null ? null : toBase(d(v)),
+            ])
+          ),
         ])
-      ) as Record<string, number | null>,
+      ) as Record<string, Record<string, number | null>>,
 
       flowsByAssetClassBase: Object.fromEntries(
         Object.entries(p.flowsByAssetClass).map(([k, v]) => [k, toBase(d(v))])

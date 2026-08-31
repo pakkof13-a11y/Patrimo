@@ -43,8 +43,10 @@ import type { LedgerState, LedgerTx } from "../../accounting/types";
 import { d, zero, type Decimal } from "../../money/decimal";
 import { closeAtOrBefore, type DailyCloseIndex } from "../class-history";
 import {
+  ENVELOPE_CAPABLE_CLASSES,
   VALUATION_ASSET_CLASSES,
   VALUATION_ENVELOPES,
+  type EnvelopeCapableClass,
   type ValuationAssetClass,
   type ValuationEnvelope,
 } from "./types";
@@ -281,9 +283,24 @@ function envelopeBucketOf(
   return candidat ? "UNKNOWN" : null;
 }
 
-function emptyEnvelopes(): Record<ValuationEnvelope, Decimal> {
-  const out = {} as Record<ValuationEnvelope, Decimal>;
-  for (const e of VALUATION_ENVELOPES) out[e] = zero();
+/** Une classe peut-elle être qualifiée par une enveloppe titres ? */
+function isEnvelopeCapable(cls: ValuationAssetClass): cls is EnvelopeCapableClass {
+  return (ENVELOPE_CAPABLE_CLASSES as readonly string[]).includes(cls);
+}
+
+function emptyCrossing(): Record<
+  EnvelopeCapableClass,
+  Record<ValuationEnvelope, Decimal>
+> {
+  const out = {} as Record<
+    EnvelopeCapableClass,
+    Record<ValuationEnvelope, Decimal>
+  >;
+  for (const c of ENVELOPE_CAPABLE_CLASSES) {
+    const par = {} as Record<ValuationEnvelope, Decimal>;
+    for (const e of VALUATION_ENVELOPES) par[e] = zero();
+    out[c] = par;
+  }
   return out;
 }
 
@@ -310,6 +327,11 @@ function emptyEnvelopes(): Record<ValuationEnvelope, Decimal> {
 function envelopeSnapshot(
   byEnv: Record<ValuationEnvelope, Decimal>
 ): Record<ValuationEnvelope, number | null> {
+  /*
+    La règle est appliquée **classe par classe** : « aucune action démontrée en
+    PEA » et « aucune obligation démontrée en PEA » sont deux affirmations
+    distinctes, et l'inconnu de l'une ne doit pas rendre l'autre absente.
+  */
   const unknown = byEnv.UNKNOWN;
   const out = {} as Record<ValuationEnvelope, number | null>;
   for (const e of VALUATION_ENVELOPES) {
@@ -572,8 +594,16 @@ export class PortfolioValuationEngine {
       ValuationAssetClass,
       Array<{ assetId: string; quantity: Decimal; costBasisEur: Decimal }>
     >();
-    const positionsByEnvelope = new Map<
-      ValuationEnvelope,
+    /*
+      Troisième regroupement : le couple (classe, enveloppe).
+
+      Une seule Map, clé composite, plutôt qu'une Map de Maps : les positions y
+      sont rangées une fois et valorisées une fois, comme pour les deux autres
+      découpages. La clé n'est construite que pour les classes qu'une enveloppe
+      peut qualifier — croiser « Crypto » et « PEA » n'aurait pas de sens.
+    */
+    const positionsByCrossing = new Map<
+      string,
       Array<{ assetId: string; quantity: Decimal; costBasisEur: Decimal }>
     >();
     /*
@@ -615,14 +645,17 @@ export class PortfolioValuationEngine {
         entière du point quotidien — c'est l'état de clôture que la courbe
         décrit — et seulement à partir de 13 h 55 en intraday.
       */
-      const seau = envelopeBucketOf(
-        this.inputs.envelopeEventsByAsset.get(pos.assetId),
-        resolutionAt
-      );
-      if (seau) {
-        const byEnv = positionsByEnvelope.get(seau);
-        if (byEnv) byEnv.push(pos);
-        else positionsByEnvelope.set(seau, [pos]);
+      if (isEnvelopeCapable(cls)) {
+        const seau = envelopeBucketOf(
+          this.inputs.envelopeEventsByAsset.get(pos.assetId),
+          resolutionAt
+        );
+        if (seau) {
+          const cle = `${cls}|${seau}`;
+          const liste = positionsByCrossing.get(cle);
+          if (liste) liste.push(pos);
+          else positionsByCrossing.set(cle, [pos]);
+        }
       }
     }
 
@@ -685,17 +718,18 @@ export class PortfolioValuationEngine {
     }
 
     /*
-      Valorisation par enveloppe — mêmes lignes, même résolveur.
+      Valorisation du croisement — mêmes lignes, même résolveur.
 
       Troisième regroupement du même total, pas un troisième calcul : les
       positions sont les mêmes objets, aux mêmes quantités, valorisés par le
       résolveur déjà construit. Les valoriser à part ferait diverger les
       arithmétiques.
     */
-    const byEnv = emptyEnvelopes();
-    for (const [env, positions] of positionsByEnvelope) {
+    const croise = emptyCrossing();
+    for (const [cle, positions] of positionsByCrossing) {
+      const [cls, env] = cle.split("|") as [EnvelopeCapableClass, ValuationEnvelope];
       const { marketEur } = valuePositions(positions, resolve, observedSet);
-      byEnv[env] = byEnv[env].plus(marketEur);
+      croise[cls][env] = croise[cls][env].plus(marketEur);
     }
 
     // ── Poches de cash, alternatifs, épargne salariale ───────────────────────
@@ -839,7 +873,9 @@ export class PortfolioValuationEngine {
         VALUATION_ASSET_CLASSES.map((c) => [c, byClass[c].toNumber()])
       ) as Record<ValuationAssetClass, number>,
 
-      byEnvelope: envelopeSnapshot(byEnv),
+      byAssetClassAndEnvelope: Object.fromEntries(
+        ENVELOPE_CAPABLE_CLASSES.map((c) => [c, envelopeSnapshot(croise[c])])
+      ) as Record<EnvelopeCapableClass, Record<ValuationEnvelope, number | null>>,
 
       flowsByAssetClass: Object.fromEntries(
         VALUATION_ASSET_CLASSES.map((c) => [c, flowsByClass[c].toNumber()])

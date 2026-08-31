@@ -112,6 +112,18 @@ export const VALUATION_ENVELOPES = ["PEA", "CTO", "UNKNOWN"] as const;
 export type ValuationEnvelope = (typeof VALUATION_ENVELOPES)[number];
 
 /**
+ * Les seules classes qu'une enveloppe titres peut qualifier.
+ *
+ * Croiser « Crypto » et « PEA » n'a pas de sens : la question ne se pose que
+ * pour ce qui peut être logé dans un compte-titres. Le dire dans le type plutôt
+ * que dans un commentaire ferme la porte à un appelant qui demanderait un
+ * croisement vide, et documente le périmètre là où il est lu.
+ */
+export const ENVELOPE_CAPABLE_CLASSES = ["ACTIONS", "OBLIGATIONS"] as const;
+
+export type EnvelopeCapableClass = (typeof ENVELOPE_CAPABLE_CLASSES)[number];
+
+/**
  * Une valeur datée. Brique de base de toute chronologie : hors du journal,
  * aucun compartiment ne cote — ils ne connaissent que des constats datés.
  */
@@ -177,17 +189,26 @@ export type PortfolioValuationPoint = {
    * courant : une ligne aujourd'hui en PEA n'était pas PEA avant que le journal
    * ne l'établisse, et cette période est comptée en `UNKNOWN`.
    *
-   * `PEA + CTO + UNKNOWN` couvre les seules lignes titres. Ce n'est pas une
-   * partition du patrimoine : crypto, immobilier et assurance-vie n'y figurent
-   * pas, et une ligne sortie des enveloppes titres cesse d'y contribuer.
+   * `PEA + CTO + UNKNOWN` couvre les seules lignes titres de la classe. Ce
+   * n'est pas une partition du patrimoine : une ligne logée en assurance-vie ou
+   * détachée de tout compte n'y figure pas.
    *
    * `null` sur `PEA` ou `CTO` signifie **absent**, et non zéro : rien ne
    * démontre cette enveloppe à cette date, et une ligne inconnue pourrait s'y
    * trouver. Zéro reste employé quand il est vrai — aucune ligne titre en
    * suspens, donc l'enveloppe est bien vide. `UNKNOWN` est toujours un nombre :
    * c'est une valeur mesurée, celle des lignes non démontrées.
+   *
+   * Ventilé **par classe**, et non globalement. La ventilation globale, qui
+   * existait ici, additionnait actions et obligations : elle répondait à « où
+   * sont mes titres », quand l'écran demande désormais « où sont mes actions ».
+   * La garder à côté du croisement aurait fait deux représentations d'un même
+   * découpage, dont l'une est la somme de l'autre.
    */
-  byEnvelope: Record<ValuationEnvelope, number | null>;
+  byAssetClassAndEnvelope: Record<
+    EnvelopeCapableClass,
+    Record<ValuationEnvelope, number | null>
+  >;
 
   /**
    * Ce que la classe a produit, une fois les mouvements de capitaux retirés :

@@ -84,12 +84,12 @@ export type EvolutionSeriesPoint = {
    */
   byAssetClass?: Record<string, number>;
   /**
-   * Valeur des titres par enveloppe fiscale — PEA, CTO, UNKNOWN.
+   * Valeur des titres par classe puis par enveloppe fiscale.
    *
    * `null` sur `PEA` ou `CTO` veut dire absent : rien ne démontre cette
    * enveloppe à cette date. Le distinguer de zéro est tout l'objet du champ.
    */
-  byEnvelope?: Record<string, number | null>;
+  byAssetClassAndEnvelope?: Record<string, Record<string, number | null>>;
   isLive?: boolean;
 };
 
@@ -365,12 +365,12 @@ type StockAcc = {
    */
   byAssetClass?: Record<string, number>;
   /**
-   * Valeur des titres par enveloppe fiscale — PEA, CTO, UNKNOWN.
+   * Valeur des titres par classe puis par enveloppe fiscale.
    *
    * `null` sur `PEA` ou `CTO` veut dire absent : rien ne démontre cette
    * enveloppe à cette date. Le distinguer de zéro est tout l'objet du champ.
    */
-  byEnvelope?: Record<string, number | null>;
+  byAssetClassAndEnvelope?: Record<string, Record<string, number | null>>;
   isLive?: boolean;
 };
 
@@ -451,7 +451,7 @@ function normalizePoint(p: HistoryPoint): {
   rents: number;
   status?: "EXACT" | "ESTIMATED";
   byAssetClass?: Record<string, number>;
-  byEnvelope?: Record<string, number | null>;
+  byAssetClassAndEnvelope?: Record<string, Record<string, number | null>>;
   isLive?: boolean;
 } {
   const total = Number(p.totalValueBase) || 0;
@@ -487,7 +487,7 @@ function normalizePoint(p: HistoryPoint): {
     status:
       p.status == null ? undefined : p.status === "EXACT" ? "EXACT" : "ESTIMATED",
     byAssetClass: p.byAssetClassBase,
-    byEnvelope: p.byEnvelopeBase,
+    byAssetClassAndEnvelope: p.byAssetClassAndEnvelopeBase,
     isLive: p.isLive,
   };
 }
@@ -600,7 +600,7 @@ export function buildEvolutionSeries(
       intervalType: interval,
       status: s.status,
       byAssetClass: s.byAssetClass,
-      byEnvelope: s.byEnvelope,
+      byAssetClassAndEnvelope: s.byAssetClassAndEnvelope,
       isLive: s.isLive,
     };
   });

@@ -144,10 +144,10 @@ describe("aucune rétroprojection — le cœur du chantier", () => {
 
     for (const jour of ["2024-06-01", "2025-01-01", "2026-05-31"]) {
       const p = at(s, jour);
-      expect(p.byEnvelope.CTO).toBeNull();
-      expect(p.byEnvelope.PEA).toBeNull();
+      expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBeNull();
+      expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBeNull();
       // Mais la valeur ne disparaît pas : elle est comptée comme inconnue.
-      expect(p.byEnvelope.UNKNOWN).toBeCloseTo(1_000, 6);
+      expect(p.byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBeCloseTo(1_000, 6);
     }
   });
 
@@ -155,26 +155,26 @@ describe("aucune rétroprojection — le cœur du chantier", () => {
     const s = observeeTard("PEA");
     const p = at(s, "2025-06-01");
 
-    expect(p.byEnvelope.PEA).toBeNull();
-    expect(p.byEnvelope.CTO).toBeNull();
-    expect(p.byEnvelope.UNKNOWN).toBeCloseTo(1_000, 6);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBeNull();
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBeNull();
+    expect(p.byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBeCloseTo(1_000, 6);
   });
 
   it("la contribution commence exactement à la date d'observation", () => {
     const s = observeeTard("CTO");
 
     // La veille : rien n'est démontré, donc rien n'est affirmé.
-    expect(at(s, "2026-05-31").byEnvelope.CTO).toBeNull();
-    expect(at(s, "2026-05-31").byEnvelope.UNKNOWN).toBeCloseTo(1_000, 6);
+    expect(at(s, "2026-05-31").byAssetClassAndEnvelope.ACTIONS.CTO).toBeNull();
+    expect(at(s, "2026-05-31").byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBeCloseTo(1_000, 6);
 
     /*
       Le jour même : l'enveloppe est établie. `PEA` redevient un zéro **vrai**,
       puisque plus aucune ligne titre n'est en suspens — l'absence ne se
       justifie que tant que l'inconnu subsiste.
     */
-    expect(at(s, "2026-06-01").byEnvelope.CTO).toBeCloseTo(1_000, 6);
-    expect(at(s, "2026-06-01").byEnvelope.UNKNOWN).toBe(0);
-    expect(at(s, "2026-06-01").byEnvelope.PEA).toBe(0);
+    expect(at(s, "2026-06-01").byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(1_000, 6);
+    expect(at(s, "2026-06-01").byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBe(0);
+    expect(at(s, "2026-06-01").byAssetClassAndEnvelope.ACTIONS.PEA).toBe(0);
   });
 
   it("l'inconnu n'est jamais transformé en zéro silencieux", () => {
@@ -184,9 +184,9 @@ describe("aucune rétroprojection — le cœur du chantier", () => {
       titre n'était détenu, alors que la position existait bel et bien.
     */
     const p = at(observeeTard("CTO"), "2025-01-01");
-    expect(p.byEnvelope.PEA).toBeNull();
-    expect(p.byEnvelope.CTO).toBeNull();
-    expect(p.byEnvelope.UNKNOWN).toBeCloseTo(1_000, 6);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBeNull();
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBeNull();
+    expect(p.byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBeCloseTo(1_000, 6);
   });
 
   it("un seul point inconnu suffit à effacer l'affirmation", () => {
@@ -205,10 +205,10 @@ describe("aucune rétroprojection — le cœur du chantier", () => {
       })
     ).buildSeries("2024-01-10", "2024-01-12");
 
-    expect(at(s, "2024-01-10").byEnvelope.CTO).toBeNull();
-    expect(at(s, "2024-01-10").byEnvelope.UNKNOWN).toBeCloseTo(1_000, 6);
-    expect(at(s, "2024-01-11").byEnvelope.CTO).toBeCloseTo(1_000, 6);
-    expect(at(s, "2024-01-11").byEnvelope.UNKNOWN).toBe(0);
+    expect(at(s, "2024-01-10").byAssetClassAndEnvelope.ACTIONS.CTO).toBeNull();
+    expect(at(s, "2024-01-10").byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBeCloseTo(1_000, 6);
+    expect(at(s, "2024-01-11").byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(1_000, 6);
+    expect(at(s, "2024-01-11").byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBe(0);
   });
 
   it("une suite de points inconnus laisse la courbe interrompue, sans trait à zéro", () => {
@@ -218,12 +218,12 @@ describe("aucune rétroprojection — le cœur du chantier", () => {
       n'existe pas.
     */
     const s = observeeTard("CTO");
-    const inconnus = s.filter((p) => p.byEnvelope.CTO === null);
-    const connus = s.filter((p) => p.byEnvelope.CTO !== null);
+    const inconnus = s.filter((p) => p.byAssetClassAndEnvelope.ACTIONS.CTO === null);
+    const connus = s.filter((p) => p.byAssetClassAndEnvelope.ACTIONS.CTO !== null);
 
     expect(inconnus.length).toBeGreaterThan(100);
     // Aucun point inconnu ne porte de valeur numérique traçable.
-    expect(inconnus.every((p) => p.byEnvelope.CTO == null)).toBe(true);
+    expect(inconnus.every((p) => p.byAssetClassAndEnvelope.ACTIONS.CTO == null)).toBe(true);
     // Et tous les points connus sont postérieurs au premier constat.
     expect(connus.every((p) => p.day >= "2026-06-01")).toBe(true);
   });
@@ -247,18 +247,18 @@ describe("changements d'enveloppe", () => {
   it("CTO → PEA coupe CTO et commence PEA à la date exacte", () => {
     const s = change("CTO", "PEA");
 
-    expect(at(s, "2025-06-14").byEnvelope.CTO).toBeCloseTo(1_000, 6);
-    expect(at(s, "2025-06-14").byEnvelope.PEA).toBe(0);
-    expect(at(s, "2025-06-15").byEnvelope.PEA).toBeCloseTo(1_000, 6);
-    expect(at(s, "2025-06-15").byEnvelope.CTO).toBe(0);
+    expect(at(s, "2025-06-14").byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(1_000, 6);
+    expect(at(s, "2025-06-14").byAssetClassAndEnvelope.ACTIONS.PEA).toBe(0);
+    expect(at(s, "2025-06-15").byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(1_000, 6);
+    expect(at(s, "2025-06-15").byAssetClassAndEnvelope.ACTIONS.CTO).toBe(0);
   });
 
   it("PEA → CTO fait l'inverse", () => {
     const s = change("PEA", "CTO");
 
-    expect(at(s, "2025-06-14").byEnvelope.PEA).toBeCloseTo(1_000, 6);
-    expect(at(s, "2025-06-15").byEnvelope.CTO).toBeCloseTo(1_000, 6);
-    expect(at(s, "2025-06-15").byEnvelope.PEA).toBe(0);
+    expect(at(s, "2025-06-14").byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(1_000, 6);
+    expect(at(s, "2025-06-15").byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(1_000, 6);
+    expect(at(s, "2025-06-15").byAssetClassAndEnvelope.ACTIONS.PEA).toBe(0);
   });
 
   it("deux événements insérés à l'envers restent lus selon leur date métier", () => {
@@ -276,8 +276,8 @@ describe("changements d'enveloppe", () => {
     );
     const s = e.buildSeries("2024-01-10", "2025-06-20");
 
-    expect(at(s, "2024-06-01").byEnvelope.CTO).toBeCloseTo(1_000, 6);
-    expect(at(s, "2025-06-20").byEnvelope.PEA).toBeCloseTo(1_000, 6);
+    expect(at(s, "2024-06-01").byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(1_000, 6);
+    expect(at(s, "2025-06-20").byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(1_000, 6);
   });
 });
 
@@ -299,8 +299,8 @@ describe("PEA-PME rejoint PEA", () => {
       })
     ).buildSeries("2024-01-10", "2024-01-12");
 
-    expect(at(s, "2024-01-12").byEnvelope.PEA).toBeCloseTo(1_000, 6);
-    expect(at(s, "2024-01-12").byEnvelope.CTO).toBe(0);
+    expect(at(s, "2024-01-12").byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(1_000, 6);
+    expect(at(s, "2024-01-12").byAssetClassAndEnvelope.ACTIONS.CTO).toBe(0);
   });
 
   it("le type d'enveloppe survit à la suppression du compte", () => {
@@ -329,8 +329,8 @@ describe("PEA-PME rejoint PEA", () => {
       })
     ).buildSeries("2024-01-10", "2025-02-01");
 
-    expect(at(s, "2024-06-01").byEnvelope.PEA).toBeCloseTo(1_000, 6);
-    expect(at(s, "2025-02-01").byEnvelope.PEA).toBeCloseTo(1_000, 6);
+    expect(at(s, "2024-06-01").byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(1_000, 6);
+    expect(at(s, "2025-02-01").byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(1_000, 6);
   });
 });
 
@@ -371,8 +371,8 @@ describe("composition et périmètre", () => {
   it("deux lignes sont additionnées dans leurs enveloppes respectives", () => {
     const p = at(deuxLignes(), "2024-01-15");
 
-    expect(p.byEnvelope.PEA).toBeCloseTo(1_000, 6);
-    expect(p.byEnvelope.CTO).toBeCloseTo(1_000, 6);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(1_000, 6);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(1_000, 6);
   });
 
   it("un actif hors périmètre ne pollue aucune enveloppe", () => {
@@ -383,11 +383,11 @@ describe("composition et périmètre", () => {
       sait pas si c'est un titre ».
     */
     const p = at(deuxLignes(), "2024-01-15");
-    expect(p.byEnvelope.UNKNOWN).toBe(0);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBe(0);
     const somme =
-      demontre(p.byEnvelope.PEA) +
-      demontre(p.byEnvelope.CTO) +
-      demontre(p.byEnvelope.UNKNOWN);
+      demontre(p.byAssetClassAndEnvelope.ACTIONS.PEA) +
+      demontre(p.byAssetClassAndEnvelope.ACTIONS.CTO) +
+      demontre(p.byAssetClassAndEnvelope.ACTIONS.UNKNOWN);
     expect(somme).toBeCloseTo(2_000, 6);
     // Le patrimoine, lui, contient bien la crypto.
     expect(p.grossAssets).toBeCloseTo(32_000, 6);
@@ -395,7 +395,7 @@ describe("composition et périmètre", () => {
 
   it("PEA + CTO couvre exactement le sous-ensemble connu", () => {
     const p = at(deuxLignes(), "2024-01-15");
-    expect(demontre(p.byEnvelope.PEA) + demontre(p.byEnvelope.CTO)).toBeCloseTo(
+    expect(demontre(p.byAssetClassAndEnvelope.ACTIONS.PEA) + demontre(p.byAssetClassAndEnvelope.ACTIONS.CTO)).toBeCloseTo(
       2_000,
       6
     );
@@ -415,10 +415,10 @@ describe("composition et périmètre", () => {
       })
     ).buildSeries("2024-01-10", "2025-02-01");
 
-    expect(at(s, "2024-06-01").byEnvelope.CTO).toBeCloseTo(1_000, 6);
+    expect(at(s, "2024-06-01").byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(1_000, 6);
     const apres = at(s, "2025-02-01");
-    expect(apres.byEnvelope.CTO).toBe(0);
-    expect(apres.byEnvelope.UNKNOWN).toBe(0);
+    expect(apres.byAssetClassAndEnvelope.ACTIONS.CTO).toBe(0);
+    expect(apres.byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBe(0);
   });
 });
 
@@ -436,8 +436,8 @@ describe("le périmètre suit les positions réellement détenues", () => {
       })
     ).buildSeries("2024-01-01", "2024-03-05");
 
-    expect(at(s, "2024-02-01").byEnvelope.CTO).toBe(0);
-    expect(at(s, "2024-03-05").byEnvelope.CTO).toBeCloseTo(1_000, 6);
+    expect(at(s, "2024-02-01").byAssetClassAndEnvelope.ACTIONS.CTO).toBe(0);
+    expect(at(s, "2024-03-05").byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(1_000, 6);
   });
 
   it("un actif vendu disparaît de la contribution", () => {
@@ -454,8 +454,8 @@ describe("le périmètre suit les positions réellement détenues", () => {
       })
     ).buildSeries("2024-01-10", "2024-06-10");
 
-    expect(at(s, "2024-05-31").byEnvelope.CTO).toBeCloseTo(1_000, 6);
-    expect(at(s, "2024-06-10").byEnvelope.CTO).toBe(0);
+    expect(at(s, "2024-05-31").byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(1_000, 6);
+    expect(at(s, "2024-06-10").byAssetClassAndEnvelope.ACTIONS.CTO).toBe(0);
   });
 });
 
@@ -536,9 +536,9 @@ describe("la ventilation ne touche pas le patrimoine", () => {
     ).buildSeries("2024-01-10", "2024-01-15");
 
     const p = at(s, "2024-01-15");
-    expect(p.byEnvelope.PEA).toBe(0);
-    expect(p.byEnvelope.CTO).toBe(0);
-    expect(p.byEnvelope.UNKNOWN).toBe(0);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBe(0);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBe(0);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBe(0);
     // La valeur reste au patrimoine — seule la ventilation fiscale l'ignore.
     expect(p.grossAssets).toBeCloseTo(1_000, 6);
   });
@@ -580,9 +580,9 @@ describe("la ventilation ne touche pas le patrimoine", () => {
     ).buildSeries("2024-01-10", "2024-01-15");
 
     const p = at(s, "2024-01-15");
-    expect(p.byEnvelope.PEA).toBeCloseTo(1_000, 6);
-    expect(p.byEnvelope.UNKNOWN).toBeCloseTo(500, 6);
-    expect(p.byEnvelope.CTO).toBeNull();
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(1_000, 6);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBeCloseTo(500, 6);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBeNull();
   });
 
   it("une enveloppe démontrée reste visible à côté d'un inconnu — CTO", () => {
@@ -615,9 +615,9 @@ describe("la ventilation ne touche pas le patrimoine", () => {
     ).buildSeries("2024-01-10", "2024-01-15");
 
     const p = at(s, "2024-01-15");
-    expect(p.byEnvelope.CTO).toBeCloseTo(1_000, 6);
-    expect(p.byEnvelope.UNKNOWN).toBeCloseTo(500, 6);
-    expect(p.byEnvelope.PEA).toBeNull();
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(1_000, 6);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBeCloseTo(500, 6);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBeNull();
   });
 
   it("crypto, immobilier et cash n'entrent jamais dans l'inconnu", () => {
@@ -651,10 +651,10 @@ describe("la ventilation ne touche pas le patrimoine", () => {
     ).buildSeries("2024-01-10", "2024-01-15");
 
     const p = at(s, "2024-01-15");
-    expect(p.byEnvelope.UNKNOWN).toBe(0);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBe(0);
     // Aucun titre en suspens : les deux enveloppes valent un zéro vrai.
-    expect(p.byEnvelope.PEA).toBe(0);
-    expect(p.byEnvelope.CTO).toBe(0);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBe(0);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBe(0);
     // Et le patrimoine, lui, les contient bien.
     expect(p.grossAssets).toBeCloseTo(230_000, 6);
   });
@@ -678,9 +678,230 @@ describe("la ventilation ne touche pas le patrimoine", () => {
     ).buildSeries("2024-01-10", "2024-01-15");
 
     const p = at(s, "2024-01-15");
-    expect(p.byEnvelope.UNKNOWN).toBe(0);
-    expect(p.byEnvelope.PEA).toBe(0);
-    expect(p.byEnvelope.CTO).toBe(0);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBe(0);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBe(0);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBe(0);
     expect(p.grossAssets).toBeCloseTo(1_000, 6);
+  });
+});
+
+/**
+ * Croisement classe × enveloppe.
+ *
+ * La question n'est plus « où sont mes titres » mais « où sont mes actions ».
+ * Ce qui change tient en un point : une obligation en compte-titres ne doit
+ * plus grossir la courbe « Actions en CTO », alors que la ventilation globale
+ * les additionnait.
+ */
+describe("croisement classe × enveloppe", () => {
+  /**
+   * Deux actions et une obligation, toutes trois en compte-titres, plus une
+   * action en PEA. De quoi vérifier qu'aucune ne déborde sur la case voisine.
+   */
+  function melange() {
+    return new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t1", "actPea", "2024-01-10", 10, 100), // 1 000 € actions PEA
+          buy("t2", "actCto", "2024-01-10", 5, 100), //    500 € actions CTO
+          buy("t3", "obliCto", "2024-01-10", 3, 100), //   300 € obligations CTO
+        ],
+        rawAssetClassById: new Map([
+          ["actPea", "ACTIONS"],
+          ["actCto", "ACTIONS"],
+          ["obliCto", "OBLIGATIONS"],
+        ]),
+        assetClassById: new Map([
+          ["actPea", "ACTIONS"],
+          ["actCto", "ACTIONS"],
+          ["obliCto", "OBLIGATIONS"],
+        ]),
+        envelopeEventsByAsset: new Map([
+          ["actPea", [evt("2024-01-10", "PEA")]],
+          ["actCto", [evt("2024-01-10", "CTO")]],
+          ["obliCto", [evt("2024-01-10", "CTO")]],
+        ]),
+        closes: closes({
+          actPea: { "2024-01-10": 100 },
+          actCto: { "2024-01-10": 100 },
+          obliCto: { "2024-01-10": 100 },
+        }),
+      })
+    ).buildSeries("2024-01-10", "2024-01-15");
+  }
+
+  it("Actions + PEA ne retient que les actions du PEA", () => {
+    const p = at(melange(), "2024-01-15");
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(1_000, 6);
+  });
+
+  it("Actions + CTO ne retient que les actions du CTO, pas les obligations", () => {
+    /*
+      Le cœur du chantier. La ventilation globale rendait 800 € ici — 500 €
+      d'actions plus 300 € d'obligations, toutes deux en compte-titres. Le
+      croisement sépare les deux.
+    */
+    const p = at(melange(), "2024-01-15");
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(500, 6);
+    expect(p.byAssetClassAndEnvelope.OBLIGATIONS.CTO).toBeCloseTo(300, 6);
+  });
+
+  it("Obligations + CTO porte la valeur des obligations concernées", () => {
+    const p = at(melange(), "2024-01-15");
+    expect(p.byAssetClassAndEnvelope.OBLIGATIONS.CTO).toBeCloseTo(300, 6);
+    // Aucune obligation en PEA dans ce décor : un zéro vrai, pas une absence.
+    expect(p.byAssetClassAndEnvelope.OBLIGATIONS.PEA).toBe(0);
+    expect(p.byAssetClassAndEnvelope.OBLIGATIONS.UNKNOWN).toBe(0);
+  });
+
+  it("Actions + Tout égale la somme des enveloppes connues de la classe", () => {
+    const p = at(melange(), "2024-01-15");
+    const c = p.byAssetClassAndEnvelope.ACTIONS;
+    const somme = demontre(c.PEA) + demontre(c.CTO) + demontre(c.UNKNOWN);
+    expect(somme).toBeCloseTo(1_500, 6);
+    // Et cette somme est bien la classe entière, ici sans ligne hors périmètre.
+    expect(somme).toBeCloseTo(p.byAssetClass.ACTIONS, 6);
+  });
+
+  it("aucun actif n'est compté deux fois, et le total global ne bouge pas", () => {
+    const p = at(melange(), "2024-01-15");
+    const c = p.byAssetClassAndEnvelope;
+    const croise =
+      demontre(c.ACTIONS.PEA) +
+      demontre(c.ACTIONS.CTO) +
+      demontre(c.ACTIONS.UNKNOWN) +
+      demontre(c.OBLIGATIONS.PEA) +
+      demontre(c.OBLIGATIONS.CTO) +
+      demontre(c.OBLIGATIONS.UNKNOWN);
+    expect(croise).toBeCloseTo(1_800, 6);
+    expect(p.grossAssets).toBeCloseTo(1_800, 6);
+  });
+
+  it("aucune classe hors périmètre ne reçoit de case d'enveloppe", () => {
+    /*
+      Le type l'interdit déjà, et l'objet rendu doit le confirmer : croiser
+      « Crypto » et « PEA » ne doit pas même être exprimable dans la réponse.
+    */
+    const p = at(melange(), "2024-01-15");
+    expect(Object.keys(p.byAssetClassAndEnvelope).sort()).toEqual([
+      "ACTIONS",
+      "OBLIGATIONS",
+    ]);
+  });
+
+  it("l'inconnu d'une classe ne rend pas l'autre absente", () => {
+    /*
+      Les deux classes sont indépendantes. Une action dont l'enveloppe n'est pas
+      démontrée ne doit pas effacer ce que l'on sait des obligations.
+    */
+    const s = new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t1", "actInc", "2024-01-10", 10, 100),
+          buy("t2", "obliCto", "2024-01-10", 3, 100),
+        ],
+        rawAssetClassById: new Map([
+          ["actInc", "ACTIONS"],
+          ["obliCto", "OBLIGATIONS"],
+        ]),
+        assetClassById: new Map([
+          ["actInc", "ACTIONS"],
+          ["obliCto", "OBLIGATIONS"],
+        ]),
+        envelopeEventsByAsset: new Map([
+          // Action journalisée, mais observée seulement en 2025.
+          ["actInc", [evt("2025-01-01", "PEA")]],
+          ["obliCto", [evt("2024-01-10", "CTO")]],
+        ]),
+        closes: closes({
+          actInc: { "2024-01-10": 100 },
+          obliCto: { "2024-01-10": 100 },
+        }),
+      })
+    ).buildSeries("2024-01-10", "2024-01-15");
+
+    const p = at(s, "2024-01-15");
+    // Actions : rien n'est démontré, l'inconnu porte la valeur.
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBeNull();
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBeNull();
+    expect(p.byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBeCloseTo(1_000, 6);
+    // Obligations : parfaitement connues, et intactes.
+    expect(p.byAssetClassAndEnvelope.OBLIGATIONS.CTO).toBeCloseTo(300, 6);
+    expect(p.byAssetClassAndEnvelope.OBLIGATIONS.PEA).toBe(0);
+  });
+});
+
+describe("le croisement suit les changements d'enveloppe dans le temps", () => {
+  /**
+   * Scénario du §15 : deux actions qui échangent leurs enveloppes.
+   *
+   * Date 1 — A en PEA, B en CTO.
+   * Date 2 — A passe en CTO, B y reste : tout est en CTO.
+   * Date 3 — B passe en PEA, A reste en CTO : les rôles sont inversés.
+   *
+   * Tester le seul état final laisserait passer une série qui ne bouge jamais.
+   */
+  function chasseCroisee() {
+    return new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t1", "A", "2024-01-01", 10, 100), // 1 000 €
+          buy("t2", "B", "2024-01-01", 2, 100), //    200 €
+        ],
+        rawAssetClassById: new Map([
+          ["A", "ACTIONS"],
+          ["B", "ACTIONS"],
+        ]),
+        assetClassById: new Map([
+          ["A", "ACTIONS"],
+          ["B", "ACTIONS"],
+        ]),
+        envelopeEventsByAsset: new Map([
+          ["A", [evt("2024-01-01", "PEA"), evt("2024-02-01", "CTO")]],
+          ["B", [evt("2024-01-01", "CTO"), evt("2024-03-01", "PEA")]],
+        ]),
+        closes: closes({
+          A: { "2024-01-01": 100 },
+          B: { "2024-01-01": 100 },
+        }),
+      })
+    ).buildSeries("2024-01-01", "2024-03-05");
+  }
+
+  it("date 1 — A en PEA, B en CTO", () => {
+    const p = at(chasseCroisee(), "2024-01-15");
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(1_000, 6);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(200, 6);
+  });
+
+  it("date 2 — A rejoint B en CTO, le PEA se vide pour de vrai", () => {
+    const p = at(chasseCroisee(), "2024-02-15");
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(1_200, 6);
+    // Zéro **vrai** : plus aucune action en suspens, le PEA est bien vide.
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBe(0);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.UNKNOWN).toBe(0);
+  });
+
+  it("date 3 — les rôles sont inversés", () => {
+    const p = at(chasseCroisee(), "2024-03-05");
+    expect(p.byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(200, 6);
+    expect(p.byAssetClassAndEnvelope.ACTIONS.CTO).toBeCloseTo(1_000, 6);
+  });
+
+  it("les bascules tombent au jour exact, pas la veille ni le lendemain", () => {
+    const s = chasseCroisee();
+    // A quitte le PEA le 1er février.
+    expect(at(s, "2024-01-31").byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(1_000, 6);
+    expect(at(s, "2024-02-01").byAssetClassAndEnvelope.ACTIONS.PEA).toBe(0);
+    // B rejoint le PEA le 1er mars.
+    expect(at(s, "2024-02-29").byAssetClassAndEnvelope.ACTIONS.PEA).toBe(0);
+    expect(at(s, "2024-03-01").byAssetClassAndEnvelope.ACTIONS.PEA).toBeCloseTo(200, 6);
+  });
+
+  it("le total de la classe ne bouge pas au fil des bascules", () => {
+    // Les actions changent d'enveloppe, pas de valeur.
+    for (const jour of ["2024-01-15", "2024-02-15", "2024-03-05"]) {
+      expect(at(chasseCroisee(), jour).byAssetClass.ACTIONS).toBeCloseTo(1_200, 6);
+    }
   });
 });
