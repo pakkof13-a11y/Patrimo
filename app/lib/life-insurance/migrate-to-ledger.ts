@@ -124,6 +124,14 @@ type Loaded = {
    * contrat-ci » plutôt que « quelque part au journal ».
    */
   contractsWithLedgerEuroFund: Set<string>;
+  /**
+   * À quel contrat appartient chaque position du journal.
+   *
+   * Absent de la carte = position non rattachée : le nom reste alors le seul
+   * indice, et le rapprochement par présomption s'applique. Présent = la
+   * question est tranchée, et aucun autre contrat ne peut la revendiquer.
+   */
+  contractByAssetId: Map<string, string>;
 };
 
 async function loadContracts(userId: string): Promise<Loaded> {
@@ -136,7 +144,7 @@ async function loadContracts(userId: string): Promise<Loaded> {
   // appeler le calcul qui fait déjà foi partout ailleurs.
   const { getHoldings } = await import("../portfolio/service");
 
-  const [rows, holdings, euroFundSupports] = await Promise.all([
+  const [rows, holdings, attachedSupports] = await Promise.all([
     prisma.lifeInsurance.findMany({
       where: { userId },
       include: { products: true },
@@ -145,11 +153,10 @@ async function loadContracts(userId: string): Promise<Loaded> {
     getHoldings(userId, "EUR"),
     prisma.lifeInsuranceSupport.findMany({
       where: {
-        kind: "FONDS_EURO",
         lifeInsuranceId: { not: null },
         asset: { is: { userId } },
       },
-      select: { lifeInsuranceId: true },
+      select: { lifeInsuranceId: true, assetId: true, kind: true },
     }),
   ]);
 
@@ -164,9 +171,17 @@ async function loadContracts(userId: string): Promise<Loaded> {
   return {
     ledger,
     contractsWithLedgerEuroFund: new Set(
-      euroFundSupports
+      attachedSupports
+        .filter((s) => s.kind === "FONDS_EURO")
         .map((s) => s.lifeInsuranceId)
         .filter((id): id is string => id != null)
+    ),
+    contractByAssetId: new Map(
+      attachedSupports
+        .filter((s): s is typeof s & { lifeInsuranceId: string } =>
+          s.lifeInsuranceId != null
+        )
+        .map((s) => [s.assetId, s.lifeInsuranceId])
     ),
     contracts: rows.map((r) => ({
       id: r.id,
@@ -188,10 +203,26 @@ async function loadContracts(userId: string): Promise<Loaded> {
  * positions.
  *
  * Rien ne relie techniquement un contrat de la table à une plateforme du
- * journal : le rapprochement doit donc considérer toutes les positions AV. Mais
- * il doit le faire globalement, pas contrat par contrat — sinon deux contrats
- * portant un support homonyme revendiqueraient tous deux la même position, et
- * le total « compté deux fois » serait lui-même compté deux fois.
+ * journal : le rapprochement doit donc considérer les positions AV sans
+ * rattachement connu. Mais il doit le faire globalement, pas contrat par
+ * contrat — sinon deux contrats portant un support homonyme revendiqueraient
+ * tous deux la même position, et le total « compté deux fois » serait lui-même
+ * compté deux fois.
+ *
+ * ## Le rattachement l'emporte sur le nom
+ *
+ * Un ETF World se retrouve dans la moitié des assurances-vie. Deux contrats
+ * peuvent donc porter un support homonyme sans que ce soit le même. Rapprochés
+ * sur le seul nom, le premier contrat servi emportait la position : sa ligne de
+ * table était supprimée comme « doublon » d'une position qui ne lui appartenait
+ * pas, et le second migrait la sienne en doublant celle du premier. Une valeur
+ * historique effacée sans contrepartie, et une position attribuée au mauvais
+ * contrat.
+ *
+ * `LifeInsuranceSupport.lifeInsuranceId` tranche la question quand il est
+ * renseigné, et il est le seul à pouvoir le faire. Une position rattachée n'est
+ * donc proposée qu'à son contrat ; une position non rattachée reste offerte à
+ * tous, le nom demeurant alors le seul indice disponible.
  */
 function reconcileAllContracts(loaded: Loaded) {
   const remaining = [...loaded.ledger];
@@ -201,7 +232,11 @@ function reconcileAllContracts(loaded: Loaded) {
       name: p.name,
       valueEur: p.currentValue.toString(),
     }));
-    const r = reconcileSupports(tableSupports, remaining);
+    const recevables = remaining.filter((l) => {
+      const proprietaire = loaded.contractByAssetId.get(l.assetId);
+      return proprietaire == null || proprietaire === c.id;
+    });
+    const r = reconcileSupports(tableSupports, recevables);
     // Les positions appariées sortent du pool : elles ne peuvent plus être
     // revendiquées par un contrat suivant.
     const claimed = new Set(r.duplicates.map((dp) => dp.ledger.assetId));

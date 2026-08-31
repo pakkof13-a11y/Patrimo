@@ -102,7 +102,15 @@ function scenarioSpirica() {
   getHoldings.mockResolvedValue([
     positionAV("a-fe", "Fonds euro Spirica", "25500"),
   ]);
-  supportFindMany.mockResolvedValue([{ lifeInsuranceId: SPIRICA }]);
+  /*
+    La fiche du support porte son contrat, son actif et sa nature. Le filtre sur
+    `kind` se fait désormais en mémoire — la requête charge tous les supports
+    rattachés pour construire aussi la carte actif → contrat — donc le champ
+    doit figurer ici, comme il figure en base.
+  */
+  supportFindMany.mockResolvedValue([
+    { lifeInsuranceId: SPIRICA, assetId: "a-fe", kind: "FONDS_EURO" },
+  ]);
 }
 
 describe("contrat ambigu : fonds euro déjà au journal", () => {
@@ -163,7 +171,9 @@ describe("contrat sans ambiguïté", () => {
     getHoldings.mockResolvedValue([
       positionAV("a-fe", "Fonds euro Spirica", "25500"),
     ]);
-    supportFindMany.mockResolvedValue([{ lifeInsuranceId: SPIRICA }]);
+    supportFindMany.mockResolvedValue([
+      { lifeInsuranceId: SPIRICA, assetId: "a-fe", kind: "FONDS_EURO" },
+    ]);
 
     const r = await migrateLifeInsuranceToLedger(USER);
     expect(r.created).toBe(1);
