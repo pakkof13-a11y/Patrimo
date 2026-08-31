@@ -470,19 +470,40 @@ export async function openImportCsvModal(page: Page) {
     await page.goto(url.pathname + url.search, { waitUntil: "domcontentloaded" });
   }
 
-  // 2) Secours clic header
-  const byTestId = page.getByTestId("import-csv-modal");
-  if (!(await byTestId.isVisible().catch(() => false))) {
+  /*
+    2) Secours clic header — seulement si le deep-link n'a vraiment pas ouvert.
+
+    Le test d'ouverture était un `isVisible()` immédiat, lancé alors que la
+    page venait de naviguer : la modale n'était pas encore montée, on tombait
+    dans le secours, et son `click({ force: true })` partait vers le bouton
+    d'en-tête — désormais recouvert par l'overlay de la modale qui venait de
+    s'ouvrir. `force` ignore justement ce recouvrement : le mousedown
+    atterrissait sur l'overlay, dont le gestionnaire ferme la modale.
+
+    La fermeture passe par `router.replace` pour retirer `?import=1`, donc elle
+    n'était visible qu'une seconde plus tard. L'assertion d'ouverture qui suit
+    passait, le test continuait, et la modale disparaissait en plein milieu :
+    l'échec tombait bien après sa cause, sur une assertion sans rapport.
+
+    On attend donc réellement la modale avant de conclure à un échec du
+    deep-link, et l'on clique sans `force` : si quelque chose recouvre le
+    bouton, le test doit le dire, pas passer outre.
+  */
+  const modal = page.getByTestId("import-csv-modal");
+  const opened = await modal
+    .waitFor({ state: "visible", timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (!opened) {
     const btn = page.getByTestId("open-import-csv");
     if (await btn.isVisible().catch(() => false)) {
-      await btn.click({ force: true });
+      await btn.click();
     }
   }
 
   // Un seul locator (éviter .or() + strict mode quand titre + body matchent)
-  await expect(page.getByTestId("import-csv-modal")).toBeVisible({
-    timeout: 15_000,
-  });
+  await expect(modal).toBeVisible({ timeout: 15_000 });
 }
 
 /**

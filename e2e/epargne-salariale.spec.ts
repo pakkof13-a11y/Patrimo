@@ -66,21 +66,36 @@ test.describe("Épargne salariale", () => {
       nombre de plans dans son nom accessible. Deux titres nommés « Épargne
       salariale » signifieraient que le pli a rouvert le sien.
     */
+    /*
+      Attendre que le pli soit rendu avant d'affirmer ce qu'il ne contient pas.
+
+      Une assertion négative est vraie d'elle-même tant que le contenu n'est pas
+      arrivé. Ces vérifications venaient en tête de test et passaient donc sur
+      un pli encore vide : vertes par accident de calendrier, aveugles à la
+      régression qu'elles prétendaient garder.
+    */
+    await expect(management.getByText("Positions FCPE")).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(management.getByTestId("es-add-line")).toHaveCount(1);
+
     const titles = page.getByRole("heading", { name: "Épargne salariale" });
     await expect(titles).toHaveCount(1);
 
-    // La bande d'indicateurs appartient à la vue d'ensemble, pas au pli.
-    await expect(page.getByTestId("es-kpi-strip")).toBeVisible();
-    for (const label of ["Valeur totale", "Disponible", "Bloqué", "Liquidité"]) {
-      await expect(
-        management.getByText(label, { exact: true }),
-        `« ${label} » est répété dans la section de gestion`
-      ).toHaveCount(0);
-    }
+    /*
+      La bande d'indicateurs appartient à la vue d'ensemble, pas au pli.
 
-    // Ce que le pli doit garder, lui, est toujours là.
-    await expect(management.getByTestId("es-add-line")).toHaveCount(1);
-    await expect(management.getByText("Positions FCPE")).toBeVisible();
+      On vise la bande elle-même plutôt que ses libellés. « Disponible » et
+      « Bloqué » nomment aussi le badge de liquidité de chaque ligne FCPE :
+      les chercher par texte confondait un indicateur répété avec quatre
+      pastilles de tableau parfaitement légitimes, et l'assertion ne tenait
+      qu'aussi longtemps que ces lignes n'étaient pas chargées.
+    */
+    await expect(page.getByTestId("es-kpi-strip")).toHaveCount(1);
+    await expect(
+      management.getByTestId("es-kpi-strip"),
+      "la section de gestion rouvre sa propre bande d'indicateurs"
+    ).toHaveCount(0);
   });
 
   test("le repli de gestion survit au rechargement — l'état vit dans l'URL", async ({

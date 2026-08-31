@@ -171,18 +171,30 @@ test.describe("Métaux précieux", () => {
     await page.getByTestId("metals-has-invoice").check();
     await page.getByTestId("metals-submit").click();
 
-    await expect(page.getByText("Lot ajouté")).toBeVisible({ timeout: 15_000 });
-    await expect(
-      page.getByTestId("precious-metals-table")
-    ).toContainText("Test Maple 1 oz");
+    /*
+      Nettoyage garanti, y compris en échec.
 
-    // Nettoyage : le lot ne doit pas polluer les tests suivants.
-    const body = await (await page.request.get("/api/precious-metals")).json();
-    const created = body.lines.find(
-      (l: { denomination: string }) => l.denomination === "Test Maple 1 oz"
-    );
-    if (created) {
-      await page.request.delete(`/api/precious-metals?id=${created.id}`);
+      Le lot était supprimé après les assertions : dès que l'une d'elles
+      tombait, il restait en base pour tout le reste de la suite — l'échec
+      d'un test en contaminait d'autres, et la cause devenait illisible. Le
+      `finally` fait du nettoyage une promesse du test, pas une récompense de
+      sa réussite.
+    */
+    try {
+      await expect(page.getByText("Lot ajouté")).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(page.getByTestId("precious-metals-table")).toContainText(
+        "Test Maple 1 oz"
+      );
+    } finally {
+      const body = await (await page.request.get("/api/precious-metals")).json();
+      const created = body.lines?.find(
+        (l: { denomination: string }) => l.denomination === "Test Maple 1 oz"
+      );
+      if (created) {
+        await page.request.delete(`/api/precious-metals?id=${created.id}`);
+      }
     }
   });
 });
