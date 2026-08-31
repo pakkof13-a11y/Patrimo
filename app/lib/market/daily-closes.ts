@@ -258,6 +258,26 @@ export async function collectDailyCloses(opts: {
   return report;
 }
 
+/**
+ * Lit les clôtures quotidiennes d'un ensemble d'actifs sur une plage.
+ *
+ * ## La collecte se demande, elle ne s'obtient pas par omission
+ *
+ * La condition était `opts?.refresh !== false` : ne rien passer suffisait donc
+ * à déclencher des appels fournisseurs et des écritures dans `AssetDailyClose`.
+ * Les trois appelants de lecture passaient bien `refresh: false` et étaient
+ * corrects, mais le défaut était structurel — le comportement dangereux était
+ * celui qu'on obtenait sans rien écrire, et aucun test n'aurait signalé un
+ * futur appelant l'oubliant.
+ *
+ * `refresh: true` est désormais la seule façon de collecter. Une lecture reste
+ * une lecture, y compris quand on l'écrit vite.
+ *
+ * Rien d'autre ne change : ni les règles de fraîcheur, ni la politique de
+ * remplissage, ni le comportement de `refresh: true`, qui appelle le même
+ * `collectDailyCloses` qu'auparavant. La tâche planifiée, elle, ne passe pas
+ * par ici : elle appelle `collectDailyClosesForAssets` directement.
+ */
 export async function getDailyCloses(
   userId: string,
   assetIds: string[],
@@ -268,7 +288,7 @@ export async function getDailyCloses(
   const now = opts?.now ?? new Date();
   const unique = [...new Set(assetIds)].filter(Boolean);
 
-  if (opts?.refresh !== false && unique.length > 0) {
+  if (opts?.refresh === true && unique.length > 0) {
     await collectDailyCloses({ userId, assetIds: unique, fromDay, toDay, now });
   }
 

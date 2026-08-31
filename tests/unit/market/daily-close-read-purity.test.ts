@@ -5,10 +5,11 @@ import { describe, expect, it } from "vitest";
 /**
  * Une lecture d'historique ne collecte pas.
  *
- * `getDailyCloses` complète le cache avant de répondre : c'est légitime pour un
- * écran qui vient de demander une plage, mais interdit pour le moteur
- * historique, qui doit pouvoir reconstruire cinq ans sans qu'un affichage
- * déclenche des appels fournisseurs.
+ * `getDailyCloses` peut compléter le cache avant de répondre, mais seulement si
+ * on le lui demande par `refresh: true` — c'est légitime pour un écran qui vient
+ * de réclamer une plage, et interdit pour le moteur historique, qui doit
+ * pouvoir reconstruire cinq ans sans qu'un affichage déclenche des appels
+ * fournisseurs.
  *
  * Depuis que la tâche planifiée entretient `AssetDailyClose`, cette séparation
  * compte davantage : la collecte a un endroit, et ce n'est pas le chemin de

@@ -46,16 +46,20 @@ describe("chemins de lecture — aucune collecte, aucun fournisseur", () => {
     (chemin) => {
       const src = lire(chemin);
       /*
-        `getDailyCloses` collecte par défaut : sans `refresh: false`, une simple
-        consultation rappelle les fournisseurs et écrit `AssetDailyClose`.
-        C'est précisément le défaut corrigé — il ne doit pas revenir par
-        omission d'une option.
+        `getDailyCloses` ne collecte plus que sur `refresh: true`. L'omission
+        est donc devenue sûre, et exiger `refresh: false` n'aurait plus de sens
+        — ce serait contraindre une écriture facultative.
+
+        Ce qui reste dangereux, et que ce test garde désormais, c'est la
+        demande explicite : un chemin de lecture qui réclamerait la collecte
+        rappellerait les fournisseurs et écrirait `AssetDailyClose` au milieu
+        d'une simple consultation.
       */
       const appels = src.match(/getDailyCloses\s*\(/g) ?? [];
       if (appels.length === 0) return;
 
       expect(appels).toHaveLength(1);
-      expect(src).toMatch(/refresh:\s*false/);
+      expect(src).not.toMatch(/refresh:\s*true/);
     }
   );
 
@@ -126,15 +130,17 @@ describe("aucune quatrième porte", () => {
     expect(fautives).toEqual([]);
   });
 
-  it("aucune route ne remplit le cache de clôtures par omission", () => {
+  it("aucune route ne demande la collecte de clôtures", () => {
     /*
-      `getDailyCloses` collecte par défaut. Une route qui l'appellerait sans
-      `refresh: false` rouvrirait la porte sans qu'aucun nom de collecteur
-      n'apparaisse dans son code.
+      L'omission ne collecte plus : ce test gardait la porte contre un oubli, il
+      garde désormais contre une demande. Une route qui passerait
+      `refresh: true` collecterait sans qu'aucun nom de collecteur n'apparaisse
+      dans son code — c'est le seul chemin par lequel la collecte peut encore
+      s'inviter dans une consultation.
     */
     const fautives = toutesLesRoutes().filter((r) => {
       const src = lire(r);
-      return /getDailyCloses\s*\(/.test(src) && !/refresh:\s*false/.test(src);
+      return /getDailyCloses\s*\(/.test(src) && /refresh:\s*true/.test(src);
     });
 
     expect(fautives).toEqual([]);
