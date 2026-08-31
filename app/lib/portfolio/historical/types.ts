@@ -180,8 +180,14 @@ export type PortfolioValuationPoint = {
    * `PEA + CTO + UNKNOWN` couvre les seules lignes titres. Ce n'est pas une
    * partition du patrimoine : crypto, immobilier et assurance-vie n'y figurent
    * pas, et une ligne sortie des enveloppes titres cesse d'y contribuer.
+   *
+   * `null` sur `PEA` ou `CTO` signifie **absent**, et non zéro : rien ne
+   * démontre cette enveloppe à cette date, et une ligne inconnue pourrait s'y
+   * trouver. Zéro reste employé quand il est vrai — aucune ligne titre en
+   * suspens, donc l'enveloppe est bien vide. `UNKNOWN` est toujours un nombre :
+   * c'est une valeur mesurée, celle des lignes non démontrées.
    */
-  byEnvelope: Record<ValuationEnvelope, number>;
+  byEnvelope: Record<ValuationEnvelope, number | null>;
 
   /**
    * Ce que la classe a produit, une fois les mouvements de capitaux retirés :

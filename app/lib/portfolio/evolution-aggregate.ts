@@ -83,8 +83,13 @@ export type EvolutionSeriesPoint = {
    * s'arrêtait ici.
    */
   byAssetClass?: Record<string, number>;
-  /** Valeur des titres par enveloppe fiscale — PEA, CTO, UNKNOWN. */
-  byEnvelope?: Record<string, number>;
+  /**
+   * Valeur des titres par enveloppe fiscale — PEA, CTO, UNKNOWN.
+   *
+   * `null` sur `PEA` ou `CTO` veut dire absent : rien ne démontre cette
+   * enveloppe à cette date. Le distinguer de zéro est tout l'objet du champ.
+   */
+  byEnvelope?: Record<string, number | null>;
   isLive?: boolean;
 };
 
@@ -125,7 +130,19 @@ function parisStartOfCalendarDay(now = new Date()): Date {
   return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
 }
 
-function startOfRange(range: EvolutionRange, now = new Date()): Date | null {
+/**
+ * Début de la fenêtre affichée, ou `null` quand la plage porte tout
+ * l'historique.
+ *
+ * Exportée pour que l'écran puisse raisonner sur la **même** fenêtre que la
+ * série : l'avertissement d'historique incomplet doit couvrir exactement ce que
+ * l'œil voit, et redériver ces bornes ailleurs les ferait diverger à la
+ * première évolution des plages.
+ */
+export function startOfRange(
+  range: EvolutionRange,
+  now = new Date()
+): Date | null {
   const day = 24 * 60 * 60 * 1000;
   switch (range) {
     case "7d": {
@@ -347,8 +364,13 @@ type StockAcc = {
    * pas pouvoir confondre « classe à zéro » et « ventilation inconnue ».
    */
   byAssetClass?: Record<string, number>;
-  /** Valeur des titres par enveloppe fiscale — PEA, CTO, UNKNOWN. */
-  byEnvelope?: Record<string, number>;
+  /**
+   * Valeur des titres par enveloppe fiscale — PEA, CTO, UNKNOWN.
+   *
+   * `null` sur `PEA` ou `CTO` veut dire absent : rien ne démontre cette
+   * enveloppe à cette date. Le distinguer de zéro est tout l'objet du champ.
+   */
+  byEnvelope?: Record<string, number | null>;
   isLive?: boolean;
 };
 
@@ -429,7 +451,7 @@ function normalizePoint(p: HistoryPoint): {
   rents: number;
   status?: "EXACT" | "ESTIMATED";
   byAssetClass?: Record<string, number>;
-  byEnvelope?: Record<string, number>;
+  byEnvelope?: Record<string, number | null>;
   isLive?: boolean;
 } {
   const total = Number(p.totalValueBase) || 0;

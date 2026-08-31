@@ -1288,9 +1288,17 @@ export async function getPortfolioHistory(
         Object.entries(p.byAssetClass).map(([k, v]) => [k, toBase(d(v))])
       ) as Record<string, number>,
 
+      /*
+        L'absence traverse la conversion telle quelle : convertir `null` en
+        zéro ici rendrait à l'affichage l'ignorance que le moteur vient
+        précisément de distinguer.
+      */
       byEnvelopeBase: Object.fromEntries(
-        Object.entries(p.byEnvelope).map(([k, v]) => [k, toBase(d(v))])
-      ) as Record<string, number>,
+        Object.entries(p.byEnvelope).map(([k, v]) => [
+          k,
+          v == null ? null : toBase(d(v)),
+        ])
+      ) as Record<string, number | null>,
 
       flowsByAssetClassBase: Object.fromEntries(
         Object.entries(p.flowsByAssetClass).map(([k, v]) => [k, toBase(d(v))])

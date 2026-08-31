@@ -15,6 +15,7 @@ import {
   evolutionIntervalHint,
   evolutionIntervalLabel,
   isEvolutionRangeEnabled,
+  startOfRange,
   toPercentSeries,
   withBenchmarkSeries,
   type EvolutionRange,
@@ -386,22 +387,36 @@ export function PortfolioEvolutionPanel({
   }, [history, scope, assetClass, classMetric, envelope]);
 
   /**
-   * Part des titres dont l'enveloppe n'est pas démontrée, au dernier point.
+   * Part des titres dont l'enveloppe n'est pas démontrée, sur toute la fenêtre.
    *
    * Le journal ne remonte qu'à sa mise en place : tout ce qui précède est
    * inconnu, et le taire laisserait croire que `PEA + CTO` couvre tous les
-   * titres. Le chiffre est celui du point le plus récent de la fenêtre — c'est
-   * lui que l'œil lit, et un cumul sur la période n'aurait pas de sens pour un
-   * stock.
+   * titres.
+   *
+   * Le chiffre était lu sur le dernier point, ce qui l'annulait dans le cas le
+   * plus courant : une fois toutes les lignes observées, le présent est connu
+   * et l'avertissement disparaissait — alors même que les cinq années
+   * précédentes de la courbe, elles, restaient inconnues. On balaie donc la
+   * fenêtre affichée, et l'on retient le montant le plus élevé qu'elle porte :
+   * c'est la part que la courbe ne démontre pas.
+   *
+   * `startOfRange` est celle de la série, pour que l'avertissement couvre
+   * exactement ce que l'œil voit.
    */
   const unknownEnvelopeEur = useMemo(() => {
     if (!envelope) return 0;
-    for (let i = history.length - 1; i >= 0; i--) {
-      const v = history[i]?.byEnvelopeBase;
-      if (v) return Number(v.UNKNOWN ?? 0);
+    const from = startOfRange(range);
+    const fromT = from ? from.getTime() : -Infinity;
+    let max = 0;
+    for (const p of history) {
+      if (Date.parse(p.date) < fromT) continue;
+      const v = p.byEnvelopeBase;
+      if (!v) continue;
+      const u = Number(v.UNKNOWN ?? 0);
+      if (Number.isFinite(u) && u > max) max = u;
     }
-    return 0;
-  }, [history, envelope]);
+    return max;
+  }, [history, envelope, range]);
 
   const { points: rawPoints, interval } = useMemo(
     () => buildEvolutionSeries(scopedHistory, range, "cumul"),
@@ -715,11 +730,27 @@ export function PortfolioEvolutionPanel({
               description="Actualisez les cours pour enregistrer un premier point de courbe."
             />
           ) : noPoints ? (
-            <EmptyPlaceholder
-              compact
-              title="Période trop courte"
-              description="Choisissez une plage plus large ou attendez davantage d'historique."
-            />
+            /*
+              Deux raisons très différentes de n'avoir aucun point, et une seule
+              phrase les couvrait. Quand l'enveloppe est inconnue sur toute la
+              fenêtre, « période trop courte » envoie élargir la plage — ce qui
+              ne révélera jamais rien, l'historique manquant étant justement
+              plus ancien. On dit donc ce qui manque réellement.
+            */
+            envelope && unknownEnvelopeEur > 0 ? (
+              <EmptyPlaceholder
+                compact
+                testId="evolution-envelope-all-unknown"
+                title="Enveloppe inconnue sur cette période"
+                description="Le journal des enveloppes ne remonte pas jusqu'ici : aucune valeur PEA ou CTO n'y est démontrable. Une plage plus récente en montrera la partie connue."
+              />
+            ) : (
+              <EmptyPlaceholder
+                compact
+                title="Période trop courte"
+                description="Choisissez une plage plus large ou attendez davantage d'historique."
+              />
+            )
           ) : versus === "none" ? (
             <PortfolioValueChart data={points} baseCurrency={baseCurrency} />
           ) : (
@@ -731,7 +762,7 @@ export function PortfolioEvolutionPanel({
         </div>
       </div>
 
-      {envelope && unknownEnvelopeEur > 0 && !empty && !noPoints && (
+      {envelope && unknownEnvelopeEur > 0 && !empty && (
         <p
           className="text-meta mt-1.5 shrink-0"
           data-testid="evolution-envelope-unknown"
@@ -741,10 +772,15 @@ export function PortfolioEvolutionPanel({
             utilisateur lirait « PEA 40 800 € » en croyant y voir tous ses
             titres de PEA, alors que le journal ne couvre qu'une partie de la
             période.
+
+            La ligne s'affiche aussi quand la courbe est vide : c'est même le
+            cas où elle importe le plus, l'écran n'ayant alors rien d'autre à
+            montrer que l'absence.
           */}
-          {formatCurrency(unknownEnvelopeEur, baseCurrency)} de titres dont
-          l&apos;enveloppe n&apos;est pas connue sur cette période — le journal
-          des enveloppes ne remonte pas plus loin.
+          Une partie de l&apos;historique PEA/CTO est inconnue avant le premier
+          constat d&apos;enveloppe — jusqu&apos;à{" "}
+          {formatCurrency(unknownEnvelopeEur, baseCurrency)} de titres non
+          rattachés sur cette période.
         </p>
       )}
 

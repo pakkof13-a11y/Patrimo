@@ -281,8 +281,12 @@ export type HistoryPoint = {
    * Résolue par le journal des enveloppes, jamais par l'état courant. `UNKNOWN`
    * porte les lignes dont on sait qu'elles sont des titres mais dont
    * l'enveloppe à cette date n'est pas démontrée — jamais zéro déguisé.
+   *
+   * `null` sur `PEA` ou `CTO` veut dire **absent** : rien ne démontre cette
+   * enveloppe à cette date. Le point n'est alors pas tracé, plutôt que d'être
+   * posé à zéro sur la courbe. Zéro subsiste là où il est vrai.
    */
-  byEnvelopeBase?: Record<string, number>;
+  byEnvelopeBase?: Record<string, number | null>;
   flowsByAssetClassBase?: Record<string, number>;
   /**
    * `valeur(D) − valeur(D−1) − flux(D)` par classe. Absent au premier point

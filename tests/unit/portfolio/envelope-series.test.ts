@@ -99,6 +99,18 @@ function closes(spec: Record<string, Record<string, number>>) {
 const at = (s: ReturnType<PortfolioValuationEngine["buildSeries"]>, jour: string) =>
   s.find((p) => p.day === jour)!;
 
+/**
+ * Valeur démontrée d'une enveloppe.
+ *
+ * `null` veut dire « rien ne le démontre » : l'additionner n'aurait pas de
+ * sens, et le convertir en zéro reproduirait le défaut que ce fichier garde.
+ * On échoue donc plutôt que de deviner.
+ */
+function demontre(v: number | null): number {
+  expect(v).not.toBeNull();
+  return v as number;
+}
+
 describe("aucune rétroprojection — le cœur du chantier", () => {
   /**
    * Une ligne achetée en 2024, observée en CTO seulement en 2026.
@@ -119,32 +131,50 @@ describe("aucune rétroprojection — le cœur du chantier", () => {
     ).buildSeries("2024-01-10", "2026-06-05");
   }
 
-  it("un actif CTO observé en 2026 reste inconnu en 2024 et 2025", () => {
+  it("un actif CTO observé en 2026 est absent des enveloppes en 2024 et 2025", () => {
+    /*
+      `null`, et non `0`.
+
+      Ces assertions exigeaient auparavant zéro, et entérinaient donc le défaut
+      qu'elles prétendaient garder : une courbe posée à zéro sur toute la
+      profondeur antérieure au journal affirme « aucun titre en CTO », là où la
+      vérité est « on ne sait pas ». L'absence est la seule réponse honnête.
+    */
     const s = observeeTard("CTO");
 
     for (const jour of ["2024-06-01", "2025-01-01", "2026-05-31"]) {
       const p = at(s, jour);
-      expect(p.byEnvelope.CTO).toBe(0);
-      expect(p.byEnvelope.PEA).toBe(0);
+      expect(p.byEnvelope.CTO).toBeNull();
+      expect(p.byEnvelope.PEA).toBeNull();
       // Mais la valeur ne disparaît pas : elle est comptée comme inconnue.
       expect(p.byEnvelope.UNKNOWN).toBeCloseTo(1_000, 6);
     }
   });
 
-  it("un actif PEA observé en 2026 reste inconnu avant", () => {
+  it("un actif PEA observé en 2026 est absent des enveloppes avant", () => {
     const s = observeeTard("PEA");
     const p = at(s, "2025-06-01");
 
-    expect(p.byEnvelope.PEA).toBe(0);
+    expect(p.byEnvelope.PEA).toBeNull();
+    expect(p.byEnvelope.CTO).toBeNull();
     expect(p.byEnvelope.UNKNOWN).toBeCloseTo(1_000, 6);
   });
 
   it("la contribution commence exactement à la date d'observation", () => {
     const s = observeeTard("CTO");
 
-    expect(at(s, "2026-05-31").byEnvelope.CTO).toBe(0);
+    // La veille : rien n'est démontré, donc rien n'est affirmé.
+    expect(at(s, "2026-05-31").byEnvelope.CTO).toBeNull();
+    expect(at(s, "2026-05-31").byEnvelope.UNKNOWN).toBeCloseTo(1_000, 6);
+
+    /*
+      Le jour même : l'enveloppe est établie. `PEA` redevient un zéro **vrai**,
+      puisque plus aucune ligne titre n'est en suspens — l'absence ne se
+      justifie que tant que l'inconnu subsiste.
+    */
     expect(at(s, "2026-06-01").byEnvelope.CTO).toBeCloseTo(1_000, 6);
     expect(at(s, "2026-06-01").byEnvelope.UNKNOWN).toBe(0);
+    expect(at(s, "2026-06-01").byEnvelope.PEA).toBe(0);
   });
 
   it("l'inconnu n'est jamais transformé en zéro silencieux", () => {
@@ -154,8 +184,48 @@ describe("aucune rétroprojection — le cœur du chantier", () => {
       titre n'était détenu, alors que la position existait bel et bien.
     */
     const p = at(observeeTard("CTO"), "2025-01-01");
-    const somme = p.byEnvelope.PEA + p.byEnvelope.CTO + p.byEnvelope.UNKNOWN;
-    expect(somme).toBeCloseTo(1_000, 6);
+    expect(p.byEnvelope.PEA).toBeNull();
+    expect(p.byEnvelope.CTO).toBeNull();
+    expect(p.byEnvelope.UNKNOWN).toBeCloseTo(1_000, 6);
+  });
+
+  it("un seul point inconnu suffit à effacer l'affirmation", () => {
+    /*
+      Cas §2 du chantier : l'inconnu ne dure qu'une journée. Le défaut n'en est
+      pas moins présent — un zéro isolé au milieu d'une courbe se lit comme un
+      creux réel, ce qui est pire qu'un trou.
+    */
+    const s = new PortfolioValuationEngine(
+      inputs({
+        transactions: [buy("t1", "a1", "2024-01-10", 10, 100)],
+        rawAssetClassById: new Map([["a1", "ACTIONS"]]),
+        assetClassById: new Map([["a1", "ACTIONS"]]),
+        envelopeEventsByAsset: new Map([["a1", [evt("2024-01-11", "CTO")]]]),
+        closes: closes({ a1: { "2024-01-10": 100, "2024-01-11": 100 } }),
+      })
+    ).buildSeries("2024-01-10", "2024-01-12");
+
+    expect(at(s, "2024-01-10").byEnvelope.CTO).toBeNull();
+    expect(at(s, "2024-01-10").byEnvelope.UNKNOWN).toBeCloseTo(1_000, 6);
+    expect(at(s, "2024-01-11").byEnvelope.CTO).toBeCloseTo(1_000, 6);
+    expect(at(s, "2024-01-11").byEnvelope.UNKNOWN).toBe(0);
+  });
+
+  it("une suite de points inconnus laisse la courbe interrompue, sans trait à zéro", () => {
+    /*
+      Cas §3 : ce que le graphique doit recevoir, c'est une série trouée. Un
+      point à zéro serait tracé et relierait deux dates par un segment qui
+      n'existe pas.
+    */
+    const s = observeeTard("CTO");
+    const inconnus = s.filter((p) => p.byEnvelope.CTO === null);
+    const connus = s.filter((p) => p.byEnvelope.CTO !== null);
+
+    expect(inconnus.length).toBeGreaterThan(100);
+    // Aucun point inconnu ne porte de valeur numérique traçable.
+    expect(inconnus.every((p) => p.byEnvelope.CTO == null)).toBe(true);
+    // Et tous les points connus sont postérieurs au premier constat.
+    expect(connus.every((p) => p.day >= "2026-06-01")).toBe(true);
   });
 });
 
@@ -314,7 +384,10 @@ describe("composition et périmètre", () => {
     */
     const p = at(deuxLignes(), "2024-01-15");
     expect(p.byEnvelope.UNKNOWN).toBe(0);
-    const somme = p.byEnvelope.PEA + p.byEnvelope.CTO + p.byEnvelope.UNKNOWN;
+    const somme =
+      demontre(p.byEnvelope.PEA) +
+      demontre(p.byEnvelope.CTO) +
+      demontre(p.byEnvelope.UNKNOWN);
     expect(somme).toBeCloseTo(2_000, 6);
     // Le patrimoine, lui, contient bien la crypto.
     expect(p.grossAssets).toBeCloseTo(32_000, 6);
@@ -322,7 +395,10 @@ describe("composition et périmètre", () => {
 
   it("PEA + CTO couvre exactement le sous-ensemble connu", () => {
     const p = at(deuxLignes(), "2024-01-15");
-    expect(p.byEnvelope.PEA + p.byEnvelope.CTO).toBeCloseTo(2_000, 6);
+    expect(demontre(p.byEnvelope.PEA) + demontre(p.byEnvelope.CTO)).toBeCloseTo(
+      2_000,
+      6
+    );
   });
 
   it("une ligne sortie des enveloppes titres cesse de contribuer", () => {
@@ -435,9 +511,21 @@ describe("la ventilation ne touche pas le patrimoine", () => {
     }
   });
 
-  it("sans aucun journal, les trois seaux restent à zéro", () => {
-    // Aucune invention : sans événement, aucune ligne n'entre dans la
-    // ventilation, pas même en `UNKNOWN`.
+  it("une ligne jamais journalisée reste hors de la ventilation — limite connue", () => {
+    /*
+      Limite assumée, épinglée ici pour qu'elle ne dérive pas en silence.
+
+      Sans le moindre événement, rien ne démontre qu'une ligne soit candidate au
+      PEA ou au CTO, et elle n'entre donc pas dans la ventilation. Élargir le
+      critère au compartiment titres a été essayé : il fait entrer une ligne CFD
+      de 54 648 € du compte de démonstration, qui porte bien la classe `ACTIONS`
+      mais n'est candidate à aucune de ces deux enveloppes. Rien, dans le moteur,
+      ne la distingue d'une ligne héritée sans journal.
+
+      Le zéro qui subsiste ici n'est donc pas corrigé par ce chantier. Il ne
+      concerne que les portefeuilles dont aucune ligne n'a jamais été
+      journalisée — le seed et les cinq portes d'écriture en posent un depuis.
+    */
     const s = new PortfolioValuationEngine(
       inputs({
         transactions: [buy("t1", "a1", "2024-01-10", 10, 100)],
@@ -452,6 +540,147 @@ describe("la ventilation ne touche pas le patrimoine", () => {
     expect(p.byEnvelope.CTO).toBe(0);
     expect(p.byEnvelope.UNKNOWN).toBe(0);
     // La valeur reste au patrimoine — seule la ventilation fiscale l'ignore.
+    expect(p.grossAssets).toBeCloseTo(1_000, 6);
+  });
+
+  it("une enveloppe démontrée reste visible à côté d'un inconnu — PEA", () => {
+    /*
+      Cas §6 : deux lignes titres, l'une journalisée en PEA, l'autre pas.
+
+      Taire le PEA parce qu'une autre ligne est inconnue perdrait la seule
+      partie que le journal établit. Le montant démontré s'affiche donc, et
+      l'inconnu reste identifiable à côté. `CTO`, lui, n'a rien qui le démontre
+      et reste absent : la ligne inconnue pourrait s'y trouver.
+    */
+    const s = new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t1", "a1", "2024-01-10", 10, 100),
+          buy("t2", "a2", "2024-01-10", 5, 100),
+        ],
+        rawAssetClassById: new Map([
+          ["a1", "ACTIONS"],
+          ["a2", "ACTIONS"],
+        ]),
+        assetClassById: new Map([
+          ["a1", "ACTIONS"],
+          ["a2", "ACTIONS"],
+        ]),
+        envelopeEventsByAsset: new Map([
+          ["a1", [evt("2024-01-10", "PEA")]],
+          // Journalisée, donc candidate — mais seulement observée en 2025 :
+          // au 15 janvier 2024 son enveloppe n'est pas démontrée.
+          ["a2", [evt("2025-01-01", "CTO")]],
+        ]),
+        closes: closes({
+          a1: { "2024-01-10": 100 },
+          a2: { "2024-01-10": 100 },
+        }),
+      })
+    ).buildSeries("2024-01-10", "2024-01-15");
+
+    const p = at(s, "2024-01-15");
+    expect(p.byEnvelope.PEA).toBeCloseTo(1_000, 6);
+    expect(p.byEnvelope.UNKNOWN).toBeCloseTo(500, 6);
+    expect(p.byEnvelope.CTO).toBeNull();
+  });
+
+  it("une enveloppe démontrée reste visible à côté d'un inconnu — CTO", () => {
+    // Cas §7, symétrique du précédent.
+    const s = new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t1", "a1", "2024-01-10", 10, 100),
+          buy("t2", "a2", "2024-01-10", 5, 100),
+        ],
+        rawAssetClassById: new Map([
+          ["a1", "ACTIONS"],
+          ["a2", "ACTIONS"],
+        ]),
+        assetClassById: new Map([
+          ["a1", "ACTIONS"],
+          ["a2", "ACTIONS"],
+        ]),
+        envelopeEventsByAsset: new Map([
+          ["a1", [evt("2024-01-10", "CTO")]],
+          // Journalisée, donc candidate — mais seulement observée en 2025 :
+          // au 15 janvier 2024 son enveloppe n'est pas démontrée.
+          ["a2", [evt("2025-01-01", "PEA")]],
+        ]),
+        closes: closes({
+          a1: { "2024-01-10": 100 },
+          a2: { "2024-01-10": 100 },
+        }),
+      })
+    ).buildSeries("2024-01-10", "2024-01-15");
+
+    const p = at(s, "2024-01-15");
+    expect(p.byEnvelope.CTO).toBeCloseTo(1_000, 6);
+    expect(p.byEnvelope.UNKNOWN).toBeCloseTo(500, 6);
+    expect(p.byEnvelope.PEA).toBeNull();
+  });
+
+  it("crypto, immobilier et cash n'entrent jamais dans l'inconnu", () => {
+    /*
+      Cas §9. Le critère d'appartenance a changé — la classe d'actif plutôt que
+      le journal — et ce test vérifie qu'il n'a pas pour autant élargi le seau.
+
+      Aucune de ces trois lignes n'a d'événement : sous l'ancien critère elles
+      étaient exclues faute de journal, sous le nouveau elles le sont parce
+      qu'aucune n'appartient au compartiment titres.
+    */
+    const s = new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t1", "a1", "2024-01-10", 1, 30_000),
+          buy("t2", "a2", "2024-01-10", 1, 200_000),
+        ],
+        rawAssetClassById: new Map([
+          ["a1", "CRYPTO"],
+          ["a2", "IMMOBILIER"],
+        ]),
+        assetClassById: new Map([
+          ["a1", "CRYPTO"],
+          ["a2", "IMMOBILIER"],
+        ]),
+        closes: closes({
+          a1: { "2024-01-10": 30_000 },
+          a2: { "2024-01-10": 200_000 },
+        }),
+      })
+    ).buildSeries("2024-01-10", "2024-01-15");
+
+    const p = at(s, "2024-01-15");
+    expect(p.byEnvelope.UNKNOWN).toBe(0);
+    // Aucun titre en suspens : les deux enveloppes valent un zéro vrai.
+    expect(p.byEnvelope.PEA).toBe(0);
+    expect(p.byEnvelope.CTO).toBe(0);
+    // Et le patrimoine, lui, les contient bien.
+    expect(p.grossAssets).toBeCloseTo(230_000, 6);
+  });
+
+  it("un support d'assurance-vie n'entre pas dans l'inconnu", () => {
+    /*
+      Le piège du nouveau critère, et la raison de viser le compartiment plutôt
+      que la classe brute : un ETF logé en assurance-vie porte bien la classe
+      `ACTIONS`, mais la surcharge le range en `ASSURANCE_VIE`. Ce n'est pas un
+      candidat PEA/CTO, et le compter en inconnu gonflerait le seau d'un montant
+      qui n'a rien à y faire.
+    */
+    const s = new PortfolioValuationEngine(
+      inputs({
+        transactions: [buy("t1", "a1", "2024-01-10", 10, 100)],
+        // Classe brute : ACTIONS. Classe surchargée : ASSURANCE_VIE.
+        rawAssetClassById: new Map([["a1", "ACTIONS"]]),
+        assetClassById: new Map([["a1", "ASSURANCE_VIE"]]),
+        closes: closes({ a1: { "2024-01-10": 100 } }),
+      })
+    ).buildSeries("2024-01-10", "2024-01-15");
+
+    const p = at(s, "2024-01-15");
+    expect(p.byEnvelope.UNKNOWN).toBe(0);
+    expect(p.byEnvelope.PEA).toBe(0);
+    expect(p.byEnvelope.CTO).toBe(0);
     expect(p.grossAssets).toBeCloseTo(1_000, 6);
   });
 });

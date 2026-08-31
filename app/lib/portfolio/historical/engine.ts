@@ -230,24 +230,30 @@ function classOfComponent(comp: ValuationComponent): ValuationAssetClass {
 }
 
 /**
- * Seau d'enveloppe d'une ligne à une date — ou `null` si elle n'est pas une
- * ligne titres.
- *
- * Trois règles, dans cet ordre.
+ * Seau d'enveloppe d'une ligne à une date — ou `null` si elle sort du champ.
  *
  * L'enveloppe résolue fait foi quand elle est connue : `PEA_PME` rejoint `PEA`,
- * comme le fait déjà `accountTypeForEnvelope`. Une ligne sortie des enveloppes
- * titres — devenue AV, crypto, immobilier — rend `UNATTACHED` et cesse de
- * contribuer : elle n'est plus un titre, la compter fausserait la courbe.
+ * comme le fait déjà `accountTypeForEnvelope`. Une ligne détachée de tout compte
+ * rend `UNATTACHED` et cesse de contribuer : là, zéro est un fait, pas une
+ * ignorance — on **sait** qu'elle n'est dans aucune enveloppe.
  *
- * Reste `UNKNOWN`. Il ne suffit pas à faire entrer une ligne dans le seau des
- * inconnues : une position crypto n'a aucun événement et rendrait `UNKNOWN`
- * elle aussi. On n'y range donc que les lignes dont le journal démontre
- * qu'elles **sont** des titres — au moins un événement portant `CTO` ou `PEA`.
+ * Reste `UNKNOWN`, et son critère d'appartenance est le journal : une ligne n'y
+ * entre que si un événement porte déjà `CTO` ou `PEA`. C'est le seul signal qui
+ * démontre qu'elle est un candidat à ces enveloppes.
  *
- * La nuance est celle du chantier : « on ne sait pas quelle enveloppe » n'est
- * pas « on ne sait pas si c'est un titre ». La première appelle un seau
- * `UNKNOWN` visible ; la seconde, une exclusion pure et simple.
+ * Le compartiment titres avait été essayé comme critère, plus large et
+ * apparemment plus juste — il aurait couvert les lignes jamais journalisées.
+ * Mesuré sur les données réelles, il happe une ligne CFD de 54 648 € : elle
+ * porte la classe `ACTIONS`, entre donc au compartiment titres, mais son compte
+ * est un CFD et elle n'est candidate ni au PEA ni au CTO. Rien dans le moteur ne
+ * la distingue d'une ligne héritée sans journal, et gonfler l'inconnu d'un
+ * montant hors périmètre serait un défaut pire que celui qu'on corrige.
+ *
+ * La nuance de fond : « on ne sait pas quelle enveloppe » n'est pas « on ne sait
+ * pas si c'est un titre ». La première appelle `UNKNOWN` ; la seconde, une
+ * exclusion. Conséquence assumée, documentée dans le rapport du chantier : un
+ * portefeuille dont aucune ligne n'a jamais été journalisée reste hors de cette
+ * ventilation.
  */
 function envelopeBucketOf(
   events:
@@ -258,25 +264,63 @@ function envelopeBucketOf(
         envelopeType: string | null;
       }>
     | undefined,
-  at: Date
+  at: Date | null
 ): ValuationEnvelope | null {
-  if (!events || events.length === 0) return null;
+  // Sans journal, rien ne démontre que la ligne soit un titre en enveloppe.
+  if (!events || events.length === 0 || !at) return null;
 
   const resolu = resolveEnvelopeFromEvents(events, at);
   if (resolu === "PEA" || resolu === "PEA_PME") return "PEA";
   if (resolu === "CTO") return "CTO";
   if (resolu === "UNATTACHED") return null;
 
-  // `UNKNOWN` : la ligne est-elle seulement un titre ?
-  const estUnTitre = events.some(
+  // `UNKNOWN` : la ligne est-elle seulement un candidat aux enveloppes titres ?
+  const candidat = events.some(
     (e) => e.accountType === "CTO" || e.accountType === "PEA"
   );
-  return estUnTitre ? "UNKNOWN" : null;
+  return candidat ? "UNKNOWN" : null;
 }
 
 function emptyEnvelopes(): Record<ValuationEnvelope, Decimal> {
   const out = {} as Record<ValuationEnvelope, Decimal>;
   for (const e of VALUATION_ENVELOPES) out[e] = zero();
+  return out;
+}
+
+/**
+ * Restitution des enveloppes : une absence là où rien n'est démontré.
+ *
+ * Le regroupement produit toujours trois totaux, et l'un d'eux vaut zéro dès
+ * qu'aucune ligne n'y tombe. Or ce zéro recouvre deux situations que rien ne
+ * distinguait ensuite : « aucun titre dans cette enveloppe », qui est un fait,
+ * et « rien ne dit qu'il y en ait », qui est une ignorance. Rendus tous deux
+ * comme `0`, la courbe affirmait une enveloppe vide sur toute la profondeur
+ * antérieure au journal.
+ *
+ * La distinction se lit sur `UNKNOWN`, qui porte les lignes titres dont
+ * l'enveloppe n'est pas établie à cette date. Tant qu'il est nul, un zéro sur
+ * `PEA` ou `CTO` est vrai et reste un zéro. Dès qu'il ne l'est plus, une
+ * enveloppe sans montant démontré devient `null` : la ligne en suspens pourrait
+ * s'y trouver, et l'affirmer vide serait faux.
+ *
+ * Un montant démontré, lui, reste affiché même en présence d'inconnu — c'est un
+ * minorant certain, et le taire perdrait la seule partie que le journal établit.
+ * L'écart est signalé à part, par `UNKNOWN`.
+ */
+function envelopeSnapshot(
+  byEnv: Record<ValuationEnvelope, Decimal>
+): Record<ValuationEnvelope, number | null> {
+  const unknown = byEnv.UNKNOWN;
+  const out = {} as Record<ValuationEnvelope, number | null>;
+  for (const e of VALUATION_ENVELOPES) {
+    if (e === "UNKNOWN") {
+      // Toujours un nombre : c'est une valeur mesurée, pas une ignorance.
+      out[e] = unknown.toNumber();
+      continue;
+    }
+    const v = byEnv[e];
+    out[e] = v.isZero() && !unknown.isZero() ? null : v.toNumber();
+  }
   return out;
 }
 
@@ -571,12 +615,10 @@ export class PortfolioValuationEngine {
         entière du point quotidien — c'est l'état de clôture que la courbe
         décrit — et seulement à partir de 13 h 55 en intraday.
       */
-      const seau = resolutionAt
-        ? envelopeBucketOf(
-            this.inputs.envelopeEventsByAsset.get(pos.assetId),
-            resolutionAt
-          )
-        : null;
+      const seau = envelopeBucketOf(
+        this.inputs.envelopeEventsByAsset.get(pos.assetId),
+        resolutionAt
+      );
       if (seau) {
         const byEnv = positionsByEnvelope.get(seau);
         if (byEnv) byEnv.push(pos);
@@ -797,9 +839,7 @@ export class PortfolioValuationEngine {
         VALUATION_ASSET_CLASSES.map((c) => [c, byClass[c].toNumber()])
       ) as Record<ValuationAssetClass, number>,
 
-      byEnvelope: Object.fromEntries(
-        VALUATION_ENVELOPES.map((e) => [e, byEnv[e].toNumber()])
-      ) as Record<ValuationEnvelope, number>,
+      byEnvelope: envelopeSnapshot(byEnv),
 
       flowsByAssetClass: Object.fromEntries(
         VALUATION_ASSET_CLASSES.map((c) => [c, flowsByClass[c].toNumber()])
