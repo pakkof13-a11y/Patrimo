@@ -9,7 +9,37 @@ type CacheEntry = {
 
 let cache: CacheEntry | null = null;
 let inflight: Promise<Record<string, number>> | null = null;
+/** Instant du dernier échec fournisseur, 0 si le dernier appel a abouti. */
+let lastFailureAt = 0;
+
 const TTL_MS = 60 * 60 * 1000;
+
+/**
+ * Délai minimal entre deux tentatives après un échec.
+ *
+ * Le repli écrivait `fetchedAt: 0`, ce qui rendait l'entrée perpétuellement
+ * périmée : chaque lecture relançait un appel sortant, avec 2 500 ms de budget.
+ * Mesuré sur une suite E2E de 27 minutes, 1 913 tentatives — environ soixante-
+ * dix par minute, pour une donnée qui ne bouge pas en une heure.
+ *
+ * Une minute borne le débit à une tentative par minute et par processus, soit
+ * une soixantaine de fois moins. C'est assez court pour que le retour du
+ * fournisseur soit vu presque tout de suite, et assez long pour cesser de le
+ * marteler pendant qu'il est à terre.
+ */
+const RETRY_AFTER_ERROR_MS = 60 * 1000;
+
+/**
+ * Âge au-delà duquel des taux réels cessent d'être servis, même en panne.
+ *
+ * Le repli ne doit pas devenir un cache permanent. Une journée est la borne
+ * retenue : les grandes devises bougent de l'ordre du demi-pourcent par jour,
+ * si bien qu'un taux de la veille reste une bien meilleure approximation que la
+ * table figée ci-dessous — laquelle peut dériver de plusieurs pourcents en
+ * quelques mois. Passé ce délai, en revanche, on ne peut plus prétendre que la
+ * valeur décrit le marché du jour, et la table déclarée reprend la main.
+ */
+const STALE_MAX_MS = 24 * 60 * 60 * 1000;
 const FALLBACK: Record<string, number> = {
   EUR: 1,
   USD: 1.08,
@@ -29,9 +59,30 @@ const FALLBACK: Record<string, number> = {
  * (déjà utilisé pour le rate-limit, cf. app/lib/api/kv-store.ts).
  */
 export async function getEurRates(): Promise<Record<string, number>> {
-  if (cache && Date.now() - cache.fetchedAt < TTL_MS) {
+  const now = Date.now();
+
+  // Taux réels encore frais : rien à demander.
+  if (cache && !cache.isFallback && now - cache.fetchedAt < TTL_MS) {
     return cache.rates;
   }
+
+  /*
+    Panne récente : on sert ce qu'on a plutôt que de refrapper à la porte.
+
+    Ce palier est toute la correction. Sans lui, une indisponibilité
+    transformait chaque lecture — et il y a dix appelants, dont le chargement de
+    l'historique et les soldes de plateformes — en un aller-retour réseau voué à
+    échouer.
+
+    Ce qui est servi dépend de ce qu'on détient : des taux réels tant qu'ils ont
+    moins d'un jour, la table déclarée sinon.
+  */
+  if (cache && now - lastFailureAt < RETRY_AFTER_ERROR_MS) {
+    if (cache.isFallback || now - cache.fetchedAt < STALE_MAX_MS) {
+      return cache.rates;
+    }
+  }
+
   if (inflight) return inflight;
 
   inflight = (async () => {
@@ -44,16 +95,35 @@ export async function getEurRates(): Promise<Record<string, number>> {
       const data = (await res.json()) as { rates?: Record<string, number> };
       const rates = { EUR: 1, ...FALLBACK, ...(data.rates ?? {}) };
       cache = { rates, fetchedAt: Date.now(), isFallback: false };
+      // Le fournisseur répond : la fenêtre de repli n'a plus lieu d'être.
+      lastFailureAt = 0;
       return rates;
     } catch (e) {
       console.warn(
         "[fx] Frankfurter indisponible — fallback taux statiques",
         e instanceof Error ? e.message : e
       );
+      const echecAt = Date.now();
+      lastFailureAt = echecAt;
+
+      /*
+        Les derniers taux réels valent mieux qu'une table figée.
+
+        Le repli les écrasait : un fournisseur tombé cinq minutes après une
+        réponse correcte faisait basculer l'application sur des valeurs
+        approchées, alors qu'elle venait de connaître les vraies. On les
+        conserve tant qu'ils ont moins d'un jour.
+      */
+      if (
+        cache &&
+        !cache.isFallback &&
+        echecAt - cache.fetchedAt < STALE_MAX_MS
+      ) {
+        return cache.rates;
+      }
+
       const rates = { ...FALLBACK };
-      // fetchedAt: 0 → ne compte jamais comme "frais" (force un re-fetch au
-      // prochain appel au lieu de figer le fallback pendant TTL_MS/1h).
-      cache = { rates, fetchedAt: 0, isFallback: true };
+      cache = { rates, fetchedAt: echecAt, isFallback: true };
       return rates;
     } finally {
       inflight = null;
