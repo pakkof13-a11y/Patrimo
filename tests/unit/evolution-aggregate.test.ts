@@ -117,7 +117,19 @@ describe("buildEvolutionSeries", () => {
 });
 
 describe("toPercentSeries", () => {
-  function bare(total: number, benchmark?: number): EvolutionSeriesPoint {
+  /**
+   * Un point de série réduit à ce que `toPercentSeries` lit.
+   *
+   * `growth` porte la croissance cumulée, flux retirés : c'est elle, et non la
+   * valeur, qui donne la courbe du portefeuille depuis que le comparatif ne
+   * crédite plus le portefeuille de ses propres apports. Ces décors n'ont aucun
+   * flux, la croissance suit donc la valeur.
+   */
+  function bare(
+    total: number,
+    benchmark?: number,
+    growth = total / 100_000
+  ): EvolutionSeriesPoint {
     return {
       date: "2026-01-01T00:00:00.000Z",
       label: "1 janv.",
@@ -145,6 +157,7 @@ describe("toPercentSeries", () => {
       dRents: 0,
       benchmark,
       intervalType: "day",
+      growth,
     };
   }
 

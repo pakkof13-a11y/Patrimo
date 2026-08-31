@@ -90,6 +90,19 @@ export type EvolutionSeriesPoint = {
    * enveloppe à cette date. Le distinguer de zéro est tout l'objet du champ.
    */
   byAssetClassAndEnvelope?: Record<string, Record<string, number | null>>;
+  /**
+   * Croissance cumulée de la grandeur affichée, flux retirés, base 1 au premier
+   * point de la fenêtre.
+   *
+   * C'est elle que l'on compare à un indice, et non la valeur : un versement
+   * augmente la valeur sans qu'aucun investissement n'ait rien produit, quand
+   * un indice ne reçoit jamais d'apport. Comparer les deux revenait à créditer
+   * le portefeuille de ses propres dépôts.
+   *
+   * `undefined` quand le résultat d'investissement de la grandeur affichée
+   * n'est pas connu — la comparaison est alors tue plutôt que faussée.
+   */
+  growth?: number;
   isLive?: boolean;
 };
 
@@ -371,6 +384,26 @@ type StockAcc = {
    * enveloppe à cette date. Le distinguer de zéro est tout l'objet du champ.
    */
   byAssetClassAndEnvelope?: Record<string, Record<string, number | null>>;
+  /**
+   * Résultat d'investissement de la période, en devise : ce que le moteur
+   * calcule comme `valeur(D) − valeur(D−1) − flux(D)`, transporté tel quel.
+   *
+   * `undefined` quand la grandeur affichée n'en a pas.
+   */
+  perf?: number;
+  /**
+   * Croissance cumulée de la grandeur affichée, flux retirés, base 1 au premier
+   * point de la fenêtre.
+   *
+   * C'est elle que l'on compare à un indice, et non la valeur : un versement
+   * augmente la valeur sans qu'aucun investissement n'ait rien produit, quand
+   * un indice ne reçoit jamais d'apport. Comparer les deux revenait à créditer
+   * le portefeuille de ses propres dépôts.
+   *
+   * `undefined` quand le résultat d'investissement de la grandeur affichée
+   * n'est pas connu — la comparaison est alors tue plutôt que faussée.
+   */
+  growth?: number;
   isLive?: boolean;
 };
 
@@ -452,6 +485,15 @@ function normalizePoint(p: HistoryPoint): {
   status?: "EXACT" | "ESTIMATED";
   byAssetClass?: Record<string, number>;
   byAssetClassAndEnvelope?: Record<string, Record<string, number | null>>;
+  /**
+   * Résultat d'investissement de la période, en devise : ce que le moteur
+   * calcule comme `valeur(D) − valeur(D−1) − flux(D)`, transporté tel quel.
+   *
+   * `undefined` quand la grandeur affichée n'en a pas.
+   */
+  perf?: number;
+  /** Croissance cumulée, posée après coup par le chaînage du rendement. */
+  growth?: number;
   isLive?: boolean;
 } {
   const total = Number(p.totalValueBase) || 0;
@@ -463,10 +505,15 @@ function normalizePoint(p: HistoryPoint): {
   const rents = Number(p.rentsBase) || 0;
   const income =
     Number(p.cashIncomeBase) || dividends + coupons + rents || 0;
+  const perfRaw = p.investmentPerformanceBase;
   return {
     date: p.date,
     total,
     flows: Number(p.externalFlowsBase) || 0,
+    perf:
+      perfRaw == null || !Number.isFinite(Number(perfRaw))
+        ? undefined
+        : Number(perfRaw),
     cash,
     positions,
     realized: Number(p.realizedPnlBase) || 0,
@@ -524,6 +571,49 @@ export function buildEvolutionSeries(
       filtered = inRange;
     }
     // sinon garder tout (historique trop court)
+  }
+
+  /*
+    Rendement chaîné, jour par jour, sur la fenêtre affichée.
+
+    C'est la seule grandeur du portefeuille comparable à un indice. La variation
+    de valeur ne l'est pas : elle contient les apports et les retraits, quand un
+    indice n'en reçoit jamais. Sur le compte de démonstration, l'écart entre les
+    deux atteint près de sept points.
+
+    On chaîne plutôt qu'on ne divise la somme des résultats par la valeur
+    initiale, parce qu'un versement déplace la base en cours de route : les
+    journées qui le suivent produisent leur résultat sur un capital plus grand,
+    et le rapporter à la mise de départ le surévaluerait. Chaîner
+    `1 + résultat(D) / valeur(D−1)` neutralise exactement cela — c'est ce que
+    fait un indice, et c'est ce qui rend les deux comparables.
+
+    Le numérateur est le résultat d'investissement du moteur, transporté sans
+    recalcul : `valeur(D) − valeur(D−1) − flux(D)`. La convention de performance
+    du produit est donc la même ici que partout ailleurs.
+
+    Une journée dont la base est nulle ou négative ne produit pas de rendement
+    définissable : la croissance est reportée telle quelle plutôt que d'inventer
+    un pourcentage. Et si le résultat d'investissement manque, la croissance
+    reste absente — la comparaison sera tue, pas approximée.
+  */
+  {
+    let facteur: number | undefined = 1;
+    for (let i = 0; i < filtered.length; i++) {
+      const pt = filtered[i]!;
+      if (i === 0) {
+        pt.growth = facteur;
+        continue;
+      }
+      const base = filtered[i - 1]!.total;
+      const perf = pt.perf;
+      if (facteur == null || perf == null) {
+        facteur = undefined;
+      } else if (base > 0) {
+        facteur = facteur * (1 + perf / base);
+      }
+      pt.growth = facteur;
+    }
   }
 
   const interval = resolveEvolutionInterval(range, filtered.length);
@@ -597,6 +687,8 @@ export function buildEvolutionSeries(
       dDividends: prev ? s.dividends - prev.dividends : 0,
       dCoupons: prev ? s.coupons - prev.coupons : 0,
       dRents: prev ? s.rents - prev.rents : 0,
+      // Stock, comme `total` : la croissance de fin de bucket fait foi.
+      growth: s.growth,
       intervalType: interval,
       status: s.status,
       byAssetClass: s.byAssetClass,
@@ -797,11 +889,29 @@ export function toPercentSeries(
   if (points.length === 0) return [];
   const base = points[0]!.total;
   const safeBase = base > 0 ? base : null;
+  /*
+    Base de croissance : celle du premier point **affiché**.
+
+    La fenêtre peut commencer bien après le début de la série, et la croissance
+    est cumulée depuis ce début. La ramener ici fait partir la courbe à 0 %,
+    comme celle de l'indice.
+  */
+  const g0 = points[0]!.growth;
+  const growthBase = g0 != null && g0 > 0 ? g0 : null;
   return points.map((p) => ({
     date: p.date,
     label: p.label,
     periodLabel: p.periodLabel,
-    portfolioPct: safeBase ? ((p.total - safeBase) / safeBase) * 100 : 0,
+    /*
+      Le portefeuille est rendu par son rendement chaîné, jamais par sa
+      variation de valeur : celle-ci contient les apports, que l'indice ne
+      connaît pas. `growthBase` ramène la croissance au premier point affiché,
+      la fenêtre pouvant commencer bien après le début de la série.
+    */
+    portfolioPct:
+      growthBase != null && p.growth != null
+        ? (p.growth / growthBase - 1) * 100
+        : 0,
     benchmarkPct:
       safeBase && p.benchmark != null
         ? ((p.benchmark - safeBase) / safeBase) * 100
@@ -830,7 +940,19 @@ export function benchmarkGapPct(
   const first = points[0]!;
   const last = points[points.length - 1]!;
   if (!(first.total > 0)) return null;
-  const portfolioPct = ((last.total - first.total) / first.total) * 100;
+  /*
+    Même grandeur des deux côtés.
+
+    `portfolioPct` valait la variation de valeur entre les bornes, apports
+    compris. Sur la fenêtre par défaut du compte de démonstration, cela donnait
+    +8,71 % là où les investissements avaient produit +1,96 % : les 61 325 € de
+    versements de la période étaient comptés comme de la performance, et
+    l'écart annoncé avec l'indice s'en trouvait faux de près de sept points.
+  */
+  if (first.growth == null || last.growth == null || !(first.growth > 0)) {
+    return null;
+  }
+  const portfolioPct = (last.growth / first.growth - 1) * 100;
   const b0 = first.benchmark;
   const b1 = last.benchmark;
   if (b0 == null || b1 == null || !(b0 > 0)) return null;

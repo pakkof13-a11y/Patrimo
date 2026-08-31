@@ -107,6 +107,8 @@ describe("withBenchmarkSeries", () => {
       dCoupons: 0,
       dRents: 0,
       intervalType: "day",
+      // Aucun flux dans ce décor : la croissance suit donc la valeur.
+      growth: 1,
     },
     {
       date: "2026-07-01T12:00:00.000Z",
@@ -134,6 +136,7 @@ describe("withBenchmarkSeries", () => {
       dCoupons: 0,
       dRents: 0,
       intervalType: "day",
+      growth: 1.1,
     },
   ];
 
