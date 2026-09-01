@@ -318,4 +318,39 @@ test.describe("Épargne salariale", () => {
     await page.getByTestId("es-view-overview").click();
     await expect(page.getByTestId("es-context-column")).toBeVisible();
   });
+
+  test("un encours illisible ne s'affiche pas à zéro euro", async ({ page }) => {
+    /*
+      Trois états, pas deux : `lines` vaut `q.data?.lines ?? []`, si bien qu'une
+      requête en échec rend la même liste vide qu'un compte sans support. Une
+      fois les tentatives épuisées, la bande affichait « 0,00 € » de valeur
+      totale, de disponible et de bloqué — mesuré sur ce jeu de démonstration
+      qui porte pourtant 12 814,25 €, et sans que rien ne signale l'échec.
+
+      Le test attend la fin réelle du chargement — plus aucune tuile en
+      `data-loading` — sans quoi il constaterait le squelette et passerait pour
+      une mauvaise raison.
+    */
+    await page.route("**/api/employee-savings**", (route) =>
+      route.fulfill({ status: 500, json: { error: "indisponible" } })
+    );
+    await page.goto("/epargne-salariale", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("employee-savings-tab")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const bande = page.getByTestId("es-kpi-strip");
+    await expect(bande).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(async () => bande.locator("[data-loading='true']").count(), {
+        timeout: 40_000,
+      })
+      .toBe(0);
+
+    await expect(
+      bande,
+      "un encours inconnu ne s'écrit pas « 0,00 € »"
+    ).not.toContainText("0,00");
+  });
+
 });

@@ -114,6 +114,20 @@ export function EsOverview({
   );
 
   const loading = q.isLoading;
+  /*
+    Trois états, pas deux.
+
+    `lines` vaut `q.data?.lines ?? []` : une requête en échec rend donc la même
+    liste vide qu'un compte sans support, et `computeTotals` en tire zéro. Une
+    fois `isLoading` retombé — les tentatives épuisées —, la bande affichait
+    « 0,00 € » de valeur totale, de disponible et de bloqué, sans rien signaler.
+    Mesuré sur le jeu de démonstration : 12 814,25 € présentés comme 0,00 €.
+
+    L'absence de réponse n'est pas un encours nul. La tuile de performance
+    tenait déjà la distinction avec « — » ; les autres l'adoptent ici.
+  */
+  const donneesConnues = q.data != null;
+  const MONTANT_INCONNU = "— €";
 
   return (
     <div className={cn("min-w-0", className)} data-testid="es-overview">
@@ -125,14 +139,26 @@ export function EsOverview({
         <KpiBandTile
           testId="es-kpi-value"
           label="Valeur totale"
-          value={formatCurrency(String(totals.totalValue), "EUR")}
-          secondary={`${totals.lineCount} support${totals.lineCount > 1 ? "s" : ""}`}
+          value={
+            donneesConnues
+              ? formatCurrency(String(totals.totalValue), "EUR")
+              : MONTANT_INCONNU
+          }
+          secondary={
+            donneesConnues
+              ? `${totals.lineCount} support${totals.lineCount > 1 ? "s" : ""}`
+              : undefined
+          }
           loading={loading}
         />
         <KpiBandTile
           testId="es-kpi-available"
           label="Disponible"
-          value={formatCurrency(String(totals.availableValue), "EUR")}
+          value={
+            donneesConnues
+              ? formatCurrency(String(totals.availableValue), "EUR")
+              : MONTANT_INCONNU
+          }
           secondary={
             totals.availablePct != null
               ? `${totals.availablePct.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} % de l'encours`
@@ -144,7 +170,11 @@ export function EsOverview({
         <KpiBandTile
           testId="es-kpi-blocked"
           label="Bloqué"
-          value={formatCurrency(String(totals.blockedValue), "EUR")}
+          value={
+            donneesConnues
+              ? formatCurrency(String(totals.blockedValue), "EUR")
+              : MONTANT_INCONNU
+          }
           secondary={
             unlock ? `Prochain déblocage dans ${unlock.daysAway} j` : undefined
           }
@@ -171,7 +201,7 @@ export function EsOverview({
         <KpiBandTile
           testId="es-kpi-plans"
           label="Plans"
-          value={String(totals.planCount)}
+          value={donneesConnues ? String(totals.planCount) : "—"}
           secondary={`${managerCount} gestionnaire${managerCount > 1 ? "s" : ""}`}
           loading={loading}
         />
