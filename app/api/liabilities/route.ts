@@ -161,7 +161,12 @@ export async function PUT(req: Request) {
     }
   }
 
-  const data: Prisma.LiabilityUpdateInput = {};
+  /*
+    `UncheckedUpdateMany` et non `Update` : l'écriture passe par `updateMany`,
+    qui n'accepte aucune écriture de relation imbriquée. Le type le dit, et le
+    rattachement au bien se fait par sa clé étrangère — comme à la création.
+  */
+  const data: Prisma.LiabilityUncheckedUpdateManyInput = {};
 
   if (f.name !== undefined) data.name = f.name;
   if (f.initialAmount !== undefined)
@@ -180,7 +185,16 @@ export async function PUT(req: Request) {
   if (f.bankName !== undefined) data.bankName = f.bankName || null;
   if (f.category !== undefined) data.category = f.category;
   if (f.assetId !== undefined) {
-    data.asset = f.assetId ? { connect: { id: f.assetId } } : { disconnect: true };
+    /*
+      `data.asset = { connect } / { disconnect }` était rejeté par Prisma :
+      `updateMany` ne connaît pas les écritures de relation. Toute modification
+      du bien financé — rattachement comme détachement — échouait donc en
+      erreur serveur, sans que rien d'autre ne soit écrit.
+
+      L'appartenance du bien est vérifiée plus haut ; il ne reste qu'à poser la
+      clé, chaîne vide valant détachement.
+    */
+    data.assetId = f.assetId || null;
   }
   if (f.notes !== undefined) data.notes = f.notes || null;
   if (f.startDate !== undefined) data.startDate = f.startDate ? new Date(f.startDate) : null;
