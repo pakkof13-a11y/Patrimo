@@ -232,12 +232,32 @@ async function resolveFx(input: CreateTxInput): Promise<CreateTxInput> {
   }
 
   if (provided.eq(1) && currency !== "EUR") {
+    /*
+      Devise étrangère sans taux fourni : on demande le taux courant.
+
+      `fxRateToEur` applique la politique décidée en B1 — taux du fournisseur,
+      derniers taux réels si la panne est récente, table déclarée au-delà. Ce
+      repli est assumé et reste valide : il décrit une approximation du jour,
+      pas une valeur inventée pour une date passée.
+
+      Ce qui ne l'était pas, c'est cette branche de secours. Elle rendait
+      `{ ...input, currency }`, donc sans `fxRateToEur`, et la construction des
+      données retombait sur le `Decimal @default(1)` du modèle : un dollar
+      valait un euro, écrit comme un fait, pour la seule raison que le
+      fournisseur n'avait pas répondu. Même doctrine qu'en A1 — un taux
+      inconnu n'est ni zéro, ni un.
+    */
+    let live: string;
     try {
-      const live = await liveFxToEur(currency);
-      return { ...input, currency, fxRateToEur: live };
+      live = await liveFxToEur(currency);
     } catch {
-      return { ...input, currency };
+      throw new AccountingError(
+        "FX_RATE_UNKNOWN",
+        `Taux de conversion ${currency}→EUR indisponible : ` +
+          "renseignez-le manuellement plutôt que d'enregistrer un montant converti à un taux non constaté."
+      );
     }
+    return { ...input, currency, fxRateToEur: live };
   }
   return { ...input, currency };
 }
