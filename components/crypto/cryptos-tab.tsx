@@ -157,6 +157,22 @@ export function CryptosTab({
   });
 
   const data = q.data;
+  /*
+    Trois états, pas deux.
+
+    `loading={q.isPending}` ne couvre que le premier chargement. Une fois les
+    tentatives épuisées, il retombe à faux alors que `data` reste indéfini, et
+    les `?? 0` ci-dessous affichaient alors « 0,00 € » de comptant, de DeFi, de
+    NFT et de P&L latent. Mesuré sur le jeu de démonstration : 51 578 € de
+    comptant et 16 415,15 € de P&L latent présentés comme zéro, sans que rien
+    ne signale l'échec.
+
+    Les valeurs numériques restent à zéro pour les calculs dérivés — parts du
+    camembert, comparaisons — mais ce qui est **affiché** distingue désormais
+    l'inconnu du nul.
+  */
+  const donneesConnues = data != null;
+  const MONTANT_INCONNU = "— €";
   const variation =
     data?.variation24hPct != null ? Number(data.variation24hPct) : null;
   const spot = Number(data?.spotEur ?? 0);
@@ -259,7 +275,11 @@ export function CryptosTab({
           >
             <AltDashKpi
               label="Comptant"
-              value={formatCurrency(String(spot), baseCurrency)}
+              value={
+                donneesConnues
+                  ? formatCurrency(String(spot), baseCurrency)
+                  : MONTANT_INCONNU
+              }
               hint={
                 spot > 0
                   ? "Jetons détenus, consolidés par coin"
@@ -270,7 +290,11 @@ export function CryptosTab({
             />
             <AltDashKpi
               label="DeFi (net)"
-              value={formatCurrency(String(defi), baseCurrency)}
+              value={
+                donneesConnues
+                  ? formatCurrency(String(defi), baseCurrency)
+                  : MONTANT_INCONNU
+              }
               hint={
                 defi !== 0
                   ? "Dépôts moins emprunts"
@@ -281,7 +305,11 @@ export function CryptosTab({
             />
             <AltDashKpi
               label="NFTs (floor)"
-              value={formatCurrency(String(nft), baseCurrency)}
+              value={
+                donneesConnues
+                  ? formatCurrency(String(nft), baseCurrency)
+                  : MONTANT_INCONNU
+              }
               hint={
                 nft > 0
                   ? "Estimation floor price"
@@ -292,8 +320,16 @@ export function CryptosTab({
             />
             <AltDashKpi
               label="P&L latent"
-              value={formatCurrency(String(pnl), baseCurrency)}
-              hint={`${data?.walletCount ?? 0} wallet(s) connecté(s)`}
+              value={
+                donneesConnues
+                  ? formatCurrency(String(pnl), baseCurrency)
+                  : MONTANT_INCONNU
+              }
+              hint={
+                donneesConnues
+                  ? `${data.walletCount ?? 0} wallet(s) connecté(s)`
+                  : undefined
+              }
               tone={pnlTone(pnl)}
               loading={q.isPending}
             />

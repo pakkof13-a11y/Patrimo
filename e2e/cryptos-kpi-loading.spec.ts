@@ -127,4 +127,37 @@ test.describe("Vue d'ensemble Cryptos — chargement", () => {
       timeout: 20_000,
     });
   });
+
+  test("un résumé illisible ne s'affiche pas à zéro euro", async ({ page }) => {
+    /*
+      Le chargement était traité, l'échec ne l'était pas.
+
+      `loading={q.isPending}` ne couvre que la première requête : une fois les
+      tentatives épuisées, il retombe à faux alors que `data` reste indéfini, et
+      les `?? 0` reprenaient la main. Mesuré sur ce jeu de démonstration —
+      51 578 € de comptant et 16 415,15 € de P&L latent — les quatre tuiles
+      affichaient « 0,00 € », sans que rien ne signale l'échec.
+
+      Le test attend la fin réelle du chargement plutôt qu'un délai fixe : sans
+      cela il constaterait le squelette et passerait pour une mauvaise raison.
+    */
+    await page.route("**/api/crypto/summary**", (route) =>
+      route.fulfill({ status: 500, json: { error: "indisponible" } })
+    );
+    await page.goto("/cryptos", { waitUntil: "domcontentloaded" });
+
+    const bande = page.getByTestId("crypto-dashboard-kpis");
+    await expect(bande).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(async () => bande.locator("[data-loading='true']").count(), {
+        timeout: 40_000,
+      })
+      .toBe(0);
+
+    await expect(
+      bande,
+      "un encours inconnu ne s'écrit pas « 0,00 € »"
+    ).not.toContainText("0,00");
+  });
+
 });
