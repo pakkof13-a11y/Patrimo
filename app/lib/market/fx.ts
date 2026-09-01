@@ -133,6 +133,43 @@ export async function getEurRates(): Promise<Record<string, number>> {
   return inflight;
 }
 
+/**
+ * Aucun taux fondé n'existe pour cette devise.
+ *
+ * Distincte d'une panne réseau : le fournisseur peut très bien avoir répondu.
+ * Elle dit qu'aucune source — taux vivants, cache, table déclarée — ne permet
+ * d'affirmer combien vaut une unité de cette devise.
+ */
+export class FxRateUnknownError extends Error {
+  readonly currency: string;
+  constructor(currency: string) {
+    super(
+      `Taux ${currency}→EUR indisponible : aucune source ne permet de le fonder.`
+    );
+    this.name = "FxRateUnknownError";
+    this.currency = currency;
+  }
+}
+
+/**
+ * Combien d'unités de `cur` pour un euro, ou `null` si rien ne le fonde.
+ *
+ * Le dernier maillon était `?? 1`. Pour une devise absente à la fois des taux
+ * servis et de la table déclarée — couronne suédoise, zloty, livre turque —, il
+ * affirmait une parité avec l'euro. Mesuré : 1 000 SEK convertis en 1 000 €,
+ * soit onze fois leur valeur, et ce montant pouvait être persisté.
+ *
+ * Les cinq entrées de la table restent des replis légitimes, assumés et
+ * documentés. Ce qui disparaît est le sixième cas, celui qu'aucune source ne
+ * fonde : il vaut désormais « inconnu », jamais « un ».
+ */
+function rateOf(cur: string, rates: Record<string, number>): number | null {
+  if (cur === "EUR") return 1;
+  const rate = rates[cur] ?? FALLBACK[cur];
+  if (rate == null || !Number.isFinite(rate) || rate <= 0) return null;
+  return rate;
+}
+
 export function convertFromEurSync(
   amountEur: DecimalInput,
   to: string,
@@ -140,7 +177,8 @@ export function convertFromEurSync(
 ): string {
   const cur = to.toUpperCase();
   if (cur === "EUR") return toFixed(d(amountEur), 12);
-  const rate = rates[cur] ?? FALLBACK[cur] ?? 1;
+  const rate = rateOf(cur, rates);
+  if (rate == null) throw new FxRateUnknownError(cur);
   return toFixed(d(amountEur).times(rate), 12);
 }
 
@@ -151,8 +189,8 @@ export function convertToEurSync(
 ): string {
   const cur = from.toUpperCase();
   if (cur === "EUR") return toFixed(d(amount), 12);
-  const rate = rates[cur] ?? FALLBACK[cur] ?? 1;
-  if (!rate) return toFixed(d(amount), 12);
+  const rate = rateOf(cur, rates);
+  if (rate == null) throw new FxRateUnknownError(cur);
   return toFixed(d(amount).div(rate), 12);
 }
 
@@ -170,8 +208,8 @@ export async function fxRateToEur(from: string): Promise<string> {
   const cur = from.toUpperCase();
   if (cur === "EUR") return "1";
   const rates = await getEurRates();
-  const rate = rates[cur] ?? FALLBACK[cur] ?? 1;
-  if (!rate) return "1";
+  const rate = rateOf(cur, rates);
+  if (rate == null) throw new FxRateUnknownError(cur);
   return toFixed(d(1).div(rate), 10);
 }
 
