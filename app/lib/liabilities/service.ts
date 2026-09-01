@@ -68,6 +68,16 @@ export type LiabilityEventType =
   (typeof LIABILITY_EVENT_TYPES)[keyof typeof LIABILITY_EVENT_TYPES];
 
 /**
+ * La dette a changé entre sa lecture et l'écriture de sa matérialisation.
+ *
+ * Levée plutôt que rendue : les événements de l'échéance sont créés avant
+ * l'écriture du solde, dans la même transaction. Sortir par un `return`
+ * validerait ces événements alors que le solde n'a pas bougé — l'exception
+ * annule l'ensemble.
+ */
+class LiabilityStateChanged extends Error {}
+
+/**
  * Apply all due monthly debits for one liability (idempotent via lastPaymentAppliedAt).
  * Requires userId — never loads/writes a liability by bare id alone.
  * Returns updated remaining if any debit ran.
@@ -114,7 +124,8 @@ export async function applyDuePaymentsForLiability(
 
   if (events.length === 0) return liability;
 
-  return prisma.$transaction(async (tx) => {
+  const materialiser = () =>
+    prisma.$transaction(async (tx) => {
     for (const e of events) {
       await tx.liabilityEvent.create({
         data: {
@@ -142,18 +153,59 @@ export async function applyDuePaymentsForLiability(
       endDate = lastApplied || now;
     }
 
+    /*
+      Écriture conditionnée à l'état qui a servi à la projection.
+
+      La dette est lue hors transaction, les échéances sont projetées à partir
+      de `remainingAmount` et `lastPaymentAppliedAt`, puis écrites ici. Le
+      filtre ne portait que sur l'identité : tout ce qui survenait entre la
+      lecture et l'écriture était écrasé par un solde calculé sur une valeur
+      périmée — une saisie de capital restant dû, notamment, que la route
+      d'édition permet.
+
+      Deux matérialisations concurrentes posaient par ailleurs le même
+      problème que pour les livrets : parties du même `lastPaymentAppliedAt`,
+      toutes deux créaient les mêmes `LiabilityEvent`, et la trace comptable
+      comptait l'échéance deux fois.
+
+      Exiger les deux champs lus transforme l'écriture en compare-and-set. Le
+      SGBD évalue le filtre et applique la donnée en une seule instruction :
+      si la dette a bougé, aucune ligne ne correspond, et la transaction est
+      abandonnée — événements compris, puisqu'ils sont écrits dans le même
+      `tx`.
+    */
     const write = await tx.liability.updateMany({
-      where: owned(liabilityId, userId),
+      where: {
+        ...owned(liabilityId, userId),
+        remainingAmount: liability.remainingAmount,
+        lastPaymentAppliedAt: liability.lastPaymentAppliedAt,
+      },
       data: {
         remainingAmount: new Prisma.Decimal(remaining),
         lastPaymentAppliedAt: lastApplied,
         endDate,
       },
     });
-    if (write.count === 0) return null;
+    if (write.count === 0) {
+      // La course est perdue : rien ne doit subsister, pas même les
+      // événements créés plus haut dans cette transaction.
+      throw new LiabilityStateChanged();
+    }
 
     return tx.liability.findFirst({ where: owned(liabilityId, userId) });
-  });
+    });
+
+  try {
+    return await materialiser();
+  } catch (e) {
+    /*
+      Course perdue : une autre exécution, ou une saisie utilisateur, a modifié
+      la dette entre sa lecture et cette écriture. Rien n'a été écrit — on rend
+      `null`, comme lorsque la dette est introuvable, plutôt que d'écraser.
+    */
+    if (e instanceof LiabilityStateChanged) return null;
+    throw e;
+  }
 }
 
 /**
