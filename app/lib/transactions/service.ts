@@ -204,18 +204,31 @@ async function resolveFx(input: CreateTxInput): Promise<CreateTxInput> {
     (provided.eq(1) || !input.fxRateToEur || input.fxRateToEur === "");
 
   if (forceHistorical) {
-    try {
-      const pay = input.paymentDate || input.occurredAt;
-      const hist = await fxRateToEurOnDate(currency, pay);
-      return { ...input, currency, fxRateToEur: hist };
-    } catch {
-      try {
-        const live = await liveFxToEur(currency);
-        return { ...input, currency, fxRateToEur: live };
-      } catch {
-        return { ...input, currency };
-      }
+    const pay = input.paymentDate || input.occurredAt;
+    const hist = await fxRateToEurOnDate(currency, pay);
+    /*
+      Taux historique introuvable : on refuse l'écriture.
+
+      Les deux replis d'avant — taux du jour, puis aucun taux, ce qui vaut 1 —
+      produisaient un `fxRateToEur` inventé, et `grossAmountEur` en découlait.
+      Une fois en base, rien ne distinguait plus ce montant d'un montant
+      constaté : la donnée était corrompue durablement et en silence.
+
+      `Transaction.fxRateToEur` est un `Decimal @default(1)` non nullable, et
+      `grossAmountEur` est requis : le modèle ne sait pas représenter « taux
+      inconnu ». Tant que c'est le cas, ne rien écrire est la seule option qui
+      ne mente pas. L'appelant reçoit une erreur explicite et peut fournir le
+      taux lui-même — un taux saisi reste prioritaire et n'emprunte pas ce
+      chemin.
+    */
+    if (hist == null) {
+      throw new AccountingError(
+        "FX_RATE_UNKNOWN",
+        `Taux historique ${currency}→EUR indisponible pour le ${String(pay).slice(0, 10)} : ` +
+          "renseignez-le manuellement plutôt que d'enregistrer un montant converti à un taux non constaté."
+      );
     }
+    return { ...input, currency, fxRateToEur: hist };
   }
 
   if (provided.eq(1) && currency !== "EUR") {

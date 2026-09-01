@@ -435,10 +435,21 @@ export function TransactionModal({
           { cache: "no-store" }
         );
         if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { fxRateToEur?: string };
-        if (data.fxRateToEur && !cancelled) {
+        const data = (await res.json()) as { fxRateToEur?: string | null };
+        if (cancelled) return;
+        if (data.fxRateToEur) {
           form.setValue("fxRateToEur", data.fxRateToEur, { shouldDirty: true });
           setFxHint(`Taux historique ${cur}→EUR au ${day} : ${data.fxRateToEur}`);
+        } else {
+          /*
+            Rien n'est prérempli : un taux du jour posé dans ce champ serait
+            enregistré comme s'il datait de l'opération. L'écran le dit au lieu
+            de rester muet, sans quoi l'utilisateur croirait à un simple retard
+            de chargement.
+          */
+          setFxHint(
+            `Taux historique ${cur}→EUR au ${day} indisponible — saisissez-le pour enregistrer l'opération.`
+          );
         }
       } catch {
         /* ignore */

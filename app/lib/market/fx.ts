@@ -177,12 +177,30 @@ export async function fxRateToEur(from: string): Promise<string> {
 
 /**
  * Taux historique : 1 unité `from` → EUR, pour une date donnée (YYYY-MM-DD).
- * Source Frankfurter (BCE) ; fallback live puis table.
+ *
+ * Source Frankfurter (BCE), et elle seule. Rend `null` quand le taux de cette
+ * date n'est pas démontré — fournisseur injoignable, délai dépassé, date hors
+ * série, devise absente de la réponse.
+ *
+ * ## Pourquoi aucun repli
+ *
+ * Cette fonction rendait `fxRateToEur(cur)` en cas d'échec, c'est-à-dire le
+ * taux **du jour** — lequel, depuis le cache dégradé, peut lui-même être la
+ * table statique déclarée plus haut. Un dividende de 2021 pouvait donc être
+ * converti à 1,08 USD et le résultat écrit dans `Transaction.fxRateToEur`, où
+ * plus rien ne le distinguait d'un taux réellement constaté. L'écart valait la
+ * dérive entre les deux dates, sans borne.
+ *
+ * Le taux courant et le taux historique répondent à deux questions
+ * différentes. Le repli du premier n'a pas à contaminer le second : quand la
+ * date n'est pas documentée, la seule réponse vraie est « je ne sais pas », et
+ * c'est à l'appelant de décider quoi en faire. Aucun appelant n'a le droit de
+ * la remplacer par une approximation.
  */
 export async function fxRateToEurOnDate(
   from: string,
   date: Date | string
-): Promise<string> {
+): Promise<string | null> {
   const cur = from.toUpperCase();
   if (cur === "EUR") return "1";
 
@@ -205,9 +223,9 @@ export async function fxRateToEurOnDate(
       }
     }
   } catch {
-    // fall through
+    // Réseau, délai dépassé, réponse illisible : rien n'est démontré.
   }
-  return fxRateToEur(cur);
+  return null;
 }
 
 export async function convertAmount(
