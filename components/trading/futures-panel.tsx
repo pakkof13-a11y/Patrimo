@@ -8,6 +8,7 @@ import { fetchJson } from "@/app/lib/api-client";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import {
   CRYPTO_EXCHANGES,
@@ -98,6 +99,20 @@ export function FuturesPanel({ className }: { className?: string }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [showClosed, setShowClosed] = useState(false);
+  /*
+    « Suppr. » supprimait au clic, sans rien demander, juste à côté de
+    « Clôturer » — deux actions voisines aux sens très différents.
+
+    La suppression ne porte que sur une ligne `TradingPosition` : ni cascade,
+    ni rejeu comptable. Elle reste irréversible, et le message le dit sans
+    prétendre à davantage.
+  */
+  const [suppressionCiblee, setSuppressionCiblee] = useState<{
+    id: string;
+    pair: string;
+    direction: string;
+  } | null>(null);
+
   const [importExchange, setImportExchange] = useState<string>("BINANCE");
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -577,7 +592,14 @@ export function FuturesPanel({ className }: { className?: string }) {
                           <button
                             type="button"
                             className="btn btn-ghost text-[11px] text-[var(--danger)]"
-                            onClick={() => remove.mutate(p.id)}
+                            onClick={() =>
+                              setSuppressionCiblee({
+                                id: p.id,
+                                pair: p.pair,
+                                direction: p.direction,
+                              })
+                            }
+                            data-testid="futures-delete-btn"
                           >
                             Suppr.
                           </button>
@@ -657,6 +679,26 @@ export function FuturesPanel({ className }: { className?: string }) {
           </p>
         </>
       )}
+
+      <ConfirmDialog
+        open={suppressionCiblee != null}
+        danger
+        title="Supprimer la position"
+        message={
+          suppressionCiblee
+            ? `${suppressionCiblee.pair} · ${
+                suppressionCiblee.direction === "LONG" ? "Long" : "Short"
+              }. La ligne est retirée du suivi ; cette action est définitive.`
+            : ""
+        }
+        testId="futures-delete-confirm"
+        onCancel={() => setSuppressionCiblee(null)}
+        onConfirm={() => {
+          const cible = suppressionCiblee;
+          setSuppressionCiblee(null);
+          if (cible) remove.mutate(cible.id);
+        }}
+      />
     </section>
   );
 }

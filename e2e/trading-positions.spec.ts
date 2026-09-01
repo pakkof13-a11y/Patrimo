@@ -316,4 +316,59 @@ test.describe("Trading — positions", () => {
     await expect(page.getByTestId("empty-patrimony-cockpit")).toHaveCount(0);
     await expect(page.getByTestId("trading-empty-cta")).toBeVisible();
   });
+
+  test("supprimer une position à levier demande confirmation", async ({
+    page,
+    request,
+  }) => {
+    /*
+      « Suppr. » supprimait au clic, sans rien demander, juste à côté de
+      « Clôturer » — deux actions voisines aux sens très différents.
+
+      La position est créée puis supprimée par ce test, pour ne pas toucher
+      aux lignes du jeu de démonstration dont d'autres specs dépendent.
+    */
+    const paire = `ZZTEST${Date.now()}`;
+    const cree = await request.post("/api/crypto/futures", {
+      data: {
+        exchange: "BINANCE",
+        pair: paire,
+        marginType: "USDT_M",
+        baseCurrency: "ZZT",
+        quoteCurrency: "USDT",
+        direction: "LONG",
+        leverage: "2",
+        sizeContracts: "1",
+        entryPrice: "100",
+        openedAt: new Date().toISOString(),
+      },
+    });
+    expect(cree.ok()).toBe(true);
+
+    await openTrading(page);
+    await page.getByTestId("trading-sub-futures").click();
+    const ligne = page
+      .getByTestId("futures-open-row")
+      .filter({ hasText: paire });
+    await expect(ligne).toBeVisible({ timeout: 20_000 });
+
+    // 1) Le clic ouvre le dialogue et ne supprime rien.
+    await ligne.getByTestId("futures-delete-btn").click();
+    const dialogue = page.getByTestId("futures-delete-confirm");
+    await expect(dialogue).toBeVisible();
+    await expect(dialogue).toContainText(paire);
+
+    // 2) Annuler laisse la position en place.
+    await dialogue.getByRole("button", { name: "Annuler" }).click();
+    await expect(dialogue).toHaveCount(0);
+    await expect(ligne).toBeVisible();
+
+    // 3) Confirmer supprime réellement.
+    await ligne.getByTestId("futures-delete-btn").click();
+    const dialogue2 = page.getByTestId("futures-delete-confirm");
+    await expect(dialogue2).toBeVisible();
+    await dialogue2.getByRole("button", { name: "Supprimer" }).click();
+    await expect(ligne).toHaveCount(0, { timeout: 20_000 });
+  });
+
 });

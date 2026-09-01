@@ -353,4 +353,58 @@ test.describe("Épargne salariale", () => {
     ).not.toContainText("0,00");
   });
 
+
+  test("supprimer une ligne demande confirmation dans le dialogue du produit", async ({
+    page,
+    request,
+  }) => {
+    /*
+      La suppression passait par `window.confirm()`, la boîte native, alors que
+      le produit dispose de `ConfirmDialog` — documenté comme son remplaçant.
+      L'utilisateur était protégé ; seule la forme différait du reste.
+
+      La ligne est créée puis supprimée par ce test, pour ne pas toucher au jeu
+      de démonstration dont les autres specs dépendent.
+    */
+    const fonds = `ZZFONDS${Date.now()}`;
+    const cree = await request.post("/api/employee-savings", {
+      data: {
+        planType: "PEE",
+        manager: "ZZ Test",
+        fundName: fonds,
+        units: "10",
+        nav: "100",
+        currency: "EUR",
+      },
+    });
+    expect(cree.ok()).toBe(true);
+
+    await page.goto("/epargne-salariale#gestion", {
+      waitUntil: "domcontentloaded",
+    });
+    const gestion = page.getByTestId("es-management");
+    await expect(gestion).toBeVisible({ timeout: 20_000 });
+
+    const ligne = gestion.locator("tr").filter({ hasText: fonds });
+    await expect(ligne).toBeVisible({ timeout: 20_000 });
+
+    // 1) Le clic ouvre le dialogue du produit et ne supprime rien.
+    await ligne.getByTestId("es-line-delete").click();
+    const dialogue = page.getByTestId("es-line-delete-confirm");
+    await expect(dialogue).toBeVisible();
+    await expect(dialogue).toContainText(fonds);
+
+    // 2) Annuler laisse la ligne en place.
+    await dialogue.getByRole("button", { name: "Annuler" }).click();
+    await expect(dialogue).toHaveCount(0);
+    await expect(ligne).toBeVisible();
+
+    // 3) Confirmer supprime réellement.
+    await ligne.getByTestId("es-line-delete").click();
+    const dialogue2 = page.getByTestId("es-line-delete-confirm");
+    await expect(dialogue2).toBeVisible();
+    await dialogue2.getByRole("button", { name: "Supprimer" }).click();
+    await expect(ligne).toHaveCount(0, { timeout: 20_000 });
+  });
+
 });

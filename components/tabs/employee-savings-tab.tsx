@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DateInput } from "@/components/ui/date-input";
 import { EmptyPlaceholder } from "@/components/ui/panel";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import {
   COMMON_MANAGERS,
@@ -84,6 +85,18 @@ export function EmployeeSavingsManagement({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [managerOther, setManagerOther] = useState("");
+  /*
+    La suppression passait par `window.confirm()`, alors que `ConfirmDialog`
+    est justement le composant prévu pour le remplacer. L'utilisateur était
+    protégé — seule la forme différait du reste du produit.
+
+    Le comportement est repris à l'identique : même action, mêmes conditions,
+    seule la boîte native cède la place au dialogue commun.
+  */
+  const [suppressionCiblee, setSuppressionCiblee] = useState<{
+    id: string;
+    fundName: string;
+  } | null>(null);
   const [showUnlockHelp, setShowUnlockHelp] = useState(false);
 
   const lines = q.data?.lines ?? [];
@@ -911,11 +924,13 @@ export function EmployeeSavingsManagement({
                         size="sm"
                         variant="ghost"
                         className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600 dark:hover:text-red-400"
-                        onClick={() => {
-                          if (confirm("Supprimer cette position ?")) {
-                            delMut.mutate(l.id);
-                          }
-                        }}
+                        onClick={() =>
+                          setSuppressionCiblee({
+                            id: l.id,
+                            fundName: l.fundName,
+                          })
+                        }
+                        data-testid="es-line-delete"
                         title="Supprimer"
                         aria-label="Supprimer la position"
                       >
@@ -929,6 +944,24 @@ export function EmployeeSavingsManagement({
           </table>
         </div>
       </ModuleCard>
+
+      <ConfirmDialog
+        open={suppressionCiblee != null}
+        danger
+        title="Supprimer cette position ?"
+        message={
+          suppressionCiblee
+            ? `${suppressionCiblee.fundName} — la ligne est retirée de votre épargne salariale. Cette action est définitive.`
+            : ""
+        }
+        testId="es-line-delete-confirm"
+        onCancel={() => setSuppressionCiblee(null)}
+        onConfirm={() => {
+          const cible = suppressionCiblee;
+          setSuppressionCiblee(null);
+          if (cible) delMut.mutate(cible.id);
+        }}
+      />
     </div>
   );
 }
