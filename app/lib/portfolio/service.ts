@@ -735,29 +735,41 @@ export async function getPlatformCashBalances(
   });
 }
 
-/** FCPE / PEE / PER — valeur = parts × VL, convertie en EUR */
+/**
+ * FCPE / PEE / PER — valeur = parts × VL, convertie en EUR.
+ *
+ * Une erreur de lecture **remonte**. Elle était rattrapée ici et rendue comme
+ * `zero()`, ce qui retirait tout le compartiment de `totalAssets` puis de
+ * `netWorth` : une épargne salariale de 25 000 € devenue illisible faisait
+ * afficher un patrimoine inférieur de 25 000 €, sans aucune réserve, et le
+ * seul indice partait dans les journaux du serveur.
+ *
+ * Aucun compte, aucune ligne : le total vaut zéro, et c'est vrai. Une requête
+ * qui échoue ne dit rien du montant — c'est la distinction que le moteur
+ * historique tient déjà partout, et que les passifs et le cash explicite
+ * tiennent ici même, sans rattrapage.
+ *
+ * L'erreur a une destination : la route rend un 500, la requête cliente n'a
+ * pas de résumé, et la bande d'indicateurs affiche « — € » — son placeholder
+ * de montant inconnu. Rien à inventer pour la transporter.
+ */
 export async function getEmployeeSavingsTotalEur(
   userId: string,
   rates?: Record<string, number>
 ) {
   const fx = rates ?? (await getEurRates());
-  try {
-    const rows = await prisma.employeeSavingsLine.findMany({
-      where: { userId },
-      select: { units: true, nav: true, currency: true },
-    });
-    let total = zero();
-    for (const r of rows) {
-      const mv = d(r.units.toString()).times(d(r.nav.toString()));
-      total = total.plus(
-        d(convertToEurSync(mv.toString(), r.currency || "EUR", fx))
-      );
-    }
-    return total;
-  } catch (e) {
-    console.error("[portfolio] employee savings total failed:", e);
-    return zero();
+  const rows = await prisma.employeeSavingsLine.findMany({
+    where: { userId },
+    select: { units: true, nav: true, currency: true },
+  });
+  let total = zero();
+  for (const r of rows) {
+    const mv = d(r.units.toString()).times(d(r.nav.toString()));
+    total = total.plus(
+      d(convertToEurSync(mv.toString(), r.currency || "EUR", fx))
+    );
   }
+  return total;
 }
 
 export async function getLiabilitiesTotalEur(
@@ -802,17 +814,16 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
       getPlatformCashBalances(userId, base, rates, ledger),
       getLiabilitiesTotalEur(userId, rates),
       getExplicitCashTotalEur(userId),
-      getAlternativesPortfolioSlice(userId, rates).catch((err) => {
-        console.error("[portfolio] alternatives slice failed:", err);
-        return {
-          metalsEur: 0,
-          privateEquityEur: 0,
-          crowdlendingEur: 0,
-          tangiblesEur: 0,
-          totalEur: 0,
-          slices: [] as { id: string; name: string; value: number }[],
-        };
-      }),
+      /*
+        Pas de rattrapage : ce `.catch` rendait un compartiment entièrement à
+        zéro, que `totalAssets` additionnait sans réserve. Un patrimoine
+        amputé de tous les alternatifs se lisait comme un patrimoine exact.
+
+        Les passifs et le cash explicite, juste au-dessus, laissent déjà
+        remonter leurs erreurs. Aligner ce compartiment sur eux, plutôt que de
+        lui inventer une règle propre.
+      */
+      getAlternativesPortfolioSlice(userId, rates),
       getEmployeeSavingsTotalEur(userId, rates),
     ]);
 
@@ -820,7 +831,12 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
   const costBasis = totalCostBasis(ledger);
   // Cash pockets: only balances explicitly entered and > 0 (banks, livrets, CTO/PEA/AV)
   const cash = explicitCash.totalEur;
-  const alternativesEur = d(String(alternatives?.totalEur ?? 0));
+  /*
+    Ni `?.` ni `?? 0` : la promesse rend une tranche complète ou échoue. Ce
+    repli ne pouvait plus être atteint, et il aurait ramené par la porte de
+    derrière le zéro que ce chantier retire.
+  */
+  const alternativesEur = d(String(alternatives.totalEur));
   const employeeSavingsEur = esEur;
   // Sous-totaux informatifs — déjà inclus dans marketValue (holdings), pas
   // additifs au net worth (contrairement à alternatives/ES qui vivent hors holdings).
