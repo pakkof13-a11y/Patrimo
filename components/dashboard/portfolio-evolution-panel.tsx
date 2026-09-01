@@ -3,6 +3,7 @@
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import type { HistoryPoint } from "@/app/lib/types/ui";
+import { scopeHistory } from "@/app/lib/portfolio/scope-history";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
@@ -325,82 +326,10 @@ export function PortfolioEvolutionPanel({
     un mouvement de marché. Réécrire le total en amont garantit qu'une seule
     des deux métriques circule dans toute la chaîne d'affichage.
   */
-  const scopedHistory = useMemo(() => {
-    /*
-      Une classe isolée passe par le même chemin que « patrimoine net » : le
-      total est réécrit **en amont**, et toute la chaîne d'affichage — deltas,
-      rebasage du comparatif, infobulles — travaille ensuite sur une seule
-      grandeur. Filtrer en aval aurait laissé les variations calculées sur le
-      patrimoine entier sous une étiquette de classe.
-
-      Les points dont la ventilation est absente sont **retirés**, jamais
-      ramenés à zéro : une ventilation inconnue n'est pas une classe vide, et
-      la courbe doit s'interrompre là où la donnée s'arrête.
-    */
-    /*
-      Croisement classe × enveloppe : même chemin que les classes, le total est
-      réécrit en amont pour que deltas, rebasage et infobulles travaillent tous
-      sur la grandeur affichée.
-
-      Le croisement est lu dans la série, jamais reconstruit ici : la valeur
-      d'une action en PEA à une date est celle que le moteur a calculée, avec le
-      même prix et le même statut que partout ailleurs.
-
-      Les points sans ventilation sont **retirés** : une période antérieure au
-      journal ne dit rien, et la ramener à zéro affirmerait une enveloppe vide.
-    */
-    if (assetClass && envelope) {
-      const out = [];
-      for (const p of history) {
-        const v = p.byAssetClassAndEnvelopeBase?.[assetClass]?.[envelope];
-        if (v == null) continue;
-        out.push({ ...p, totalValueBase: v, totalValueEur: v, netWorthBase: v });
-      }
-      return out;
-    }
-
-    if (assetClass) {
-      const out = [];
-      /*
-        Deux lectures possibles de la même classe.
-
-        « Valeur » trace l'encours, apports compris. « Performance » trace ce
-        que le marché a produit, une fois les mouvements de capitaux retirés —
-        c'est un **cumul** de résultats quotidiens, pas un encours, d'où
-        l'accumulation ci-dessous. Les présenter sous le même nom ferait passer
-        un versement pour un gain.
-
-        La performance n'existe pas au premier point d'une série : sans veille,
-        rien n'est comparable. Ces points sont écartés plutôt que ramenés à
-        zéro.
-      */
-      let cumul = 0;
-      for (const p of history) {
-        if (classMetric === "performance") {
-          const perf = p.performanceByAssetClassBase?.[assetClass];
-          if (perf == null) continue;
-          cumul += perf;
-          out.push({
-            ...p,
-            totalValueBase: cumul,
-            totalValueEur: cumul,
-            netWorthBase: cumul,
-          });
-          continue;
-        }
-        const v = p.byAssetClassBase?.[assetClass];
-        if (v == null) continue;
-        out.push({ ...p, totalValueBase: v, totalValueEur: v, netWorthBase: v });
-      }
-      return out;
-    }
-    if (scope !== "net") return history;
-    return history.map((p) =>
-      p.netWorthBase == null
-        ? p
-        : { ...p, totalValueBase: p.netWorthBase, totalValueEur: p.netWorthBase }
-    );
-  }, [history, scope, assetClass, classMetric, envelope]);
+  const scopedHistory = useMemo(
+    () => scopeHistory(history, { scope, assetClass, envelope, classMetric }),
+    [history, scope, assetClass, classMetric, envelope]
+  );
 
   /**
    * Part des titres dont l'enveloppe n'est pas démontrée, sur toute la fenêtre.
