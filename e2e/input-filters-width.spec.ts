@@ -60,12 +60,18 @@ async function boxes(page: Page, zone: Zone) {
   const toolbar = page.getByTestId(zone.toolbar);
   await expect(toolbar).toBeVisible({ timeout: 30_000 });
   const toolbarBox = (await toolbar.boundingBox())!;
-  const filters: Array<{ id: string; x: number; y: number; width: number }> = [];
+  const filters: Array<{
+    id: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }> = [];
   for (const id of zone.filters) {
     const el = page.getByTestId(id);
     if ((await el.count()) === 0) continue;
     const b = await el.boundingBox();
-    if (b) filters.push({ id, x: b.x, y: b.y, width: b.width });
+    if (b) filters.push({ id, x: b.x, y: b.y, width: b.width, height: b.height });
   }
   return { toolbarBox, filters };
 }
@@ -112,7 +118,28 @@ for (const zone of ZONES) {
             décompte de lignes ou une hauteur de barre : au moins deux filtres
             partagent une ligne. Un filtre par ligne, c'est le défaut d'origine.
           */
-          const rows = new Set(filters.map((f) => Math.round(f.y)));
+          /*
+            Deux filtres d'une même ligne ne partagent pas forcément l'ordonnée
+            au pixel près : des hauteurs différentes et un alignement centré
+            suffisent à les décaler d'une fraction de pixel. `Math.round` a
+            compté 748 et 749 comme deux lignes distinctes et fait échouer ce
+            test alors que la barre était correcte.
+
+            On regroupe donc par centre vertical, avec pour tolérance la moitié
+            de la hauteur du plus petit filtre. Cela ne peut pas masquer le
+            défaut surveillé : l'empilement d'origine sépare les filtres de
+            leur hauteur entière — mesuré ici à 91 px entre deux lignes réelles,
+            pour des filtres d'environ 36 px.
+          */
+          const tolerance = Math.min(...filters.map((f) => f.height)) / 2;
+          const centres: number[] = [];
+          for (const f of filters) {
+            const centre = f.y + f.height / 2;
+            if (!centres.some((c) => Math.abs(c - centre) < tolerance)) {
+              centres.push(centre);
+            }
+          }
+          const rows = new Set(centres);
           expect(
             rows.size,
             `un filtre par ligne à ${width} px : ${filters
