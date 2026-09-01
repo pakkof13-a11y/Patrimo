@@ -217,4 +217,48 @@ test.describe("Transactions", () => {
     await page.getByTestId("tx-delete-confirm-cancel").click();
     await expect(confirm).toHaveCount(0);
   });
+
+  test("un journal illisible n'annonce ni zéro euro ni zéro opération", async ({
+    page,
+  }) => {
+    /*
+      Les indicateurs affichaient `?? 0` : achats, ventes, revenus et frais à
+      « 0,00 € », et « Aucune transaction » en sous-titre, pendant que la
+      bannière d'erreur annonçait l'échec juste au-dessus. Quatre montants et un
+      décompte faux, présentés comme certains.
+
+      La route rend toujours `kpis`, à zéro compris quand le filtre ne ramène
+      rien : leur absence ne signifie donc jamais « aucune opération », mais
+      « la requête n'a pas abouti ». L'écran doit le dire.
+    */
+    await page.route("**/api/transactions**", (route) =>
+      route.fulfill({ status: 500, json: { error: "journal indisponible" } })
+    );
+    await page.goto("/transactions", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("transactions-tab")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // L'échec est annoncé…
+    await expect(page.getByText(/Impossible de charger le journal/i)).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // …et aucun montant n'est affirmé.
+    for (const id of ["tx-kpi-buys", "tx-kpi-sells", "tx-kpi-income", "tx-kpi-fees"]) {
+      const tuile = page.getByTestId(id);
+      await expect(tuile).toBeVisible();
+      await expect(
+        tuile,
+        `${id} : un montant inconnu ne s'écrit pas « 0,00 € »`
+      ).not.toContainText("0,00");
+      await expect(tuile).toContainText("—");
+    }
+
+    await expect(page.getByTestId("tx-kpi-count")).toContainText("—");
+    await expect(page.getByTestId("tx-total-count")).not.toContainText(
+      "Aucune transaction"
+    );
+  });
+
 });

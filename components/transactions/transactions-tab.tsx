@@ -274,6 +274,19 @@ export function TransactionsTab({
   const pageCount = Math.max(1, listQ.data?.pageCount ?? 1);
   const typeCounts = listQ.data?.typeCounts ?? {};
   const kpis = listQ.data?.kpis;
+  /*
+    La route rend toujours `kpis`, à zéro compris quand le filtre ne ramène
+    rien. Son absence ne signifie donc jamais « aucune opération » : elle
+    signifie que la requête n'a pas abouti — chargement en cours, ou échec.
+
+    Les tuiles affichaient `?? 0`, soit « 0,00 € » d'achats, de ventes, de
+    revenus et de frais pendant qu'une bannière annonçait l'échec juste
+    au-dessus. Quatre montants faux présentés comme certains. La bande
+    d'indicateurs du tableau de bord tient déjà cette distinction avec son
+    placeholder « — € » ; c'est la même règle ici.
+  */
+  const kpisConnus = kpis != null;
+  const MONTANT_INCONNU = "— €";
 
   // Clamp pageIndex si hors bornes (données chargées)
   useEffect(() => {
@@ -561,6 +574,12 @@ export function TransactionsTab({
 
   function formatCountSummary(): string {
     if (loading && !hasLoadedOnce) return "Chargement…";
+    /*
+      Sans réponse, on ne sait pas combien il y a d'opérations. Annoncer
+      « Aucune transaction » affirmait un journal vide là où il n'a pas pu être
+      lu — la bannière d'erreur disait déjà le contraire, deux lignes plus haut.
+    */
+    if (!listQ.data) return "Journal indisponible";
     if (totalDb === 0 && filteredTotal === 0) return "Aucune transaction";
     const base = `${totalDb} transaction${totalDb !== 1 ? "s" : ""}`;
     if (filteredTotal !== totalDb) {
@@ -632,21 +651,21 @@ export function TransactionsTab({
           <KpiBandTile
             testId="tx-kpi-count"
             label="Transactions"
-            value={filteredTotal.toLocaleString("fr-FR")}
+            value={kpisConnus ? filteredTotal.toLocaleString("fr-FR") : "—"}
             secondary="Opérations"
             loading={showSkeleton}
           />
           <KpiBandTile
             testId="tx-kpi-buys"
             label="Achats"
-            value={formatCurrency(kpis?.buysEur ?? 0, "EUR")}
+            value={kpisConnus ? formatCurrency(kpis!.buysEur, "EUR") : MONTANT_INCONNU}
             secondary="Sur la période"
             loading={showSkeleton}
           />
           <KpiBandTile
             testId="tx-kpi-sells"
             label="Ventes"
-            value={formatCurrency(kpis?.sellsEur ?? 0, "EUR")}
+            value={kpisConnus ? formatCurrency(kpis!.sellsEur, "EUR") : MONTANT_INCONNU}
             secondary="Sur la période"
             tone="positive"
             loading={showSkeleton}
@@ -654,7 +673,7 @@ export function TransactionsTab({
           <KpiBandTile
             testId="tx-kpi-income"
             label="Revenus"
-            value={formatCurrency(kpis?.incomeEur ?? 0, "EUR")}
+            value={kpisConnus ? formatCurrency(kpis!.incomeEur, "EUR") : MONTANT_INCONNU}
             secondary="Dividendes, intérêts…"
             tone="positive"
             loading={showSkeleton}
@@ -662,7 +681,7 @@ export function TransactionsTab({
           <KpiBandTile
             testId="tx-kpi-fees"
             label="Frais"
-            value={formatCurrency(kpis?.feesEur ?? 0, "EUR")}
+            value={kpisConnus ? formatCurrency(kpis!.feesEur, "EUR") : MONTANT_INCONNU}
             secondary="Total des frais"
             tone="negative"
             loading={showSkeleton}
