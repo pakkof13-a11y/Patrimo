@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, Plus, Tags } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ImageLogo, PlatformLogo } from "@/components/ui/platform-logo";
 import { AssetPriceChart } from "@/components/assets/asset-price-chart";
 import { AssetRelatedNews } from "@/components/assets/asset-related-news";
@@ -490,6 +491,18 @@ function Transactions({
   onDeleteTx: (id: string) => void;
   onAddTransaction?: (type?: string) => void;
 }) {
+  /*
+    La même suppression, deux contrats.
+
+    Depuis l'onglet Transactions, effacer une opération passe par une
+    confirmation qui rappelle pourquoi : une transaction est une source de
+    vérité, dont les positions, le prix de revient et le cash découlent par
+    rejeu du journal. Depuis cette fiche, le bouton « Supprimer » — voisin
+    immédiat de « Modifier » — déclenchait le même effacement sans rien
+    demander.
+  */
+  const [suppressionCiblee, setSuppressionCiblee] = useState<string | null>(null);
+
   const rows = useMemo(
     () =>
       [...data.transactions].sort(
@@ -560,7 +573,8 @@ function Transactions({
                   variant="ghost"
                   size="sm"
                   className="h-7 px-2 text-[length:var(--text-2xs)]"
-                  onClick={() => onDeleteTx(t.id)}
+                  onClick={() => setSuppressionCiblee(t.id)}
+                  data-testid="asset-tx-delete"
                 >
                   Supprimer
                 </Button>
@@ -569,6 +583,20 @@ function Transactions({
           ))}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={suppressionCiblee != null}
+        danger
+        title="Supprimer l'opération"
+        message="Les positions, le prix de revient et le cash sont recalculés à partir du journal : supprimer cette opération les modifie. Cette action est définitive."
+        testId="asset-tx-delete-confirm"
+        onCancel={() => setSuppressionCiblee(null)}
+        onConfirm={() => {
+          const id = suppressionCiblee;
+          setSuppressionCiblee(null);
+          if (id) onDeleteTx(id);
+        }}
+      />
     </div>
   );
 }
