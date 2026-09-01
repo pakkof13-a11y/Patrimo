@@ -379,9 +379,17 @@ test.describe("Épargne salariale", () => {
     });
     expect(cree.ok()).toBe(true);
 
+    /*
+      Rechargement explicite : le `beforeEach` a déjà ouvert la page, donc une
+      navigation vers la même URL avec une ancre ne change pas de document et
+      ne relance aucune requête. La liste servie serait celle d'avant la
+      création, et la ligne resterait introuvable — ce qui s'est produit dès
+      que ce test a été joué à la suite des autres.
+    */
     await page.goto("/epargne-salariale#gestion", {
       waitUntil: "domcontentloaded",
     });
+    await page.reload({ waitUntil: "domcontentloaded" });
     const gestion = page.getByTestId("es-management");
     await expect(gestion).toBeVisible({ timeout: 20_000 });
 
