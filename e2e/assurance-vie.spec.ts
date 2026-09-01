@@ -75,9 +75,19 @@ test.describe("Assurance-vie", () => {
     await page.getByTestId("av-view-premiums").click();
     const view = page.getByTestId("av-premiums-view");
     await expect(view).toBeVisible();
-    if ((await premiums.innerText()).includes("0,00")) {
-      await expect(view).toContainText(/aucun versement déclaré/i);
-    }
+    /*
+      La condition portait sur la tuile elle-même : si elle cessait d'afficher
+      « 0,00 », le contrôle disparaissait — alors que c'est précisément le cas
+      où l'écran risquerait de présenter l'encours comme un gain.
+
+      Le jeu de démonstration ne déclare aucune prime, et la tuile affiche bien
+      « 0,00 € » (mesuré). Les deux faits sont donc exigés ensemble.
+    */
+    await expect(
+      premiums,
+      "le jeu de démonstration ne déclare aucune prime"
+    ).toContainText("0,00");
+    await expect(view).toContainText(/aucun versement déclaré/i);
   });
 
   test("une performance non mesurable est dite, jamais tracée à plat", async ({

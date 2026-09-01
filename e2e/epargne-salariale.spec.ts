@@ -162,8 +162,22 @@ test.describe("Épargne salariale", () => {
       qui aurait tout rapporté et rien coûté. L'écran doit alors le dire au
       lieu d'afficher un pourcentage.
     */
+    /*
+      Les deux issues sont légitimes, et chacune doit être vérifiée.
+
+      Sans montants versés, la tuile doit refuser de chiffrer un gain — « — »,
+      jamais un pourcentage. Avec des montants, elle doit au contraire en
+      afficher un. Le jeu de démonstration déclare des versements (mesuré :
+      « +17,03 % »), si bien que la première branche ne s'exécutait jamais et
+      que la seconde n'existait pas : ce test ne vérifiait rien.
+    */
     if ((await perf.innerText()).includes("non renseignés")) {
       await expect(perf).toContainText("—");
+    } else {
+      await expect(
+        perf,
+        "des versements sont déclarés : la performance doit être chiffrée"
+      ).toContainText("%");
     }
   });
 
@@ -211,10 +225,17 @@ test.describe("Épargne salariale", () => {
 
     // Le fonds monétaire du jeu de démonstration ne doit pas être rangé en
     // actions : ce serait annoncer un risque qui n'existe pas.
+    /*
+      Le jeu de démonstration porte bien un fonds monétaire — présence mesurée.
+      La condition faisait donc disparaître le contrôle au moment exact où le
+      fonds serait rangé ailleurs, c'est-à-dire la régression visée.
+    */
     const monetary = page.getByTestId("es-allocation-monetary");
-    if ((await monetary.count()) > 0) {
-      await expect(monetary).toContainText(/monétaires/i);
-    }
+    await expect(
+      monetary,
+      "le jeu de démonstration contient un fonds monétaire : il doit avoir sa famille"
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(monetary).toContainText(/monétaires/i);
   });
 
   test("la fiche d'un plan porte sa répartition et son horizon de déblocage", async ({

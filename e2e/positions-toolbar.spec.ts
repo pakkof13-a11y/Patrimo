@@ -120,13 +120,17 @@ test.describe("Positions — toolbar & filtres", () => {
     await expect(pageSize).toHaveValue("10");
 
     await page.getByTestId("holdings-group-by").selectOption("assetCategory");
-    // Header de groupe si données seed
+    /*
+      Le regroupement doit produire des en-têtes. La condition « peut être 0 si
+      pas de données classifiées » rendait ce contrôle sans effet le jour où le
+      regroupement cesserait d'en produire — 9 en-têtes mesurés sur le jeu de
+      démonstration, qui porte des positions classées.
+    */
     const groups = page.locator("[data-testid^='category-group-header-']");
-    // Soft : peut être 0 si pas de données classifiées
-    const n = await groups.count();
-    if (n > 0) {
-      await expect(groups.first()).toBeVisible();
-    }
+    await expect(
+      groups.first(),
+      "regroupement par catégorie : au moins un en-tête de groupe est attendu"
+    ).toBeVisible({ timeout: 10_000 });
     // Group mode hides page-size and shows disabled notice
     await expect(page.getByTestId("holdings-page-size")).toHaveCount(0);
     await expect(page.getByTestId("holdings-page-size-disabled")).toBeVisible();

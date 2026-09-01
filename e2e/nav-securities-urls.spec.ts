@@ -72,20 +72,34 @@ test.describe("URL des enveloppes titres", () => {
     await page.goto("/cto", { waitUntil: "domcontentloaded" });
     await expectSecuritiesScreen(page);
 
+    /*
+      Ce test ne s'exécutait pas.
+
+      Les deux entrées vivent derrière le dépliant « Avoirs » de la barre
+      latérale : tant qu'il est replié, elles ne sont pas rendues et
+      `count()` vaut zéro — mesuré à 0 pour les deux sur /cto. Les deux
+      branches étaient donc systématiquement sautées, et le surlignage n'a
+      jamais été vérifié.
+
+      Le dépliant est ouvert, puis les deux assertions sont exigées. Leur
+      disparition est désormais un échec, ce qu'elle doit être : la barre
+      latérale est une structure de l'application, pas une donnée du décor.
+    */
+    await page.getByTestId("nav-group-avoirs").click();
+
     const securitiesNav = page.getByTestId("nav-securities");
-    if ((await securitiesNav.count()) > 0) {
-      await expect(securitiesNav.first()).toHaveAttribute(
-        "aria-current",
-        "page"
-      );
-    }
+    await expect(
+      securitiesNav.first(),
+      "l'écran affiché est PEA & CTO : l'entrée correspondante doit être active"
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(securitiesNav.first()).toHaveAttribute("aria-current", "page");
+
     const holdingsNav = page.getByTestId("nav-holdings");
-    if ((await holdingsNav.count()) > 0) {
-      await expect(holdingsNav.first()).not.toHaveAttribute(
-        "aria-current",
-        "page"
-      );
-    }
+    await expect(holdingsNav.first()).toBeVisible({ timeout: 10_000 });
+    await expect(holdingsNav.first()).not.toHaveAttribute(
+      "aria-current",
+      "page"
+    );
   });
 
   test("l'historique du navigateur reste cohérent avec l'URL", async ({
