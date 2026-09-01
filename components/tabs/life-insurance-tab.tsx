@@ -23,6 +23,7 @@ import {
   type TaxHousehold,
 } from "@/app/lib/life-insurance/fiscal";
 import { RedemptionSimulatorPanel } from "@/components/life-insurance/redemption-simulator-panel";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { Holding } from "@/app/lib/types/ui";
 import { toast } from "sonner";
 
@@ -433,6 +434,17 @@ function PolicyCard({
   policy: Policy;
   onChanged: () => Promise<void>;
 }) {
+  /*
+    La corbeille lançait la suppression au clic, sans rien demander.
+
+    Un contrat emporte ses supports en cascade (`onDelete: Cascade` sur
+    `LifeInsuranceProduct`) : un clic malheureux effaçait donc le contrat et
+    toutes ses lignes, sans retour possible. Tous les autres modules
+    destructeurs du produit — banques, passifs, alternatifs, titres, NFT,
+    DeFi — passent par `ConfirmDialog` ; celui-ci ne le faisait pas.
+  */
+  const [confirmerSuppression, setConfirmerSuppression] = useState(false);
+
   const split = checkPremiumsSplit({
     premiumsBefore2017Eur: p.premiumsBefore2017Eur ?? "0",
     premiumsAfter2017Eur: p.premiumsAfter2017Eur ?? "0",
@@ -507,14 +519,27 @@ function PolicyCard({
           variant="ghost"
           size="sm"
           aria-label="Supprimer le contrat"
-          onClick={() =>
-            fetchJson(`/api/life-insurance?id=${p.id}`, {
-              method: "DELETE",
-            }).then(onChanged)
-          }
+          data-testid="av-policy-delete"
+          onClick={() => setConfirmerSuppression(true)}
         >
           <Trash2 className="h-3.5 w-3.5 text-red-500" />
         </Button>
+        <ConfirmDialog
+          open={confirmerSuppression}
+          danger
+          title="Supprimer le contrat"
+          message={`${p.insurer} — ${p.products.length} support${
+            p.products.length > 1 ? "s" : ""
+          } seront supprimés avec lui. Cette action est définitive.`}
+          testId="av-policy-delete-confirm"
+          onCancel={() => setConfirmerSuppression(false)}
+          onConfirm={() => {
+            setConfirmerSuppression(false);
+            void fetchJson(`/api/life-insurance?id=${p.id}`, {
+              method: "DELETE",
+            }).then(onChanged);
+          }}
+        />
       </div>
 
       <div className="space-y-2 px-4 py-3" data-testid="av-policy-premiums">
