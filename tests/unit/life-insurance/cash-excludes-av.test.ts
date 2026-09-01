@@ -83,13 +83,26 @@ describe("getExplicitCashTotalEur", () => {
     expect(totalEur.toString()).toBe("1000");
   });
 
-  it("exclut les soldes négatifs ou nuls", async () => {
+  it("compte chaque solde saisi avec son signe", async () => {
+    /*
+      Ce test exigeait 500 : le découvert de 200 € était ignoré, et le compte à
+      zéro aussi — sans effet, lui.
+
+      La règle a changé (B2). Un solde saisi est une information certaine et
+      compte pour ce qu'il vaut : rien d'autre dans le modèle ne rattrape un
+      découvert, et le chargeur historique a toujours transmis les soldes
+      signés. Exclure le négatif ici surévaluait le patrimoine et faisait
+      décrocher la carte du jour de la courbe.
+
+      Le sujet propre de ce fichier — l'assurance-vie n'entre pas dans le cash —
+      est inchangé et couvert par les tests ci-dessus.
+    */
     bankFindMany.mockResolvedValue([
       { balance: dec("500"), currency: "EUR", bankName: "A" },
       { balance: dec("-200"), currency: "EUR", bankName: "B" },
       { balance: dec("0"), currency: "EUR", bankName: "C" },
     ]);
     const { totalEur } = await getExplicitCashTotalEur("u1");
-    expect(totalEur.toString()).toBe("500");
+    expect(totalEur.toString()).toBe("300");
   });
 });

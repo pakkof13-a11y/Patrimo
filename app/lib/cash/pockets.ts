@@ -1,7 +1,7 @@
 import { prisma } from "../prisma";
 import { d, toFixed, zero, type Decimal } from "../money/decimal";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
-import { positiveCashOnly, savingsDisplayBalance, type RateType, type PayoutFrequency } from "../money/savings";
+import { savingsDisplayBalance, type RateType, type PayoutFrequency } from "../money/savings";
 import {
   applyDueInterestForUser,
   mapSavingsRowForApi,
@@ -9,8 +9,36 @@ import {
 import { normalizePlatformSearch } from "../platforms/presets";
 
 /**
- * Sum all explicit cash pockets that have balance > 0 only.
- * Does NOT include ledger APPORT cash (legacy) — banks tab is the source of truth.
+ * Somme des poches de trésorerie saisies, **avec leur signe**.
+ *
+ * N'inclut pas le cash APPORT du journal (legacy) — l'onglet Banques est la
+ * source de vérité.
+ *
+ * ## La règle de signe, et pourquoi elle a changé
+ *
+ * Ces sommes ignoraient tout solde non strictement positif. Un compte courant
+ * à −2 000 € comptait donc pour 0 dans le patrimoine net, alors même que
+ * l'écran affichait bien −2 000 €.
+ *
+ * Le chargeur historique, lui, a toujours transmis les soldes signés
+ * (`historical/load.ts`). Les deux moitiés du produit répondaient donc
+ * différemment à la même question, et la courbe décrochait de la carte du jour
+ * du montant du découvert — exactement la marche que le moteur de valorisation
+ * dit exister pour supprimer.
+ *
+ * Trois faits ont tranché :
+ *
+ * 1. un solde de −2 000 € est une information **certaine**, pas une absence.
+ *    Le refus de compter s'applique à ce qu'on ignore, jamais à ce qu'on sait ;
+ * 2. rien d'autre ne rattrape un découvert. `Liability` est bâti pour un prêt
+ *    amortissable — capital initial, capital restant, mensualité, échéances —
+ *    n'a aucune catégorie de découvert et aucun lien vers `BankAccount`.
+ *    Exclure le négatif faisait donc disparaître une dette réelle du
+ *    patrimoine, qui s'en trouvait surévalué ;
+ * 3. aligner le direct sur l'historique est le plus petit des deux changements,
+ *    et le seul qui rende la courbe et la carte comparables.
+ *
+ * Un solde **inconnu** reste inconnu : ce module ne voit que des soldes saisis.
  */
 export async function getExplicitCashTotalEur(userId: string) {
   const rates = await getEurRates();
@@ -23,7 +51,6 @@ export async function getExplicitCashTotalEur(userId: string) {
   ]);
 
   for (const b of banks) {
-    if (!positiveCashOnly(b.balance.toString())) continue;
     total = total.plus(d(convertToEurSync(b.balance.toString(), b.currency, rates)));
   }
 
@@ -43,12 +70,10 @@ export async function getExplicitCashTotalEur(userId: string) {
       rateType,
       freq
     );
-    if (!positiveCashOnly(displayBalance)) continue;
     total = total.plus(d(convertToEurSync(displayBalance, s.currency, rates)));
   }
 
   for (const e of envelopes) {
-    if (!positiveCashOnly(e.balance.toString())) continue;
     total = total.plus(d(convertToEurSync(e.balance.toString(), e.currency, rates)));
   }
 
@@ -78,8 +103,10 @@ export async function getBankPocketCashByNameEur(
   const fx = rates ?? (await getEurRates());
   const byName = new Map<string, Decimal>();
 
+  // Même règle de signe que le total : la poche d'une banque vaut ce qu'elle
+  // vaut, découvert compris. Elle valait 0, ce qui la disait vide.
   const add = (bankName: string | null | undefined, amountEur: Decimal) => {
-    if (!bankName?.trim() || amountEur.lte(0)) return;
+    if (!bankName?.trim()) return;
     const key = normalizePlatformSearch(bankName);
     if (!key) return;
     byName.set(key, (byName.get(key) || zero()).plus(amountEur));
@@ -91,7 +118,6 @@ export async function getBankPocketCashByNameEur(
   ]);
 
   for (const b of banks) {
-    if (!positiveCashOnly(b.balance.toString())) continue;
     const eur = d(convertToEurSync(b.balance.toString(), b.currency, fx));
     add(b.bankName, eur);
   }
@@ -112,7 +138,6 @@ export async function getBankPocketCashByNameEur(
       rateType,
       freq
     );
-    if (!positiveCashOnly(displayBalance)) continue;
     // Livret sans banque de détention : compte dans le cash global, pas sur une plateforme
     if (!s.bankName?.trim()) continue;
     const eur = d(convertToEurSync(displayBalance, s.currency, fx));
@@ -130,7 +155,6 @@ export async function listBankAccounts(userId: string, base = "EUR") {
   });
   return rows.map((b) => {
     const bal = b.balance.toString();
-    const counts = positiveCashOnly(bal);
     return {
       id: b.id,
       bankName: b.bankName,
@@ -139,10 +163,17 @@ export async function listBankAccounts(userId: string, base = "EUR") {
       notes: b.notes,
       isPro: b.isPro,
       ownershipPct: b.ownershipPct?.toString() ?? null,
-      countsInNetWorth: counts,
-      balanceBase: counts
-        ? convertFromEurSync(convertToEurSync(bal, b.currency, rates), base, rates)
-        : "0",
+      /*
+        Conservé, et désormais toujours vrai : un solde saisi entre dans le
+        patrimoine, quel que soit son signe. Le champ reste au contrat pour ne
+        pas casser ses consommateurs, mais il ne sert plus à écarter personne.
+      */
+      countsInNetWorth: true,
+      balanceBase: convertFromEurSync(
+        convertToEurSync(bal, b.currency, rates),
+        base,
+        rates
+      ),
     };
   });
 }
@@ -158,17 +189,14 @@ export async function listSavingsAccounts(userId: string, base = "EUR") {
   });
   return rows.map((s) => {
     const mapped = mapSavingsRowForApi(s);
-    const counts = positiveCashOnly(mapped.displayBalance);
     return {
       ...mapped,
-      countsInNetWorth: counts,
-      displayBalanceBase: counts
-        ? convertFromEurSync(
-            convertToEurSync(mapped.displayBalance, s.currency, rates),
-            base,
-            rates
-          )
-        : "0",
+      countsInNetWorth: true,
+      displayBalanceBase: convertFromEurSync(
+        convertToEurSync(mapped.displayBalance, s.currency, rates),
+        base,
+        rates
+      ),
     };
   });
 }
@@ -187,13 +215,11 @@ export async function listLifeInsurances(userId: string, base = "EUR") {
       currentValue: p.currentValue.toString(),
       currency: p.currency,
       notes: p.notes,
-      valueBase: positiveCashOnly(p.currentValue.toString())
-        ? convertFromEurSync(
-            convertToEurSync(p.currentValue.toString(), p.currency, rates),
-            base,
-            rates
-          )
-        : "0",
+      valueBase: convertFromEurSync(
+        convertToEurSync(p.currentValue.toString(), p.currency, rates),
+        base,
+        rates
+      ),
     }));
     const productsTotal = products.reduce(
       (acc, p) => acc.plus(d(p.currentValue)),
@@ -220,10 +246,12 @@ export async function listLifeInsurances(userId: string, base = "EUR") {
       ),
       outstandingEur,
       products,
-      cashCounts: positiveCashOnly(cash),
-      cashBase: positiveCashOnly(cash)
-        ? convertFromEurSync(convertToEurSync(cash, av.currency, rates), base, rates)
-        : "0",
+      cashCounts: true,
+      cashBase: convertFromEurSync(
+        convertToEurSync(cash, av.currency, rates),
+        base,
+        rates
+      ),
       productsTotal: toFixed(productsTotal, 8),
     };
   });
@@ -258,16 +286,17 @@ export async function listEnvelopeCash(userId: string, base = "EUR") {
   const rows = await prisma.envelopeCash.findMany({ where: { userId } });
   return rows.map((e) => {
     const bal = e.balance.toString();
-    const counts = positiveCashOnly(bal);
     return {
       id: e.id,
       envelope: e.envelope,
       balance: bal,
       currency: e.currency,
-      countsInNetWorth: counts,
-      balanceBase: counts
-        ? convertFromEurSync(convertToEurSync(bal, e.currency, rates), base, rates)
-        : "0",
+      countsInNetWorth: true,
+      balanceBase: convertFromEurSync(
+        convertToEurSync(bal, e.currency, rates),
+        base,
+        rates
+      ),
     };
   });
 }

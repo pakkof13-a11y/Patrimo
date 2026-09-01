@@ -261,11 +261,6 @@ export function savingsDisplayBalance(
   };
 }
 
-/** Only count cash if strictly > 0 (no phantom valuation) */
-export function positiveCashOnly(amount: DecimalInput): boolean {
-  return d(amount).gt(0);
-}
-
 export function describePayoutRule(schedule: SavingsSchedule): string {
   switch (schedule.payoutFrequency) {
     case "DAILY":
