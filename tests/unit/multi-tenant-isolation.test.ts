@@ -132,11 +132,19 @@ describe("applyDueInterestForSavings multi-tenant", () => {
     const res = await applyDueInterestForSavings("owner", "sav-1", now);
     expect(res).not.toBeNull();
     expect(res!.periodsCredited).toBeGreaterThan(0);
-    expect(savingsUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "sav-1", userId: "owner" },
-      })
-    );
+    /*
+      Le sujet de ce test reste l'isolation : l'écriture doit toujours porter
+      `id` ET `userId`, jamais l'identifiant seul.
+
+      Le filtre en compte désormais deux autres — `balance` et `lastPayoutAt` —
+      qui conditionnent l'écriture à l'état ayant servi au calcul (C1). On vise
+      donc les deux champs d'isolation nommément, plutôt que de figer la forme
+      entière du `where` : cette dernière rendait le test dépendant de tout
+      ajout au filtre, y compris de ceux qui le renforcent.
+    */
+    const where = savingsUpdateMany.mock.calls[0]![0].where;
+    expect(where.id).toBe("sav-1");
+    expect(where.userId).toBe("owner");
   });
 });
 
