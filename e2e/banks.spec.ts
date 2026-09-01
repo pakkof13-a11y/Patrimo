@@ -296,4 +296,40 @@ test.describe("Banques", () => {
     await page.getByTestId("banks-view-overview").click();
     await expect(page.getByTestId("bank-institution-list")).toBeVisible();
   });
+
+  test("des totaux illisibles ne s'affichent pas à zéro euro", async ({ page }) => {
+    /*
+      Trois états, pas deux : le garde `isPending && !data` ne couvre que le
+      premier chargement. Une fois les tentatives épuisées, il retombe à faux
+      alors que le résumé reste absent — c'est l'échec, et les tuiles lisaient
+      alors `?? "0"`.
+
+      Mesuré avant correction : « 0,00 € » de liquidités et d'épargne, sur un
+      écran qui ne signale l'échec nulle part. La route rend toujours ces
+      totaux, à zéro compris quand il n'y a aucun compte : leur absence
+      signifie « pas de réponse », jamais « rien ».
+
+      Le test attend la **fin réelle** du chargement — plus aucune tuile en
+      `data-loading` — sans quoi il constaterait le squelette et passerait pour
+      une mauvaise raison, ce qui a d'abord été le cas.
+    */
+    await page.route("**/api/banks/summary**", (route) =>
+      route.fulfill({ status: 500, json: { error: "indisponible" } })
+    );
+    await page.goto("/banques", { waitUntil: "domcontentloaded" });
+
+    const bande = page.getByTestId("banks-summary-strip");
+    await expect(bande).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(async () => bande.locator("[data-loading='true']").count(), {
+        timeout: 30_000,
+      })
+      .toBe(0);
+
+    await expect(
+      bande,
+      "des totaux inconnus ne s'écrivent pas « 0,00 € »"
+    ).not.toContainText("0,00");
+  });
+
 });

@@ -304,6 +304,21 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
 
   const summary = summaryQ.data;
   const summaryLoading = summaryQ.isPending && !summaryQ.data;
+  /*
+    Trois états, pas deux.
+
+    `summaryLoading` ne couvre que le premier chargement. Une fois les
+    tentatives épuisées, il retombe à faux alors que `summary` reste indéfini :
+    c'est l'échec, et il n'était distingué de rien. Les tuiles lisaient
+    `?? "0"` et affichaient donc « 0,00 € » de liquidités et d'épargne —
+    mesuré, cet écran ne signalant l'échec nulle part par ailleurs.
+
+    La route rend toujours ces totaux, à zéro compris quand il n'y a aucun
+    compte : leur absence signifie « pas de réponse », jamais « rien ». La
+    tuile « Rendement », dans la même bande, tenait déjà la distinction.
+  */
+  const totauxConnus = summary != null;
+  const MONTANT_INCONNU = "— €";
   const nbInstitutions = institutionCount(products);
   const accountCount = products.length;
 
@@ -424,13 +439,21 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
       >
         <KpiBandTile
           label="Liquidités"
-          value={formatCurrency(summary?.checkingTotalBase ?? "0", baseCurrency)}
+          value={
+            totauxConnus
+              ? formatCurrency(summary.checkingTotalBase, baseCurrency)
+              : MONTANT_INCONNU
+          }
           secondary="Comptes courants"
           loading={summaryLoading}
         />
         <KpiBandTile
           label="Épargne"
-          value={formatCurrency(summary?.savingsTotalBase ?? "0", baseCurrency)}
+          value={
+            totauxConnus
+              ? formatCurrency(summary.savingsTotalBase, baseCurrency)
+              : MONTANT_INCONNU
+          }
           secondary="Livrets + intérêts courus"
           loading={summaryLoading}
         />
@@ -446,10 +469,11 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
         />
         <KpiBandTile
           label="Intérêts projetés"
-          value={formatCurrency(
-            summary?.projectedAnnualInterestBase ?? "0",
-            baseCurrency
-          )}
+          value={
+            totauxConnus
+              ? formatCurrency(summary.projectedAnnualInterestBase, baseCurrency)
+              : MONTANT_INCONNU
+          }
           secondary="Projection 12 mois"
           loading={summaryLoading}
         />
