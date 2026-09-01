@@ -145,13 +145,52 @@ test.describe("Fiscalité", () => {
     /*
       « Non redevable » et « Non calculé » disent deux choses différentes, et
       aucune des deux ne s'écrit « 0 € ».
+
+      Ce test se gardait lui-même de s'exécuter. Son corps entier tenait dans
+      `if ((await placeholder.count()) > 0)` : le placeholder qu'il devait
+      vérifier était aussi sa condition d'entrée. Sa disparition — c'est-à-dire
+      la régression même qu'il surveille — rendait le compteur nul, sautait la
+      branche et laissait le test au vert. La panne emportait son propre témoin.
+
+      L'absence est désormais construite plutôt que guettée. `/api/real-estate/tax`
+      est refusée : le parc immobilier n'est pas chargé, `realEstate` vaut null,
+      et l'assiette de l'IFI est donc inconnue — pas nulle, inconnue. Le
+      composant n'a alors qu'une seule réponse acceptable, « Non calculé », et
+      elle est exigée sans condition.
+
+      La donnée de démonstration n'est pas touchée : le refus ne vaut que pour
+      cette page-ci.
     */
+    await page.route("**/api/real-estate/tax**", (route) =>
+      route.fulfill({ status: 500, json: { error: "assiette indisponible" } })
+    );
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("fiscal-year-tab")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("fiscal-skeleton")).toHaveCount(0, {
+      timeout: 30_000,
+    });
+
     const ifi = page.getByTestId("fiscal-kpi-ifi");
+    await expect(ifi).toBeVisible({ timeout: 20_000 });
+
     const placeholder = page.getByTestId("fiscal-kpi-ifi-placeholder");
-    if ((await placeholder.count()) > 0) {
-      await expect(placeholder).toHaveText(/Non redevable|Non calculé/);
-      await expect(ifi).not.toContainText("0,00 €");
-    }
+    await expect(
+      placeholder,
+      "assiette immobilière non chargée : la tuile IFI doit afficher son placeholder, pas un montant"
+    ).toBeVisible({ timeout: 20_000 });
+
+    /*
+      « Non calculé » et non « Non redevable » : la seconde affirmerait qu'on a
+      mesuré l'assiette et qu'elle passe sous le seuil. On n'a rien mesuré.
+    */
+    await expect(placeholder).toHaveText("Non calculé");
+
+    // Ni le zéro, ni aucun autre montant : une valeur chiffrée ici viendrait
+    // forcément d'ailleurs — d'une autre année, ou d'un défaut de substitution.
+    await expect(ifi).not.toContainText("0,00 €");
+    await expect(ifi).not.toContainText(/\d[\d\s ]*,\d{2}\s*€/);
   });
 
   test("l'estimation ne se présente jamais comme définitive", async ({
@@ -294,19 +333,37 @@ test.describe("Fiscalité", () => {
     const immo = (fy.byEnvelope ?? []).find(
       (b: { accountType: string }) => b.accountType === "IMMOBILIER"
     );
-    if (immo) {
-      const gross = Number(immo.dividendsGrossEur);
-      await expect(panel).toContainText(
-        gross.toLocaleString("fr-FR", { minimumFractionDigits: 2 })
-      );
-    }
+    /*
+      Sans condition : le test s'est déjà arrêté plus haut si l'enveloppe
+      Immobilier n'existe pas, et la ligne cliquée vient précisément de
+      `byEnvelope`. Un `if (immo)` laissait donc l'assertion sauter dans le seul
+      cas où elle aurait quelque chose à dire — l'enveloppe disparue de l'API
+      alors que l'écran l'affiche encore.
+    */
+    expect(
+      immo,
+      "la ligne Immobilier est affichée : l'API doit porter l'enveloppe correspondante"
+    ).toBeTruthy();
+    const gross = Number(immo.dividendsGrossEur);
+    await expect(panel).toContainText(
+      gross.toLocaleString("fr-FR", { minimumFractionDigits: 2 })
+    );
 
     // Une enveloppe titres, elle, garde son vocabulaire : rien de générique
     // n'a été imposé aux autres enveloppes.
+    /*
+      Détenir un compte-titres est une vraie condition — tout le monde n'en a
+      pas. Elle se dit par un skip, qui apparaît au bilan, et non par un `if`
+      qui rendait le test vert au moment même où l'enveloppe titres perdait son
+      vocabulaire.
+    */
     const ctoRow = page.locator('[data-fiscal-row="envelope:CTO"]');
-    if ((await ctoRow.count()) > 0) {
-      await ctoRow.click();
-      await expect(panel).toContainText("Dividendes bruts");
-    }
+    test.skip(
+      (await ctoRow.count()) === 0,
+      "Aucune enveloppe CTO cette année dans le jeu de démo"
+    );
+
+    await ctoRow.click();
+    await expect(panel).toContainText("Dividendes bruts");
   });
 });
