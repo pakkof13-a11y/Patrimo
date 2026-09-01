@@ -58,6 +58,7 @@ export async function loadHistoricalInputs(
     savings,
     savingsEvents,
     envelopes,
+    envelopeCashEvents,
     metals,
     peRows,
     clRows,
@@ -95,6 +96,18 @@ export async function loadHistoricalInputs(
       orderBy: { occurredAt: "asc" },
     }),
     prisma.envelopeCash.findMany({ where: { userId } }),
+    /*
+      Constats de trésorerie d'enveloppe.
+
+      Chargés une fois, comme ceux des comptes bancaires et des livrets, et
+      versés dans le même tableau d'événements : le compartiment de trésorerie
+      sait déjà construire une chronologie à partir de constats datés. Aucune
+      requête n'entre donc dans la boucle des jours.
+    */
+    prisma.envelopeCashEvent.findMany({
+      where: { envelopeCash: { userId } },
+      orderBy: { occurredAt: "asc" },
+    }),
     prisma.preciousMetalPosition.findMany({ where: { userId } }),
     prisma.privateEquityPosition.findMany({
       where: { userId },
@@ -273,6 +286,25 @@ export async function loadHistoricalInputs(
         rates
       ),
       type: e.type,
+    })),
+    /*
+      Constats d'enveloppe, dans le même moule.
+
+      `type` vaut `OBSERVED` et jamais `INTEREST` : l'écart entre deux constats
+      est donc compté comme un flux de capital, exactement comme l'était le
+      solde entier avant ce journal. Rien ne permet de distinguer un versement
+      d'un intérêt — l'API ne demande que le solde — et créditer la performance
+      d'un montant inexpliqué serait le seul choix vraiment faux.
+
+      La devise est celle figée sur le constat, pas celle de la ligne : une
+      enveloppe qui change de devise ne doit pas réécrire ses anciens montants.
+    */
+    ...envelopeCashEvents.map((e) => ({
+      accountId: e.envelopeCashId,
+      occurredAt: e.occurredAt,
+      amountEur: eur(e.amount, e.currency, rates),
+      balanceAfterEur: eur(e.balanceAfter, e.currency, rates),
+      type: "OBSERVED",
     })),
   ];
 

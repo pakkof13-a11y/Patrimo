@@ -32,9 +32,43 @@ export async function PUT(req: Request) {
   const balance =
     f.balance !== undefined ? new Prisma.Decimal(f.balance || "0") : row.balance;
 
-  const write = await prisma.envelopeCash.updateMany({
-    where: { id: row.id, userId },
-    data: { balance, currency },
+  /*
+    Le solde et son constat sont écrits ensemble.
+
+    L'historique de trésorerie s'ancrait sur `updatedAt`, que Prisma réécrit à
+    chaque écriture de la ligne : chaque saisie déplaçait le point où
+    l'enveloppe apparaît dans le passé et effaçait ce que l'on savait de l'état
+    précédent. Un journal accumule au lieu d'écraser.
+
+    L'écriture est atomique : un solde modifié sans son constat rouvrirait
+    exactement le défaut corrigé, sur cette saisie-là.
+
+    Le constat n'est posé que lorsqu'un solde est réellement affirmé. Changer la
+    seule devise n'affirme rien sur le montant, et écrire un constat pour cela
+    ferait passer une correction administrative pour une observation.
+  */
+  const affirmeUnSolde = f.balance !== undefined;
+  const ecart = balance.minus(row.balance);
+
+  const write = await prisma.$transaction(async (tx) => {
+    const maj = await tx.envelopeCash.updateMany({
+      where: { id: row.id, userId },
+      data: { balance, currency },
+    });
+    if (maj.count > 0 && affirmeUnSolde) {
+      await tx.envelopeCashEvent.create({
+        data: {
+          envelopeCashId: row.id,
+          userId,
+          // L'instant de la saisie : l'API n'en connaît aucun autre.
+          occurredAt: new Date(),
+          balanceAfter: balance,
+          amount: ecart,
+          currency,
+        },
+      });
+    }
+    return maj;
   });
   if (write.count === 0) {
     return NextResponse.json({ error: "Enveloppe introuvable" }, { status: 404 });

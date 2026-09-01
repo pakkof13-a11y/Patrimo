@@ -1574,10 +1574,59 @@ model EnvelopeCash {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events EnvelopeCashEvent[]
 
   @@unique([userId, envelope])
   @@index([userId])
+}
+
+/// Journal des constats de trésorerie d'enveloppe.
+///
+/// ## Pourquoi ce journal
+///
+/// `EnvelopeCash` ne portait que son solde courant et ses horodatages
+/// techniques. L'historique s'ancrait donc sur `updatedAt`, que Prisma réécrit à
+/// **chaque** écriture de la ligne : modifier le solde déplaçait le point où la
+/// trésorerie apparaît dans le passé, et effaçait ce que l'on savait de l'état
+/// précédent. La donnée n'était pas seulement absente, elle était détruite à
+/// chaque saisie.
+///
+/// Ses deux modèles frères — `BankAccountEvent` et `SavingsAccountEvent` — ont
+/// ce journal depuis toujours. Celui-ci en reprend la forme.
+///
+/// ## Ce qu'un constat dit, et ce qu'il ne dit pas
+///
+/// L'API de saisie n'accepte qu'une enveloppe et un solde : aucune date métier,
+/// aucun libellé de mouvement. L'utilisateur affirme « mon CTO porte 5 200 €
+/// **aujourd'hui** ». `occurredAt` est donc l'instant de la saisie, et rien
+/// d'autre — c'est la même convention que `AssetEnvelopeEvent` : un constat daté
+/// d'un état, qui ne dit rien de ce qui le précède.
+///
+/// `amount` est l'écart avec le constat précédent. Il est compté comme un flux
+/// de capital, jamais comme de la performance : rien ne permet de distinguer un
+/// versement d'un intérêt, et créditer la performance d'un montant inexpliqué
+/// serait le seul choix vraiment faux.
+model EnvelopeCashEvent {
+  id             String @id @default(cuid())
+  envelopeCashId String
+  userId         String
+
+  /// Instant du constat — celui de la saisie, seul instant que l'API connaisse.
+  occurredAt DateTime @default(now())
+  /// Solde constaté à cet instant.
+  balanceAfter Decimal @db.Decimal(28, 12)
+  /// Écart avec le constat précédent, compté comme flux de capital.
+  amount       Decimal @db.Decimal(28, 12)
+  /// Devise du constat, figée ici : la ligne peut changer de devise ensuite.
+  currency     String  @default("EUR")
+
+  createdAt DateTime @default(now())
+
+  envelopeCash EnvelopeCash @relation(fields: [envelopeCashId], references: [id], onDelete: Cascade)
+
+  @@index([envelopeCashId, occurredAt])
+  @@index([userId, occurredAt])
 }
 
 /// Compte titres détenu chez un courtier — PEA, PEA-PME ou compte-titres
