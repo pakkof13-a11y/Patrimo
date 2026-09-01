@@ -330,6 +330,32 @@ test.describe("Banques", () => {
       bande,
       "des totaux inconnus ne s'écrivent pas « 0,00 € »"
     ).not.toContainText("0,00");
+
+    /*
+      L'échec doit aussi être dit. Les tuiles affichaient « — € » sans que rien
+      n'explique pourquoi : même formulation que l'onglet Transactions, avec de
+      quoi relancer.
+    */
+    await expect(page.getByTestId("banks-summary-error")).toBeVisible();
+    await expect(page.getByTestId("banks-summary-error")).toContainText(
+      /Impossible de charger les totaux/i
+    );
+  });
+
+  test("aucune bannière d'indisponibilité quand les totaux répondent", async ({
+    page,
+  }) => {
+    await page.goto("/banques", { waitUntil: "domcontentloaded" });
+    const bande = page.getByTestId("banks-summary-strip");
+    await expect(bande).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(async () => bande.locator("[data-loading='true']").count(), {
+        timeout: 30_000,
+      })
+      .toBe(0);
+
+    // Succès, y compris un succès sans aucun compte : rien à signaler.
+    await expect(page.getByTestId("banks-summary-error")).toHaveCount(0);
   });
 
 });

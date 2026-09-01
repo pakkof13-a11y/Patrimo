@@ -24,7 +24,7 @@ import {
   type EsRange,
   type OverviewLine,
 } from "@/app/lib/employee-savings/overview";
-import { cn, formatCurrency } from "@/app/lib/utils";
+import { cn, formatCurrency, MONTANT_INCONNU } from "@/app/lib/utils";
 
 /**
  * Vue d'ensemble de l'épargne salariale.
@@ -127,7 +127,6 @@ export function EsOverview({
     tenait déjà la distinction avec « — » ; les autres l'adoptent ici.
   */
   const donneesConnues = q.data != null;
-  const MONTANT_INCONNU = "— €";
 
   return (
     <div className={cn("min-w-0", className)} data-testid="es-overview">

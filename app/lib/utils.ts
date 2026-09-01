@@ -7,6 +7,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Montant que l'application ne connaît pas.
+ *
+ * À distinguer de zéro, qui est un montant : ce libellé dit qu'aucune réponse
+ * n'est disponible — requête en échec, compartiment indisponible. Il était
+ * redéfini à l'identique dans cinq composants, avec le risque qu'un écran
+ * finisse par en dire autre chose que les autres.
+ */
+export const MONTANT_INCONNU = "— €";
+
 export function formatCurrency(value: number | string, currency: string = "EUR") {
   return formatMoney(value, currency);
 }

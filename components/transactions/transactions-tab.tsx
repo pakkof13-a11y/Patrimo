@@ -44,6 +44,7 @@ import {
   formatDate,
   formatQuantity,
   cn,
+  MONTANT_INCONNU,
 } from "@/app/lib/utils";
 import { DataRow } from "@/components/ui/data-row";
 import type { TxRow } from "@/app/lib/types/ui";
@@ -286,7 +287,6 @@ export function TransactionsTab({
     placeholder « — € » ; c'est la même règle ici.
   */
   const kpisConnus = kpis != null;
-  const MONTANT_INCONNU = "— €";
 
   // Clamp pageIndex si hors bornes (données chargées)
   useEffect(() => {

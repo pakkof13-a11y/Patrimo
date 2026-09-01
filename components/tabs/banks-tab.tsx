@@ -33,7 +33,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { fetchJson } from "@/app/lib/api-client";
-import { formatCurrency, cn } from "@/app/lib/utils";
+import { formatCurrency, cn, MONTANT_INCONNU } from "@/app/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -318,7 +318,13 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
     tuile « Rendement », dans la même bande, tenait déjà la distinction.
   */
   const totauxConnus = summary != null;
-  const MONTANT_INCONNU = "— €";
+  /*
+    L'échec du résumé n'était annoncé nulle part sur cet écran : les tuiles
+    disaient « — € » sans que rien n'explique pourquoi. Même formulation et même
+    mécanisme que l'onglet Transactions — un message discret sous le sous-titre,
+    avec de quoi relancer.
+  */
+  const resumeIndisponible = !totauxConnus && !summaryLoading;
   const nbInstitutions = institutionCount(products);
   const accountCount = products.length;
 
@@ -356,6 +362,21 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
               </>
             ) : null}
           </p>
+          {resumeIndisponible && (
+            <p
+              className="mt-[var(--space-1)] text-[length:var(--text-xs)] text-[var(--danger)]"
+              data-testid="banks-summary-error"
+            >
+              Impossible de charger les totaux —{" "}
+              <button
+                type="button"
+                className="font-medium underline underline-offset-2"
+                onClick={() => void summaryQ.refetch()}
+              >
+                réessayer
+              </button>
+            </p>
+          )}
         </div>
 
         <div className="relative flex shrink-0 items-center gap-[var(--space-2)]">

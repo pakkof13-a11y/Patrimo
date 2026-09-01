@@ -21,7 +21,7 @@ import {
   Tooltip,
 } from "recharts";
 import { fetchJson } from "@/app/lib/api-client";
-import { cn, formatCurrency } from "@/app/lib/utils";
+import { cn, formatCurrency, MONTANT_INCONNU } from "@/app/lib/utils";
 import { CHART_COLORS } from "@/app/lib/types/ui";
 import { DefiPanel } from "@/components/crypto/defi-panel";
 import { NftPanel } from "@/components/crypto/nft-panel";
@@ -172,7 +172,6 @@ export function CryptosTab({
     l'inconnu du nul.
   */
   const donneesConnues = data != null;
-  const MONTANT_INCONNU = "— €";
   const variation =
     data?.variation24hPct != null ? Number(data.variation24hPct) : null;
   const spot = Number(data?.spotEur ?? 0);

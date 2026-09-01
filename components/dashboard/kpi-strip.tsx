@@ -17,7 +17,7 @@ import {
   EyeOff,
 } from "lucide-react";
 import { Kpi } from "@/components/ui/kpi";
-import { formatCurrency, cn } from "@/app/lib/utils";
+import { formatCurrency, cn, MONTANT_INCONNU } from "@/app/lib/utils";
 import { FinanceTip } from "@/components/ui/finance-tooltip";
 import {
   KPI_VISIBLE_KEY,
@@ -106,8 +106,8 @@ export function KpiStrip({
    * substitution garde une longueur fixe, sinon la largeur de la tuile
    * laisserait deviner l'ordre de grandeur qu'on cherche à cacher.
    */
-  /** Placeholder d'un montant inconnu — déjà employé par les tuiles estompées. */
-  const zeroValue = "— €";
+  /** Placeholder d'un montant inconnu — partagé avec les autres bandes. */
+  const zeroValue = MONTANT_INCONNU;
 
   /**
    * Absence de données, une fois le chargement terminé.
