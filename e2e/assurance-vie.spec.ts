@@ -157,9 +157,25 @@ test.describe("Assurance-vie", () => {
   test("les poches d'épargne se lisent en texte, pas seulement en couleur", async ({
     page,
   }) => {
+    /*
+      La précondition est l'existence de contrats, pas celle de la légende.
+
+      Sortir sur l'absence de la légende rendait ce test vert au moment même où
+      la répartition cessait d'être lisible en texte — ce qu'il est censé
+      protéger.
+    */
+    const contrats = await contractCards(page);
+    test.skip(
+      (await contrats.count()) === 0,
+      "Aucun contrat d'assurance-vie : pas de répartition à lire"
+    );
+
     await page.getByTestId("av-view-allocation").click();
     const legend = page.getByTestId("av-allocation-legend");
-    if ((await legend.count()) === 0) return;
+    await expect(
+      legend,
+      "des contrats existent, la répartition doit être lisible"
+    ).toBeVisible({ timeout: 15_000 });
     // Un anneau seul n'est pas lisible au lecteur d'écran, et deux teintes
     // proches ne se distinguent pas sur un écran mal calibré.
     await expect(legend).toContainText(/%/);

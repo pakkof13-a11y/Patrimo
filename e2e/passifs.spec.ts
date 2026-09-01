@@ -77,10 +77,22 @@ test.describe("Passifs / Crédits", () => {
     test.skip((await rows.count()) === 0, "Aucun crédit");
 
     await rows.first().click();
+
+    /*
+      La barre est absente quand le capital initial est inconnu — c'est un
+      refus, pas un oubli : une barre vide affirmerait que rien n'a été
+      remboursé. Mais sortir sur cette absence rendait le test vert quand la
+      barre disparaissait pour une tout autre raison.
+
+      Les deux crédits du jeu de démonstration portent un capital initial —
+      220 000 € et 18 000 €. La barre doit donc être là, et son absence est
+      un échec, pas une dispense.
+    */
     const progress = page.getByTestId("liability-progress");
-    // Absente quand le capital initial est inconnu — c'est un refus, pas un
-    // oubli : une barre vide affirmerait que rien n'a été remboursé.
-    if ((await progress.count()) === 0) return;
+    await expect(
+      progress,
+      "le crédit porte un capital initial, la progression doit s'afficher"
+    ).toBeVisible({ timeout: 15_000 });
 
     await expect(progress).toContainText("%");
     await expect(progress).toContainText("Capital initial");

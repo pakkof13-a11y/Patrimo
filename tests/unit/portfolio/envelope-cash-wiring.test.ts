@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -162,13 +165,10 @@ describe("le chargement apporte les constats au moteur", () => {
     fixture contenait justement un constat en base.
   */
   const source = () =>
-    require("node:fs").readFileSync(
-      require("node:path").resolve(
-        process.cwd(),
-        "app/lib/portfolio/historical/load.ts"
-      ),
+    readFileSync(
+      resolve(process.cwd(), "app/lib/portfolio/historical/load.ts"),
       "utf8"
-    ) as string;
+    );
 
   it("les constats d'enveloppe sont chargés", () => {
     expect(source()).toContain("envelopeCashEvent.findMany");

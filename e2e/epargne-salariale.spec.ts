@@ -10,6 +10,22 @@ import { gotoDashboard } from "./helpers";
  * les actions. Le reste — l'ordre des cartes, les couleurs — peut bouger.
  */
 
+/**
+ * Attend que la liste des plans ait répondu, puis dit s'il y en a.
+ *
+ * Attendre `es-plans` ne suffit pas : la carte est rendue pendant le
+ * squelette, donc `es-plan-row` y vaut zéro pour une raison de calendrier et
+ * non d'absence de données. La liste chargée porte l'un des deux marqueurs
+ * terminaux — la table, ou l'état vide explicite `es-no-plan` — et c'est sur
+ * lui qu'on statue.
+ */
+async function plansCharges(page: import("@playwright/test").Page) {
+  const vide = page.getByTestId("es-no-plan");
+  const table = page.getByTestId("es-plan-table");
+  await expect(vide.or(table)).toBeVisible({ timeout: 20_000 });
+  return (await vide.count()) === 0;
+}
+
 test.describe("Épargne salariale", () => {
   test.beforeEach(async ({ page }) => {
     await gotoDashboard(page);
@@ -115,9 +131,15 @@ test.describe("Épargne salariale", () => {
     const pill = page.getByTestId("es-plan-count");
     await expect(pill).toBeVisible({ timeout: 20_000 });
 
+    /*
+      Sans plan, la pastille n'a rien à compter et le scénario n'a pas d'objet.
+      Le dire par un skip visible plutôt que par un retour muet : la pastille
+      pouvait tomber à zéro sans que ce test ne bronche.
+    */
+    test.skip(!(await plansCharges(page)), "Aucun plan d'épargne salariale à compter");
+
     const rows = page.getByTestId("es-plan-row");
     const shown = await rows.count();
-    if (shown === 0) return;
 
     // Un plan = un type d'enveloppe chez un gestionnaire. Le seed en compte
     // trois pour quatre supports : la pastille ne doit pas compter les lignes.
@@ -170,9 +192,19 @@ test.describe("Épargne salariale", () => {
   test("les familles de supports se lisent en texte et distinguent le monétaire", async ({
     page,
   }) => {
+    /*
+      La précondition est l'existence de plans, pas celle de la légende.
+      Sortir sur l'absence de la légende rendait ce test vert au moment même où
+      la répartition cessait d'être lisible en texte.
+    */
+    test.skip(!(await plansCharges(page)), "Aucun plan : pas de répartition à lire");
+
     await page.getByTestId("es-view-allocation").click();
     const legend = page.getByTestId("es-allocation-legend");
-    if ((await legend.count()) === 0) return;
+    await expect(
+      legend,
+      "des plans existent, la répartition doit être lisible"
+    ).toBeVisible({ timeout: 15_000 });
 
     await expect(legend).toContainText("%");
     await expect(legend).toContainText("€");
@@ -193,9 +225,9 @@ test.describe("Épargne salariale", () => {
       au profit d'une ligne comparable ; elles doivent donc se retrouver dans
       la fiche, pas s'être évaporées.
     */
-    await expect(page.getByTestId("es-plans")).toBeVisible({ timeout: 20_000 });
+    // Sans plan, il n'y a pas de fiche à ouvrir — dit au bilan, pas en silence.
+    test.skip(!(await plansCharges(page)), "Aucun plan : pas de fiche à ouvrir");
     const rows = page.getByTestId("es-plan-row");
-    if ((await rows.count()) === 0) return;
 
     await rows.first().click();
 
@@ -222,9 +254,13 @@ test.describe("Épargne salariale", () => {
   test("sélectionner un plan ouvre sa fiche sans emporter la liste", async ({
     page,
   }) => {
+    /*
+      Ce skip existait déjà, mais il se prononçait sur `es-plans` — rendue dès
+      le squelette. Il se déclenchait donc toujours, et ce test ne s'exécutait
+      jamais malgré les quatre supports du jeu de démonstration.
+    */
+    test.skip(!(await plansCharges(page)), "Aucun plan dans le jeu de démonstration");
     const rows = page.getByTestId("es-plan-row");
-    await expect(page.getByTestId("es-plans")).toBeVisible({ timeout: 20_000 });
-    test.skip((await rows.count()) === 0, "Aucun plan dans le jeu de démonstration");
 
     await rows.first().click();
     const panel = page.getByTestId("es-plan-panel");

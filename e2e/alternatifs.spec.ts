@@ -52,9 +52,25 @@ test.describe("Actifs alternatifs", () => {
   test("la répartition couvre les familles réellement détenues", async ({
     page,
   }) => {
-    await investmentRows(page);
+    const lignes = await investmentRows(page);
+    /*
+      La précondition est l'existence d'investissements, pas celle du panneau.
+
+      Sortir sur l'absence du panneau rendait ce test vert précisément quand la
+      répartition ne s'affichait plus — le défaut qu'il garde. On déclare donc
+      la vraie précondition, visible au bilan, et l'absence du panneau redevient
+      un échec.
+    */
+    test.skip(
+      (await lignes.count()) === 0,
+      "Aucun investissement alternatif : pas de répartition à vérifier"
+    );
+
     const split = page.getByTestId("alt-split");
-    if ((await split.count()) === 0) return;
+    await expect(
+      split,
+      "des investissements existent, la répartition doit s'afficher"
+    ).toBeVisible({ timeout: 15_000 });
 
     /*
       Aucune famille vide n'apparaît : une part à 0 % dans la légende

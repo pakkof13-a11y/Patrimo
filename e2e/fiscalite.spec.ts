@@ -184,14 +184,42 @@ test.describe("Fiscalité", () => {
   test("une année sans opération affiche un état vide local, pas le cockpit", async ({
     page,
   }) => {
-    // 1990 : antérieure à toute donnée du jeu de démo.
-    await page.getByTestId("fiscal-year-select").selectOption("2021");
-    await page.waitForTimeout(1500);
+    /*
+      Ce test ne s'exécutait jamais.
+
+      Son commentaire annonçait « 1990 : antérieure à toute donnée du jeu de
+      démo », mais il sélectionnait 2021 — et le sélecteur n'offre de toute
+      façon que les six dernières années (HISTORY_YEARS), toutes pourvues
+      d'opérations dans le jeu de démonstration. `fiscal-empty` ne pouvait donc
+      pas apparaître, et la sortie muette rendait le test vert sans avoir
+      vérifié quoi que ce soit.
+
+      L'année vide se fabrique ici, et non dans le seed : les lignes viennent
+      de `byEnvelope` et du parc immobilier. On vide la première et on refuse
+      le second — l'écran est conçu pour survivre à cette erreur-là. La donnée
+      de démonstration reste intacte pour tous les autres tests.
+    */
+    await page.route("**/api/tax/fiscal-year**", async (route) => {
+      const reponse = await route.fetch();
+      const payload = (await reponse.json()) as Record<string, unknown>;
+      await route.fulfill({
+        json: { ...payload, byEnvelope: [], history: [] },
+      });
+    });
+    await page.route("**/api/real-estate/tax**", (route) =>
+      route.fulfill({ status: 500, json: { error: "indisponible" } })
+    );
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("fiscal-year-tab")).toBeVisible({
+      timeout: 20_000,
+    });
 
     const empty = page.getByTestId("fiscal-empty");
-    if ((await empty.count()) === 0) return;
-
-    await expect(empty).toBeVisible();
+    await expect(
+      empty,
+      "aucune ligne imposable : l'état vide local doit s'afficher"
+    ).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("empty-patrimony-cockpit")).toHaveCount(0);
   });
 
