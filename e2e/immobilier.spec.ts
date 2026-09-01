@@ -18,14 +18,28 @@ import { gotoDashboard } from "./helpers";
  * rend les lignes telles quelles.
  */
 async function propertyRows(page: Page) {
-  await expect(page.getByTestId("re-properties")).toBeVisible({
-    timeout: 25_000,
-  });
-  const rows = page.getByTestId("property-row");
-  await expect
-    .poll(async () => rows.count(), { timeout: 25_000 })
-    .toBeGreaterThanOrEqual(0);
-  return rows;
+  /*
+    Attendre l'état **terminal** de la liste, pas sa carte.
+
+    `re-properties` est la carte, rendue dès le squelette ; le sondage qui
+    suivait exigeait `count() >= 0`, condition vraie immédiatement et donc
+    satisfaite alors qu'aucune ligne n'était encore montée. Les trois
+    `test.skip((await rows.count()) === 0)` de ce fichier se déclenchaient
+    alors à tort.
+
+    Mesuré sur le jeu de démonstration, qui porte un bien : zéro ligne au
+    moment où l'ancien helper rendait la main, une ligne cinq secondes plus
+    tard. Ces trois tests ne se sont donc jamais exécutés.
+
+    La liste chargée porte l'un des deux marqueurs terminaux — la table, ou
+    l'invitation à déclarer un premier bien —, et c'est sur lui qu'on attend.
+  */
+  await expect(
+    page
+      .getByTestId("property-table")
+      .or(page.getByText(/Aucun bien déclaré/i))
+  ).toBeVisible({ timeout: 25_000 });
+  return page.getByTestId("property-row");
 }
 
 test.describe("Immobilier", () => {
