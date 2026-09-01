@@ -21,14 +21,36 @@ export async function POST(req: Request) {
   if (isCron) {
     const users = await prisma.user.findMany({ select: { id: true } });
     let totalPeriods = 0;
+    const errors: Array<{ userId: string; message: string }> = [];
+
     for (const u of users) {
-      const r = await applyDueInterestForUser(u.id);
-      totalPeriods += r.periodsCredited;
+      /*
+        Chaque utilisateur est isolé, pour la même raison que les livrets le
+        sont à l'intérieur : sans cela, la première exception interrompait le
+        job et privait d'intérêts tous les utilisateurs situés après elle dans
+        l'ordre de lecture, à chaque passage.
+
+        Les échecs sont rapportés dans la réponse : un job qui n'a traité qu'une
+        partie de ses utilisateurs doit le dire.
+      */
+      try {
+        const r = await applyDueInterestForUser(u.id);
+        totalPeriods += r.periodsCredited;
+        for (const e of r.errors) {
+          errors.push({ userId: u.id, message: `livret ${e.savingsId} : ${e.message}` });
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Erreur inconnue";
+        console.error("[savings/accrue] utilisateur", u.id, message);
+        errors.push({ userId: u.id, message });
+      }
     }
+
     return NextResponse.json({
       mode: "cron",
       users: users.length,
       periodsCredited: totalPeriods,
+      errors,
     });
   }
 

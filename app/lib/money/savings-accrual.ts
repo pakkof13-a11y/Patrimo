@@ -125,17 +125,39 @@ export async function applyDueInterestForUser(userId: string, now: Date = new Da
   // Cumul en Decimal : sommer des intérêts en float dérive dès quelques
   // livrets (0.1 + 0.2 ≠ 0.3) sur un montant restitué tel quel par l'API.
   let totalInterest = d(0);
+  const errors: Array<{ savingsId: string; message: string }> = [];
+
   for (const r of rows) {
-    const res = await applyDueInterestForSavings(userId, r.id, now);
-    if (res) {
-      periods += res.periodsCredited;
-      totalInterest = totalInterest.plus(d(res.totalInterest || 0));
+    /*
+      Chaque livret est isolé.
+
+      La boucle laissait remonter la première exception : le job s'arrêtait là,
+      et tous les livrets suivants ne recevaient jamais leurs intérêts. Une
+      seule ligne en défaut bloquait ainsi les autres à chaque passage, sans
+      que la réponse dise jusqu'où le job était allé.
+
+      L'échec n'est pas avalé pour autant : il est journalisé et rapporté à
+      l'appelant, comme le fait déjà le cron intraday pour la collecte
+      quotidienne.
+    */
+    try {
+      const res = await applyDueInterestForSavings(userId, r.id, now);
+      if (res) {
+        periods += res.periodsCredited;
+        totalInterest = totalInterest.plus(d(res.totalInterest || 0));
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erreur inconnue";
+      console.error("[savings-accrual] livret", r.id, message);
+      errors.push({ savingsId: r.id, message });
     }
   }
+
   return {
     accounts: rows.length,
     periodsCredited: periods,
     totalInterest: totalInterest.toString(),
+    errors,
   };
 }
 
