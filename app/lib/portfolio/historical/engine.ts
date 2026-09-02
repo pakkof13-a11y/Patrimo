@@ -38,7 +38,12 @@
 
 import { endOfParisDay, parisDayKey } from "../../dates/paris";
 import { toEur } from "../../accounting/fx";
-import { applyTransaction, createEmptyLedger } from "../../accounting/ledger";
+import {
+  applyTransaction,
+  createEmptyLedger,
+  totalCostBasis,
+  totalRealizedPnl,
+} from "../../accounting/ledger";
 import type { LedgerState, LedgerTx } from "../../accounting/types";
 import { d, zero, type Decimal } from "../../money/decimal";
 import { closeAtOrBefore, type DailyCloseIndex } from "../class-history";
@@ -470,6 +475,7 @@ export class PortfolioValuationEngine {
 
     const out: PortfolioValuationPoint[] = [];
     let previousGross: Decimal | null = null;
+    const realized = new RealizedPnlAccumulator();
 
     for (const day of days) {
       ledgerFlowToday = emptyFlows();
@@ -490,7 +496,9 @@ export class PortfolioValuationEngine {
         true,
         // La ventilation de la veille — la seule référence qui rende la
         // performance d'une classe mesurable.
-        out.length > 0 ? out[out.length - 1]!.byAssetClass : null
+        out.length > 0 ? out[out.length - 1]!.byAssetClass : null,
+        undefined,
+        realized.through(state)
       );
       out.push(point);
       previousGross = d(point.grossAssets);
@@ -579,7 +587,19 @@ export class PortfolioValuationEngine {
      * interroger le journal à 14 h 37 — sans quoi un changement survenu à
      * 16 h vaudrait dès le matin.
      */
-    at?: Date
+    at?: Date,
+    /**
+     * Cumul du réalisé à cette date, quand l'appelant le tient déjà.
+     *
+     * Une boucle de série connaît les lots apparus depuis le point précédent et
+     * peut donc entretenir ce cumul en temps constant. Sans cet argument, il est
+     * recalculé sur l'ensemble des lots — ce qui convient à un point isolé, et
+     * seulement à lui.
+     *
+     * La valeur est la même dans les deux cas : c'est la somme des mêmes lots,
+     * et un test le vérifie sur une série complète.
+     */
+    realizedPnlEur?: Decimal
   ): PortfolioValuationPoint {
     const estimated = new Set<ValuationComponent>();
 
@@ -889,6 +909,24 @@ export class PortfolioValuationEngine {
       externalFlows: externalFlows.toNumber(),
       investmentPerformance: investmentPerformance.toNumber(),
       ledgerCash: totalLedgerCash(state).toNumber(),
+
+      /*
+        Trois lectures de l'état comptable déjà rejoué — aucun calcul nouveau.
+
+        Ce sont les fonctions mêmes que le patrimoine du jour appelle
+        (`totalCostBasis`, `totalRealizedPnl`, `state.cashIncomeEur`) : le P&L
+        latent et le réalisé d'une date passée sont donc obtenus par le chemin
+        qui produit ceux d'aujourd'hui, et non par une seconde formule qu'il
+        faudrait maintenir d'accord avec la première.
+
+        Le cumul du réalisé est fourni par l'appelant quand il rejoue une série :
+        additionner tous les lots à chaque journée coûterait le carré de
+        l'activité sur un historique long, quand la boucle, elle, n'a besoin que
+        des lots apparus depuis la veille.
+      */
+      positionsCostBasis: totalCostBasis(state).toNumber(),
+      realizedPnl: (realizedPnlEur ?? totalRealizedPnl(state)).toNumber(),
+      ledgerCashIncome: state.cashIncomeEur.toNumber(),
       status,
       estimatedComponents: [...estimated].sort(),
       weakestPriceOrigin: weakestOrigin(originsSeen),
@@ -935,6 +973,7 @@ export class PortfolioValuationEngine {
     const out: Array<PortfolioValuationPoint & { at: Date }> = [];
     let previousGross: Decimal | null = null;
     let previousDay: DayKey | null = null;
+    const realized = new RealizedPnlAccumulator();
 
     for (const at of instants) {
       const day = parisDayKey(at);
@@ -967,7 +1006,8 @@ export class PortfolioValuationEngine {
         out.length > 0 ? out[out.length - 1]!.byAssetClass : null,
         // L'heure exacte du point : le journal des enveloppes se lit à cet
         // instant, pas à la fin de la journée.
-        at
+        at,
+        realized.through(state)
       );
       out.push({ ...point, at });
       previousGross = d(point.grossAssets);
@@ -995,6 +1035,31 @@ export class PortfolioValuationEngine {
       applyLedgerTx(state, tx);
     }
     return this.valuationAt(day, state, flowToday, null);
+  }
+}
+
+/**
+ * Cumul du réalisé, entretenu au fil d'un rejeu.
+ *
+ * Les lots réalisés ne sont qu'ajoutés à l'état, jamais retirés ni réordonnés :
+ * un curseur suffit donc pour n'additionner chaque lot qu'une fois, là où une
+ * somme complète à chaque journée coûterait le produit des jours par
+ * l'activité. Sur dix ans de courbe et un millier de ventes, c'est la
+ * différence entre trois millions d'additions et mille.
+ *
+ * Le résultat est celui de `totalRealizedPnl` — mêmes lots, même champ, même
+ * ordre.
+ */
+class RealizedPnlAccumulator {
+  private index = 0;
+  private total: Decimal = zero();
+
+  /** Cumul à l'état courant, lots apparus depuis le dernier appel compris. */
+  through(state: LedgerState): Decimal {
+    for (; this.index < state.realizedLots.length; this.index++) {
+      this.total = this.total.plus(state.realizedLots[this.index]!.realizedPnlEur);
+    }
+    return this.total;
   }
 }
 

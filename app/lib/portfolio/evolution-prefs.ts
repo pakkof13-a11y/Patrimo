@@ -207,6 +207,23 @@ export function loadEvolutionPrefs(): EvolutionPrefsV5 {
   return { ...DEFAULT_EVOLUTION_PREFS, versus: loadDefaultBenchmark() };
 }
 
+/**
+ * Écrit la seule période, sans toucher au reste des préférences.
+ *
+ * La période est devenue commune au tableau de bord — la courbe d'évolution et
+ * le bandeau d'indicateurs la partagent — et son état vit désormais au-dessus
+ * du panneau qui l'affiche. Elle reste pourtant rangée là où elle l'a toujours
+ * été : lui ouvrir une clé à part aurait fait deux périodes mémorisées pour un
+ * seul réglage à l'écran, et la première divergence entre les deux serait
+ * passée inaperçue.
+ *
+ * Lecture puis réécriture complète, plutôt qu'une écriture partielle : c'est
+ * `saveEvolutionPrefs` qui reste seul juge de ce qu'un objet valide contient.
+ */
+export function saveEvolutionRange(range: EvolutionRange): void {
+  saveEvolutionPrefs({ ...loadEvolutionPrefs(), range });
+}
+
 export function saveEvolutionPrefs(prefs: EvolutionPrefsV5): void {
   const payload: EvolutionPrefsV5 = {
     v: 5,

@@ -5,7 +5,9 @@ import {
   evolutionDeltaSummary,
   resolveEvolutionInterval,
   startOfIsoWeekMonday,
+  startOfRange,
   toPercentSeries,
+  windowForRange,
   type EvolutionRange,
   type EvolutionSeriesPoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
@@ -59,6 +61,93 @@ describe("ISO week buckets (Mon–Sun)", () => {
     const mon = startOfIsoWeekMonday(new Date("2026-07-16T12:00:00.000Z"));
     // Thursday 16 Jul → Monday 13 Jul
     expect(mon.toISOString().slice(0, 10)).toBe("2026-07-13");
+  });
+});
+
+/**
+ * Période partagée entre la courbe d'évolution et le bandeau d'indicateurs.
+ *
+ * Le bandeau lisait auparavant une fenêtre fixe de trente points, indépendante
+ * du sélecteur : passer de 1M à 1A changeait la courbe et laissait les tuiles
+ * inchangées. Ces tests protègent la règle inverse — une seule fenêtre, celle
+ * que l'utilisateur a choisie.
+ */
+describe("windowForRange", () => {
+  const now = new Date("2026-09-02T12:00:00.000Z");
+
+  /** Série quotidienne contiguë se terminant à `now`. */
+  function daily(count: number): HistoryPoint[] {
+    const day = 24 * 60 * 60 * 1000;
+    const end = now.getTime();
+    return Array.from({ length: count }, (_, i) =>
+      pt(new Date(end - (count - 1 - i) * day).toISOString(), 1_000 + i)
+    );
+  }
+
+  it("« Tout » rend l'historique entier — plus aucun plafond à 30 points", () => {
+    expect(windowForRange(daily(120), "all", now)).toHaveLength(120);
+  });
+
+  it("une période longue dépasse largement les 30 points d'autrefois", () => {
+    const win = windowForRange(daily(400), "1y", now);
+    expect(win.length).toBeGreaterThan(30);
+    expect(win.length).toBeLessThan(400);
+  });
+
+  it("changer de période change la fenêtre", () => {
+    const points = daily(400);
+    const unMois = windowForRange(points, "1m", now).length;
+    const unAn = windowForRange(points, "1y", now).length;
+    const tout = windowForRange(points, "all", now).length;
+    expect(unMois).toBeLessThan(unAn);
+    expect(unAn).toBeLessThan(tout);
+  });
+
+  it("ne garde que la période, plus l'ancre qui la précède", () => {
+    const points = daily(400);
+    const from = startOfRange("1m", now)!.getTime();
+    const win = windowForRange(points, "1m", now);
+
+    // Un seul point antérieur à la borne — l'ancre, en tête de fenêtre.
+    const avant = win.filter((p) => Date.parse(p.date) < from);
+    expect(avant).toHaveLength(1);
+    expect(avant[0]).toBe(win[0]);
+
+    // Et c'est bien le dernier point connu avant la fenêtre : la valeur de
+    // départ de la période, pas un point pris au hasard.
+    const anterieurs = points.filter((p) => Date.parse(p.date) < from);
+    expect(win[0]).toBe(anterieurs[anterieurs.length - 1]);
+  });
+
+  it("historique plus court que la période : tout est rendu, jamais rien", () => {
+    expect(windowForRange(daily(3), "5y", now)).toHaveLength(3);
+  });
+
+  it("écarte les dates illisibles au lieu de les placer n'importe où", () => {
+    const points = [...daily(3), pt("pas-une-date", 42)];
+    expect(windowForRange(points, "all", now)).toHaveLength(3);
+  });
+
+  it("la courbe d'évolution s'appuie sur exactement la même fenêtre", () => {
+    const points = daily(400);
+    for (const range of ["1m", "3m", "1y", "all"] as EvolutionRange[]) {
+      const win = windowForRange(points, range, now);
+      const { points: courbe } = buildEvolutionSeries(
+        points,
+        range,
+        "cumul",
+        now
+      );
+
+      // Les deux s'arrêtent au même point.
+      expect(courbe[courbe.length - 1]!.date).toBe(win[win.length - 1]!.date);
+
+      // Et la courbe ne remonte jamais au-delà de la fenêtre des indicateurs —
+      // elle peut seulement masquer l'ancre, qu'elle a d'abord utilisée.
+      expect(Date.parse(courbe[0]!.date)).toBeGreaterThanOrEqual(
+        Date.parse(win[0]!.date)
+      );
+    }
   });
 });
 

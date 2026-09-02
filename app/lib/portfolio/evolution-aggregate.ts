@@ -193,6 +193,41 @@ export function startOfRange(
   }
 }
 
+/**
+ * Points de l'historique compris dans une période.
+ *
+ * **Une seule** implémentation de « ce que couvre la période », partagée par la
+ * courbe d'évolution et par le bandeau d'indicateurs qui l'accompagne. Les deux
+ * blocs décrivent le même écran : deux filtrages écrits séparément auraient
+ * fini par diverger d'un jour, et l'écart aurait été invisible.
+ *
+ * Le point qui précède immédiatement la fenêtre est conservé **en tête** quand
+ * il existe : c'est la valeur de départ de la période, sans laquelle la
+ * première variation n'aurait rien à quoi se comparer. Il borne la fenêtre, il
+ * n'en fait pas partie.
+ *
+ * Historique plus court que la période demandée : tout est rendu plutôt que
+ * rien. Une fenêtre plus courte qu'annoncée reste lisible ; un écran vide, non.
+ */
+export function windowForRange<T extends { date: string }>(
+  points: T[],
+  range: EvolutionRange,
+  now = new Date()
+): T[] {
+  const valid = points.filter((p) => Number.isFinite(Date.parse(p.date)));
+  const from = startOfRange(range, now);
+  if (!from) return valid;
+
+  const fromT = from.getTime();
+  let anchorIdx = -1;
+  for (let i = 0; i < valid.length; i++) {
+    if (Date.parse(valid[i]!.date) < fromT) anchorIdx = i;
+  }
+  const inRange = valid.filter((p) => Date.parse(p.date) >= fromT);
+  if (inRange.length === 0) return valid;
+  return anchorIdx >= 0 ? [valid[anchorIdx]!, ...inRange] : inRange;
+}
+
 /** Lundi 00:00 (civil Paris) de la semaine ISO contenant `date`. */
 export function startOfIsoWeekMonday(date: Date): Date {
   const iso = date.toISOString();
@@ -552,26 +587,23 @@ export function buildEvolutionSeries(
     return { points: [], interval: "day" };
   }
 
-  const from = startOfRange(range, now);
-  let filtered = raw
-    .map(normalizePoint)
-    .filter((p) => Number.isFinite(Date.parse(p.date)));
+  /*
+    Le fenêtrage n'est plus écrit ici : il est partagé avec le bandeau
+    d'indicateurs (`windowForRange`). Même code, donc même période — c'était la
+    seule façon de garantir que les tuiles et la courbe parlent de la même
+    tranche de temps. Le comportement est inchangé : dates invalides écartées,
+    point d'ancrage conservé en tête pour le Δ, historique trop court rendu en
+    entier.
+  */
+  const filtered = windowForRange(raw.map(normalizePoint), range, now);
 
-  if (from) {
-    const fromT = from.getTime();
-    // garder un point d’ancrage juste avant la fenêtre pour le Δ
-    let anchorIdx = -1;
-    for (let i = 0; i < filtered.length; i++) {
-      if (Date.parse(filtered[i]!.date) < fromT) anchorIdx = i;
-    }
-    const inRange = filtered.filter((p) => Date.parse(p.date) >= fromT);
-    if (anchorIdx >= 0 && inRange.length > 0) {
-      filtered = [filtered[anchorIdx]!, ...inRange];
-    } else if (inRange.length > 0) {
-      filtered = inRange;
-    }
-    // sinon garder tout (historique trop court)
-  }
+  /*
+    La borne elle-même sert encore deux fois plus bas — densification du 7J,
+    retrait de l'ancre en mode cumul. Même appel, même `now` que dans
+    `windowForRange` : les deux ne peuvent pas désigner deux instants
+    différents.
+  */
+  const from = startOfRange(range, now);
 
   /*
     Rendement chaîné, jour par jour, sur la fenêtre affichée.

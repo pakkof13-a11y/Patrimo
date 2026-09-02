@@ -1051,6 +1051,8 @@ export type PortfolioHistoryPoint = {
   realizedPnlBase?: number;
   unrealizedPnlBase?: number;
   cashIncomeBase?: number;
+  /** Revenus cumulés du journal, intérêts compris — cf. `ledgerCashIncome`. */
+  ledgerCashIncomeBase?: number;
   dividendsBase?: number;
   couponsBase?: number;
   rentsBase?: number;
@@ -1361,6 +1363,44 @@ export async function getPortfolioHistory(
                 toBase(d(v)),
               ])
             ) as Record<string, number>),
+
+      /*
+        P&L latent et réalisé, reconstruits par la définition du jour.
+
+        `unrealizedPnl = marketValue − costBasis` est exactement ce que calcule
+        `getPortfolioBundle` ; ici, `marketValue` est la valeur de marché des
+        positions du journal — les cinq compartiments qu'alimente
+        `componentOfAssetClass` — et `costBasis` le prix de revient que le moteur
+        tenait déjà à cette date. Aucune formule nouvelle : les deux membres
+        viennent du même état comptable rejoué.
+
+        Conséquence assumée, identique des deux côtés : une position sans cours
+        connu est retenue à son coût, et pèse donc zéro dans le latent. C'est ce
+        que fait déjà le patrimoine du jour (« If no market price, show cost as
+        value »), et c'est ce qui fait que le dernier point de la série tombe sur
+        le montant affiché plutôt qu'à côté.
+      */
+      unrealizedPnlBase: toBase(
+        d(p.securities)
+          .plus(d(p.crypto))
+          .plus(d(p.realEstate))
+          .plus(d(p.lifeInsurance))
+          .plus(d(p.otherAssets))
+          .minus(d(p.positionsCostBasis))
+      ),
+      totalCostBase: toBase(d(p.positionsCostBasis)),
+      realizedPnlBase: toBase(d(p.realizedPnl)),
+      /*
+        Revenus du journal — dividendes, coupons, loyers **et intérêts**.
+
+        Champ distinct de `cashIncomeBase`, que `attachIncomeSplit` remplit à
+        partir des trois premiers types seulement. Les deux coexistent parce
+        qu'ils ne répondent pas à la même question : la ventilation sert la vue
+        décomposée de la courbe, celui-ci reproduit le `cashIncomeEur` du
+        patrimoine du jour — le seul avec lequel un indicateur « réalisé +
+        revenus » puisse se terminer sur le montant qu'il affiche.
+      */
+      ledgerCashIncomeBase: toBase(d(p.ledgerCashIncome)),
 
       securitiesBase: toBase(d(p.securities)),
       cryptoBase: toBase(d(p.crypto)),
