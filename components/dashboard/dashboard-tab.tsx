@@ -255,6 +255,10 @@ export function DashboardTab({
   const netWorth = summary
     ? num(summary.netWorthBase ?? summary.netWorthEur)
     : null;
+  /** Somme des actifs, sans déduction des passifs — même source que `netWorth`. */
+  const grossAssets = summary
+    ? num(summary.totalGrossAssetsBase ?? summary.totalGrossAssetsEur)
+    : null;
 
   /*
     Le tableau de bord ne porte plus l'accueil.
@@ -276,10 +280,11 @@ export function DashboardTab({
       data-testid="dashboard-tab"
       data-maturity={maturity}
     >
-      {/* —— 1. Patrimoine net —— */}
+      {/* —— 1. Patrimoine (net ou brut, sélecteur dans la carte) —— */}
       {blocks.showEvolutionChart && (
         <TerminalHero
           netWorth={netWorth}
+          grossAssets={grossAssets}
           history={stableHistory}
           baseCurrency={baseCurrency}
           loading={showHistoryLoading}

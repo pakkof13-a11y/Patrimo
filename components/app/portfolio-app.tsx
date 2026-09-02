@@ -74,7 +74,6 @@ import { KpiStrip } from "@/components/dashboard/kpi-strip";
 import { DashboardTab } from "@/components/dashboard/dashboard-tab";
 import { EmptyPatrimonyCockpit } from "@/components/dashboard/empty-patrimony-cockpit";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DashboardHero } from "@/components/dashboard/dashboard-hero";
 import { HoldingsSection } from "@/components/holdings/holdings-section";
 import { TransactionModal } from "@/components/modals/transaction-modal";
 import { PlatformModal } from "@/components/modals/platform-modal";
@@ -1175,22 +1174,18 @@ function PortfolioAppClient({
           )}
         >
           {/*
-            Dashboard "terminal premium" (cockpit mature uniquement) : hero
-            patrimoine net, avant le bandeau KPI. Restyle uniquement —
-            Positions/Transactions/etc. non affectés (scope via la classe
-            dashboard-premium ci-dessus).
+            Dashboard "terminal premium" (cockpit mature uniquement) : restyle
+            uniquement — Positions/Transactions/etc. non affectés (scope via
+            la classe dashboard-premium ci-dessus).
             Pas de second <MarketTicker /> ici : le bandeau marchés est déjà
             rendu une fois pour toute l'application (cf. plus haut) — un
             second bandeau sur ce seul onglet aurait dupliqué la même
             information avec un second catalogue d'indices.
+            Pas de hero « Patrimoine net » ici non plus, pour la même raison :
+            `DashboardTab` en rend déjà un (`TerminalHero`), mieux intégré à
+            la rangée d'indicateurs qui le suit — les deux doublonnaient le
+            même chiffre en tête d'écran (chantier « doublon Patrimoine »).
           */}
-          {isDashboard && dashBlocks.showKpiStrip && (
-            <DashboardHero
-              baseCurrency={baseCurrency}
-              summary={summary}
-              history={historyQ.data?.history ?? []}
-            />
-          )}
 
           {/*
             KPI strip :

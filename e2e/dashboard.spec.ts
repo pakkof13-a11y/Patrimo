@@ -32,6 +32,59 @@ test.describe("Tableau de bord", () => {
     });
   });
 
+  test("sélecteur Patrimoine net / brut : libellé, valeur et calcul", async ({
+    page,
+    request,
+  }) => {
+    await gotoDashboard(page);
+    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("terminal-hero")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // Référence indépendante de l'écran : les mêmes totaux que la carte lit,
+    // via l'API — pas un recalcul, une seconde lecture de la même source.
+    const res = await request.get("/api/portfolio");
+    expect(res.ok()).toBeTruthy();
+    const { summary } = await res.json();
+    const expectedNet = Math.round(Number(summary.netWorthEur));
+    const expectedGross = Math.round(Number(summary.totalGrossAssetsEur));
+    const expectedLiabilities = Math.round(Number(summary.totalLiabilitiesEur));
+
+    // Vérifie l'identité métier sur les données réelles du compte, pas en dur :
+    // brut = actifs, net = actifs − passifs.
+    expect(expectedGross - expectedLiabilities).toBe(expectedNet);
+
+    // La carte n'affiche ni symbole ni décimales sur le chiffre de tête
+    // (`formatHeadline`) : ne comparer que les chiffres.
+    const parseHeadline = (t: string) => Number(t.replace(/[^\d-]/g, ""));
+
+    // Défaut : Patrimoine net — comportement inchangé par ce sélecteur.
+    await expect(page.getByRole("heading", { name: "Patrimoine net" })).toBeVisible();
+    await expect(page.getByTestId("hero-mode-net")).toHaveAttribute(
+      "data-active",
+      "true"
+    );
+    const netText = await page.getByTestId("hero-net-worth").innerText();
+    expect(parseHeadline(netText)).toBe(expectedNet);
+
+    // Passage en Patrimoine brut.
+    await page.getByTestId("hero-mode-gross").click();
+    await expect(page.getByRole("heading", { name: "Patrimoine brut" })).toBeVisible();
+    await expect(page.getByTestId("hero-mode-gross")).toHaveAttribute(
+      "data-active",
+      "true"
+    );
+    const grossText = await page.getByTestId("hero-net-worth").innerText();
+    expect(parseHeadline(grossText)).toBe(expectedGross);
+
+    // Retour au mode net.
+    await page.getByTestId("hero-mode-net").click();
+    await expect(page.getByRole("heading", { name: "Patrimoine net" })).toBeVisible();
+    const netTextAgain = await page.getByTestId("hero-net-worth").innerText();
+    expect(parseHeadline(netTextAgain)).toBe(expectedNet);
+  });
+
   test("actualiser les prix répond sans erreur fatale", async ({ page }) => {
     await gotoDashboard(page);
 

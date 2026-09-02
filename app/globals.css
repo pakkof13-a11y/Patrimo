@@ -1691,20 +1691,6 @@ body.col-resizing {
   font-family: var(--font-geist-mono), ui-monospace, monospace;
 }
 
-/* ── Hero patrimoine net ── */
-.dashboard-hero {
-  background: linear-gradient(135deg, var(--muted), var(--card));
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-xs);
-}
-
-.dashboard-hero-value {
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-}
-
 /* ── Bandeau ticker défilant (indices / crypto / forex) ── */
 .dashboard-ticker {
   border: 1px solid var(--border);
