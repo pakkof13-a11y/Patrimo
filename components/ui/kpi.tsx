@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { cn } from "@/app/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -16,6 +17,8 @@ export function Kpi({
   accent = false,
   muted = false,
   loading = false,
+  /** Variante "terminal" (Dashboard) : flèche de tendance au lieu du liseré coloré */
+  variant = "default",
 }: {
   icon: React.ReactNode;
   label: React.ReactNode;
@@ -44,7 +47,9 @@ export function Kpi({
    * patrimoine net est le pire mensonge que cet écran puisse produire.
    */
   loading?: boolean;
+  variant?: "default" | "terminal";
 }) {
+  const terminal = variant === "terminal";
   return (
     <div
       className={cn(
@@ -53,9 +58,11 @@ export function Kpi({
           "bg-[var(--gold-muted)] ring-1 ring-inset ring-[var(--gold-2)]/25",
         // Ni liseré de tendance ni estompage tant qu'aucune valeur n'est
         // connue : les deux affirmeraient quelque chose sur une donnée absente.
-        !loading && tone === "up" &&
+        // Le liseré cède aussi la place en variante "terminal", où la
+        // tendance se lit par la flèche plutôt que par la bordure.
+        !loading && !terminal && tone === "up" &&
           "border-l-[3px] border-l-[var(--success)]/80 dark:border-l-[var(--success)]/70",
-        !loading && tone === "down" &&
+        !loading && !terminal && tone === "down" &&
           "border-l-[3px] border-l-[var(--danger)]/75 dark:border-l-[var(--danger)]/65",
         !loading && muted && "opacity-50"
       )}
@@ -79,22 +86,36 @@ export function Kpi({
         // quand le montant arrive.
         <Skeleton className="h-[1.05rem] w-3/5 sm:h-[1.125rem] xl:h-[1.2rem]" />
       ) : (
-        <div
-          className={cn(
-            "kpi-value min-w-0 leading-none break-words",
-            accent
-              ? "kpi-value--primary text-[1.2rem] sm:text-xl xl:text-[1.4rem]"
-              : "text-[1.05rem] sm:text-lg xl:text-[1.2rem]",
-            muted
-              ? "text-[var(--muted-foreground)]"
-              : tone === "up"
-                ? "text-[var(--success)]"
-                : tone === "down"
-                  ? "text-[var(--danger)]"
-                  : !accent && "text-[var(--foreground)]"
+        <div className="flex min-w-0 items-center gap-1">
+          <div
+            className={cn(
+              "kpi-value min-w-0 leading-none break-words",
+              accent
+                ? "kpi-value--primary text-[1.2rem] sm:text-xl xl:text-[1.4rem]"
+                : "text-[1.05rem] sm:text-lg xl:text-[1.2rem]",
+              muted
+                ? "text-[var(--muted-foreground)]"
+                : tone === "up"
+                  ? "text-[var(--success)]"
+                  : tone === "down"
+                    ? "text-[var(--danger)]"
+                    : !accent && "text-[var(--foreground)]"
+            )}
+          >
+            {value}
+          </div>
+          {terminal && tone === "up" && (
+            <ArrowUpRight
+              className="h-3.5 w-3.5 shrink-0 text-[var(--success)]"
+              aria-hidden
+            />
           )}
-        >
-          {value}
+          {terminal && tone === "down" && (
+            <ArrowDownRight
+              className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]"
+              aria-hidden
+            />
+          )}
         </div>
       )}
     </div>

@@ -1632,6 +1632,119 @@ body.col-resizing {
   }
 }
 
+/**
+ * ── Dashboard "terminal premium" ──────────────────────────────────────
+ * Scope volontairement limité à l'onglet Dashboard (classe posée sur son
+ * conteneur dans portfolio-app.tsx) : Positions / Transactions / Plateformes /
+ * Fiscalité restent inchangés pour l'instant. Redéfinit les tokens déjà
+ * consommés par Button / Panel / Kpi / card — aucun de ces composants n'a
+ * besoin d'être modifié pour hériter du nouvel habillage.
+ */
+.dashboard-premium {
+  --primary: #9c6a1f;
+  --primary-foreground: #ffffff;
+  --primary-soft: rgba(156, 106, 31, 0.09);
+  --border: #e4dfd2;
+  --border-strong: #cfc6ac;
+  --muted: #f1ece0;
+  --muted-foreground: #6b6252;
+  --ring: rgb(156 106 31 / 0.28);
+
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, #fbf9f4 0%, #f6f2e7 100%);
+  border: 1px solid var(--border);
+  padding: 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-gap);
+}
+
+@media (min-width: 640px) {
+  .dashboard-premium {
+    padding: 1.125rem;
+    gap: var(--section-gap-lg);
+  }
+}
+
+.dark .dashboard-premium {
+  --card: #17140f;
+  --card-foreground: #ece7dd;
+  --foreground: #ece7dd;
+  --elevated: #1d1911;
+  --primary: #cf9f56;
+  --primary-foreground: #17140f;
+  --primary-soft: rgba(207, 159, 86, 0.14);
+  --muted: #1d1912;
+  --muted-foreground: #9a9484;
+  --border: rgba(236, 231, 221, 0.08);
+  --border-strong: rgba(236, 231, 221, 0.16);
+  --table-head: rgba(23, 20, 15, 0.95);
+  --ring: rgb(207 159 86 / 0.3);
+
+  background: linear-gradient(160deg, #17140f 0%, #100e0a 100%);
+  border-color: var(--border);
+}
+
+/* Chiffres monétaires / % du dashboard en Geist Mono tabulaire */
+.dashboard-premium .kpi-value,
+.dashboard-premium .tabular-nums {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/* ── Hero patrimoine net ── */
+.dashboard-hero {
+  background: linear-gradient(135deg, var(--muted), var(--card));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xs);
+}
+
+.dashboard-hero-value {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Bandeau ticker défilant (indices / crypto / forex) ── */
+.dashboard-ticker {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: #0b0a08;
+  overflow: hidden;
+}
+
+.dark .dashboard-ticker {
+  background: #000000;
+}
+
+.dashboard-ticker-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.75rem;
+  white-space: nowrap;
+  animation: pt-ticker 32s linear infinite;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+.dashboard-ticker:hover .dashboard-ticker-track {
+  animation-play-state: paused;
+}
+
+@keyframes pt-ticker {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-ticker-track {
+    animation: none;
+  }
+}
+
 /* Visually hidden but available to screen readers / skip-link */
 .sr-only {
   position: absolute;

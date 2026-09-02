@@ -71,6 +71,8 @@ export function KpiStrip({
   /** Masque alternatifs / épargne / passifs à zéro pour alléger le bandeau */
   smartFilter = false,
   loading = false,
+  /** Variante terminal (Dashboard uniquement) : flèche de tendance sur les tuiles */
+  dashboardStyle = false,
 }: {
   summary?: Record<string, string | number | unknown>;
   baseCurrency: string;
@@ -89,6 +91,7 @@ export function KpiStrip({
    * réellement nul s'affiche bien `0,00 €`.
    */
   loading?: boolean;
+  dashboardStyle?: boolean;
 }) {
   /** true = afficher les KPI (défaut) — seed client via lazy + sync event */
   const [visible, setVisible] = useState(() =>
@@ -289,6 +292,7 @@ export function KpiStrip({
             tone={latentValue >= 0 ? "up" : "down"}
             testId="kpi-latent"
             loading={loading}
+            variant={dashboardStyle ? "terminal" : "default"}
           />
           <Kpi
             icon={<TrendingUp className="h-4 w-4" />}
@@ -372,6 +376,7 @@ export function KpiStrip({
             accent
             testId="kpi-net-worth"
             loading={loading}
+            variant={dashboardStyle ? "terminal" : "default"}
           />
         </div>
       )}

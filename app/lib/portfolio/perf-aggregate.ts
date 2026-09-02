@@ -9,6 +9,7 @@ import type {
   LedgerTxLite,
   TotalReturnPoint,
 } from "@/app/lib/portfolio/total-return";
+import { parisDayKey } from "@/app/lib/dates/paris";
 
 export type AggregateInterval = "day" | "week" | "month";
 
@@ -118,10 +119,10 @@ export function clipSeriesFromFirstBuy(
 
   const buyT = new Date(firstBuyAt).getTime();
   if (!Number.isFinite(buyT)) return [];
-  const buyDay = parisYmdKey(firstBuyAt);
+  const buyDay = parisDayKey(firstBuyAt);
 
   let startIdx = series.findIndex((p) => {
-    const barDay = parisYmdKey(p.date);
+    const barDay = parisDayKey(p.date);
     if (buyDay && barDay) return barDay >= buyDay;
     return new Date(p.date).getTime() >= buyT;
   });
@@ -136,17 +137,6 @@ export function clipSeriesFromFirstBuy(
   }
 
   return series.slice(startIdx);
-}
-
-function parisYmdKey(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Paris",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
 }
 
 export type AggregatedPerfPoint = {
@@ -182,10 +172,6 @@ export type AggregatedPerfPoint = {
   /** Aires / colonnes divergentes basées sur chartValueEur */
   pos: number;
   neg: number;
-
-  /** @deprecated alias chartValueEur */
-  totalReturnEur: number;
-  totalReturnPct: number;
 
   intervalType: AggregateInterval;
   close: number;
@@ -389,14 +375,8 @@ export function groupDataByInterval(
     const periodRealizedEur = sumField(group, "periodRealizedEur");
     const incomePnlEur = sumField(group, "incomePnlEur");
 
-    const totalPnlEur =
-      typeof last.totalPnlEur === "number"
-        ? last.totalPnlEur
-        : last.totalReturnEur;
-    const totalPnlPct =
-      typeof last.totalPnlPct === "number"
-        ? last.totalPnlPct
-        : last.totalReturnPct;
+    const totalPnlEur = last.totalPnlEur ?? 0;
+    const totalPnlPct = last.totalPnlPct ?? 0;
     const latentPnlEur =
       typeof last.latentPnlEur === "number" ? last.latentPnlEur : 0;
     const latentPnlPct =
@@ -459,8 +439,6 @@ export function groupDataByInterval(
       chartValuePct,
       pos: chartValueEur >= 0 ? chartValueEur : 0,
       neg: chartValueEur < 0 ? chartValueEur : 0,
-      totalReturnEur: chartValueEur,
-      totalReturnPct: chartValuePct,
       intervalType,
       close: last.close,
       qty: last.qty,
@@ -514,8 +492,6 @@ export function applyPerfMetricMode(
       chartValuePct,
       pos: chartValueEur >= 0 ? chartValueEur : 0,
       neg: chartValueEur < 0 ? chartValueEur : 0,
-      totalReturnEur: chartValueEur,
-      totalReturnPct: chartValuePct,
     };
   });
 }

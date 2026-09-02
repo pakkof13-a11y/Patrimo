@@ -29,11 +29,11 @@ export function PerfAggTooltip({
       ? p.periodPnlEur
       : metricMode === "dividends"
         ? p.dividendsNetCumEur
-        : (p.totalPnlEur ?? p.chartValueEur ?? p.totalReturnEur);
+        : (p.totalPnlEur ?? p.chartValueEur);
   const pct =
     metricMode === "period" || metricMode === "dividends"
       ? p.chartValuePct
-      : (p.totalPnlPct ?? p.totalReturnPct);
+      : p.totalPnlPct;
   const up = value >= 0;
   const intervalHint =
     intervalType === "day"
@@ -130,7 +130,7 @@ export function PerfColumnShape(props: {
   payload?: AggregatedPerfPoint;
 }) {
   const { x = 0, y = 0, width = 0, height = 0, payload } = props;
-  const value = payload?.chartValueEur ?? payload?.totalReturnEur ?? 0;
+  const value = payload?.chartValueEur ?? 0;
   if (!width || height === 0) return null;
 
   const fill = value >= 0 ? PERF_POS : PERF_NEG;

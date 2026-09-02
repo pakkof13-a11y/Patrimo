@@ -12,6 +12,9 @@ export type MarketIndexKey =
   | "eurostoxx50"
   | "msciworld"
   | "bitcoin"
+  | "ethereum"
+  | "eurusd"
+  | "gold"
   // Bandeau de marché
   | "dax"
   | "stoxx600"
@@ -20,8 +23,7 @@ export type MarketIndexKey =
   | "btcusd"
   | "ethusd"
   | "xauusd"
-  | "xagusd"
-  | "eurusd";
+  | "xagusd";
 
 export type MarketIndex = {
   key: MarketIndexKey;
@@ -48,6 +50,9 @@ export const MARKET_INDICES: MarketIndex[] = [
     hint: "Actions monde (proxy ETF)",
   },
   { key: "bitcoin", label: "Bitcoin", yahoo: "BTC-EUR", hint: "BTC en euro" },
+  { key: "ethereum", label: "Ethereum", yahoo: "ETH-EUR", hint: "ETH en euro" },
+  { key: "eurusd", label: "EUR/USD", yahoo: "EURUSD=X", hint: "Change euro / dollar" },
+  { key: "gold", label: "Or", yahoo: "GC=F", hint: "Once d'or (USD, futures Comex)" },
 ];
 
 /**
