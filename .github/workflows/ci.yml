@@ -100,7 +100,14 @@ jobs:
     name: E2E Playwright
     runs-on: ubuntu-latest
     needs: quality
-    timeout-minutes: 30
+    # Mesuré sur le run 79 (PR #25) : la seule étape "Run E2E tests" a duré
+    # 28min11s avant d'être annulée par ce timeout — les 394 tests avaient
+    # pourtant tous été exécutés (le dernier, watchlist.spec.ts, s'est
+    # terminé 3s avant l'annulation). Avec les ~2 min d'installation/seed/
+    # build/Chromium qui précèdent dans le même budget, la marge était quasi
+    # nulle. 45 min redonne une marge réelle sans dépendre d'un retry pour
+    # faire disparaître le dépassement.
+    timeout-minutes: 45
 
     services:
       postgres:
@@ -136,6 +143,22 @@ jobs:
           npx prisma migrate deploy
           npm run db:seed
 
+      # Base isolée pour la suite E2E — même service Postgres, base distincte.
+      #
+      # Sans elle, `e2e/global-setup.ts` seed sur la même base que l'étape
+      # précédente : le compte admin, déjà rempli d'un portefeuille complet
+      # par le `npm run db:seed` ci-dessus, n'est jamais vidé (le code le
+      # documente lui-même : "Seed E2E = wipe compte demo uniquement (admin
+      # préservé, donc non vierge)"). Les deux specs de `cockpit.spec.ts` qui
+      # décrivent l'écran d'un compte sans données se connectent en admin et
+      # échouaient donc à chaque exécution CI, de façon reproductible :
+      # `getByTestId('empty-patrimony-cockpit')` introuvable, parce que
+      # l'admin avait 115 transactions au lieu de zéro.
+      - name: Create isolated e2e database
+        run: |
+          PGPASSWORD=patrimo psql -h localhost -U patrimo -d patrimo -c "CREATE DATABASE patrimo_e2e;"
+          DATABASE_URL="postgresql://patrimo:patrimo@localhost:5432/patrimo_e2e?schema=public" npx prisma migrate deploy
+
       - name: Production build
         run: npm run build
 
@@ -146,6 +169,7 @@ jobs:
         run: npm run test:e2e
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+          DATABASE_URL_E2E: postgresql://patrimo:patrimo@localhost:5432/patrimo_e2e?schema=public
 
       - name: Upload Playwright report
         if: failure()
