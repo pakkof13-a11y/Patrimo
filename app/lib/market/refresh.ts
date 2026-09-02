@@ -2,7 +2,7 @@ import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "../prisma";
 import { d, toFixed } from "../money/decimal";
 import { fetchPriceWithFallback } from "./registry";
-import { isBinanceSupported } from "./providers/binance-ws";
+import { isBinanceSupported } from "./providers/binance";
 import { resolveCoingeckoId, fetchCoingeckoSimplePrices } from "./providers/coingecko";
 import { pricePrecision } from "./price-utils";
 import type { AssetMeta, PriceQuoteResult } from "./types";
