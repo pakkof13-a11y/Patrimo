@@ -2,7 +2,7 @@ import type { AssetMeta, MarketDataProvider, PriceQuoteResult } from "./types";
 import { finnhubProvider, hasFinnhubApiKey } from "./providers/finnhub";
 import { yahooProvider } from "./providers/yahoo";
 import { coingeckoProvider } from "./providers/coingecko";
-import { binanceProvider, isBinanceSupported } from "./providers/binance-ws";
+import { binanceProvider, isBinanceSupported } from "./providers/binance";
 import { manualProvider } from "./providers/manual";
 
 /**
@@ -75,20 +75,6 @@ export async function fetchPriceWithFallback(
     status: "ERROR",
     error: errors.join(" | ") || "Aucun fournisseur de prix disponible",
   };
-}
-
-export function resolveProvider(asset: AssetMeta): MarketDataProvider {
-  if (asset.priceProvider === "YAHOO") return yahooProvider;
-  if (asset.priceProvider === "MANUAL") return manualProvider;
-  if (asset.priceProvider === "FINNHUB") return hasFinnhubKey() ? finnhubProvider : yahooProvider;
-  // CRYPTO / COINGECKO : Binance si couvert, sinon CoinGecko
-  if (asset.priceProvider === "COINGECKO" || asset.assetClass === "CRYPTO") {
-    return isBinanceSupported({ ...asset, assetClass: "CRYPTO" })
-      ? binanceProvider
-      : coingeckoProvider;
-  }
-  if (asset.assetClass === "ACTIONS") return hasFinnhubKey() ? finnhubProvider : yahooProvider;
-  return manualProvider;
 }
 
 export function listProviders(): MarketDataProvider[] {

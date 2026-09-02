@@ -7,7 +7,7 @@ import {
   getBinancePrices,
   __resetBinanceCache,
   BINANCE_UNSUPPORTED,
-} from "@/app/lib/market/providers/binance-ws";
+} from "@/app/lib/market/providers/binance";
 import type { AssetMeta } from "@/app/lib/market/types";
 
 function cryptoAsset(ticker: string | null, extra?: Partial<AssetMeta>): AssetMeta {

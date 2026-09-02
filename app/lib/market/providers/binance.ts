@@ -12,8 +12,9 @@
  * direct ; il a été retiré parce qu'il court-circuitait cette élection — chaque
  * onglet ouvert aurait sondé Binance toutes les 30 s pour le même résultat.
  *
- * Le nom du fichier conserve le suffixe `-ws` pour la nomenclature de la tâche ;
- * l'implémentation est REST+cache (pas de socket serveur).
+ * Ce fichier s'est un temps appelé `binance-ws.ts` — nom trompeur pour une
+ * implémentation REST+cache, sans aucun socket serveur. Renommé en
+ * `binance.ts` (chantier 28) pour refléter la réalité.
  *
  * Paires : Binance cote en <BASE>EUR (majors) ou <BASE>USDT (alts). Pour les
  * paires USDT on convertit USD→EUR via app/lib/market/fx.ts (USDT ≈ USD).
@@ -31,7 +32,16 @@ export const BINANCE_BASE_URL = "https://api.binance.com/api/v3";
 // NOTE : cache local lambda — non partagé entre instances Vercel. Deux lambdas
 // peuvent servir des prix Binance décalés de ±TTL. Acceptable pour un TTL
 // court (30 s) ; voir effectiveBinanceCacheTtlMs() pour le garde-fou.
-/** Cache serveur TTL — l'aspect « temps réel » côté client vient du polling 30 s. */
+/**
+ * Cache serveur TTL : 30 s.
+ *
+ * À distinguer du polling client (`PRICE_AUTO_REFRESH_MS`, 60 s,
+ * `app/lib/constants.ts`) : c'est ce second intervalle, pas celui-ci, qui
+ * donne l'aspect « temps réel » perçu — un onglet leader interroge le
+ * registry toutes les 60 s, et ce cache de 30 s ne fait qu'éviter qu'un
+ * rafraîchissement manuel immédiatement après le tick planifié ne reparte
+ * en réseau pour rien.
+ */
 export const BINANCE_CACHE_TTL_MS = 30_000;
 
 /**

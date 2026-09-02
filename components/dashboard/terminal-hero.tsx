@@ -37,30 +37,52 @@ function formatPct(v: number): string {
   })} %`;
 }
 
+type HeroMode = "net" | "gross";
+
+const HERO_MODE_LABEL: Record<HeroMode, string> = {
+  net: "Patrimoine net",
+  gross: "Patrimoine brut",
+};
+
 /**
- * Carte de tête — le patrimoine net.
+ * Carte de tête — le patrimoine, net ou brut selon le sélecteur.
  *
  * C'est le seul chiffre de l'écran qui a droit à `--text-5xl` : la hiérarchie
  * du tableau de bord tient entièrement à ce qu'aucun autre nombre ne vienne
  * lui disputer le premier regard.
  *
+ * Net/Brut ne recalcule rien : les deux valeurs viennent telles quelles du
+ * même `summary` que le reste du tableau de bord (`netWorthBase`/`Eur` et
+ * `totalGrossAssetsBase`/`Eur`, cf. app/lib/portfolio/service.ts). Le
+ * graphique et la variation en dessous restent inchangés quel que soit le
+ * mode — ils décrivent déjà la valeur brute des actifs par défaut
+ * (`totalValueBase`, cf. commentaire de `service.ts`), donc rester silencieux
+ * ici ne casse rien côté « Net » (comportement identique à avant ce
+ * sélecteur) et devient même cohérent côté « Brut ».
+ *
  * Le graphique de droite est délibérément sans axe ni graduation. Il ne sert
- * pas à lire une valeur — la carte « Évolution du patrimoine net », plus bas,
+ * pas à lire une valeur — la carte « Évolution du portefeuille », plus bas,
  * s'en charge — mais à donner la forme du trajet en moins d'une seconde.
  */
 export function TerminalHero({
   netWorth,
+  grossAssets,
   history,
   baseCurrency,
   loading,
 }: {
   netWorth: number | null;
+  /** Somme des actifs, sans déduction des passifs. */
+  grossAssets: number | null;
   history: HistoryPoint[];
   baseCurrency: string;
   loading?: boolean;
 }) {
   const [range, setRange] = useState<EvolutionRange>("1y");
+  const [mode, setMode] = useState<HeroMode>("net");
   const [amountsHidden] = useAmountsHidden();
+
+  const displayValue = mode === "net" ? netWorth : grossAssets;
 
   const series = useMemo(
     () => buildEvolutionSeries(history, range, "cumul").points,
@@ -91,12 +113,48 @@ export function TerminalHero({
       <div className="flex flex-wrap items-start justify-between gap-[var(--space-5)]">
         {/* ── Chiffre de tête ── */}
         <div className="min-w-0">
-          <h2 id="hero-heading" className="text-label">
-            Patrimoine net
-          </h2>
+          <div className="flex flex-wrap items-center gap-[var(--space-2)]">
+            <h2 id="hero-heading" className="text-label">
+              {HERO_MODE_LABEL[mode]}
+            </h2>
+
+            {/*
+              Discret, à côté du libellé plutôt que dans un bloc séparé —
+              même logique visuelle que le sélecteur de période à droite.
+            */}
+            <div
+              className="term-seg"
+              role="tablist"
+              aria-label="Net ou brut"
+              data-testid="hero-mode-toggle"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "net"}
+                data-active={mode === "net"}
+                className="term-seg-item"
+                data-testid="hero-mode-net"
+                onClick={() => setMode("net")}
+              >
+                Net
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "gross"}
+                data-active={mode === "gross"}
+                className="term-seg-item"
+                data-testid="hero-mode-gross"
+                onClick={() => setMode("gross")}
+              >
+                Brut
+              </button>
+            </div>
+          </div>
 
           <div className="mt-[var(--space-3)] flex flex-wrap items-baseline gap-[var(--space-3)]">
-            {loading && netWorth === null ? (
+            {loading && displayValue === null ? (
               <span
                 className="num block h-[var(--text-4xl)] w-[14rem] rounded-[var(--radius-sm)] bg-[var(--surface-sunken)]"
                 aria-hidden
@@ -110,9 +168,9 @@ export function TerminalHero({
                 )}
                 data-testid="hero-net-worth"
               >
-                {netWorth === null
+                {displayValue === null
                   ? "—"
-                  : maskAmount(formatHeadline(netWorth), amountsHidden)}
+                  : maskAmount(formatHeadline(displayValue), amountsHidden)}
               </span>
             )}
             <span className="text-label">{baseCurrency}</span>
