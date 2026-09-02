@@ -135,24 +135,57 @@ function mapExisting(row: {
   };
 }
 
-async function validateOwnership(input: CreateTxInput, client: DbClient = prisma) {
-  const platform = await client.platform.findFirst({
-    where: { id: input.platformId, userId: input.userId },
-  });
-  if (!platform) throw new AccountingError("PLATFORM_NOT_FOUND", "Plateforme introuvable");
+/**
+ * Mémo des appartenances déjà vérifiées pour UN utilisateur, sur la durée d'un
+ * lot (import CSV). Un import répète la même plateforme et les mêmes quelques
+ * tickers sur des centaines de lignes : revérifier à chaque ligne coûte un
+ * aller-retour SQL pour un résultat déjà connu.
+ *
+ * L'isolation multi-tenant est préservée : le cache porte son `userId`, n'est
+ * consulté que pour ce même userId, et ne vit que le temps d'un appel.
+ * Une entrée signifie « cet id appartient bien à cet utilisateur, vérifié en
+ * base plus tôt dans ce même lot » — jamais « non vérifié, on laisse passer ».
+ */
+export type OwnershipCache = {
+  userId: string;
+  platforms: Set<string>;
+  assets: Set<string>;
+};
 
-  if (input.toPlatformId) {
+export function createOwnershipCache(userId: string): OwnershipCache {
+  return { userId, platforms: new Set(), assets: new Set() };
+}
+
+async function validateOwnership(
+  input: CreateTxInput,
+  client: DbClient = prisma,
+  cache?: OwnershipCache
+) {
+  // Le cache n'est utilisable que s'il a été constitué pour CE utilisateur.
+  const memo = cache && cache.userId === input.userId ? cache : null;
+
+  if (!memo?.platforms.has(input.platformId)) {
+    const platform = await client.platform.findFirst({
+      where: { id: input.platformId, userId: input.userId },
+    });
+    if (!platform) throw new AccountingError("PLATFORM_NOT_FOUND", "Plateforme introuvable");
+    memo?.platforms.add(input.platformId);
+  }
+
+  if (input.toPlatformId && !memo?.platforms.has(input.toPlatformId)) {
     const to = await client.platform.findFirst({
       where: { id: input.toPlatformId, userId: input.userId },
     });
     if (!to) throw new AccountingError("TO_PLATFORM_NOT_FOUND", "Plateforme de destination introuvable");
+    memo?.platforms.add(input.toPlatformId);
   }
 
-  if (input.assetId) {
+  if (input.assetId && !memo?.assets.has(input.assetId)) {
     const asset = await client.asset.findFirst({
       where: { id: input.assetId, userId: input.userId },
     });
     if (!asset) throw new AccountingError("ASSET_NOT_FOUND", "Actif introuvable");
+    memo?.assets.add(input.assetId);
   }
 }
 
@@ -171,27 +204,60 @@ async function resolveFx(input: CreateTxInput): Promise<CreateTxInput> {
     (provided.eq(1) || !input.fxRateToEur || input.fxRateToEur === "");
 
   if (forceHistorical) {
-    try {
-      const pay = input.paymentDate || input.occurredAt;
-      const hist = await fxRateToEurOnDate(currency, pay);
-      return { ...input, currency, fxRateToEur: hist };
-    } catch {
-      try {
-        const live = await liveFxToEur(currency);
-        return { ...input, currency, fxRateToEur: live };
-      } catch {
-        return { ...input, currency };
-      }
+    const pay = input.paymentDate || input.occurredAt;
+    const hist = await fxRateToEurOnDate(currency, pay);
+    /*
+      Taux historique introuvable : on refuse l'écriture.
+
+      Les deux replis d'avant — taux du jour, puis aucun taux, ce qui vaut 1 —
+      produisaient un `fxRateToEur` inventé, et `grossAmountEur` en découlait.
+      Une fois en base, rien ne distinguait plus ce montant d'un montant
+      constaté : la donnée était corrompue durablement et en silence.
+
+      `Transaction.fxRateToEur` est un `Decimal @default(1)` non nullable, et
+      `grossAmountEur` est requis : le modèle ne sait pas représenter « taux
+      inconnu ». Tant que c'est le cas, ne rien écrire est la seule option qui
+      ne mente pas. L'appelant reçoit une erreur explicite et peut fournir le
+      taux lui-même — un taux saisi reste prioritaire et n'emprunte pas ce
+      chemin.
+    */
+    if (hist == null) {
+      throw new AccountingError(
+        "FX_RATE_UNKNOWN",
+        `Taux historique ${currency}→EUR indisponible pour le ${String(pay).slice(0, 10)} : ` +
+          "renseignez-le manuellement plutôt que d'enregistrer un montant converti à un taux non constaté."
+      );
     }
+    return { ...input, currency, fxRateToEur: hist };
   }
 
   if (provided.eq(1) && currency !== "EUR") {
+    /*
+      Devise étrangère sans taux fourni : on demande le taux courant.
+
+      `fxRateToEur` applique la politique décidée en B1 — taux du fournisseur,
+      derniers taux réels si la panne est récente, table déclarée au-delà. Ce
+      repli est assumé et reste valide : il décrit une approximation du jour,
+      pas une valeur inventée pour une date passée.
+
+      Ce qui ne l'était pas, c'est cette branche de secours. Elle rendait
+      `{ ...input, currency }`, donc sans `fxRateToEur`, et la construction des
+      données retombait sur le `Decimal @default(1)` du modèle : un dollar
+      valait un euro, écrit comme un fait, pour la seule raison que le
+      fournisseur n'avait pas répondu. Même doctrine qu'en A1 — un taux
+      inconnu n'est ni zéro, ni un.
+    */
+    let live: string;
     try {
-      const live = await liveFxToEur(currency);
-      return { ...input, currency, fxRateToEur: live };
+      live = await liveFxToEur(currency);
     } catch {
-      return { ...input, currency };
+      throw new AccountingError(
+        "FX_RATE_UNKNOWN",
+        `Taux de conversion ${currency}→EUR indisponible : ` +
+          "renseignez-le manuellement plutôt que d'enregistrer un montant converti à un taux non constaté."
+      );
     }
+    return { ...input, currency, fxRateToEur: live };
   }
   return { ...input, currency };
 }
@@ -287,13 +353,13 @@ function validateLedgerIncremental(
   state: LedgerState,
   pending: LedgerTx,
   allowNegativeCash?: boolean
-) {
+): LedgerState {
   const soft = Boolean(allowNegativeCash);
   try {
-    applyTransaction(cloneLedgerState(state), pending, { allowNegativeCash: soft });
+    return applyTransaction(cloneLedgerState(state), pending, { allowNegativeCash: soft });
   } catch (strictErr) {
     try {
-      applyTransaction(cloneLedgerState(state), pending, {
+      return applyTransaction(cloneLedgerState(state), pending, {
         allowNegativeCash: true,
         clampOversell: true,
       });
@@ -318,11 +384,27 @@ export async function createTransaction(
    * de cette transaction. Sans `prismaClient`, utilise le singleton global
    * et le cache ledger (chemin le plus courant, écritures utilisateur).
    */
-  prismaClient?: DbClient
+  prismaClient?: DbClient,
+  /**
+   * `ledgerState` : état partagé et réutilisé entre plusieurs écritures d'un
+   * même lot (import CSV — voir commit.ts). Évite un `loadLedgerForUser` +
+   * replay complet à CHAQUE ligne : sans ça, invalider le cache après
+   * chaque insertion rend l'import en O(n²) sur le nombre de lignes déjà
+   * en base, et un CSV de quelques centaines de lignes dépasse le timeout
+   * serverless (10s). L'état est mis à jour en place après chaque écriture
+   * réussie ; l'appelant invalide le cache une seule fois à la fin du lot
+   * via `skipInvalidate`.
+   */
+  opts?: {
+    ledgerState?: LedgerState;
+    skipInvalidate?: boolean;
+    /** Mémo d'appartenances du lot — voir OwnershipCache. */
+    ownership?: OwnershipCache;
+  }
 ) {
   const client = prismaClient ?? prisma;
   const input = await resolveFx(raw);
-  await validateOwnership(input, client);
+  await validateOwnership(input, client, opts?.ownership);
 
   const occurredAt = new Date(input.occurredAt);
   if (Number.isNaN(occurredAt.getTime())) {
@@ -405,8 +487,13 @@ export async function createTransaction(
   } else {
     // Chemin normal : réutilise le ledger déjà calculé/caché par
     // loadLedgerForUser (fingerprint) au lieu d'un findMany + replay complet.
-    const ledgerState = await loadLedgerForUser(input.userId);
-    validateLedgerIncremental(ledgerState, newTx, allowNeg);
+    const ledgerState = opts?.ledgerState ?? (await loadLedgerForUser(input.userId));
+    const nextState = validateLedgerIncremental(ledgerState, newTx, allowNeg);
+    if (opts?.ledgerState) {
+      // Lot (import CSV) : reporter la tx validée dans l'état partagé pour
+      // que la ligne suivante la voie sans repasser par la DB.
+      Object.assign(opts.ledgerState, nextState);
+    }
   }
 
   const amounts = computeNetCashImpactEur(newTx);
@@ -424,8 +511,10 @@ export async function createTransaction(
     },
   });
 
-  const { invalidateLedgerCache } = await import("../portfolio/ledger-cache");
-  invalidateLedgerCache(input.userId);
+  if (!opts?.skipInvalidate) {
+    const { invalidateLedgerCache } = await import("../portfolio/ledger-cache");
+    invalidateLedgerCache(input.userId);
+  }
 
   return created;
 }

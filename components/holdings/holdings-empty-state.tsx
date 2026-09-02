@@ -57,7 +57,7 @@ export function HoldingsEmptyState({
         testId="holdings-empty"
         emptyKind="envelope"
         title={`Aucune position en ${envelopeLabel || "cette enveloppe"}`}
-        description="Changez d’enveloppe ou enregistrez un achat sur ce type de compte."
+        description="Changez d’enveloppe, ou enregistrez un achat dans celle-ci."
       />
     );
   }
@@ -73,6 +73,7 @@ export function HoldingsEmptyState({
           {onAddTransaction && (
             <Button
               type="button"
+              variant="gold"
               size="sm"
               onClick={onAddTransaction}
               data-testid="holdings-empty-add-tx"
@@ -84,7 +85,7 @@ export function HoldingsEmptyState({
           {onImport && (
             <Button
               type="button"
-              variant="outline"
+              variant="gold"
               size="sm"
               onClick={onImport}
               data-testid="holdings-empty-import"

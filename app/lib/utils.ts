@@ -7,6 +7,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Montant que l'application ne connaît pas.
+ *
+ * À distinguer de zéro, qui est un montant : ce libellé dit qu'aucune réponse
+ * n'est disponible — requête en échec, compartiment indisponible. Il était
+ * redéfini à l'identique dans cinq composants, avec le risque qu'un écran
+ * finisse par en dire autre chose que les autres.
+ */
+export const MONTANT_INCONNU = "— €";
+
 export function formatCurrency(value: number | string, currency: string = "EUR") {
   return formatMoney(value, currency);
 }
@@ -163,6 +173,32 @@ export function formatUnitPrice(
 
 export function formatPercent(value: number | string) {
   return formatPctPoints(value);
+}
+
+/**
+ * Variation signée : « +1 707,30 € », « −312,00 € », « 0,00 € ».
+ *
+ * Le signe est écrit, pas seulement peint. Une variation qui ne se distingue
+ * que par sa couleur disparaît pour un lecteur daltonien, sur une capture en
+ * noir et blanc, ou dès qu'un thème adoucit la palette. Zéro ne prend pas de
+ * signe : « +0,00 € » annoncerait un gain là où il n'y a rien.
+ *
+ * Le moins est un vrai signe moins (U+2212) et non un trait d'union : c'est
+ * lui qui a la chasse d'un chiffre, donc qui garde la colonne alignée.
+ */
+export function formatSignedCurrency(
+  value: number | string,
+  currency: string = "EUR"
+) {
+  const n = Number(value) || 0;
+  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  return `${sign}${formatCurrency(Math.abs(n), currency)}`;
+}
+
+export function formatSignedPercent(value: number | string) {
+  const n = Number(value) || 0;
+  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  return `${sign}${formatPercent(Math.abs(n))}`;
 }
 
 export function formatDate(value: string | Date) {

@@ -15,12 +15,35 @@ function tx(over: Partial<NetPriceTx>): NetPriceTx {
 }
 
 describe("txNetPriceEur", () => {
-  it("recompute un ACHAT depuis prix unitaire × qté (EUR)", () => {
+  it("recompute un ACHAT depuis prix unitaire × qté, frais ajoutés", () => {
     const v = txNetPriceEur(
       tx({ type: "ACHAT", quantity: "10", unitPrice: "100", fees: "5" })
     );
-    // 10×100 − 5 = 995
+    // À l'achat on décaisse le brut ET les frais : 10×100 + 5 = 1005.
+    // Ce test attendait 995 (frais retranchés), ce qui contredisait
+    // `applyBuy` (coût = qty × prix + frais) et le PRU affiché à l'écran.
+    expect(v).toBeCloseTo(1005, 6);
+  });
+
+  it("retranche les frais sur une VENTE (produit encaissé)", () => {
+    const v = txNetPriceEur(
+      tx({ type: "VENTE", quantity: "10", unitPrice: "100", fees: "5" })
+    );
     expect(v).toBeCloseTo(995, 6);
+  });
+
+  it("aligne le net d'un ACHAT sur le coût de revient du grand livre", () => {
+    // Cas réel : achat immobilier 285 000 € + 12 000 € de frais → PRU 297 000 €.
+    const v = txNetPriceEur(
+      tx({
+        type: "ACHAT",
+        quantity: "1",
+        unitPrice: "285000",
+        grossAmountEur: "285000",
+        fees: "12000",
+      })
+    );
+    expect(v).toBeCloseTo(297_000, 6);
   });
 
   it("convertit un trade en devise étrangère via fx", () => {

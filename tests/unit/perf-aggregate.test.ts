@@ -21,6 +21,8 @@ function pt(
     incomePnlEur?: number;
     latentPnlEur?: number;
     qty?: number;
+    costBasisEur?: number;
+    cashInvestedNet?: number;
     events?: TotalReturnPoint["events"];
   } = {}
 ): TotalReturnPoint {
@@ -34,9 +36,9 @@ function pt(
     qty: opts.qty ?? 1,
     qtyOpen: opts.qty ?? 1,
     cumpEur: 90,
-    costBasisEur: 90,
+    costBasisEur: opts.costBasisEur ?? 90,
     positionValue: 100,
-    cashInvestedNet: 90,
+    cashInvestedNet: opts.cashInvestedNet ?? 90,
     dividendsCum: 0,
     dividendsGrossCumEur: 0,
     dividendsNetCumEur: 0,
@@ -135,6 +137,27 @@ describe("applyPerfMetricMode", () => {
     const cumul = applyPerfMetricMode(base, "cumul");
     expect(cumul[0]!.chartValueEur).toBeCloseTo(100, 5);
     expect(cumul[0]!.pos).toBeCloseTo(100, 5);
+  });
+
+  it("period % uses cost basis, robust to partial-sale cash collapse", () => {
+    // Position doublée puis à moitié cédée : cashInvestedNet ~0 alors que 500 €
+    // de coût restent au travail. L'ancienne base (cashInvestedNet) → % aberrant
+    // (division par ~0). La base costBasisEur donne un rendement fini et correct.
+    const base = groupDataByInterval(
+      [
+        pt("2026-06-10T12:00:00.000Z", {
+          periodPnlEur: 50,
+          totalPnlEur: 100,
+          costBasisEur: 500,
+          cashInvestedNet: 0,
+        }),
+      ],
+      "day"
+    );
+    const period = applyPerfMetricMode(base, "period");
+    expect(period[0]!.chartValueEur).toBeCloseTo(50, 5);
+    expect(period[0]!.chartValuePct).toBeCloseTo(10, 5); // 50 / 500 (pas /0)
+    expect(Number.isFinite(period[0]!.chartValuePct)).toBe(true);
   });
 });
 
@@ -242,5 +265,23 @@ describe("first buy & period gates", () => {
     expect(isPerfPeriodEnabled("1y", "2025-07-16T12:00:00.000Z", now)).toBe(
       age >= 365
     );
+  });
+
+  it("respects barCount for 7d period", () => {
+    const now = new Date("2026-07-16T12:00:00.000Z");
+    const buy45 = "2026-06-01T12:00:00.000Z";
+    // 7d without barCount: always true
+    expect(isPerfPeriodEnabled("7d", buy45, now)).toBe(true);
+    // 7d with barCount undefined: always true
+    expect(isPerfPeriodEnabled("7d", buy45, now, undefined)).toBe(true);
+    // 7d with barCount < 2: false
+    expect(isPerfPeriodEnabled("7d", buy45, now, 0)).toBe(false);
+    expect(isPerfPeriodEnabled("7d", buy45, now, 1)).toBe(false);
+    // 7d with barCount >= 2: true
+    expect(isPerfPeriodEnabled("7d", buy45, now, 2)).toBe(true);
+    expect(isPerfPeriodEnabled("7d", buy45, now, 5)).toBe(true);
+    // all period: always true regardless of barCount
+    expect(isPerfPeriodEnabled("all", buy45, now, 0)).toBe(true);
+    expect(isPerfPeriodEnabled("all", buy45, now, 1)).toBe(true);
   });
 });

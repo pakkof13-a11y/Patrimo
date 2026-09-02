@@ -27,6 +27,41 @@ export type RefreshItemResult = {
 
 /** Délai entre deux CHUNKS CoinGecko consécutifs (free tier ~10-30 rpm). */
 const COINGECKO_PACE_MS = 1200;
+
+/**
+ * Requêtes simultanées pour le groupe A (Binance / Yahoo / Finnhub).
+ *
+ * Auparavant `Promise.all` sur tout le groupe, sans borne : un portefeuille de
+ * 80 actions ouvrait 80 requêtes d'un coup. Finnhub plafonne à 60 appels par
+ * minute et Yahoo n'apprécie pas davantage les rafales — le refresh se sabordait
+ * lui-même dès que le portefeuille grossissait.
+ *
+ * Le budget Finnhub (`finnhubRestLimiter`) reste la vraie protection de quota ;
+ * cette borne évite simplement d'empiler des dizaines de requêtes en attente et
+ * de saturer le pool de sockets.
+ */
+const GROUP_A_CONCURRENCY = 6;
+
+/** Exécute `worker` sur `items` avec une concurrence bornée, dans l'ordre. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let cursor = 0;
+  const runners = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      while (cursor < items.length) {
+        const index = cursor++;
+        out[index] = await worker(items[index]!);
+      }
+    }
+  );
+  await Promise.all(runners);
+  return out;
+}
 /** /simple/price accepte de nombreux ids par appel — on charge par lots. */
 const COINGECKO_CHUNK_SIZE = 30;
 
@@ -99,12 +134,14 @@ export async function refreshEligiblePrices(userId: string): Promise<{
   };
   const dbWriteEntries: DbWriteEntry[] = [];
 
-  // --- Groupe A : fetch en parallèle (Binance/Yahoo/Finnhub — pas de quota agressif) ---
-  const groupAResults = await Promise.all(
-    groupA.map(async ({ asset, meta }) => {
+  // --- Groupe A : fetch à concurrence bornée (Binance / Yahoo / Finnhub) ---
+  const groupAResults = await mapWithConcurrency(
+    groupA,
+    GROUP_A_CONCURRENCY,
+    async ({ asset, meta }) => {
       const quote = await fetchPriceWithFallback(meta);
       return { asset, meta, quote };
-    })
+    }
   );
 
   // --- Groupe B : CoinGecko en lots batchés (un seul appel /simple/price par
@@ -242,7 +279,20 @@ export async function refreshEligiblePrices(userId: string): Promise<{
           data: {
             assetId: asset.id,
             priceEur: new Prisma.Decimal(quote.priceEur),
+            priceNative:
+              quote.priceNative != null
+                ? new Prisma.Decimal(quote.priceNative)
+                : null,
+            nativeCurrency: nativeCurrency || null,
             source: quote.source,
+            /*
+              Le cours vient d'être relevé : il s'applique à maintenant. C'est
+              le seul cas où les deux temps coïncident légitimement, et
+              l'écrire ici évite d'avoir un jour à le déduire de `capturedAt`
+              — ce qui reviendrait à dater le passé du jour où on l'a lu.
+            */
+            marketAt: now,
+            granularity: "spot",
           },
         }),
       });

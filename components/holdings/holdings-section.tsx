@@ -25,19 +25,26 @@ import {
   type ColumnOrderState,
   type ColumnSizingState,
 } from "@tanstack/react-table";
-import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Sparkline } from "@/components/ui/sparkline";
+import { buildClassPeriodSeries } from "@/app/lib/portfolio/class-period-series";
+import { fetchJson } from "@/app/lib/api-client";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
-import { PlatformLogo } from "@/components/ui/platform-logo";
+import { AssetLogo, PlatformLogo } from "@/components/ui/platform-logo";
 import { EnvelopeCashPanel } from "@/components/tabs/envelope-cash-panel";
 import { LifeInsuranceTab } from "@/components/tabs/life-insurance-tab";
 import { PositionCategoryGroupHeader } from "@/components/holdings/position-category-group-header";
+import { PositionGroupHeader } from "@/components/holdings/position-group-header";
 import { EditAssetCategoryModal } from "@/components/holdings/edit-asset-category-modal";
 import {
   HoldingsToolbar,
   type HoldingsPageSize,
 } from "@/components/holdings/holdings-toolbar";
 import { HoldingsEmptyState } from "@/components/holdings/holdings-empty-state";
+import { PortfolioKpiCards } from "@/components/holdings/portfolio-kpi-cards";
+import { visibilityForMode } from "@/app/lib/portfolio/holdings-view-mode";
 import {
   applyPlatformFilterToHolding,
   holdingMatchesPlatform,
@@ -50,6 +57,12 @@ import {
   TriggerLevelInput,
   type TriggerField,
 } from "@/components/holdings/holding-table-row";
+import { holdingsToCsv } from "@/app/lib/portfolio/holdings-csv";
+import {
+  matchesPnlFilter,
+  parsePnlFilter,
+  type PnlFilter,
+} from "@/app/lib/portfolio/pnl-filter";
 import { PageJump } from "@/components/ui/page-jump";
 import {
   ACCOUNT_TYPES,
@@ -59,13 +72,18 @@ import {
 } from "@/app/lib/constants";
 import {
   formatCurrency,
-  formatPercent,
+  formatSignedCurrency,
+  formatSignedPercent,
   formatUnitPrice,
   getAssetClassLabel,
   getChangeColor,
   cn,
 } from "@/app/lib/utils";
-import { type Holding, type MainTab } from "@/app/lib/types/ui";
+import {
+  type HistoryPoint,
+  type Holding,
+  type MainTab,
+} from "@/app/lib/types/ui";
 import {
   HOLDINGS_GROUP_BY_KEY,
   HOLDINGS_GROUP_COLLAPSED_KEY,
@@ -76,21 +94,29 @@ import {
   type SavedHoldingsView,
 } from "@/app/lib/ui-preferences";
 import {
+  assetCategoryLabel,
   groupPositionsByAssetCategory,
+  parseAssetCategory,
   parseHoldingsGroupBy,
   type HoldingsGroupBy,
 } from "@/app/lib/assets/categories";
 import { groupPositionsByBlockchain } from "@/app/lib/assets/blockchain";
+import {
+  groupPositionsByAssetClass,
+  parseAssetClass,
+} from "@/app/lib/assets/asset-class-groups";
+import { useClassPnlQuery } from "@/app/hooks/use-portfolio-queries";
 
 const DEFAULT_PAGE_SIZE: HoldingsPageSize = 20;
 import {
   COLUMN_RESIZE_MAX,
   COLUMN_RESIZE_MIN,
   HOLDINGS_COLUMN_META,
+  columnAlign,
+  columnMeta,
   resetHoldingsColumns,
   defaultColumnOrder,
   defaultColumnSizing,
-  defaultHoldingsVisibility,
   loadColumnOrder,
   loadColumnSizing,
   loadColumnVisibility,
@@ -105,6 +131,7 @@ import {
 } from "@/app/lib/display-preferences";
 import { useDisplay } from "@/components/layout/display-provider";
 import { matchesSearchQuery } from "@/components/ui/table-filters";
+import { HorizontalScrollbar } from "@/components/ui/h-scrollbar";
 import { useDebouncedValue } from "@/app/hooks/use-debounced-value";
 import {
   formatPageLabel,
@@ -115,9 +142,19 @@ import {
 const TABLE_KEY = "holdings";
 const EXPAND_COL_PX = HOLDINGS_EXPAND_COL_PX;
 
+/** Aligné sur le plafond de la route : au-delà, elle tronque la demande. */
+const SPARKLINE_MAX_ASSETS = 120;
+/**
+ * Les clôtures d'hier ne changent plus : le cache peut être long. Il n'y a
+ * aucune raison de retélécharger un mois d'historique parce qu'on est revenu
+ * sur l'onglet.
+ */
+const SPARKLINE_STALE_MS = 5 * 60_000;
+
 export function HoldingsSection({
   tab,
   holdings,
+  history,
   loading,
   baseCurrency,
   envelopeFilters,
@@ -125,13 +162,15 @@ export function HoldingsSection({
   onAccountTypeChange,
   onTriggerLevelChange,
   onRowDoubleClick,
-  onOpenTransactionForAsset,
+  selectedAssetId,
   onCategoryChange,
   onAddTransaction,
   onImport,
 }: {
   tab: MainTab;
   holdings: Holding[];
+  /** Historique patrimonial global — alimente les sparklines des KPI. */
+  history?: HistoryPoint[];
   loading: boolean;
   baseCurrency: string;
   /** Multi-sélection d’enveloppes (filtrage déjà appliqué côté parent ou ici) */
@@ -144,14 +183,11 @@ export function HoldingsSection({
     value: string | null
   ) => void;
   onRowDoubleClick: (assetId: string) => void;
+  /** Ligne actuellement affichée dans la colonne de détail. */
+  selectedAssetId?: string | null;
   /** CTA empty state */
   onAddTransaction?: () => void;
   onImport?: () => void;
-  /** Menu contextuel ligne : type tx + holding */
-  onOpenTransactionForAsset?: (
-    type: string,
-    holding: Holding
-  ) => void;
   /** Après changement de sous-catégorie (rechargement holdings) */
   onCategoryChange?: (assetId: string, category: string) => void;
 }) {
@@ -169,19 +205,27 @@ export function HoldingsSection({
   const [searchInput, setSearchInput] = useState("");
   const debouncedSearch = useDebouncedValue(searchInput, 300);
   const [accountFilter, setAccountFilter] = useState("");
+  /** Filtre rapide P&L latent : tout / gagnants / perdants */
+  const [pnlFilter, setPnlFilter] = useState<PnlFilter>("all");
+  /**
+   * Puces de filtre. Convention commune : liste vide = aucune restriction.
+   * Elles ne sont pas persistées — un filtre est un geste de consultation,
+   * pas un réglage ; le retrouver actif trois jours plus tard ferait croire
+   * à un portefeuille amputé.
+   */
+  const [assetClassFilters, setAssetClassFilters] = useState<string[]>([]);
+  const [currencyFilters, setCurrencyFilters] = useState<string[]>([]);
   /** Filtre plateforme (deep-link depuis Mes plateformes : ?platformId=) */
   const platformIdFromUrl = searchParams.get("platformId") || "";
   const platformFilterId = platformIdFromUrl.trim();
   const platformNameFromUrl = (searchParams.get("platformName") || "").trim();
-  /** Asset ids with expanded recent-transactions panel */
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: DEFAULT_PAGE_SIZE,
   });
 
   // ── Regroupement par sous-catégorie ──────────────────────────────────────
-  const [groupBy, setGroupByState] = useState<HoldingsGroupBy>("none");
+  const [groupBy, setGroupByState] = useState<HoldingsGroupBy>("assetClass");
   const [groupPrefsReady, setGroupPrefsReady] = useState(false);
   /** envelopeKey → category → collapsed */
   const [collapsedByEnvelope, setCollapsedByEnvelope] = useState<
@@ -205,8 +249,10 @@ export function HoldingsSection({
     if (fromUrl != null) {
       setGroupByState(parseHoldingsGroupBy(fromUrl));
     } else {
+      // Le portefeuille s'ouvre regroupé par classe d'actifs : trente lignes
+      // à plat ne disent pas de quoi le patrimoine est fait, six groupes si.
       setGroupByState(
-        parseHoldingsGroupBy(loadUiPref(HOLDINGS_GROUP_BY_KEY, "none"))
+        parseHoldingsGroupBy(loadUiPref(HOLDINGS_GROUP_BY_KEY, "assetClass"))
       );
     }
     setCollapsedByEnvelope(
@@ -271,16 +317,16 @@ export function HoldingsSection({
     [envelopeKey]
   );
 
-  function toggleExpanded(assetId: string) {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(assetId)) next.delete(assetId);
-      else next.add(assetId);
-      return next;
-    });
-  }
+  /**
+   * Même valeur qu'au chargement des préférences : sans cela le premier rendu
+   * afficherait huit colonnes puis en ajouterait trois après hydratation, et
+   * le tableau sauterait sous les yeux à chaque arrivée sur la page.
+   */
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() =>
-    defaultHoldingsVisibility("fluid")
+    visibilityForMode(
+      "summary",
+      HOLDINGS_COLUMN_META.map((c) => c.id)
+    )
   );
   const [columnOrder, setColumnOrder] = useState<ColumnOrderState>(() =>
     defaultColumnOrder()
@@ -307,7 +353,16 @@ export function HoldingsSection({
 
   // Load saved column prefs (visibility + order + locked widths)
   useEffect(() => {
-    const fallback = defaultHoldingsVisibility(layoutWidth);
+    /**
+     * À défaut de préférence enregistrée, le portefeuille s'ouvre en « Synthèse »
+     * — les colonnes du mockup. Le défaut historique (colonnes obligatoires
+     * seules) ne correspondait à aucun des trois modes : les trois onglets
+     * s'affichaient éteints à la première visite, ce qui se lit comme une panne.
+     */
+    const fallback = visibilityForMode(
+      "summary",
+      HOLDINGS_COLUMN_META.map((c) => c.id)
+    );
     setColumnVisibility(loadColumnVisibility(TABLE_KEY, fallback));
     setColumnOrder(loadColumnOrder(TABLE_KEY));
     setLockedSizing(loadColumnSizing(TABLE_KEY));
@@ -348,7 +403,7 @@ export function HoldingsSection({
   }, []);
 
   // Reset page quand tab/filtres/tri changent (adjust state while rendering)
-  const paginationResetKey = `${tab}:${envelopeKey}:${holdings.length}:${debouncedSearch}:${accountFilter}:${platformFilterId}:${groupBy}`;
+  const paginationResetKey = `${tab}:${envelopeKey}:${holdings.length}:${debouncedSearch}:${accountFilter}:${platformFilterId}:${groupBy}:${pnlFilter}:${assetClassFilters.join(",")}:${currencyFilters.join(",")}`;
   const [prevPaginationResetKey, setPrevPaginationResetKey] = useState(
     paginationResetKey
   );
@@ -357,13 +412,29 @@ export function HoldingsSection({
     setPagination((prev) => ({ ...prev, pageIndex: 0 }));
   }
 
-  function clearPlatformFilter() {
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("platformId");
-    params.delete("platformName");
-    const q = params.toString();
-    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
-  }
+  /**
+   * Le filtre plateforme passe par l'URL, pas par un état local : c'est le même
+   * paramètre que le lien profond « voir les positions de cette plateforme »
+   * depuis l'écran Plateformes. Deux mécanismes pour un seul filtre finiraient
+   * par se contredire.
+   */
+  const setPlatformFilter = useCallback(
+    (id: string | null, name?: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (id) {
+        params.set("platformId", id);
+        if (name) params.set("platformName", name);
+        else params.delete("platformName");
+      } else {
+        params.delete("platformId");
+        params.delete("platformName");
+      }
+      const q = params.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
 
   const holdingsWithCategory = useMemo(() => {
     return holdings.map((h) => ({
@@ -384,6 +455,15 @@ export function HoldingsSection({
         return false;
       }
       if (accountFilter && (h.accountType || "CTO") !== accountFilter) return false;
+      if (
+        assetClassFilters.length > 0 &&
+        !assetClassFilters.includes(h.assetClass)
+      ) {
+        return false;
+      }
+      if (currencyFilters.length > 0 && !currencyFilters.includes(h.currency)) {
+        return false;
+      }
       return matchesSearchQuery(debouncedSearch, [
         h.name,
         h.ticker,
@@ -394,20 +474,75 @@ export function HoldingsSection({
       ]);
     });
 
-    // Sans filtre plateforme → vue agrégée inchangée
-    if (!platformFilterId) return visible;
+    // Reslice métriques (qty / MV / P&L) sur la jambe filtrée uniquement —
+    // le filtre P&L doit porter sur les valeurs affichées, donc après reslice.
+    const resliced = platformFilterId
+      ? recomputeAllocationsForFiltered(
+          visible.map((h) => applyPlatformFilterToHolding(h, platformFilterId))
+        )
+      : visible;
 
-    // Reslice métriques (qty / MV / P&L) sur la jambe filtrée uniquement
-    const sliced = visible.map((h) =>
-      applyPlatformFilterToHolding(h, platformFilterId)
+    if (pnlFilter === "all") return resliced;
+    return resliced.filter((h) =>
+      matchesPnlFilter(h.unrealizedPnlBase || h.unrealizedPnlEur, pnlFilter)
     );
-    return recomputeAllocationsForFiltered(sliced);
   }, [
     holdingsWithCategory,
     debouncedSearch,
     accountFilter,
     platformFilterId,
+    pnlFilter,
+    assetClassFilters,
+    currencyFilters,
   ]);
+
+  /**
+   * Options des puces, tirées des positions **avant** filtrage : une liste qui
+   * se vide au fur et à mesure qu'on filtre empêche de revenir en arrière.
+   * Les compteurs, eux, sont ceux de la source — ils disent combien de lignes
+   * la valeur représente, pas combien il en reste après les autres filtres.
+   */
+  const chipOptions = useMemo(() => {
+    const classes = new Map<string, number>();
+    const currencies = new Map<string, number>();
+    const platforms = new Map<string, { label: string; count: number }>();
+    for (const h of holdingsWithCategory) {
+      classes.set(h.assetClass, (classes.get(h.assetClass) ?? 0) + 1);
+      currencies.set(h.currency, (currencies.get(h.currency) ?? 0) + 1);
+      const slices =
+        h.platformSlices && h.platformSlices.length > 0
+          ? h.platformSlices.map((s) => ({
+              id: s.platformId,
+              name: s.platformName,
+            }))
+          : [{ id: h.platformId, name: h.platformName }];
+      for (const p of slices) {
+        if (!p.id) continue;
+        const prev = platforms.get(p.id);
+        platforms.set(p.id, {
+          label: prev?.label || p.name || "—",
+          count: (prev?.count ?? 0) + 1,
+        });
+      }
+    }
+    const byLabel = (a: { label: string }, b: { label: string }) =>
+      a.label.localeCompare(b.label, "fr", { sensitivity: "base" });
+    return {
+      assetClasses: [...classes.entries()]
+        .map(([value, count]) => ({
+          value,
+          label: getAssetClassLabel(value),
+          count,
+        }))
+        .sort(byLabel),
+      currencies: [...currencies.entries()]
+        .map(([value, count]) => ({ value, label: value, count }))
+        .sort(byLabel),
+      platforms: [...platforms.entries()]
+        .map(([value, { label, count }]) => ({ value, label, count }))
+        .sort(byLabel),
+    };
+  }, [holdingsWithCategory]);
 
   const platformFilterLabel = useMemo(() => {
     if (!platformFilterId) return null;
@@ -434,8 +569,50 @@ export function HoldingsSection({
     return platformNameFromUrl || "Plateforme sélectionnée";
   }, [platformFilterId, platformNameFromUrl, holdings]);
 
-  const groupMode =
-    groupBy === "assetCategory" || groupBy === "blockchain";
+  const groupMode = groupBy !== "none";
+
+  /**
+   * Vignettes de tendance — une requête pour tout le tableau.
+   *
+   * La clé porte les actifs du portefeuille **avant** filtrage, et non les
+   * lignes visibles : sinon chaque frappe dans la recherche relancerait une
+   * requête pour redessiner des courbes déjà en cache. La liste est triée pour
+   * que deux rendus du même portefeuille produisent la même clé.
+   */
+  const sparklineIds = useMemo(() => {
+    const ids = [...new Set(holdings.map((h) => h.assetId).filter(Boolean))];
+    ids.sort();
+    return ids.slice(0, SPARKLINE_MAX_ASSETS);
+  }, [holdings]);
+
+  const trendColumnVisible = columnVisibility.trend !== false;
+
+  const sparklinesQuery = useQuery({
+    queryKey: ["portfolio-sparklines", sparklineIds],
+    // Colonne masquée = aucune requête : on ne télécharge pas trente
+    // historiques pour des courbes que personne ne regarde.
+    enabled: sparklineIds.length > 0 && trendColumnVisible,
+    queryFn: () =>
+      fetchJson<{ series: Record<string, number[]> }>(
+        `/api/portfolio/sparklines?ids=${encodeURIComponent(sparklineIds.join(","))}`
+      ),
+    /*
+      Une réponse vide n'est pas mise en cache : elle veut souvent dire que la
+      route n'a pas encore fini de peupler le cache de clôtures. La garder cinq
+      minutes afficherait un tableau de tirets alors que les données sont
+      arrivées entre-temps. Dès qu'une seule courbe revient, on tient la
+      réponse pour bonne — un portefeuille où *rien* n'a d'historique est un
+      cache froid, pas un état stable.
+    */
+    staleTime: (query) =>
+      Object.keys(query.state.data?.series ?? {}).length > 0
+        ? SPARKLINE_STALE_MS
+        : 0,
+    gcTime: 15 * 60_000,
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+  const sparklines = sparklinesQuery.data?.series;
 
   const columns = useMemo<ColumnDef<Holding>[]>(
     () => [
@@ -449,17 +626,44 @@ export function HoldingsSection({
           return compareAssetNames(a, b);
         },
         cell: ({ row }) => (
-          <div className="flex items-center gap-2.5">
-            <PlatformLogo
+          // `min-w-0` sur le conteneur ET la colonne de texte : sans lui, un
+          // enfant flex refuse de rétrécir sous sa largeur de contenu, donc le
+          // nom débordait et se faisait couper net par la cellule — « Appartement
+          // Loca », sans ellipse, ce qui se lit comme un bug plutôt que comme une
+          // troncature. Le nom complet reste accessible au survol.
+          <div className="flex min-w-0 items-center gap-2.5">
+            <AssetLogo
               src={row.original.assetLogoUrl || row.original.logoUrl}
               name={row.original.name}
+              ticker={row.original.ticker}
+              isin={row.original.isin}
+              assetClass={row.original.assetClass}
               size={28}
             />
-            <div>
-              <div className="font-medium">{row.original.name}</div>
-              {row.original.isin && (
-                <div className="font-mono text-[10px] text-slate-500">{row.original.isin}</div>
-              )}
+            <div className="min-w-0">
+              <div className="truncate font-medium" title={row.original.name}>
+                {row.original.name}
+              </div>
+              <div className="flex min-w-0 items-center gap-1.5">
+                {row.original.isin && (
+                  <span className="truncate font-mono text-[10px] text-slate-500">
+                    {row.original.isin}
+                  </span>
+                )}
+                {/* Sous-catégorie : jusqu'ici visible seulement en mode
+                    regroupement (en-tête de groupe), invisible ligne par
+                    ligne en tri normal — modifiable via le badge Catégorie
+                    du panneau déplié, mais sans rappel dans la cellule elle-même. */}
+                {parseAssetCategory(row.original.category) !== "UNCLASSIFIED" && (
+                  <span
+                    className="shrink-0 truncate rounded-full bg-[var(--muted)] px-1.5 py-px text-[9px] font-medium text-[var(--muted-foreground)]"
+                    title="Sous-catégorie (classification d'affichage)"
+                    data-testid="holding-category-badge"
+                  >
+                    {assetCategoryLabel(row.original.category)}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         ),
@@ -468,8 +672,10 @@ export function HoldingsSection({
         accessorKey: "ticker",
         id: "ticker",
         header: "Ticker",
+        // Or et monospace : le ticker est un code, pas un nom. La couleur le
+        // distingue du libellé de l'actif sans ajouter de séparateur.
         cell: ({ row }) => (
-          <span className="font-mono text-xs tabular-nums text-slate-600 dark:text-slate-300">
+          <span className="font-mono text-[length:var(--text-xs)] tracking-[var(--tracking-label)] text-[var(--primary-text)]">
             {row.original.ticker || "—"}
           </span>
         ),
@@ -477,24 +683,53 @@ export function HoldingsSection({
       {
         accessorKey: "accountType",
         id: "accountType",
-        header: "Type de compte",
-        cell: ({ row }) => (
-          <select
-            className="input !w-auto !py-1 text-xs"
-            value={row.original.accountType || "CTO"}
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => {
-              e.stopPropagation();
-              onAccountTypeChange(row.original.assetId, e.target.value);
-            }}
-          >
-            {(Object.keys(ACCOUNT_TYPES) as AccountType[]).map((k) => (
-              <option key={k} value={k}>
-                {ACCOUNT_TYPES[k]}
-              </option>
-            ))}
-          </select>
-        ),
+        header: "Enveloppe",
+        /*
+          Pastille compacte plutôt que menu déroulant pleine largeur.
+
+          Le libellé long (« Compte-Titres », « Assurance-Vie ») imposait une
+          colonne de 160 px pour une information qui tient en trois lettres, et
+          la boîte de sélection tirait l'œil plus que les nombres voisins. On
+          affiche donc le code, dans une pastille — mais le champ reste un
+          `<select>` : l'enveloppe se corrige toujours d'un clic depuis le
+          tableau, ce qu'un simple badge aurait retiré.
+        */
+        cell: ({ row }) => {
+          const code = (row.original.accountType || "CTO") as AccountType;
+          return (
+            <span className="holdings-envelope-cell">
+              {/*
+                Le libellé visible est un `<span>`, le `<select>` est transparent
+                par-dessus. Un `<select>` prend la largeur de sa plus longue
+                option, quelle que soit celle qui est choisie : « AV » occupait
+                donc la place d'« IMMOBILIER », et la colonne alignait six
+                pastilles identiques dont aucune ne faisait la taille de son
+                texte. Le `<span>`, lui, ne mesure que ce qu'il affiche — et le
+                `<select>` conserve son menu natif, appréciable au doigt.
+              */}
+              <span className="holdings-envelope-pill" data-autosize-box>
+                <span className="holdings-envelope-pill__label">{code}</span>
+                <select
+                  className="holdings-envelope-pill__input"
+                  aria-label="Enveloppe"
+                  title={ACCOUNT_TYPES[code]}
+                  value={code}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    onAccountTypeChange(row.original.assetId, e.target.value);
+                  }}
+                >
+                  {(Object.keys(ACCOUNT_TYPES) as AccountType[]).map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+                </select>
+              </span>
+            </span>
+          );
+        },
       },
       {
         accessorKey: "platformName",
@@ -567,7 +802,7 @@ export function HoldingsSection({
       {
         accessorKey: "quantity",
         id: "quantity",
-        header: "Quantité",
+        header: "Qté",
         cell: ({ getValue }) => (
           <span className="font-semibold tabular-nums text-base">
             {Number(getValue<string>()).toLocaleString("fr-FR", {
@@ -589,7 +824,7 @@ export function HoldingsSection({
       {
         accessorKey: "currentPriceNative",
         id: "currentPriceNative",
-        header: "Cours actuel",
+        header: "Cours",
         cell: ({ row }) => (
           <div>
             <div className="tabular-nums">
@@ -599,25 +834,27 @@ export function HoldingsSection({
                 { crypto: row.original.assetClass === "CRYPTO" }
               )}
             </div>
-            <div className="text-[10px] uppercase tracking-wide text-slate-400">
-              {row.original.priceSource || "n/a"}
-              {row.original.priceStatus === "STALE" && (
-                <span className="ml-1 text-amber-500">· périmé</span>
-              )}
-              {row.original.priceStatus === "OK" &&
-                row.original.priceSource &&
-                row.original.priceSource !== "seed" &&
-                row.original.priceSource !== "coût" && (
-                  <span className="ml-1 text-emerald-500">· live</span>
-                )}
-            </div>
+            {/*
+              La provenance du cours ne s'affiche plus sous chaque ligne : elle
+              répétait « Démo » trente fois pour une information qui n'intéresse
+              que lorsqu'elle cloche. Seul le cas qui cloche reste visible — un
+              cours périmé —, et la ligne entière le signale déjà par
+              `data-stale`. Le détail complet vit dans le panneau de droite.
+            */}
+            {row.original.priceStatus === "STALE" && (
+              <div className="text-[10px] tracking-wide text-amber-500">
+                cours périmé
+              </div>
+            )}
           </div>
         ),
       },
       {
         accessorKey: "marketValueBase",
         id: "marketValueBase",
-        header: `Valeur totale (${baseCurrency})`,
+        // La devise est déjà portée par chaque cellule (« 312 000,00 € ») :
+        // la répéter en en-tête ne faisait que le faire tronquer.
+        header: "Valeur",
         cell: ({ row }) => (
           <div>
             <span className="font-medium tabular-nums">
@@ -626,37 +863,111 @@ export function HoldingsSection({
                 baseCurrency
               )}
             </span>
-            <div className="text-[10px] text-slate-400">qté × cours</div>
           </div>
         ),
       },
       {
+        /*
+          Tendance à trente jours.
+
+          Une colonne sans donnée propre : elle ne trie pas, ne se redimensionne
+          pas, ne dit rien qu'une autre colonne ne dise en chiffres. Elle donne
+          la seule chose qu'un nombre ne donne pas — la forme du chemin parcouru
+          pour y arriver.
+
+          Vide quand l'actif n'a pas de clôtures en cache. Une diagonale entre
+          deux points inventés aurait l'apparence d'une tendance sans en être
+          une, ce qui serait pire que la case vide.
+        */
+        id: "trend",
+        accessorKey: "assetId",
+        // En-tête muet : le mockup n'en montre aucun au-dessus des vignettes,
+        // et le libellé complet reste disponible — infobulle de l'en-tête et
+        // sélecteur de colonnes le lisent depuis la méta.
+        header: () => <span className="sr-only">Tendance 30 j</span>,
+        enableSorting: false,
+        cell: ({ row }) => {
+          const closes = sparklines?.[row.original.assetId];
+          if (!closes || closes.length < 2) {
+            return (
+              <span className="text-[10px] text-slate-400 dark:text-slate-600">
+                —
+              </span>
+            );
+          }
+          const up = closes[closes.length - 1]! >= closes[0]!;
+          return (
+            /*
+              Taille fixe et centrée, jamais étirée sur la largeur de la
+              colonne : une vignette qui s'allonge quand la colonne s'élargit
+              écrase sa propre pente, et deux lignes voisines cessent d'être
+              comparables entre elles.
+            */
+            <span
+              className="flex h-5 w-full items-center justify-center"
+              title={`Tendance sur ${closes.length} clôtures (30 derniers jours)`}
+            >
+              <Sparkline
+                values={closes}
+                stroke={up ? "var(--chart-positive)" : "var(--chart-negative)"}
+                width={56}
+                height={20}
+                strokeWidth={1.1}
+              />
+            </span>
+          );
+        },
+      },
+      {
+        /*
+          Variation : le montant, puis la proportion sous lui.
+
+          Les deux chiffres répondent à une seule question et ne se lisent
+          jamais l'un sans l'autre — « +1 700 € » ne dit pas si la ligne a bien
+          travaillé, « +20 % » ne dit pas ce que ça pèse. En deux colonnes,
+          leurs en-têtes se tronquaient de la même façon (« P&L LAT… » deux
+          fois) et l'œil devait faire l'aller-retour de l'une à l'autre.
+
+          Le tri porte sur les euros ; la colonne « Variation (%) », décochée
+          par défaut, reste disponible pour classer par performance.
+        */
         accessorKey: "unrealizedPnlBase",
         id: "unrealizedPnlBase",
-        header: "P&L latent (€)",
-        cell: ({ row }) => (
-          <span className={cn("tabular-nums font-medium", getChangeColor(row.original.unrealizedPnlBase))}>
-            {formatCurrency(
-              row.original.unrealizedPnlBase || row.original.unrealizedPnlEur,
-              baseCurrency
-            )}
-          </span>
-        ),
+        header: "Variation",
+        cell: ({ row }) => {
+          const amount =
+            row.original.unrealizedPnlBase || row.original.unrealizedPnlEur;
+          return (
+            <div>
+              <div className={cn("num font-medium", getChangeColor(amount))}>
+                {formatSignedCurrency(amount, baseCurrency)}
+              </div>
+              <div
+                className={cn(
+                  "num text-[length:var(--text-2xs)]",
+                  getChangeColor(row.original.unrealizedPnlPct)
+                )}
+              >
+                {formatSignedPercent(row.original.unrealizedPnlPct)}
+              </div>
+            </div>
+          );
+        },
       },
       {
         accessorKey: "unrealizedPnlPct",
         id: "unrealizedPnlPct",
-        header: "P&L latent (%)",
+        header: "Variation %",
         cell: ({ row }) => (
-          <span className={cn("tabular-nums", getChangeColor(row.original.unrealizedPnlPct))}>
-            {formatPercent(row.original.unrealizedPnlPct)}
+          <span className={cn("num", getChangeColor(row.original.unrealizedPnlPct))}>
+            {formatSignedPercent(row.original.unrealizedPnlPct)}
           </span>
         ),
       },
       {
         accessorKey: "allocationPctOfClass",
         id: "allocationPctOfClass",
-        header: "Allocation (%)",
+        header: "Alloc. classe",
         cell: ({ row }) => (
           <div className="tabular-nums">
             <span className="font-medium">
@@ -675,7 +986,10 @@ export function HoldingsSection({
       {
         accessorKey: "allocationPct",
         id: "allocationPct",
-        header: "Alloc. portefeuille",
+        // « Poids » plutôt qu'« Alloc. portefeuille » : tronqué, l'en-tête
+        // affichait « ALLOC. PORTEFE… ». Le libellé complet reste dans le
+        // sélecteur de colonnes et dans l'infobulle.
+        header: "Poids",
         cell: ({ row }) => (
           <span className="tabular-nums">
             {Number(row.original.allocationPct || 0).toLocaleString("fr-FR", {
@@ -769,19 +1083,31 @@ export function HoldingsSection({
         accessorKey: "stopLoss",
         header: "Stop Loss",
         enableSorting: false,
-        cell: ({ row }) =>
-          onTriggerLevelChange ? (
-            <TriggerLevelInput
-              assetId={row.original.assetId}
-              field="stopLoss"
-              value={row.original.stopLoss}
-              onCommit={onTriggerLevelChange}
-            />
-          ) : (
-            <span className="tabular-nums text-xs text-zinc-500">
-              {row.original.stopLoss || "—"}
-            </span>
-          ),
+        cell: ({ row }) => (
+          <div className="flex flex-col items-end gap-0.5">
+            {onTriggerLevelChange ? (
+              <TriggerLevelInput
+                assetId={row.original.assetId}
+                field="stopLoss"
+                value={row.original.stopLoss}
+                currentPrice={row.original.currentPriceNative}
+                onCommit={onTriggerLevelChange}
+              />
+            ) : (
+              <span className="tabular-nums text-xs text-zinc-500">
+                {row.original.stopLoss || "—"}
+              </span>
+            )}
+            {row.original.hasSecondaryLevels && (
+              <span
+                className="text-[10px] leading-tight text-zinc-400"
+                title="Niveaux SL/TP présents sur une jambe secondaire (autre plateforme) — la jambe principale est affichée en priorité"
+              >
+                Niveaux sur jambe secondaire inclus
+              </span>
+            )}
+          </div>
+        ),
       },
       {
         id: "tp1",
@@ -794,6 +1120,7 @@ export function HoldingsSection({
               assetId={row.original.assetId}
               field="tp1"
               value={row.original.tp1}
+              currentPrice={row.original.currentPriceNative}
               onCommit={onTriggerLevelChange}
             />
           ) : (
@@ -813,6 +1140,7 @@ export function HoldingsSection({
               assetId={row.original.assetId}
               field="tp2"
               value={row.original.tp2}
+              currentPrice={row.original.currentPriceNative}
               onCommit={onTriggerLevelChange}
             />
           ) : (
@@ -832,6 +1160,7 @@ export function HoldingsSection({
               assetId={row.original.assetId}
               field="tp3"
               value={row.original.tp3}
+              currentPrice={row.original.currentPriceNative}
               onCommit={onTriggerLevelChange}
             />
           ) : (
@@ -851,6 +1180,7 @@ export function HoldingsSection({
               assetId={row.original.assetId}
               field="tp4"
               value={row.original.tp4}
+              currentPrice={row.original.currentPriceNative}
               onCommit={onTriggerLevelChange}
             />
           ) : (
@@ -860,7 +1190,7 @@ export function HoldingsSection({
           ),
       },
     ],
-    [baseCurrency, onAccountTypeChange, onTriggerLevelChange]
+    [baseCurrency, onAccountTypeChange, onTriggerLevelChange, sparklines]
   );
 
   const table = useReactTable({
@@ -934,6 +1264,10 @@ export function HoldingsSection({
 
   /** Lignes triées (pré-pagination) pour regroupement — order = tri tableau */
   const sortedAllRows = table.getPrePaginationRowModel().rows;
+  const classGroups =
+    groupBy === "assetClass"
+      ? groupPositionsByAssetClass(sortedAllRows.map((r) => r.original))
+      : [];
   const categoryGroups =
     groupBy === "assetCategory"
       ? groupPositionsByAssetCategory(sortedAllRows.map((r) => r.original))
@@ -943,7 +1277,11 @@ export function HoldingsSection({
       ? groupPositionsByBlockchain(sortedAllRows.map((r) => r.original))
       : [];
   const activeGroups =
-    groupBy === "blockchain" ? blockchainGroups : categoryGroups;
+    groupBy === "assetClass"
+      ? classGroups
+      : groupBy === "blockchain"
+        ? blockchainGroups
+        : categoryGroups;
   const rowByAssetId = useMemo(() => {
     const m = new Map<string, Row<Holding>>();
     for (const r of sortedAllRows) m.set(r.original.assetId, r);
@@ -951,15 +1289,102 @@ export function HoldingsSection({
      
   }, [sortedAllRows]);
 
+  /**
+   * Courbe et variation du jour de chaque classe.
+   *
+   * Chargées seulement quand le tableau est effectivement regroupé par classe :
+   * la série parcourt tout le ledger de la fenêtre, et le portefeuille n'a pas
+   * à payer ce calcul quand personne ne regarde les groupes. La lecture ne
+   * contacte aucun fournisseur — elle se sert du cache de clôtures tel qu'il
+   * est, sans le remplir.
+   */
+  const classPnlQ = useClassPnlQuery("1m", groupBy === "assetClass");
+  const classSeries = useMemo(() => {
+    const points = classPnlQ.data?.points;
+    if (!points?.length) return null;
+
+    const incomplete = new Set<string>();
+    for (const p of points) {
+      for (const cls of p.incompleteClasses ?? []) {
+        incomplete.add(parseAssetClass(cls));
+      }
+    }
+
+    /*
+      Performance de la période, et non valeur de marché : la courbe montait
+      d'un cran le jour d'un achat, si bien qu'un versement s'y lisait comme un
+      gain. Le P&L cumulé neutralise les flux — la ligne ne bouge que sous
+      l'effet des cours, et son point d'arrivée est le chiffre affiché à côté.
+    */
+    const performance = buildClassPeriodSeries(points);
+
+    const values = new Map<string, number[]>();
+    const periodPnl = new Map<string, number>();
+    const periodPct = new Map<string, number | null>();
+    for (const [rawClass, perf] of performance) {
+      const cls = parseAssetClass(rawClass);
+      values.set(cls, perf.cumulative);
+      periodPnl.set(cls, perf.pnl);
+      periodPct.set(cls, perf.pct);
+    }
+
+    return { values, periodPnl, periodPct, incomplete };
+  }, [classPnlQ.data]);
+
   const allEnvelopesCount = Object.keys(ACCOUNT_TYPES).length;
-  const positionsTitle =
-    envelopeFilters.length === 0
-      ? "Positions — aucune enveloppe"
-      : envelopeFilters.length === allEnvelopesCount
-        ? "Positions (toutes les enveloppes)"
-        : envelopeFilters.length === 1
-          ? `Positions — ${ACCOUNT_TYPES[envelopeFilters[0]!]}`
-          : `Positions — ${envelopeFilters.length} enveloppes`;
+  /**
+   * Titre invariable.
+   *
+   * Il portait auparavant l'état du filtre d'enveloppe (« Positions — PEA »,
+   * « Positions — 3 enveloppes »). Le filtre étant désormais matérialisé par
+   * une puce juste en dessous, le répéter dans le titre faisait bouger le
+   * repère principal de la page à chaque clic — exactement ce qu'un titre ne
+   * doit pas faire.
+   */
+  const positionsTitle = "Portefeuille";
+
+  /**
+   * Un filtre restreint-il l'affichage ? Sert à deux choses : afficher le
+   * bouton de réinitialisation, et retirer les sparklines des cartes KPI
+   * (l'historique porte sur tout le patrimoine, pas sur la sélection).
+   */
+  const hasActiveFilters =
+    Boolean(debouncedSearch.trim()) ||
+    Boolean(accountFilter) ||
+    Boolean(platformFilterId) ||
+    pnlFilter !== "all" ||
+    assetClassFilters.length > 0 ||
+    currencyFilters.length > 0 ||
+    envelopeFilters.length < allEnvelopesCount;
+
+  /**
+   * Série de classe des en-têtes de groupe — supprimée dès qu'un filtre agit.
+   *
+   * `/api/portfolio/class-pnl` calcule sur **tout** le portefeuille : il ne
+   * connaît ni la recherche, ni l'enveloppe, ni les classes cochées à l'écran.
+   * Filtrer sur le PEA laissait donc l'en-tête « Actions » afficher la courbe
+   * et le P&L de période de toutes les actions, CTO compris, juste au-dessus
+   * d'un décompte de lignes qui, lui, respectait le filtre : deux chiffres
+   * contradictoires sur la même ligne.
+   *
+   * Les tuiles KPI appliquaient déjà cette règle (`filtered`) ; les en-têtes de
+   * groupe l'ignoraient. Une sous-série filtrée n'est pas calculable ici — mieux
+   * vaut ne rien montrer que montrer le portefeuille entier sous une étiquette
+   * restreinte.
+   */
+  const groupClassSeries = hasActiveFilters ? null : classSeries;
+
+  const resetFilters = useCallback(() => {
+    setSearchInput("");
+    setAccountFilter("");
+    setPnlFilter("all");
+    setAssetClassFilters([]);
+    setCurrencyFilters([]);
+    setPlatformFilter(null);
+    // Réinitialiser = revenir à « toutes les enveloppes », pas à aucune :
+    // le seul état où le tableau est vide n'est pas un point de départ.
+    onEnvelopeFiltersChange?.(Object.keys(ACCOUNT_TYPES) as AccountType[]);
+  }, [onEnvelopeFiltersChange, setPlatformFilter]);
 
   /** Clé stable des colonnes visibles (identité stable entre renders). */
   const visibleLeafKey = table
@@ -971,7 +1396,25 @@ export function HoldingsSection({
     () => (visibleLeafKey ? visibleLeafKey.split("|") : []),
     [visibleLeafKey]
   );
-  const visibleColCount = visibleLeafIds.length + 1;
+  /** +2 : colonne sélection + colonne expand (plus de colonne ⋯ — actions dans l’historique) */
+  const visibleColCount = visibleLeafIds.length + 2;
+
+  /**
+   * Colonnes visibles avec leur largeur — les en-têtes de groupe rendent une
+   * cellule par colonne pour que leurs totaux tombent sous la colonne qu'ils
+   * totalisent, quel que soit l'ordre choisi par l'utilisateur.
+   */
+  const groupHeaderColumns = useMemo(
+    () =>
+      table.getVisibleLeafColumns().map((c) => ({
+        id: c.id,
+        size: c.getSize(),
+      })),
+    // `columnSizing` n'est pas lu directement : c'est lui qui fait bouger
+    // `getSize()`, d'où sa présence explicite dans les dépendances.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [table, visibleLeafKey, columnSizing]
+  );
   const isResizingColumn = table.getState().columnSizingInfo.isResizingColumn;
 
   useEffect(() => {
@@ -1032,24 +1475,59 @@ export function HoldingsSection({
     skipSortRef.current = true;
   }
 
+  /**
+   * Export CSV de ce qui est à l'écran.
+   *
+   * Il portait sur une sélection par cases à cocher, dont la colonne a
+   * disparu. Exporter les lignes filtrées revient au même geste en un clic de
+   * moins : ce que l'utilisateur voit est ce qu'il emporte. Les colonnes
+   * exportées restent celles affichées, dans leur ordre.
+   */
+  function downloadSelectionCsv() {
+    const selected = filteredHoldings;
+    if (selected.length === 0) return;
+    const csv = holdingsToCsv(selected, visibleLeafIds, baseCurrency);
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `positions-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <section className="space-y-3 sm:space-y-4" data-testid="holdings-section">
-      {tab === "cto" && <EnvelopeCashPanel envelope="CTO" />}
-      {tab === "pea" && <EnvelopeCashPanel envelope="PEA" lockCurrencyToEur />}
+      {/*
+        Plus de branche `cto` / `pea` : leurs poches d'espèces sont éditées
+        dans l'onglet « PEA & CTO », qui porte désormais ces enveloppes. `av`
+        reste ici, son onglet étant bien une vue filtrée de ce tableau.
+      */}
       {tab === "av" && (
         <>
           <EnvelopeCashPanel envelope="AV" />
           <div className="mb-1 sm:mb-2">
-            <LifeInsuranceTab />
+            <LifeInsuranceTab
+              avHoldings={holdings.filter((h) => h.accountType === "AV")}
+            />
           </div>
         </>
       )}
+      <PortfolioKpiCards
+        holdings={filteredHoldings}
+        history={history}
+        baseCurrency={baseCurrency}
+        filtered={hasActiveFilters}
+      />
       <div className="card-flat min-w-0 overflow-hidden">
         <HoldingsToolbar
           title={positionsTitle}
+          onExportCsv={downloadSelectionCsv}
           subtitle={
             envelopeFilters.length === allEnvelopesCount
-              ? "Positions calculées depuis le journal · CUMP multi-compte"
+              ? "Positions calculées depuis le journal · CUMP multi-plateforme"
               : envelopeFilters.length === 0
                 ? "Sélectionnez au moins une enveloppe pour afficher les positions"
                 : `${envelopeFilters.map((e) => ACCOUNT_TYPES[e]).join(" · ")} · journal`
@@ -1066,19 +1544,36 @@ export function HoldingsSection({
           onExpandAllGroups={expandAllGroups}
           onCollapseAllGroups={() =>
             collapseAllGroups(
-              groupBy === "blockchain"
-                ? blockchainGroups.map((g) => g.blockchainKey)
-                : categoryGroups.map((g) => g.category)
+              groupBy === "assetClass"
+                ? classGroups.map((g) => g.assetClass)
+                : groupBy === "blockchain"
+                  ? blockchainGroups.map((g) => g.blockchainKey)
+                  : categoryGroups.map((g) => g.category)
             )
           }
           search={searchInput}
           onSearchChange={setSearchInput}
           accountFilter={accountFilter}
           onAccountFilterChange={setAccountFilter}
-          platformFilterLabel={platformFilterLabel}
-          onClearPlatformFilter={
-            platformFilterId ? clearPlatformFilter : undefined
+          pnlFilter={pnlFilter}
+          onPnlFilterChange={setPnlFilter}
+          assetClassOptions={chipOptions.assetClasses}
+          assetClassFilters={assetClassFilters}
+          onAssetClassFiltersChange={setAssetClassFilters}
+          currencyOptions={chipOptions.currencies}
+          currencyFilters={currencyFilters}
+          onCurrencyFiltersChange={setCurrencyFilters}
+          platformOptions={chipOptions.platforms}
+          platformFilterId={platformFilterId}
+          onPlatformFilterChange={(id) =>
+            setPlatformFilter(
+              id,
+              chipOptions.platforms.find((p) => p.value === id)?.label
+            )
           }
+          platformFilterLabel={platformFilterLabel}
+          hasActiveFilters={hasActiveFilters}
+          onResetFilters={resetFilters}
           pageSize={pagination.pageSize}
           onPageSizeChange={(n) =>
             setPagination({ pageIndex: 0, pageSize: n })
@@ -1093,6 +1588,9 @@ export function HoldingsSection({
               search: searchInput,
               visibility: columnVisibility as Record<string, boolean>,
               pageSize: pagination.pageSize,
+              groupBy,
+              sorting: sorting.map((s) => ({ id: s.id, desc: s.desc })),
+              pnlFilter,
               createdAt: new Date().toISOString(),
             };
             const next = [...savedViews, view];
@@ -1112,6 +1610,17 @@ export function HoldingsSection({
             if (view.visibility) {
               setColumnVisibility(view.visibility as VisibilityState);
             }
+            // Absent sur les vues créées avant l'ajout de ce champ : ne pas
+            // écraser le regroupement/tri courant par un défaut arbitraire.
+            if (view.groupBy !== undefined) {
+              setGroupBy(parseHoldingsGroupBy(view.groupBy));
+            }
+            if (view.sorting) {
+              setSorting(view.sorting);
+            }
+            if (view.pnlFilter !== undefined) {
+              setPnlFilter(parsePnlFilter(view.pnlFilter));
+            }
             if (onEnvelopeFiltersChange && view.envelope) {
               const parts = view.envelope
                 .split(",")
@@ -1124,8 +1633,12 @@ export function HoldingsSection({
             visibility: columnVisibility as Record<string, boolean>,
             order: columnOrder,
             onVisibilityChange: (id, visible) => {
-              const meta = HOLDINGS_COLUMN_META.find((c) => c.id === id);
-              if (meta?.group === "mandatory" || meta?.locked) {
+              // Seul le verrou refuse le décochage — pas l'appartenance au
+              // groupe obligatoire, qui dit seulement « affichée au départ ».
+              // La case du sélecteur applique la même règle : les deux doivent
+              // s'accorder, sinon elle se décoche à l'écran sans rien changer.
+              const meta = columnMeta(id);
+              if (meta?.locked) {
                 setColumnVisibility((prev) => ({ ...prev, [id]: true }));
                 return;
               }
@@ -1143,6 +1656,7 @@ export function HoldingsSection({
         />
         <div
           ref={scrollWrapRef}
+          id="holdings-table-scroll"
           className="table-container-responsive table-fluid-wrap holdings-table-scroll"
           data-testid="holdings-table-scroll"
         >
@@ -1162,15 +1676,6 @@ export function HoldingsSection({
             <thead className="table-head text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id}>
-                  <th
-                    className="holdings-expand-col px-0 py-3 text-center"
-                    style={{
-                      width: EXPAND_COL_PX,
-                      minWidth: EXPAND_COL_PX,
-                      maxWidth: EXPAND_COL_PX,
-                    }}
-                    aria-label="Déplier les transactions"
-                  />
                   {hg.headers.map((h) => {
                     const colId = h.column.id;
                     const size = h.getSize();
@@ -1178,7 +1683,7 @@ export function HoldingsSection({
                     const isResizing = h.column.getIsResizing();
                     const isLocked = lockedSizing[colId] != null;
                     const fullLabel =
-                      HOLDINGS_COLUMN_META.find((c) => c.id === colId)?.label ??
+                      columnMeta(colId)?.label ??
                       String(h.column.columnDef.header ?? colId);
                     return (
                       <th
@@ -1193,8 +1698,29 @@ export function HoldingsSection({
                         style={{
                           width: size,
                           minWidth: floor,
+                          textAlign: columnAlign(colId),
                         }}
-                        title={`${fullLabel}\nClic = trier · ⋮⋮ = déplacer · bord = largeur`}
+                        title={`${fullLabel}\nClic = trier · glisser = déplacer · bord = largeur`}
+                        /*
+                          L'en-tête entier porte le glisser-déposer, au lieu
+                          d'une poignée dédiée. Celle-ci occupait seize pixels
+                          dans chacune des dix colonnes — assez pour tronquer
+                          « TICKER » en « TICK… » — et le mockup n'en montre
+                          aucune. La cible est désormais plus grande, pas plus
+                          petite.
+                        */
+                        draggable
+                        onDragStart={(e) => {
+                          dragColRef.current = colId;
+                          setDraggingCol(colId);
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/plain", colId);
+                        }}
+                        onDragEnd={() => {
+                          dragColRef.current = null;
+                          setDraggingCol(null);
+                          setDragOverCol(null);
+                        }}
                         onDragOver={(e) => {
                           e.preventDefault();
                           e.dataTransfer.dropEffect = "move";
@@ -1222,34 +1748,21 @@ export function HoldingsSection({
                       >
                         <span className="inline-flex max-w-full items-center gap-0.5 overflow-hidden">
                           <span
-                            draggable
-                            className="col-drag-hint inline-flex shrink-0"
-                            title="Glisser pour réordonner"
-                            onDragStart={(e) => {
-                              dragColRef.current = colId;
-                              setDraggingCol(colId);
-                              e.dataTransfer.effectAllowed = "move";
-                              e.dataTransfer.setData("text/plain", colId);
-                              e.stopPropagation();
-                            }}
-                            onDragEnd={() => {
-                              dragColRef.current = null;
-                              setDraggingCol(null);
-                              setDragOverCol(null);
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <GripVertical className="h-3 w-3" aria-hidden />
-                          </span>
-                          <span
                             className="min-w-0 truncate"
                             data-column-label
                             title={fullLabel}
                           >
                             {flexRender(h.column.columnDef.header, h.getContext())}
-                            {{ asc: " ↑", desc: " ↓" }[h.column.getIsSorted() as string] ??
-                              null}
                           </span>
+                          {/* Hors du span tronqué : sur les colonnes étroites (ticker,
+                              devise, qté), le glyphe texte précédent se faisait couper
+                              net par l'ellipse — une icône séparée, jamais tronquée. */}
+                          {h.column.getIsSorted() === "asc" && (
+                            <ArrowUp className="h-3 w-3 shrink-0" aria-hidden />
+                          )}
+                          {h.column.getIsSorted() === "desc" && (
+                            <ArrowDown className="h-3 w-3 shrink-0" aria-hidden />
+                          )}
                         </span>
                         {h.column.getCanResize() && (
                           <div
@@ -1373,53 +1886,91 @@ export function HoldingsSection({
                 !groupMode &&
                 table.getRowModel().rows.map((row) =>
                   renderHoldingRow(row, {
-                    expandedIds,
-                    toggleExpanded,
-                    visibleColCount,
-                    onRowDoubleClick,
-                    onOpenTransactionForAsset,
-                    onEditCategory: setEditCategoryHolding,
+                    onOpenAsset: onRowDoubleClick,
+                    selectedAssetId,
                   })
                 )}
               {!loading &&
                 groupMode &&
                 activeGroups.map((group) => {
                   const groupKey =
-                    "blockchainKey" in group
-                      ? group.blockchainKey
-                      : group.category;
+                    "assetClass" in group
+                      ? group.assetClass
+                      : "blockchainKey" in group
+                        ? group.blockchainKey
+                        : group.category;
                   const expanded = !isGroupCollapsed(groupKey);
                   return (
                     <Fragment key={groupKey}>
-                      <PositionCategoryGroupHeader
-                        label={group.label}
-                        count={group.count}
-                        totalMarketValue={group.totalMarketValue}
-                        totalUnrealizedPnl={group.totalUnrealizedPnl}
-                        weightPct={group.weightPct}
-                        baseCurrency={baseCurrency}
-                        expanded={expanded}
-                        onToggle={() => toggleGroupCollapsed(groupKey)}
-                        colSpan={Math.max(visibleColCount, 1)}
-                      />
+                      {"assetClass" in group ? (
+                        <PositionGroupHeader
+                          label={group.label}
+                          assetClass={group.assetClass}
+                          count={group.count}
+                          totalMarketValue={group.totalMarketValue}
+                          totalUnrealizedPnl={group.totalUnrealizedPnl}
+                          unrealizedPnlPct={group.unrealizedPnlPct}
+                          weightPct={group.weightPct}
+                          spark={groupClassSeries?.values.get(group.assetClass)}
+                          periodPnl={
+                            groupClassSeries?.periodPnl.get(group.assetClass) ?? null
+                          }
+                          periodPct={
+                            groupClassSeries?.periodPct.get(group.assetClass) ?? null
+                          }
+                          estimated={groupClassSeries?.incomplete.has(
+                            group.assetClass
+                          )}
+                          totalCostBasis={group.totalCostBasis}
+                          baseCurrency={baseCurrency}
+                          expanded={expanded}
+                          onToggle={() => toggleGroupCollapsed(groupKey)}
+                          columns={groupHeaderColumns}
+                        />
+                      ) : (
+                        <PositionCategoryGroupHeader
+                          label={group.label}
+                          count={group.count}
+                          totalMarketValue={group.totalMarketValue}
+                          totalUnrealizedPnl={group.totalUnrealizedPnl}
+                          weightPct={group.weightPct}
+                          baseCurrency={baseCurrency}
+                          expanded={expanded}
+                          onToggle={() => toggleGroupCollapsed(groupKey)}
+                          colSpan={Math.max(visibleColCount, 1)}
+                        />
+                      )}
                       {expanded &&
                         group.positions.map((pos) => {
                           const row = rowByAssetId.get(pos.assetId);
                           if (!row) return null;
                           return renderHoldingRow(row, {
-                            expandedIds,
-                            toggleExpanded,
-                            visibleColCount,
-                            onRowDoubleClick,
-                            onOpenTransactionForAsset,
-                            onEditCategory: setEditCategoryHolding,
-                          });
+                    onOpenAsset: onRowDoubleClick,
+                    selectedAssetId,
+                  });
                         })}
                     </Fragment>
                   );
                 })}
             </tbody>
           </table>
+        </div>
+
+        {/*
+          Barre de défilement explicite, collée au bas du cadre.
+
+          La barre native est superposée sur la plupart des systèmes : elle
+          n'occupe aucune place et ne se montre qu'en cours de défilement, si
+          bien qu'à la souris les colonnes de droite étaient inatteignables.
+          Posée après le tableau, elle obligerait de surcroît à descendre
+          trente lignes pour l'atteindre puis à remonter pour lire.
+        */}
+        <div className="sticky bottom-0 z-10 bg-[var(--card)] px-[var(--space-3)] pb-[var(--space-2)] pt-[var(--space-1)]">
+          <HorizontalScrollbar
+            targetRef={scrollWrapRef}
+            controls="holdings-table-scroll"
+            label="Défilement horizontal du portefeuille"
+          />
         </div>
         {(() => {
           const total = filteredHoldings.length;

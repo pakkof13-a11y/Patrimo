@@ -218,9 +218,16 @@ type PositionsResponse = {
         }>;
       };
       flags?: { displayable?: boolean; is_trash?: boolean };
+      protocol?: string | null;
+      application_metadata?: {
+        name?: string | null;
+        icon?: { url?: string | null } | null;
+        contract_address?: string | null;
+      } | null;
     };
     relationships?: {
       chain?: { data?: { id?: string } };
+      dapp?: { data?: { id?: string } };
     };
   }>;
 };
@@ -344,6 +351,112 @@ export async function fetchZerionPositions(
       chainId,
       contractAddress: impl?.address || null,
       positionType: a.position_type || null,
+    });
+  }
+
+  out.sort((a, b) => (b.usdValue ?? 0) - (a.usdValue ?? 0));
+  return out;
+}
+
+export type ZerionDefiItem = {
+  /** Identifiant Zerion de la position — stable entre deux synchros. */
+  externalId: string;
+  ticker: string;
+  name: string;
+  amount: number;
+  usdValue: number | null;
+  priceUsd: number | null;
+  chainId: string | null;
+  contractAddress: string | null;
+  logo: string | null;
+  /** `position_type` brut : staked, deposit, loan, locked, reward… */
+  positionType: string | null;
+  protocol: string | null;
+  protocolLogo: string | null;
+};
+
+/**
+ * Positions « complexes » : tout ce qui est engagé dans un protocole.
+ *
+ * Le pendant exact de `fetchZerionPositions`, qui filtre `only_simple` et ne
+ * voit donc que les jetons posés dans le portefeuille. Les deux appels sont
+ * disjoints par construction — c'est ce qui garantit qu'un ETH staké chez Lido
+ * ne soit pas compté à la fois comme solde et comme position DeFi.
+ */
+export async function fetchZerionDefiPositions(
+  address: string,
+  apiKey?: string | null,
+  opts?: { chainId?: string | null; currency?: string }
+): Promise<ZerionDefiItem[]> {
+  const key = resolveZerionApiKey(apiKey);
+  if (!key) {
+    throw new ZerionError(
+      "Clé API Zerion manquante — configurez ZERION_API_KEY sur le serveur (Vercel)",
+      "CONFIG"
+    );
+  }
+
+  const query: Record<string, string> = {
+    currency: opts?.currency || "usd",
+    "filter[positions]": "only_complex",
+    "filter[trash]": "only_non_trash",
+    sort: "value",
+  };
+  if (opts?.chainId) query["filter[chain_ids]"] = opts.chainId;
+
+  const body = await zerionGet<PositionsResponse>(
+    `/wallets/${encodeURIComponent(address)}/positions/`,
+    key,
+    query
+  );
+
+  const out: ZerionDefiItem[] = [];
+  for (const row of body.data || []) {
+    const a = row.attributes;
+    if (!a) continue;
+    if (a.flags?.is_trash) continue;
+    if (a.flags?.displayable === false) continue;
+
+    const amount =
+      typeof a.quantity?.float === "number"
+        ? a.quantity.float
+        : Number(a.quantity?.numeric ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+
+    const usd =
+      typeof a.value === "number" && Number.isFinite(a.value) ? a.value : null;
+    // Poussière : une position à moins d'un centime encombre la vue sans rien
+    // changer au patrimoine.
+    if (usd != null && usd < 0.01) continue;
+
+    const fi = a.fungible_info;
+    const ticker = (fi?.symbol || "???").trim().toUpperCase().slice(0, 24);
+    const chainId =
+      row.relationships?.chain?.data?.id ||
+      fi?.implementations?.[0]?.chain_id ||
+      null;
+    const impl =
+      fi?.implementations?.find((i) => i.chain_id === chainId) ||
+      fi?.implementations?.[0];
+
+    out.push({
+      externalId: row.id || `${chainId}:${ticker}:${a.position_type ?? ""}`,
+      ticker,
+      name: (fi?.name || a.name || ticker).slice(0, 120),
+      amount,
+      usdValue: usd,
+      priceUsd:
+        typeof a.price === "number" && Number.isFinite(a.price) ? a.price : null,
+      chainId,
+      contractAddress: impl?.address || null,
+      logo: fi?.icon?.url || null,
+      positionType: a.position_type || null,
+      protocol:
+        a.application_metadata?.name ||
+        a.protocol ||
+        row.relationships?.dapp?.data?.id ||
+        null,
+      protocolLogo: a.application_metadata?.icon?.url || null,
     });
   }
 

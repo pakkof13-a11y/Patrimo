@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { crowdlendingSchema } from "@/app/lib/schemas";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 import {
   presentFields,
   requireBodyId,
@@ -21,7 +22,7 @@ export async function GET() {
   } catch (e) {
     console.error("[crowdlending GET]", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erreur" },
+      { error: clientErrorMessage(e, "Erreur") },
       { status: 500 }
     );
   }
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ line }, { status: 201 });
   } catch (e) {
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erreur" },
+      { error: clientErrorMessage(e, "Erreur") },
       { status: 400 }
     );
   }
@@ -57,7 +58,7 @@ export async function PUT(req: Request) {
     const line = await updateCrowdlending(userId, id, patch);
     return NextResponse.json({ line });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Erreur";
+    const msg = clientErrorMessage(e, "Erreur");
     return NextResponse.json({ error: msg }, { status: msg.includes("introuvable") ? 404 : 400 });
   }
 }
@@ -71,7 +72,7 @@ export async function DELETE(req: Request) {
     await deleteCrowdlending(userId, id);
     return NextResponse.json({ ok: true });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Erreur";
+    const msg = clientErrorMessage(e, "Erreur");
     return NextResponse.json({ error: msg }, { status: msg.includes("introuvable") ? 404 : 400 });
   }
 }

@@ -5,6 +5,7 @@ import { cacheGet, cacheSet, cachePrune } from "@/app/lib/api/memory-cache";
 import { consumeRateLimit } from "@/app/lib/api/simple-rate-limit";
 import { withTimeout } from "@/app/lib/utils/with-timeout";
 import { MARKET_INDEX_SYMBOLS } from "@/app/lib/portfolio/market-indices";
+import { serverErrorDetail } from "@/app/lib/api/error-response";
 
 const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey"],
@@ -163,7 +164,8 @@ export async function GET(req: Request) {
       }
     );
   } catch (e) {
-    console.error("[benchmark]", e instanceof Error ? e.message : "error");
+    // Log serveur : détail complet conservé (jamais renvoyé au client).
+    console.error("[benchmark]", serverErrorDetail(e));
     return NextResponse.json(
       {
         error: "Échec récupération indice",

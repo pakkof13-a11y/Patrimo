@@ -1,63 +1,53 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import { ChevronDown, SlidersHorizontal } from "lucide-react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import type { HistoryPoint } from "@/app/lib/types/ui";
+import { scopeHistory } from "@/app/lib/portfolio/scope-history";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/app/lib/api-client";
 import {
   buildEvolutionSeries,
+  benchmarkGapPct,
+  benchmarkLabel,
   evolutionDeltaSummary,
   evolutionIntervalHint,
   evolutionIntervalLabel,
   isEvolutionRangeEnabled,
+  startOfRange,
+  toPercentSeries,
   withBenchmarkSeries,
-  benchmarkLabel,
-  benchmarkGapPct,
-  type EvolutionChartStyle,
-  type EvolutionMetric,
   type EvolutionRange,
-  type EvolutionViewMode,
   type IndexClosePoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
 import {
   DEFAULT_EVOLUTION_PREFS,
   loadEvolutionPrefs,
+  normalizeEnvelopeFor,
   saveEvolutionPrefs,
   type EvolutionBenchmark,
-  type EvolutionBenchmarkChoice,
-  type EvolutionPrefsV4,
+  type EvolutionPrefsV5,
+  type EvolutionAssetClass,
+  type EvolutionScope,
 } from "@/app/lib/portfolio/evolution-prefs";
-import { loadDefaultBenchmark } from "@/app/lib/portfolio/benchmark-prefs";
 import {
   MARKET_INDICES,
   marketIndexLabel,
   type MarketIndexKey,
 } from "@/app/lib/portfolio/market-indices";
+import {
+  PortfolioPercentChart,
+  PortfolioValueChart,
+} from "@/components/dashboard/portfolio-evolution-charts";
+import { IntradaySection } from "@/components/dashboard/intraday-section";
 
 const emptySubscribe = () => () => undefined;
 
 function useIsClient() {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
 }
-import {
-  DecomposedCumulAreas,
-  DecomposedCumulColumns,
-  DecomposedPeriodChart,
-  GlobalColumnsChart,
-  GlobalLineChart,
-  PeriodColumnsChart,
-  PeriodLineChart,
-} from "@/components/dashboard/portfolio-evolution-charts";
 
 const RANGES: { id: EvolutionRange; label: string }[] = [
   { id: "7d", label: "7J" },
@@ -70,49 +60,125 @@ const RANGES: { id: EvolutionRange; label: string }[] = [
   { id: "all", label: "Tout" },
 ];
 
-const METRICS: { id: EvolutionMetric; label: string; title: string }[] = [
+/**
+ * Classes proposées au sélecteur.
+ *
+ * Les six valeurs de `Asset.assetClass`, plus « Tout ». Cette taxonomie est la
+ * seule reconstructible historiquement : `assetClass` n'a aucun chemin de mise
+ * à jour, là où `category` et `accountType` sont mutables sans journal — les
+ * utiliser ferait qu'un reclassement d'aujourd'hui réécrirait tout le passé.
+ */
+const CLASS_CHOICES: {
+  id: EvolutionAssetClass | "all";
+  label: string;
+  title: string;
+}[] = [
+  { id: "all", label: "Tout", title: "Patrimoine entier, toutes classes confondues" },
+  { id: "ACTIONS", label: "Actions", title: "Actions et ETF" },
+  { id: "OBLIGATIONS", label: "Obligations", title: "Obligations et fonds obligataires" },
+  { id: "CRYPTO", label: "Crypto", title: "Toutes les positions crypto détenues à chaque date" },
+  { id: "IMMOBILIER", label: "Immobilier", title: "Biens directs et véhicules indirects" },
+  { id: "CASH", label: "Cash", title: "Trésorerie — comptes, livrets, dépôts à terme" },
   {
-    id: "cumul",
-    label: "Cumulée",
-    title: "Niveau de patrimoine à chaque période",
-  },
-  {
-    id: "period",
-    label: "Périodique",
-    title: "Variation entre deux périodes",
+    id: "AUTRE",
+    label: "Autre",
+    title:
+      "Alternatifs, épargne salariale et actifs sans classe dédiée dans cette taxonomie",
   },
 ];
 
-const STYLES: { id: EvolutionChartStyle; label: string }[] = [
-  { id: "line", label: "Courbe" },
-  { id: "columns", label: "Colonnes" },
-];
-
-const VIEWS: { id: EvolutionViewMode; label: string; title: string }[] = [
-  { id: "global", label: "Globale", title: "Patrimoine total uniquement" },
+/**
+ * Ce que la courbe trace pour une classe.
+ *
+ * Les deux libellés sont explicites, et jamais interchangés : une variation de
+ * valeur inclut les apports, une performance ne les compte pas.
+ */
+/**
+ * Enveloppes fiscales proposées au sélecteur.
+ *
+ * `PEA-PME` n'a pas sa propre entrée : il rejoint `PEA`, comme le fait déjà
+ * `accountTypeForEnvelope` — les deux plans partagent la même famille fiscale.
+ * En faire une quatrième courbe inventerait une taxonomie que le reste du
+ * dépôt ignore.
+ */
+const ENVELOPE_CHOICES: {
+  id: "all" | "PEA" | "CTO";
+  label: string;
+  title: string;
+}[] = [
+  { id: "all", label: "Tout", title: "Patrimoine entier, toutes enveloppes confondues" },
   {
-    id: "decomposed",
-    label: "Décomposée",
-    title: "Positions, cash, revenus (div. / coupons / loyers), P&L",
+    id: "PEA",
+    label: "PEA",
+    title: "Titres détenus en PEA ou PEA-PME, sur les périodes où le journal le démontre",
+  },
+  {
+    id: "CTO",
+    label: "CTO",
+    title: "Titres détenus en compte-titres, sur les périodes où le journal le démontre",
   },
 ];
 
-const BENCHMARK_CHOICES: {
-  id: EvolutionBenchmarkChoice;
+const METRIC_CHOICES: {
+  id: "value" | "performance";
+  label: string;
+  title: string;
+}[] = [
+  { id: "value", label: "Valeur", title: "Encours de la classe, apports compris" },
+  {
+    id: "performance",
+    label: "Performance",
+    title:
+      "Résultat cumulé de la classe, mouvements de capitaux retirés — hors revenus encaissés",
+  },
+];
+
+const SCOPE_CHOICES: {
+  id: EvolutionScope;
   label: string;
   title: string;
 }[] = [
   {
-    id: "default",
-    label: "Défaut",
-    title: "Benchmark défini dans Préférences",
+    id: "gross",
+    label: "Portefeuille",
+    title: "Valeur brute des actifs — titres, cash, alternatifs, épargne salariale",
   },
-  { id: "none", label: "Aucun", title: "Pas de comparaison" },
   {
-    id: "inflation",
-    label: "Inflation",
-    title: "Pouvoir d'achat — indice des prix INSEE (IPC France)",
+    id: "net",
+    label: "Patrimoine net",
+    title: "Valeur brute des actifs moins le capital restant dû",
   },
+];
+
+/**
+ * Échelle de lecture — quotidienne ou horaire.
+ *
+ * Proposée sur la seule fenêtre de sept jours : c'est là que l'heure a un sens,
+ * et la collecte horaire ne remonte de toute façon pas plus loin. Le choix est
+ * volontairement local et non mémorisé — c'est une façon de regarder, pas un
+ * réglage de compte, et le mémoriser ferait rouvrir l'écran sur une courbe que
+ * l'utilisateur n'a pas demandée.
+ *
+ * La courbe quotidienne reste le défaut : l'intraday s'ajoute au parcours, il
+ * ne le remplace pas.
+ */
+type EvolutionScale = "daily" | "intraday";
+
+const SCALE_CHOICES: { id: EvolutionScale; label: string; title: string }[] = [
+  { id: "daily", label: "Jour", title: "Un point par jour — historique complet" },
+  {
+    id: "intraday",
+    label: "Heure",
+    title: "Un point par heure, sur les observations réellement collectées",
+  },
+];
+
+const VERSUS_CHOICES: {
+  id: EvolutionBenchmark;
+  label: string;
+  title: string;
+}[] = [
+  { id: "none", label: "Aucun", title: "Valeur du portefeuille, en devise" },
   {
     id: "index",
     label: "Indice",
@@ -126,26 +192,16 @@ function Segmented<T extends string>({
   onChange,
   ariaLabel,
   testIdPrefix,
-  size = "md",
-  muted = false,
 }: {
-  items: { id: T; label: string; title?: string }[];
+  items: { id: T; label: string; title?: string; disabled?: boolean }[];
   value: T;
   onChange: (v: T) => void;
   ariaLabel: string;
   testIdPrefix?: string;
-  size?: "md" | "sm";
-  /** Contrôles secondaires : moins saillants */
-  muted?: boolean;
 }) {
   return (
     <div
-      className={cn(
-        "inline-flex max-w-full flex-wrap rounded-[var(--radius-md)] border p-0.5",
-        muted
-          ? "border-[var(--border)]/70 bg-transparent"
-          : "border-[var(--border)] bg-[var(--muted)]/45"
-      )}
+      className="inline-flex max-w-full flex-wrap rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/45 p-0.5"
       role="tablist"
       aria-label={ariaLabel}
     >
@@ -158,24 +214,21 @@ function Segmented<T extends string>({
             role="tab"
             title={item.title}
             aria-selected={selected}
+            aria-disabled={item.disabled}
+            disabled={item.disabled}
             data-testid={
               testIdPrefix ? `${testIdPrefix}-${item.id}` : undefined
             }
-            onClick={() => onChange(item.id)}
+            onClick={() => !item.disabled && onChange(item.id)}
             className={cn(
-              "rounded-[var(--radius-sm)] font-medium transition",
+              "rounded-[var(--radius-sm)] px-2.5 py-1 text-[11px] font-medium transition",
               "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-              size === "sm"
-                ? "px-1.5 py-0.5 text-[10px]"
-                : "px-2.5 py-1 text-[11px]",
-              selected &&
-                !muted &&
-                "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]",
-              selected &&
-                muted &&
-                "bg-[var(--muted)] font-semibold text-[var(--foreground)]",
-              !selected &&
-                "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              // Même traitement que les périodes hors historique : le choix
+              // reste visible, mais on voit qu'il n'est pas disponible.
+              item.disabled && "cursor-not-allowed opacity-40",
+              selected
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]"
+                : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
             )}
           >
             {item.label}
@@ -187,10 +240,11 @@ function Segmented<T extends string>({
 }
 
 /**
- * Module Évolution du portefeuille — V3
- * Hiérarchie : période → lecture/style → options avancées (vue / Vs)
- * Prefs persistées (localStorage versionné).
- * Conçu pour s'insérer dans une colonne de grille (pas de bandeau full-width).
+ * Module Évolution du portefeuille — refonte « premium » orientée
+ * investissement, à deux réglages seulement : la période et la comparaison
+ * (« Versus »). Toute la logique d'affichage (numéraire vs pourcentage,
+ * rebasage du benchmark) est centralisée ici et dans `evolution-aggregate.ts`
+ * — aucun calcul de performance dupliqué ailleurs dans l'app.
  */
 export function PortfolioEvolutionPanel({
   history,
@@ -204,55 +258,49 @@ export function PortfolioEvolutionPanel({
   className?: string;
 }) {
   const isClient = useIsClient();
-  const [prefs, setPrefs] = useState<EvolutionPrefsV4>(DEFAULT_EVOLUTION_PREFS);
-  const [userDefaultBm, setUserDefaultBm] = useState<EvolutionBenchmark>("none");
+  const [prefs, setPrefs] = useState<EvolutionPrefsV5>(DEFAULT_EVOLUTION_PREFS);
   const [hydrated, setHydrated] = useState(false);
-  const styleTouched = useRef(false);
 
-  // Seed prefs/benchmark depuis localStorage au passage client (adjust state while rendering)
+  // Seed prefs depuis localStorage au passage client (adjust state while rendering)
   if (isClient && !hydrated) {
     setHydrated(true);
     setPrefs(loadEvolutionPrefs());
-    setUserDefaultBm(loadDefaultBenchmark());
   }
 
-  useEffect(() => {
-    if (!hydrated) return;
-    saveEvolutionPrefs(prefs);
-  }, [prefs, hydrated]);
+  const { range, versus, indexKey, scope } = prefs;
+  const assetClass = prefs.assetClass ?? null;
+  const classMetric = prefs.classMetric ?? "value";
+  const envelope = prefs.envelope ?? null;
 
-  // Recharger le défaut si l'utilisateur change les Préférences (autre onglet / focus)
-  useEffect(() => {
-    function onFocus() {
-      setUserDefaultBm(loadDefaultBenchmark());
-    }
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, []);
+  /*
+    L'échelle n'est pas mémorisée avec les autres préférences : c'est une façon
+    de regarder sur l'instant, pas un réglage de compte. Elle retombe donc sur
+    « Jour » — la courbe de référence — à chaque ouverture.
+  */
+  const [scale, setScale] = useState<EvolutionScale>("daily");
+  // L'heure n'a de sens que sur la fenêtre courte, la seule que la collecte
+  // horaire couvre. Ailleurs, le choix disparaît et la lecture reste quotidienne.
+  const scaleAvailable = range === "7d";
+  const showIntraday = scaleAvailable && scale === "intraday";
 
-  const { range, metric, style, view, benchmark, indexKey, advancedOpen } =
-    prefs;
+  const update = (patch: Partial<EvolutionPrefsV5>) => {
+    setPrefs((p) => {
+      const fusion = { ...p, ...patch, v: 5 as const };
+      /*
+        L'état en session passe par le même normaliseur que le stockage.
 
-  /** Benchmark effectif (héritage préférences ou override dashboard) */
-  const activeBenchmark: EvolutionBenchmark =
-    benchmark === "default" ? userDefaultBm : benchmark;
-
-  const update = (patch: Partial<EvolutionPrefsV4>) => {
-    setPrefs((p) => ({ ...p, ...patch, v: 4 }));
-  };
-
-  const setMetric = (m: EvolutionMetric) => {
-    // Soft default style only if user n'a pas forcé le style
-    if (!styleTouched.current) {
-      update({ metric: m, style: m === "period" ? "columns" : "line" });
-    } else {
-      update({ metric: m });
-    }
-  };
-
-  const setStyle = (s: EvolutionChartStyle) => {
-    styleTouched.current = true;
-    update({ style: s });
+        Sans lui, une combinaison invalide vivrait le temps d'une session sans
+        jamais être écrite : la courbe serait filtrée sur une enveloppe
+        qu'aucun contrôle n'affiche, et le rechargement « corrigerait » l'écran
+        sans que rien n'ait changé.
+      */
+      const next = {
+        ...fusion,
+        envelope: normalizeEnvelopeFor(fusion.assetClass, fusion.envelope),
+      };
+      if (hydrated) saveEvolutionPrefs(next);
+      return next;
+    });
   };
 
   const firstDate = history[0]?.date ?? null;
@@ -267,17 +315,62 @@ export function PortfolioEvolutionPanel({
 
   // Repli 7j si la période courante devient indisponible (adjust state while rendering)
   if (hydrated && !rangeEnabled[range] && range !== "7d") {
-    setPrefs((p) => ({ ...p, range: "7d", v: 4 as const }));
+    setPrefs((p) => ({ ...p, range: "7d", v: 5 as const }));
   }
 
+  /*
+    Le périmètre est choisi **avant** l'agrégation, pas après.
+
+    Actifs bruts et patrimoine net diffèrent de l'encours des dettes : les
+    mélanger dans une même série ferait passer un remboursement d'emprunt pour
+    un mouvement de marché. Réécrire le total en amont garantit qu'une seule
+    des deux métriques circule dans toute la chaîne d'affichage.
+  */
+  const scopedHistory = useMemo(
+    () => scopeHistory(history, { scope, assetClass, envelope, classMetric }),
+    [history, scope, assetClass, classMetric, envelope]
+  );
+
+  /**
+   * Part des titres dont l'enveloppe n'est pas démontrée, sur toute la fenêtre.
+   *
+   * Le journal ne remonte qu'à sa mise en place : tout ce qui précède est
+   * inconnu, et le taire laisserait croire que `PEA + CTO` couvre tous les
+   * titres.
+   *
+   * Le chiffre était lu sur le dernier point, ce qui l'annulait dans le cas le
+   * plus courant : une fois toutes les lignes observées, le présent est connu
+   * et l'avertissement disparaissait — alors même que les cinq années
+   * précédentes de la courbe, elles, restaient inconnues. On balaie donc la
+   * fenêtre affichée, et l'on retient le montant le plus élevé qu'elle porte :
+   * c'est la part que la courbe ne démontre pas.
+   *
+   * `startOfRange` est celle de la série, pour que l'avertissement couvre
+   * exactement ce que l'œil voit.
+   */
+  const unknownEnvelopeEur = useMemo(() => {
+    if (!assetClass || !envelope) return 0;
+    const from = startOfRange(range);
+    const fromT = from ? from.getTime() : -Infinity;
+    let max = 0;
+    for (const p of history) {
+      if (Date.parse(p.date) < fromT) continue;
+      const u = Number(
+        p.byAssetClassAndEnvelopeBase?.[assetClass]?.UNKNOWN ?? 0
+      );
+      if (Number.isFinite(u) && u > max) max = u;
+    }
+    return max;
+  }, [history, assetClass, envelope, range]);
+
   const { points: rawPoints, interval } = useMemo(
-    () => buildEvolutionSeries(history, range, metric),
-    [history, range, metric]
+    () => buildEvolutionSeries(scopedHistory, range, "cumul"),
+    [scopedHistory, range]
   );
 
   // Mode "index" : récupère les clôtures réelles de l'indice choisi sur la
   // fenêtre affichée (marge amont pour disposer d'une clôture de base).
-  const wantIndex = view === "global" && activeBenchmark === "index";
+  const wantIndex = versus === "index";
   const idxFromKey = rawPoints[0]?.date.slice(0, 10) ?? "";
   const idxToKey = rawPoints[rawPoints.length - 1]?.date.slice(0, 10) ?? "";
   const indexQ = useQuery({
@@ -294,40 +387,42 @@ export function PortfolioEvolutionPanel({
       );
     },
   });
-  const indexData = indexQ.data;
   const indexCloses = useMemo<IndexClosePoint[]>(
-    () => indexData?.points ?? [],
-    [indexData]
+    () => indexQ.data?.points ?? [],
+    [indexQ.data]
   );
 
   const points = useMemo(
-    () =>
-      view === "global" && activeBenchmark !== "none"
-        ? withBenchmarkSeries(rawPoints, activeBenchmark, { indexCloses })
-        : withBenchmarkSeries(rawPoints, "none"),
-    [rawPoints, view, activeBenchmark, indexCloses]
+    () => withBenchmarkSeries(rawPoints, versus, { indexCloses }),
+    [rawPoints, versus, indexCloses]
+  );
+
+  /*
+    Trois situations distinctes, et elles ne se disent pas pareil :
+    la période est trop courte, la donnée manque, ou tout va bien.
+  */
+
+  const percentPoints = useMemo(
+    () => (versus === "none" ? [] : toPercentSeries(points)),
+    [points, versus]
   );
 
   const gap = useMemo(
-    () =>
-      view === "global" && activeBenchmark !== "none"
-        ? benchmarkGapPct(points)
-        : null,
-    [points, view, activeBenchmark]
+    () => (versus === "none" ? null : benchmarkGapPct(points)),
+    [points, versus]
   );
 
   const benchmarkDisplayName =
-    activeBenchmark === "index"
-      ? marketIndexLabel(indexKey)
-      : benchmarkLabel(activeBenchmark);
+    versus === "index" ? marketIndexLabel(indexKey) : benchmarkLabel(versus);
 
   const summary = useMemo(() => evolutionDeltaSummary(points), [points]);
+  const headlinePct =
+    percentPoints.length > 0
+      ? percentPoints[percentPoints.length - 1]!.portfolioPct
+      : 0;
 
   const empty = !loading && history.length === 0;
-  const noPoints = !loading && !empty && points.length === 0;
-
-  const showBenchmark =
-    view === "global" && activeBenchmark !== "none";
+  const noPoints = !loading && !empty && rawPoints.length === 0;
 
   return (
     <div
@@ -341,13 +436,16 @@ export function PortfolioEvolutionPanel({
         title="Évolution du portefeuille"
         subtitle={
           <>
-            Positions et liquidités
+            {assetClass && envelope
+              ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass} en ${envelope} — valeur`
+              : assetClass
+              ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass}${assetClass === "OBLIGATIONS" ? " (CTO)" : ""} — ${classMetric === "performance" ? "performance" : "valeur"}`
+              : scope === "net"
+                ? "Patrimoine net"
+                : "Actifs bruts"}
             <span className="mx-1 opacity-40">·</span>
             {evolutionIntervalLabel(interval)}
-            <span className="sr-only">
-              {" "}
-              ({evolutionIntervalHint(interval)})
-            </span>
+            <span className="sr-only"> ({evolutionIntervalHint(interval)})</span>
             {baseCurrency !== "EUR" ? (
               <>
                 <span className="mx-1 opacity-40">·</span>
@@ -358,28 +456,48 @@ export function PortfolioEvolutionPanel({
         }
         actions={
           summary && points.length > 0 ? (
-            <div
-              className={cn(
-                "shrink-0 text-right text-xs font-semibold tabular-nums",
-                summary.delta >= 0
-                  ? "text-[var(--success)]"
-                  : "text-[var(--danger)]"
-              )}
-              data-testid="evolution-delta"
-              title="Variation de la valeur totale sur la période affichée"
-            >
-              {summary.delta >= 0 ? "+" : ""}
-              {formatCurrency(summary.delta, baseCurrency)}
-              <span className="ml-1 font-medium opacity-90">
-                ({summary.delta >= 0 ? "+" : ""}
-                {summary.pct.toFixed(1)}&nbsp;%)
-              </span>
+            <div className="shrink-0 text-right" data-testid="evolution-headline">
+              <div
+                className={cn(
+                  "text-lg font-bold tabular-nums sm:text-xl",
+                  (versus === "none" ? summary.delta : headlinePct) >= 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--danger)]"
+                )}
+              >
+                {versus === "none" ? (
+                  <>
+                    {summary.delta >= 0 ? "+" : ""}
+                    {formatCurrency(summary.delta, baseCurrency)}
+                  </>
+                ) : (
+                  <>
+                    {headlinePct >= 0 ? "+" : ""}
+                    {headlinePct.toFixed(1)}&nbsp;%
+                  </>
+                )}
+              </div>
+              <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
+                {versus === "none"
+                  ? /*
+                       Deux chiffres, deux significations.
+
+                       Le montant au-dessus est la variation du patrimoine,
+                       versements compris. Le pourcentage est le rendement des
+                       investissements, versements neutralisés — c'est pourquoi
+                       il ne vaut pas « montant / valeur de départ ». Le dire
+                       explicitement évite de lire l'un comme le ratio de
+                       l'autre.
+                    */
+                    `${summary.pct >= 0 ? "+" : ""}${summary.pct.toFixed(1)} % de rendement`
+                  : `Vs ${benchmarkDisplayName}`}
+              </div>
             </div>
           ) : null
         }
       />
 
-      {/* Primaire : période + cumul/périodique · Avancé repliable */}
+      {/* Période + Versus — deux réglages, rien d'autre. */}
       <div className="mb-2.5 space-y-2" data-testid="evolution-controls">
         <div
           className="flex min-w-0 flex-wrap items-center gap-0.5 sm:gap-1"
@@ -423,195 +541,216 @@ export function PortfolioEvolutionPanel({
           })}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-          <Segmented
-            items={METRICS}
-            value={metric}
-            onChange={setMetric}
-            ariaLabel="Mode de lecture"
-            testIdPrefix="evolution-metric"
-          />
-          <button
-            type="button"
-            className={cn(
-              "ml-auto inline-flex items-center gap-1 rounded-[var(--radius-md)] border border-[var(--border)] px-2 py-1 text-[11px] font-medium transition",
-              "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-              advancedOpen
-                ? "border-[var(--primary)]/30 bg-[var(--primary-soft)] text-[var(--foreground)]"
-                : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-            )}
-            aria-expanded={advancedOpen}
-            data-testid="evolution-advanced-toggle"
-            onClick={() => update({ advancedOpen: !advancedOpen })}
-          >
-            <SlidersHorizontal className="h-3 w-3" aria-hidden />
-            Affichage
-            <ChevronDown
-              className={cn(
-                "h-3 w-3 transition-transform",
-                advancedOpen && "rotate-180"
-              )}
-              aria-hidden
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+          {scaleAvailable && (
+            <Segmented
+              items={SCALE_CHOICES}
+              value={scale}
+              onChange={setScale}
+              ariaLabel="Échelle de lecture"
+              testIdPrefix="evolution-scale"
             />
-          </button>
-        </div>
+          )}
+          {/*
+            La classe commande, l'enveloppe précise.
 
-        {advancedOpen && (
-          <div
-            className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/15 px-2.5 py-2"
-            data-testid="evolution-advanced"
-          >
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                Style
-              </span>
-              <Segmented
-                items={STYLES}
-                value={style}
-                onChange={setStyle}
-                ariaLabel="Style de graphique"
-                testIdPrefix="evolution-style"
-                size="sm"
-                muted
-              />
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                Vue
-              </span>
-              <Segmented
-                items={VIEWS}
-                value={view}
-                onChange={(v) => update({ view: v })}
-                ariaLabel="Mode de vue"
-                testIdPrefix="evolution-view"
-                size="sm"
-                muted
-              />
-            </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                Vs
-              </span>
-              <Segmented
-                items={BENCHMARK_CHOICES}
-                value={benchmark}
-                onChange={(b) => update({ benchmark: b })}
-                ariaLabel="Comparaison"
-                testIdPrefix="evolution-benchmark"
-                size="sm"
-                muted
-              />
-            </div>
-            {activeBenchmark === "index" && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                  Indice
-                </span>
-                <select
-                  className="input !h-7 !w-auto !min-w-0 !py-0 !pl-2 !pr-6 text-[11px]"
-                  value={indexKey}
-                  onChange={(e) =>
-                    update({ indexKey: e.target.value as MarketIndexKey })
-                  }
-                  data-testid="evolution-index-select"
-                  aria-label="Choix de l'indice de comparaison"
-                  title="Indice de marché comparé au portefeuille"
-                >
-                  {MARKET_INDICES.map((idx) => (
-                    <option key={idx.key} value={idx.key} title={idx.hint}>
-                      {idx.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {view === "decomposed" && activeBenchmark !== "none" && (
-              <p className="text-meta w-full basis-full">
-                Comparaison disponible en vue globale
-              </p>
-            )}
-          </div>
-        )}
+            Les deux ne sont plus exclusives : « où sont mes actions » est une
+            question qui a un sens, et y répondre demandait de composer les deux
+            filtres. La hiérarchie est celle de la question — on choisit d'abord
+            ce que l'on détient, puis, quand cela s'y prête, où.
+
+            Changer de classe remet l'enveloppe à « Tout » : garder « PEA » en
+            passant sur la crypto laisserait un filtre actif qu'aucun contrôle
+            n'affiche plus.
+          */}
+          <Segmented
+            items={CLASS_CHOICES}
+            value={assetClass ?? "all"}
+            onChange={(v) =>
+              update({
+                assetClass: v === "all" ? null : (v as EvolutionAssetClass),
+                envelope: null,
+              })
+            }
+            ariaLabel="Classe d'actifs"
+            testIdPrefix="evolution-class"
+          />
+          {/*
+            Le sélecteur d'enveloppe n'existe que là où la question se pose.
+
+            Sur les actions seulement : ce sont les seules lignes dont le
+            portefeuille de démonstration comme le modèle admettent les deux
+            enveloppes. Les obligations reçoivent une indication plutôt qu'un
+            choix — voir le sous-titre — et la crypto, l'immobilier, le cash et
+            « Autre » n'ont aucun rapport avec un compte-titres.
+          */}
+          {assetClass === "ACTIONS" && (
+            <Segmented
+              items={ENVELOPE_CHOICES}
+              value={envelope ?? "all"}
+              onChange={(v) =>
+                update({ envelope: v === "all" ? null : (v as "PEA" | "CTO") })
+              }
+              ariaLabel="Enveloppe fiscale"
+              testIdPrefix="evolution-envelope"
+            />
+          )}
+          {/*
+            Valeur ou performance : la distinction n'a de sens que sur une
+            classe, la courbe globale ayant déjà sa propre lecture.
+
+            Retirée dès qu'une enveloppe est choisie : la performance se calcule
+            en retirant les flux, et aucun flux historique n'est attribuable à
+            une enveloppe — l'enveloppe d'un achat de 2024 est précisément ce
+            que le journal ne dit pas. Proposer le choix produirait un chiffre
+            faux.
+          */}
+          {assetClass && !envelope && (
+            <Segmented
+              items={METRIC_CHOICES}
+              value={classMetric}
+              onChange={(v) => update({ classMetric: v })}
+              ariaLabel="Grandeur tracée"
+              testIdPrefix="evolution-metric"
+            />
+          )}
+          {/*
+            Brut ou net ne se pose que sur le patrimoine entier : les dettes
+            n'appartiennent à aucune classe, et proposer « Crypto nette »
+            n'aurait pas de sens.
+          */}
+          {!assetClass && !envelope && (
+            <Segmented
+              items={SCOPE_CHOICES}
+              value={scope}
+              onChange={(v) => update({ scope: v })}
+              ariaLabel="Périmètre"
+              testIdPrefix="evolution-scope"
+            />
+          )}
+          <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+            Vs
+          </span>
+          <Segmented
+            items={VERSUS_CHOICES}
+            value={versus}
+            onChange={(v) => update({ versus: v })}
+            ariaLabel="Comparaison"
+            testIdPrefix="evolution-versus"
+          />
+          {versus === "index" && (
+            <select
+              className="input !h-7 w-auto !min-w-0 py-0 pl-2 pr-6 text-[11px]"
+              value={indexKey}
+              onChange={(e) =>
+                update({ indexKey: e.target.value as MarketIndexKey })
+              }
+              data-testid="evolution-index-select"
+              aria-label="Choix de l'indice de comparaison"
+              title="Indice de marché comparé au portefeuille"
+            >
+              {MARKET_INDICES.map((idx) => (
+                <option key={idx.key} value={idx.key} title={idx.hint}>
+                  {idx.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
-      {/* —— Graphique (flex pour s'aligner sur la colonne droite) —— */}
+      {/* Graphique — flex pour s'aligner sur la colonne droite du dashboard */}
       <div
         className="relative min-h-[12.5rem] w-full flex-1 sm:min-h-[13.5rem]"
         data-testid="evolution-chart"
       >
         <div className="absolute inset-0">
-        {loading ? (
-          <div
-            className="flex h-full flex-col gap-3 px-2 py-2"
-            data-testid="evolution-loading-skeleton"
-            aria-busy="true"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <Skeleton className="h-3 w-28" />
-              <Skeleton className="h-6 w-20 rounded-full" />
+          {/*
+            L'intraday court-circuite les états de la courbe quotidienne : il a
+            les siens, et « historique encore vide » ne décrirait pas la même
+            chose qu'« aucune donnée intraday collectée ».
+          */}
+          {showIntraday ? (
+            <IntradaySection baseCurrency={baseCurrency} />
+          ) : loading ? (
+            <div
+              className="flex h-full flex-col gap-3 px-2 py-2"
+              data-testid="evolution-loading-skeleton"
+              aria-busy="true"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <Skeleton className="h-3 w-28" />
+                <Skeleton className="h-6 w-20 rounded-full" />
+              </div>
+              <Skeleton className="min-h-[10rem] w-full flex-1 rounded-[var(--radius-lg)]" />
+              <div className="flex gap-2">
+                <Skeleton className="h-2 w-14" />
+                <Skeleton className="h-2 w-16" />
+                <Skeleton className="h-2 w-12" />
+              </div>
             </div>
-            <Skeleton className="min-h-[10rem] w-full flex-1 rounded-[var(--radius-lg)]" />
-            <div className="flex gap-2">
-              <Skeleton className="h-2 w-14" />
-              <Skeleton className="h-2 w-16" />
-              <Skeleton className="h-2 w-12" />
-            </div>
-          </div>
-        ) : empty ? (
-          <EmptyPlaceholder
-            compact
-            title="Historique encore vide"
-            description="Actualisez les cours pour enregistrer un premier point de courbe."
-          />
-        ) : noPoints ? (
-          <EmptyPlaceholder
-            compact
-            title="Période trop courte"
-            description="Choisissez une plage plus large ou attendez davantage d'historique."
-          />
-        ) : view === "decomposed" && metric === "cumul" ? (
-          style === "columns" ? (
-            <DecomposedCumulColumns data={points} baseCurrency={baseCurrency} />
+          ) : empty ? (
+            <EmptyPlaceholder
+              compact
+              title="Historique encore vide"
+              description="Actualisez les cours pour enregistrer un premier point de courbe."
+            />
+          ) : noPoints ? (
+            /*
+              Deux raisons très différentes de n'avoir aucun point, et une seule
+              phrase les couvrait. Quand l'enveloppe est inconnue sur toute la
+              fenêtre, « période trop courte » envoie élargir la plage — ce qui
+              ne révélera jamais rien, l'historique manquant étant justement
+              plus ancien. On dit donc ce qui manque réellement.
+            */
+            envelope && unknownEnvelopeEur > 0 ? (
+              <EmptyPlaceholder
+                compact
+                testId="evolution-envelope-all-unknown"
+                title="Enveloppe inconnue sur cette période"
+                description="Le journal des enveloppes ne remonte pas jusqu'ici : aucune valeur PEA ou CTO n'y est démontrable. Une plage plus récente en montrera la partie connue."
+              />
+            ) : (
+              <EmptyPlaceholder
+                compact
+                title="Période trop courte"
+                description="Choisissez une plage plus large ou attendez davantage d'historique."
+              />
+            )
+          ) : versus === "none" ? (
+            <PortfolioValueChart data={points} baseCurrency={baseCurrency} />
           ) : (
-            <DecomposedCumulAreas data={points} baseCurrency={baseCurrency} />
-          )
-        ) : view === "decomposed" && metric === "period" ? (
-          <DecomposedPeriodChart
-            data={points}
-            baseCurrency={baseCurrency}
-            style={style}
-          />
-        ) : metric === "period" ? (
-          style === "line" ? (
-            <PeriodLineChart
-              data={points}
-              baseCurrency={baseCurrency}
-              showBenchmark={showBenchmark}
+            <PortfolioPercentChart
+              data={percentPoints}
               benchmarkName={benchmarkDisplayName}
             />
-          ) : (
-            <PeriodColumnsChart data={points} baseCurrency={baseCurrency} />
-          )
-        ) : style === "columns" ? (
-          <GlobalColumnsChart data={points} baseCurrency={baseCurrency} />
-        ) : (
-          <GlobalLineChart
-            data={points}
-            baseCurrency={baseCurrency}
-            showBenchmark={showBenchmark}
-            benchmarkName={benchmarkDisplayName}
-          />
-        )}
+          )}
         </div>
       </div>
 
-      {view === "decomposed" && !empty && points.length > 0 && (
-        <p className="text-meta mt-2 shrink-0">
-          Revenus du journal · dividendes, coupons, loyers
+      {envelope && unknownEnvelopeEur > 0 && !empty && (
+        <p
+          className="text-meta mt-1.5 shrink-0"
+          data-testid="evolution-envelope-unknown"
+        >
+          {/*
+            Nommer l'écart plutôt que le laisser deviner. Sans cette ligne, un
+            utilisateur lirait « PEA 40 800 € » en croyant y voir tous ses
+            titres de PEA, alors que le journal ne couvre qu'une partie de la
+            période.
+
+            La ligne s'affiche aussi quand la courbe est vide : c'est même le
+            cas où elle importe le plus, l'écran n'ayant alors rien d'autre à
+            montrer que l'absence.
+          */}
+          Une partie de l&apos;historique PEA/CTO est inconnue avant le premier
+          constat d&apos;enveloppe — jusqu&apos;à{" "}
+          {formatCurrency(unknownEnvelopeEur, baseCurrency)} de titres non
+          rattachés sur cette période.
         </p>
       )}
-      {showBenchmark && (
+
+      {versus !== "none" && !empty && !noPoints && points.length > 0 && (
         <p className="text-meta mt-1.5 shrink-0" data-testid="evolution-vs-note">
           Vs {benchmarkDisplayName}
           {gap ? (
@@ -628,7 +767,13 @@ export function PortfolioEvolutionPanel({
                 data-testid="evolution-vs-gap"
               >
                 {gap.gapPct >= 0 ? "+" : ""}
-                {gap.gapPct.toFixed(1)} pts
+                {/* Convention française, comme les montants juste à côté :
+                    « 13.9 pts » à côté de « 100 400,00 € » jure. */}
+                {gap.gapPct.toLocaleString("fr-FR", {
+                  minimumFractionDigits: 1,
+                  maximumFractionDigits: 1,
+                })}{" "}
+                pts
               </span>
             </>
           ) : wantIndex && indexQ.isLoading ? (
@@ -638,8 +783,6 @@ export function PortfolioEvolutionPanel({
           ) : (
             ""
           )}
-          {activeBenchmark === "inflation" ? " · IPC France" : ""}
-          {benchmark === "default" ? " · défaut préférences" : ""}
         </p>
       )}
     </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { tangibleAssetSchema } from "@/app/lib/schemas";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 import {
   presentFields,
   requireBodyId,
@@ -10,6 +11,7 @@ import {
   createTangible,
   deleteTangible,
   listTangibles,
+  TangibleInputError,
   updateTangible,
 } from "@/app/lib/alternatives/tangibles";
 
@@ -21,7 +23,7 @@ export async function GET() {
   } catch (e) {
     console.error("[tangibles GET]", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erreur" },
+      { error: clientErrorMessage(e, "Erreur") },
       { status: 500 }
     );
   }
@@ -37,9 +39,15 @@ export async function POST(req: Request) {
     const line = await createTangible(userId, parsed.data);
     return NextResponse.json({ line }, { status: 201 });
   } catch (e) {
+    // Une erreur de saisie porte un message utile ; tout le reste est un
+    // défaut serveur, qui doit laisser une trace plutôt qu'un « Erreur » nu.
+    if (e instanceof TangibleInputError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    console.error("[tangibles POST]", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erreur" },
-      { status: 400 }
+      { error: clientErrorMessage(e, "Création impossible") },
+      { status: 500 }
     );
   }
 }
@@ -57,8 +65,17 @@ export async function PUT(req: Request) {
     const line = await updateTangible(userId, id, patch);
     return NextResponse.json({ line });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Erreur";
-    return NextResponse.json({ error: msg }, { status: msg.includes("introuvable") ? 404 : 400 });
+    if (e instanceof TangibleInputError) {
+      return NextResponse.json(
+        { error: e.message },
+        { status: e.message.includes("introuvable") ? 404 : 400 }
+      );
+    }
+    console.error("[tangibles PUT]", e);
+    return NextResponse.json(
+      { error: clientErrorMessage(e, "Mise à jour impossible") },
+      { status: 500 }
+    );
   }
 }
 
@@ -71,7 +88,7 @@ export async function DELETE(req: Request) {
     await deleteTangible(userId, id);
     return NextResponse.json({ ok: true });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Erreur";
+    const msg = clientErrorMessage(e, "Erreur");
     return NextResponse.json({ error: msg }, { status: msg.includes("introuvable") ? 404 : 400 });
   }
 }

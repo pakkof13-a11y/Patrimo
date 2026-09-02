@@ -1,3 +1,5 @@
+import { parseNumber } from "./normalize";
+
 /**
  * Empreintes d’import + classification strict / suspect pour arbitrage UI.
  */
@@ -21,10 +23,19 @@ export function normalizeImportNumber(
   v: string | number | null | undefined
 ): string {
   if (v == null || v === "") return "";
-  const s = String(v).trim().replace(/\s/g, "").replace(",", ".");
-  if (!s) return "";
-  const n = Number(s);
-  if (!Number.isFinite(n)) return s.toLowerCase();
+  const raw = String(v).trim();
+  if (!raw) return "";
+
+  // Le flux principal fournit déjà des nombres canoniques (mapCsvToDrafts
+  // parse puis restringifie). On passe malgré tout par `parseNumber` pour que
+  // deux écritures d'un même montant — « 1234.56 » côté base et « 1,234.56 »
+  // saisi à la main dans l'aperçu d'import — produisent la même empreinte.
+  // Sans ça, `.replace(",", ".")` (non global) donnait « 1.234.56 », donc NaN,
+  // donc deux empreintes différentes : le doublon passait au travers.
+  const n = parseNumber(raw);
+  if (n == null || !Number.isFinite(n)) {
+    return raw.replace(/\s/g, "").toLowerCase();
+  }
   const fixed = n.toFixed(8).replace(/\.?0+$/, "");
   return fixed === "-0" ? "0" : fixed;
 }

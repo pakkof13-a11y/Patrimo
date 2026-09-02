@@ -501,7 +501,7 @@ export function AssetPriceChart({
               className={cn(
                 "text-[10px] font-medium tabular-nums",
                 delta.up
-                  ? "text-sky-600 dark:text-sky-400"
+                  ? "text-stone-600 dark:text-stone-400"
                   : "text-[var(--muted-foreground)]"
               )}
             >
@@ -624,7 +624,7 @@ export function AssetPriceChart({
               >
                 <span className="hidden sm:inline">Vs</span>
                 <select
-                  className="input !w-auto !py-0.5 !text-[10px]"
+                  className="input w-auto py-0.5 text-[10px]"
                   value={benchmarkMode}
                   onChange={(e) =>
                     setBenchmarkMode(e.target.value as BenchmarkMode)
@@ -840,6 +840,28 @@ export function AssetPriceChart({
             </p>
           </div>
         </div>
+      )}
+
+      {/*
+        Série synthétique : le dire en toutes lettres, pas seulement par un
+        badge de neuf pixels. Sans feed marché, l'API rend une courbe fabriquée
+        — elle a l'exacte apparence d'un historique réel, et c'est précisément
+        ce qui la rend trompeuse. Le graphique reste affiché (sa forme sert au
+        repérage des transactions), mais aucun niveau n'y est exploitable.
+      */}
+      {!historyError && q.data?.source === "mock" && (
+        <p
+          data-testid="chart-mock-notice"
+          className={cn(
+            "mb-2 rounded-md px-2 py-1 text-[10px] leading-snug",
+            "bg-amber-50 text-amber-900 ring-1 ring-inset ring-amber-300",
+            "dark:bg-amber-950/60 dark:text-amber-100 dark:ring-amber-700"
+          )}
+        >
+          Aucun historique de cours n&apos;est disponible pour cet actif : la
+          courbe ci-dessous est une série synthétique. Ni les niveaux ni la
+          performance affichés ne reflètent le marché.
+        </p>
       )}
 
       {/* Zone graphique unique */}

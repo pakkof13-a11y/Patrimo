@@ -5,6 +5,7 @@
  */
 
 export type MarketIndexKey =
+  // Comparateur « Versus »
   | "cac40"
   | "sp500"
   | "nasdaq"
@@ -13,7 +14,16 @@ export type MarketIndexKey =
   | "bitcoin"
   | "ethereum"
   | "eurusd"
-  | "gold";
+  | "gold"
+  // Bandeau de marché
+  | "dax"
+  | "stoxx600"
+  | "nasdaq100"
+  | "djia"
+  | "btcusd"
+  | "ethusd"
+  | "xauusd"
+  | "xagusd";
 
 export type MarketIndex = {
   key: MarketIndexKey;
@@ -45,10 +55,62 @@ export const MARKET_INDICES: MarketIndex[] = [
   { key: "gold", label: "Or", yahoo: "GC=F", hint: "Once d'or (USD, futures Comex)" },
 ];
 
-const BY_KEY = new Map(MARKET_INDICES.map((i) => [i.key, i]));
+/**
+ * Bandeau marchés du terminal — catalogue distinct de `MARKET_INDICES`.
+ *
+ * Les deux listes servent des rôles différents et ne doivent pas fusionner :
+ * `MARKET_INDICES` peuple le sélecteur « Versus » du graphique d'évolution
+ * (seules des références auxquelles comparer un portefeuille y ont un sens),
+ * tandis que celle-ci est un fil d'actualité de marché — une parité EUR/USD
+ * s'y lit très bien mais ne serait pas un benchmark patrimonial recevable.
+ *
+ * L'ordre est celui du défilement : les places européennes, puis les
+ * américaines, puis le hors-séance permanent (crypto, métaux, change). Il suit
+ * la journée d'un investisseur français, et regroupe les instruments qui
+ * ferment ensemble — un bandeau où « fermé » alterne avec des cours vivants se
+ * lit plus mal qu'un bandeau où les états se suivent.
+ *
+ * Les deux alimentent en revanche la même liste blanche côté API.
+ */
+export const MARKET_TICKERS: MarketIndex[] = [
+  { key: "cac40", label: "CAC 40", yahoo: "^FCHI", hint: "Actions françaises" },
+  { key: "dax", label: "DAX", yahoo: "^GDAXI", hint: "Actions allemandes" },
+  {
+    key: "stoxx600",
+    label: "STOXX 600",
+    yahoo: "^STOXX",
+    hint: "Grandes cap. européennes",
+  },
+  { key: "sp500", label: "S&P 500", yahoo: "^GSPC", hint: "Grandes cap. US" },
+  { key: "nasdaq100", label: "NASDAQ 100", yahoo: "^NDX", hint: "Tech US" },
+  { key: "djia", label: "DOW JONES", yahoo: "^DJI", hint: "Industrielles US" },
+  { key: "btcusd", label: "BTC/USD", yahoo: "BTC-USD", hint: "Bitcoin en dollar" },
+  { key: "ethusd", label: "ETH/USD", yahoo: "ETH-USD", hint: "Ether en dollar" },
+  { key: "xauusd", label: "XAU/USD", yahoo: "XAUUSD=X", hint: "Once d'or" },
+  { key: "xagusd", label: "XAG/USD", yahoo: "XAGUSD=X", hint: "Once d'argent" },
+  {
+    key: "eurusd",
+    label: "EUR/USD",
+    yahoo: "EURUSD=X",
+    hint: "Parité euro / dollar",
+  },
+];
+
+const BY_KEY = new Map(
+  [...MARKET_INDICES, ...MARKET_TICKERS].map((i) => [i.key, i])
+);
+
+/**
+ * Vrai uniquement pour les clés proposées dans le sélecteur « Versus ».
+ *
+ * Volontairement plus strict que `BY_KEY` : une préférence persistée pointant
+ * sur un symbole réservé au bandeau (EUR/USD…) laisserait le `<select>` sans
+ * option correspondante, donc sans valeur affichée.
+ */
+const SELECTABLE = new Set(MARKET_INDICES.map((i) => i.key));
 
 export function isMarketIndexKey(v: unknown): v is MarketIndexKey {
-  return typeof v === "string" && BY_KEY.has(v as MarketIndexKey);
+  return typeof v === "string" && SELECTABLE.has(v as MarketIndexKey);
 }
 
 export function marketIndexByKey(key: string): MarketIndex | undefined {
@@ -59,7 +121,10 @@ export function marketIndexLabel(key: string): string {
   return BY_KEY.get(key as MarketIndexKey)?.label ?? "Indice";
 }
 
-/** Table {key → symbole Yahoo} pour l'API benchmark. */
+/**
+ * Liste blanche {key → symbole Yahoo} de l'API `/api/benchmark`.
+ * Union des deux catalogues : tout ce que l'UI peut demander, et rien de plus.
+ */
 export const MARKET_INDEX_SYMBOLS: Record<string, string> = Object.fromEntries(
-  MARKET_INDICES.map((i) => [i.key, i.yahoo])
+  [...MARKET_INDICES, ...MARKET_TICKERS].map((i) => [i.key, i.yahoo])
 );

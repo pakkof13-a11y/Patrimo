@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { resetUserData } from "@/app/lib/portfolio/clear-user-data";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 /**
  * DELETE /api/preferences/clear-data
@@ -32,10 +33,10 @@ export async function DELETE(req: Request) {
     console.error("[preferences/clear-data DELETE]", e);
     return NextResponse.json(
       {
-        error:
-          e instanceof Error
-            ? e.message
-            : "Erreur base de données lors de la réinitialisation",
+        error: clientErrorMessage(
+          e,
+          "Erreur base de données lors de la réinitialisation"
+        ),
       },
       { status: 500 }
     );

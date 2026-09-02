@@ -6,6 +6,7 @@ import {
   fxRateToEur,
 } from "@/app/lib/market/fx";
 import { requireUserId } from "@/app/lib/auth-helpers";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 export async function GET(req: Request) {
   const userId = await requireUserId();
@@ -30,12 +31,21 @@ export async function GET(req: Request) {
         from.toUpperCase() === "EUR"
           ? "1"
           : await fxRateToEurOnDate(from, date);
+      /*
+        `source` disait « frankfurter-historical » quoi qu'il arrive, y compris
+        quand la valeur venait en réalité du taux du jour. L'étiquette affirmait
+        une provenance que la donnée n'avait pas.
+
+        Un taux non démontré se rend désormais `null`, avec une source qui le
+        dit. La réponse reste 200 : ne pas connaître un taux d'archive n'est pas
+        une erreur de la requête.
+      */
       return NextResponse.json({
         from: from.toUpperCase(),
         to: "EUR",
         date,
         fxRateToEur: rate,
-        source: "frankfurter-historical",
+        source: rate == null ? "unknown" : "frankfurter-historical",
       });
     }
 
@@ -55,7 +65,7 @@ export async function GET(req: Request) {
   } catch (e) {
     console.error("GET /api/fx", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erreur de conversion FX" },
+      { error: clientErrorMessage(e, "Erreur de conversion FX") },
       { status: 500 }
     );
   }

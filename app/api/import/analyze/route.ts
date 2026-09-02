@@ -9,6 +9,7 @@ import {
 import type { ImportDraftRow } from "@/app/lib/import/map-rows";
 import type { ColumnMapping } from "@/app/lib/import/types";
 import { AccountingError } from "@/app/lib/accounting";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 /**
  * POST /api/import/analyze
@@ -114,7 +115,7 @@ export async function POST(req: Request) {
     }
     console.error("import analyze", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erreur d'analyse" },
+      { error: clientErrorMessage(e, "Erreur d'analyse") },
       { status: 500 }
     );
   }

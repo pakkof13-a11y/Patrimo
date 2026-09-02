@@ -1,4 +1,4 @@
-# Patrimo — Suivi de patrimoine
+# Aurea — Suivi de patrimoine
 
 Application locale de suivi d’investissements (actions, crypto, immobilier, cash multi-plateformes).
 
@@ -266,14 +266,14 @@ ce cas (URL sans `neon.tech` et hors Vercel) et utilise l'adapter
 ## Import CSV
 
 - Bouton **Import CSV** (en-tête + onglet Transactions)
-- Formats : **Auto-détection**, **Modèle Patrimo**, **Générique**, **Binance**, **Boursorama**, **Revolut** (compte / invest), **Coinbase** (Transaction history)
+- Formats : **Auto-détection**, **Modèle Aurea**, **Générique**, **Binance**, **Boursorama**, **Revolut** (compte / invest), **Coinbase** (Transaction history)
 - Flux : fichier → analyse / prévisualisation → sélection des lignes → import
 - Actifs manquants créés automatiquement (ticker / nom)
 - Modèle téléchargeable : `GET /api/import/template` ou bouton dans la modale
 - API : `POST /api/import/preview`, `POST /api/import/commit`
 - Historique importé en ordre chronologique avec `allowNegativeCash` pour coller aux exports
 
-Exemple de colonnes modèle Patrimo :
+Exemple de colonnes modèle Aurea :
 
 ```text
 date;type;ticker;name;quantity;unit_price;fees;currency;cash_amount;notes;asset_class

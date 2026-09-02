@@ -1,43 +1,33 @@
 "use client";
 
 import { fetchJson } from "@/app/lib/api-client";
-import { Fragment, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Banknote,
-  CalendarClock,
-  ChevronDown,
-  ChevronRight,
-  PencilLine,
-  Plus,
-  Trash2,
-} from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field, FormActions } from "@/components/ui/field";
 import { Modal } from "@/components/ui/modal";
 import { DateInput } from "@/components/ui/date-input";
-import { FinanceTip } from "@/components/ui/finance-tooltip";
 import { LiabilityCreateForm } from "@/components/modals/liability-create-form";
 import type { LiabilityForm } from "@/app/lib/schemas";
-import { LIABILITY_LENDER_OPTIONS } from "@/app/lib/constants";
-import { formatCurrency, formatDate, cn } from "@/app/lib/utils";
 import {
-  buildAmortizationSchedule,
-  currentScheduleIndex,
-  nextPaymentDueDate,
-  repaymentProgressPct,
-} from "@/app/lib/liabilities/amortization";
+  LIABILITY_CATEGORIES,
+  LIABILITY_CATEGORY_LABELS,
+  LIABILITY_LENDER_OPTIONS,
+} from "@/app/lib/constants";
+import { formatCurrency } from "@/app/lib/utils";
+
 import {
-  ModuleCallout,
-  ModuleCard,
-  ModuleCardHeader,
-  ModuleGuidedEmpty,
-  ModuleKpi,
-  ModulePageHeader,
-  moduleTableHeadClass,
-  moduleTableRowClass,
-} from "@/components/ui/module-shell";
+  buildLiabilityViews,
+  computeLiabilityTotals,
+  debtToPatrimonyPct,
+} from "@/app/lib/liabilities/overview";
+import { LiabilityList } from "@/components/liabilities/liability-list";
+import { LiabilityPanel } from "@/components/liabilities/liability-panel";
+import { Skeleton } from "@/components/ui/skeleton";
+import { KpiBandTile } from "@/components/ui/kpi-tiles";
+
 
 type LiabilityRow = {
   id: string;
@@ -48,11 +38,23 @@ type LiabilityRow = {
   currency: string;
   interestRate: string | null;
   monthlyPayment: string | null;
+  insuranceMonthly: string | null;
   startDate: string | null;
   endDate: string | null;
   paymentDay: number | null;
   lastPaymentAppliedAt: string | null;
   bankName: string | null;
+  category: string;
+  /** assetId brut (colonne Prisma) — voir linkedAssetId pour l'alias API/UI. */
+  assetId: string | null;
+  linkedAssetId: string | null;
+  linkedAsset: {
+    id: string;
+    name: string;
+    category: string;
+    accountType: string;
+    manualPrice: string | null;
+  } | null;
   notes: string | null;
   monthsRemaining: number | null;
   estimatedInterestRemaining: string;
@@ -66,18 +68,47 @@ type LiabilityRow = {
   }>;
 };
 
-const EVENT_LABELS: Record<string, string> = {
-  MONTHLY_DEBIT: "Prélèvement mensuel",
-  EARLY_REPAYMENT_PARTIAL: "Remb. anticipé partiel",
-  EARLY_REPAYMENT_TOTAL: "Remb. anticipé total",
-  PAYMENT_CHANGE: "Avenant mensualité",
-  RATE_CHANGE: "Avenant taux d'intérêt",
+/** Sous-ensemble d'Asset utilisé pour le sélecteur « Bien lié » — GET /api/assets réutilisé. */
+type LinkableAsset = {
+  id: string;
+  name: string;
+  ticker: string | null;
+  category: string;
+  accountType: string;
 };
 
-export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
+function isRealEstateAsset(a: LinkableAsset): boolean {
+  return a.category === "REAL_ESTATE_DIRECT" || a.accountType === "IMMOBILIER";
+}
+
+
+type LiabilityCategory = (typeof LIABILITY_CATEGORIES)[number];
+
+const LIABILITY_VIEWS = [
+  { id: "overview", label: "Vue d'ensemble" },
+  { id: "credits", label: "Crédits" },
+  { id: "schedule", label: "Échéancier" },
+  { id: "cost", label: "Coût de la dette" },
+] as const;
+
+type LiabilityViewId = (typeof LIABILITY_VIEWS)[number]["id"];
+
+export function LiabilitiesTab({
+  grossAssetsEur,
+  onOpenAsset,
+}: {
+  /**
+   * Actifs bruts, pour rapporter la dette au patrimoine. Absent, le ratio
+   * n'est pas affiché — un ratio sans dénominateur ne veut rien dire.
+   */
+  grossAssetsEur?: number | null;
+  /** Ouvre le bien immobilier financé par un crédit. */
+  onOpenAsset?: (assetId: string) => void;
+}) {
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [view, setView] = useState<LiabilityViewId>("overview");
   const [earlyId, setEarlyId] = useState<string | null>(null);
   const [earlyKind, setEarlyKind] = useState<"PARTIAL" | "TOTAL">("PARTIAL");
   const [earlyAmount, setEarlyAmount] = useState("");
@@ -89,7 +120,19 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
   const [amendDate, setAmendDate] = useState(() =>
     new Date().toISOString().slice(0, 10)
   );
-  const [showHelp, setShowHelp] = useState(false);
+  const [rateId, setRateId] = useState<string | null>(null);
+  const [rateValue, setRateValue] = useState("");
+  const [rateDate, setRateDate] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [deleteTarget, setDeleteTarget] = useState<LiabilityRow | null>(null);
+  const [deleteConfirmChecked, setDeleteConfirmChecked] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const DELETE_CONFIRM_WORD = "SUPPRIMER";
+  const canForceDelete =
+    deleteConfirmChecked &&
+    deleteConfirmText.trim().toUpperCase() === DELETE_CONFIRM_WORD;
+
 
   const listQ = useQuery({
     queryKey: ["liabilities"],
@@ -99,25 +142,26 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
       ),
   });
 
+  // Réutilise la liste d'actifs déjà exposée par /api/assets (pas de route
+  // dédiée) pour peupler le sélecteur de bien immobilier lié.
+  const assetsQ = useQuery({
+    queryKey: ["assets"],
+    queryFn: () => fetchJson<{ assets: LinkableAsset[] }>("/api/assets"),
+  });
+  const realEstateAssets = useMemo(
+    () => (assetsQ.data?.assets ?? []).filter(isRealEstateAsset),
+    [assetsQ.data?.assets]
+  );
+
   const rows = useMemo(
     () => listQ.data?.liabilities ?? [],
     [listQ.data?.liabilities]
   );
-  const totalRemaining = listQ.data?.totalRemainingEur || "0";
 
-  const monthlyOutflow = useMemo(() => {
-    return rows.reduce((acc, l) => {
-      if (!l.monthlyPayment) return acc;
-      const n = Number(l.monthlyPayment);
-      return acc + (Number.isFinite(n) ? n : 0);
-    }, 0);
-  }, [rows]);
-
-  const activeCount = useMemo(
-    () => rows.filter((l) => Number(l.remainingAmount) > 0).length,
-    [rows]
-  );
-
+  // Échéance à venir : calculée une seule fois pour tous les crédits actifs
+  // (pas de fausse alerte sur les crédits soldés — jamais dans activeRows).
+  // Diff en jours calendaires UTC, cohérent avec nextPaymentDueDate /
+  // startOfUtcDay déjà utilisés par le module d'amortissement.
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["liabilities"] });
     await qc.invalidateQueries({ queryKey: ["holdings"] });
@@ -132,19 +176,6 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
     onSuccess: async () => {
       toast.success("Crédit créé");
       setShowCreate(false);
-      await refresh();
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const patchMut = useMutation({
-    mutationFn: (body: Record<string, string | number | null>) =>
-      fetchJson("/api/liabilities", {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: async () => {
-      toast.success("Passif mis à jour");
       await refresh();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -205,431 +236,463 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const rateMut = useMutation({
+    mutationFn: () =>
+      fetchJson("/api/liabilities", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "rate_change",
+          liabilityId: rateId,
+          interestRate: rateValue,
+          eventDate: rateDate,
+        }),
+      }),
+    onSuccess: async () => {
+      toast.success("Taux mis à jour — projections recalculées");
+      setRateId(null);
+      setRateValue("");
+      await refresh();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const views = buildLiabilityViews(rows);
+  const totals = computeLiabilityTotals(views);
+  const selectedView = views.find((v) => v.id === selectedId) ?? null;
+  const selectedRow = rows.find((l) => l.id === selectedId) ?? null;
+  const debtRatioPct = debtToPatrimonyPct(totals.totalDebtEur, grossAssetsEur);
+
+  const visibleViews =
+    view === "credits" || view === "overview"
+      ? views
+      : views.filter((v) => v.status === "ACTIVE");
+
+  /*
+    Charge mensuelle consolidée — les trois prochaines échéances, tous crédits
+    confondus. Elle répond à « combien cela me coûte chaque mois », qui est la
+    deuxième des quatre questions du module.
+  */
+  const [clock] = useState(() => new Date());
+
+  /*
+    Charge mensuelle consolidée — les trois prochaines échéances, tous crédits
+    confondus. Elle répond à « combien cela me coûte chaque mois », la deuxième
+    des quatre questions du module.
+
+    L'horloge est lue une fois, dans un initialiseur d'état : la lire à chaque
+    rendu rendrait le composant impur et ferait bouger les dates sous le
+    curseur.
+  */
+  const upcomingActive = views.filter(
+    (v) => v.status === "ACTIVE" && v.totalMonthlyEur != null
+  );
+  const upcomingTotal = upcomingActive.reduce(
+    (s, v) => s + (v.totalMonthlyEur ?? 0),
+    0
+  );
+  const upcoming =
+    upcomingActive.length === 0
+      ? []
+      : [1, 2, 3].map((i) => ({
+          date: new Date(
+            Date.UTC(clock.getUTCFullYear(), clock.getUTCMonth() + i, 1)
+          ),
+          amount: upcomingTotal,
+        }));
+
   return (
-    <div className="section-stack" data-testid="liabilities-tab">
-      <ModulePageHeader
-        title="Passifs / Crédits"
-        subtitle={
-          <>
-            Crédits immobiliers, auto, conso ou dettes privées — capital restant
-            dû, mensualités et{" "}
-            <span className="inline-flex items-center gap-0.5">
-              prélèvement automatique
-              <FinanceTip term="Mensualité" />
-            </span>
-            .
-          </>
-        }
-        actions={
-          <Button
-            size="sm"
-            onClick={() => setShowCreate(true)}
-            data-testid="liability-add"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Nouveau crédit
-          </Button>
-        }
-      />
+    <div className="min-w-0 space-y-[var(--space-4)]" data-testid="liabilities-tab">
+      <datalist id="liability-lenders-datalist">
+        {LIABILITY_LENDER_OPTIONS.map((b) => (
+          <option key={b} value={b} />
+        ))}
+      </datalist>
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <ModuleKpi
-          label="Capital restant dû"
-          value={formatCurrency(totalRemaining, "EUR")}
-          valueClassName="text-[var(--danger)]"
-          hint={
-            rows.length === 0
-              ? "Somme des dettes une fois les crédits saisis"
-              : baseCurrency !== "EUR"
-                ? `Reporting aussi en ${baseCurrency}`
-                : "Total consolidé en euros"
-          }
-        />
-        <ModuleKpi
-          label="Crédits actifs"
-          value={
-            <>
-              {activeCount}
-              {rows.length > 0 && activeCount !== rows.length ? (
-                <span className="text-base font-normal text-[var(--muted-foreground)]">
-                  {" "}
-                  / {rows.length}
-                </span>
-              ) : null}
-            </>
-          }
-          hint="Positions avec capital encore dû"
-        />
-        <ModuleKpi
-          label="Charge mensuelle"
-          tip={<FinanceTip term="Mensualité" />}
-          value={formatCurrency(String(monthlyOutflow), "EUR")}
-          hint="Somme des mensualités renseignées"
-        />
-        <div className="card p-3.5 sm:p-4">
-          <div className="text-label">Suivi automatique</div>
-          <p className="text-meta mt-2 leading-relaxed">
-            À chaque passage du jour de prélèvement, le capital restant diminue
-            de la mensualité (sans double comptage).
+      {/* ── En-tête ──────────────────────────────────────────────── */}
+      <header className="module-page-header flex flex-wrap items-start justify-between gap-[var(--space-3)] px-0.5">
+        <div className="min-w-0">
+          <h1 className="text-title">Passifs / Crédits</h1>
+          <p className="text-meta">
+            Vue d&apos;ensemble de vos dettes et financements
+            {totals.activeCount > 0 ? (
+              <>
+                <span className="mx-1 opacity-40">·</span>
+                {totals.activeCount} crédit{totals.activeCount > 1 ? "s" : ""} en
+                cours
+                {totals.settledCount > 0 ? (
+                  <>
+                    <span className="mx-1 opacity-40">·</span>
+                    {totals.settledCount} soldé
+                    {totals.settledCount > 1 ? "s" : ""}
+                  </>
+                ) : null}
+              </>
+            ) : null}
           </p>
-          <button
-            type="button"
-            className="mt-2 text-[11px] font-medium text-[var(--primary)] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-            onClick={() => setShowHelp((v) => !v)}
-            aria-expanded={showHelp}
-          >
-            {showHelp ? "Masquer l’aide" : "Comprendre le module"}
-          </button>
         </div>
-      </section>
 
-      {showHelp && (
-        <ModuleCallout tone="info">
-          <ul className="space-y-1.5">
-            <li>
-              <strong>Capital restant dû</strong> — solde encore à rembourser ;
-              décrémenté automatiquement ou via remboursement anticipé.
-            </li>
-            <li>
-              <strong>Jour de prélèvement</strong> — jour du mois (1–31) où la
-              mensualité est appliquée. La date de début borne le premier
-              prélèvement possible.
-            </li>
-            <li>
-              <strong>Remboursement anticipé</strong> — partiel ou total, hors
-              échéance mensuelle.
-            </li>
-            <li>
-              <strong>Avenant</strong> — nouvelle mensualité ou taux : durée et
-              intérêts restants sont réestimés.
-            </li>
-          </ul>
-        </ModuleCallout>
+        <div className="relative flex shrink-0 items-center gap-[var(--space-2)]">
+          <Button onClick={() => setShowCreate(true)} data-testid="liability-add">
+            <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            Ajouter un crédit
+          </Button>
+        </div>
+      </header>
+
+      {/* ── KPI ──────────────────────────────────────────────────── */}
+      <div
+        className="card grid grid-cols-2 divide-x divide-y divide-[var(--border)] overflow-hidden sm:grid-cols-3 sm:divide-y-0 lg:grid-cols-5"
+        data-testid="liability-kpi-strip"
+      >
+        <KpiBandTile
+          testId="liability-kpi-debt"
+          label="Dette totale"
+          value={formatCurrency(String(totals.totalDebtEur), "EUR")}
+          secondary="Capital restant dû"
+          loading={listQ.isPending && !listQ.data}
+        />
+        <KpiBandTile
+          testId="liability-kpi-monthly"
+          label="Mensualités"
+          value={
+            totals.monthlyEur > 0
+              ? formatCurrency(String(totals.monthlyEur), "EUR")
+              : "—"
+          }
+          secondary={
+            totals.monthlyInsuranceEur > 0
+              ? `dont ${formatCurrency(String(totals.monthlyInsuranceEur), "EUR")} d'assurance`
+              : "Total mensuel"
+          }
+          loading={listQ.isPending && !listQ.data}
+        />
+        <KpiBandTile
+          testId="liability-kpi-rate"
+          label="Taux moyen"
+          value={
+            totals.weightedRatePct != null
+              ? `${totals.weightedRatePct.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} %`
+              : "—"
+          }
+          secondary="Pondéré par l'encours"
+          loading={listQ.isPending && !listQ.data}
+        />
+        <div data-testid="liability-kpi-interest-remaining">
+          <KpiBandTile
+            testId="liability-kpi-interest"
+            label="Intérêts restants"
+            value={formatCurrency(
+              String(totals.estimatedInterestRemainingEur),
+              "EUR"
+            )}
+            secondary="Estimation"
+            loading={listQ.isPending && !listQ.data}
+          />
+        </div>
+        <KpiBandTile
+          testId="liability-kpi-count"
+          label="Crédits actifs"
+          value={String(totals.activeCount)}
+          secondary={
+            totals.lastEndDate
+              ? `Fin ${totals.lastEndDateIsEstimated ? "env. " : ""}${new Date(
+                  totals.lastEndDate
+                ).toLocaleDateString("fr-FR", {
+                  month: "short",
+                  year: "numeric",
+                })}`
+              : "En cours"
+          }
+          loading={listQ.isPending && !listQ.data}
+        />
+      </div>
+
+      {/*
+        Poids de la dette dans le patrimoine.
+
+        Affiché seulement quand les actifs bruts sont connus : un ratio sans
+        dénominateur ne veut rien dire, et le montrer à 100 % serait pire que
+        de ne rien montrer.
+      */}
+      {debtRatioPct != null && (
+        <div
+          className="card flex flex-wrap items-baseline justify-between gap-[var(--space-3)] px-[var(--space-4)] py-[var(--space-3)]"
+          data-testid="liability-debt-ratio"
+        >
+          <div className="min-w-0">
+            <p className="text-label">Dette / patrimoine</p>
+            <p className="num text-[length:var(--text-lg)] font-semibold text-[var(--foreground)]">
+              {formatCurrency(String(totals.totalDebtEur), "EUR")}
+              <span className="mx-2 text-[var(--foreground-faint)]">·</span>
+              <span className="text-[var(--primary-text)]">
+                {debtRatioPct.toLocaleString("fr-FR", {
+                  maximumFractionDigits: 1,
+                })}{" "}
+                %
+              </span>
+            </p>
+          </div>
+          <p className="text-meta shrink-0">
+            Actifs bruts{" "}
+            <span className="num">
+              {formatCurrency(String(grossAssetsEur ?? 0), "EUR")}
+            </span>
+          </p>
+        </div>
       )}
 
-      <ModuleCard>
-        <ModuleCardHeader
-          title="Crédits en cours"
-          subtitle="Progression, prochaine échéance, amortissement prévisionnel et remboursements"
-        />
-
-        {listQ.isLoading ? (
-          <div
-            className="space-y-2 px-4 py-4"
-            aria-busy="true"
-            data-testid="liabilities-loading"
-          >
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div
-                key={i}
-                className="h-14 skeleton-block rounded-lg border border-[var(--border)]"
-              />
-            ))}
-          </div>
-        ) : rows.length === 0 ? (
-          <ModuleGuidedEmpty
-            title="Aucun crédit pour l’instant"
-            description="Enregistrez un crédit immobilier, auto, consommation ou une dette privée pour suivre le capital restant, la charge mensuelle et le calendrier."
-            bullets={[
-              "Montant initial et capital restant dû",
-              "Mensualité + jour de prélèvement → décrément auto",
-              "Tableau d’amortissement prévisionnel",
-              "Remboursements anticipés en un clic",
-            ]}
-            primaryLabel="Créer mon premier crédit"
-            onPrimary={() => setShowCreate(true)}
-            primaryTestId="liability-empty-add"
-          />
-        ) : (
-          <div className="table-container-responsive table-fluid-wrap">
-            <table
-              className="table-fluid text-sm"
-              data-testid="liabilities-table"
+      {/* ── Navigation secondaire ────────────────────────────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-[var(--space-2)]">
+        <div className="term-seg" role="tablist" aria-label="Vues des passifs">
+          {LIABILITY_VIEWS.map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              role="tab"
+              aria-selected={view === v.id}
+              data-active={view === v.id}
+              className="term-seg-item"
+              onClick={() => setView(v.id)}
+              data-testid={`liability-view-${v.id}`}
             >
-              <thead className={moduleTableHeadClass}>
-                <tr>
-                  <th className="px-3 py-2.5 text-left">Crédit</th>
-                  <th className="px-3 py-2.5 text-right">Capital</th>
-                  <th className="px-3 py-2.5 text-right">Taux</th>
-                  <th className="px-3 py-2.5 text-left">Prochaine échéance</th>
-                  <th className="min-w-[8rem] px-3 py-2.5 text-left">
-                    Progression
-                  </th>
-                  <th className="px-3 py-2.5 text-right">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((l) => {
-                  const expanded = expandedId === l.id;
-                  const pct = repaymentProgressPct(
-                    l.initialAmount,
-                    l.remainingAmount
-                  );
-                  const nextDue = nextPaymentDueDate({
-                    paymentDay: l.paymentDay,
-                    startDate: l.startDate ? new Date(l.startDate) : null,
-                    endDate: l.endDate ? new Date(l.endDate) : null,
-                    lastPaymentAppliedAt: l.lastPaymentAppliedAt
-                      ? new Date(l.lastPaymentAppliedAt)
-                      : null,
-                  });
-                  const nextAmount =
-                    l.monthlyPayment && Number(l.remainingAmount) > 0
-                      ? l.monthlyPayment
-                      : null;
-                  const isActive = Number(l.remainingAmount) > 0;
+              {v.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-                  return (
-                    <Fragment key={l.id}>
-                      <tr
-                        className={cn(
-                          moduleTableRowClass,
-                          !isActive && "opacity-60"
-                        )}
-                        data-testid={`liability-row-${l.id}`}
+      {/* ── Corps : liste + panneau ──────────────────────────────── */}
+      <div className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)] xl:items-start">
+        <div className="flex min-w-0 flex-col gap-[var(--gap-card)]">
+          {view === "schedule" && (
+            <section
+              className="card min-w-0 p-[var(--space-4)]"
+              data-testid="liability-schedule-view"
+            >
+              <h2 className="text-label mb-[var(--space-3)]">
+                Prochaines échéances
+              </h2>
+              {upcoming.length === 0 ? (
+                <p className="text-meta">
+                  Aucune mensualité renseignée — la charge mensuelle ne peut pas
+                  être projetée.
+                </p>
+              ) : (
+                <>
+                  <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
+                    {upcoming.map((u) => (
+                      <li
+                        key={u.date.toISOString()}
+                        className="flex items-baseline justify-between gap-[var(--space-3)] py-[var(--space-2)]"
                       >
-                        <td className="px-3 py-2.5">
-                          <button
-                            type="button"
-                            className="flex items-start gap-1.5 text-left"
-                            onClick={() =>
-                              setExpandedId((id) =>
-                                id === l.id ? null : l.id
-                              )
-                            }
-                            aria-expanded={expanded}
-                            data-testid={`liability-expand-${l.id}`}
-                          >
-                            {expanded ? (
-                              <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
-                            ) : (
-                              <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
-                            )}
-                            <span>
-                              <span className="font-medium text-[var(--foreground)]">
-                                {l.name}
-                              </span>
-                              <span className="mt-0.5 block text-[11px] text-[var(--muted-foreground)]">
-                                {l.bankName || "Prêteur non renseigné"}
-                                {l.monthsRemaining != null
-                                  ? ` · ${l.monthsRemaining} mois restants`
-                                  : ""}
-                                {!isActive ? " · soldé" : ""}
-                              </span>
-                            </span>
-                          </button>
-                        </td>
-                        <td className="px-3 py-2.5 text-right">
-                          <div className="tabular-nums font-semibold text-[var(--danger)]">
-                            {formatCurrency(l.remainingAmount, l.currency)}
-                          </div>
-                          <div className="text-[10px] tabular-nums text-[var(--muted-foreground)]">
-                            initial{" "}
-                            {formatCurrency(l.initialAmount, l.currency)}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5 text-right">
-                          <div className="tabular-nums text-[var(--foreground)]">
-                            {l.interestRate != null && l.interestRate !== ""
-                              ? `${Number(l.interestRate).toLocaleString("fr-FR", { maximumFractionDigits: 3 })} %`
-                              : "—"}
-                          </div>
-                          <div className="text-[10px] text-[var(--muted-foreground)]">
-                            effectif / an
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5">
-                          {isActive && nextDue ? (
-                            <div>
-                              <div className="font-medium tabular-nums text-[var(--foreground)]">
-                                {formatDate(nextDue.toISOString())}
-                              </div>
-                              <div className="text-[11px] tabular-nums text-teal-600 dark:text-teal-300">
-                                {nextAmount
-                                  ? formatCurrency(nextAmount, l.currency)
-                                  : "—"}
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-[var(--muted-foreground)]">
-                              —
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <div className="flex items-center gap-2">
-                            <div
-                              className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--muted)]"
-                              role="progressbar"
-                              aria-valuenow={Math.round(pct)}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                              aria-label={`Remboursé à ${Math.round(pct)} %`}
-                            >
-                              <div
-                                className="h-full rounded-full bg-gradient-to-r from-teal-600 to-teal-400 transition-[width]"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                            <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-[var(--muted-foreground)]">
-                              {Math.round(pct)} %
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-2 py-2 text-right">
-                          <div className="inline-flex flex-wrap items-center justify-end gap-1">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="!h-8 text-[11px]"
-                              disabled={!isActive}
-                              data-testid={`liability-repay-${l.id}`}
-                              title="Enregistrer un remboursement (prérempli avec la prochaine mensualité)"
-                              onClick={() => {
-                                setEarlyId(l.id);
-                                setEarlyKind("PARTIAL");
-                                setEarlyAmount(
-                                  l.monthlyPayment &&
-                                    Number(l.monthlyPayment) > 0
-                                    ? String(l.monthlyPayment)
-                                    : ""
-                                );
-                                setEarlyDate(
-                                  new Date().toISOString().slice(0, 10)
-                                );
-                              }}
-                            >
-                              <Banknote className="h-3.5 w-3.5" />
-                              <span className="hidden sm:inline">
-                                Remboursement
-                              </span>
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="!h-8 text-[11px]"
-                              data-testid={`liability-detail-${l.id}`}
-                              onClick={() =>
-                                setExpandedId((id) =>
-                                  id === l.id ? null : l.id
-                                )
-                              }
-                            >
-                              {expanded ? "Masquer" : "Détail"}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="!h-7 !w-7 !px-0 text-slate-400 hover:text-slate-800"
-                              title="Avenant mensualité"
-                              aria-label="Avenant mensualité"
-                              onClick={() => {
-                                setAmendId(l.id);
-                                setAmendPayment(l.monthlyPayment || "");
-                                setAmendDate(
-                                  new Date().toISOString().slice(0, 10)
-                                );
-                              }}
-                            >
-                              <PencilLine className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
-                              aria-label="Supprimer le crédit"
-                              onClick={() => {
-                                if (
-                                  confirm(
-                                    `Supprimer le crédit « ${l.name} » ?`
-                                  )
-                                ) {
-                                  deleteMut.mutate(l.id);
-                                }
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                      {expanded && (
-                        <tr className="border-t border-[var(--border)] bg-[var(--muted)]/20">
-                          <td colSpan={6} className="px-4 py-4">
-                            <LiabilityDetailPanel
-                              liability={l}
-                              onEditRate={(v) => {
-                                fetchJson("/api/liabilities", {
-                                  method: "POST",
-                                  body: JSON.stringify({
-                                    action: "rate_change",
-                                    liabilityId: l.id,
-                                    interestRate: v || "0",
-                                  }),
-                                })
-                                  .then(() => {
-                                    toast.success(
-                                      "Taux mis à jour — projections recalculées"
-                                    );
-                                    return refresh();
-                                  })
-                                  .catch((err: Error) =>
-                                    toast.error(err.message)
-                                  );
-                              }}
-                              onEditRemaining={(v) => {
-                                if (v !== l.remainingAmount)
-                                  patchMut.mutate({
-                                    id: l.id,
-                                    remainingAmount: v,
-                                  });
-                              }}
-                              onEditPaymentDay={(v) => {
-                                const cur =
-                                  l.paymentDay != null
-                                    ? String(l.paymentDay)
-                                    : "";
-                                if (v !== cur)
-                                  patchMut.mutate({
-                                    id: l.id,
-                                    paymentDay: v === "" ? null : v,
-                                  });
-                              }}
-                              onEditBank={(v) => {
-                                if (v !== (l.bankName || ""))
-                                  patchMut.mutate({
-                                    id: l.id,
-                                    bankName: v || null,
-                                  });
-                              }}
-                              onRepay={() => {
-                                setEarlyId(l.id);
-                                setEarlyKind("PARTIAL");
-                                setEarlyAmount(
-                                  l.monthlyPayment &&
-                                    Number(l.monthlyPayment) > 0
-                                    ? String(l.monthlyPayment)
-                                    : ""
-                                );
-                                setEarlyDate(
-                                  new Date().toISOString().slice(0, 10)
-                                );
-                              }}
-                            />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </ModuleCard>
+                        <span className="text-[length:var(--text-xs)] text-[var(--foreground)]">
+                          {u.date.toLocaleDateString("fr-FR", {
+                            day: "2-digit",
+                            month: "long",
+                            year: "numeric",
+                          })}
+                        </span>
+                        <span className="num text-[length:var(--text-xs)] font-medium">
+                          {formatCurrency(String(u.amount), "EUR")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-meta mt-[var(--space-3)]">
+                    Somme des mensualités des crédits en cours, assurance
+                    comprise. Le détail échéance par échéance se lit dans la
+                    fiche d&apos;un crédit, onglet Amortissement.
+                  </p>
+                </>
+              )}
+            </section>
+          )}
 
+          {view === "cost" && (
+            <section
+              className="card min-w-0 p-[var(--space-4)]"
+              data-testid="liability-cost-view"
+            >
+              <h2 className="text-label mb-[var(--space-3)]">Coût de la dette</h2>
+              <dl className="grid grid-cols-2 gap-[var(--space-3)] sm:grid-cols-4">
+                <div>
+                  <dt className="text-label">Intérêts restants</dt>
+                  <dd className="num text-[length:var(--text-sm)] font-semibold val-negative">
+                    {formatCurrency(
+                      String(totals.estimatedInterestRemainingEur),
+                      "EUR"
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-label">Assurance mensuelle</dt>
+                  <dd className="num text-[length:var(--text-sm)] font-semibold">
+                    {totals.monthlyInsuranceEur > 0
+                      ? formatCurrency(
+                          String(totals.monthlyInsuranceEur),
+                          "EUR"
+                        )
+                      : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-label">Taux moyen pondéré</dt>
+                  <dd className="num text-[length:var(--text-sm)] font-semibold">
+                    {totals.weightedRatePct != null
+                      ? `${totals.weightedRatePct.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} %`
+                      : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-label">Charge mensuelle</dt>
+                  <dd className="num text-[length:var(--text-sm)] font-semibold">
+                    {formatCurrency(String(totals.monthlyEur), "EUR")}
+                  </dd>
+                </div>
+              </dl>
+
+              {totals.byCategory.length > 0 && (
+                <>
+                  <h3 className="text-label mt-[var(--space-5)] mb-[var(--space-2)]">
+                    Répartition par type
+                  </h3>
+                  <div
+                    className="flex h-2 w-full overflow-hidden rounded-full bg-[var(--muted)]"
+                    role="img"
+                    aria-label={totals.byCategory
+                      .map(
+                        (c) =>
+                          `${LIABILITY_CATEGORY_LABELS[c.category as LiabilityCategory] ?? c.category} ${Math.round(c.sharePct ?? 0)} %`
+                      )
+                      .join(", ")}
+                  >
+                    {totals.byCategory.map((c, i) => (
+                      <span
+                        key={c.category}
+                        style={{
+                          width: `${c.sharePct ?? 0}%`,
+                          background: `var(--chart-${(i % 5) + 1})`,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <ul className="mt-[var(--space-3)] grid gap-[var(--space-1)] sm:grid-cols-2">
+                    {totals.byCategory.map((c, i) => (
+                      <li
+                        key={c.category}
+                        className="flex items-baseline justify-between gap-[var(--space-3)]"
+                      >
+                        <span className="flex min-w-0 items-center gap-[var(--space-2)] text-[length:var(--text-xs)] text-[var(--foreground-secondary)]">
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{ background: `var(--chart-${(i % 5) + 1})` }}
+                            aria-hidden
+                          />
+                          {LIABILITY_CATEGORY_LABELS[
+                            c.category as LiabilityCategory
+                          ] ?? c.category}
+                        </span>
+                        <span className="num shrink-0 text-[length:var(--text-xs)]">
+                          {formatCurrency(String(c.remainingEur), "EUR")}
+                          <span className="text-meta ml-[var(--space-2)]">
+                            {c.sharePct != null
+                              ? `${c.sharePct.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`
+                              : ""}
+                          </span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
+              <p className="text-meta mt-[var(--space-4)]">
+                Les intérêts restants sont une estimation calculée sur la durée
+                résiduelle, à taux constant. Un remboursement anticipé les
+                réduit.
+              </p>
+            </section>
+          )}
+
+          {/* Liste des crédits — présente sous chaque vue. */}
+          <section className="card min-w-0 overflow-hidden" data-testid="liability-list">
+            <div className="flex flex-wrap items-baseline justify-between gap-[var(--space-2)] border-b border-[var(--border)] px-[var(--space-4)] py-[var(--space-3)]">
+              <h2 className="text-label">Crédits</h2>
+              <span className="text-meta num">
+                {formatCurrency(String(totals.totalDebtEur), "EUR")}
+              </span>
+            </div>
+
+            {listQ.isPending && !listQ.data ? (
+              <div
+                className="space-y-[var(--space-2)] p-[var(--space-4)]"
+                data-testid="liabilities-loading"
+              >
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+            ) : views.length === 0 ? (
+              /*
+                État vide **local** : l'utilisateur peut posséder tout un
+                patrimoine et n'avoir aucun crédit. Ce n'est pas un compte
+                vierge, et le cockpit global n'a rien à faire ici.
+              */
+              <div className="p-[var(--space-6)] text-center" data-testid="liability-empty">
+                <p className="text-[length:var(--text-sm)] font-medium text-[var(--foreground)]">
+                  Aucun passif
+                </p>
+                <p className="text-meta mx-auto mt-[var(--space-1)] max-w-prose">
+                  Aucune dette n&apos;est actuellement renseignée. Un crédit
+                  immobilier, auto ou à la consommation vient en déduction de
+                  votre patrimoine net.
+                </p>
+                <Button
+                  className="mt-[var(--space-4)]"
+                  onClick={() => setShowCreate(true)}
+                  data-testid="liability-empty-add"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  Ajouter un crédit
+                </Button>
+              </div>
+            ) : (
+              <LiabilityList
+                views={visibleViews}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+              />
+            )}
+          </section>
+        </div>
+
+        <LiabilityPanel
+          view={selectedView}
+          events={selectedRow?.events ?? []}
+          onClose={() => setSelectedId(null)}
+          onEdit={(target) => {
+            if (!selectedRow) return;
+            if (target === "payment") {
+              setAmendId(selectedRow.id);
+              setAmendPayment(selectedRow.monthlyPayment ?? "");
+            } else {
+              setRateId(selectedRow.id);
+              setRateValue(selectedRow.interestRate ?? "");
+            }
+          }}
+          onRepay={() => {
+            if (!selectedRow) return;
+            setEarlyId(selectedRow.id);
+            setEarlyKind("PARTIAL");
+            setEarlyAmount("");
+          }}
+          onDelete={() => {
+            if (selectedRow) setDeleteTarget(selectedRow);
+          }}
+          onOpenLinkedAsset={
+            onOpenAsset ? (assetId) => onOpenAsset(assetId) : undefined
+          }
+        />
+      </div>
       {showCreate && (
         <Modal
           title="Nouveau crédit / passif"
@@ -640,6 +703,7 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
             pending={createMut.isPending}
             onCancel={() => setShowCreate(false)}
             onSubmit={(values) => createMut.mutate(values)}
+            linkableAssets={realEstateAssets}
           />
         </Modal>
       )}
@@ -674,7 +738,7 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
             })()}
             <Field label="Type">
               <select
-                className="input"
+                className="input w-full"
                 value={earlyKind}
                 onChange={(e) =>
                   setEarlyKind(e.target.value as "PARTIAL" | "TOTAL")
@@ -688,7 +752,7 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
             {earlyKind === "PARTIAL" && (
               <Field label="Montant remboursé">
                 <input
-                  className="input"
+                  className="input w-full"
                   value={earlyAmount}
                   onChange={(e) => setEarlyAmount(e.target.value)}
                   placeholder="Montant"
@@ -739,7 +803,7 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
             </p>
             <Field label="Nouvelle mensualité">
               <input
-                className="input"
+                className="input w-full"
                 value={amendPayment}
                 onChange={(e) => setAmendPayment(e.target.value)}
                 inputMode="decimal"
@@ -769,248 +833,146 @@ export function LiabilitiesTab({ baseCurrency }: { baseCurrency: string }) {
           </div>
         </Modal>
       )}
-    </div>
-  );
-}
 
-/** Panneau détail : amortissement prévisionnel + historique + réglages rapides. */
-function LiabilityDetailPanel({
-  liability: l,
-  onEditRate,
-  onEditRemaining,
-  onEditPaymentDay,
-  onEditBank,
-  onRepay,
-}: {
-  liability: LiabilityRow;
-  onEditRate: (v: string) => void;
-  onEditRemaining: (v: string) => void;
-  onEditPaymentDay: (v: string) => void;
-  onEditBank: (v: string) => void;
-  onRepay: () => void;
-}) {
-  const schedule = useMemo(() => {
-    if (!l.monthlyPayment || Number(l.monthlyPayment) <= 0) return [];
-    if (!l.initialAmount || Number(l.initialAmount) <= 0) return [];
-    return buildAmortizationSchedule({
-      principal: l.initialAmount,
-      annualPercent: l.interestRate || "0",
-      monthlyPayment: l.monthlyPayment,
-      startDate: l.startDate ? new Date(l.startDate) : new Date(),
-      paymentDay: l.paymentDay ?? 1,
-      maxMonths: 480,
-    });
-  }, [l]);
-
-  const currentIdx = useMemo(
-    () => currentScheduleIndex(schedule, l.remainingAmount),
-    [schedule, l.remainingAmount]
-  );
-
-  // Afficher une fenêtre autour de l’échéance courante (perf grands tableaux)
-  const windowRows = useMemo(() => {
-    if (schedule.length <= 36) return schedule.map((r, i) => ({ r, i }));
-    const start = Math.max(0, currentIdx - 6);
-    const end = Math.min(schedule.length, start + 24);
-    return schedule.slice(start, end).map((r, j) => ({ r, i: start + j }));
-  }, [schedule, currentIdx]);
-
-  return (
-    <div className="space-y-4" data-testid={`liability-detail-${l.id}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs font-semibold text-[var(--foreground)]">
-          <CalendarClock className="h-3.5 w-3.5 text-teal-500" />
-          Détail & amortissement prévisionnel
-        </div>
-        <Button
-          size="sm"
-          className="text-[11px]"
-          onClick={onRepay}
-          data-testid={`liability-detail-repay-${l.id}`}
+      {rateId && (
+        <Modal
+          title="Avenant — nouveau taux"
+          onClose={() => setRateId(null)}
         >
-          <Banknote className="h-3.5 w-3.5" />
-          Enregistrer un remboursement
-        </Button>
-      </div>
-
-      {/* Réglages compacts */}
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <label className="text-[11px]">
-          <span className="text-[var(--muted-foreground)]">Taux annuel %</span>
-          <input
-            className="input mt-0.5 !py-1 text-right text-xs"
-            defaultValue={l.interestRate ?? ""}
-            key={`${l.id}-rate-${l.interestRate}`}
-            onBlur={(e) => {
-              const v = e.target.value.trim();
-              if (v !== (l.interestRate ?? "")) onEditRate(v);
-            }}
-          />
-        </label>
-        <label className="text-[11px]">
-          <span className="text-[var(--muted-foreground)]">
-            Capital restant dû
-          </span>
-          <input
-            className="input mt-0.5 !py-1 text-right text-xs font-semibold"
-            defaultValue={l.remainingAmount}
-            key={`${l.id}-rem-${l.remainingAmount}`}
-            onBlur={(e) => onEditRemaining(e.target.value)}
-          />
-        </label>
-        <label className="text-[11px]">
-          <span className="text-[var(--muted-foreground)]">
-            Jour de prélèvement
-          </span>
-          <input
-            className="input mt-0.5 !py-1 text-center text-xs"
-            type="number"
-            min={1}
-            max={31}
-            defaultValue={l.paymentDay ?? ""}
-            key={`${l.id}-day-${l.paymentDay}`}
-            onBlur={(e) => onEditPaymentDay(e.target.value)}
-          />
-        </label>
-        <label className="text-[11px]">
-          <span className="text-[var(--muted-foreground)]">Prêteur</span>
-          <select
-            className="input mt-0.5 !py-1 text-xs"
-            defaultValue={l.bankName || ""}
-            key={`${l.id}-bank-${l.bankName}`}
-            onChange={(e) => onEditBank(e.target.value)}
-          >
-            <option value="">—</option>
-            {l.bankName &&
-              !(LIABILITY_LENDER_OPTIONS as readonly string[]).includes(
-                l.bankName
-              ) && <option value={l.bankName}>{l.bankName}</option>}
-            {LIABILITY_LENDER_OPTIONS.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      {/* Tableau d’amortissement */}
-      {schedule.length === 0 ? (
-        <p className="text-xs text-[var(--muted-foreground)]">
-          Renseignez une mensualité et un capital pour générer le tableau
-          d’amortissement.
-        </p>
-      ) : (
-        <div>
-          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
-            Tableau d’amortissement
-            {schedule.length > 36
-              ? ` · échéances ${windowRows[0]!.i + 1}–${windowRows[windowRows.length - 1]!.i + 1} / ${schedule.length}`
-              : ` · ${schedule.length} échéances`}
-          </p>
-          <div className="max-h-72 overflow-auto rounded-lg border border-[var(--border)]">
-            <table className="w-full text-left text-[11px]">
-              <thead className="sticky top-0 bg-[var(--table-head)] text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
-                <tr>
-                  <th className="px-2 py-1.5">#</th>
-                  <th className="px-2 py-1.5">Échéance</th>
-                  <th className="px-2 py-1.5 text-right">Capital remboursé</th>
-                  <th className="px-2 py-1.5 text-right">Intérêts</th>
-                  <th className="px-2 py-1.5 text-right">Assurance</th>
-                  <th className="px-2 py-1.5 text-right">Capital restant</th>
-                </tr>
-              </thead>
-              <tbody>
-                {windowRows.map(({ r, i }) => {
-                  const isCurrent = i === currentIdx;
-                  return (
-                    <tr
-                      key={r.index}
-                      className={cn(
-                        "border-t border-[var(--border)]/70",
-                        isCurrent &&
-                          "bg-teal-500/15 font-medium ring-1 ring-inset ring-teal-500/30"
-                      )}
-                      data-current={isCurrent ? "true" : undefined}
-                    >
-                      <td className="px-2 py-1 tabular-nums text-[var(--muted-foreground)]">
-                        {r.index}
-                        {isCurrent ? (
-                          <span className="ml-1 text-[9px] font-semibold uppercase text-teal-500">
-                            actuel
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="px-2 py-1 tabular-nums">
-                        {r.dueDate ? formatDate(r.dueDate) : "—"}
-                      </td>
-                      <td className="px-2 py-1 text-right tabular-nums">
-                        {formatCurrency(r.principalPaid, l.currency)}
-                      </td>
-                      <td className="px-2 py-1 text-right tabular-nums text-amber-600/90 dark:text-amber-300/90">
-                        {formatCurrency(r.interest, l.currency)}
-                      </td>
-                      <td className="px-2 py-1 text-right tabular-nums text-[var(--muted-foreground)]">
-                        {formatCurrency(r.insurance, l.currency)}
-                      </td>
-                      <td className="px-2 py-1 text-right tabular-nums">
-                        {formatCurrency(r.remainingAfter, l.currency)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="space-y-3" data-testid="liability-rate-modal">
+            <p className="text-[11px] leading-snug text-slate-500">
+              Nouveau taux annuel à effet donné. La durée résiduelle et les
+              intérêts restants estimés sont recalculés sur le capital restant
+              dû.
+            </p>
+            <Field label="Nouveau taux annuel (%)">
+              <input
+                className="input w-full"
+                value={rateValue}
+                onChange={(e) => setRateValue(e.target.value)}
+                inputMode="decimal"
+                data-testid="liability-rate-value"
+              />
+            </Field>
+            <Field label="Date d’effet">
+              <DateInput
+                value={rateDate}
+                onChange={(e) => setRateDate(e.target.value)}
+                data-testid="liability-rate-date"
+              />
+            </Field>
+            <FormActions>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setRateId(null)}
+              >
+                Annuler
+              </Button>
+              <Button
+                onClick={() => rateMut.mutate()}
+                disabled={rateMut.isPending || !rateValue}
+                data-testid="liability-rate-submit"
+              >
+                Appliquer l’avenant
+              </Button>
+            </FormActions>
           </div>
-          <p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
-            Calculs en Decimal.js · assurance non modélisée en base (colonne à
-            0 €) · échéance courante mise en évidence.
-          </p>
-        </div>
+        </Modal>
       )}
 
-      {/* Historique événements */}
-      <div>
-        <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
-          Historique des événements
-        </div>
-        {l.events.length === 0 ? (
-          <p className="text-xs text-[var(--muted-foreground)]">
-            Aucun événement — les prélèvements et remboursements apparaîtront
-            ici.
-          </p>
-        ) : (
-          <ul className="max-h-40 space-y-1 overflow-y-auto text-xs">
-            {l.events.map((e) => (
-              <li
-                key={e.id}
-                className="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--border)]/60 py-1.5 last:border-0"
+      {deleteTarget && (
+        <Modal
+          title={`Supprimer « ${deleteTarget.name} »`}
+          onClose={() => {
+            setDeleteTarget(null);
+            setDeleteConfirmChecked(false);
+            setDeleteConfirmText("");
+          }}
+          panelClassName="max-w-md"
+        >
+          <div className="space-y-3" data-testid="liability-delete-modal">
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-[12px] leading-relaxed text-red-950 dark:border-red-900 dark:bg-red-950/40 dark:text-red-50">
+              <p className="font-semibold">Action irréversible</p>
+              <p className="mt-1">
+                Cette action supprimera définitivement le crédit{" "}
+                <strong>{deleteTarget.name}</strong>, son{" "}
+                <strong>historique d’événements</strong> (prélèvements,
+                avenants, remboursements) et les{" "}
+                <strong>projections associées</strong>. Aucune récupération
+                possible.
+              </p>
+            </div>
+
+            <label className="flex cursor-pointer items-start gap-2 text-[12px] text-[var(--foreground)]">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={deleteConfirmChecked}
+                onChange={(e) => setDeleteConfirmChecked(e.target.checked)}
+                data-testid="liability-delete-confirm-check"
+              />
+              <span>
+                Je comprends que cette action est définitive et que
+                l’historique de ce crédit sera effacé.
+              </span>
+            </label>
+
+            <label className="block text-[11px] text-red-900/90 dark:text-red-100/85">
+              <span className="mb-1 block font-medium">
+                Pour confirmer, saisissez{" "}
+                <kbd className="rounded bg-red-100 px-1 font-mono text-[10px] dark:bg-red-950">
+                  {DELETE_CONFIRM_WORD}
+                </kbd>
+              </span>
+              <input
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                className="input w-full border-red-200 bg-white py-1.5 dark:border-red-900/50 dark:bg-[var(--input-bg)]"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder={DELETE_CONFIRM_WORD}
+                data-testid="liability-delete-confirm-input"
+                aria-label={`Saisir ${DELETE_CONFIRM_WORD} pour confirmer`}
+              />
+            </label>
+
+            <div className="flex flex-col gap-1.5 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setDeleteTarget(null);
+                  setDeleteConfirmChecked(false);
+                  setDeleteConfirmText("");
+                }}
+                data-testid="liability-delete-cancel"
               >
-                <span>
-                  <span className="font-medium">
-                    {EVENT_LABELS[e.type] || e.type}
-                  </span>
-                  {e.notes ? (
-                    <span className="text-[var(--muted-foreground)]">
-                      {" "}
-                      · {e.notes}
-                    </span>
-                  ) : null}
-                </span>
-                <span className="tabular-nums text-[var(--muted-foreground)]">
-                  {formatDate(e.eventDate)}
-                  {e.amount
-                    ? ` · ${formatCurrency(e.amount, l.currency)}`
-                    : ""}
-                  {e.remainingAfter != null
-                    ? ` → restant ${formatCurrency(e.remainingAfter, l.currency)}`
-                    : ""}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+                Annuler
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                disabled={!canForceDelete || deleteMut.isPending}
+                data-testid="liability-delete-confirm"
+                onClick={() => {
+                  if (!canForceDelete) return;
+                  deleteMut.mutate(deleteTarget.id);
+                  setDeleteTarget(null);
+                  setDeleteConfirmChecked(false);
+                  setDeleteConfirmText("");
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {deleteMut.isPending ? "Suppression…" : "SUPPRIMER"}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

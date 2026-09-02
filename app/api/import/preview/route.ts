@@ -8,6 +8,7 @@ import {
 import { IMPORT_FORMATS } from "@/app/lib/import/presets";
 import type { ColumnMapping } from "@/app/lib/import/types";
 import { listAdapters } from "@/app/lib/import/adapters/registry";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 export async function POST(req: Request) {
   const userId = await requireUserId();
@@ -87,7 +88,7 @@ export async function POST(req: Request) {
   } catch (e) {
     console.error("import preview", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erreur d'analyse CSV" },
+      { error: clientErrorMessage(e, "Erreur d'analyse CSV") },
       { status: 500 }
     );
   }

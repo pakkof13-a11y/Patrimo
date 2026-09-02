@@ -1,7 +1,11 @@
+import { recordEnvelopeEvent } from "@/app/lib/securities/envelope-history";
 import { prisma } from "../prisma";
-import { createTransaction } from "../transactions/service";
+import { createTransaction, createOwnershipCache } from "../transactions/service";
+import { loadLedgerForUser } from "../portfolio/service";
+import { invalidateLedgerCache } from "../portfolio/ledger-cache";
 import { resolveAssetLogo } from "../assets/logos";
 import { assetReuseByTickerWhere } from "../assets/reuse";
+import { detailRequirementError } from "../assets/envelope-requirements";
 import { resolveCoingeckoId } from "../market/providers/coingecko";
 import { findOrCreatePlatform } from "../platforms/upsert";
 import { resolvePlatformLogo } from "../platforms/presets";
@@ -62,7 +66,13 @@ async function resolveOrCreateAsset(
   userId: string,
   platformId: string,
   row: ImportDraftRow,
-  overrideAccountType?: string
+  overrideAccountType?: string,
+  /**
+   * Cache d'actifs du lot. Un relevé courtier répète les mêmes quelques
+   * tickers sur des centaines de lignes (111 lignes Revolut = 5 tickers) :
+   * sans cache, chaque ligne refait les deux findFirst de résolution.
+   */
+  assetCache?: Map<string, string>
 ): Promise<string | null> {
   const needsAsset =
     row.type &&
@@ -90,12 +100,22 @@ async function resolveOrCreateAsset(
         ? "IMMOBILIER"
         : "CTO");
 
+  // Clé = tout ce dont dépend la résolution ci-dessous.
+  const cacheKey = `${platformId}|${accountType}|${ticker ?? ""}|${name.toLowerCase()}`;
+  const memo = assetCache?.get(cacheKey);
+  if (memo) return memo;
+
+  const remember = (id: string) => {
+    assetCache?.set(cacheKey, id);
+    return id;
+  };
+
   if (ticker) {
     const byTicker = await prisma.asset.findFirst({
       where: assetReuseByTickerWhere(userId, ticker, accountType),
       orderBy: { createdAt: "asc" },
     });
-    if (byTicker) return byTicker.id;
+    if (byTicker) return remember(byTicker.id);
   }
 
   const byName = await prisma.asset.findFirst({
@@ -105,7 +125,28 @@ async function resolveOrCreateAsset(
       name: { equals: name, mode: "insensitive" },
     },
   });
-  if (byName) return byName.id;
+  if (byName) return remember(byName.id);
+
+  /*
+    Passé les réutilisations ci-dessus, l'actif est neuf — il ne peut donc
+    porter aucune fiche métier. Le créer en IMMOBILIER le ferait peser au
+    patrimoine et dans l'assiette IFI sans figurer dans aucun onglet du module,
+    l'état dans lequel deux SCPI ont vécu.
+
+    Un relevé ne dit jamais s'il s'agit d'un bien détenu en direct ou d'une part
+    de société, et l'import n'a ni adresse ni société de gestion à inscrire :
+    inventer l'une des deux fiches serait faux. La ligne est donc rejetée, et
+    elle seule — la boucle d'appel collecte le message et poursuit le fichier.
+  */
+  const refus = detailRequirementError(accountType, {
+    hasRealEstate: false,
+    hasIndirectRealEstate: false,
+  });
+  if (refus) {
+    throw new Error(
+      `${refus} L'import ne peut pas créer « ${name} » : ajoutez-le d'abord depuis Immobilier, puis relancez l'import.`
+    );
+  }
 
   const logoUrl = resolveAssetLogo({
     ticker,
@@ -119,22 +160,52 @@ async function resolveOrCreateAsset(
       ? resolveCoingeckoId(ticker) || ticker
       : ticker || null;
 
-  const created = await prisma.asset.create({
-    data: {
+  /*
+    Création et constat d'enveloppe dans la même transaction.
+
+    La date retenue est celle de la **création de la ligne**, pas celle des
+    opérations importées. Un fichier peut porter des transactions de 2023 sans
+    rien dire de l'enveloppe qui les abritait alors : la déduire reviendrait à
+    fabriquer un passé. Ce que l'import démontre, c'est qu'à l'instant de
+    l'import la ligne est dans cette enveloppe — et c'est tout ce qui est
+    enregistré.
+
+    Limite assumée, et documentée : pour une ligne importée, les périodes
+    antérieures à l'import restent inconnues, même si ses opérations sont
+    anciennes.
+  */
+  const created = await prisma.$transaction(async (tx) => {
+    const asset = await tx.asset.create({
+      data: {
+        userId,
+        platformId,
+        name,
+        ticker: ticker || null,
+        assetClass,
+        currency: row.currency || "EUR",
+        accountType,
+        priceProvider,
+        providerSymbol,
+        logoUrl: logoUrl || null,
+      },
+    });
+
+    await recordEnvelopeEvent(tx, {
+      assetId: asset.id,
       userId,
-      platformId,
-      name,
-      ticker: ticker || null,
-      assetClass,
-      currency: row.currency || "EUR",
-      accountType,
-      priceProvider,
-      providerSymbol,
-      logoUrl: logoUrl || null,
-    },
+      kind: "OBSERVED",
+      state: {
+        accountType: asset.accountType,
+        securitiesAccountId: asset.securitiesAccountId,
+        envelopeType: null,
+      },
+      occurredAt: asset.createdAt,
+    });
+
+    return asset;
   });
 
-  return created.id;
+  return remember(created.id);
 }
 
 async function loadExistingLite(
@@ -439,6 +510,16 @@ export async function commitImportRows(params: {
   const assetCountBefore = await prisma.asset.count({ where: { userId } });
   const seenStrict = new Set<string>();
 
+  // État de ledger chargé une seule fois et mis à jour en place au fil des
+  // lignes (voir createTransaction/service.ts) — sans ça, invalider le cache
+  // après chaque insertion force un replay complet du journal à CHAQUE ligne,
+  // en O(n²) sur un CSV de plusieurs centaines de lignes (timeout serverless).
+  const ledgerState = await loadLedgerForUser(userId);
+  // Mémos du lot : évitent de revérifier en base, à chaque ligne, la même
+  // plateforme et les mêmes tickers (cf. OwnershipCache / resolveOrCreateAsset).
+  const ownership = createOwnershipCache(userId);
+  const assetCache = new Map<string, string>();
+
   for (const row of toImport) {
     try {
       const rowPlatformId = await resolveRowPlatformId(
@@ -456,25 +537,35 @@ export async function commitImportRows(params: {
         continue;
       }
 
-      const assetId = await resolveOrCreateAsset(userId, rowPlatformId, row, params.accountEnvelopeType);
-      await createTransaction({
+      const assetId = await resolveOrCreateAsset(
         userId,
-        type: row.type as TxType,
-        platformId: rowPlatformId,
-        assetId: assetId || null,
-        quantity: row.quantity || undefined,
-        unitPrice: row.unitPrice || undefined,
-        cashAmount: row.cashAmount || undefined,
-        fees: row.fees || "0",
-        currency: row.currency || "EUR",
-        fxRateToEur: "1",
-        occurredAt: row.occurredAt || new Date().toISOString(),
-        notes: row.notes
-          ? `[Import CSV L${row.line}] ${row.notes}`
-          : `[Import CSV L${row.line}]`,
-        autoFundCash: true,
-        allowNegativeCash: true,
-      });
+        rowPlatformId,
+        row,
+        params.accountEnvelopeType,
+        assetCache
+      );
+      await createTransaction(
+        {
+          userId,
+          type: row.type as TxType,
+          platformId: rowPlatformId,
+          assetId: assetId || null,
+          quantity: row.quantity || undefined,
+          unitPrice: row.unitPrice || undefined,
+          cashAmount: row.cashAmount || undefined,
+          fees: row.fees || "0",
+          currency: row.currency || "EUR",
+          fxRateToEur: "1",
+          occurredAt: row.occurredAt || new Date().toISOString(),
+          notes: row.notes
+            ? `[Import CSV L${row.line}] ${row.notes}`
+            : `[Import CSV L${row.line}]`,
+          autoFundCash: true,
+          allowNegativeCash: true,
+        },
+        undefined,
+        { ledgerState, skipInvalidate: true, ownership }
+      );
       seenStrict.add(sfp);
       created++;
     } catch (e) {
@@ -487,6 +578,10 @@ export async function commitImportRows(params: {
       errors.push({ line: row.line, message });
       skipped++;
     }
+  }
+
+  if (created > 0) {
+    invalidateLedgerCache(userId);
   }
 
   const assetCountAfter = await prisma.asset.count({ where: { userId } });

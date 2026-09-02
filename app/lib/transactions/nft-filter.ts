@@ -44,26 +44,106 @@ export function looksLikeNft(input: {
   return NFT_HINT.test(hay);
 }
 
+/** Champs texte de la transaction inspectés par l'heuristique NFT. */
+type TxTextField = "notes";
+/** Champs texte de l'actif lié inspectés par l'heuristique NFT. */
+type AssetTextField = "name" | "notes" | "providerSymbol";
+
+/** Motifs cherchés dans les notes de la transaction. */
+const TX_NOTE_HINTS = [
+  "nft",
+  "ERC-721",
+  "ERC721",
+  "metaplex",
+  "opensea",
+  "collectible",
+] as const;
+
 /**
- * Prisma `NOT` pour exclure les NFT du journal principal.
- * Heuristique notes / nom / ticker / providerSymbol.
+ * Champs de `Asset` pouvant valoir `NULL` au schéma.
+ *
+ * `name` est obligatoire : lui appliquer une branche `null` ferait rejeter la
+ * requête par Prisma, qui n'accepte pas `null` comme filtre sur un champ non
+ * nullable.
+ */
+const NULLABLE_ASSET_FIELDS = new Set<AssetTextField>([
+  "notes",
+  "providerSymbol",
+]);
+
+/** Motifs cherchés sur l'actif lié, par champ. */
+const ASSET_HINTS: ReadonlyArray<[AssetTextField, string]> = [
+  ["name", "nft"],
+  ["name", "collectible"],
+  ["notes", "nft"],
+  ["providerSymbol", "nft"],
+];
+
+/**
+ * « Ce champ de la transaction ne contient pas `needle` », **valeur nulle
+ * comprise**.
+ *
+ * En SQL, `NOT (notes LIKE '%nft%')` vaut `UNKNOWN` quand `notes` est `NULL`,
+ * et une clause `WHERE` ne garde que ce qui est vrai : une transaction sans
+ * notes disparaissait donc du journal. La branche `null` explicite rétablit la
+ * lecture attendue — pas de notes signifie pas de NFT.
+ */
+function txFieldWithout(
+  field: TxTextField,
+  needle: string
+): Record<string, unknown> {
+  return {
+    OR: [
+      { [field]: null },
+      // `mode` est frère de `not` : le filtre imbriqué n'accepte pas l'option.
+      { [field]: { mode: "insensitive", not: { contains: needle } } },
+    ],
+  };
+}
+
+/**
+ * Même chose sur l'actif lié, avec deux échappatoires supplémentaires : la
+ * transaction peut n'avoir aucun actif (apport, retrait, frais bancaires), et
+ * l'actif peut avoir le champ vide.
+ *
+ * Sans elles, un filtre sur `asset.notes` — champ presque toujours vide —
+ * écartait **toute transaction portant un actif**, c'est-à-dire tous les
+ * achats, ventes et dividendes.
+ */
+function assetFieldWithout(
+  field: AssetTextField,
+  needle: string
+): Record<string, unknown> {
+  // `is:` explicite : sur une relation optionnelle, Prisma n'accepte pas la
+  // forme abrégée `asset: { champ: … }`.
+  const branches: Array<Record<string, unknown>> = [{ assetId: null }];
+  if (NULLABLE_ASSET_FIELDS.has(field)) {
+    branches.push({ asset: { is: { [field]: null } } });
+  }
+  branches.push({
+    asset: {
+      is: { [field]: { mode: "insensitive", not: { contains: needle } } },
+    },
+  });
+  return { OR: branches };
+}
+
+/**
+ * Clause Prisma excluant les NFT du journal principal.
+ *
+ * Rendue sous forme d'un `AND` de conditions déjà négatives, plutôt que d'un
+ * `NOT` global : chaque condition peut ainsi gérer ses propres valeurs nulles,
+ * ce qu'une négation d'ensemble ne permet pas.
  */
 export function nftExcludePrismaClause(): {
-  NOT: Array<Record<string, unknown>>;
+  AND: Array<Record<string, unknown>>;
 } {
   return {
-    NOT: [
-      { notes: { contains: "nft", mode: "insensitive" } },
-      { notes: { contains: "ERC-721", mode: "insensitive" } },
-      { notes: { contains: "ERC721", mode: "insensitive" } },
-      { notes: { contains: "metaplex", mode: "insensitive" } },
-      { asset: { name: { contains: "nft", mode: "insensitive" } } },
-      { asset: { notes: { contains: "nft", mode: "insensitive" } } },
-      { asset: { providerSymbol: { contains: "nft", mode: "insensitive" } } },
-      // collectible / opensea
-      { notes: { contains: "opensea", mode: "insensitive" } },
-      { notes: { contains: "collectible", mode: "insensitive" } },
-      { asset: { name: { contains: "collectible", mode: "insensitive" } } },
+    AND: [
+      ...TX_NOTE_HINTS.map((needle) => txFieldWithout("notes", needle)),
+      ...ASSET_HINTS.map(([field, needle]) =>
+        assetFieldWithout(field, needle)
+      ),
     ],
   };
 }

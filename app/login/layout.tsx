@@ -8,7 +8,7 @@ export default function LoginLayout({
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-400">
+        <div className="flex min-h-screen items-center justify-center bg-[var(--background)] text-[var(--muted-foreground)]">
           Chargement…
         </div>
       }

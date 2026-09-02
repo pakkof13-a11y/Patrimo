@@ -26,6 +26,7 @@ import {
 } from "@/app/lib/news/release-filter";
 import { CountryFlag } from "@/components/ui/country-flag";
 import { cn } from "@/app/lib/utils";
+import { assetLogoSources } from "@/app/lib/logos/logodev";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDistanceToNow } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -382,10 +383,12 @@ export function NewsMacroPanel({
               <h3 className="text-title">
                 Résultats des entreprises
               </h3>
+              {/* Le sous-titre dit ce que la liste contient, et rien d'autre :
+                  uniquement les titres détenus. */}
               <p className="text-meta">
                 {portfolioTickers.length > 0
-                  ? "Priorité portefeuille"
-                  : "Publications cotées"}
+                  ? "Vos titres uniquement"
+                  : "Aucun titre coté au portefeuille"}
               </p>
             </div>
           </header>
@@ -414,10 +417,18 @@ export function NewsMacroPanel({
                 Calendrier des résultats indisponible
               </p>
             ) : earnAll.length === 0 ? (
+              /*
+                Vide n'est pas une panne : sur un portefeuille de quelques
+                lignes, il se passe des semaines sans publication. On dit
+                laquelle des deux situations on rencontre — pas de titre coté,
+                ou pas d'annonce — pour que le silence s'explique de lui-même.
+              */
               <p className="py-6 text-center text-xs text-[var(--muted-foreground)]">
-                {earnFilter === "upcoming"
-                  ? "Aucun résultat à venir"
-                  : "Aucun résultat publié (24 h)"}
+                {portfolioTickers.length === 0
+                  ? "Aucun titre coté au portefeuille — rien à annoncer"
+                  : earnFilter === "upcoming"
+                    ? "Aucun résultat à venir pour vos titres"
+                    : "Aucun résultat publié pour vos titres (24 h)"}
               </p>
             ) : (
               <ul className="space-y-1.5">
@@ -506,7 +517,7 @@ export function NewsMacroPanel({
 const RESULT_COLOR = {
   above: "text-emerald-700 dark:text-emerald-300 font-semibold",
   below: "text-red-700 dark:text-red-300 font-semibold",
-  equal: "text-sky-700 dark:text-sky-300 font-semibold",
+  equal: "text-stone-700 dark:text-stone-300 font-semibold",
   na: "text-[var(--muted-foreground)]",
 } as const;
 
@@ -610,9 +621,29 @@ function CompanyLogo({
   sizeClassName?: string;
   radiusClassName?: string;
 }) {
-  const [failed, setFailed] = useState(false);
   const size = sizeClassName === "h-10 w-10" ? 40 : 24;
-  if (!src || failed) {
+  // Le ticker sert de second identifiant : quand la source ne fournit pas de
+  // logo — ou qu'il ne charge pas — logo.dev sait encore le résoudre, et les
+  // initiales ne restent que si tout échoue.
+  const sources = useMemo(() => {
+    const fromTicker = ticker
+      ? assetLogoSources({ ticker, name, size })
+      : name
+        ? assetLogoSources({ name, size })
+        : [];
+    return src ? [src, ...fromTicker] : fromTicker;
+  }, [src, ticker, name, size]);
+  const [index, setIndex] = useState(0);
+  // Le composant est réutilisé d'une société à l'autre quand le fil se
+  // rafraîchit : sans remise à zéro, l'échec de la précédente vaudrait échec
+  // de la suivante.
+  const [seenFirst, setSeenFirst] = useState(sources[0]);
+  if (sources[0] !== seenFirst) {
+    setSeenFirst(sources[0]);
+    setIndex(0);
+  }
+
+  if (index >= sources.length) {
     return (
       <span
         className={cn(
@@ -631,7 +662,7 @@ function CompanyLogo({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={src}
+      src={sources[index]}
       alt=""
       width={size}
       height={size}
@@ -643,7 +674,7 @@ function CompanyLogo({
         sizeClassName,
         radiusClassName
       )}
-      onError={() => setFailed(true)}
+      onError={() => setIndex((i) => i + 1)}
     />
   );
 }

@@ -50,7 +50,7 @@ export type FormatPreset = {
 export const IMPORT_FORMATS: FormatPreset[] = [
   {
     id: "patrimo",
-    label: "Modèle Patrimo (recommandé)",
+    label: "Modèle Aurea (recommandé)",
     description:
       "Colonnes : date, type, ticker, name, quantity, unit_price, fees, currency, cash_amount, notes, asset_class",
     aliases: {

@@ -1,372 +1,133 @@
 "use client";
 
-import { fetchJson } from "@/app/lib/api-client";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+/**
+ * Onglet Banques — vue de trésorerie patrimoniale.
+ *
+ * L'écran présentait trois listes indépendantes, chacune précédée de son
+ * formulaire de création permanent : comptes courants, livrets, dépôts à
+ * terme. C'était une console d'administration, pas une vue de patrimoine. On y
+ * lisait des lignes, jamais une exposition.
+ *
+ * La hiérarchie est désormais celle par laquelle on lit réellement sa
+ * trésorerie :
+ *
+ *     patrimoine bancaire → établissement → produit → détail
+ *
+ * L'établissement passe en premier parce que c'est lui qui porte le risque de
+ * contrepartie et la garantie des dépôts ; les trois natures de produit
+ * restent distinctes en base et dans les sous-onglets, mais cessent d'être
+ * trois univers séparés à l'écran.
+ *
+ * Le détail — et toute l'édition avec lui — vit dans la colonne de droite,
+ * exactement comme la fiche d'actif de la page Portefeuille et avec la même
+ * classe `.asset-panel`. La liste reste visible, la sélection reste repérable,
+ * et passer d'un compte à l'autre ne demande de refermer quoi que ce soit.
+ *
+ * Aucune route n'a changé : `/api/banks`, `/api/savings`, `/api/term-deposits`
+ * et `/api/banks/summary` sont appelées comme avant, avec les mêmes charges
+ * utiles.
+ */
+
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ChevronDown,
-  HelpCircle,
-  Plus,
-  RefreshCw,
-  Search,
-  Trash2,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { BANK_OPTIONS } from "@/app/lib/constants";
-import {
-  ACCOUNT_CURRENCY_OPTIONS,
-  currencyLabel,
-} from "@/app/lib/money/currencies";
-import { formatCurrency, cn } from "@/app/lib/utils";
+import { ChevronDown, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { fetchJson } from "@/app/lib/api-client";
+import { formatCurrency, cn, MONTANT_INCONNU } from "@/app/lib/utils";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import { KpiBandTile } from "@/components/ui/kpi-tiles";
+import {
+  groupByInstitution,
+  institutionCount,
+  type BankProduct,
+} from "@/app/lib/cash/bank-groups";
+import {
+  REGULATED_PRODUCT_LABELS,
+  type RegulatedProductType,
+} from "@/app/lib/cash/regulated-products";
+import { InstitutionList, ProductTable } from "@/components/banks/bank-lists";
+import {
+  BankDetailPanel,
+  type BankPanelTarget,
+} from "@/components/banks/bank-detail-panel";
+import {
+  AddCheckingModal,
+  AddSavingsModal,
+  AddTermDepositModal,
+  type AddKind,
+  type CheckingPayload,
+  type SavingsPayload,
+  type TermDepositPayload,
+} from "@/components/banks/add-account-modals";
+import type {
+  BankAccountRow,
+  BanksSummary,
+  BankSelection,
+  SavingsRow,
+  TermDepositRow,
+} from "@/components/banks/bank-types";
 
-/* ─── Shared atoms ─────────────────────────────────────────────────── */
+const VIEWS = [
+  { id: "overview", label: "Vue d'ensemble" },
+  { id: "checking", label: "Comptes" },
+  { id: "savings", label: "Livrets" },
+  { id: "term", label: "Dépôts à terme" },
+] as const;
 
-function CurrencySelect({
-  value,
-  onChange,
-  className,
-  title,
-}: {
-  value: string;
-  onChange: (code: string) => void;
-  className?: string;
-  title?: string;
-}) {
-  const codes = ACCOUNT_CURRENCY_OPTIONS as readonly string[];
-  const options = codes.includes(value) ? codes : [value, ...codes];
-  return (
-    <select
-      className={cn("input !py-1.5", className)}
-      value={value}
-      title={title}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {options.map((c) => (
-        <option key={c} value={c}>
-          {currencyLabel(c)}
-        </option>
-      ))}
-    </select>
-  );
-}
+type ViewId = (typeof VIEWS)[number]["id"];
 
-/** Combobox banque — liste en portal (fixed) pour passer au-dessus des cartes sœurs. */
-function BankNameCombobox({
-  value,
-  onChange,
-  className,
-  testId,
-  placeholder = "Rechercher une banque…",
-}: {
-  value: string;
-  onChange: (name: string) => void;
-  className?: string;
-  testId?: string;
-  placeholder?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState(value);
-  const [prevValue, setPrevValue] = useState(value);
-  const [menuBox, setMenuBox] = useState<{
-    top: number;
-    left: number;
-    width: number;
-  } | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLUListElement>(null);
-
-  // Sync query au prop value (adjust state while rendering)
-  if (value !== prevValue) {
-    setPrevValue(value);
-    setQuery(value);
-  }
-
-  const updateMenuPosition = () => {
-    const el = inputRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setMenuBox({
-      top: r.bottom + 4,
-      left: r.left,
-      width: Math.max(r.width, 220),
-    });
-  };
-
-  useLayoutEffect(() => {
-    // Pas de reset au close : le menu n'est rendu (JSX) que si `open` est vrai
-    if (!open) return;
-    updateMenuPosition();
-    const onScrollOrResize = () => updateMenuPosition();
-    window.addEventListener("resize", onScrollOrResize);
-    // capture scroll on any ancestor
-    window.addEventListener("scroll", onScrollOrResize, true);
-    return () => {
-      window.removeEventListener("resize", onScrollOrResize);
-      window.removeEventListener("scroll", onScrollOrResize, true);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDoc(e: MouseEvent) {
-      const t = e.target as Node;
-      if (rootRef.current?.contains(t)) return;
-      if (menuRef.current?.contains(t)) return;
-      setOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const list = [...BANK_OPTIONS];
-    if (!q) return list;
-    return list.filter((b) => b.toLowerCase().includes(q));
-  }, [query]);
-
-  const listboxId = `${testId || "bank-combobox"}-listbox`;
-
-  const menu =
-    open &&
-    menuBox &&
-    typeof document !== "undefined" &&
-    createPortal(
-      <ul
-        ref={menuRef}
-        id={listboxId}
-        role="listbox"
-        data-testid={testId ? `${testId}-listbox` : "bank-combobox-listbox"}
-        className="fixed z-[200] max-h-56 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--card)] py-1 shadow-xl"
-        style={{
-          top: menuBox.top,
-          left: menuBox.left,
-          width: menuBox.width,
-        }}
-      >
-        {filtered.length === 0 ? (
-          <li className="px-3 py-2 text-xs text-[var(--muted-foreground)]">
-            Aucune banque — validez pour garder « {query.trim()} »
-          </li>
-        ) : (
-          filtered.map((b) => (
-            <li key={b}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={b === value}
-                className={cn(
-                  "block w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--muted)]",
-                  b === value &&
-                    "bg-teal-700/10 font-medium text-teal-900 dark:text-teal-100"
-                )}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  onChange(b);
-                  setQuery(b);
-                  setOpen(false);
-                }}
-              >
-                {b}
-              </button>
-            </li>
-          ))
-        )}
-      </ul>,
-      document.body
-    );
-
-  return (
-    <div
-      ref={rootRef}
-      className={cn("relative min-w-0", open && "z-[60]", className)}
-    >
-      <div className="relative">
-        <Search
-          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--muted-foreground)]"
-          aria-hidden
-        />
-        <input
-          ref={inputRef}
-          role="combobox"
-          className="input w-full !py-1.5 !pl-8 !pr-8 text-sm"
-          value={query}
-          data-testid={testId}
-          placeholder={placeholder}
-          aria-label="Banque"
-          aria-expanded={open}
-          aria-controls={listboxId}
-          aria-autocomplete="list"
-          aria-haspopup="listbox"
-          onFocus={() => setOpen(true)}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOpen(true);
-          }}
-          onBlur={() => {
-            if (query.trim() && query.trim() !== value) {
-              onChange(query.trim());
-            }
-          }}
-        />
-        <ChevronDown
-          className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--muted-foreground)]"
-          aria-hidden
-        />
-      </div>
-      {menu}
-    </div>
-  );
-}
-
-function NetWorthBadge({
-  included,
-  compact,
-}: {
-  included: boolean;
-  compact?: boolean;
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-        included
-          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
-          : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-      )}
-      title={
-        included
-          ? "Solde > 0 : ce compte entre dans le patrimoine net"
-          : "Solde à 0 : ignoré du patrimoine net (évite le bruit)"
-      }
-    >
-      {included ? "Dans le patrimoine" : "Hors patrimoine (0)"}
-      {!compact && (
-        <HelpCircle className="h-2.5 w-2.5 opacity-60" aria-hidden />
-      )}
-    </span>
-  );
-}
-
-function FieldLabel({
-  children,
-  hint,
-}: {
-  children: React.ReactNode;
-  hint?: string;
-}) {
-  return (
-    <span className="mb-1 flex items-center gap-1 text-[11px] font-medium text-[var(--muted-foreground)]">
-      {children}
-      {hint && (
-        <span title={hint} className="cursor-help text-slate-400">
-          <HelpCircle className="h-3 w-3" />
-        </span>
-      )}
-    </span>
-  );
-}
-
-const DOW_LABELS = [
-  "",
-  "Lundi",
-  "Mardi",
-  "Mercredi",
-  "Jeudi",
-  "Vendredi",
-  "Samedi",
-  "Dimanche",
-];
-const MONTH_LABELS = [
-  "",
-  "Janvier",
-  "Février",
-  "Mars",
-  "Avril",
-  "Mai",
-  "Juin",
-  "Juillet",
-  "Août",
-  "Septembre",
-  "Octobre",
-  "Novembre",
-  "Décembre",
-];
-
-/* ─── Main tab ─────────────────────────────────────────────────────── */
-
+/**
+ * KPI de tête.
+ *
+ * Grand chiffre, intitulé discret dessous, aucune carte colorée : c'est la
+ * grammaire d'un terminal, et celle qu'emploient déjà le tableau de bord et
+ * l'onglet Cryptos. Les valeurs viennent telles quelles de
+ * `/api/banks/summary` — cet écran n'a pas de calcul propre à défendre.
+ */
 export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
   const qc = useQueryClient();
+
   const banksQ = useQuery({
     queryKey: ["banks"],
-    queryFn: () =>
-      fetchJson<{
-        accounts: Array<{
-          id: string;
-          bankName: string;
-          balance: string;
-          currency: string;
-          countsInNetWorth: boolean;
-        }>;
-      }>("/api/banks"),
+    queryFn: () => fetchJson<{ accounts: BankAccountRow[] }>("/api/banks"),
   });
   const savingsQ = useQuery({
     queryKey: ["savings"],
-    queryFn: () =>
-      fetchJson<{
-        accounts: Array<{
-          id: string;
-          name: string;
-          bankName: string | null;
-          balance: string;
-          displayBalance: string;
-          apyPercent: string;
-          rateType: string;
-          payoutFrequency: string;
-          payoutDayOfWeek: number | null;
-          payoutDayOfMonth: number | null;
-          payoutMonth: number | null;
-          payoutRuleLabel: string;
-          dailyInterest: string;
-          periodInterest: string;
-          daysElapsed: number;
-          currency: string;
-          countsInNetWorth: boolean;
-          lastPayoutAt: string | null;
-        }>;
-      }>("/api/savings"),
+    queryFn: () => fetchJson<{ accounts: SavingsRow[] }>("/api/savings"),
     refetchInterval: 60_000,
   });
+  const summaryQ = useQuery({
+    queryKey: ["banks-summary"],
+    queryFn: () => fetchJson<BanksSummary>("/api/banks/summary"),
+  });
+  const termDepositsQ = useQuery({
+    queryKey: ["term-deposits"],
+    queryFn: () =>
+      fetchJson<{ termDeposits: TermDepositRow[] }>("/api/term-deposits"),
+  });
 
-  const [bankName, setBankName] = useState("Revolut");
-  const [bankBalance, setBankBalance] = useState("0");
-  const [bankCurrency, setBankCurrency] = useState("EUR");
-
-  const [livretName, setLivretName] = useState("Livret A");
-  const [livretBankName, setLivretBankName] = useState("Revolut");
-  const [livretBalance, setLivretBalance] = useState("0");
-  const [livretApy, setLivretApy] = useState("3");
-  const [livretRateType, setLivretRateType] = useState<"APR" | "APY">("APY");
-  const [livretFreq, setLivretFreq] = useState<
-    "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY"
-  >("DAILY");
-  const [livretDow, setLivretDow] = useState(1);
-  const [livretDom, setLivretDom] = useState(1);
-  const [livretMonth, setLivretMonth] = useState(12);
-  const [livretCurrency, setLivretCurrency] = useState("EUR");
-  const [livretAdvanced, setLivretAdvanced] = useState(false);
-  const [expandedSavings, setExpandedSavings] = useState<Record<string, boolean>>(
-    {}
+  const banks = useMemo(() => banksQ.data?.accounts ?? [], [banksQ.data]);
+  const savings = useMemo(() => savingsQ.data?.accounts ?? [], [savingsQ.data]);
+  const termDeposits = useMemo(
+    () => termDepositsQ.data?.termDeposits ?? [],
+    [termDepositsQ.data]
   );
+
+  const [view, setView] = useState<ViewId>("overview");
+  const [selection, setSelection] = useState<BankSelection | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addKind, setAddKind] = useState<AddKind | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<BankPanelTarget | null>(null);
 
   /** Invalide banques + KPI cash + plateformes (cash rattaché par nom). */
   const refresh = async () => {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["banks"] }),
       qc.invalidateQueries({ queryKey: ["savings"] }),
+      qc.invalidateQueries({ queryKey: ["banks-summary"] }),
+      qc.invalidateQueries({ queryKey: ["term-deposits"] }),
       qc.invalidateQueries({ queryKey: ["holdings"] }),
       qc.invalidateQueries({ queryKey: ["platforms"] }),
       qc.invalidateQueries({ queryKey: ["portfolio-history"] }),
@@ -374,48 +135,71 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
   };
 
   const addBank = useMutation({
-    mutationFn: () =>
-      fetchJson("/api/banks", {
-        method: "POST",
-        body: JSON.stringify({
-          bankName,
-          balance: bankBalance || "0",
-          currency: bankCurrency || "EUR",
-        }),
-      }),
+    mutationFn: (body: CheckingPayload) =>
+      fetchJson("/api/banks", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: async () => {
       toast.success("Compte courant ajouté");
-      setBankBalance("0");
+      setAddKind(null);
       await refresh();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const addSavings = useMutation({
-    mutationFn: () =>
-      fetchJson("/api/savings", {
-        method: "POST",
-        body: JSON.stringify({
-          name: livretName,
-          bankName: livretBankName.trim() || null,
-          balance: livretBalance || "0",
-          apyPercent: livretApy || "0",
-          rateType: livretRateType,
-          payoutFrequency: livretFreq,
-          payoutDayOfWeek: livretFreq === "WEEKLY" ? livretDow : null,
-          payoutDayOfMonth:
-            livretFreq === "MONTHLY" || livretFreq === "YEARLY"
-              ? livretDom
-              : null,
-          payoutMonth: livretFreq === "YEARLY" ? livretMonth : null,
-          currency: livretCurrency || "EUR",
-        }),
-      }),
+    mutationFn: (body: SavingsPayload) =>
+      fetchJson("/api/savings", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: async () => {
       toast.success("Livret ajouté");
-      setLivretBalance("0");
+      setAddKind(null);
       await refresh();
     },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const addTermDeposit = useMutation({
+    mutationFn: (body: TermDepositPayload) =>
+      fetchJson("/api/term-deposits", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: async () => {
+      toast.success("Dépôt à terme ajouté");
+      setAddKind(null);
+      await refresh();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const patchBank = useMutation({
+    mutationFn: (body: Record<string, string | boolean>) =>
+      fetchJson("/api/banks", { method: "PUT", body: JSON.stringify(body) }),
+    onSuccess: () => refresh(),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const patchSavings = useMutation({
+    mutationFn: (body: Record<string, string | boolean>) =>
+      fetchJson("/api/savings", { method: "PUT", body: JSON.stringify(body) }),
+    onSuccess: () => refresh(),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteBank = useMutation({
+    mutationFn: (id: string) =>
+      fetchJson(`/api/banks?id=${id}`, { method: "DELETE" }),
+    onSuccess: () => refresh(),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const deleteSavings = useMutation({
+    mutationFn: (id: string) =>
+      fetchJson(`/api/savings?id=${id}`, { method: "DELETE" }),
+    onSuccess: () => refresh(),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const deleteTermDeposit = useMutation({
+    mutationFn: (id: string) =>
+      fetchJson(`/api/term-deposits/${id}`, { method: "DELETE" }),
+    onSuccess: () => refresh(),
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -435,702 +219,413 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const patchBank = useMutation({
-    mutationFn: (body: Record<string, string>) =>
-      fetchJson("/api/banks", { method: "PUT", body: JSON.stringify(body) }),
-    onSuccess: () => refresh(),
-    onError: (e: Error) => toast.error(e.message),
-  });
+  /*
+    Les trois listes deviennent une seule collection de produits.
 
-  const patchSavings = useMutation({
-    mutationFn: (body: Record<string, string>) =>
-      fetchJson("/api/savings", { method: "PUT", body: JSON.stringify(body) }),
-    onSuccess: () => refresh(),
-    onError: (e: Error) => toast.error(e.message),
-  });
+    C'est la seule transformation que fait cet écran sur les données : elle
+    n'invente aucun montant, elle ne fait qu'aplatir trois formes en une pour
+    que le regroupement par établissement puisse opérer.
+  */
+  const products = useMemo<BankProduct[]>(() => {
+    const out: BankProduct[] = [];
+    for (const b of banks) {
+      out.push({
+        id: b.id,
+        kind: "CHECKING",
+        name: "Compte courant",
+        bankName: b.bankName,
+        balance: b.balance,
+        balanceBase: b.balanceBase ?? b.balance,
+        currency: b.currency,
+        ratePercent: null,
+        countsInNetWorth: b.countsInNetWorth,
+        isPro: b.isPro,
+        ownershipPct: b.ownershipPct,
+      });
+    }
+    for (const s of savings) {
+      out.push({
+        id: s.id,
+        kind: "SAVINGS",
+        name: s.name,
+        bankName: s.bankName,
+        // Le solde d'affichage inclut les intérêts courus : c'est ce que le
+        // livret vaut aujourd'hui, donc ce que la liste doit montrer.
+        balance: s.displayBalance,
+        balanceBase: s.displayBalanceBase ?? s.displayBalance,
+        currency: s.currency,
+        ratePercent: s.apyPercent,
+        countsInNetWorth: s.countsInNetWorth,
+        isPro: s.isPro,
+        ownershipPct: s.ownershipPct,
+      });
+    }
+    for (const t of termDeposits) {
+      out.push({
+        id: t.id,
+        kind: "TERM_DEPOSIT",
+        name: `Dépôt à terme${t.maturityDate ? ` · ${new Date(t.maturityDate).toLocaleDateString("fr-FR", { month: "short", year: "2-digit" })}` : ""}`,
+        bankName: t.bankName,
+        balance: t.principal,
+        balanceBase: t.principalBase,
+        currency: t.currency,
+        ratePercent: t.ratePercent,
+        countsInNetWorth: true,
+        isPro: t.isPro,
+        ownershipPct: t.ownershipPct,
+      });
+    }
+    return out;
+  }, [banks, savings, termDeposits]);
 
-  const banks = banksQ.data?.accounts ?? [];
-  const savings = savingsQ.data?.accounts ?? [];
+  const institutions = useMemo(
+    () => groupByInstitution(products),
+    [products]
+  );
+
+  /** Résout la sélection en cible du panneau, ou `null` si la ligne a disparu. */
+  const panelTarget = useMemo<BankPanelTarget | null>(() => {
+    if (!selection) return null;
+    if (selection.kind === "INSTITUTION") {
+      const inst = institutions.find((i) => i.key === selection.id);
+      return inst ? { kind: "INSTITUTION", institution: inst } : null;
+    }
+    if (selection.kind === "CHECKING") {
+      const row = banks.find((b) => b.id === selection.id);
+      return row ? { kind: "CHECKING", row } : null;
+    }
+    if (selection.kind === "SAVINGS") {
+      const row = savings.find((s) => s.id === selection.id);
+      return row ? { kind: "SAVINGS", row } : null;
+    }
+    const row = termDeposits.find((t) => t.id === selection.id);
+    return row ? { kind: "TERM_DEPOSIT", row } : null;
+  }, [selection, institutions, banks, savings, termDeposits]);
+
+  const summary = summaryQ.data;
+  const summaryLoading = summaryQ.isPending && !summaryQ.data;
+  /*
+    Trois états, pas deux.
+
+    `summaryLoading` ne couvre que le premier chargement. Une fois les
+    tentatives épuisées, il retombe à faux alors que `summary` reste indéfini :
+    c'est l'échec, et il n'était distingué de rien. Les tuiles lisaient
+    `?? "0"` et affichaient donc « 0,00 € » de liquidités et d'épargne —
+    mesuré, cet écran ne signalant l'échec nulle part par ailleurs.
+
+    La route rend toujours ces totaux, à zéro compris quand il n'y a aucun
+    compte : leur absence signifie « pas de réponse », jamais « rien ». La
+    tuile « Rendement », dans la même bande, tenait déjà la distinction.
+  */
+  const totauxConnus = summary != null;
+  /*
+    L'échec du résumé n'était annoncé nulle part sur cet écran : les tuiles
+    disaient « — € » sans que rien n'explique pourquoi. Même formulation et même
+    mécanisme que l'onglet Transactions — un message discret sous le sous-titre,
+    avec de quoi relancer.
+  */
+  const resumeIndisponible = !totauxConnus && !summaryLoading;
+  const nbInstitutions = institutionCount(products);
+  const accountCount = products.length;
+
+  const visibleProducts = useMemo(() => {
+    if (view === "checking") return products.filter((p) => p.kind === "CHECKING");
+    if (view === "savings") return products.filter((p) => p.kind === "SAVINGS");
+    if (view === "term")
+      return products.filter((p) => p.kind === "TERM_DEPOSIT");
+    return products;
+  }, [products, view]);
+
+  const confirmDelete = () => {
+    if (!deleteTarget || deleteTarget.kind === "INSTITUTION") return;
+    const id = deleteTarget.row.id;
+    if (deleteTarget.kind === "CHECKING") deleteBank.mutate(id);
+    else if (deleteTarget.kind === "SAVINGS") deleteSavings.mutate(id);
+    else deleteTermDeposit.mutate(id);
+    setSelection(null);
+    setDeleteTarget(null);
+  };
 
   return (
-    <div className="section-stack space-y-6" data-testid="banks-tab">
-      <header className="module-page-header px-0.5">
-        <h1 className="text-title">Banques</h1>
-        <p className="module-intro text-meta">
-          Comptes courants et livrets · conversion en {baseCurrency} pour le
-          patrimoine agrégé uniquement
-        </p>
-      </header>
-
-      {/* ═══════════════ Comptes courants ═══════════════ */}
-      <section className="space-y-3" data-testid="banks-checking-section">
-        <div className="flex flex-wrap items-end justify-between gap-2 px-0.5">
-          <div>
-            <h2 className="text-sm font-semibold tracking-tight text-[var(--foreground)]">
-              Comptes courants
-            </h2>
-            <p className="text-meta">
-              Liquidités à vue · inclus dans le patrimoine si solde &gt; 0
-            </p>
-          </div>
-        </div>
-
-        {/* Carte d’ajout rapide — séparée de la liste */}
-        <div className="card p-3.5 sm:p-4" data-testid="banks-checking-add">
-          <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
-            Ajouter un compte
+    <div className="section-stack space-y-[var(--space-4)]" data-testid="banks-tab">
+      <header className="module-page-header flex flex-wrap items-start justify-between gap-[var(--space-3)] px-0.5">
+        <div className="min-w-0">
+          <h1 className="text-title">Banques</h1>
+          <p className="text-meta">
+            Trésorerie, épargne et liquidités
+            {accountCount > 0 ? (
+              <>
+                <span className="mx-1 opacity-40">·</span>
+                {nbInstitutions} établissement{nbInstitutions > 1 ? "s" : ""}
+                <span className="mx-1 opacity-40">·</span>
+                {accountCount} compte{accountCount > 1 ? "s" : ""}
+              </>
+            ) : null}
           </p>
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-            <label className="min-w-0 flex-1 sm:min-w-[12rem] sm:max-w-xs">
-              <FieldLabel>Banque</FieldLabel>
-              <BankNameCombobox
-                value={bankName}
-                onChange={setBankName}
-                testId="banks-add-bank-name"
-              />
-            </label>
-            <label className="w-full sm:w-32">
-              <FieldLabel hint="Montant dans la devise du compte (pas de conversion auto)">
-                Solde
-              </FieldLabel>
-              <input
-                className="input w-full !py-1.5 tabular-nums"
-                value={bankBalance}
-                onChange={(e) => setBankBalance(e.target.value)}
-                inputMode="decimal"
-                data-testid="banks-add-balance"
-              />
-            </label>
-            <label className="w-full sm:w-32">
-              <FieldLabel hint="Devise nominale du compte — le solde n’est pas converti">
-                Devise
-              </FieldLabel>
-              <CurrencySelect
-                value={bankCurrency}
-                onChange={setBankCurrency}
-                className="w-full"
-                title="Devise du compte courant"
-              />
-            </label>
-            <Button
-              size="sm"
-              className="h-9 shrink-0"
-              onClick={() => addBank.mutate()}
-              disabled={addBank.isPending}
-              data-testid="banks-add-submit"
+          {resumeIndisponible && (
+            <p
+              className="mt-[var(--space-1)] text-[length:var(--text-xs)] text-[var(--danger)]"
+              data-testid="banks-summary-error"
             >
-              <Plus className="h-3.5 w-3.5" />
-              Ajouter
-            </Button>
-          </div>
+              Impossible de charger les totaux —{" "}
+              <button
+                type="button"
+                className="font-medium underline underline-offset-2"
+                onClick={() => void summaryQ.refetch()}
+              >
+                réessayer
+              </button>
+            </p>
+          )}
         </div>
 
-        {/* Liste existante */}
-        <div className="card overflow-hidden" data-testid="banks-checking-list">
-          <div className="border-b border-[var(--border)] px-4 py-2.5">
-            <p className="text-[11px] font-medium text-[var(--muted-foreground)]">
-              Comptes enregistrés
-              {!banksQ.isLoading && (
-                <span className="ml-1.5 tabular-nums">
-                  · {banks.length}
-                </span>
-              )}
-            </p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[36rem] text-sm">
-              <thead className="table-head text-[10px] uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-4 py-2.5 text-left font-medium">Banque</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Solde</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Devise</th>
-                  <th className="px-4 py-2.5 text-center font-medium">
-                    Patrimoine
-                  </th>
-                  <th className="px-4 py-2.5 text-right font-medium">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {banks.map((a) => (
-                  <tr
-                    key={a.id}
-                    className="border-t border-[var(--border)] hover:bg-[var(--muted)]/20"
-                  >
-                    <td className="px-4 py-2.5">
-                      <BankNameCombobox
-                        value={a.bankName}
-                        onChange={(bankName) =>
-                          patchBank.mutate({ id: a.id, bankName })
-                        }
-                        className="min-w-[10rem]"
-                      />
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <input
-                        className="input ml-auto !w-32 !py-1.5 text-right tabular-nums"
-                        defaultValue={a.balance}
-                        key={`${a.id}-bal-${a.balance}`}
-                        onBlur={(e) => {
-                          if (e.target.value !== a.balance) {
-                            patchBank.mutate({
-                              id: a.id,
-                              balance: e.target.value,
-                            });
-                          }
-                        }}
-                      />
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <CurrencySelect
-                        value={a.currency || "EUR"}
-                        className="!w-28"
-                        title="Devise de ce compte (solde non converti)"
-                        onChange={(currency) => {
-                          if (currency !== a.currency) {
-                            patchBank.mutate({ id: a.id, currency });
-                          }
-                        }}
-                      />
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      <NetWorthBadge included={a.countsInNetWorth} />
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0"
-                        title="Supprimer"
-                        aria-label="Supprimer le compte"
-                        onClick={() =>
-                          fetchJson(`/api/banks?id=${a.id}`, {
-                            method: "DELETE",
-                          }).then(refresh)
-                        }
-                      >
-                        <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-                {banks.length === 0 && !banksQ.isLoading && (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-8 text-center text-sm text-[var(--muted-foreground)]"
-                    >
-                      Aucun compte courant — utilisez le formulaire ci-dessus
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      {/* ═══════════════ Livrets ═══════════════ */}
-      <section className="space-y-3" data-testid="banks-savings-section">
-        <div className="flex flex-wrap items-end justify-between gap-2 px-0.5">
-          <div>
-            <h2 className="text-sm font-semibold tracking-tight text-[var(--foreground)]">
-              Livrets d&apos;épargne
-            </h2>
-            <p className="text-meta">
-              Intérêts capitalisés selon la périodicité choisie
-            </p>
-          </div>
+        <div className="relative flex shrink-0 items-center gap-[var(--space-2)]">
           <Button
-            size="sm"
-            variant="outline"
-            className="h-8 gap-1.5"
+            variant="ghost"
             onClick={() => accrueMut.mutate()}
-            disabled={accrueMut.isPending || savings.length === 0}
-            title="Crédite au solde les périodes d’intérêts déjà échues (selon chaque règle de livret)"
-            data-testid="banks-accrue-interests"
+            disabled={accrueMut.isPending}
+            title="Créditer les intérêts dus sur les livrets"
+            data-testid="banks-accrue"
           >
             <RefreshCw
               className={cn(
-                "h-3.5 w-3.5",
+                "mr-1.5 h-3.5 w-3.5",
                 accrueMut.isPending && "animate-spin"
               )}
+              aria-hidden
             />
-            Actualiser les intérêts
+            Créditer les intérêts
           </Button>
-        </div>
 
-        {/* Ajout livret — essentiel + avancé repliable */}
-        <div className="card p-3.5 sm:p-4" data-testid="banks-savings-add">
-          <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
-            Ajouter un livret
-          </p>
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-            <label className="w-full sm:min-w-[9rem] sm:flex-1 sm:max-w-[12rem]">
-              <FieldLabel>Nom</FieldLabel>
-              <input
-                className="input w-full !py-1.5"
-                value={livretName}
-                onChange={(e) => setLivretName(e.target.value)}
-              />
-            </label>
-            <label className="min-w-0 flex-1 sm:min-w-[12rem] sm:max-w-xs">
-              <FieldLabel hint="Banque de détention — rattache le solde à la plateforme du même nom">
-                Banque
-              </FieldLabel>
-              <BankNameCombobox
-                value={livretBankName}
-                onChange={setLivretBankName}
-                testId="banks-savings-add-bank"
-              />
-            </label>
-            <label className="w-full sm:w-28">
-              <FieldLabel>Solde</FieldLabel>
-              <input
-                className="input w-full !py-1.5 tabular-nums"
-                value={livretBalance}
-                onChange={(e) => setLivretBalance(e.target.value)}
-                inputMode="decimal"
-              />
-            </label>
-            <label className="w-full sm:w-24">
-              <FieldLabel
-                hint="APY = rendement annualisé effectif · APR = taux nominal annualisé"
-              >
-                Taux %
-              </FieldLabel>
-              <input
-                className="input w-full !py-1.5 tabular-nums"
-                value={livretApy}
-                onChange={(e) => setLivretApy(e.target.value)}
-                inputMode="decimal"
-              />
-            </label>
-            <label className="w-full sm:w-28">
-              <FieldLabel hint="Devise nominale du livret">Devise</FieldLabel>
-              <CurrencySelect
-                value={livretCurrency}
-                onChange={setLivretCurrency}
-                className="w-full"
-              />
-            </label>
-            <Button
-              size="sm"
-              className="h-9 shrink-0"
-              onClick={() => addSavings.mutate()}
-              disabled={addSavings.isPending}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Ajouter
-            </Button>
-          </div>
-
-          <button
-            type="button"
-            className={cn(
-              "mt-3 inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
-            )}
-            aria-expanded={livretAdvanced}
-            onClick={() => setLivretAdvanced((v) => !v)}
-            data-testid="banks-savings-advanced-toggle"
+          <Button
+            onClick={() => setAddOpen((o) => !o)}
+            data-testid="banks-add-open"
+            aria-expanded={addOpen}
+            aria-haspopup="menu"
           >
-            <ChevronDown
-              className={cn(
-                "h-3.5 w-3.5 transition-transform",
-                livretAdvanced && "rotate-180"
-              )}
-            />
-            Réglages du taux et des versements
-          </button>
+            <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            Ajouter
+            <ChevronDown className="ml-1 h-3.5 w-3.5" aria-hidden />
+          </Button>
 
-          {livretAdvanced && (
-            <div
-              className="mt-2.5 flex flex-wrap items-end gap-3 rounded-lg border border-[var(--border)] bg-[var(--muted)]/20 p-3"
-              data-testid="banks-savings-advanced"
-            >
-              <label className="w-full sm:w-24">
-                <FieldLabel hint="APY : taux effectif · APR : taux nominal divisé par le nombre de périodes">
-                  Type
-                </FieldLabel>
-                <select
-                  className="input w-full !py-1.5"
-                  value={livretRateType}
-                  onChange={(e) =>
-                    setLivretRateType(e.target.value as "APR" | "APY")
-                  }
-                >
-                  <option value="APY">APY</option>
-                  <option value="APR">APR</option>
-                </select>
-              </label>
-              <label className="w-full sm:w-36">
-                <FieldLabel>Périodicité</FieldLabel>
-                <select
-                  className="input w-full !py-1.5"
-                  value={livretFreq}
-                  onChange={(e) =>
-                    setLivretFreq(
-                      e.target.value as
-                        | "DAILY"
-                        | "WEEKLY"
-                        | "MONTHLY"
-                        | "YEARLY"
-                    )
-                  }
-                >
-                  <option value="DAILY">Journalier</option>
-                  <option value="WEEKLY">Hebdomadaire</option>
-                  <option value="MONTHLY">Mensuel</option>
-                  <option value="YEARLY">Annuel</option>
-                </select>
-              </label>
-              {livretFreq === "WEEKLY" && (
-                <label className="w-full sm:w-32">
-                  <FieldLabel>Jour</FieldLabel>
-                  <select
-                    className="input w-full !py-1.5"
-                    value={livretDow}
-                    onChange={(e) => setLivretDow(Number(e.target.value))}
+          {addOpen ? (
+            <>
+              {/*
+                Fond transparent plein écran : cliquer ailleurs referme le menu.
+                Moins coûteux qu'un écouteur global, et le focus reste piégé
+                dans le menu tant qu'il est ouvert.
+              */}
+              <button
+                type="button"
+                className="fixed inset-0 z-40 cursor-default"
+                aria-label="Fermer le menu"
+                onClick={() => setAddOpen(false)}
+              />
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-50 mt-[var(--space-1)] min-w-[12rem] overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--card)] py-[var(--space-1)] shadow-[var(--shadow-lg)]"
+                data-testid="banks-add-menu"
+              >
+                {(
+                  [
+                    ["CHECKING", "Compte courant"],
+                    ["SAVINGS", "Livret"],
+                    ["TERM_DEPOSIT", "Dépôt à terme"],
+                  ] as const
+                ).map(([kind, label]) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    role="menuitem"
+                    className="block w-full px-[var(--space-3)] py-[var(--space-2)] text-left text-[length:var(--text-xs)] text-[var(--foreground)] transition-[background-color] hover:bg-[var(--surface-hover)]"
+                    onClick={() => {
+                      setAddKind(kind);
+                      setAddOpen(false);
+                    }}
+                    data-testid={`banks-add-${kind.toLowerCase()}`}
                   >
-                    {[1, 2, 3, 4, 5, 6, 7].map((d) => (
-                      <option key={d} value={d}>
-                        {DOW_LABELS[d]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              {(livretFreq === "MONTHLY" || livretFreq === "YEARLY") && (
-                <label className="w-full sm:w-28">
-                  <FieldLabel>Jour du mois</FieldLabel>
-                  <input
-                    type="number"
-                    min={1}
-                    max={31}
-                    className="input w-full !py-1.5"
-                    value={livretDom}
-                    onChange={(e) => setLivretDom(Number(e.target.value))}
-                  />
-                </label>
-              )}
-              {livretFreq === "YEARLY" && (
-                <label className="w-full sm:w-32">
-                  <FieldLabel>Mois</FieldLabel>
-                  <select
-                    className="input w-full !py-1.5"
-                    value={livretMonth}
-                    onChange={(e) => setLivretMonth(Number(e.target.value))}
-                  >
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => (
-                      <option key={m} value={m}>
-                        {MONTH_LABELS[m]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <p className="w-full text-[10px] leading-relaxed text-[var(--muted-foreground)]">
-                Les intérêts courus s&apos;affichent en temps réel ; le bouton
-                « Actualiser les intérêts » crédite au solde les périodes déjà
-                échues selon la règle de chaque livret.
-              </p>
-            </div>
-          )}
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
         </div>
+      </header>
 
-        {/* Liste livrets — lignes compactes + réglages au clic */}
-        <div className="card overflow-hidden" data-testid="banks-savings-list">
-          <div className="border-b border-[var(--border)] px-4 py-2.5">
-            <p className="text-[11px] font-medium text-[var(--muted-foreground)]">
-              Livrets enregistrés
-              {!savingsQ.isLoading && (
-                <span className="ml-1.5 tabular-nums">· {savings.length}</span>
+      {/* KPI — mêmes chiffres que /api/banks/summary, présentation terminal. */}
+      <div
+        className="card grid grid-cols-2 divide-x divide-y divide-[var(--border)] overflow-hidden sm:grid-cols-3 sm:divide-y-0 lg:grid-cols-5"
+        data-testid="banks-summary-strip"
+      >
+        <KpiBandTile
+          label="Liquidités"
+          value={
+            totauxConnus
+              ? formatCurrency(summary.checkingTotalBase, baseCurrency)
+              : MONTANT_INCONNU
+          }
+          secondary="Comptes courants"
+          loading={summaryLoading}
+        />
+        <KpiBandTile
+          label="Épargne"
+          value={
+            totauxConnus
+              ? formatCurrency(summary.savingsTotalBase, baseCurrency)
+              : MONTANT_INCONNU
+          }
+          secondary="Livrets + intérêts courus"
+          loading={summaryLoading}
+        />
+        <KpiBandTile
+          label="Rendement"
+          value={
+            summary?.weightedApyPct
+              ? `${Number(summary.weightedApyPct).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} %`
+              : "—"
+          }
+          secondary="Moyen pondéré, livrets"
+          loading={summaryLoading}
+        />
+        <KpiBandTile
+          label="Intérêts projetés"
+          value={
+            totauxConnus
+              ? formatCurrency(summary.projectedAnnualInterestBase, baseCurrency)
+              : MONTANT_INCONNU
+          }
+          secondary="Projection 12 mois"
+          loading={summaryLoading}
+        />
+        <KpiBandTile
+          label="Établissements"
+          value={String(nbInstitutions)}
+          secondary={`${accountCount} compte${accountCount > 1 ? "s" : ""}`}
+        />
+      </div>
+
+      {/* Liste + détail côte à côte — même grille que la page Portefeuille. */}
+      <div className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)] xl:items-start">
+        <section className="card min-w-0 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-[var(--space-2)] border-b border-[var(--border)] px-[var(--space-4)] py-[var(--space-3)]">
+            <div
+              className="term-seg"
+              role="tablist"
+              aria-label="Vue des produits bancaires"
+            >
+              {VIEWS.map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === v.id}
+                  data-active={view === v.id}
+                  className="term-seg-item"
+                  onClick={() => setView(v.id)}
+                  data-testid={`banks-view-${v.id}`}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+            <span className="text-meta num">
+              Total{" "}
+              {formatCurrency(
+                String(
+                  institutions.reduce((acc, i) => acc + i.totalBase, 0)
+                ),
+                baseCurrency
               )}
-            </p>
+            </span>
           </div>
 
-          {savings.length === 0 && !savingsQ.isLoading ? (
-            <p className="px-4 py-8 text-center text-sm text-[var(--muted-foreground)]">
-              Aucun livret — ajoutez-en un ci-dessus
-            </p>
+          {banksQ.isPending || savingsQ.isPending || termDepositsQ.isPending ? (
+            <div className="space-y-[var(--space-2)] p-[var(--space-4)]">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : view === "overview" ? (
+            <InstitutionList
+              institutions={institutions}
+              baseCurrency={baseCurrency}
+              selection={selection}
+              onSelect={setSelection}
+            />
           ) : (
-            <ul className="divide-y divide-[var(--border)]">
-              {savings.map((a) => {
-                const open = Boolean(expandedSavings[a.id]);
-                return (
-                  <li key={a.id} className="px-3 py-3 sm:px-4">
-                    <div className="flex flex-wrap items-start gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <input
-                            className="input !w-auto min-w-[8rem] max-w-[14rem] !py-1 font-medium"
-                            defaultValue={a.name}
-                            key={`${a.id}-name-${a.name}`}
-                            onBlur={(e) => {
-                              if (e.target.value !== a.name)
-                                patchSavings.mutate({
-                                  id: a.id,
-                                  name: e.target.value,
-                                });
-                            }}
-                          />
-                          <NetWorthBadge
-                            included={a.countsInNetWorth}
-                            compact
-                          />
-                        </div>
-                        <div className="mt-1.5 max-w-xs">
-                          <FieldLabel hint="Banque de détention">
-                            Banque
-                          </FieldLabel>
-                          <BankNameCombobox
-                            value={a.bankName || ""}
-                            onChange={(bankName) =>
-                              patchSavings.mutate({ id: a.id, bankName })
-                            }
-                            placeholder="Banque de détention…"
-                          />
-                        </div>
-                        <p className="text-meta mt-1">
-                          {a.rateType || "APY"} {a.apyPercent}&nbsp;% ·{" "}
-                          {a.payoutRuleLabel}
-                        </p>
-                      </div>
-
-                      <div className="text-right">
-                        <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                          Solde affiché
-                        </p>
-                        <p className="text-base font-semibold tabular-nums text-[var(--foreground)]">
-                          {formatCurrency(a.displayBalance, a.currency)}
-                        </p>
-                        <p className="text-[10px] text-[var(--muted-foreground)]">
-                          Crédité{" "}
-                          {formatCurrency(a.balance, a.currency)}
-                          {a.daysElapsed > 0 && (
-                            <> · {a.daysElapsed}&nbsp;j courus</>
-                          )}
-                        </p>
-                        <p className="mt-0.5 text-[11px] font-medium tabular-nums text-emerald-600 dark:text-emerald-400">
-                          +
-                          {formatCurrency(
-                            a.periodInterest || a.dailyInterest,
-                            a.currency
-                          )}
-                          <span className="font-normal text-[var(--muted-foreground)]">
-                            {" "}
-                            / période
-                          </span>
-                        </p>
-                      </div>
-
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 text-[11px]"
-                          aria-expanded={open}
-                          onClick={() =>
-                            setExpandedSavings((prev) => ({
-                              ...prev,
-                              [a.id]: !prev[a.id],
-                            }))
-                          }
-                        >
-                          Régler
-                          <ChevronDown
-                            className={cn(
-                              "ml-0.5 h-3.5 w-3.5 transition-transform",
-                              open && "rotate-180"
-                            )}
-                          />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          title="Supprimer"
-                          aria-label="Supprimer le livret"
-                          onClick={() =>
-                            fetchJson(`/api/savings?id=${a.id}`, {
-                              method: "DELETE",
-                            }).then(refresh)
-                          }
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                        </Button>
-                      </div>
-                    </div>
-
-                    {open && (
-                      <div className="mt-3 grid gap-2 rounded-lg border border-[var(--border)] bg-[var(--muted)]/15 p-3 sm:grid-cols-2 lg:grid-cols-4">
-                        <label className="text-[11px] text-[var(--muted-foreground)]">
-                          Solde crédité
-                          <input
-                            className="input mt-1 w-full !py-1.5 text-right tabular-nums"
-                            defaultValue={a.balance}
-                            key={`${a.id}-bal-${a.balance}`}
-                            onBlur={(e) => {
-                              if (e.target.value !== a.balance)
-                                patchSavings.mutate({
-                                  id: a.id,
-                                  balance: e.target.value,
-                                });
-                            }}
-                          />
-                        </label>
-                        <label className="text-[11px] text-[var(--muted-foreground)]">
-                          Devise
-                          <div className="mt-1">
-                            <CurrencySelect
-                              value={a.currency || "EUR"}
-                              className="w-full"
-                              onChange={(currency) => {
-                                if (currency !== a.currency) {
-                                  patchSavings.mutate({ id: a.id, currency });
-                                }
-                              }}
-                            />
-                          </div>
-                        </label>
-                        <label className="text-[11px] text-[var(--muted-foreground)]">
-                          Type de taux
-                          <select
-                            className="input mt-1 w-full !py-1.5"
-                            value={a.rateType || "APY"}
-                            onChange={(e) =>
-                              patchSavings.mutate({
-                                id: a.id,
-                                rateType: e.target.value,
-                              })
-                            }
-                          >
-                            <option value="APY">APY</option>
-                            <option value="APR">APR</option>
-                          </select>
-                        </label>
-                        <label className="text-[11px] text-[var(--muted-foreground)]">
-                          Taux %
-                          <input
-                            className="input mt-1 w-full !py-1.5 text-right tabular-nums"
-                            defaultValue={a.apyPercent}
-                            key={`${a.id}-apy-${a.apyPercent}`}
-                            onBlur={(e) => {
-                              if (e.target.value !== a.apyPercent)
-                                patchSavings.mutate({
-                                  id: a.id,
-                                  apyPercent: e.target.value,
-                                });
-                            }}
-                          />
-                        </label>
-                        <label className="text-[11px] text-[var(--muted-foreground)] sm:col-span-2">
-                          Périodicité
-                          <select
-                            className="input mt-1 w-full !py-1.5"
-                            value={a.payoutFrequency || "DAILY"}
-                            onChange={(e) =>
-                              patchSavings.mutate({
-                                id: a.id,
-                                payoutFrequency: e.target.value,
-                              })
-                            }
-                          >
-                            <option value="DAILY">Journalier</option>
-                            <option value="WEEKLY">Hebdomadaire</option>
-                            <option value="MONTHLY">Mensuel</option>
-                            <option value="YEARLY">Annuel</option>
-                          </select>
-                        </label>
-                        {a.payoutFrequency === "WEEKLY" && (
-                          <label className="text-[11px] text-[var(--muted-foreground)]">
-                            Jour
-                            <select
-                              className="input mt-1 w-full !py-1.5"
-                              value={a.payoutDayOfWeek ?? 1}
-                              onChange={(e) =>
-                                patchSavings.mutate({
-                                  id: a.id,
-                                  payoutDayOfWeek: e.target.value,
-                                })
-                              }
-                            >
-                              {[1, 2, 3, 4, 5, 6, 7].map((d) => (
-                                <option key={d} value={d}>
-                                  {DOW_LABELS[d]}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        )}
-                        {(a.payoutFrequency === "MONTHLY" ||
-                          a.payoutFrequency === "YEARLY") && (
-                          <label className="text-[11px] text-[var(--muted-foreground)]">
-                            Jour du mois
-                            <input
-                              type="number"
-                              min={1}
-                              max={31}
-                              className="input mt-1 w-full !py-1.5"
-                              defaultValue={a.payoutDayOfMonth ?? 1}
-                              key={`${a.id}-dom-${a.payoutDayOfMonth}`}
-                              onBlur={(e) =>
-                                patchSavings.mutate({
-                                  id: a.id,
-                                  payoutDayOfMonth: e.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                        )}
-                        {a.payoutFrequency === "YEARLY" && (
-                          <label className="text-[11px] text-[var(--muted-foreground)]">
-                            Mois
-                            <select
-                              className="input mt-1 w-full !py-1.5"
-                              value={a.payoutMonth ?? 12}
-                              onChange={(e) =>
-                                patchSavings.mutate({
-                                  id: a.id,
-                                  payoutMonth: e.target.value,
-                                })
-                              }
-                            >
-                              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(
-                                (m) => (
-                                  <option key={m} value={m}>
-                                    {MONTH_LABELS[m]}
-                                  </option>
-                                )
-                              )}
-                            </select>
-                          </label>
-                        )}
-                        {a.lastPayoutAt && (
-                          <p className="text-meta sm:col-span-2">
-                            Dernier versement :{" "}
-                            {new Date(a.lastPayoutAt).toLocaleDateString(
-                              "fr-FR"
-                            )}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+            <ProductTable
+              products={visibleProducts}
+              selection={selection}
+              onSelect={setSelection}
+              emptyLabel={
+                view === "checking"
+                  ? "Aucun compte courant."
+                  : view === "savings"
+                    ? "Aucun livret."
+                    : "Aucun dépôt à terme."
+              }
+            />
           )}
+        </section>
 
-          <p className="border-t border-[var(--border)] px-4 py-2.5 text-[11px] leading-relaxed text-[var(--muted-foreground)]">
-            Solde affiché = solde crédité + intérêts courus non encore versés.
-            La conversion en {baseCurrency} sert uniquement au patrimoine
-            agrégé. « Actualiser les intérêts » capitalise les périodes dues.
-          </p>
-        </div>
-      </section>
+        <BankDetailPanel
+          target={panelTarget}
+          baseCurrency={baseCurrency}
+          onClose={() => setSelection(null)}
+          onPatchBank={(body) => patchBank.mutate(body)}
+          onPatchSavings={(body) => patchSavings.mutate(body)}
+          onDelete={setDeleteTarget}
+          onSelectProduct={(kind, id) =>
+            setSelection({ kind, id } as BankSelection)
+          }
+        />
+      </div>
+
+      {addKind === "CHECKING" && (
+        <AddCheckingModal
+          onClose={() => setAddKind(null)}
+          onSubmit={(p) => addBank.mutate(p)}
+          pending={addBank.isPending}
+        />
+      )}
+      {addKind === "SAVINGS" && (
+        <AddSavingsModal
+          onClose={() => setAddKind(null)}
+          onSubmit={(p) => addSavings.mutate(p)}
+          pending={addSavings.isPending}
+        />
+      )}
+      {addKind === "TERM_DEPOSIT" && (
+        <AddTermDepositModal
+          onClose={() => setAddKind(null)}
+          onSubmit={(p) => addTermDeposit.mutate(p)}
+          pending={addTermDeposit.isPending}
+        />
+      )}
+
+      {deleteTarget && deleteTarget.kind !== "INSTITUTION" && (
+        <ConfirmDialog
+          open
+          danger
+          title="Supprimer ce produit ?"
+          message={
+            deleteTarget.kind === "CHECKING"
+              ? `Le compte courant ${deleteTarget.row.bankName} et son historique seront supprimés.`
+              : deleteTarget.kind === "SAVINGS"
+                ? `Le livret ${deleteTarget.row.name} (${
+                    REGULATED_PRODUCT_LABELS[
+                      deleteTarget.row.productType as RegulatedProductType
+                    ] ?? deleteTarget.row.productType
+                  }) et son historique seront supprimés.`
+                : `Le dépôt à terme ${deleteTarget.row.bankName ?? ""} sera supprimé.`
+          }
+          confirmLabel="Supprimer"
+          testId="banks-delete-confirm"
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }

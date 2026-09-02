@@ -1,46 +1,224 @@
+/**
+ * Actifs tangibles — objets de collection et biens meubles.
+ *
+ * Le module ne se contente plus d'un libellé et d'un prix : chaque ligne porte
+ * sa date d'achat, son justificatif et, selon la catégorie, ce qui fait
+ * réellement sa valeur — le traitement et le titre d'une pierre, la référence
+ * et les papiers d'une montre, l'appellation et le format d'un vin.
+ *
+ * ## La fiscalité est calculée, jamais stockée
+ *
+ * Chaque ligne expose une simulation de cession **à la valeur estimée**, via
+ * le moteur partagé de l'article 150 VI. C'est une projection : rien n'est dû
+ * tant que le bien n'est pas vendu. Deux règles y sont décisives et absentes
+ * de la plupart des simulateurs :
+ *
+ * - **En dessous de 5 000 € de prix de cession, aucun impôt** — ni forfaitaire,
+ *   ni sur la plus-value. C'est le cas de la majorité d'une collection.
+ * - **Les meubles meublants et les automobiles sont exonérés par nature**,
+ *   sauf qualification d'objet de collection.
+ *
+ * Tous les montants transitent en Decimal.
+ */
+
 import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "@/app/lib/prisma";
+import { d, type Decimal, type DecimalInput } from "@/app/lib/money/decimal";
 import {
-  TANGIBLE_CATEGORIES,
+  fiscalNature,
+  isTangibleCategory,
   TANGIBLE_CATEGORY_LABELS,
-  type TangibleAssetDto,
-  type TangibleAssetsSummary,
   type TangibleCategory,
+} from "@/app/lib/tangibles/constants";
+import {
+  breakEvenYear,
+  computeMovableSaleTax,
+} from "@/app/lib/tax/movable-assets";
+import {
+  annualCostOfOwnership,
+  coverageRatio,
+  HIGH_VALUE_UNINSURED_EUR,
+  insuranceStatus,
+  INSURANCE_TYPES,
+  netCarryYield,
+  ownershipAlerts,
+  STORAGE_TYPES,
+} from "@/app/lib/tangibles/ownership";
+import type {
+  TangibleAssetDto,
+  TangibleAssetsSummary,
+  TangibleOwnership,
+  TangibleTaxPreview,
 } from "./types";
 
-function dec(v: string | number | undefined | null, fallback = "0"): Prisma.Decimal {
-  const s = String(v ?? fallback).trim().replace(",", ".");
-  const n = Number(s);
-  return new Prisma.Decimal(Number.isFinite(n) ? s : fallback);
+export class TangibleInputError extends Error {}
+
+function dec(value: DecimalInput | null | undefined, fallback = "0"): Prisma.Decimal {
+  const raw = String(value ?? fallback).trim().replace(",", ".");
+  const parsed = Number(raw);
+  return new Prisma.Decimal(Number.isFinite(parsed) && raw !== "" ? raw : fallback);
 }
 
-function n(v: string | number): number {
-  const x = Number(String(v).replace(",", "."));
-  return Number.isFinite(x) ? x : 0;
+/** Decimal optionnel : `null` reste `null`, il ne devient pas zéro. */
+function optDec(value: DecimalInput | null | undefined): Prisma.Decimal | null {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return null;
+  }
+  return dec(value);
 }
 
-function normalizeCategory(raw: string | undefined): TangibleCategory {
-  const s = String(raw || "OTHER").toUpperCase();
-  if ((TANGIBLE_CATEGORIES as readonly string[]).includes(s)) return s as TangibleCategory;
-  return "OTHER";
+function optInt(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return null;
+  }
+  const parsed = Number(String(value).replace(",", "."));
+  return Number.isFinite(parsed) ? Math.round(parsed) : null;
 }
 
-function mapRow(row: {
-  id: string;
-  category: string;
-  brandOrArtist: string;
-  modelName: string;
-  yearOrVintage: string | null;
-  purchasePrice: Prisma.Decimal;
-  estimatedValue: Prisma.Decimal;
-  currency: string;
-  hasCertificate: boolean;
-  notes: string | null;
-}): TangibleAssetDto {
-  const cost = n(row.purchasePrice.toString());
-  const val = n(row.estimatedValue.toString());
-  const pnl = val - cost;
-  const pct = cost > 0 ? (pnl / cost) * 100 : 0;
+function optText(value: string | null | undefined): string | null {
+  const trimmed = String(value ?? "").trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function optBool(value: boolean | null | undefined): boolean | null {
+  return value === null || value === undefined ? null : Boolean(value);
+}
+
+function parseDate(value: string | Date | null | undefined): Date | null {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function normalizeInsuranceType(raw: string | undefined | null): string | null {
+  const value = String(raw ?? "").toUpperCase();
+  return (INSURANCE_TYPES as readonly string[]).includes(value) ? value : null;
+}
+
+function normalizeStorageType(raw: string | undefined | null): string | null {
+  const value = String(raw ?? "").toUpperCase();
+  return (STORAGE_TYPES as readonly string[]).includes(value) ? value : null;
+}
+
+function normalizeCategory(raw: string | undefined | null): TangibleCategory {
+  const value = String(raw ?? "OTHER").toUpperCase();
+  return isTangibleCategory(value) ? value : "OTHER";
+}
+
+type Row = Prisma.TangibleAssetGetPayload<Record<string, never>>;
+
+/**
+ * Simule la cession de la ligne à sa valeur estimée.
+ *
+ * Le prix de revient retenu est le prix d'achat : les frais d'acquisition ne
+ * sont pas saisis pour les tangibles, l'omission majore donc la plus-value —
+ * elle est prudente sur l'impôt annoncé, jamais optimiste.
+ */
+function taxPreview(row: Row): TangibleTaxPreview {
+  const nature = fiscalNature(row.category, row.isCollectible);
+  // Les frais d'acquisition entrent dans le prix de revient : commissaire-
+  // priseur, expertise, transport. Les omettre gonflerait la plus-value
+  // taxable au régime réel.
+  const costBasis = d(row.purchasePrice.toString()).plus(
+    row.acquisitionFees?.toString() ?? 0
+  );
+  const computed = computeMovableSaleTax({
+    nature,
+    salePriceEur: row.estimatedValue.toString(),
+    costBasisEur: costBasis,
+    acquiredAt: row.purchaseDate,
+    soldAt: new Date(),
+    // Le justificatif d'achat, et lui seul : un certificat d'authenticité
+    // atteste ce qu'est l'objet, pas ce qu'il a coûté ni quand il a été
+    // acquis — les deux éléments qu'exige l'option de l'article 150 VL.
+    hasInvoice: row.purchaseDate !== null && row.hasPurchaseProof,
+  });
+
+  const chosen =
+    computed.recommended === "FORFAIT" ? computed.flat : computed.capitalGain;
+
+  return {
+    holdingYears: row.purchaseDate ? computed.holdingYears : null,
+    costBasisEur: costBasis.toFixed(2),
+    breakEvenYear: breakEvenYear({
+      nature,
+      salePriceEur: row.estimatedValue.toString(),
+      costBasisEur: costBasis,
+    }),
+    exempt: computed.exempt,
+    exemptionReason: computed.exemptionReason,
+    flatTaxEur: computed.flat.taxEur,
+    capitalGainTaxEur: computed.capitalGain.taxEur,
+    recommendedRegime: computed.recommended,
+    taxDueEur: chosen.taxEur,
+    netProceedsEur: chosen.netProceedsEur,
+    optionAvailable: computed.capitalGain.available,
+    rationale: computed.rationale,
+  };
+}
+
+/**
+ * Coût de détention de la ligne.
+ *
+ * Ce bloc ne touche jamais à `taxPreview` : les frais de garde et les primes
+ * d'assurance ne sont pas déductibles de la plus-value imposable au titre de
+ * l'article 150 VI. Les additionner donnerait un impôt sous-évalué.
+ */
+function ownershipView(row: Row, holdingYears: number | null): TangibleOwnership {
+  const annualCost = annualCostOfOwnership({
+    insurancePremiumAnnual: row.insurancePremiumAnnual?.toString() ?? null,
+    storageCostAnnual: row.storageCostAnnual?.toString() ?? null,
+  });
+
+  const carry = netCarryYield({
+    estimatedValue: row.estimatedValue.toString(),
+    purchasePrice: row.purchasePrice.toString(),
+    holdingYears,
+    annualCost,
+  });
+
+  const ratio = coverageRatio(
+    row.estimatedValue.toString(),
+    row.insuranceValue?.toString() ?? null
+  );
+
+  return {
+    annualCostEur: annualCost.toFixed(2),
+    totalCarryCostEur: carry.totalCarryCostEur,
+    netPnlEur: carry.netPnlEur,
+    netPnlPct: carry.netPnlPct,
+    carryDragPct: carry.carryDragPct,
+    coverageRatio: ratio ? Number(ratio.toFixed(4)) : null,
+    insuranceStatus: insuranceStatus({
+      estimatedValue: row.estimatedValue.toString(),
+      insuranceValue: row.insuranceValue?.toString() ?? null,
+      insuranceExpiryDate: row.insuranceExpiryDate,
+    }),
+    alerts: ownershipAlerts({
+      estimatedValue: row.estimatedValue.toString(),
+      storageCostAnnual: row.storageCostAnnual?.toString() ?? null,
+      insurancePremiumAnnual: row.insurancePremiumAnnual?.toString() ?? null,
+      insuranceValue: row.insuranceValue?.toString() ?? null,
+      insuranceExpiryDate: row.insuranceExpiryDate,
+      insuranceType: row.insuranceType,
+      appraisalDate: row.appraisalDate,
+      storageType: row.storageType,
+      storageRenewalDate: row.storageRenewalDate,
+      totalCarryCostEur: carry.totalCarryCostEur,
+      grossPnlEur: carry.grossPnlEur,
+    }),
+  };
+}
+
+function mapRow(row: Row): TangibleAssetDto {
+  const cost = d(row.purchasePrice.toString());
+  const value = d(row.estimatedValue.toString());
+  const pnl = value.minus(cost);
+  const pct = cost.gt(0) ? pnl.div(cost).times(100) : d(0);
+  // La durée de détention vient du calcul fiscal : une seule source pour deux
+  // usages, sinon les deux blocs pourraient annoncer des durées différentes.
+  const tax = taxPreview(row);
+
   return {
     id: row.id,
     category: normalizeCategory(row.category),
@@ -54,29 +232,160 @@ function mapRow(row: {
     notes: row.notes,
     unrealizedPnl: pnl.toFixed(2),
     unrealizedPnlPct: pct.toFixed(2),
+
+    purchaseDate: row.purchaseDate?.toISOString() ?? null,
+    purchaseSource: row.purchaseSource,
+    certificateRef: row.certificateRef,
+    certificateIssuer: row.certificateIssuer,
+    hasPurchaseProof: row.hasPurchaseProof,
+    acquisitionFees: row.acquisitionFees?.toString() ?? null,
+
+    appraisalValue: row.appraisalValue?.toString() ?? null,
+    appraisalDate: row.appraisalDate?.toISOString() ?? null,
+    appraisalProvider: row.appraisalProvider,
+    insuranceValue: row.insuranceValue?.toString() ?? null,
+    storageLocation: row.storageLocation,
+    isCollectible: row.isCollectible,
+
+    gemType: row.gemType,
+    caratWeight: row.caratWeight?.toString() ?? null,
+    gemClarity: row.gemClarity,
+    gemColor: row.gemColor,
+    gemCut: row.gemCut,
+    gemTreatment: row.gemTreatment,
+    gemOrigin: row.gemOrigin,
+    jewelryType: row.jewelryType,
+    metalBase: row.metalBase,
+    metalWeightG: row.metalWeightG?.toString() ?? null,
+    hasPunchmarks: row.hasPunchmarks,
+    watchMovement: row.watchMovement,
+    watchDiameterMm: row.watchDiameterMm?.toString() ?? null,
+    watchReference: row.watchReference,
+    watchBoxPapers: row.watchBoxPapers,
+    wineAppellation: row.wineAppellation,
+    wineBottleCount: row.wineBottleCount,
+    wineBottleFormat: row.wineBottleFormat,
+    wineStorageType: row.wineStorageType,
+    autoMileageKm: row.autoMileageKm,
+    autoRegistration: row.autoRegistration,
+    autoInspectionOk: row.autoInspectionOk,
+    autoPreviousOwners: row.autoPreviousOwners,
+
+    insurancePremiumAnnual: row.insurancePremiumAnnual?.toString() ?? null,
+    insuranceProvider: row.insuranceProvider,
+    insurancePolicyRef: row.insurancePolicyRef,
+    insuranceExpiryDate: row.insuranceExpiryDate?.toISOString() ?? null,
+    insuranceType: row.insuranceType,
+    storageType: row.storageType,
+    storageCostAnnual: row.storageCostAnnual?.toString() ?? null,
+    storageProvider: row.storageProvider,
+    storageContractRef: row.storageContractRef,
+    storageRenewalDate: row.storageRenewalDate?.toISOString() ?? null,
+
+    includeInEstate: row.includeInEstate,
+    estateNote: row.estateNote,
+
+    tax,
+    ownership: ownershipView(row, tax.holdingYears),
   };
 }
 
-export function summarizeTangibles(lines: TangibleAssetDto[]): TangibleAssetsSummary {
-  let totalCost = 0;
-  let totalValue = 0;
-  const byCat = new Map<string, number>();
-  for (const l of lines) {
-    totalCost += n(l.purchasePrice);
-    totalValue += n(l.estimatedValue);
-    byCat.set(l.category, (byCat.get(l.category) || 0) + n(l.estimatedValue));
+export function summarizeTangibles(
+  lines: TangibleAssetDto[]
+): TangibleAssetsSummary {
+  let totalCost = d(0);
+  let totalValue = d(0);
+  let totalInsured = d(0);
+  let taxBurden = d(0);
+  let exemptCount = 0;
+  let withCertificateCount = 0;
+  let withAppraisalCount = 0;
+  let undatedCount = 0;
+  let withPurchaseProofCount = 0;
+  let underInsuredCount = 0;
+  let uninsuredHighValueCount = 0;
+  let expiringPolicyCount = 0;
+  let fullyExemptCount = 0;
+  let custodyCost = d(0);
+  let ownershipCost = d(0);
+  let highCustodyCostCount = 0;
+  let ownershipAlertCount = 0;
+  let excludedFromEstate = d(0);
+  const byCategory = new Map<string, Decimal>();
+
+  for (const line of lines) {
+    totalCost = totalCost.plus(line.purchasePrice);
+    totalValue = totalValue.plus(line.estimatedValue);
+    totalInsured = totalInsured.plus(line.insuranceValue ?? 0);
+    taxBurden = taxBurden.plus(line.tax.taxDueEur);
+    if (line.tax.exempt) exemptCount += 1;
+    if (line.hasCertificate) withCertificateCount += 1;
+    if (line.appraisalValue !== null) withAppraisalCount += 1;
+    if (!line.purchaseDate) undatedCount += 1;
+    if (line.hasPurchaseProof) withPurchaseProofCount += 1;
+    if (line.ownership.insuranceStatus === "UNDER") underInsuredCount += 1;
+    if (
+      line.ownership.insuranceStatus === "EXPIRED" ||
+      line.ownership.insuranceStatus === "EXPIRING"
+    ) {
+      expiringPolicyCount += 1;
+    }
+    // Non assuré **et** au-dessus du seuil qui rend l'omission coûteuse.
+    if (
+      line.ownership.insuranceStatus === "NONE" &&
+      d(line.estimatedValue).gte(HIGH_VALUE_UNINSURED_EUR)
+    ) {
+      uninsuredHighValueCount += 1;
+    }
+    // « Pleinement exonéré » au sens de la durée : 22 ans révolus. Distinct
+    // de `exemptCount`, qui inclut le seuil des 5 000 € et les véhicules.
+    if (line.tax.exemptionReason === "HOLDING_PERIOD") fullyExemptCount += 1;
+    custodyCost = custodyCost.plus(line.storageCostAnnual ?? 0);
+    ownershipCost = ownershipCost.plus(line.ownership.annualCostEur);
+    ownershipAlertCount += line.ownership.alerts.length;
+    if (line.ownership.alerts.some((a) => a.code === "HIGH_CUSTODY_COST")) {
+      highCustodyCostCount += 1;
+    }
+    if (!line.includeInEstate) {
+      excludedFromEstate = excludedFromEstate.plus(line.estimatedValue);
+    }
+    byCategory.set(
+      line.category,
+      (byCategory.get(line.category) ?? d(0)).plus(line.estimatedValue)
+    );
   }
-  const totalPnl = totalValue - totalCost;
+
+  const totalPnl = totalValue.minus(totalCost);
+  const totalPnlPct = totalCost.gt(0)
+    ? totalPnl.div(totalCost).times(100).toNumber()
+    : 0;
+
   return {
     totalCost: totalCost.toFixed(2),
     totalValue: totalValue.toFixed(2),
     totalPnl: totalPnl.toFixed(2),
-    totalPnlPct: totalCost > 0 ? Math.round((totalPnl / totalCost) * 1000) / 10 : 0,
+    totalPnlPct: Math.round(totalPnlPct * 10) / 10,
     lineCount: lines.length,
-    byCategory: [...byCat.entries()].map(([k, value]) => ({
-      name: TANGIBLE_CATEGORY_LABELS[k as TangibleCategory] || k,
-      value: Math.round(value * 100) / 100,
+    byCategory: [...byCategory.entries()].map(([key, value]) => ({
+      name: TANGIBLE_CATEGORY_LABELS[key as TangibleCategory] ?? key,
+      value: Number(value.toFixed(2)),
     })),
+    totalInsuredValue: totalInsured.toFixed(2),
+    estimatedTaxBurden: taxBurden.toFixed(2),
+    exemptCount,
+    withCertificateCount,
+    withAppraisalCount,
+    undatedCount,
+    withPurchaseProofCount,
+    fullyExemptCount,
+    underInsuredCount,
+    uninsuredHighValueCount,
+    expiringPolicyCount,
+    totalAnnualCustodyCost: custodyCost.toFixed(2),
+    totalAnnualOwnershipCost: ownershipCost.toFixed(2),
+    highCustodyCostCount,
+    ownershipAlertCount,
+    excludedFromEstateEur: excludedFromEstate.toFixed(2),
   };
 }
 
@@ -99,26 +408,132 @@ export type TangibleInput = {
   currency?: string;
   hasCertificate?: boolean;
   notes?: string | null;
+
+  purchaseDate?: string | null;
+  purchaseSource?: string | null;
+  certificateRef?: string | null;
+  certificateIssuer?: string | null;
+  hasPurchaseProof?: boolean;
+  acquisitionFees?: string | number | null;
+
+  appraisalValue?: string | number | null;
+  appraisalDate?: string | null;
+  appraisalProvider?: string | null;
+  insuranceValue?: string | number | null;
+  storageLocation?: string | null;
+  isCollectible?: boolean;
+
+  insurancePremiumAnnual?: string | number | null;
+  insuranceProvider?: string | null;
+  insurancePolicyRef?: string | null;
+  insuranceExpiryDate?: string | null;
+  insuranceType?: string | null;
+  storageType?: string | null;
+  storageCostAnnual?: string | number | null;
+  storageProvider?: string | null;
+  storageContractRef?: string | null;
+  storageRenewalDate?: string | null;
+
+  includeInEstate?: boolean;
+  estateNote?: string | null;
+
+  gemType?: string | null;
+  caratWeight?: string | number | null;
+  gemClarity?: string | null;
+  gemColor?: string | null;
+  gemCut?: string | null;
+  gemTreatment?: string | null;
+  gemOrigin?: string | null;
+  jewelryType?: string | null;
+  metalBase?: string | null;
+  metalWeightG?: string | number | null;
+  hasPunchmarks?: boolean | null;
+  watchMovement?: string | null;
+  watchDiameterMm?: string | number | null;
+  watchReference?: string | null;
+  watchBoxPapers?: boolean | null;
+  wineAppellation?: string | null;
+  wineBottleCount?: number | string | null;
+  wineBottleFormat?: string | null;
+  wineStorageType?: string | null;
+  autoMileageKm?: number | string | null;
+  autoRegistration?: string | null;
+  autoInspectionOk?: boolean | null;
+  autoPreviousOwners?: number | string | null;
 };
 
 function normalize(input: TangibleInput) {
   return {
     category: normalizeCategory(input.category),
-    brandOrArtist: String(input.brandOrArtist || "").trim(),
-    modelName: String(input.modelName || "").trim(),
-    yearOrVintage: input.yearOrVintage ? String(input.yearOrVintage).trim() : null,
-    purchasePrice: dec(input.purchasePrice, "0"),
-    estimatedValue: dec(input.estimatedValue, "0"),
-    currency: (input.currency || "EUR").toUpperCase().slice(0, 3),
+    brandOrArtist: String(input.brandOrArtist ?? "").trim(),
+    modelName: String(input.modelName ?? "").trim(),
+    yearOrVintage: optText(input.yearOrVintage),
+    purchasePrice: dec(input.purchasePrice),
+    estimatedValue: dec(input.estimatedValue),
+    currency: (input.currency ?? "EUR").toUpperCase().slice(0, 3),
     hasCertificate: Boolean(input.hasCertificate),
-    notes: input.notes ? String(input.notes) : null,
+    notes: optText(input.notes),
+
+    purchaseDate: parseDate(input.purchaseDate),
+    purchaseSource: optText(input.purchaseSource),
+    certificateRef: optText(input.certificateRef),
+    certificateIssuer: optText(input.certificateIssuer),
+    hasPurchaseProof: Boolean(input.hasPurchaseProof),
+    acquisitionFees: optDec(input.acquisitionFees),
+
+    appraisalValue: optDec(input.appraisalValue),
+    appraisalDate: parseDate(input.appraisalDate),
+    appraisalProvider: optText(input.appraisalProvider),
+    insuranceValue: optDec(input.insuranceValue),
+    storageLocation: optText(input.storageLocation),
+    isCollectible: Boolean(input.isCollectible),
+
+    insurancePremiumAnnual: optDec(input.insurancePremiumAnnual),
+    insuranceProvider: optText(input.insuranceProvider),
+    insurancePolicyRef: optText(input.insurancePolicyRef),
+    insuranceExpiryDate: parseDate(input.insuranceExpiryDate),
+    insuranceType: normalizeInsuranceType(input.insuranceType),
+    storageType: normalizeStorageType(input.storageType),
+    storageCostAnnual: optDec(input.storageCostAnnual),
+    storageProvider: optText(input.storageProvider),
+    storageContractRef: optText(input.storageContractRef),
+    storageRenewalDate: parseDate(input.storageRenewalDate),
+
+    // Par défaut inclus dans l'assiette : c'est le cas général, et l'exclusion
+    // est une décision explicite (donation déjà réalisée, bien démembré…).
+    includeInEstate: input.includeInEstate ?? true,
+    estateNote: optText(input.estateNote),
+
+    gemType: optText(input.gemType),
+    caratWeight: optDec(input.caratWeight),
+    gemClarity: optText(input.gemClarity),
+    gemColor: optText(input.gemColor),
+    gemCut: optText(input.gemCut),
+    gemTreatment: optText(input.gemTreatment),
+    gemOrigin: optText(input.gemOrigin),
+    jewelryType: optText(input.jewelryType),
+    metalBase: optText(input.metalBase),
+    metalWeightG: optDec(input.metalWeightG),
+    hasPunchmarks: optBool(input.hasPunchmarks),
+    watchMovement: optText(input.watchMovement),
+    watchDiameterMm: optDec(input.watchDiameterMm),
+    watchReference: optText(input.watchReference),
+    watchBoxPapers: optBool(input.watchBoxPapers),
+    wineAppellation: optText(input.wineAppellation),
+    wineBottleCount: optInt(input.wineBottleCount),
+    wineBottleFormat: optText(input.wineBottleFormat),
+    wineStorageType: optText(input.wineStorageType),
+    autoMileageKm: optInt(input.autoMileageKm),
+    autoRegistration: optText(input.autoRegistration),
+    autoInspectionOk: optBool(input.autoInspectionOk),
+    autoPreviousOwners: optInt(input.autoPreviousOwners),
   };
 }
 
 export async function createTangible(userId: string, input: TangibleInput) {
   const data = normalize(input);
-  if (!data.brandOrArtist) throw new Error("Marque / artiste requis");
-  if (!data.modelName) throw new Error("Modèle / nom requis");
+  if (!data.brandOrArtist) throw new TangibleInputError("Marque / artiste requis");
+  if (!data.modelName) throw new TangibleInputError("Modèle / nom requis");
   const row = await prisma.tangibleAsset.create({ data: { userId, ...data } });
   return mapRow(row);
 }
@@ -129,32 +544,113 @@ export async function updateTangible(
   input: Partial<TangibleInput>
 ) {
   const existing = await prisma.tangibleAsset.findFirst({ where: { id, userId } });
-  if (!existing) throw new Error("Actif introuvable");
+  if (!existing) throw new TangibleInputError("Actif introuvable");
+
+  /**
+   * Un champ absent du patch garde sa valeur ; `null` explicite l'efface.
+   *
+   * Le formulaire n'envoie que ce que la catégorie affiche : sans cette règle,
+   * passer une bague en montre effacerait le carat au lieu de le conserver —
+   * et le rétablir après coup serait impossible.
+   */
+  function keep<K extends keyof TangibleInput>(
+    key: K,
+    current: unknown
+  ): TangibleInput[K] {
+    return (input[key] !== undefined ? input[key] : current) as TangibleInput[K];
+  }
+
   const data = normalize({
-    category: input.category ?? existing.category,
-    brandOrArtist: input.brandOrArtist ?? existing.brandOrArtist,
-    modelName: input.modelName ?? existing.modelName,
-    yearOrVintage:
-      input.yearOrVintage !== undefined ? input.yearOrVintage : existing.yearOrVintage,
-    purchasePrice: input.purchasePrice ?? existing.purchasePrice.toString(),
-    estimatedValue: input.estimatedValue ?? existing.estimatedValue.toString(),
-    currency: input.currency ?? existing.currency,
-    hasCertificate:
-      input.hasCertificate !== undefined ? input.hasCertificate : existing.hasCertificate,
-    notes: input.notes !== undefined ? input.notes : existing.notes,
+    category: keep("category", existing.category),
+    brandOrArtist: keep("brandOrArtist", existing.brandOrArtist) as string,
+    modelName: keep("modelName", existing.modelName) as string,
+    yearOrVintage: keep("yearOrVintage", existing.yearOrVintage),
+    purchasePrice: keep("purchasePrice", existing.purchasePrice.toString()),
+    estimatedValue: keep("estimatedValue", existing.estimatedValue.toString()),
+    currency: keep("currency", existing.currency),
+    hasCertificate: keep("hasCertificate", existing.hasCertificate),
+    notes: keep("notes", existing.notes),
+
+    purchaseDate: keep("purchaseDate", existing.purchaseDate?.toISOString() ?? null),
+    purchaseSource: keep("purchaseSource", existing.purchaseSource),
+    certificateRef: keep("certificateRef", existing.certificateRef),
+    certificateIssuer: keep("certificateIssuer", existing.certificateIssuer),
+    hasPurchaseProof: keep("hasPurchaseProof", existing.hasPurchaseProof),
+    acquisitionFees: keep(
+      "acquisitionFees",
+      existing.acquisitionFees?.toString() ?? null
+    ),
+
+    appraisalValue: keep("appraisalValue", existing.appraisalValue?.toString() ?? null),
+    appraisalDate: keep("appraisalDate", existing.appraisalDate?.toISOString() ?? null),
+    appraisalProvider: keep("appraisalProvider", existing.appraisalProvider),
+    insuranceValue: keep("insuranceValue", existing.insuranceValue?.toString() ?? null),
+    storageLocation: keep("storageLocation", existing.storageLocation),
+    isCollectible: keep("isCollectible", existing.isCollectible),
+
+    insurancePremiumAnnual: keep(
+      "insurancePremiumAnnual",
+      existing.insurancePremiumAnnual?.toString() ?? null
+    ),
+    insuranceProvider: keep("insuranceProvider", existing.insuranceProvider),
+    insurancePolicyRef: keep("insurancePolicyRef", existing.insurancePolicyRef),
+    insuranceExpiryDate: keep(
+      "insuranceExpiryDate",
+      existing.insuranceExpiryDate?.toISOString() ?? null
+    ),
+    insuranceType: keep("insuranceType", existing.insuranceType),
+    storageType: keep("storageType", existing.storageType),
+    storageCostAnnual: keep(
+      "storageCostAnnual",
+      existing.storageCostAnnual?.toString() ?? null
+    ),
+    storageProvider: keep("storageProvider", existing.storageProvider),
+    storageContractRef: keep("storageContractRef", existing.storageContractRef),
+    storageRenewalDate: keep(
+      "storageRenewalDate",
+      existing.storageRenewalDate?.toISOString() ?? null
+    ),
+
+    includeInEstate: keep("includeInEstate", existing.includeInEstate),
+    estateNote: keep("estateNote", existing.estateNote),
+
+    gemType: keep("gemType", existing.gemType),
+    caratWeight: keep("caratWeight", existing.caratWeight?.toString() ?? null),
+    gemClarity: keep("gemClarity", existing.gemClarity),
+    gemColor: keep("gemColor", existing.gemColor),
+    gemCut: keep("gemCut", existing.gemCut),
+    gemTreatment: keep("gemTreatment", existing.gemTreatment),
+    gemOrigin: keep("gemOrigin", existing.gemOrigin),
+    jewelryType: keep("jewelryType", existing.jewelryType),
+    metalBase: keep("metalBase", existing.metalBase),
+    metalWeightG: keep("metalWeightG", existing.metalWeightG?.toString() ?? null),
+    hasPunchmarks: keep("hasPunchmarks", existing.hasPunchmarks),
+    watchMovement: keep("watchMovement", existing.watchMovement),
+    watchDiameterMm: keep(
+      "watchDiameterMm",
+      existing.watchDiameterMm?.toString() ?? null
+    ),
+    watchReference: keep("watchReference", existing.watchReference),
+    watchBoxPapers: keep("watchBoxPapers", existing.watchBoxPapers),
+    wineAppellation: keep("wineAppellation", existing.wineAppellation),
+    wineBottleCount: keep("wineBottleCount", existing.wineBottleCount),
+    wineBottleFormat: keep("wineBottleFormat", existing.wineBottleFormat),
+    wineStorageType: keep("wineStorageType", existing.wineStorageType),
+    autoMileageKm: keep("autoMileageKm", existing.autoMileageKm),
+    autoRegistration: keep("autoRegistration", existing.autoRegistration),
+    autoInspectionOk: keep("autoInspectionOk", existing.autoInspectionOk),
+    autoPreviousOwners: keep("autoPreviousOwners", existing.autoPreviousOwners),
   });
-  const write = await prisma.tangibleAsset.updateMany({
-    where: { id, userId },
-    data,
-  });
-  if (write.count === 0) throw new Error("Actif introuvable");
+
+  const write = await prisma.tangibleAsset.updateMany({ where: { id, userId }, data });
+  if (write.count === 0) throw new TangibleInputError("Actif introuvable");
   const row = await prisma.tangibleAsset.findFirst({ where: { id, userId } });
-  if (!row) throw new Error("Actif introuvable");
+  if (!row) throw new TangibleInputError("Actif introuvable");
   return mapRow(row);
 }
 
 export async function deleteTangible(userId: string, id: string) {
   const result = await prisma.tangibleAsset.deleteMany({ where: { id, userId } });
-  if (result.count === 0) throw new Error("Actif introuvable");
+  if (result.count === 0) throw new TangibleInputError("Actif introuvable");
   return { ok: true };
 }

@@ -1,7 +1,7 @@
 # Config Gitleaks — https://github.com/gitleaks/gitleaks
 # Utilisé en CI (.github/workflows/ci.yml)
 
-title = "Patrimo"
+title = "Aurea"
 
 [extend]
 useDefault = true

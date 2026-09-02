@@ -232,6 +232,8 @@ export function TransactionModal({
   onAssetLabelChange,
   onRequestCreatePlatform,
   onSelectCatalogPlatform,
+  realEstatePlatformIds,
+  onRequestAddProperty,
 }: {
   open: boolean;
   editing: boolean;
@@ -249,6 +251,10 @@ export function TransactionModal({
   onRequestCreatePlatform?: (prefill?: string) => void;
   /** Sélection d’un courtier du catalogue → upsert + sélection */
   onSelectCatalogPlatform?: (opt: PlatformOption) => void | Promise<void>;
+  /** Plateformes « Notaire / immobilier » — la saisie y suit un autre chemin. */
+  realEstatePlatformIds?: readonly string[];
+  /** Ouvre le formulaire immobilier dédié pour cette plateforme. */
+  onRequestAddProperty?: (platformId: string) => void;
 }) {
   const currency = form.watch("currency") || "EUR";
   const fxRateToEur = form.watch("fxRateToEur") || "1";
@@ -261,6 +267,18 @@ export function TransactionModal({
   const occurredAt = form.watch("occurredAt");
   const isIncome = ["DIVIDENDE", "COUPON", "LOYER", "INTERET"].includes(
     String(txType || "")
+  );
+
+  /**
+   * Plateforme immobilière sélectionnée : la saisie d'un bien ne passe pas par
+   * ce formulaire. Un bien n'a ni ticker ni cours, et son acquisition crée en
+   * une fois l'actif, ses caractéristiques et la transaction d'achat — trois
+   * écritures que ce modal ne sait pas produire ensemble.
+   */
+  const selectedPlatformId = form.watch("platformId") || "";
+  const isRealEstatePlatform = Boolean(
+    selectedPlatformId &&
+      realEstatePlatformIds?.includes(selectedPlatformId)
   );
 
   const vis = useMemo(() => visibilityForType(String(txType || "")), [txType]);
@@ -417,10 +435,21 @@ export function TransactionModal({
           { cache: "no-store" }
         );
         if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { fxRateToEur?: string };
-        if (data.fxRateToEur && !cancelled) {
+        const data = (await res.json()) as { fxRateToEur?: string | null };
+        if (cancelled) return;
+        if (data.fxRateToEur) {
           form.setValue("fxRateToEur", data.fxRateToEur, { shouldDirty: true });
           setFxHint(`Taux historique ${cur}→EUR au ${day} : ${data.fxRateToEur}`);
+        } else {
+          /*
+            Rien n'est prérempli : un taux du jour posé dans ce champ serait
+            enregistré comme s'il datait de l'opération. L'écran le dit au lieu
+            de rester muet, sans quoi l'utilisateur croirait à un simple retard
+            de chargement.
+          */
+          setFxHint(
+            `Taux historique ${cur}→EUR au ${day} indisponible — saisissez-le pour enregistrer l'opération.`
+          );
         }
       } catch {
         /* ignore */
@@ -459,7 +488,7 @@ export function TransactionModal({
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Type">
               <select
-                className="input"
+                className="input w-full"
                 data-testid="tx-type"
                 {...form.register("type")}
               >
@@ -511,14 +540,40 @@ export function TransactionModal({
               </p>
             </Field>
           </div>
-          <p
-            className="rounded-lg border border-teal-500/20 bg-teal-500/5 px-2.5 py-1.5 text-[11px] leading-snug text-teal-800 dark:text-teal-200"
-            data-testid="tx-type-hint"
-          >
-            <span className="font-semibold">{typeLabel}</span>
-            {" — "}
-            {vis.typeHint}
-          </p>
+          {isRealEstatePlatform ? (
+            <div
+              className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-2.5 text-[11px] leading-snug text-violet-900 dark:text-violet-200"
+              data-testid="tx-real-estate-redirect"
+            >
+              <p className="font-semibold">Plateforme immobilière</p>
+              <p className="mt-0.5">
+                Un bien se saisit dans un formulaire dédié : type, surface,
+                adresse, quote-part et prêt associé. L&apos;acquisition y crée
+                d&apos;un coup le bien et sa transaction d&apos;achat.
+              </p>
+              <button
+                type="button"
+                className="btn btn-primary mt-2 text-[11px]"
+                data-testid="tx-open-property-form"
+                onClick={() => onRequestAddProperty?.(selectedPlatformId)}
+              >
+                Ajouter un bien immobilier
+              </button>
+              <p className="mt-2 opacity-80">
+                Les loyers, charges et travaux de biens déjà saisis restent à
+                enregistrer ici, comme des transactions ordinaires.
+              </p>
+            </div>
+          ) : (
+            <p
+              className="rounded-lg border border-teal-500/20 bg-teal-500/5 px-2.5 py-1.5 text-[11px] leading-snug text-teal-800 dark:text-teal-200"
+              data-testid="tx-type-hint"
+            >
+              <span className="font-semibold">{typeLabel}</span>
+              {" — "}
+              {vis.typeHint}
+            </p>
+          )}
         </Section>
 
         {/* ── 2. Actif ── */}
@@ -556,7 +611,7 @@ export function TransactionModal({
             {vis.ticker && (
               <Field label="Ticker">
                 <input
-                  className="input font-mono uppercase"
+                  className="input w-full font-mono uppercase"
                   data-testid="tx-ticker"
                   placeholder="ex. MC.PA, AAPL, BTC"
                   autoComplete="off"
@@ -591,7 +646,7 @@ export function TransactionModal({
             {vis.quantity && (
               <Field label={vis.quantityLabel}>
                 <input
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-qty"
                   placeholder={
                     String(txType) === "SPLIT" ? "2" : undefined
@@ -603,7 +658,7 @@ export function TransactionModal({
             {vis.unitPrice && (
               <Field label="Prix unitaire">
                 <input
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-price"
                   {...form.register("unitPrice")}
                 />
@@ -616,7 +671,7 @@ export function TransactionModal({
                 }
               >
                 <input
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-cash"
                   {...form.register("cashAmount")}
                 />
@@ -625,7 +680,7 @@ export function TransactionModal({
             {vis.fees && (
               <Field label="Frais">
                 <input
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-fees"
                   {...form.register("fees")}
                 />
@@ -633,7 +688,7 @@ export function TransactionModal({
             )}
             <Field label="Devise">
               <select
-                className="input"
+                className="input w-full"
                 data-testid="tx-currency"
                 value={(currency || "EUR").toUpperCase()}
                 onChange={(e) => {
@@ -658,7 +713,7 @@ export function TransactionModal({
               }
             >
               <input
-                className="input"
+                className="input w-full"
                 data-testid="tx-fx"
                 {...form.register("fxRateToEur")}
               />
@@ -682,7 +737,7 @@ export function TransactionModal({
 
             <button
               type="button"
-              className="text-[11px] font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
+              className="text-[11px] font-medium text-stone-700 underline-offset-2 hover:underline dark:text-stone-300"
               onClick={() => setShowFxHelp((v) => !v)}
               aria-expanded={showFxHelp}
             >
@@ -691,7 +746,7 @@ export function TransactionModal({
                 : "Aide conversion & impact €"}
             </button>
             {showFxHelp && (
-              <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-2.5 py-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+              <div className="rounded-lg border border-stone-500/20 bg-stone-500/5 px-2.5 py-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
                 <p>
                   Le <strong>taux → EUR</strong> convertit prix, cash et frais
                   pour le PRU et l&apos;impact cash en euros. En revenu non-EUR,
@@ -708,7 +763,7 @@ export function TransactionModal({
 
             {fxHint && (
               <p
-                className="text-[11px] text-sky-700 dark:text-sky-300"
+                className="text-[11px] text-stone-700 dark:text-stone-300"
                 data-testid="tx-fx-hint"
               >
                 {fxHint}
@@ -742,14 +797,14 @@ export function TransactionModal({
           <Field label={isIncome ? "Date (compta / défaut)" : "Date"}>
             <input
               type="datetime-local"
-              className="input"
+              className="input w-full"
               data-testid="tx-date"
               {...form.register("occurredAt")}
             />
           </Field>
           <Field label="Notes">
             <input
-              className="input"
+              className="input w-full"
               placeholder="Référence courtier, commentaire…"
               {...form.register("notes")}
             />
@@ -767,7 +822,7 @@ export function TransactionModal({
               <Field label="Ex-date (détachement)">
                 <input
                   type="date"
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-ex-date"
                   {...form.register("exDate")}
                 />
@@ -775,7 +830,7 @@ export function TransactionModal({
               <Field label="Date de paiement">
                 <input
                   type="date"
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-payment-date"
                   {...form.register("paymentDate")}
                 />
@@ -789,7 +844,7 @@ export function TransactionModal({
                 }
               >
                 <input
-                  className="input"
+                  className="input w-full"
                   data-testid="tx-wht-rate"
                   placeholder="ex. 0.15 ou 15"
                   {...form.register("withholdingTaxRate")}

@@ -9,14 +9,16 @@
 import { prisma } from "@/app/lib/prisma";
 import { d, zero } from "@/app/lib/money/decimal";
 import { convertToEurSync, getEurRates } from "@/app/lib/market/fx";
-import type {
-  AlternativesDashboardPayload,
-  AlternativesPortfolioSlice,
+import {
+  buildAlternativesShortAlerts,
+  type AlternativesDashboardPayload,
+  type AlternativesPortfolioSlice,
 } from "./types";
 import { listPreciousMetals } from "./precious-metals";
 import { listPrivateEquity } from "./private-equity";
 import { listCrowdlending } from "./crowdlending";
 import { listTangibles } from "./tangibles";
+import { buildConsolidatedInvestments } from "./consolidated";
 
 function sumFieldEur(
   rows: Array<{ currency: string; value: string }>,
@@ -42,19 +44,26 @@ type Delegate = {
   >;
 };
 
-function getDelegate(name: string): Delegate | null {
+function getDelegate(name: string): Delegate {
   const client = prisma as unknown as Record<string, Delegate | undefined>;
   const del = client[name];
   if (!del || typeof del.findMany !== "function") {
-    console.warn(
-      `[alternatives] Prisma model "${name}" unavailable — run: npx prisma generate (stop next dev first)`
+    /*
+      Modèle absent du client généré. Cela n'arrive qu'en développement, quand
+      le client n'a pas été régénéré après une migration.
+
+      Rendre un tableau vide faisait passer « je ne peux pas lire cette poche »
+      pour « cette poche est vide » : la valeur disparaissait du patrimoine
+      sans que rien ne le dise. On échoue franchement, message d'aide compris.
+    */
+    throw new Error(
+      `[alternatives] modèle Prisma « ${name} » indisponible — lancez : npx prisma generate (arrêtez next dev d'abord)`
     );
-    return null;
   }
   return del;
 }
 
-async function safeFindMany(
+async function findRows(
   modelName: string,
   args: unknown
 ): Promise<
@@ -67,24 +76,9 @@ async function safeFindMany(
     status?: string;
   }>
 > {
-  const del = getDelegate(modelName);
-  if (!del) return [];
-  try {
-    return await del.findMany(args);
-  } catch (e) {
-    console.error(`[alternatives] ${modelName}.findMany failed:`, e);
-    return [];
-  }
+  // L'erreur remonte : une poche illisible n'est pas une poche vide.
+  return getDelegate(modelName).findMany(args);
 }
-
-const EMPTY: AlternativesPortfolioSlice = {
-  metalsEur: 0,
-  privateEquityEur: 0,
-  crowdlendingEur: 0,
-  tangiblesEur: 0,
-  totalEur: 0,
-  slices: [],
-};
 
 /**
  * Total market value (EUR) of all alternative sleeves for a user.
@@ -93,93 +87,88 @@ export async function getAlternativesPortfolioSlice(
   userId: string,
   rates?: Record<string, number>
 ): Promise<AlternativesPortfolioSlice> {
-  try {
-    const fx = rates ?? (await getEurRates());
+  const fx = rates ?? (await getEurRates());
 
-    const [metals, pe, cl, tangibles] = await Promise.all([
-      safeFindMany("preciousMetalPosition", {
-        where: { userId },
-        select: { currentValue: true, currency: true },
-      }),
-      safeFindMany("privateEquityPosition", {
-        where: { userId },
-        select: { currentNav: true, currency: true },
-      }),
-      safeFindMany("crowdlendingPosition", {
-        where: { userId },
-        select: { capitalInvested: true, currency: true, status: true },
-      }),
-      safeFindMany("tangibleAsset", {
-        where: { userId },
-        select: { estimatedValue: true, currency: true },
-      }),
-    ]);
+  const [metals, pe, cl, tangibles] = await Promise.all([
+    findRows("preciousMetalPosition", {
+      where: { userId },
+      select: { currentValue: true, currency: true },
+    }),
+    findRows("privateEquityPosition", {
+      where: { userId },
+      select: { currentNav: true, currency: true },
+    }),
+    findRows("crowdlendingPosition", {
+      where: { userId },
+      select: { capitalInvested: true, currency: true, status: true },
+    }),
+    findRows("tangibleAsset", {
+      where: { userId },
+      select: { estimatedValue: true, currency: true },
+    }),
+  ]);
 
-    const metalsEur = sumFieldEur(
-      metals.map((m) => ({
-        value: m.currentValue?.toString() ?? "0",
-        currency: m.currency || "EUR",
-      })),
-      fx
-    );
-    const privateEquityEur = sumFieldEur(
-      pe.map((p) => ({
-        value: p.currentNav?.toString() ?? "0",
-        currency: p.currency || "EUR",
-      })),
-      fx
-    );
-    const clActive = cl.filter((c) => c.status === "ACTIVE" || c.status === "LATE");
-    const crowdlendingEur = sumFieldEur(
-      clActive.map((c) => ({
-        value: c.capitalInvested?.toString() ?? "0",
-        currency: c.currency || "EUR",
-      })),
-      fx
-    );
-    const tangiblesEur = sumFieldEur(
-      tangibles.map((t) => ({
-        value: t.estimatedValue?.toString() ?? "0",
-        currency: t.currency || "EUR",
-      })),
-      fx
-    );
+  const metalsEur = sumFieldEur(
+    metals.map((m) => ({
+      value: m.currentValue?.toString() ?? "0",
+      currency: m.currency || "EUR",
+    })),
+    fx
+  );
+  const privateEquityEur = sumFieldEur(
+    pe.map((p) => ({
+      value: p.currentNav?.toString() ?? "0",
+      currency: p.currency || "EUR",
+    })),
+    fx
+  );
+  const clActive = cl.filter((c) => c.status === "ACTIVE" || c.status === "LATE");
+  const crowdlendingEur = sumFieldEur(
+    clActive.map((c) => ({
+      value: c.capitalInvested?.toString() ?? "0",
+      currency: c.currency || "EUR",
+    })),
+    fx
+  );
+  const tangiblesEur = sumFieldEur(
+    tangibles.map((t) => ({
+      value: t.estimatedValue?.toString() ?? "0",
+      currency: t.currency || "EUR",
+    })),
+    fx
+  );
 
-    const m = metalsEur.toNumber();
-    const p = privateEquityEur.toNumber();
-    const c = crowdlendingEur.toNumber();
-    const t = tangiblesEur.toNumber();
-    const totalEur = m + p + c + t;
+  const m = metalsEur.toNumber();
+  const p = privateEquityEur.toNumber();
+  const c = crowdlendingEur.toNumber();
+  const t = tangiblesEur.toNumber();
+  const totalEur = m + p + c + t;
 
-    return {
-      metalsEur: m,
-      privateEquityEur: p,
-      crowdlendingEur: c,
-      tangiblesEur: t,
-      totalEur,
-      slices: [
-        { id: "metals", name: "Métaux précieux", value: Math.round(m * 100) / 100 },
-        {
-          id: "private-equity",
-          name: "Private Equity",
-          value: Math.round(p * 100) / 100,
-        },
-        {
-          id: "crowdlending",
-          name: "Crowdlending",
-          value: Math.round(c * 100) / 100,
-        },
-        {
-          id: "tangibles",
-          name: "Actifs tangibles",
-          value: Math.round(t * 100) / 100,
-        },
-      ].filter((s) => s.value > 0),
-    };
-  } catch (e) {
-    console.error("[alternatives] getAlternativesPortfolioSlice failed:", e);
-    return EMPTY;
-  }
+  return {
+    metalsEur: m,
+    privateEquityEur: p,
+    crowdlendingEur: c,
+    tangiblesEur: t,
+    totalEur,
+    slices: [
+      { id: "metals", name: "Métaux précieux", value: Math.round(m * 100) / 100 },
+      {
+        id: "private-equity",
+        name: "Private Equity",
+        value: Math.round(p * 100) / 100,
+      },
+      {
+        id: "crowdlending",
+        name: "Crowdlending",
+        value: Math.round(c * 100) / 100,
+      },
+      {
+        id: "tangibles",
+        name: "Actifs tangibles",
+        value: Math.round(t * 100) / 100,
+      },
+    ].filter((s) => s.value > 0),
+  };
 }
 
 /**
@@ -203,5 +192,17 @@ export async function getAlternativesDashboardBundle(
     privateEquity: pe.summary,
     crowdlending: cl.summary,
     tangibles: tangibles.summary,
+    shortAlerts: buildAlternativesShortAlerts(cl.summary, pe.summary),
+    /*
+      Les quatre listes étaient déjà chargées pour en tirer les summaries, puis
+      jetées. Les consolider ici ne coûte aucune requête de plus et donne à la
+      vue d'ensemble sa liste unique sans quatre appels réseau supplémentaires.
+    */
+    investments: buildConsolidatedInvestments({
+      metals: metals.lines,
+      privateEquity: pe.lines,
+      crowdlending: cl.lines,
+      tangibles: tangibles.lines,
+    }),
   };
 }

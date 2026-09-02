@@ -3,15 +3,18 @@
 import { fetchJson } from "@/app/lib/api-client";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DateInput } from "@/components/ui/date-input";
 import { FinanceTip } from "@/components/ui/finance-tooltip";
 import { cn, formatCurrency, getChangeColor } from "@/app/lib/utils";
 import {
   PE_TYPES,
   PE_TYPE_LABELS,
+  type AlternativesDashboardPayload,
+  type PeType,
   type PrivateEquityDto,
   type PrivateEquitySummary,
 } from "@/app/lib/alternatives/types";
@@ -22,7 +25,9 @@ import {
   AltFormSection,
   AltMiniKpi,
   AltModuleShell,
+  pnlTone,
 } from "@/components/tabs/alternatives-shell";
+import { moduleTableHeadClass } from "@/components/ui/module-shell";
 
 type FormState = {
   companyName: string;
@@ -34,6 +39,14 @@ type FormState = {
   currentNav: string;
   currency: string;
   notes: string;
+  // Mode expert — cycle de vie du capital et identité du véhicule
+  committedCapital: string;
+  calledCapital: string;
+  distributionsReceived: string;
+  ownershipPercent: string;
+  vehicleName: string;
+  round: string;
+  expectedExitDate: string;
 };
 
 const empty = (): FormState => ({
@@ -46,6 +59,13 @@ const empty = (): FormState => ({
   currentNav: "",
   currency: "EUR",
   notes: "",
+  committedCapital: "",
+  calledCapital: "",
+  distributionsReceived: "",
+  ownershipPercent: "",
+  vehicleName: "",
+  round: "",
+  expectedExitDate: "",
 });
 
 function toForm(l: PrivateEquityDto): FormState {
@@ -59,7 +79,63 @@ function toForm(l: PrivateEquityDto): FormState {
     currentNav: l.currentNav,
     currency: l.currency,
     notes: l.notes || "",
+    committedCapital: l.committedCapital,
+    // Valeur brute : un 0 stocké reste un champ vide à l'écran, le repli
+    // n'est appliqué qu'à l'affichage et dans les ratios.
+    calledCapital: Number(l.calledCapital) > 0 ? l.calledCapital : "",
+    distributionsReceived: l.distributionsReceived,
+    ownershipPercent: l.ownershipPercent || "",
+    vehicleName: l.vehicleName || "",
+    round: l.round || "",
+    expectedExitDate: l.expectedExitDate || "",
   };
+}
+
+/** Une ligne portant des données expertes ouvre la section d'emblée. */
+function hasExpertData(l: PrivateEquityDto): boolean {
+  return (
+    Number(l.committedCapital) > 0 ||
+    Number(l.calledCapital) > 0 ||
+    Number(l.distributionsReceived) > 0 ||
+    !!l.ownershipPercent ||
+    !!l.vehicleName ||
+    !!l.round ||
+    !!l.expectedExitDate
+  );
+}
+
+function num(v: string): number {
+  const n = Number(String(v).replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function fmtMultiple(v: string | number | null | undefined): string {
+  if (v == null || v === "") return "—";
+  return `${Number(v).toLocaleString("fr-FR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}×`;
+}
+
+// ─── Filtres ────────────────────────────────────────────────────────────────
+
+const PERF_FILTERS = ["ALL", "ABOVE", "BELOW", "DISTRIBUTING"] as const;
+type PerfFilter = (typeof PERF_FILTERS)[number];
+
+const PERF_LABELS: Record<PerfFilter, string> = {
+  ALL: "Tous",
+  ABOVE: "TVPI > 1×",
+  BELOW: "TVPI < 1×",
+  DISTRIBUTING: "Distribuant",
+};
+
+function matchesPerf(l: PrivateEquityDto, f: PerfFilter): boolean {
+  if (f === "ALL") return true;
+  if (f === "DISTRIBUTING") return Number(l.distributionsReceived) > 0;
+  // TVPI null = aucun capital appelé : ni au-dessus ni en dessous de 1×,
+  // la ligne est écartée des deux filtres de performance.
+  if (l.tvpi == null) return false;
+  return f === "ABOVE" ? Number(l.tvpi) > 1 : Number(l.tvpi) < 1;
 }
 
 export function AlternativesPrivateEquity({
@@ -76,31 +152,74 @@ export function AlternativesPrivateEquity({
       ),
   });
 
+  const altSummaryQ = useQuery({
+    queryKey: ["alternatives-summary", "dashboard"],
+    queryFn: () =>
+      fetchJson<AlternativesDashboardPayload>("/api/alternatives/summary"),
+    staleTime: 60_000,
+  });
+
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [expert, setExpert] = useState(false);
   const [form, setForm] = useState<FormState>(empty());
+  const [typeFilter, setTypeFilter] = useState<"ALL" | PeType>("ALL");
+  const [perfFilter, setPerfFilter] = useState<PerfFilter>("ALL");
+  const [deleteTarget, setDeleteTarget] = useState<PrivateEquityDto | null>(
+    null
+  );
 
-  const lines = q.data?.lines ?? [];
+  const lines = useMemo(() => q.data?.lines ?? [], [q.data?.lines]);
   const summary = q.data?.summary;
   const hasLines = lines.length > 0;
 
-  const investedPreview = useMemo(() => {
-    const s = Number(String(form.shares).replace(",", ".")) || 0;
-    const p =
-      Number(String(form.acquisitionPricePerShare).replace(",", ".")) || 0;
-    return s * p;
-  }, [form.shares, form.acquisitionPricePerShare]);
+  const totalAlt = Number(altSummaryQ.data?.summary.totalEur ?? 0);
+  const peShareOfAlt =
+    totalAlt > 0 && summary
+      ? (Number(summary.totalCalledCapital) / totalAlt) * 100
+      : null;
 
-  const moicPreview = useMemo(() => {
-    const nav = Number(String(form.currentNav).replace(",", ".")) || 0;
-    if (investedPreview <= 0) return 0;
-    return nav / investedPreview;
-  }, [form.currentNav, investedPreview]);
+  const visible = useMemo(
+    () =>
+      lines.filter(
+        (l) =>
+          (typeFilter === "ALL" || l.peType === typeFilter) &&
+          matchesPerf(l, perfFilter)
+      ),
+    [lines, typeFilter, perfFilter]
+  );
 
-  const pnlPreview = useMemo(() => {
-    const nav = Number(String(form.currentNav).replace(",", ".")) || 0;
-    return nav - investedPreview;
-  }, [form.currentNav, investedPreview]);
+  /**
+   * Aperçu live des multiples sur les valeurs non encore enregistrées.
+   *
+   * Reproduit volontairement la règle de `private-equity.ts` : il n'existe
+   * pas encore de DTO à lire pour une saisie en cours. Toute évolution de
+   * `effectiveCalledCapital` côté service doit être répercutée ici.
+   */
+  const preview = useMemo(() => {
+    const invested = num(form.shares) * num(form.acquisitionPricePerShare);
+    const nav = num(form.currentNav);
+    const distributions = num(form.distributionsReceived);
+    const entered = num(form.calledCapital);
+    const called = entered > 0 ? entered : invested;
+    const calledIsDerived = entered <= 0;
+    return {
+      invested,
+      nav,
+      called,
+      calledIsDerived,
+      pnl: nav - invested,
+      dpi: called > 0 ? distributions / called : null,
+      rvpi: called > 0 ? nav / called : null,
+      tvpi: called > 0 ? (nav + distributions) / called : null,
+    };
+  }, [
+    form.shares,
+    form.acquisitionPricePerShare,
+    form.currentNav,
+    form.distributionsReceived,
+    form.calledCapital,
+  ]);
 
   async function invalidate() {
     await Promise.all([
@@ -111,7 +230,7 @@ export function AlternativesPrivateEquity({
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      const body = {
+      const body: Record<string, unknown> = {
         companyName: form.companyName,
         sector: form.sector || null,
         peType: form.peType,
@@ -121,7 +240,21 @@ export function AlternativesPrivateEquity({
         currentNav: form.currentNav || "0",
         currency: form.currency || "EUR",
         notes: form.notes || null,
+        committedCapital: form.committedCapital || "0",
+        distributionsReceived: form.distributionsReceived || "0",
+        ownershipPercent: form.ownershipPercent || null,
+        vehicleName: form.vehicleName || null,
+        round: form.round || null,
+        expectedExitDate: form.expectedExitDate || null,
       };
+      // Capital appelé laissé vide : à la création on omet le champ pour que
+      // le service l'initialise à parts × PRU ; en édition on envoie 0, seule
+      // façon de revenir au mode dérivé après une saisie manuelle.
+      if (form.calledCapital.trim()) {
+        body.calledCapital = form.calledCapital;
+      } else if (editingId) {
+        body.calledCapital = "0";
+      }
       if (editingId) {
         return fetchJson("/api/private-equity", {
           method: "PUT",
@@ -137,6 +270,7 @@ export function AlternativesPrivateEquity({
       toast.success(editingId ? "Position mise à jour" : "Position ajoutée");
       setEditingId(null);
       setForm(empty());
+      setExpert(false);
       setShowForm(false);
       await invalidate();
     },
@@ -158,6 +292,14 @@ export function AlternativesPrivateEquity({
   function startCreate() {
     setEditingId(null);
     setForm(empty());
+    setExpert(false);
+    setShowForm(true);
+  }
+
+  function startEdit(l: PrivateEquityDto) {
+    setEditingId(l.id);
+    setForm(toForm(l));
+    setExpert(hasExpertData(l));
     setShowForm(true);
   }
 
@@ -165,6 +307,7 @@ export function AlternativesPrivateEquity({
     setShowForm(false);
     setEditingId(null);
     setForm(empty());
+    setExpert(false);
   }
 
   return (
@@ -180,10 +323,10 @@ export function AlternativesPrivateEquity({
           </span>{" "}
           saisie manuellement ·{" "}
           <span className="inline-flex items-center gap-0.5">
-            MOIC
+            TVPI
             <FinanceTip term="MOIC" />
           </span>{" "}
-          = valorisation ÷ capital investi
+          = (NAV + distributions) ÷ capital appelé
         </>
       }
       action={
@@ -200,27 +343,41 @@ export function AlternativesPrivateEquity({
       kpis={
         <>
           <AltMiniKpi
-            label="Capital investi"
-            value={formatCurrency(summary?.totalInvested || "0", baseCurrency)}
-            hint="Saisi (parts × prix d’acquisition)"
+            label="Capital appelé"
+            value={formatCurrency(
+              summary?.totalCalledCapital || "0",
+              baseCurrency
+            )}
+            hint={
+              peShareOfAlt != null
+                ? `Sur ${formatCurrency(summary?.totalInvested || "0", baseCurrency)} investis · ${peShareOfAlt.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} % de la poche alt.`
+                : `Sur ${formatCurrency(summary?.totalInvested || "0", baseCurrency)} investis`
+            }
+            loading={q.isPending}
           />
           <AltMiniKpi
             label="NAV totale"
             value={formatCurrency(summary?.totalNav || "0", baseCurrency)}
             hint="Somme des valorisations manuelles"
             tip={<FinanceTip term="NAV PE" />}
+            loading={q.isPending}
           />
           <AltMiniKpi
-            label="P&L latent"
-            value={formatCurrency(summary?.totalPnl || "0", baseCurrency)}
-            tone={Number(summary?.totalPnl || 0)}
-            hint="NAV − investi (calculé)"
-          />
-          <AltMiniKpi
-            label="MOIC moyen"
-            value={`${summary?.avgMoic ?? 0}×`}
-            hint="NAV ÷ investi (calculé)"
+            label="TVPI moyen"
+            value={fmtMultiple(summary?.avgTvpi)}
+            hint={`DPI ${fmtMultiple(summary?.avgDpi)} · RVPI ${fmtMultiple(summary?.avgRvpi)}`}
             tip={<FinanceTip term="MOIC" />}
+            loading={q.isPending}
+          />
+          <AltMiniKpi
+            label="Distributions"
+            value={formatCurrency(
+              summary?.totalDistributions || "0",
+              baseCurrency
+            )}
+            hint={`P&L latent : ${formatCurrency(summary?.totalPnl || "0", baseCurrency)}`}
+            tone={pnlTone(Number(summary?.totalPnl || 0))}
+            loading={q.isPending}
           />
         </>
       }
@@ -256,7 +413,7 @@ export function AlternativesPrivateEquity({
           >
             <AltField label="Société">
               <input
-                className="input"
+                className="input w-full"
                 value={form.companyName}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, companyName: e.target.value }))
@@ -267,7 +424,7 @@ export function AlternativesPrivateEquity({
             </AltField>
             <AltField label="Secteur">
               <input
-                className="input"
+                className="input w-full"
                 value={form.sector}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, sector: e.target.value }))
@@ -277,7 +434,7 @@ export function AlternativesPrivateEquity({
             </AltField>
             <AltField label="Type">
               <select
-                className="input"
+                className="input w-full"
                 value={form.peType}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, peType: e.target.value }))
@@ -306,7 +463,7 @@ export function AlternativesPrivateEquity({
           >
             <AltField label="Nombre de parts">
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.shares}
                 onChange={(e) =>
@@ -319,12 +476,12 @@ export function AlternativesPrivateEquity({
               hint={
                 <>
                   Investi calculé :{" "}
-                  {formatCurrency(String(investedPreview), form.currency)}
+                  {formatCurrency(String(preview.invested), form.currency)}
                 </>
               }
             >
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.acquisitionPricePerShare}
                 onChange={(e) =>
@@ -337,7 +494,7 @@ export function AlternativesPrivateEquity({
             </AltField>
             <AltField label="Devise">
               <input
-                className="input uppercase"
+                className="input w-full uppercase"
                 maxLength={3}
                 value={form.currency}
                 onChange={(e) =>
@@ -352,7 +509,7 @@ export function AlternativesPrivateEquity({
 
           <AltFormSection
             title="Valorisation (manuelle)"
-            hint="NAV saisie par vous · MOIC et P&L calculés automatiquement."
+            hint="NAV saisie par vous · multiples et P&L calculés automatiquement."
           >
             <AltField
               label={
@@ -362,23 +519,20 @@ export function AlternativesPrivateEquity({
                 </span>
               }
               hint={
-                investedPreview > 0 ? (
+                preview.invested > 0 ? (
                   <>
-                    MOIC estimé :{" "}
-                    <strong>{moicPreview.toFixed(2)}×</strong>
-                    {" · "}
-                    P&L :{" "}
+                    P&L latent :{" "}
                     <strong>
-                      {formatCurrency(String(pnlPreview), form.currency)}
+                      {formatCurrency(String(preview.pnl), form.currency)}
                     </strong>
                   </>
                 ) : (
-                  "Renseignez l’investi pour voir le MOIC"
+                  "Renseignez l’investi pour voir le P&L"
                 )
               }
             >
               <input
-                className="input"
+                className="input w-full"
                 inputMode="decimal"
                 value={form.currentNav}
                 onChange={(e) =>
@@ -389,7 +543,7 @@ export function AlternativesPrivateEquity({
             </AltField>
             <AltField label="Notes" className="sm:col-span-2">
               <input
-                className="input"
+                className="input w-full"
                 value={form.notes}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, notes: e.target.value }))
@@ -398,140 +552,465 @@ export function AlternativesPrivateEquity({
               />
             </AltField>
           </AltFormSection>
+
+          {/* Multiples live — visibles quel que soit le mode, ils dépendent
+              de champs simples (NAV) autant qu'experts (distributions). */}
+          <div
+            className="grid gap-2 rounded-[var(--radius-xl)] border border-[var(--border)] bg-[var(--card)]/50 p-3 sm:grid-cols-3"
+            data-testid="pe-multiples-preview"
+          >
+            <MultiplePreview
+              label="DPI"
+              value={preview.dpi}
+              hint="Distributions ÷ appelé"
+            />
+            <MultiplePreview
+              label="RVPI"
+              value={preview.rvpi}
+              hint="NAV ÷ appelé"
+            />
+            <MultiplePreview
+              label="TVPI"
+              value={preview.tvpi}
+              hint="(NAV + distributions) ÷ appelé"
+              strong
+            />
+            <p className="text-[10px] leading-snug text-[var(--muted-foreground)] sm:col-span-3">
+              Capital appelé retenu :{" "}
+              <strong>
+                {formatCurrency(String(preview.called), form.currency)}
+              </strong>{" "}
+              —{" "}
+              {preview.calledIsDerived
+                ? "dérivé des parts × PRU"
+                : "saisi manuellement"}
+              .
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
+            aria-expanded={expert}
+            onClick={() => setExpert((v) => !v)}
+            data-testid="pe-expert-toggle"
+          >
+            <ChevronDown
+              className={cn("h-3.5 w-3.5 transition-transform", expert && "rotate-180")}
+            />
+            Mode expert — appels de capital, distributions et véhicule
+          </button>
+
+          {expert && (
+            <div className="space-y-3" data-testid="pe-expert">
+              <AltFormSection
+                title="Cycle du capital"
+                hint="Engagement total, part réellement appelée et distributions déjà perçues."
+              >
+                <AltField
+                  label="Capital engagé (commitment)"
+                  hint="Montant total promis au véhicule, appelé ou non"
+                >
+                  <input
+                    className="input w-full"
+                    inputMode="decimal"
+                    value={form.committedCapital}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, committedCapital: e.target.value }))
+                    }
+                    data-testid="pe-committed-capital"
+                  />
+                </AltField>
+                <AltField
+                  label="Capital appelé"
+                  hint={
+                    preview.calledIsDerived
+                      ? "Vide = dérivé des parts × PRU. Dénominateur du DPI / RVPI / TVPI."
+                      : "Saisi manuellement. Videz le champ pour revenir au calcul parts × PRU."
+                  }
+                >
+                  <input
+                    className="input w-full"
+                    inputMode="decimal"
+                    placeholder={String(preview.invested || "")}
+                    value={form.calledCapital}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, calledCapital: e.target.value }))
+                    }
+                    data-testid="pe-called-capital"
+                  />
+                </AltField>
+                <AltField
+                  label="Distributions perçues"
+                  hint="Cumul : dividendes, cessions partielles, retour de capital"
+                >
+                  <input
+                    className="input w-full"
+                    inputMode="decimal"
+                    value={form.distributionsReceived}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        distributionsReceived: e.target.value,
+                      }))
+                    }
+                    data-testid="pe-distributions"
+                  />
+                </AltField>
+              </AltFormSection>
+
+              <AltFormSection
+                title="Véhicule & sortie"
+                hint="Structure de détention, tour de table et horizon de liquidité."
+              >
+                <AltField
+                  label="Quote-part détenue (%)"
+                  hint="Pourcentage du capital de la société"
+                >
+                  <input
+                    className="input w-full"
+                    inputMode="decimal"
+                    placeholder="12,5"
+                    value={form.ownershipPercent}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, ownershipPercent: e.target.value }))
+                    }
+                    data-testid="pe-ownership"
+                  />
+                </AltField>
+                <AltField
+                  label="Véhicule"
+                  hint="Fonds, holding, SPV portant la participation"
+                >
+                  <input
+                    className="input w-full"
+                    value={form.vehicleName}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, vehicleName: e.target.value }))
+                    }
+                    placeholder="FPCI, SPV, holding…"
+                  />
+                </AltField>
+                <AltField label="Tour de table">
+                  <input
+                    className="input w-full"
+                    value={form.round}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, round: e.target.value }))
+                    }
+                    placeholder="Seed, Série A…"
+                  />
+                </AltField>
+                <AltField
+                  label="Sortie envisagée"
+                  hint="Horizon de liquidité estimé, purement indicatif"
+                >
+                  <DateInput
+                    value={form.expectedExitDate}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, expectedExitDate: e.target.value }))
+                    }
+                  />
+                </AltField>
+              </AltFormSection>
+            </div>
+          )}
         </AltFormPanel>
       }
     >
       {!q.isLoading && !hasLines && !showForm ? (
         <AltEmptyState
           title="Aucune position de private equity"
-          description="Suivez le capital investi, la valorisation manuelle (NAV), le P&L latent et le MOIC de vos participations non cotées."
+          description="Suivez le capital appelé, la valorisation manuelle (NAV), les distributions perçues et les multiples DPI / RVPI / TVPI de vos participations non cotées."
           bullets={[
             "Société, type (direct, fonds, crowdequity…)",
             "Parts et prix d’acquisition → capital investi (calculé)",
-            "NAV actuelle saisie manuellement → MOIC et P&L (calculés)",
+            "NAV actuelle saisie manuellement → P&L latent (calculé)",
+            "Mode expert : commitment, capital appelé, distributions, quote-part et véhicule",
           ]}
           primaryLabel="Nouvelle position"
           onPrimary={startCreate}
           primaryTestId="pe-empty-add"
         />
       ) : (
-        <div className="table-container-responsive table-fluid-wrap">
-          <table
-            className="table-fluid text-sm"
-            data-testid="private-equity-table"
-          >
-            <thead className="table-head text-[10px] uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-3 py-2.5 text-left">Société</th>
-                <th className="px-3 py-2.5 text-left">Secteur</th>
-                <th className="px-3 py-2.5 text-left">Type</th>
-                <th className="px-3 py-2.5 text-right">Parts</th>
-                <th className="px-3 py-2.5 text-right">PRU / part</th>
-                <th className="px-3 py-2.5 text-right">Investi</th>
-                <th className="px-3 py-2.5 text-left">Date</th>
-                <th className="px-3 py-2.5 text-right">NAV</th>
-                <th className="px-3 py-2.5 text-right">MOIC</th>
-                <th className="px-3 py-2.5 text-right">+/- €</th>
-                <th className="px-3 py-2.5 text-right">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {q.isLoading && (
-                <tr>
-                  <td
-                    colSpan={11}
-                    className="px-4 py-10 text-center text-sm text-slate-400"
-                  >
-                    Chargement…
-                  </td>
-                </tr>
-              )}
-              {lines.map((l) => (
-                <tr
-                  key={l.id}
-                  className="border-t border-[var(--border)] transition-colors hover:bg-[var(--muted)]/35"
+        <>
+          {hasLines && (
+            <div
+              className="flex flex-wrap items-center gap-3 border-b border-[var(--border)] px-4 py-2.5 sm:px-5"
+              data-testid="pe-filters"
+            >
+              <label className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--muted-foreground)]">
+                Type
+                <select
+                  className="input w-full !h-7 py-0 text-[11px]"
+                  value={typeFilter}
+                  onChange={(e) =>
+                    setTypeFilter(e.target.value as "ALL" | PeType)
+                  }
+                  data-testid="pe-filter-type"
                 >
-                  <td className="px-3 py-2 font-medium">{l.companyName}</td>
-                  <td className="px-3 py-2 text-xs text-slate-500">
-                    {l.sector || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-xs">
-                    {PE_TYPE_LABELS[l.peType] || l.peType}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {Number(l.shares).toLocaleString("fr-FR", {
-                      maximumFractionDigits: 4,
-                    })}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-xs">
-                    {formatCurrency(l.acquisitionPricePerShare, l.currency)}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {formatCurrency(l.investedTotal, l.currency)}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-slate-500">
-                    {l.investmentDate
-                      ? new Date(l.investmentDate).toLocaleDateString("fr-FR")
-                      : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-right font-medium tabular-nums">
-                    {formatCurrency(l.currentNav, l.currency)}
-                  </td>
-                  <td className="px-3 py-2 text-right font-semibold tabular-nums text-teal-700 dark:text-teal-300">
-                    {Number(l.moic).toLocaleString("fr-FR", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                    ×
-                  </td>
-                  <td
+                  <option value="ALL">Tous ({lines.length})</option>
+                  {PE_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {PE_TYPE_LABELS[t]} (
+                      {lines.filter((l) => l.peType === t).length})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div
+                className="inline-flex rounded-md border border-[var(--border)] p-0.5"
+                role="group"
+                aria-label="Filtrer par performance"
+              >
+                {PERF_FILTERS.map((key) => (
+                  <button
+                    key={key}
+                    type="button"
                     className={cn(
-                      "px-3 py-2 text-right font-medium tabular-nums",
-                      getChangeColor(l.unrealizedPnl)
+                      "rounded px-2 py-1 text-[11px] font-medium transition",
+                      perfFilter === key
+                        ? "bg-teal-700 text-white"
+                        : "text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
                     )}
+                    aria-pressed={perfFilter === key}
+                    data-testid={`pe-filter-${key.toLowerCase()}`}
+                    onClick={() => setPerfFilter(key)}
                   >
-                    {formatCurrency(l.unrealizedPnl, l.currency)}
-                  </td>
-                  <td className="px-2 py-1.5 text-right">
-                    <div className="inline-flex gap-0.5">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="!h-7 !w-7 !px-0 text-slate-400 hover:text-slate-800"
-                        onClick={() => {
-                          setEditingId(l.id);
-                          setForm(toForm(l));
-                          setShowForm(true);
-                        }}
-                        aria-label="Modifier"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600"
-                        onClick={() => {
-                          if (confirm(`Supprimer « ${l.companyName} » ?`)) {
-                            delMut.mutate(l.id);
-                          }
-                        }}
-                        aria-label="Supprimer"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </td>
+                    {PERF_LABELS[key]}
+                    <span className="ml-1 opacity-60 tabular-nums">
+                      {lines.filter((l) => matchesPerf(l, key)).length}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="table-container-responsive table-fluid-wrap">
+            <table
+              className="table-fluid text-sm"
+              data-testid="private-equity-table"
+            >
+              <thead className={moduleTableHeadClass}>
+                <tr>
+                  <th className="px-3 py-2.5 text-left">Société</th>
+                  <th className="px-3 py-2.5 text-left">Secteur</th>
+                  <th className="px-3 py-2.5 text-left">Type</th>
+                  <th className="px-3 py-2.5 text-right">Investi</th>
+                  <th className="px-3 py-2.5 text-left">Date</th>
+                  <th className="px-3 py-2.5 text-right">NAV</th>
+                  <th className="px-3 py-2.5 text-right">Distributions</th>
+                  <th className="px-3 py-2.5 text-right">DPI</th>
+                  <th className="px-3 py-2.5 text-right">TVPI</th>
+                  <th className="px-3 py-2.5 text-right">+/- €</th>
+                  <th className="px-3 py-2.5 text-right">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {q.isLoading && (
+                  <tr>
+                    <td
+                      colSpan={11}
+                      className="px-4 py-10 text-center text-sm text-[var(--muted-foreground)]"
+                    >
+                      Chargement…
+                    </td>
+                  </tr>
+                )}
+                {!q.isLoading && hasLines && visible.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={11}
+                      className="px-4 py-10 text-center text-sm text-[var(--muted-foreground)]"
+                      data-testid="pe-no-match"
+                    >
+                      Aucune position ne correspond aux filtres.
+                    </td>
+                  </tr>
+                )}
+                {visible.map((l) => (
+                  <tr
+                    key={l.id}
+                    className="border-t border-[var(--border)] transition-colors hover:bg-[var(--muted)]/35"
+                  >
+                    <td className="px-3 py-2 font-medium">
+                      <div className="flex items-center gap-1.5">
+                        <span>{l.companyName}</span>
+                        {l.round && <RoundBadge round={l.round} />}
+                      </div>
+                      {l.ownershipPercent && (
+                        <div
+                          className="text-[10px] font-normal text-[var(--muted-foreground)]"
+                          title="Quote-part détenue"
+                        >
+                          {Number(l.ownershipPercent).toLocaleString("fr-FR", {
+                            maximumFractionDigits: 2,
+                          })}{" "}
+                          % du capital
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                      {l.sector || "—"}
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {PE_TYPE_LABELS[l.peType] || l.peType}
+                      {l.vehicleName && (
+                        <div className="text-[10px] text-[var(--muted-foreground)]">
+                          {l.vehicleName}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {formatCurrency(l.investedTotal, l.currency)}
+                      <div
+                        className="text-[10px] font-normal text-[var(--muted-foreground)]"
+                        title={
+                          l.calledCapitalIsDerived
+                            ? "Capital appelé dérivé des parts × PRU — aucun appel saisi"
+                            : "Capital appelé saisi manuellement"
+                        }
+                      >
+                        {l.calledCapitalIsDerived
+                          ? `${Number(l.shares).toLocaleString("fr-FR", {
+                              maximumFractionDigits: 4,
+                            })} × ${formatCurrency(l.acquisitionPricePerShare, l.currency)}`
+                          : `${formatCurrency(l.calledCapital, l.currency)} appelé`}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                      {l.investmentDate
+                        ? new Date(l.investmentDate).toLocaleDateString("fr-FR")
+                        : "—"}
+                      {l.expectedExitDate && (
+                        <div
+                          className="text-[10px] text-[var(--muted-foreground)]"
+                          title="Sortie envisagée"
+                        >
+                          →{" "}
+                          {new Date(l.expectedExitDate).toLocaleDateString(
+                            "fr-FR"
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right font-medium tabular-nums">
+                      {formatCurrency(l.currentNav, l.currency)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {Number(l.distributionsReceived) > 0 ? (
+                        <span className="val-positive font-medium">
+                          {formatCurrency(l.distributionsReceived, l.currency)}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-xs">
+                      {fmtMultiple(l.dpi)}
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold tabular-nums text-teal-700 dark:text-teal-300">
+                      {fmtMultiple(l.tvpi)}
+                    </td>
+                    <td
+                      className={cn(
+                        "px-3 py-2 text-right font-medium tabular-nums",
+                        getChangeColor(l.unrealizedPnl)
+                      )}
+                    >
+                      {formatCurrency(l.unrealizedPnl, l.currency)}
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <div className="inline-flex gap-0.5">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                          onClick={() => startEdit(l)}
+                          aria-label="Modifier"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--danger)]"
+                          onClick={() => setDeleteTarget(l)}
+                          aria-label="Supprimer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget != null}
+        title="Supprimer la position"
+        message={
+          deleteTarget
+            ? `« ${deleteTarget.companyName} » sera définitivement supprimée. Cette action est irréversible.`
+            : ""
+        }
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) delMut.mutate(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+        testId="pe-delete-confirm"
+      />
     </AltModuleShell>
+  );
+}
+
+function MultiplePreview({
+  label,
+  value,
+  hint,
+  strong,
+}: {
+  label: string;
+  value: number | null;
+  hint: string;
+  strong?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-label normal-case tracking-wide">{label}</div>
+      <div
+        className={cn(
+          "mt-0.5 tabular-nums tracking-tight",
+          strong
+            ? "text-base font-semibold text-teal-700 dark:text-teal-300"
+            : "text-sm font-semibold"
+        )}
+      >
+        {fmtMultiple(value)}
+      </div>
+      <div className="mt-0.5 text-[10px] text-[var(--muted-foreground)]">
+        {hint}
+      </div>
+    </div>
+  );
+}
+
+function RoundBadge({ round }: { round: string }) {
+  return (
+    <span
+      className="inline-flex rounded px-1 py-0.5 text-[9px] font-semibold uppercase text-[var(--muted-foreground)] ring-1 ring-inset ring-[var(--border)]"
+      title="Tour de table"
+    >
+      {round}
+    </span>
   );
 }

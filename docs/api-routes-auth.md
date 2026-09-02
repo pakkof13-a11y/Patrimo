@@ -51,6 +51,25 @@ Invalidation cache : `invalidateUserAccessCache(userId)` après suppression / ch
 | Route | Note |
 |-------|------|
 | `POST /api/savings/accrue` | Session user **ou** `Authorization: Bearer $CRON_SECRET` / header `x-cron-secret` pour traitement multi-user |
+| `GET /api/cron/collect-intraday` | `$CRON_SECRET` **uniquement** — déclenché par Vercel Cron, qui appelle en GET. Aucun repli session : aucun écran ne peut l'atteindre |
+| `POST /api/cron/collect-intraday` | Session user (amorçage / diagnostic) **ou** `$CRON_SECRET` pour tous les comptes |
+
+### Dispense de session pour les tâches planifiées
+
+Le proxy (`auth.ts`, callback `authorized`) couvre `/api/**` et redirige vers
+`/login` toute requête sans session. Une tâche Vercel Cron n'en a pas : elle
+n'apporte qu'un en-tête. `POST /api/savings/accrue` était donc redirigé en 307
+**même avec le bon secret**, et ce cron n'a jamais pu s'exécuter.
+
+`isCronPath(path) && hasCronCredential(request)` lève la redirection sur les
+seuls chemins de cron — `/api/cron/**` et la route historique des livrets. La
+dispense ne juge que la **forme** de la requête : le handler compare le secret
+en temps constant (`timingSafeEqualSecret`) et répond 401 s'il est faux.
+Franchir le proxy n'est donc pas être autorisé.
+
+Le secret n'est pas comparé dans le proxy pour deux raisons : `node:crypto` n'y
+est pas garanti, et deux comparaisons feraient deux autorités pour une seule
+décision.
 
 ## Middleware vs handler
 

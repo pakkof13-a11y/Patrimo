@@ -20,19 +20,23 @@ test.describe("Navigation & shell", () => {
       page.getByTestId("portfolio-evolution-panel")
     ).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText("Évolution du portefeuille")).toBeVisible();
-    await expect(page.getByText("Allocation par classe")).toBeVisible();
+    await expect(page.getByTestId("allocation-card")).toBeVisible();
 
     await clickNav(page, "Transactions");
     await expect(page).toHaveURL(/\/transactions/);
-    await expect(page.getByText("Journal des transactions")).toBeVisible();
+    // Le titre est « Transactions » depuis la refonte du journal ; on vérifie
+    // la bande d'indicateurs, stable quel que soit le wording.
+    await expect(page.getByTestId("tx-kpis")).toBeVisible({ timeout: 15_000 });
 
-    // Produit : « Mes plateformes » (groupe Sources) → /comptes
+    // « Plateformes » vit désormais sous Suivi, à l'URL /plateformes.
     await clickNav(page, "Mes plateformes");
-    await expect(page).toHaveURL(/\/comptes/);
+    await expect(page).toHaveURL(/\/plateformes/);
     await expect(page.getByTestId("platforms-tab")).toBeVisible({
       timeout: 10_000,
     });
-    await expect(page.getByText("Mes plateformes")).toBeVisible();
+    // Titre de page « Plateformes » ; « Mes plateformes » reste le libellé de
+    // navigation. On vérifie la synthèse, stable quel que soit le wording.
+    await expect(page.getByTestId("platforms-summary")).toBeVisible();
     // CTA stable : création contextuelle via transaction
     await expect(page.getByTestId("platforms-add-platform")).toBeVisible({
       timeout: 10_000,

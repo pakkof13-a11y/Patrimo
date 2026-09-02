@@ -1,4 +1,4 @@
-// Patrimo — PostgreSQL schema
+// Aurea — PostgreSQL schema
 // Holdings from transactions; cash pockets (banks, envelopes) are explicit & optional.
 
 generator client {
@@ -24,24 +24,48 @@ model User {
   emailVerified DateTime?
   image         String?
   baseCurrency  String    @default("EUR")
+  /// Situation fiscale du foyer pour l'abattement AV : SINGLE | COUPLE
+  taxHousehold  String    @default("SINGLE")
+  /// Tranche marginale d'imposition du foyer — 0 | 11 | 30 | 41 | 45.
+  ///
+  /// Portée par l'utilisateur et non par un bien : un foyer a une tranche,
+  /// appliquée à l'ensemble de ses revenus fonciers agrégés. Même raisonnement
+  /// que `taxHousehold`, juste au-dessus.
+  ///
+  /// Nullable à dessein : « non renseigné » se distingue de « 30 % ». Aurea ne
+  /// calcule pas cette tranche — il ne connaît ni les salaires ni les parts du
+  /// foyer — donc elle reste déclarative, et son absence doit rester visible.
+  marginalTaxRatePct Int?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts           Account[]
-  sessions           Session[]
-  platforms          Platform[]
-  assets             Asset[]
-  snapshots          PortfolioSnapshot[]
-  liabilities        Liability[]
-  bankAccounts            BankAccount[]
-  savingsAccounts         SavingsAccount[]
-  lifeInsurances          LifeInsurance[]
-  envelopeCash            EnvelopeCash[]
-  employeeSavingsLines    EmployeeSavingsLine[]
-  preciousMetalPositions  PreciousMetalPosition[]
-  privateEquityPositions  PrivateEquityPosition[]
-  crowdlendingPositions   CrowdlendingPosition[]
-  tangibleAssets          TangibleAsset[]
+  accounts               Account[]
+  sessions               Session[]
+  platforms              Platform[]
+  assets                 Asset[]
+  snapshots              PortfolioSnapshot[]
+  liabilities            Liability[]
+  bankAccounts           BankAccount[]
+  savingsAccounts        SavingsAccount[]
+  termDeposits           TermDeposit[]
+  lifeInsurances         LifeInsurance[]
+  envelopeCash           EnvelopeCash[]
+  employeeSavingsLines   EmployeeSavingsLine[]
+  preciousMetalPositions PreciousMetalPosition[]
+  preciousMetalSales     PreciousMetalSale[]
+  privateEquityPositions PrivateEquityPosition[]
+  crowdlendingPositions  CrowdlendingPosition[]
+  tangibleAssets         TangibleAsset[]
+  tradingPositions       TradingPosition[]
+  defiStrategies         DefiStrategy[]
+  securitiesAccounts     SecuritiesAccount[]
+  tradingAccounts        TradingAccount[]
+  defiSyncCursors        DefiSyncCursor[]
+  defiProtocolRefs       DefiProtocolRef[]
+  defiMarketRefs         DefiMarketRef[]
+  nftCollections         NftCollection[]
+  nftAssets              NftAsset[]
+  nftSyncCursors         NftSyncCursor[]
 
   @@index([role])
 }
@@ -84,38 +108,42 @@ model VerificationToken {
 // ─── Domain ───────────────────────────────────────────────────────────────────
 
 model Platform {
-  id            String   @id @default(cuid())
-  userId        String
-  name          String
+  id                 String    @id @default(cuid())
+  userId             String
+  name               String
   /// COURTIER | EXCHANGE_CRYPTO | BANQUE | BLOCKCHAIN | …
-  type          String   @default("COURTIER")
+  type               String    @default("COURTIER")
   /// Optional nuance, e.g. "Layer 1" | "Layer 2 / EVM" for blockchains
-  subtype       String?
-  logoKey       String?
-  logoUrl       String?
-  walletAddress String?
+  subtype            String?
+  logoKey            String?
+  logoUrl            String?
+  walletAddress      String?
   /// Clé API GoldRush (Covalent) optionnelle par plateforme — défaut serveur sinon
-  walletApiKey  String?
-  notes         String?
+  walletApiKey       String?
+  notes              String?
   /// Curseur sync Solana RPC : dernière signature connue (plus récente)
   lastKnownSignature String?
   /// Dernière synchro on-chain réussie (soldes et/ou txs)
   lastSyncedAt       DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assets           Asset[]
-  transactionsFrom Transaction[] @relation("TxPlatform")
-  transactionsTo   Transaction[] @relation("TxToPlatform")
-  onchainTxs       BlockchainOnchainTx[]
+  user               User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assets             Asset[]
+  transactionsFrom   Transaction[]         @relation("TxPlatform")
+  transactionsTo     Transaction[]         @relation("TxToPlatform")
+  onchainTxs         BlockchainOnchainTx[]
+  securitiesAccounts SecuritiesAccount[]
+  defiSyncCursors    DefiSyncCursor[]
+  nftEvents          NftEvent[]
+  nftSyncCursors     NftSyncCursor[]
 
+  @@unique([userId, name])
   @@index([userId])
   @@index([userId, type])
-  @@unique([userId, name])
 }
 
-/// Transactions on-chain Solana (RPC natif) — distinctes du journal ledger Patrimo.
+/// Transactions on-chain Solana (RPC natif) — distinctes du journal ledger Aurea.
 model BlockchainOnchainTx {
   id               String    @id @default(cuid())
   userId           String
@@ -162,50 +190,77 @@ enum AssetCategory {
 }
 
 model Asset {
-  id              String    @id @default(cuid())
-  userId          String
-  platformId      String
-  name            String
-  ticker          String?
+  id                  String        @id @default(cuid())
+  userId              String
+  platformId          String
+  name                String
+  ticker              String?
   /// Code ISIN (actions / ETF) — recherche & affichage
-  isin            String?
-  assetClass      String
+  isin                String?
+  assetClass          String
   /// Sous-catégorie UI (regroupement Positions) — n’affecte pas les calculs
-  category        AssetCategory @default(UNCLASSIFIED)
-  currency        String    @default("EUR")
+  category            AssetCategory @default(UNCLASSIFIED)
+  currency            String        @default("EUR")
   /// ISO 3166-1 alpha-2 (US, DE, FR…) — WHT dividendes
-  countryCode     String?
+  countryCode         String?
   /// Override taux prélèvement à la source 0–1 (null = table pays)
-  withholdingTaxRate Decimal? @db.Decimal(8, 6)
+  withholdingTaxRate  Decimal?      @db.Decimal(8, 6)
   /// Fiscal / storage envelope: CTO | PEA | AV | CRYPTO | IMMOBILIER
-  accountType     String    @default("CTO")
-  priceProvider   String    @default("FINNHUB")
-  providerSymbol  String?
-  logoUrl         String?
-  notes           String?
-  manualPrice     Decimal?  @db.Decimal(28, 12)
+  accountType         String        @default("CTO")
+  /// Compte titres de rattachement (PEA / PEA-PME / CTO). Nullable : les
+  /// actifs antérieurs à l'onglet « PEA & CTO » restent rattachés à leur
+  /// seule `platform`, et `accountType` continue de porter l'enveloppe
+  /// fiscale — ce champ ne fait que désigner *lequel* des comptes de cette
+  /// enveloppe détient la ligne, ce qu'une chaîne ne pouvait pas exprimer
+  /// dès lors qu'un utilisateur détient plusieurs CTO.
+  securitiesAccountId String?
+  priceProvider       String        @default("FINNHUB")
+  providerSymbol      String?
+  logoUrl             String?
+  notes               String?
+  manualPrice         Decimal?      @db.Decimal(28, 12)
   /// Exit levels in asset native currency (long): auto-sell on price refresh
-  stopLoss        Decimal?  @db.Decimal(28, 12)
-  tp1             Decimal?  @db.Decimal(28, 12)
-  tp2             Decimal?  @db.Decimal(28, 12)
-  tp3             Decimal?  @db.Decimal(28, 12)
-  tp4             Decimal?  @db.Decimal(28, 12)
-  acquisitionDate DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  stopLoss            Decimal?      @db.Decimal(28, 12)
+  tp1                 Decimal?      @db.Decimal(28, 12)
+  tp2                 Decimal?      @db.Decimal(28, 12)
+  tp3                 Decimal?      @db.Decimal(28, 12)
+  tp4                 Decimal?      @db.Decimal(28, 12)
+  acquisitionDate     DateTime?
+  /// Suivi manuel : date d'ajout à la watchlist du tableau de bord, `null`
+  /// si la ligne n'y figure pas. Une date plutôt qu'un booléen — elle donne
+  /// gratuitement l'ordre d'ajout, et « depuis quand je surveille ça » est
+  /// une question qu'on finit toujours par se poser.
+  watchlistedAt       DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
-  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  platform     Platform       @relation(fields: [platformId], references: [id], onDelete: Restrict)
-  transactions Transaction[]
-  priceQuote   PriceQuote?
-  priceHistory PriceHistory[]
+  user               User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform           Platform                  @relation(fields: [platformId], references: [id], onDelete: Restrict)
+  transactions       Transaction[]
+  priceQuote         PriceQuote?
+  priceHistory       PriceHistory[]
+  dailyCloses        AssetDailyClose[]
+  intradayBars       AssetIntradayBar[]
+  realEstate         RealEstateDetail?
+  indirectRealEstate IndirectRealEstateDetail?
+  defiPosition       DefiPositionDetail?
+  nftItem            NftItemDetail?
+  lifeSupport        LifeInsuranceSupport?
+  liabilities        Liability[]
+  securitiesAccount  SecuritiesAccount?        @relation(fields: [securitiesAccountId], references: [id], onDelete: SetNull)
+  envelopeEvents     AssetEnvelopeEvent[]
+  defiLegs           DefiLeg[]
+  defiEvents         DefiEvent[]
+  defiRewards        DefiReward[]
 
   @@index([userId])
   @@index([platformId])
   @@index([userId, assetClass])
   @@index([userId, accountType])
+  @@index([userId, watchlistedAt])
   @@index([userId, category])
   @@index([isin])
+  @@index([securitiesAccountId])
 }
 
 model Transaction {
@@ -225,26 +280,28 @@ model Transaction {
   currency    String  @default("EUR")
   fxRateToEur Decimal @default(1) @db.Decimal(20, 10)
 
-  grossAmountEur   Decimal @db.Decimal(28, 12)
-  feesEur          Decimal @default(0) @db.Decimal(28, 12)
-  netCashImpactEur Decimal @db.Decimal(28, 12)
+  grossAmountEur     Decimal   @db.Decimal(28, 12)
+  feesEur            Decimal   @default(0) @db.Decimal(28, 12)
+  netCashImpactEur   Decimal   @db.Decimal(28, 12)
   /// Prélèvement à la source (WHT) en EUR — snapshot à la création
-  withholdingTaxEur  Decimal @default(0) @db.Decimal(28, 12)
+  withholdingTaxEur  Decimal   @default(0) @db.Decimal(28, 12)
   /// Taux WHT appliqué (0–1), snapshot
-  withholdingTaxRate Decimal? @db.Decimal(8, 6)
+  withholdingTaxRate Decimal?  @db.Decimal(8, 6)
   /// Date de détachement (cours) — optionnel
-  exDate       DateTime?
+  exDate             DateTime?
   /// Date de paiement cash (défaut = occurredAt)
-  paymentDate  DateTime?
+  paymentDate        DateTime?
 
   occurredAt DateTime
   notes      String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  platform   Platform  @relation("TxPlatform", fields: [platformId], references: [id], onDelete: Restrict)
-  toPlatform Platform? @relation("TxToPlatform", fields: [toPlatformId], references: [id], onDelete: Restrict)
-  asset      Asset?    @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  platform   Platform    @relation("TxPlatform", fields: [platformId], references: [id], onDelete: Restrict)
+  toPlatform Platform?   @relation("TxToPlatform", fields: [toPlatformId], references: [id], onDelete: Restrict)
+  asset      Asset?      @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  defiEvents DefiEvent[]
+  nftEvents  NftEvent[]
 
   @@index([userId, occurredAt])
   @@index([platformId, occurredAt])
@@ -268,16 +325,417 @@ model PriceQuote {
   asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 }
 
+/// Capture ponctuelle du cours d'un actif, au moment d'un rafraîchissement.
+///
+/// ## Deux temps, jamais confondus
+///
+/// - `capturedAt` : quand Patrimo a **relevé** la valeur ;
+/// - `marketAt` : le moment auquel le cours **s'applique** réellement.
+///
+/// Une barre de 14 h 35 récupérée dix-huit mois plus tard porte
+/// `marketAt = 2025-02-24 14:35` et `capturedAt = 2026-08-26 10:17`. Les
+/// confondre reviendrait à dater le passé du jour où on l'a lu.
+///
+/// ## Les lignes antérieures gardent leur sémantique
+///
+/// `marketAt` est **nullable**, et rien ne le remplit rétroactivement depuis
+/// `capturedAt`. Une capture faite au fil de l'eau valait bien le cours de
+/// l'instant, mais rien ne le démontre ligne à ligne — la migration ne réécrit
+/// donc pas le passé : elle se contente de rendre le futur exprimable. Une
+/// ligne sans `marketAt` reste ce qu'elle a toujours été, une observation de
+/// rafraîchissement.
 model PriceHistory {
   id         String   @id @default(cuid())
   assetId    String
   priceEur   Decimal  @db.Decimal(28, 12)
+  /// Cours dans sa devise d'origine, quand elle est connue.
+  priceNative    Decimal? @db.Decimal(28, 12)
+  nativeCurrency String?
   source     String
+  /// Moment auquel le cours s'applique. Null = capture historique non datée.
+  marketAt   DateTime?
+  /// Finesse de la donnée — "15m" | "1h" | "4h" | "1d" | "spot".
+  granularity String?
   capturedAt DateTime @default(now())
 
   asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
   @@index([assetId, capturedAt])
+  /// Recherche temporelle : « cours de cet actif à cet instant ».
+  @@index([assetId, marketAt])
+}
+
+/// Clôture journalière d'un actif, en EUR — cache alimenté depuis les
+/// fournisseurs de cours (barres 1d). Sert à valoriser l'historique au marché
+/// pour le P&L par classe d'actif, que `PriceHistory` ne permet pas : cette
+/// dernière n'enregistre que des captures spot au moment des rafraîchissements,
+/// donc creuse et irrégulière.
+/// Ce n'est qu'un cache : il peut être vidé et reconstruit sans perte, la
+/// source de vérité restant les transactions.
+model AssetDailyClose {
+  id        String   @id @default(cuid())
+  assetId   String
+  /// Jour civil Europe/Paris, format YYYY-MM-DD (tri lexicographique = chronologique)
+  day       String
+  closeEur  Decimal  @db.Decimal(28, 12)
+  source    String
+  fetchedAt DateTime @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, day])
+  @@index([assetId, day])
+}
+
+/// Journal des enveloppes fiscales d'une ligne titre.
+///
+/// `Asset.accountType` et `Asset.securitiesAccountId` décrivent l'état
+/// **courant**. Ils sont mutables et ne gardent aucune trace : une ligne passée
+/// du CTO au PEA en 2026 paraissait, hier encore, avoir toujours été PEA. Une
+/// courbe historique par enveloppe construite là-dessus aurait réécrit le passé
+/// à chaque reclassement.
+///
+/// Ce journal enregistre ce qui s'est réellement produit, et rien d'autre. Il
+/// ne reconstruit pas le passé antérieur à sa mise en place : une date située
+/// avant le premier événement d'une ligne reste **inconnue**, ce qui est la
+/// réponse juste — `createdAt` mesure l'écriture en base, pas l'entrée dans
+/// l'enveloppe, et le compte de démonstration le montre : ses seize lignes ont
+/// été créées en 2026 alors que leurs opérations remontent à 2023.
+///
+/// `envelopeType` est **dénormalisé** volontairement. Le rattachement pointe
+/// vers un compte que l'utilisateur peut supprimer — `SetNull` détacherait
+/// alors la ligne et effacerait, avec le compte, la nature de l'enveloppe
+/// qu'elle occupait. Un journal dont le passé disparaît avec un compte ne
+/// serait pas un journal.
+model AssetEnvelopeEvent {
+  id      String @id @default(cuid())
+  assetId String
+  /// Redondant avec `asset.userId`, mais indispensable : le filtrage par
+  /// utilisateur ne doit pas dépendre d'une jointure sur une ligne qui pourrait
+  /// disparaître.
+  userId  String
+
+  /// Date **métier** de l'événement — celle où l'enveloppe a changé, distincte
+  /// de `createdAt` qui n'enregistre que le moment de l'écriture.
+  occurredAt DateTime
+
+  /// OBSERVED — constat de l'état à cette date, sans prétendre qu'il valait
+  ///            déjà avant. C'est le premier point de toute ligne existant
+  ///            avant la mise en place du journal.
+  /// CHANGED  — mutation réellement survenue et observée par l'application.
+  kind String
+
+  /// Enveloppe fiscale portée par la ligne à cet instant : CTO | PEA | AV |
+  /// CRYPTO | IMMOBILIER | CFD.
+  accountType String
+
+  /// Compte titres de rattachement à cet instant, `null` si détachée.
+  securitiesAccountId String?
+  /// Type du compte à cet instant — PEA | PEA_PME | CTO. Conservé même si le
+  /// compte est supprimé plus tard.
+  envelopeType        String?
+
+  createdAt DateTime @default(now())
+
+  /// Cascade : l'historique d'enveloppe d'un actif supprimé n'a plus d'objet.
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  /// L'ordre de lecture est chronologique par ligne : c'est exactement cet
+  /// index que `resolveEnvelopeAt` parcourt.
+  @@index([assetId, occurredAt])
+  @@index([userId, occurredAt])
+}
+
+/// Barre intra-séance d'un actif, en EUR — observations réellement collectées.
+///
+/// ## Pourquoi une table de plus
+///
+/// `AssetDailyClose` porte une contrainte `@@unique([assetId, day])` : une
+/// valeur par jour, par construction. `PortfolioSnapshot` est un upsert
+/// quotidien — chaque écriture détruit la précédente. `PriceHistory` n'a ni
+/// intervalle ni clé de dédoublonnage, et alimente déjà la reconstruction
+/// `source: "db"` de `getAssetPriceHistory` : y écrire rendrait la collecte
+/// indiscernable des captures d'un rafraîchissement manuel, et circulaire.
+///
+/// Aucune des trois ne peut donc porter de l'intra-journalier.
+///
+/// ## Prix par actif, et non instantanés de portefeuille
+///
+/// La même base reconstruit le portefeuille, les catégories, les KPI et un
+/// actif isolé. Un instantané de portefeuille fige au contraire un découpage :
+/// il ne saurait pas répondre « que valait ma poche crypto à 14 h 37 » si la
+/// composition de cette poche a changé depuis, et rouvrirait l'historique
+/// concurrent que le chantier précédent a supprimé.
+///
+/// ## Ce que la table contient — et ne contient pas
+///
+/// Uniquement des barres **réellement observées** chez un fournisseur. Aucun
+/// report, aucune interpolation, aucune série `mock` : un trou reste un trou,
+/// et c'est au lecteur de décider s'il reporte la dernière valeur connue — en
+/// l'annonçant alors comme estimée. Écrire un point reporté ici le rendrait
+/// indiscernable d'une observation quelques semaines plus tard.
+model AssetIntradayBar {
+  id      String @id @default(cuid())
+  assetId String
+
+  /// Taille de la barre — cf. `PriceBarInterval` ("15m" | "1h" | "4h").
+  /// Stockée plutôt que déduite : deux résolutions peuvent coexister sans
+  /// qu'aucune n'écrase l'autre, et une granularité plus fine s'ajoute plus
+  /// tard sans migration.
+  interval String
+  /// Début de la barre, en UTC, aligné sur l'intervalle.
+  ///
+  /// C'est l'alignement qui rend la collecte idempotente : deux passages sur
+  /// la même barre visent la même ligne. Un horodatage de capture ne le
+  /// permettrait pas — c'est le défaut de `PriceHistory`.
+  barStart DateTime
+  closeEur Decimal  @db.Decimal(28, 12)
+  /// Fournisseur ayant réellement produit la barre — jamais "mock" ni "db".
+  source    String
+  fetchedAt DateTime @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, interval, barStart])
+  @@index([assetId, interval, barStart])
+}
+
+/// Caractéristiques d'un bien immobilier détenu en direct — extension 1:1 de
+/// `Asset`, sur le modèle de `PriceQuote`.
+///
+/// Ces champs vivent à part plutôt que sur `Asset` : ils ne concernent qu'une
+/// poignée de lignes, et les porter sur le modèle central imposerait vingt-cinq
+/// colonnes vides à chaque action et chaque crypto.
+///
+/// **La quote-part n'est pas ici** : elle est portée par la `quantity` des
+/// transactions, donc par la position elle-même. Un bien détenu à 50 % est une
+/// position de 0,5 unité valorisée au prix du bien entier. La valeur au
+/// patrimoine s'en déduit sans qu'aucun calcul n'ait à se souvenir de diviser,
+/// et un rachat de part se traite comme un second achat.
+model RealEstateDetail {
+  id      String @id @default(cuid())
+  assetId String @unique
+
+  /// MAISON | APPARTEMENT | PARKING | TERRAIN | LOCAL_COMMERCIAL | AUTRE
+  propertyType String
+  /// RESIDENCE_PRINCIPALE | RESIDENCE_SECONDAIRE | LOCATIF_NU | LOCATIF_MEUBLE
+  /// | LOCATIF_SAISONNIER | MIXTE | AUTRE
+  usage        String
+
+  rooms        Int?
+  /// Surface habitable (loi Carrez pour les lots de copropriété)
+  livingAreaM2 Int?
+  landAreaM2   Int?
+
+  // ── Adresse — nécessaire au rapprochement DVF ──
+  addressLine String?
+  postalCode  String?
+  city        String?
+  inseeCode   String?
+  /// Issues du géocodage, jamais saisies à la main
+  latitude    Float?
+  longitude   Float?
+  geocodedAt  DateTime?
+
+  // ── Valorisation ──
+  /// DVF_AUTO | MANUAL — seul DVF_AUTO est réévalué automatiquement.
+  /// Une valeur corrigée par l'utilisateur n'est jamais écrasée.
+  valuationMode  String    @default("MANUAL")
+  lastValuedAt   DateTime?
+  /// Dernière estimation DVF, conservée même si l'utilisateur l'a corrigée —
+  /// permet d'afficher l'écart sans rien imposer.
+  dvfEstimateEur Decimal?  @db.Decimal(14, 2)
+  dvfConfidence  String?
+  dvfComparables Int?
+  /// DVF_LOCAL | DVF_ELARGI | ADEME_COMMUNE_DPE — palier ayant produit
+  /// `dvfEstimateEur`. Voir `estimate.ts` pour l'orchestration des paliers.
+  dvfSource      String?
+
+  // ── Régime fiscal et dispositif ──
+  /// MICRO_FONCIER | REEL_FONCIER | MICRO_BIC | REEL_BIC | LMP
+  /// Null tant que le bien n'est pas loué. Le mode de location (nu / meublé)
+  /// découle de `usage` et n'est pas dupliqué ici.
+  rentalRegime          String?
+  /// PINEL | DENORMANDIE | MALRAUX | … — orthogonal au régime : un Pinel reste
+  /// un locatif nu déclaré au foncier, assorti d'une réduction d'impôt.
+  taxScheme             String?
+  /// Fin de l'engagement de location (Pinel 6/9/12 ans, Denormandie…).
+  /// Conservée parce qu'une sortie anticipée fait reprendre la réduction.
+  commitmentEndDate     DateTime?
+  /// Meublé de tourisme classé — ouvre l'abattement micro-BIC majoré (71 %).
+  isClassifiedTourism   Boolean   @default(false)
+  /// Année de l'investissement — détermine le barème du dispositif, qui a été
+  /// raboté en 2023 puis en 2024 pour le Pinel.
+  schemeStartYear       Int?
+  /// Durée d'engagement en années (6, 9 ou 12 en Pinel).
+  schemeCommitmentYears Int?
+  /// Base du dispositif : prix de revient du logement, ou montant des travaux
+  /// pour Malraux. Distincte du prix d'acquisition au journal, qui inclut les
+  /// frais et ne correspond pas à l'assiette légale.
+  schemeBaseEur         Decimal?  @db.Decimal(14, 2)
+  /// Taux Malraux retenu : 30 % (PSMV) ou 22 % (PVAP).
+  schemeRatePct         Decimal?  @db.Decimal(6, 3)
+
+  // ── Exploitation ──
+  monthlyRentEur       Decimal? @db.Decimal(12, 2)
+  monthlyChargesEur    Decimal? @db.Decimal(12, 2)
+  annualPropertyTaxEur Decimal? @db.Decimal(12, 2)
+  /// Taux d'occupation moyen en % — surtout utile en location saisonnière
+  occupancyRatePct     Decimal? @db.Decimal(5, 2)
+
+  // ── Écritures récurrentes ──
+  /// Jour du mois d'encaissement du loyer (1–31), null = pas d'automatisation.
+  /// Le mécanisme reprend celui de `Liability.paymentDay` : même calcul
+  /// d'échéances, même curseur, plutôt qu'un second planificateur.
+  rentDay              Int?
+  /// Dernière échéance de loyer déjà générée — curseur de reprise.
+  lastRentAppliedAt    DateTime?
+  /// Dernière échéance de charges déjà générée.
+  lastChargesAppliedAt DateTime?
+  /// Début de la période locative (première échéance possible).
+  rentalStartDate      DateTime?
+  /// Fin du bail — au-delà, plus aucune échéance n'est générée.
+  rentalEndDate        DateTime?
+
+  // ── Descriptif : physique ──
+  constructionYear Int?
+  /// DPE : A à G
+  energyRating     String?
+  /// Nombre de places de parking/box — `> 0` vaut présence, pas de booléen
+  /// séparé à garder synchronisé.
+  parkingSpots     Int?
+  floor            Int?
+  /// Nombre d'étages de l'immeuble — distinct de `floor`, l'étage du lot.
+  totalFloors      Int?
+  hasElevator      Boolean?
+  orientation      String?
+  viewType         String?
+  hasBalcony       Boolean?
+  balconyAreaM2    Int?
+  hasGarden        Boolean?
+  gardenAreaM2     Int?
+  hasCellar        Boolean?
+
+  // ── Descriptif : état et performance énergétique ──
+  /// GES : A à G, même échelle que `energyRating` (DPE), colonne distincte.
+  gesRating     String?
+  /// Consommation énergétique en kWh/m²/an, telle qu'affichée sur le DPE.
+  dpeKwhM2Year  Int?
+  heatingType   String?
+  windowQuality String?
+
+  // ── Copropriété ──
+  isCopropriete         Boolean?
+  annualCoproChargesEur Decimal? @db.Decimal(12, 2)
+  /// Provisions pour travaux (fonds travaux / ALUR), distinctes des charges
+  /// courantes.
+  annualCoproProvisions Decimal? @db.Decimal(12, 2)
+
+  // ── Fiscalité locale ──
+  /// Toujours due sur les résidences secondaires (`usage`), supprimée pour
+  /// les résidences principales depuis 2023.
+  annualHabitationTaxEur Decimal? @db.Decimal(12, 2)
+
+  // ── Équipements complémentaires ──
+  hasPool            Boolean?
+  bathroomCount      Int?
+  hasAirConditioning Boolean?
+  hasFireplace       Boolean?
+  hasAlarm           Boolean?
+
+  // ── Risques (Géorisques) ──
+  /// AUCUN | FAIBLE | MOYEN | FORT — échelle unifiée dérivée des nomenclatures
+  /// officielles (zonage sismique, potentiel radon…), voir georisques.ts.
+  riskFlood         String?
+  riskSeismic       String?
+  riskRadon         String?
+  riskClaySoil      String?
+  /// Distingue « jamais interrogé » (false) de « interrogé, rien à signaler »
+  /// (true avec les quatre risques à `AUCUN` ou `null` si la réponse ne les
+  /// couvrait pas toutes) — un simple `null` sur les risques ne le permettrait pas.
+  georisquesFetched Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+}
+
+// ─── DVF — référentiel des ventes immobilières (données publiques) ────────────
+
+/// Vente immobilière issue des données DVF (Etalab), **agrégée au niveau
+/// mutation**.
+///
+/// Un fichier DVF a une ligne par lot, pas par vente : une maison vendue avec
+/// son garage et son terrain produit plusieurs lignes qui partagent le même
+/// `id_mutation` et **répètent** la même `valeur_fonciere`. Traiter chaque
+/// ligne comme une vente compterait la même transaction plusieurs fois dans
+/// les comparables ; sommer les valeurs foncières triplerait le prix. Le
+/// regroupement est donc fait une fois pour toutes à l'import.
+///
+/// Contrairement au reste du schéma, ce modèle n'a **pas** de `userId` : ce
+/// sont des données publiques, identiques pour tous les comptes, et aucune
+/// donnée utilisateur n'y transite. Ce n'est pas un oubli d'isolation, c'est un
+/// référentiel partagé, reconstructible intégralement depuis la source.
+model DvfSale {
+  id            String   @id @default(cuid())
+  /// id_mutation DVF — plusieurs lignes source partagent cet identifiant
+  mutationId    String
+  soldOn        DateTime
+  /// MAISON | APPARTEMENT
+  propertyType  String
+  /// valeur_fonciere de la mutation entière, en euros
+  valueEur      Decimal  @db.Decimal(14, 2)
+  /// Somme des surfaces bâties des SEULS locaux d'habitation — inclure le
+  /// garage gonflerait la surface et écraserait le prix au m².
+  builtAreaM2   Int
+  rooms         Int
+  landAreaM2    Int?
+  /// valueEur / builtAreaM2 — dénormalisé : filtre d'aberrations et tri
+  pricePerM2    Decimal  @db.Decimal(12, 2)
+  latitude      Float
+  longitude     Float
+  postalCode    String?
+  inseeCode     String
+  communeName   String
+  department    String
+  /// La mutation portait aussi un garage / parking / dépendance
+  hasDependency Boolean  @default(false)
+  /// Nombre de lignes DVF fusionnées — trace d'audit
+  sourceRows    Int      @default(1)
+  importId      String
+
+  import DvfImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@unique([mutationId, propertyType])
+  @@index([latitude, longitude])
+  @@index([department, soldOn])
+  @@index([inseeCode])
+  @@index([importId])
+}
+
+/// Traçabilité d'un chargement DVF : un département × un millésime.
+/// L'unicité `(department, year)` rend l'import rejouable — recharger un
+/// millésime remplace ses ventes au lieu de les dupliquer.
+model DvfImport {
+  id            String    @id @default(cuid())
+  department    String
+  year          Int
+  sourceUrl     String
+  /// RUNNING | DONE | ERROR
+  status        String    @default("RUNNING")
+  rowsRead      Int       @default(0)
+  salesStored   Int       @default(0)
+  rejected      Int       @default(0)
+  /// Décompte par motif de rejet — permet de voir ce qui a été écarté
+  rejectReasons Json?
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  error         String?
+
+  sales DvfSale[]
+
+  @@unique([department, year])
 }
 
 model PortfolioSnapshot {
@@ -300,44 +758,60 @@ model PortfolioSnapshot {
 
 /// Debts / crédits — amortissement dynamique + événements de vie
 model Liability {
-  id              String    @id @default(cuid())
-  userId          String
-  name            String
-  initialAmount   Decimal   @db.Decimal(28, 12)
-  remainingAmount Decimal   @db.Decimal(28, 12)
-  currency        String    @default("EUR")
-  interestRate    Decimal?  @db.Decimal(10, 6)
-  monthlyPayment  Decimal?  @db.Decimal(28, 12)
-  startDate       DateTime?
-  endDate         DateTime?
+  id                   String    @id @default(cuid())
+  userId               String
+  name                 String
+  initialAmount        Decimal   @db.Decimal(28, 12)
+  remainingAmount      Decimal   @db.Decimal(28, 12)
+  currency             String    @default("EUR")
+  interestRate         Decimal?  @db.Decimal(10, 6)
+  monthlyPayment       Decimal?  @db.Decimal(28, 12)
+  /// Assurance emprunteur mensuelle (hors intérêts). Null = 0.
+  insuranceMonthly     Decimal?  @db.Decimal(28, 12)
+  startDate            DateTime?
+  endDate              DateTime?
   /// Day of month for automatic debit (1–31). Clamped to last day of short months.
-  paymentDay      Int?
+  paymentDay           Int?
   /// Last payment-day date for which a monthly debit was applied
   lastPaymentAppliedAt DateTime?
   /// Free-text bank / lender name
-  bankName        String?
-  notes           String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  bankName             String?
+  /// IMMOBILIER | AUTO | CONSOMMATION | DETTE_PRIVEE | PROFESSIONNEL | AUTRE
+  category             String    @default("AUTRE")
+  notes                String?
+  /// Bien financé par ce prêt (optionnel).
+  ///
+  /// Sert à **l'attribution**, pas au calcul du patrimoine net : celui-ci
+  /// déduit déjà l'ensemble des passifs. Le lien permet d'afficher le net par
+  /// bien (valeur − capital restant dû) et le rendement sur fonds propres.
+  ///
+  /// `remainingAmount` reste le montant réellement dû, jamais pondéré par la
+  /// quote-part de propriété : on peut détenir la moitié d'un bien tout en
+  /// étant solidaire de la totalité de l'emprunt.
+  assetId              String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset  Asset?           @relation(fields: [assetId], references: [id], onDelete: SetNull)
   events LiabilityEvent[]
 
   @@index([userId])
+  @@index([assetId])
 }
 
 /// Lifecycle events: monthly debit, early repayment, payment amendment
 model LiabilityEvent {
-  id          String   @id @default(cuid())
-  liabilityId String
+  id             String   @id @default(cuid())
+  liabilityId    String
   /// MONTHLY_DEBIT | EARLY_REPAYMENT_PARTIAL | EARLY_REPAYMENT_TOTAL | PAYMENT_CHANGE
-  type        String
-  amount      Decimal? @db.Decimal(28, 12)
+  type           String
+  amount         Decimal? @db.Decimal(28, 12)
   /// Remaining capital after this event
   remainingAfter Decimal? @db.Decimal(28, 12)
-  eventDate   DateTime
-  notes       String?
-  createdAt   DateTime @default(now())
+  eventDate      DateTime
+  notes          String?
+  createdAt      DateTime @default(now())
 
   liability Liability @relation(fields: [liabilityId], references: [id], onDelete: Cascade)
 
@@ -348,50 +822,139 @@ model LiabilityEvent {
 
 /// Compte courant — balance defaults 0, only counts in net worth if > 0
 model BankAccount {
-  id        String   @id @default(cuid())
-  userId    String
+  id           String   @id @default(cuid())
+  userId       String
   /// Bank label (dropdown list or free text stored as string)
-  bankName  String
-  balance   Decimal  @default(0) @db.Decimal(28, 12)
-  currency  String   @default("EUR")
-  notes     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  bankName     String
+  balance      Decimal  @default(0) @db.Decimal(28, 12)
+  currency     String   @default("EUR")
+  /// Exclu du patrimoine personnel : un compte pro ne s'additionne pas au
+  /// patrimoine net comme un compte perso, même s'il figure dans la liste.
+  isPro        Boolean  @default(false)
+  /// Part détenue sur un compte joint, 0–100. Null = compte individuel
+  /// (100 % implicite) — ne pas stocker 100 par défaut évite de confondre
+  /// « non renseigné » et « joint à parts égales ».
+  ownershipPct Decimal? @db.Decimal(6, 3)
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events BankAccountEvent[]
 
   @@index([userId])
 }
 
+/// Historique des mouvements d'un compte courant — sur le modèle de
+/// `LiabilityEvent`. Généré à chaque changement de solde, jamais saisi à la
+/// main : c'est ce qui permet une courbe d'évolution fiable, contrairement à
+/// un journal que l'utilisateur devrait renseigner lui-même en plus du solde.
+model BankAccountEvent {
+  id            String   @id @default(cuid())
+  bankAccountId String
+  /// OPENING | DEPOSIT | WITHDRAWAL
+  type          String
+  /// Delta signé — positif pour un dépôt, négatif pour un retrait.
+  amount        Decimal  @db.Decimal(28, 12)
+  balanceAfter  Decimal  @db.Decimal(28, 12)
+  occurredAt    DateTime @default(now())
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  @@index([bankAccountId, occurredAt])
+}
+
 /// Livret d'épargne — intérêts planifiés (APR/APY × périodicité)
 model SavingsAccount {
-  id            String   @id @default(cuid())
-  userId        String
-  name          String
+  id               String    @id @default(cuid())
+  userId           String
+  name             String
   /// Banque de détention (aligné comptes courants / plateformes)
-  bankName      String?
+  bankName         String?
+  /// LIVRET_A | LDDS | LEP | PEL | CEL | AUTRE — détermine le plafond légal
+  /// suggéré (voir `regulated-products.ts`) ; un livret bancaire non
+  /// réglementé (AUTRE) n'a pas de plafond imposé.
+  productType      String    @default("AUTRE")
+  /// Plafond de versement (hors intérêts capitalisés). Saisi par
+  /// l'utilisateur ou pré-rempli depuis `productType` — jamais recalculé en
+  /// silence : un plafond légal change par décret, pas par notre code.
+  ceilingAmount    Decimal?  @db.Decimal(28, 12)
   /// Principal / last booked balance (crédité aux dates de versement)
-  balance       Decimal  @default(0) @db.Decimal(28, 12)
+  balance          Decimal   @default(0) @db.Decimal(28, 12)
   /// Taux annuel saisi en % (ex. 3.0 = 3%) — interprété selon rateType
-  apyPercent    Decimal  @default(0) @db.Decimal(10, 6)
+  apyPercent       Decimal   @default(0) @db.Decimal(10, 6)
   /// APR (linéaire) | APY (composé rétro-calculé)
-  rateType      String   @default("APY")
+  rateType         String    @default("APY")
   /// DAILY | WEEKLY | MONTHLY | YEARLY
-  payoutFrequency String @default("DAILY")
+  payoutFrequency  String    @default("DAILY")
   /// ISO weekday 1=Lundi … 7=Dimanche (WEEKLY)
-  payoutDayOfWeek Int?
+  payoutDayOfWeek  Int?
   /// Jour du mois 1–31 (MONTHLY / YEARLY)
   payoutDayOfMonth Int?
   /// Mois 1–12 (YEARLY)
-  payoutMonth   Int?
+  payoutMonth      Int?
   /// Dernier versement d'intérêts crédité au solde
-  lastPayoutAt  DateTime?
+  lastPayoutAt     DateTime?
   /// Horloge d'affichage (intérêts courus non encore versés)
-  lastAccruedAt DateTime @default(now())
-  currency      String   @default("EUR")
-  notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  lastAccruedAt    DateTime  @default(now())
+  currency         String    @default("EUR")
+  /// Cf. BankAccount.isPro
+  isPro            Boolean   @default(false)
+  /// Cf. BankAccount.ownershipPct
+  ownershipPct     Decimal?  @db.Decimal(6, 3)
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user   User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events SavingsAccountEvent[]
+
+  @@index([userId])
+}
+
+/// Historique d'un livret — mêmes principes que `BankAccountEvent`, plus le
+/// type `INTEREST` : un versement d'intérêts n'est ni un dépôt ni un retrait
+/// de l'utilisateur, le confondre avec l'un des deux fausserait la lecture
+/// « qu'est-ce que j'ai épargné moi-même vs. ce que le taux m'a rapporté ».
+model SavingsAccountEvent {
+  id               String   @id @default(cuid())
+  savingsAccountId String
+  /// OPENING | DEPOSIT | WITHDRAWAL | INTEREST
+  type             String
+  amount           Decimal  @db.Decimal(28, 12)
+  balanceAfter     Decimal  @db.Decimal(28, 12)
+  occurredAt       DateTime @default(now())
+  notes            String?
+  createdAt        DateTime @default(now())
+
+  savingsAccount SavingsAccount @relation(fields: [savingsAccountId], references: [id], onDelete: Cascade)
+
+  @@index([savingsAccountId, occurredAt])
+}
+
+/// Dépôt à terme (CAT) — durée fixe, taux figé à l'ouverture, pénalité en cas
+/// de retrait anticipé. Modèle distinct d'un livret : un CAT n'a ni
+/// versement libre ni capitalisation périodique, sa mécanique (échéance +
+/// pénalité) n'a presque aucun champ en commun avec `SavingsAccount`.
+model TermDeposit {
+  id                        String   @id @default(cuid())
+  userId                    String
+  bankName                  String?
+  principal                 Decimal  @db.Decimal(28, 12)
+  /// Taux annuel fixé à l'ouverture, en % — ne varie pas sur la durée du CAT.
+  ratePercent               Decimal  @db.Decimal(10, 6)
+  currency                  String   @default("EUR")
+  openedAt                  DateTime
+  maturityDate              DateTime
+  /// % du taux perdu en cas de retrait avant échéance — null = non renseigné.
+  earlyWithdrawalPenaltyPct Decimal? @db.Decimal(6, 3)
+  isPro                     Boolean  @default(false)
+  ownershipPct              Decimal? @db.Decimal(6, 3)
+  notes                     String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -401,32 +964,122 @@ model SavingsAccount {
 // ─── Assurance-Vie ────────────────────────────────────────────────────────────
 
 model LifeInsurance {
-  id        String    @id @default(cuid())
-  userId    String
-  insurer   String
-  openDate  DateTime?
+  id                    String    @id @default(cuid())
+  userId                String
+  insurer               String
+  openDate              DateTime?
   /// Cash / fonds euro
-  cashEuro  Decimal   @default(0) @db.Decimal(28, 12)
-  currency  String    @default("EUR")
-  notes     String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  cashEuro              Decimal   @default(0) @db.Decimal(28, 12)
+  currency              String    @default("EUR")
+  notes                 String?
+  /// Cumul des versements effectués avant le 27/09/2017 (seuil fiscal PFU).
+  premiumsBefore2017Eur Decimal   @default(0) @db.Decimal(28, 12)
+  /// Cumul des versements effectués à compter du 27/09/2017.
+  premiumsAfter2017Eur  Decimal   @default(0) @db.Decimal(28, 12)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  user     User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   products LifeInsuranceProduct[]
+  supports LifeInsuranceSupport[]
 
   @@index([userId])
 }
 
+/// Support d'un contrat d'assurance-vie — extension 1:1 de `Asset`, sur le
+/// modèle de `RealEstateDetail`.
+///
+/// ## Pourquoi une table d'extension
+///
+/// Un support d'AV est une position comme une autre : sa valeur et son prix de
+/// revient viennent du journal de transactions, pas d'ici. Ce qui vit ici, c'est
+/// ce que le journal ne sait pas porter — le contrat de rattachement, et les
+/// caractéristiques d'un produit structuré. Les mettre sur `Asset` imposerait
+/// vingt colonnes vides à chaque action et chaque crypto.
+///
+/// ## Le lien au contrat
+///
+/// `lifeInsuranceId` comble le maillon qui manquait : rien ne reliait
+/// techniquement une position AV à son contrat, si bien que le rapprochement
+/// devait se faire par nom — au risque de confondre deux supports homonymes
+/// détenus chez deux assureurs.
+///
+/// ## Champs structurés
+///
+/// Ils ne concernent que `kind = "STRUCTURED"` et sont donc tous facultatifs. Un
+/// fonds euro ou une UC classique n'a ni barrière ni date de constatation ;
+/// exiger ces champs pour tous aurait obligé à inventer des valeurs.
+model LifeInsuranceSupport {
+  id              String  @id @default(cuid())
+  assetId         String  @unique
+  /// Contrat de rattachement — null si le support n'a pas encore été rattaché
+  lifeInsuranceId String?
+
+  /// FONDS_EURO | UC | STRUCTURED
+  kind String @default("UC")
+
+  // ── Identification (tous supports) ────────────────────────────────────────
+  isin   String?
+  /// Société de gestion (UC) ou émetteur (structuré)
+  issuer String?
+
+  // ── Produit structuré uniquement ──────────────────────────────────────────
+  /// Sous-jacent : indice, action ou panier (« Euro Stoxx 50 »)
+  underlying  String?
+  /// Nominal souscrit, en euros
+  nominalEur  Decimal? @db.Decimal(28, 12)
+  /// Niveau initial de constatation du sous-jacent (strike)
+  strikeLevel Decimal? @db.Decimal(28, 12)
+
+  /// Coupon annuel, en %
+  couponRatePct    Decimal? @db.Decimal(10, 6)
+  /// MONTHLY | QUARTERLY | SEMIANNUAL | ANNUAL | MATURITY
+  couponFrequency  String   @default("ANNUAL")
+  /// Barrière de versement du coupon, en % du niveau initial
+  couponBarrierPct Decimal? @db.Decimal(10, 6)
+  /// Coupon à mémoire : les coupons non versés se rattrapent
+  couponMemory     Boolean  @default(false)
+
+  /// Barrière de rappel anticipé (autocall), en % du niveau initial
+  autocallBarrierPct   Decimal? @db.Decimal(10, 6)
+  /// Barrière de protection du capital à l'échéance, en % du niveau initial
+  capitalProtectionPct Decimal? @db.Decimal(10, 6)
+
+  /// Date de constatation initiale
+  strikeDate          DateTime?
+  /// Échéance finale
+  maturityDate        DateTime?
+  /// Prochaine date de constatation (coupon / rappel)
+  nextObservationDate DateTime?
+  /// Dernière constatation confirmée — curseur, comme les loyers
+  lastCouponAppliedAt DateTime?
+
+  /// Frais d'entrée sur le support, en %
+  entryFeePct      Decimal? @db.Decimal(10, 6)
+  /// Frais de gestion annuels sur encours, en %
+  managementFeePct Decimal? @db.Decimal(10, 6)
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  asset         Asset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  lifeInsurance LifeInsurance? @relation(fields: [lifeInsuranceId], references: [id], onDelete: SetNull)
+
+  @@index([lifeInsuranceId])
+  @@index([kind])
+}
+
 model LifeInsuranceProduct {
-  id               String   @id @default(cuid())
-  lifeInsuranceId  String
-  name             String
-  currentValue     Decimal  @default(0) @db.Decimal(28, 12)
-  currency         String   @default("EUR")
-  notes            String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id              String   @id @default(cuid())
+  lifeInsuranceId String
+  name            String
+  currentValue    Decimal  @default(0) @db.Decimal(28, 12)
+  currency        String   @default("EUR")
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   lifeInsurance LifeInsurance @relation(fields: [lifeInsuranceId], references: [id], onDelete: Cascade)
 
@@ -457,12 +1110,27 @@ model EmployeeSavingsLine {
   /// Origine des fonds : VOLUNTARY | INTERESTEMENT | PARTICIPATION | ABONDEMENT
   sourceType String @default("VOLUNTARY")
 
+  /// Montant réellement versé sur cette ligne, dans sa devise.
+  ///
+  /// Sans lui, `parts × VL` ne dit que ce que la position vaut aujourd'hui :
+  /// ni le versement, ni le gain, ni la performance ne sont calculables. C'est
+  /// le montant qui figure sur le relevé de l'employeur, donc celui que
+  /// l'utilisateur peut saisir. Nullable : les lignes existantes n'en ont pas,
+  /// et l'écran préfère l'annoncer plutôt que de deviner.
+  contributedAmount Decimal? @db.Decimal(28, 12)
+
+  /// Famille du support : EQUITY | DIVERSIFIED | BOND | MONETARY | OTHER
+  ///
+  /// Renseignée = choix de l'utilisateur. Nulle = l'écran la déduit du nom du
+  /// fonds et le signale comme telle, sans jamais l'écrire en base à sa place.
+  fundCategory String?
+
   /// Date d'origine du versement (base pour +5 ans PEE)
   contributionDate DateTime?
   /// Date de déblocage théorique (null si mode RETIREMENT)
   unlockDate       DateTime?
   /// DATE | RETIREMENT
-  unlockMode       String @default("DATE")
+  unlockMode       String    @default("DATE")
 
   notes     String?
   createdAt DateTime @default(now())
@@ -478,39 +1146,115 @@ model EmployeeSavingsLine {
 
 // ─── Actifs alternatifs — Métaux précieux ─────────────────────────────────────
 
-/// Position or / argent / etc. (physique ou papier), hors ledger titres
+/// Lot de métal précieux (physique ou papier), hors ledger titres.
+///
+/// Un lot = une acquisition homogène : même produit, même date, même prix.
+/// Ce grain est imposé par la fiscalité — l'abattement pour durée de détention
+/// de l'article 150 VI CGI se compte lot par lot, une moyenne le fausserait.
 model PreciousMetalPosition {
   id     String @id @default(cuid())
   userId String
 
-  /// METAL | OTHER
-  assetKind String @default("METAL")
+  /// GOLD | SILVER | PLATINUM | PALLADIUM | OTHER
+  metal             String    @default("GOLD")
   /// PHYSICAL | PAPER
-  format    String @default("PHYSICAL")
+  format            String    @default("PHYSICAL")
+  /// COIN | BAR | JEWELRY | ETC | MINING | OTHER
+  productType       String    @default("COIN")
   /// Ex. Napoléon 20F, Lingot 1 kg, Krugerrand
-  denomination String
+  denomination      String
+  /// Titre du métal en millièmes (900 pour un Napoléon, 999,9 pour un lingot)
+  fineness          Decimal   @default(999) @db.Decimal(6, 2)
   /// Nombre de pièces / barres / unités
-  quantity     Decimal @default(0) @db.Decimal(28, 12)
-  /// Poids unitaire en grammes (convertir Oz → g côté app)
-  unitWeightG  Decimal @default(0) @db.Decimal(28, 12)
+  quantity          Decimal   @default(0) @db.Decimal(28, 12)
+  /// Poids unitaire brut en grammes (convertir Oz → g côté app)
+  unitWeightG       Decimal   @default(0) @db.Decimal(28, 12)
   /// GRAM | OZ — unité saisie pour le poids unitaire
-  weightUnit   String  @default("GRAM")
-  /// Prix de revient unitaire (PRU)
-  purchasePriceUnit Decimal @default(0) @db.Decimal(28, 12)
+  weightUnit        String    @default("GRAM")
+  /// Prix de revient unitaire (PRU), frais d'acquisition exclus
+  purchasePriceUnit Decimal   @default(0) @db.Decimal(28, 12)
+  /// Frais d'acquisition du lot (commission, port, assurance)
+  acquisitionFees   Decimal   @default(0) @db.Decimal(28, 12)
+  /// Date d'acquisition — sans elle, l'abattement pour durée de détention
+  /// est incalculable et l'option pour le régime réel est fermée.
+  acquiredAt        DateTime?
+  /// Facture nominative et datée conservée : condition de l'option 2092-SD
+  hasInvoice        Boolean   @default(false)
   /// Valeur actuelle totale de la ligne (saisie manuelle pour l'instant)
-  currentValue      Decimal @default(0) @db.Decimal(28, 12)
-  currency          String  @default("EUR")
+  currentValue      Decimal   @default(0) @db.Decimal(28, 12)
+  currency          String    @default("EUR")
   /// Lieu de stockage (coffre, domicile, banque…)
   storageLocation   String?
   notes             String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sales PreciousMetalSale[]
 
   @@index([userId])
-  @@index([userId, assetKind])
+  @@index([userId, metal])
   @@index([userId, format])
+}
+
+/// Cours de clôture d'un métal précieux, en euro par gramme de métal fin.
+///
+/// Cache partagé : un cours de l'or n'appartient à personne, et le lier à un
+/// utilisateur multiplierait les appels fournisseur par le nombre de comptes.
+/// Le vider ne perd aucune donnée patrimoniale — les lots restent la source
+/// de vérité.
+model MetalSpotPrice {
+  id String @id @default(cuid())
+
+  /// GOLD | SILVER | PLATINUM | PALLADIUM
+  metal      String
+  /// Jour civil parisien, `YYYY-MM-DD`
+  day        String
+  /// Prix du gramme de métal fin, en euro
+  eurPerGram Decimal  @db.Decimal(28, 12)
+  /// Symbole interrogé, et conversion appliquée le cas échéant
+  source     String
+  fetchedAt  DateTime @default(now())
+
+  @@unique([metal, day])
+  @@index([metal, day])
+}
+
+/// Cession d'un lot de métal précieux — le fait générateur de l'impôt.
+///
+/// La ligne détenue ne dit rien de la fiscalité : seule la vente déclenche,
+/// au choix du cédant, la taxe forfaitaire (2091-SD) ou le régime des
+/// plus-values sur biens meubles (option 2092-SD).
+model PreciousMetalSale {
+  id         String  @id @default(cuid())
+  userId     String
+  positionId String?
+
+  /// Libellé figé au moment de la vente : le lot peut disparaître ensuite
+  denomination String
+  /// Quantité cédée (unités du lot)
+  quantity     Decimal   @default(0) @db.Decimal(28, 12)
+  /// Prix de cession brut — assiette de la taxe forfaitaire
+  salePriceEur Decimal   @default(0) @db.Decimal(28, 12)
+  /// Frais de vente, déductibles du seul régime réel
+  saleFeesEur  Decimal   @default(0) @db.Decimal(28, 12)
+  /// Prix d'acquisition retenu pour la quantité cédée (frais inclus)
+  costBasisEur Decimal   @default(0) @db.Decimal(28, 12)
+  soldAt       DateTime
+  acquiredAt   DateTime?
+  /// FORFAIT | PLUS_VALUE — régime effectivement déclaré
+  regime       String    @default("FORFAIT")
+  hasInvoice   Boolean   @default(false)
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user     User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position PreciousMetalPosition? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([userId, soldAt])
+  @@index([positionId])
 }
 
 /// Private equity / non-coté (PME, startups, crowdequity…)
@@ -519,25 +1263,70 @@ model PrivateEquityPosition {
   userId String
 
   /// Nom de la société
-  companyName String
-  sector      String?
+  companyName              String
+  sector                   String?
   /// CROWDEQUITY | CLUB_DEAL | DIRECT | HOLDING
-  peType      String  @default("DIRECT")
-  shares      Decimal @default(0) @db.Decimal(28, 12)
+  peType                   String    @default("DIRECT")
+  shares                   Decimal   @default(0) @db.Decimal(28, 12)
   /// Prix d'acquisition par part
-  acquisitionPricePerShare Decimal @default(0) @db.Decimal(28, 12)
-  investmentDate DateTime?
-  /// Valorisation actuelle totale de la ligne (NAV manuelle)
-  currentNav     Decimal  @default(0) @db.Decimal(28, 12)
-  currency       String   @default("EUR")
-  notes          String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  acquisitionPricePerShare Decimal   @default(0) @db.Decimal(28, 12)
+  investmentDate           DateTime?
+  /// Valorisation actuelle totale de la ligne (NAV manuelle) — dernier
+  /// point connu, dupliqué dans PrivateEquityValuation dès qu'un
+  /// historique existe.
+  currentNav               Decimal   @default(0) @db.Decimal(28, 12)
+  currency                 String    @default("EUR")
+  notes                    String?
+  /// Capital engagé (commitment) — peut excéder ce qui a été effectivement
+  /// appelé, notamment en capital-risque à appels échelonnés.
+  committedCapital         Decimal   @default(0) @db.Decimal(28, 12)
+  /// Capital effectivement appelé et versé à ce jour. Pour les lignes
+  /// existantes avant cette migration, à défaut de saisie, se déduit de
+  /// shares × acquisitionPricePerShare (non recalculé automatiquement —
+  /// voir commentaire de la migration).
+  calledCapital            Decimal   @default(0) @db.Decimal(28, 12)
+  /// Cumul des distributions perçues (dividendes, cessions partielles,
+  /// retour de capital) — sert au calcul du multiple réalisé (DPI).
+  distributionsReceived    Decimal   @default(0) @db.Decimal(28, 12)
+  /// Quote-part détenue au capital de la société, en %
+  ownershipPercent         Decimal?  @db.Decimal(10, 6)
+  /// Date de sortie anticipée (fenêtre de liquidité, maturité du fonds…)
+  expectedExitDate         DateTime?
+  /// Nom du véhicule d'investissement quand distinct de la société cible
+  /// (fonds, SPV, holding de reprise…)
+  vehicleName              String?
+  /// Tour de table à l'entrée — Seed, Series A, LBO…
+  round                    String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  valuations PrivateEquityValuation[]
 
   @@index([userId])
   @@index([userId, peType])
+}
+
+/// Historique de valorisation d'une ligne de private equity (NAV successives).
+///
+/// `currentNav` sur PrivateEquityPosition reste le dernier point connu pour
+/// un accès direct sans jointure ; cette table porte la série complète, dont
+/// le multiple non réalisé (RVPI) et la courbe de valorisation se déduisent.
+model PrivateEquityValuation {
+  id                      String @id @default(cuid())
+  privateEquityPositionId String
+
+  /// Valorisation totale de la ligne à cette date
+  nav       Decimal  @db.Decimal(28, 12)
+  /// Source ou contexte de la valorisation (rapport du fonds, estimation…)
+  note      String?
+  valuedAt  DateTime
+  createdAt DateTime @default(now())
+
+  /// Cascade : un historique de valorisation n'a aucun sens sans sa ligne.
+  position PrivateEquityPosition @relation(fields: [privateEquityPositionId], references: [id], onDelete: Cascade)
+
+  @@index([privateEquityPositionId, valuedAt])
 }
 
 /// Crowdlending / dette privée (prêts participatifs)
@@ -545,25 +1334,35 @@ model CrowdlendingPosition {
   id     String @id @default(cuid())
   userId String
 
-  projectName String
-  platform    String?
+  projectName            String
+  platform               String?
   /// Capital investi
-  capitalInvested Decimal @default(0) @db.Decimal(28, 12)
+  capitalInvested        Decimal   @default(0) @db.Decimal(28, 12)
   /// Taux d'intérêt annuel en %
-  annualYieldPercent Decimal @default(0) @db.Decimal(10, 6)
+  annualYieldPercent     Decimal   @default(0) @db.Decimal(10, 6)
   /// Durée en mois
-  durationMonths Int @default(12)
+  durationMonths         Int       @default(12)
   /// IN_FINE | AMORTIZING
-  repaymentType String @default("IN_FINE")
-  startDate     DateTime?
+  repaymentType          String    @default("IN_FINE")
+  startDate              DateTime?
   /// Date d'échéance théorique
-  maturityDate  DateTime?
+  maturityDate           DateTime?
   /// ACTIVE | LATE | REPAID | DEFAULT
-  status   String  @default("ACTIVE")
-  currency String  @default("EUR")
-  notes    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  status                 String    @default("ACTIVE")
+  currency               String    @default("EUR")
+  notes                  String?
+  /// Capital restant dû — distinct de capitalInvested une fois les
+  /// remboursements amortis pris en compte.
+  remainingCapital       Decimal   @default(0) @db.Decimal(28, 12)
+  /// Cumul des intérêts déjà perçus sur cette ligne
+  interestReceivedToDate Decimal   @default(0) @db.Decimal(28, 12)
+  /// MONTHLY | QUARTERLY | ANNUAL | IN_FINE
+  paymentFrequency       String    @default("MONTHLY")
+  nextPaymentDate        DateTime?
+  /// Notation de risque plateforme — "A" | "B" | "C" ou libre
+  riskGrade              String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -576,28 +1375,190 @@ model TangibleAsset {
   id     String @id @default(cuid())
   userId String
 
-  /// WATCHES | WINE | ART | AUTO | OTHER
-  category   String  @default("OTHER")
+  /// WATCHES | WINE | ART | AUTO | JEWELRY | GEMSTONE | HANDBAG | INSTRUMENT
+  /// | NUMISMATICS | PHILATELY | FURNITURE | OTHER
+  category       String   @default("OTHER")
   /// Marque ou artiste
-  brandOrArtist String
+  brandOrArtist  String
   /// Modèle / nom de l'œuvre
-  modelName  String
+  modelName      String
   /// Année ou millésime (texte libre)
-  yearOrVintage String?
-  purchasePrice Decimal @default(0) @db.Decimal(28, 12)
+  yearOrVintage  String?
+  purchasePrice  Decimal  @default(0) @db.Decimal(28, 12)
   /// Valeur estimée actuelle (saisie manuelle)
-  estimatedValue Decimal @default(0) @db.Decimal(28, 12)
-  currency String @default("EUR")
-  hasCertificate Boolean @default(false)
-  notes    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  estimatedValue Decimal  @default(0) @db.Decimal(28, 12)
+  currency       String   @default("EUR")
+  hasCertificate Boolean  @default(false)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // ── Acquisition ────────────────────────────────────────────────────────────
+  /// Date d'achat — sans elle, l'abattement pour durée de détention est
+  /// incalculable et l'option pour le régime réel est fermée.
+  purchaseDate      DateTime?
+  /// Vendeur, maison de vente, succession…
+  purchaseSource    String?
+  /// Numéro de certificat (GIA, LFG, carte Rolex…)
+  certificateRef    String?
+  /// Organisme certificateur (GIA, IGI, LFG, manufacture…)
+  certificateIssuer String?
+  /// Justificatifs d'achat conservés — facture, acte de vente, bordereau
+  /// d'adjudication.
+  ///
+  /// À ne pas confondre avec `hasCertificate` : un certificat d'authenticité
+  /// atteste ce qu'est l'objet, pas ce qu'il a coûté ni quand il a été acquis.
+  /// Seul le justificatif d'achat ouvre l'option pour le régime réel.
+  hasPurchaseProof  Boolean   @default(false)
+  /// Frais d'acquisition — commissaire-priseur, expertise, transport. Ils
+  /// entrent dans le prix de revient et réduisent donc la plus-value taxable.
+  acquisitionFees   Decimal?  @db.Decimal(28, 12)
+
+  // ── Valorisation & conservation ────────────────────────────────────────────
+  /// Valeur d'expertise (notaire, assureur) — distincte de la valeur de marché
+  appraisalValue    Decimal?  @db.Decimal(28, 12)
+  appraisalDate     DateTime?
+  /// Notaire, assureur, expert indépendant, maison de vente
+  appraisalProvider String?
+  /// Valeur assurée, souvent supérieure à l'estimation de revente
+  insuranceValue    Decimal?  @db.Decimal(28, 12)
+  storageLocation   String?
+
+  // ── Assurance ──────────────────────────────────────────────────────────────
+  /// Prime annuelle payée — distincte du capital assuré (`insuranceValue`),
+  /// que l'on confond souvent : l'une est un coût, l'autre une couverture.
+  insurancePremiumAnnual Decimal?  @db.Decimal(28, 12)
+  insuranceProvider      String?
+  insurancePolicyRef     String?
+  /// Échéance de la police — distincte de l'échéance du contrat de garde.
+  insuranceExpiryDate    DateTime?
+  /// MULTI_RISK | FINE_ART | JEWELRY | WATCH | OTHER
+  ///
+  /// La multirisque habitation plafonne généralement les objets de valeur à
+  /// quelques milliers d'euros : le type retenu dit si la couverture affichée
+  /// est réellement acquise.
+  insuranceType          String?
+
+  // ── Garde / conservation ───────────────────────────────────────────────────
+  /// HOME | BANK_VAULT | PRO_VAULT | THIRD_PARTY
+  ///
+  /// Détermine l'exposition réelle : un objet de valeur conservé au domicile
+  /// sans assurance est le cas que l'écran doit signaler.
+  storageType        String?
+  /// Loyer annuel du coffre, de la cave ou du dépositaire
+  storageCostAnnual  Decimal?  @db.Decimal(28, 12)
+  /// Coffreo, banque, caviste, garde-meuble…
+  storageProvider    String?
+  storageContractRef String?
+  /// Échéance du contrat de garde — un renouvellement manqué laisse l'objet
+  /// sans dépositaire déclaré.
+  storageRenewalDate DateTime?
+
+  // ── Transmission ───────────────────────────────────────────────────────────
+  /// Inclus dans l'assiette successorale.
+  ///
+  /// Aucun barème n'est calculé ici : les droits de succession relèvent d'un
+  /// chantier à part. Ce champ ne sert qu'à distinguer ce qui a déjà été donné
+  /// de ce qui reste à transmettre.
+  includeInEstate Boolean @default(true)
+  estateNote      String?
+
+  /// Objet de collection au sens fiscal.
+  ///
+  /// Décisif pour les véhicules et le mobilier : exonérés par nature
+  /// (art. 150 UA II 1°), ils redeviennent imposables lorsqu'ils sont des
+  /// objets de collection. Le champ ne se déduit pas de la catégorie.
+  isCollectible Boolean @default(false)
+
+  // ── Champs JEWELRY / GEMSTONE ──────────────────────────────────────────────
+  /// DIAMOND | RUBY | EMERALD | SAPPHIRE | PEARL | OTHER
+  gemType      String?
+  /// Poids en carats
+  caratWeight  Decimal? @db.Decimal(12, 4)
+  /// FL | IF | VVS1 | VVS2 | VS1 | VS2 | SI1 | SI2
+  gemClarity   String?
+  /// D-Z (diamant) ou description libre
+  gemColor     String?
+  /// ROUND | PRINCESS | OVAL | PEAR | CUSHION | EMERALD_CUT | OTHER
+  gemCut       String?
+  /// NONE | HEATED | FRACTURE_FILLED | SYNTHETIC
+  gemTreatment String?
+  /// Cachemire, Myanmar, Colombie…
+  gemOrigin    String?
+
+  // ── Champs JEWELRY ─────────────────────────────────────────────────────────
+  /// RING | NECKLACE | BRACELET | EARRINGS | BROOCH | OTHER
+  jewelryType   String?
+  /// GOLD_750 | GOLD_585 | SILVER_925 | PLATINUM_950
+  metalBase     String?
+  /// Poids du métal en grammes
+  metalWeightG  Decimal? @db.Decimal(12, 4)
+  /// Poinçons d'État présents
+  hasPunchmarks Boolean?
+
+  // ── Champs WATCHES ─────────────────────────────────────────────────────────
+  /// AUTOMATIC | MANUAL | QUARTZ | SOLAR
+  watchMovement   String?
+  watchDiameterMm Decimal? @db.Decimal(8, 2)
+  /// Référence fabricant (ex. 126610LN)
+  watchReference  String?
+  /// Boîte et papiers présents
+  watchBoxPapers  Boolean?
+
+  // ── Champs WINE ────────────────────────────────────────────────────────────
+  wineAppellation  String?
+  /// Nombre de bouteilles / magnums
+  wineBottleCount  Int?
+  /// BOTTLE_75 | MAGNUM | JEROBOAM | OTHER
+  wineBottleFormat String?
+  /// CAVE_PERSO | CAVE_LOUEE | COURTIER
+  wineStorageType  String?
+
+  // ── Champs AUTO ────────────────────────────────────────────────────────────
+  autoMileageKm      Int?
+  autoRegistration   String?
+  /// Contrôle technique à jour
+  autoInspectionOk   Boolean?
+  autoPreviousOwners Int?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([userId, category])
+
+  /// Revalorisations datées — la seule chronologie de valeur possible pour
+  /// un objet dont le marché ne cote pas.
+  valuations TangibleValuation[]
 }
+/// Valorisation datée d'un objet tangible.
+///
+/// Ces marchés ne cotent pas : il n'existe pas de cours d'une montre comme il
+/// existe un cours de l'or. On enregistre donc les estimations telles qu'elles
+/// surviennent — expertise, adjudication comparable, cote relevée — et la
+/// courbe se déduit de ces points, sans rien combler entre eux.
+model TangibleValuation {
+  id         String @id @default(cuid())
+  tangibleId String
+  userId     String
+
+  /// Date à laquelle la valeur a été constatée, et non celle de la saisie.
+  valuedAt DateTime
+  valueEur Decimal  @db.Decimal(28, 12)
+  /// APPRAISAL | AUCTION | MARKET | INSURANCE | MANUAL
+  ///
+  /// Une expertise d'assurance et une estimation personnelle ne se défendent
+  /// pas de la même façon : l'écran doit pouvoir les distinguer.
+  source   String   @default("MANUAL")
+  note     String?
+
+  createdAt DateTime @default(now())
+
+  tangible TangibleAsset @relation(fields: [tangibleId], references: [id], onDelete: Cascade)
+
+  @@index([tangibleId, valuedAt])
+  @@index([userId])
+}
+
 
 // ─── Poches cash CTO / PEA / AV ───────────────────────────────────────────────
 
@@ -613,8 +1574,1408 @@ model EnvelopeCash {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events EnvelopeCashEvent[]
 
   @@unique([userId, envelope])
   @@index([userId])
+}
+
+/// Journal des constats de trésorerie d'enveloppe.
+///
+/// ## Pourquoi ce journal
+///
+/// `EnvelopeCash` ne portait que son solde courant et ses horodatages
+/// techniques. L'historique s'ancrait donc sur `updatedAt`, que Prisma réécrit à
+/// **chaque** écriture de la ligne : modifier le solde déplaçait le point où la
+/// trésorerie apparaît dans le passé, et effaçait ce que l'on savait de l'état
+/// précédent. La donnée n'était pas seulement absente, elle était détruite à
+/// chaque saisie.
+///
+/// Ses deux modèles frères — `BankAccountEvent` et `SavingsAccountEvent` — ont
+/// ce journal depuis toujours. Celui-ci en reprend la forme.
+///
+/// ## Ce qu'un constat dit, et ce qu'il ne dit pas
+///
+/// L'API de saisie n'accepte qu'une enveloppe et un solde : aucune date métier,
+/// aucun libellé de mouvement. L'utilisateur affirme « mon CTO porte 5 200 €
+/// **aujourd'hui** ». `occurredAt` est donc l'instant de la saisie, et rien
+/// d'autre — c'est la même convention que `AssetEnvelopeEvent` : un constat daté
+/// d'un état, qui ne dit rien de ce qui le précède.
+///
+/// `amount` est l'écart avec le constat précédent. Il est compté comme un flux
+/// de capital, jamais comme de la performance : rien ne permet de distinguer un
+/// versement d'un intérêt, et créditer la performance d'un montant inexpliqué
+/// serait le seul choix vraiment faux.
+model EnvelopeCashEvent {
+  id             String @id @default(cuid())
+  envelopeCashId String
+  userId         String
+
+  /// Instant du constat — celui de la saisie, seul instant que l'API connaisse.
+  occurredAt DateTime @default(now())
+  /// Solde constaté à cet instant.
+  balanceAfter Decimal @db.Decimal(28, 12)
+  /// Écart avec le constat précédent, compté comme flux de capital.
+  amount       Decimal @db.Decimal(28, 12)
+  /// Devise du constat, figée ici : la ligne peut changer de devise ensuite.
+  currency     String  @default("EUR")
+
+  createdAt DateTime @default(now())
+
+  envelopeCash EnvelopeCash @relation(fields: [envelopeCashId], references: [id], onDelete: Cascade)
+
+  @@index([envelopeCashId, occurredAt])
+  @@index([userId, occurredAt])
+}
+
+/// Compte titres détenu chez un courtier — PEA, PEA-PME ou compte-titres
+/// ordinaire.
+///
+/// Ce que ce modèle apporte et que `Asset.accountType` ne pouvait pas porter :
+/// une **date d'ouverture**. Sans elle, la règle des 5 ans du PEA — qui décide
+/// à elle seule si une plus-value est imposée à l'impôt sur le revenu — est
+/// incalculable. Le reste (courtier, IBAN) n'est que du contexte ; c'est
+/// `openDate` qui justifie l'existence de la table.
+///
+/// L'enveloppe fiscale reste par ailleurs portée par `Asset.accountType` :
+/// ce modèle ne la remplace pas, il désigne *quel compte* de cette enveloppe
+/// détient la ligne — distinction qui n'a de sens que depuis qu'on admet
+/// plusieurs CTO chez plusieurs courtiers.
+///
+/// La cardinalité n'est volontairement pas la même selon l'enveloppe : le CTO
+/// est libre, tandis que PEA et PEA-PME sont limités à un par personne par la
+/// loi. Cette asymétrie est garantie en base par un index unique **partiel**
+/// (voir la migration) plutôt que par un `@@unique` complet, qui interdirait
+/// aussi le second CTO.
+model SecuritiesAccount {
+  id     String @id @default(cuid())
+  userId String
+
+  /// PEA | PEA_PME | CTO
+  envelopeType String
+  /// Courtier teneur de compte — réutilise `Platform`, qui porte déjà nom et
+  /// logo. Restrict : supprimer un courtier encore rattaché à un compte doit
+  /// échouer plutôt que d'orpheliner le compte.
+  platformId   String
+
+  /// Date d'ouverture — point de départ des 5 ans du PEA.
+  openDate DateTime
+  /// IBAN du compte espèces associé, purement documentaire.
+  iban     String?
+  notes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user          User                            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform      Platform                        @relation(fields: [platformId], references: [id], onDelete: Restrict)
+  assets        Asset[]
+  contributions SecuritiesAccountContribution[]
+
+  @@index([userId])
+  @@index([userId, envelopeType])
+  @@index([platformId])
+}
+
+/// Versements et retraits déclarés sur un compte titres.
+///
+/// Table séparée plutôt qu'un simple total sur le compte, et surtout plutôt
+/// qu'un calcul depuis le journal : un `APPORT` du journal est un dépôt de
+/// **liquidité bancaire** rattaché à une plateforme, sans notion d'enveloppe
+/// (cf. `accounting/ledger.ts`). Or un même courtier héberge couramment un PEA
+/// et un CTO, et le prix de revient des positions ne dit rien des versements
+/// dès lors qu'un arbitrage gagnant a été réinvesti. Aucune de ces deux
+/// sources ne permet donc de reconstituer un plafond de versement juste.
+///
+/// Le montant cumulé conditionne le plafond légal du PEA — un chiffre qui doit
+/// rester auditable : un total modifiable en place ne permettrait pas
+/// d'expliquer un dépassement. Même raisonnement que `BankAccountEvent`.
+model SecuritiesAccountContribution {
+  id                  String @id @default(cuid())
+  securitiesAccountId String
+
+  /// DEPOSIT | WITHDRAWAL
+  type      String
+  /// Montant en euros, toujours positif — c'est `type` qui porte le sens.
+  amountEur Decimal @db.Decimal(28, 12)
+
+  occurredAt DateTime
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  /// Cascade : l'historique de versement n'a aucun sens sans son compte,
+  /// contrairement aux titres, qui conservent leur propre journal.
+  account SecuritiesAccount @relation(fields: [securitiesAccountId], references: [id], onDelete: Cascade)
+
+  @@index([securitiesAccountId, occurredAt])
+}
+
+/// Véhicule immobilier détenu indirectement — SCPI, SCI, OPCI, foncière.
+///
+/// Extension 1:1 de `Asset`, sur le modèle de `RealEstateDetail` : la valeur
+/// et le prix de revient restent au journal (parts × prix de part), seules
+/// les caractéristiques du véhicule vivent ici. Aucune valorisation en
+/// parallèle, donc aucun risque de double comptage.
+model IndirectRealEstateDetail {
+  id      String @id @default(cuid())
+  assetId String @unique
+
+  /// SCPI | SCI_IR | SCI_IS | OPCI | SIIC | GFI | AUTRE
+  vehicle String
+  /// Société de gestion ou gérant.
+  manager String?
+
+  /// Taux de distribution annuel affiché par la société de gestion, en %.
+  /// Déclaratif : sert à comparer, pas à valoriser.
+  distributionRatePct Decimal? @db.Decimal(6, 3)
+  /// Ratio d'endettement du véhicule, en % — un levier élevé amplifie la
+  /// baisse comme la hausse de la valeur de part.
+  debtRatioPct        Decimal? @db.Decimal(6, 3)
+
+  /// Fraction de l'actif net représentative d'immobilier imposable à l'IFI,
+  /// en % (art. 965 2°). 100 pour une SCPI classique ; une part de fonds
+  /// diversifié n'est taxable qu'à hauteur de sa poche immobilière.
+  realEstateSharePct Decimal? @db.Decimal(6, 3)
+  /// Participation détenue dans le véhicule, en %. Sert l'exonération des
+  /// titres de foncières cotées détenus à moins de 5 % (art. 972 bis).
+  ownershipStakePct  Decimal? @db.Decimal(9, 6)
+  /// Exclusion manuelle de l'assiette IFI — laisse la main sur les cas
+  /// limites plutôt que de trancher une qualification à la place du porteur.
+  ifiExcluded        Boolean  @default(false)
+
+  /// IR | IS | EXONERE — transparence fiscale du véhicule.
+  taxTransparency String?
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+}
+
+/// Position DeFi — extension 1:1 d'un Asset, jamais une table de valorisation
+/// parallèle.
+///
+/// La valeur de la position vit dans le journal comme n'importe quelle autre
+/// position : `getHoldings()` la valorise une fois et une seule. Ce modèle ne
+/// porte que ce que le journal ne sait pas exprimer — le protocole, le
+/// rendement, la santé d'un prêt collatéralisé.
+///
+/// Un emprunt est stocké ici comme une position `BORROWING` : c'est
+/// `isDebtPosition()` qui lui donne son signe négatif dans les agrégats. Le
+/// signe n'est jamais inscrit en base, sans quoi deux endroits décideraient de
+/// la même chose.
+/// Regroupement optionnel de positions DeFi liées entre elles (ex. ETH →
+/// staké chez Lido → stETH déposé en collatéral chez Aave → USDC emprunté).
+///
+/// Ne porte aucune valeur propre : le P&L consolidé d'une stratégie est la
+/// somme de `netValueEur` de ses positions au moment de la lecture, jamais
+/// un champ stocké séparément — même principe que `DefiPositionDetail`
+/// lui-même vis-à-vis du journal. Une position sans `strategyId` reste une
+/// position autonome, exactement comme avant l'existence de ce modèle.
+model DefiStrategy {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  positions DefiPositionDetail[]
+
+  @@index([userId])
+}
+
+model DefiPositionDetail {
+  id      String @id @default(cuid())
+  assetId String @unique
+
+  /// Regroupement optionnel dans une stratégie multi-positions. `SetNull` :
+  /// supprimer une stratégie ne doit jamais supprimer les positions qui la
+  /// composent, seulement les en détacher.
+  strategyId String?
+  strategy   DefiStrategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+
+  /// Aave, Lido, Uniswap, Kamino…
+  protocol     String
+  protocolLogo String?
+  /// ethereum | arbitrum | base | solana…
+  chain        String?
+  /// STAKING | LIQUID_STAKING | LENDING | BORROWING | LP | YIELD_FARMING
+  /// | VAULT | RESTAKING | RWA | LOCKED | REWARDS | OTHER
+  positionType String
+
+  /// Second actif d'une position de liquidité (le premier est porté par
+  /// l'Asset lui-même).
+  pairedSymbol        String?
+  pairedAmount        Decimal? @db.Decimal(38, 18)
+  /// Prix unitaire (EUR) du second actif au moment de l'engagement. Sans lui,
+  /// l'IL ne peut pas se calculer : c'est le prix courant du premier actif
+  /// (porté par Asset) qui donne l'autre moitié de la formule.
+  pairedEntryPriceEur Decimal? @db.Decimal(28, 12)
+  poolAddress         String?
+
+  /// LP à 3, 4 ou 5 jetons (Curve, Balancer…) : jetons au-delà du second,
+  /// chacun `{ symbol, amount, entryPriceEur, allocationPct? }`.
+  ///
+  /// JSON plutôt que des colonnes `token3Symbol`..`token5Symbol` : le nombre
+  /// de jetons au-delà de 2 est rare et variable, des colonnes figées à 5
+  /// forceraient une nouvelle migration pour un pool à 6 jetons alors qu'un
+  /// tableau n'a pas de plafond arbitraire. Les deux premiers jetons restent
+  /// des colonnes dédiées : ce sont eux que lit `groupByProtocol`/l'API sans
+  /// désérialiser de JSON, et le cas 2-jetons (l'immense majorité des LP)
+  /// reste aussi simple qu'avant cette extension.
+  pairedLegs Json?
+
+  /// Liquidité concentrée façon Uniswap V3 / Curve : la position n'est
+  /// active que dans `[priceRangeMin, priceRangeMax]`. `false` = plage
+  /// complète (LP classique), seul cas où ces trois champs restent vides.
+  isConcentrated Boolean  @default(false)
+  priceRangeMin  Decimal? @db.Decimal(38, 18)
+  priceRangeMax  Decimal? @db.Decimal(38, 18)
+
+  /// Répartition de la valeur déposée entre le premier et le second jeton, en
+  /// %. Nulle sur une LP classique (répartition ≈ 50/50 implicite) ; posée
+  /// par l'utilisateur sur une position concentrée, où l'écart au range
+  /// pousse la répartition loin de 50/50.
+  token1AllocationPct Decimal? @db.Decimal(6, 3)
+  pairedAllocationPct Decimal? @db.Decimal(6, 3)
+
+  /// Rendement annualisé affiché par le protocole, en %. Déclaratif : sert à
+  /// comparer, jamais à valoriser.
+  apyPct          Decimal? @db.Decimal(9, 4)
+  /// Premier reward (conservé tel quel pour compatibilité — la quasi-totalité
+  /// des positions n'en ont qu'un seul).
+  rewardsSymbol   String?
+  rewardsAmount   Decimal? @db.Decimal(38, 18)
+  rewardsValueEur Decimal? @db.Decimal(18, 2)
+
+  /// Rewards additionnels au-delà du premier, ex. `[{ symbol, amount,
+  /// valueEur, source }]` — une LP Curve qui distribue à la fois CRV et son
+  /// propre gauge token. Même raisonnement que `pairedLegs` : JSON plutôt que
+  /// des colonnes `reward2Symbol`..`rewardNSymbol`, le nombre de rewards
+  /// au-delà du premier est rare et sans plafond naturel.
+  extraRewardLegs Json?
+
+  /// Déblocage / vesting — tous optionnels, absents = position librement
+  /// disponible (comportement actuel inchangé). `vestingSchedule` porte un
+  /// vesting linéaire ou multi-tranches : `{ cliffAt?, endAt, amount }[]`.
+  unlockAt        DateTime?
+  cliffAt         DateTime?
+  vestingSchedule Json?
+
+  /// Sac déclaratif pour ce qui n'a pas (encore) de champ dédié — campagne de
+  /// points, référence d'audit, etc. Jamais lu par un calcul, seulement
+  /// affiché : un champ qui influencerait une valorisation appartient à une
+  /// colonne nommée, pas ici.
+  metadata Json?
+
+  /// Santé d'un prêt collatéralisé. Sous 1, la position est liquidable.
+  healthFactor    Decimal? @db.Decimal(12, 4)
+  ltvPct          Decimal? @db.Decimal(6, 3)
+  liqThresholdPct Decimal? @db.Decimal(6, 3)
+
+  /// ZERION | MANUAL — une ligne saisie à la main n'est jamais écrasée par
+  /// une synchronisation. Conservé pour compatibilité ; `dataOrigin` est la
+  /// généralisation (MANUAL | WALLET_SYNC | PLATFORM_API | CSV_IMPORT).
+  source       String    @default("MANUAL")
+  lastSyncedAt DateTime?
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // ───────────────────────── Contexte d'accès ─────────────────────────
+  // Ajouté au chantier F1. Cf. docs/defi-backend-v1.md.
+
+  /// DEFI | HYBRID | CEFI — cf. `DEFI_ACCESS_MODES`. L'axe le plus
+  /// structurant du module : le risque de contrepartie d'un contrat et celui
+  /// du bilan d'une plateforme ne se pilotent pas de la même façon, et une
+  /// position hybride cumule les deux.
+  accessMode   String   @default("DEFI")
+  /// SELF_CUSTODY | CUSTODIAL | SHARED_CUSTODY | UNKNOWN. Orthogonal à
+  /// `accessMode` : un staking délégué reste auto-détenu.
+  custodyModel String   @default("UNKNOWN")
+  /// MANUAL | WALLET_SYNC | PLATFORM_API | CSV_IMPORT — pilote la priorité
+  /// d'écrasement lors d'une resynchronisation.
+  dataOrigin   String   @default("MANUAL")
+  /// Entité détentrice, en clair (SCI, holding…). Aucun modèle d'entité
+  /// n'existe dans le dépôt : une chaîne libre trace l'information sans
+  /// inventer une table hors périmètre. Limite V1 assumée.
+  ownerLabel   String?
+  /// Quote-part détenue, en %. `null` = 100 %. Même convention que
+  /// `BankAccount.ownershipPct`.
+  ownershipPct Decimal? @db.Decimal(6, 3)
+
+  // ───────────────────────── Infrastructure ─────────────────────────
+
+  /// v2 | v3 | v3.1… Deux versions d'un même protocole ont des risques et des
+  /// mécaniques distincts (Uniswap V2 vs V3), les confondre dans un seul
+  /// libellé `protocol` empêche de les distinguer dans les agrégats.
+  protocolVersion    String?
+  /// Protocole réellement à l'œuvre derrière un produit hybride — le « Earn »
+  /// d'un exchange qui route vers Aave. `UNKNOWN_NOT_DISCLOSED` est une valeur
+  /// légitime : la plateforme ne le dit pas toujours.
+  underlyingProtocol String?
+  /// Marché de prêt (« USDC », « WETH » chez Aave), vault, ou pool identifié.
+  /// Trois champs distincts plutôt qu'un seul `marketId` : ils ne désignent
+  /// pas la même chose et une position peut en porter plusieurs (un vault sur
+  /// un pool).
+  marketRef          String?
+  vaultRef           String?
+  poolRef            String?
+  /// Validateur d'un staking natif — le risque de slashing lui est propre.
+  validatorName      String?
+  /// Référence de la position NFT quand le protocole la matérialise ainsi
+  /// (Uniswap V3). Support technique : sa valeur vient des legs, jamais du
+  /// marché NFT — sans quoi une CLMM serait comptée deux fois.
+  nftPositionRef     String?
+
+  // ───────────────────────── Cycle de vie ─────────────────────────
+
+  /// ACTIVE | LOCKED | WITHDRAWING | UNSTAKING | PAUSED | CLOSED |
+  /// LIQUIDATED | UNKNOWN. `CLOSED`/`LIQUIDATED` sortent de la valorisation
+  /// sans sortir de la base : les récompenses perçues restent dues
+  /// fiscalement.
+  status   String    @default("ACTIVE")
+  openedAt DateTime?
+  closedAt DateTime?
+
+  /// Masquée de l'affichage, mais toujours comptée au patrimoine.
+  isHidden             Boolean @default(false)
+  /// Exclue des agrégats patrimoniaux, mais historisée. Distinct de
+  /// `isHidden` : l'un est cosmétique, l'autre change les totaux.
+  isIgnoredInPortfolio Boolean @default(false)
+
+  /// Position liée — jambe opposée d'un bridge, ou position d'origine après
+  /// une migration de protocole. Sert à l'anti-double-compte : une seule des
+  /// deux extrémités compte. `SetNull` plutôt que `Cascade` : supprimer une
+  /// position ne doit jamais emporter celle qui lui est liée.
+  linkedPositionId String?
+  linkedPosition   DefiPositionDetail?  @relation("DefiPositionLink", fields: [linkedPositionId], references: [id], onDelete: SetNull)
+  linkedFrom       DefiPositionDetail[] @relation("DefiPositionLink")
+
+  /// Conflit de déduplication détecté (même position vue par deux sources).
+  /// Jamais résolu silencieusement : la position reste visible pour revue.
+  conflictFlag   Boolean @default(false)
+  conflictReason String?
+
+  /// Clé d'identité côté fournisseur — `df:chain:proto:type:asset` pour
+  /// Zerion. Portée ici en plus de `Asset.providerSymbol` pour que la
+  /// déduplication n'ait pas à charger l'actif.
+  providerKey String?
+
+  asset      Asset           @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  legs       DefiLeg[]
+  events     DefiEvent[]
+  valuations DefiValuation[]
+  rewards    DefiReward[]
+
+  @@index([protocol])
+  @@index([positionType])
+  @@index([strategyId])
+  @@index([accessMode])
+  @@index([status])
+  @@index([dataOrigin])
+  @@index([isHidden, isIgnoredInPortfolio])
+  @@index([chain, protocol, positionType])
+  @@index([openedAt])
+  @@index([closedAt])
+  @@index([providerKey])
+  @@index([linkedPositionId])
+}
+
+/// Composante économique d'une position DeFi.
+///
+/// C'est le modèle qui rend le module capable de décrire autre chose qu'« un
+/// actif et un montant ». Un emprunt Aave est un `COLLATERAL` **et** un `DEBT` ;
+/// une LP, deux `ASSET` et un `SHARE` ; un stETH Lido, un `ASSET` déposé et un
+/// `RECEIPT` reçu. Sans cette séparation, impossible de retrancher une dette ni
+/// d'éviter de compter un dépôt et son reçu deux fois.
+///
+/// Les quantités portées ici décrivent l'**exposition**, pas la valorisation :
+/// la valeur vivante continue de venir du journal (`getAssetValues`). Une
+/// jambe sans `assetId` (un jeton apparié qui n'a pas d'`Asset` propre) porte
+/// son symbole en clair — c'est déjà la convention de `pairedSymbol`.
+model DefiLeg {
+  id             String @id @default(cuid())
+  defiPositionId String
+
+  /// ASSET | COLLATERAL | DEBT | RECEIPT | REWARD | SHARE | UNDERLYING.
+  legType String
+
+  /// Actif du dépôt quand il en a un. `SetNull` : supprimer un actif ne doit
+  /// pas effacer la description de la jambe, qui garde son symbole.
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  /// Symbole en clair — seule identification des jambes sans `Asset`.
+  symbol    String
+  /// Rôle du jeton dans la position : « token0 », « token1 », « debt »…
+  /// Déclaratif, sert à l'affichage et au rapprochement avec le protocole.
+  tokenRole String?
+
+  quantity Decimal @db.Decimal(38, 18)
+
+  /// Coût unitaire — en jeton natif et en euros. Sans le prix d'entrée, l'IL
+  /// d'une LP n'est pas calculable (cf. `pairedEntryPriceEur`).
+  unitCostNative Decimal? @db.Decimal(38, 18)
+  unitCostEur    Decimal? @db.Decimal(28, 12)
+  totalCostEur   Decimal? @db.Decimal(18, 2)
+
+  /// Une jambe soldée est conservée : elle explique l'exposition passée.
+  isActive Boolean @default(true)
+
+  /// Bornes d'une position concentrée quand la jambe les porte, adresse de
+  /// contrat, décimales du jeton… Ce qui n'a pas de colonne dédiée et n'entre
+  /// dans aucun calcul.
+  metadataJson Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  position DefiPositionDetail @relation(fields: [defiPositionId], references: [id], onDelete: Cascade)
+
+  @@index([defiPositionId])
+  @@index([defiPositionId, legType])
+  @@index([assetId])
+  @@index([legType, isActive])
+  @@index([symbol])
+}
+
+/// Événement de cycle de vie d'une position DeFi.
+///
+/// Le journal (`Transaction`) reste seul maître des quantités valorisées : ce
+/// modèle ne le double pas, il le **qualifie**. Un `Transaction` dit « +3 ETH
+/// sur cet actif » ; un `DefiEvent` dit « c'était un `CLAIM_REWARD` chez Lido,
+/// tx 0xabc… ». Les deux sont liés par `ledgerTransactionId` quand l'événement
+/// déplace de la quantité ; un `SYNC_REFRESH` n'en a pas, exiger une écriture
+/// pour un passage de sync fabriquerait des transactions vides.
+model DefiEvent {
+  id             String @id @default(cuid())
+  defiPositionId String
+
+  /// DEPOSIT | WITHDRAW | STAKE | UNSTAKE | CLAIM_REWARD | COMPOUND |
+  /// BORROW | REPAY | ADD_LIQUIDITY | REMOVE_LIQUIDITY | REBALANCE |
+  /// MIGRATE | LIQUIDATION | BRIDGE_IN | BRIDGE_OUT | WRAP | UNWRAP |
+  /// SYNC_REFRESH | MANUAL_OVERRIDE.
+  eventType String
+  eventDate DateTime
+
+  /// Identifiants on-chain — absents d'un événement CeFi ou saisi à la main.
+  chainId String?
+  txHash  String?
+
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  symbol  String?
+
+  fromAddress String?
+  toAddress   String?
+
+  quantity     Decimal? @db.Decimal(38, 18)
+  amountNative Decimal? @db.Decimal(38, 18)
+  amountEur    Decimal? @db.Decimal(18, 2)
+  feesNative   Decimal? @db.Decimal(38, 18)
+  feesEur      Decimal? @db.Decimal(18, 2)
+
+  /// Protocole d'arrivée d'une migration, protocole de pont… en clair, comme
+  /// `DefiPositionDetail.protocol`.
+  relatedProtocol String?
+
+  /// Écriture de journal correspondante. `SetNull` : purger une transaction ne
+  /// doit pas effacer la trace de l'événement, qui reste explicatif.
+  ledgerTransactionId String?
+  ledgerTransaction   Transaction? @relation(fields: [ledgerTransactionId], references: [id], onDelete: SetNull)
+
+  /// ZERION | DEBANK | COVALENT | SOLANA_RPC | CSV | MANUAL.
+  sourceProvider String @default("MANUAL")
+  rawPayloadJson Json?
+
+  createdAt DateTime @default(now())
+
+  position DefiPositionDetail @relation(fields: [defiPositionId], references: [id], onDelete: Cascade)
+
+  /// Un même hash peut porter plusieurs événements d'une position (un
+  /// `REMOVE_LIQUIDITY` qui rend deux jetons), mais pas deux fois le même
+  /// type : c'est la garantie de re-sync sans doublon.
+  @@unique([defiPositionId, txHash, eventType])
+  @@index([defiPositionId])
+  @@index([defiPositionId, eventDate])
+  @@index([eventType])
+  @@index([eventDate])
+  @@index([txHash])
+  @@index([ledgerTransactionId])
+}
+
+/// Snapshot de valorisation — historique, pas vérité.
+///
+/// Règle absolue du chantier : ne pas stocker `currentValue` comme vérité
+/// indépendante. La valeur vivante d'une position vient donc toujours du journal.
+/// Ce modèle conserve la **méthode** retenue, sa provenance et la raison d'un
+/// éventuel repli, pour qu'une valeur affichée hier reste explicable aujourd'hui.
+///
+/// Une seule exception, explicite : `isManual = true` fait prévaloir le snapshot
+/// le plus récent. C'est un choix délibéré sur une position dont aucun marché ne
+/// donne le prix (vault opaque, receipt token sans cotation) — signalé comme tel
+/// dans la qualité de valorisation des agrégats.
+model DefiValuation {
+  id             String   @id @default(cuid())
+  defiPositionId String
+  valuationDate  DateTime
+
+  /// MARKET | UNDERLYING_ASSETS | MANUAL | PROVIDER_ESTIMATE |
+  /// ACQUISITION_COST_FALLBACK | UNKNOWN.
+  valuationMethod String
+  /// Fournisseur du chiffre — cf. `DEFI_PROVIDERS`.
+  sourceProvider  String @default("MANUAL")
+
+  /// Décomposition complète. `net = gross − debt` ; `retained = net ×
+  /// ownershipPct`. Séparées et non recalculables l'une de l'autre : un
+  /// portefeuille à 100 k€ déposés / 60 k€ empruntés ne se pilote pas comme un
+  /// portefeuille à 40 k€ sans levier, bien que les deux pèsent 40 k€.
+  grossValueEur        Decimal? @db.Decimal(18, 2)
+  netValueEur          Decimal? @db.Decimal(18, 2)
+  debtValueEur         Decimal? @db.Decimal(18, 2)
+  collateralValueEur   Decimal? @db.Decimal(18, 2)
+  rewardsValueEur      Decimal? @db.Decimal(18, 2)
+  retainedValueEur     Decimal? @db.Decimal(18, 2)
+  /// Somme des sous-jacents d'une LP / d'un vault, quand elle est connue —
+  /// à comparer à la valeur de marché de la part pour détecter un écart.
+  lpUnderlyingValueEur Decimal? @db.Decimal(18, 2)
+  /// Frais accumulés non collectés (LP concentrée notamment).
+  feesAccruedEur       Decimal? @db.Decimal(18, 2)
+
+  /// 0–100, dérivé de la méthode (cf. `VALUATION_METHOD_CONFIDENCE`).
+  confidenceScore Int?
+  isManual        Boolean @default(false)
+  /// Pourquoi la méthode nominale n'a pas pu s'appliquer. Renseigné dès que la
+  /// méthode est un repli — une valeur de repli prise pour un prix de marché
+  /// fait croire à une position stable alors qu'elle n'est plus cotée.
+  fallbackReason  String?
+  rawPayloadJson  Json?
+
+  createdAt DateTime @default(now())
+
+  position DefiPositionDetail @relation(fields: [defiPositionId], references: [id], onDelete: Cascade)
+
+  /// Un seul snapshot par position et par instant de valorisation : une
+  /// re-synchronisation qui rejoue la même date met à jour au lieu d'empiler.
+  @@unique([defiPositionId, valuationDate])
+  @@index([defiPositionId])
+  @@index([defiPositionId, valuationDate])
+  @@index([valuationDate])
+  @@index([valuationMethod])
+  @@index([isManual])
+}
+
+/// Récompense d'une position, par jeton.
+///
+/// Remplace à terme le JSON `extraRewardLegs`, conservé pour compatibilité : un
+/// JSON n'est pas requêtable (« combien de CRV en attente, tous protocoles
+/// confondus ? ») et ne distingue pas l'accru du réclamé.
+///
+/// `POINTS` est le cas qui justifie `rewardType` : un programme de points n'a pas
+/// de marché fiable, et lui attribuer une valeur inscrirait au patrimoine la
+/// spéculation sur un airdrop futur. Cf. `isValuableRewardType`.
+model DefiReward {
+  id             String @id @default(cuid())
+  defiPositionId String
+
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  /// Symbole en clair — un jeton de récompense n'a pas toujours d'`Asset`.
+  symbol  String
+
+  /// YIELD | TRADING_FEES | EMISSIONS | AIRDROP | POINTS | COUPON | OTHER.
+  rewardType String @default("YIELD")
+
+  /// Accumulé et non réclamé. Un claim le décrémente et devient une quantité
+  /// au journal — c'est ce qui évite de compter deux fois une récompense.
+  accruedQuantity Decimal? @db.Decimal(38, 18)
+  claimedQuantity Decimal? @db.Decimal(38, 18)
+  /// Valeur de l'accru. Nulle par construction pour un `POINTS`.
+  valueEur        Decimal? @db.Decimal(18, 2)
+
+  /// Origine déclarative — « trading fees », « emissions », nom de campagne.
+  sourceLabel    String?
+  sourceProvider String    @default("MANUAL")
+  lastUpdatedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  position DefiPositionDetail @relation(fields: [defiPositionId], references: [id], onDelete: Cascade)
+
+  /// Un jeton de récompense n'apparaît qu'une fois par position et par nature :
+  /// une re-sync met à jour l'accru au lieu d'empiler des lignes.
+  @@unique([defiPositionId, symbol, rewardType])
+  @@index([defiPositionId])
+  @@index([symbol])
+  @@index([rewardType])
+}
+
+/// Curseur de pagination d'une synchronisation DeFi.
+///
+/// `Platform.lastSyncedAt` / `lastKnownSignature` ne suffisent pas : une même
+/// plateforme peut être interrogée par plusieurs fournisseurs, et une sync
+/// partielle doit pouvoir reprendre là où elle s'est arrêtée plutôt que de
+/// tout rejouer. Les compteurs `imported`/`updated`/`ignored` rendent une sync
+/// silencieusement infructueuse visible.
+model DefiSyncCursor {
+  id     String @id @default(cuid())
+  userId String
+
+  /// ZERION | DEBANK | COVALENT | SOLANA_RPC | CSV | MANUAL.
+  provider   String
+  /// Plateforme interrogée — un wallet **est** une `Platform` dans ce dépôt
+  /// (`type = BLOCKCHAIN`, champ `walletAddress`). Cf. D4 de la note.
+  platformId String?
+  platform   Platform? @relation(fields: [platformId], references: [id], onDelete: Cascade)
+  /// Adresse interrogée, quand elle diffère de celle de la plateforme.
+  sourceRef  String?
+
+  /// Portée du curseur, dérivée de `platformId` et `sourceRef`, jamais nulle.
+  ///
+  /// Nécessaire et non redondante : PostgreSQL ne fait pas collisionner deux
+  /// `NULL` dans un index unique, si bien qu'une contrainte posée directement
+  /// sur `(userId, provider, platformId, sourceRef)` laisserait créer autant de
+  /// curseurs « sans plateforme » qu'on veut — exactement le doublon qu'elle
+  /// prétend interdire. Cf. `syncScopeKey()`.
+  scopeKey String
+
+  /// Curseur opaque du fournisseur.
+  cursor String?
+
+  lastSyncAt    DateTime?
+  lastSuccessAt DateTime?
+  lastError     String?
+
+  importedCount Int @default(0)
+  updatedCount  Int @default(0)
+  ignoredCount  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Un curseur par (utilisateur, fournisseur, portée) : deux syncs
+  /// concurrentes sur la même source partageraient sinon un curseur et se
+  /// voleraient mutuellement leur position de lecture.
+  @@unique([userId, provider, scopeKey])
+  @@index([userId])
+  @@index([provider])
+  @@index([platformId])
+  @@index([userId, provider])
+}
+
+/// Référentiel de protocoles — rempli à la volée, pas livré pré-peuplé.
+///
+/// Sert à normaliser les libellés (« Aave », « aave v3 », « AAVE V3 » désignent
+/// le même risque de contrepartie) et à porter ce qui est propre au protocole et
+/// non à la position : sa catégorie, son logo, la chaîne principale.
+model DefiProtocolRef {
+  id     String @id @default(cuid())
+  userId String
+
+  /// Clé normalisée — minuscules, sans espaces (« aave-v3 »).
+  slug         String
+  name         String
+  /// Version, quand le protocole en distingue plusieurs.
+  version      String?
+  /// LENDING | DEX | LIQUID_STAKING | VAULT | RESTAKING | BRIDGE | CEFI…
+  /// Déclaratif : sert au regroupement, jamais à un calcul.
+  category     String?
+  logoUrl      String?
+  /// Chaîne principale — informative, une position porte la sienne.
+  primaryChain String?
+  websiteUrl   String?
+  notes        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  markets DefiMarketRef[]
+
+  @@unique([userId, slug])
+  @@index([userId])
+  @@index([slug])
+  @@index([category])
+}
+
+/// Marché, pool ou vault d'un protocole.
+///
+/// Un même protocole en expose des dizaines aux risques distincts : un pool
+/// USDC/USDT et un pool d'un jeton illiquide ne se comparent pas, bien que
+/// Uniswap porte les deux. Regroupe `marketRef`/`poolRef`/`vaultRef` sous une
+/// seule table parce que ces trois notions partagent exactement les mêmes
+/// attributs — seul `kind` les distingue.
+model DefiMarketRef {
+  id     String @id @default(cuid())
+  userId String
+
+  protocolRefId String?
+  protocolRef   DefiProtocolRef? @relation(fields: [protocolRefId], references: [id], onDelete: SetNull)
+
+  /// MARKET | POOL | VAULT | VALIDATOR.
+  kind String @default("POOL")
+  /// Clé normalisée, unique par utilisateur et par chaîne.
+  slug String
+  name String
+
+  chain           String?
+  contractAddress String?
+  /// Jetons du marché, en clair — « USDC », « WETH/USDC ».
+  tokenSymbols    String?
+  /// Frais du pool en % (0.05, 0.3, 1) — indicatif.
+  feeTierPct      Decimal? @db.Decimal(9, 4)
+  notes           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind, slug])
+  @@index([userId])
+  @@index([protocolRefId])
+  @@index([chain])
+  @@index([kind])
+  @@index([contractAddress])
+}
+
+/// Compte de trading à levier — CFD, futures, spread betting.
+///
+/// `brokerName` est une chaîne et non une relation vers `Platform`, à rebours
+/// de `SecuritiesAccount` : une position de trading n'est pas un `Asset`, elle
+/// n'a donc jamais eu besoin d'une plateforme, et le modèle de position porte
+/// déjà son courtier sous forme de chaîne (`exchange`). Forcer la création
+/// d'une `Platform` pour déclarer un compte IG ou XTB ajouterait une étape
+/// sans rien apporter au calcul.
+model TradingAccount {
+  id     String @id @default(cuid())
+  userId String
+
+  /// IG, XTB, Saxo, Interactive Brokers, Binance…
+  brokerName  String
+  /// CFD | FUTURES | SPREAD_BETTING | MIXED
+  accountType String @default("MIXED")
+
+  currency        String   @default("EUR")
+  /// Solde du compte, déclaratif — le P&L des positions se calcule à part.
+  balance         Decimal  @default(0) @db.Decimal(28, 12)
+  /// Marge encore disponible, telle qu'affichée par le courtier.
+  marginAvailable Decimal? @db.Decimal(28, 12)
+
+  openDate  DateTime?
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  positions TradingPosition[]
+
+  @@index([userId])
+  @@index([userId, accountType])
+}
+
+/// Position à levier — CFD, future ou perpétuel, quel que soit le sous-jacent.
+///
+/// Rattachée directement à l'utilisateur, pas à un `Asset` : contrairement à
+/// un solde ou une position DeFi, un contrat à terme n'est pas un actif
+/// détenu — c'est un pari collatéralisé par une marge. Ce que la position
+/// pèse au patrimoine n'est ni sa taille ni son notionnel, mais marge + P&L
+/// latent, un calcul qui n'a pas de sens dans le modèle quantité × prix du
+/// journal. L'étendre en extension d'Asset comme RealEstateDetail aurait
+/// forcé cette sémantique où elle ne s'applique pas.
+///
+/// ## Pourquoi ce modèle a été généralisé plutôt que dupliqué
+///
+/// Il ne portait à l'origine que des futures crypto. Créer un
+/// `TradingPosition` parallèle pour les CFD aurait produit deux tables de
+/// positions à levier, deux calculs de P&L, deux imports et deux jeux
+/// d'analytics — en laissant les futures crypto existants dans l'ancien.
+/// `underlyingType` suffit à couvrir les deux mondes, `fundingPaid` étant déjà
+/// l'exact équivalent crypto des frais de financement overnight d'un CFD.
+///
+/// La table conserve son nom d'origine (`@@map`) : le renommage ne concerne
+/// que le modèle Prisma, aucune donnée n'est déplacée.
+model TradingPosition {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Compte de rattachement. Nullable : les positions antérieures à
+  /// `TradingAccount` restent lisibles sans compte déclaré.
+  tradingAccountId String?
+  tradingAccount   TradingAccount? @relation(fields: [tradingAccountId], references: [id], onDelete: SetNull)
+
+  /// CRYPTO | INDEX | FOREX | COMMODITY | STOCK | BOND
+  ///
+  /// `CRYPTO` par défaut : c'est ce que contenait la table avant l'ouverture
+  /// aux CFD, et le défaut préserve donc le sens des lignes existantes.
+  underlyingType String @default("CRYPTO")
+
+  /// BINANCE | BYBIT | OKX | HYPERLIQUID | DYDX | IG | XTB | SAXO | OTHER
+  exchange        String
+  subAccountLabel String?
+
+  /// Identifiant de l'instrument, quel que soit le sous-jacent :
+  /// « BTC/USDT-PERP », « ETH/USD-0927 », « CAC 40 », « EUR/USD »…
+  ///
+  /// Le nom reste `pair` — hérité des futures crypto — plutôt que renommé en
+  /// `instrument` : le renommer ne changerait rien au calcul et toucherait le
+  /// service, l'import CSV, l'écran et les tests.
+  pair          String
+  /// PERPETUAL | QUARTERLY | MONTHLY | CFD
+  ///
+  /// `CFD` couvre les contrats sans échéance : c'est ce qui les distingue d'un
+  /// perpétuel crypto, dont le coût de portage passe par le funding.
+  contractType  String  @default("PERPETUAL")
+  /// USDT_M | COIN_M — propre aux futures crypto, donc absent sur un CFD.
+  marginType    String?
+  baseCurrency  String
+  quoteCurrency String
+
+  /// Échéance du contrat. Nulle sur un perpétuel et sur un CFD, qui n'en ont
+  /// pas — c'est justement ce qui les sépare d'un future daté.
+  expiryDate DateTime?
+  /// Valeur d'un point de cotation, pour le calcul du risque par tick.
+  tickValue  Decimal?  @db.Decimal(20, 8)
+
+  /// LONG | SHORT
+  direction        String
+  leverage         Decimal  @db.Decimal(8, 2)
+  sizeContracts    Decimal  @db.Decimal(28, 10)
+  notionalUsd      Decimal? @db.Decimal(20, 2)
+  entryPrice       Decimal  @db.Decimal(20, 8)
+  markPrice        Decimal? @db.Decimal(20, 8)
+  /// Dernier prix de liquidation connu de l'exchange — l'estimation servie à
+  /// l'écran est recalculée, ce champ ne fait que la doubler si disponible.
+  liquidationPrice Decimal? @db.Decimal(20, 8)
+
+  marginUsed     Decimal? @db.Decimal(20, 2)
+  fundingPaid    Decimal? @db.Decimal(20, 2)
+  commissionPaid Decimal? @db.Decimal(20, 2)
+
+  unrealizedPnl Decimal? @db.Decimal(20, 2)
+  realizedPnl   Decimal? @db.Decimal(20, 2)
+
+  stopLoss   Decimal? @db.Decimal(20, 8)
+  takeProfit Decimal? @db.Decimal(20, 8)
+
+  /// Horodatage du dernier prix de marque **réellement observé**.
+  ///
+  /// Distinct d'`updatedAt`, qui bouge dès qu'un champ change — corriger une
+  /// note ferait passer un prix vieux d'un mois pour une cotation fraîche.
+  ///
+  /// Nul tant qu'aucun prix n'a été observé : à la création, `markPrice` vaut
+  /// le prix d'entrée faute de mieux, ce qui n'est pas une observation de
+  /// marché. Aurea ne dispose d'aucune source de mark price — ni les wallets
+  /// on-chain, ni les imports de relevés n'en fournissent — donc cette date ne
+  /// peut venir que d'une saisie ou d'un import.
+  markPriceUpdatedAt DateTime?
+
+  isOpen   Boolean   @default(true)
+  openedAt DateTime?
+  closedAt DateTime?
+
+  /// Identifiant du trade côté exchange — clé d'upsert de l'import CSV, pour
+  /// qu'un même relevé importé deux fois ne double pas les positions.
+  exchangeTradeId String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, exchangeTradeId])
+  @@index([userId, isOpen])
+  @@index([userId, exchange])
+  @@index([userId, closedAt])
+  @@index([userId, underlyingType])
+  @@index([tradingAccountId])
+  /// La table garde son nom d'origine : le modèle est renommé, pas les
+  /// données. Aucune migration de contenu, donc aucun risque pour les
+  /// positions futures déjà enregistrées.
+  @@map("CryptoFuturesPosition")
+}
+
+/// Collection NFT — référentiel rempli à la volée, jamais partagé entre
+/// utilisateurs (même raisonnement que `DefiProtocolRef`, chantier DeFi F1) :
+/// deux comptes qui détiennent le même NFT ne doivent jamais lire une ligne
+/// commune, la convention de sécurité du dépôt filtre tout par `userId`.
+///
+/// Normalise ce qu'un NFT hérite de sa collection (verified/spam, royalties,
+/// floor) — sans cette table, ces informations se répétaient sur chaque NFT
+/// de la même collection sans pouvoir être rafraîchies en une fois.
+model NftCollection {
+  id     String @id @default(cuid())
+  userId String
+
+  chainId         String
+  /// Adresse de contrat (EVM) ou de collection certifiée (Solana/Metaplex).
+  contractAddress String?
+  slug            String?
+  name            String
+  symbol          String?
+  /// ERC_721 | ERC_1155 | SPL | SPL_COMPRESSED — standard dominant de la
+  /// collection, déclaratif (chaque NftAsset porte le sien).
+  standard        String?
+
+  /// UNVERIFIED | VERIFIED | UNKNOWN
+  verifiedStatus String @default("UNKNOWN")
+  /// CLEAN | SUSPECTED | CONFIRMED_SPAM | IGNORED_BY_USER
+  spamStatus     String @default("CLEAN")
+
+  creatorName    String?
+  creatorAddress String?
+  imageUrl       String?
+  bannerUrl      String?
+  externalUrl    String?
+  royaltiesBps   Int?
+  supply         Int?
+
+  /// Floor de la collection — partagé par tous les NFT qui y appartiennent.
+  /// Distinct de `NftValuation.floorPriceEur` (snapshot décisionnel d'**une**
+  /// valorisation) : ce champ-ci est le dernier floor connu, quel que soit
+  /// l'actif qui a déclenché son rafraîchissement.
+  floorPriceNative    Decimal?  @db.Decimal(38, 18)
+  floorPriceEur       Decimal?  @db.Decimal(18, 2)
+  floorPriceCurrency  String?
+  /// OPENSEA | BLUR | MAGIC_EDEN | TENSOR | RESERVOIR | MANUAL
+  floorPriceSource    String?
+  floorPriceUpdatedAt DateTime?
+
+  /// UNKNOWN | PARTIAL | COMPLETE — qualité de la fiche collection elle-même
+  /// (nom/image/royalties connus ou non), distincte de celle d'un NFT précis.
+  metadataQuality String @default("UNKNOWN")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assets NftAsset[]
+
+  @@index([userId])
+  @@index([userId, chainId, contractAddress])
+  @@index([userId, slug])
+  @@index([spamStatus])
+  @@index([verifiedStatus])
+}
+
+/// Identité technique d'un NFT — scopée par utilisateur (D2 de la note de
+/// décision), séparée de sa détention (`NftItemDetail`).
+///
+/// Justifie son existence propre : le même NFT peut être vu par plusieurs
+/// détentions successives (revente puis rachat, cf. cas 43/54 du cahier des
+/// charges) ou remonté par plusieurs providers/wallets — sans cette table,
+/// sa metadata (nom, médias, traits, rareté) serait dupliquée et
+/// désynchronisable à chaque détention.
+model NftAsset {
+  id     String @id @default(cuid())
+  userId String
+
+  /// ethereum | base | polygon | arbitrum | optimism | solana…
+  chainId  String
+  /// ERC_721 | ERC_1155 | SPL | SPL_COMPRESSED
+  standard String
+
+  /// EVM : adresse de contrat en minuscules (cf. `normalizeNftIdentity`).
+  contractAddress String?
+  /// EVM / ERC-1155 : identifiant du jeton, toujours stocké en chaîne (jamais
+  /// en nombre — certains tokenId dépassent la précision d'un entier JS).
+  tokenId         String?
+  /// Solana (SPL / SPL_COMPRESSED) : adresse du mint.
+  mintAddress     String?
+  /// Clé normalisée unique — `evm:{chainId}:{contractAddress}:{tokenId}` ou
+  /// `sol:{chainId}:{mintAddress}`. Seule clé lue par la déduplication.
+  uniqueKey       String
+
+  collectionId String?
+  collection   NftCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+
+  name            String?
+  description     String?
+  imageUrl        String?
+  animationUrl    String?
+  mediaUrl        String?
+  thumbnailUrl    String?
+  metadataUrl     String?
+  externalUrl     String?
+  /// Charge utile brute du dernier fetch de metadata — utile au diagnostic
+  /// d'une metadata cassée sans reformuler un appel réseau.
+  rawMetadataJson Json?
+
+  /// UNKNOWN | PARTIAL | COMPLETE | BROKEN — reflète la qualité de la
+  /// metadata *de ce NFT précis* (vs `NftCollection.metadataQuality`, qui
+  /// qualifie la fiche de collection).
+  metadataQuality String  @default("UNKNOWN")
+  /// image/png, video/mp4… quand connu.
+  contentType     String?
+
+  /// Jeton représentatif d'un dépôt ailleurs (bridge/L2) — jamais fusionné
+  /// aveuglément avec l'original (cf. anti-double-compte, D5).
+  isWrapped        Boolean @default(false)
+  isBridged        Boolean @default(false)
+  /// Compressed NFT Solana (Bubblegum/Merkle tree) — `standard =
+  /// SPL_COMPRESSED`, ce flag reste redondant mais lisible sans comparer une
+  /// chaîne.
+  isCompressed     Boolean @default(false)
+  /// Non transférable par conception (POAP, badge de gouvernance…).
+  isSoulbound      Boolean @default(false)
+  isSpam           Boolean @default(false)
+  isScamSuspected  Boolean @default(false)
+  /// NSFW déclaratif — pas de système de notation en V1 (limite documentée).
+  isSensitiveMedia Boolean @default(false)
+
+  /// PFP | ART | GAMING | MEMBERSHIP | RWA | PHOTO | MUSIC | DOMAIN | TICKET
+  /// | OTHER | UNKNOWN
+  category String @default("UNKNOWN")
+
+  rarityRank  Int?
+  rarityScore Decimal? @db.Decimal(12, 4)
+
+  lastMetadataRefreshAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  holdings   NftItemDetail[]
+  events     NftEvent[]
+  valuations NftValuation[]
+  traits     NftTrait[]
+  media      NftMedia[]
+
+  /// Une seule fiche d'identité par NFT et par utilisateur — c'est la
+  /// garantie structurelle qu'une resynchronisation retrouve toujours le
+  /// même `NftAsset` plutôt que d'en créer un doublon.
+  @@unique([userId, uniqueKey])
+  @@index([userId])
+  @@index([chainId, contractAddress, tokenId])
+  @@index([mintAddress])
+  @@index([collectionId])
+  @@index([isSpam])
+  @@index([isScamSuspected])
+  @@index([category])
+}
+
+/// Trait/attribut d'un NFT — many-to-one vers `NftAsset`, jamais vers une
+/// détention (un trait ne dépend pas de qui détient le NFT).
+model NftTrait {
+  id         String @id @default(cuid())
+  nftAssetId String
+
+  traitType String
+  value     String
+  /// % de la collection partageant ce trait — sert au calcul de rareté sans
+  /// dépendre d'un `rarityRank` fourni tout fait par un provider.
+  rarityPct Decimal? @db.Decimal(6, 3)
+
+  createdAt DateTime @default(now())
+
+  asset NftAsset @relation(fields: [nftAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([nftAssetId, traitType, value])
+  @@index([nftAssetId])
+  @@index([traitType])
+}
+
+/// Média secondaire d'un NFT, au-delà du jeu principal déjà porté par
+/// `NftAsset` (`imageUrl`/`animationUrl`/`mediaUrl`/`thumbnailUrl`) — une
+/// résolution alternative, une preview vidéo distincte de l'image…
+model NftMedia {
+  id         String @id @default(cuid())
+  nftAssetId String
+
+  /// IMAGE | ANIMATION | VIDEO | AUDIO | MODEL_3D | OTHER
+  mediaType String
+  url       String
+  /// Libellé déclaratif — « thumbnail-500 », « original »…
+  variant   String?
+  mimeType  String?
+
+  createdAt DateTime @default(now())
+
+  asset NftAsset @relation(fields: [nftAssetId], references: [id], onDelete: Cascade)
+
+  @@index([nftAssetId])
+  @@index([mediaType])
+}
+
+/// Détention patrimoniale d'un NFT — extension 1:1 d'un `Asset`, comme
+/// `RealEstateDetail` et `DefiPositionDetail`.
+///
+/// Conserve le nom `NftItemDetail` (D1 de la note de décision) : la table
+/// est déjà 1:1 avec `Asset`, déjà référencée par tout le module existant, et
+/// la renommer n'aurait rien changé à la structure. Elle ne porte plus
+/// l'identité technique du NFT (déplacée vers `NftAsset` par la migration
+/// `nft_backend_v1`) : un Asset générique reste la source de la quantité et
+/// du coût de revient (le journal), ce modèle porte ce que ni l'Asset ni le
+/// NftAsset ne savent exprimer — qui détient, comment, avec quelle
+/// quote-part, et son cycle de vie patrimonial.
+model NftItemDetail {
+  id      String @id @default(cuid())
+  assetId String @unique
+
+  nftAssetId String
+  nftAsset   NftAsset @relation(fields: [nftAssetId], references: [id], onDelete: Restrict)
+
+  // ───────────────────────── Contexte d'accès ─────────────────────────
+
+  /// SELF_CUSTODY | CUSTODIAL | UNKNOWN — un NFT n'a pas l'axe DeFi/Hybride/
+  /// CeFi d'un protocole (cf. `NFT_HOLDING_ACCESS_MODES`, distinct de
+  /// `DEFI_ACCESS_MODES`).
+  accessMode     String   @default("SELF_CUSTODY")
+  /// SELF_CUSTODY | CUSTODIAL | SHARED_CUSTODY | UNKNOWN — vocabulaire
+  /// réutilisé tel quel de la DeFi (même sens, même énumération).
+  custodyModel   String   @default("UNKNOWN")
+  /// MANUAL | WALLET_SYNC | PLATFORM_API | CSV_IMPORT
+  dataOrigin     String   @default("MANUAL")
+  /// Entité détentrice en clair — aucun modèle d'entité n'existe dans le
+  /// dépôt (même limite documentée que `DefiPositionDetail.ownerLabel`).
+  ownerLabel     String?
+  /// Quote-part détenue, en % — `null` = 100 %.
+  ownershipShare Decimal? @db.Decimal(6, 3)
+
+  // ───────────────────────── Cycle de vie ─────────────────────────
+
+  /// HELD | LISTED_FOR_SALE | ESCROWED | LOANED_OUT | BORROWED_IN | STAKED |
+  /// BRIDGED_OUT | WRAPPED | BURNED | TRANSFERRED_OUT | SOLD | UNKNOWN
+  status            String    @default("HELD")
+  acquisitionDate   DateTime?
+  disposalDate      DateTime?
+  /// MINT | SECONDARY_PURCHASE | TRANSFER_IN | AIRDROP | DONATION_IN |
+  /// BRIDGE_IN | UNWRAP | UNBUNDLE | MANUAL | WALLET_SYNC | UNKNOWN
+  acquisitionSource String    @default("MANUAL")
+  /// SOLD | BURNED | TRANSFER_OUT | DONATION_OUT | BRIDGE_OUT | WRAP |
+  /// BUNDLE | LOST | UNKNOWN
+  disposalSource    String?
+  acquisitionTxHash String?
+  disposalTxHash    String?
+
+  acquisitionCostNative    Decimal? @db.Decimal(38, 18)
+  acquisitionCurrency      String?
+  acquisitionCostEur       Decimal? @db.Decimal(18, 2)
+  /// Surcharge manuelle du coût d'acquisition (ex. frais annexes connus a
+  /// posteriori) — jamais recalculée automatiquement une fois posée.
+  manualAcquisitionCostEur Decimal? @db.Decimal(18, 2)
+
+  /// Cache dénormalisé de lecture, jamais une vérité indépendante : seul le
+  /// service de valorisation l'écrit, toujours recalculé depuis la dernière
+  /// ligne `NftValuation` — même convention que `Asset.manualPrice`, déjà en
+  /// place avant ce chantier (`nft-estimate-service.ts`).
+  retainedValueEur       Decimal?  @db.Decimal(18, 2)
+  /// MANUAL | FLOOR_PRICE | LAST_SALE | COLLECTION_ESTIMATE | APPRAISAL |
+  /// ACQUISITION_COST_FALLBACK | ZERO | UNKNOWN
+  retainedValueMethod    String    @default("UNKNOWN")
+  retainedValueUpdatedAt DateTime?
+
+  /// Masque un spam/scam de la galerie sans supprimer la position — cosmétique,
+  /// ne change jamais les totaux (cf. `countsInTotals`).
+  isHidden             Boolean @default(false)
+  /// Exclue des agrégats patrimoniaux mais historisée — distinct de
+  /// `isHidden`, qui est seulement cosmétique.
+  isIgnoredInPortfolio Boolean @default(false)
+
+  /// Détention liée — l'autre extrémité d'un bridge/wrap, ou la détention
+  /// d'origine après une migration de contrat. `SetNull` : supprimer une
+  /// détention ne doit jamais emporter celle qui lui est liée.
+  linkedHoldingId String?
+  linkedHolding   NftItemDetail?  @relation("NftHoldingLink", fields: [linkedHoldingId], references: [id], onDelete: SetNull)
+  linkedFrom      NftItemDetail[] @relation("NftHoldingLink")
+
+  /// Conflit de déduplication détecté (même NFT vu par deux sources) — jamais
+  /// résolu silencieusement, la détention reste visible pour revue.
+  conflictFlag   Boolean @default(false)
+  conflictReason String?
+
+  /// Clé d'identité côté fournisseur, en plus de `Asset.providerSymbol` —
+  /// évite de charger l'actif pour dédupliquer une synchronisation.
+  providerKey String?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  asset      Asset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  events     NftEvent[]
+  valuations NftValuation[]
+
+  @@index([nftAssetId])
+  @@index([accessMode])
+  @@index([status])
+  @@index([dataOrigin])
+  @@index([isHidden, isIgnoredInPortfolio])
+  @@index([acquisitionDate])
+  @@index([disposalDate])
+  @@index([linkedHoldingId])
+  @@index([providerKey])
+}
+
+/// Événement de cycle de vie d'un NFT.
+///
+/// Comme `DefiEvent` : le journal (`Transaction`) reste seul maître des
+/// quantités valorisées, ce modèle le **qualifie**. Rattaché à `NftAsset`
+/// (l'événement décrit toujours *ce NFT*), et optionnellement à la détention
+/// précise qu'il concerne quand plusieurs détentions successives existent.
+model NftEvent {
+  id         String   @id @default(cuid())
+  nftAssetId String
+  asset      NftAsset @relation(fields: [nftAssetId], references: [id], onDelete: Cascade)
+
+  nftHoldingId String?
+  holding      NftItemDetail? @relation(fields: [nftHoldingId], references: [id], onDelete: SetNull)
+
+  /// MINT | BUY | SELL | TRANSFER_IN | TRANSFER_OUT | AIRDROP | DONATION_IN |
+  /// DONATION_OUT | BUNDLE | UNBUNDLE | BURN | LIST | DELIST | BRIDGE_IN |
+  /// BRIDGE_OUT | WRAP | UNWRAP | STAKE | UNSTAKE | LOAN_OUT | LOAN_IN |
+  /// METADATA_REFRESH | VALUATION_REFRESH | SPAM_FLAG | MANUAL_OVERRIDE |
+  /// SYNC_MISSING
+  eventType String
+  eventDate DateTime
+
+  chainId String?
+  txHash  String?
+
+  fromAddress String?
+  toAddress   String?
+  marketplace String?
+  platformId  String?
+  platform    Platform? @relation(fields: [platformId], references: [id], onDelete: SetNull)
+
+  quantity        Decimal? @db.Decimal(20, 0)
+  priceNative     Decimal? @db.Decimal(38, 18)
+  priceCurrency   String?
+  priceEur        Decimal? @db.Decimal(18, 2)
+  feesNative      Decimal? @db.Decimal(38, 18)
+  feesCurrency    String?
+  feesEur         Decimal? @db.Decimal(18, 2)
+  royaltyNative   Decimal? @db.Decimal(38, 18)
+  royaltyCurrency String?
+  royaltyEur      Decimal? @db.Decimal(18, 2)
+
+  /// Regroupe les composantes d'un bundle/split — même valeur sur toutes les
+  /// jambes d'une même opération groupée.
+  bundleId String?
+
+  /// Écriture de journal correspondante, quand l'événement déplace de la
+  /// quantité. `SetNull` : purger une transaction ne doit jamais effacer la
+  /// trace de l'événement.
+  ledgerTransactionId String?
+  ledgerTransaction   Transaction? @relation(fields: [ledgerTransactionId], references: [id], onDelete: SetNull)
+
+  /// OPENSEA | MAGIC_EDEN | BLUR | TENSOR | RESERVOIR | MANUAL
+  sourceProvider String @default("MANUAL")
+  rawPayloadJson Json?
+
+  createdAt DateTime @default(now())
+
+  /// Un même hash peut porter plusieurs événements (un burn qui règle aussi
+  /// des royalties), mais pas deux fois le même type — garantie de re-sync
+  /// sans doublon.
+  @@unique([nftAssetId, txHash, eventType])
+  @@index([nftAssetId])
+  @@index([nftAssetId, eventDate])
+  @@index([nftHoldingId])
+  @@index([eventType])
+  @@index([eventDate])
+  @@index([txHash])
+  @@index([ledgerTransactionId])
+}
+
+/// Snapshot de valorisation NFT — historique décisionnel, jamais une vérité
+/// indépendante (même règle que `DefiValuation`).
+///
+/// Rattaché à `NftAsset` (floor/last sale sont des propriétés du NFT, pas de
+/// la détention), avec un rattachement optionnel à la détention précise pour
+/// une appraisal manuelle ou une quote-part spécifique.
+model NftValuation {
+  id         String   @id @default(cuid())
+  nftAssetId String
+  asset      NftAsset @relation(fields: [nftAssetId], references: [id], onDelete: Cascade)
+
+  nftHoldingId String?
+  holding      NftItemDetail? @relation(fields: [nftHoldingId], references: [id], onDelete: SetNull)
+
+  valuationDate DateTime
+
+  /// MANUAL | FLOOR_PRICE | LAST_SALE | COLLECTION_ESTIMATE | APPRAISAL |
+  /// ACQUISITION_COST_FALLBACK | ZERO | UNKNOWN
+  valuationMethod String
+  /// OPENSEA | BLUR | MAGIC_EDEN | TENSOR | RESERVOIR | MANUAL
+  sourceProvider  String @default("MANUAL")
+  currency        String @default("EUR")
+
+  /// Valeur retenue par cette méthode — ce que `retainedValueEur` recopie.
+  amountNative Decimal? @db.Decimal(38, 18)
+  amountEur    Decimal? @db.Decimal(18, 2)
+
+  floorPriceNative     Decimal? @db.Decimal(38, 18)
+  floorPriceEur        Decimal? @db.Decimal(18, 2)
+  lastSaleNative       Decimal? @db.Decimal(38, 18)
+  lastSaleEur          Decimal? @db.Decimal(18, 2)
+  appraisedValueNative Decimal? @db.Decimal(38, 18)
+  appraisedValueEur    Decimal? @db.Decimal(18, 2)
+
+  /// 0–100, dérivé de la méthode.
+  confidenceScore Int?
+  isManual        Boolean @default(false)
+  /// Pourquoi la méthode nominale n'a pas pu s'appliquer — renseigné dès que
+  /// la méthode est un repli.
+  fallbackReason  String?
+  rawPayloadJson  Json?
+
+  createdAt DateTime @default(now())
+
+  /// Une resynchronisation qui rejoue la même date met à jour au lieu
+  /// d'empiler.
+  @@unique([nftAssetId, valuationDate])
+  @@index([nftAssetId])
+  @@index([nftAssetId, valuationDate])
+  @@index([nftHoldingId])
+  @@index([valuationDate])
+  @@index([valuationMethod])
+  @@index([isManual])
+}
+
+/// Curseur de pagination d'une synchronisation NFT — structurellement
+/// identique à `DefiSyncCursor` (même `scopeKey`, mêmes compteurs).
+model NftSyncCursor {
+  id     String @id @default(cuid())
+  userId String
+
+  /// OPENSEA_WALLET | MAGIC_EDEN_WALLET | MANUAL | CSV
+  provider   String
+  platformId String?
+  platform   Platform? @relation(fields: [platformId], references: [id], onDelete: Cascade)
+  sourceRef  String?
+
+  /// Portée du curseur, dérivée de `platformId`/`sourceRef`, jamais nulle —
+  /// même raison que `DefiSyncCursor.scopeKey`.
+  scopeKey String
+
+  cursor String?
+
+  lastSyncAt    DateTime?
+  lastSuccessAt DateTime?
+  lastError     String?
+
+  importedCount Int @default(0)
+  updatedCount  Int @default(0)
+  ignoredCount  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider, scopeKey])
+  @@index([userId])
+  @@index([provider])
+  @@index([platformId])
+  @@index([userId, provider])
 }

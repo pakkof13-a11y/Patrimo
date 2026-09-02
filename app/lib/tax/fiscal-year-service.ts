@@ -7,11 +7,33 @@ import {
 
 /**
  * Charge les txs de l'utilisateur et construit le rapport fiscal année civile.
+ *
+ * Pour plusieurs années, préférez `getFiscalYearReports` : le rejeu CUMP est
+ * indépendant de l'année, et le refaire une fois par année multiplierait les
+ * scans du journal sans rien changer au résultat.
  */
 export async function getFiscalYearReport(
   userId: string,
   year: number
 ): Promise<FiscalYearReport> {
+  const [report] = await getFiscalYearReports(userId, [year]);
+  return report!;
+}
+
+/**
+ * Rapports de plusieurs années civiles, en un seul passage sur le journal.
+ *
+ * Le coût dominant est le chargement des transactions et le rejeu du CUMP ;
+ * les deux sont communs à toutes les années. Seule l'agrégation annuelle est
+ * refaite par année, et elle est purement en mémoire.
+ *
+ * Les rapports sont renvoyés dans l'ordre des années demandées.
+ */
+export async function getFiscalYearReports(
+  userId: string,
+  years: number[]
+): Promise<FiscalYearReport[]> {
+  if (years.length === 0) return [];
   const rows = await prisma.transaction.findMany({
     where: { userId },
     orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
@@ -41,5 +63,5 @@ export async function getFiscalYearReport(
 
   const cumpAtSell = buildCumpAtSellLookup(txs);
 
-  return buildFiscalYearReport(year, txs, { cumpAtSell });
+  return years.map((year) => buildFiscalYearReport(year, txs, { cumpAtSell }));
 }

@@ -3,7 +3,7 @@ import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
 /**
- * Config ESLint Patrimo.
+ * Config ESLint Aurea.
  * Hooks React 19 actifs (set-state-in-effect, refs) — corrigés dans fix/eslint-hooks-effects.
  */
 const eslintConfig = defineConfig([

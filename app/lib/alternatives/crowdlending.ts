@@ -1,9 +1,11 @@
 import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "@/app/lib/prisma";
 import {
+  CL_PAYMENT_FREQUENCIES,
   CL_REPAYMENT_TYPES,
   CL_STATUSES,
   CL_STATUS_LABELS,
+  type ClPaymentFrequency,
   type ClRepaymentType,
   type ClStatus,
   type CrowdlendingDto,
@@ -44,6 +46,77 @@ function normalizeRepayment(raw: string | undefined): ClRepaymentType {
   return "IN_FINE";
 }
 
+function normalizePaymentFrequency(raw: string | undefined): ClPaymentFrequency {
+  const s = String(raw || "MONTHLY").toUpperCase();
+  if ((CL_PAYMENT_FREQUENCIES as readonly string[]).includes(s)) {
+    return s as ClPaymentFrequency;
+  }
+  return "MONTHLY";
+}
+
+/**
+ * Capital restant dû effectif, avec repli.
+ *
+ * `remainingCapital` est un champ récent, par défaut à 0 en base — y
+ * compris sur les lignes créées avant son ajout, jamais retouchées depuis.
+ * Un 0 par défaut y signifierait « plus rien n'est dû », ce qui est faux
+ * tant qu'aucun remboursement partiel n'a été saisi : le capital initial
+ * reste investi. Le repli restitue donc `capitalInvested`, sauf ligne déjà
+ * soldée (`REPAID`), où il n'y a effectivement plus rien à devoir.
+ *
+ * `interestReceivedToDate` n'a pas ce problème : son défaut à 0 est le fait
+ * réel le plus probable pour une ligne neuve (rien encore perçu), donc il
+ * est utilisé tel quel, sans repli, dans le reste de ce fichier.
+ *
+ * Exposé dans le DTO via `effectiveRemainingCapital` : l'UI consomme la
+ * valeur résolue au lieu de réimplémenter la règle de son côté.
+ */
+export function effectiveRemainingCapital(
+  capitalInvested: Prisma.Decimal,
+  remainingCapital: Prisma.Decimal,
+  status: ClStatus
+): Prisma.Decimal {
+  if (remainingCapital.gt(0)) return remainingCapital;
+  if (status === "REPAID") return new Prisma.Decimal(0);
+  return capitalInvested;
+}
+
+/**
+ * `true` quand la valeur effective diffère de la valeur stockée, donc
+ * qu'elle a été déduite et non saisie. Un prêt soldé stocké à 0 n'est pas
+ * concerné : le repli renvoie 0 lui aussi, il n'y a aucune substitution à
+ * signaler à l'utilisateur.
+ */
+function isRemainingCapitalDerived(
+  remainingCapital: Prisma.Decimal,
+  status: ClStatus
+): boolean {
+  return !remainingCapital.gt(0) && status !== "REPAID";
+}
+
+/**
+ * Estimation simple des intérêts totaux sur la durée du prêt.
+ *
+ * In fine : le capital ne s'amortit pas avant l'échéance, les intérêts
+ * courent sur le capital plein pendant toute la durée.
+ * Amortissable : approximation par amortissement linéaire — le capital
+ * moyen exposé sur la durée vaut la moitié du capital initial. Ce n'est pas
+ * un échéancier réel (les intérêts d'un prêt amortissable dégressif sont en
+ * réalité concentrés en début de vie), mais l'ordre de grandeur reste
+ * pertinent pour comparer deux lignes entre elles.
+ */
+export function expectedTotalInterest(
+  capitalInvested: Prisma.Decimal,
+  annualYieldPercent: Prisma.Decimal,
+  durationMonths: number,
+  repaymentType: ClRepaymentType
+): Prisma.Decimal {
+  const years = new Prisma.Decimal(durationMonths).div(12);
+  const avgCapital =
+    repaymentType === "AMORTIZING" ? capitalInvested.div(2) : capitalInvested;
+  return avgCapital.times(annualYieldPercent).div(100).times(years);
+}
+
 /** Months between now and maturity (can be negative if past) */
 export function monthsUntil(maturity: Date | null, now = new Date()): number | null {
   if (!maturity) return null;
@@ -67,20 +140,11 @@ export function loanProgressPct(
   return Math.max(0, Math.min(100, Math.round(p)));
 }
 
-function mapRow(row: {
-  id: string;
-  projectName: string;
-  platform: string | null;
-  capitalInvested: Prisma.Decimal;
-  annualYieldPercent: Prisma.Decimal;
-  durationMonths: number;
-  repaymentType: string;
-  startDate: Date | null;
-  maturityDate: Date | null;
-  status: string;
-  currency: string;
-  notes: string | null;
-}): CrowdlendingDto {
+type Row = Prisma.CrowdlendingPositionGetPayload<Record<string, never>>;
+
+function mapRow(row: Row): CrowdlendingDto {
+  const repaymentType = normalizeRepayment(row.repaymentType);
+  const status = normalizeStatus(row.status);
   return {
     id: row.id,
     projectName: row.projectName,
@@ -88,26 +152,85 @@ function mapRow(row: {
     capitalInvested: row.capitalInvested.toString(),
     annualYieldPercent: row.annualYieldPercent.toString(),
     durationMonths: row.durationMonths,
-    repaymentType: normalizeRepayment(row.repaymentType),
+    repaymentType,
     startDate: toIsoDate(row.startDate),
     maturityDate: toIsoDate(row.maturityDate),
-    status: normalizeStatus(row.status),
+    status,
     currency: row.currency,
     notes: row.notes,
     monthsRemaining: monthsUntil(row.maturityDate),
     progressPct: loanProgressPct(row.startDate, row.maturityDate),
+    remainingCapital: row.remainingCapital.toString(),
+    effectiveRemainingCapital: effectiveRemainingCapital(
+      row.capitalInvested,
+      row.remainingCapital,
+      status
+    ).toFixed(2),
+    remainingCapitalIsDerived: isRemainingCapitalDerived(
+      row.remainingCapital,
+      status
+    ),
+    interestReceivedToDate: row.interestReceivedToDate.toString(),
+    paymentFrequency: normalizePaymentFrequency(row.paymentFrequency),
+    nextPaymentDate: toIsoDate(row.nextPaymentDate),
+    riskGrade: row.riskGrade,
+    expectedTotalInterest: expectedTotalInterest(
+      row.capitalInvested,
+      row.annualYieldPercent,
+      row.durationMonths,
+      repaymentType
+    ).toFixed(2),
   };
+}
+
+/**
+ * Prêt à échéance imminente : ACTIVE, échéance connue, ni déjà dépassée ni
+ * au-delà de 3 mois. Règle identique à `rowFlags.soon` dans
+ * alternatives-crowdlending.tsx — à garder synchronisée si l'une évolue.
+ */
+function isSoon(l: CrowdlendingDto): boolean {
+  return (
+    l.status === "ACTIVE" &&
+    l.monthsRemaining != null &&
+    l.monthsRemaining >= 0 &&
+    l.monthsRemaining <= 3
+  );
 }
 
 export function summarizeCrowdlending(lines: CrowdlendingDto[]): CrowdlendingSummary {
   let totalCapital = 0;
   let activeCapital = 0;
+  let remainingCapitalTotal = 0;
+  let interestReceivedTotal = 0;
+  // Moyenne pondérée : accumulée en (poids × taux) / poids plutôt qu'en
+  // moyenne de moyennes, pour qu'une grosse ligne pèse plus qu'une petite.
+  let activeWeightedYieldSum = 0;
+  let activeWeight = 0;
+  let projectedAnnualIncome = 0;
+  let soonCount = 0;
   const byStatus = new Map<string, { count: number; capital: number }>();
 
   for (const l of lines) {
     const cap = n(l.capitalInvested);
     totalCapital += cap;
-    if (l.status === "ACTIVE" || l.status === "LATE") activeCapital += cap;
+    interestReceivedTotal += n(l.interestReceivedToDate);
+
+    // Repli déjà résolu ligne à ligne par mapRow — une seule implémentation
+    // de la règle, partagée par les agrégats et l'UI.
+    const remaining = n(l.effectiveRemainingCapital);
+    remainingCapitalTotal += remaining;
+
+    const isActive = l.status === "ACTIVE" || l.status === "LATE";
+    if (isActive) {
+      activeCapital += cap;
+      const yieldPct = n(l.annualYieldPercent);
+      activeWeightedYieldSum += remaining * yieldPct;
+      activeWeight += remaining;
+      projectedAnnualIncome += (remaining * yieldPct) / 100;
+    }
+
+    if (isSoon(l)) soonCount += 1;
+
     const cur = byStatus.get(l.status) || { count: 0, capital: 0 };
     cur.count += 1;
     cur.capital += cap;
@@ -124,6 +247,14 @@ export function summarizeCrowdlending(lines: CrowdlendingDto[]): CrowdlendingSum
       count: v.count,
       capital: Math.round(v.capital * 100) / 100,
     })),
+    weightedAverageYield:
+      activeWeight > 0
+        ? Math.round((activeWeightedYieldSum / activeWeight) * 100) / 100
+        : null,
+    projectedAnnualIncome: projectedAnnualIncome.toFixed(2),
+    remainingCapitalTotal: remainingCapitalTotal.toFixed(2),
+    interestReceivedTotal: interestReceivedTotal.toFixed(2),
+    soonCount,
   };
 }
 
@@ -148,6 +279,11 @@ export type CrowdlendingInput = {
   status?: string;
   currency?: string;
   notes?: string | null;
+  remainingCapital?: string | number;
+  interestReceivedToDate?: string | number;
+  paymentFrequency?: string;
+  nextPaymentDate?: string | null;
+  riskGrade?: string | null;
 };
 
 function normalize(input: CrowdlendingInput) {
@@ -176,6 +312,11 @@ function normalize(input: CrowdlendingInput) {
     status: normalizeStatus(input.status),
     currency: (input.currency || "EUR").toUpperCase().slice(0, 3),
     notes: input.notes ? String(input.notes) : null,
+    remainingCapital: dec(input.remainingCapital, "0"),
+    interestReceivedToDate: dec(input.interestReceivedToDate, "0"),
+    paymentFrequency: normalizePaymentFrequency(input.paymentFrequency),
+    nextPaymentDate: parseDate(input.nextPaymentDate ?? null),
+    riskGrade: input.riskGrade ? String(input.riskGrade).trim() : null,
   };
 }
 
@@ -210,6 +351,16 @@ export async function updateCrowdlending(
     status: input.status ?? existing.status,
     currency: input.currency ?? existing.currency,
     notes: input.notes !== undefined ? input.notes : existing.notes,
+    remainingCapital:
+      input.remainingCapital ?? existing.remainingCapital.toString(),
+    interestReceivedToDate:
+      input.interestReceivedToDate ?? existing.interestReceivedToDate.toString(),
+    paymentFrequency: input.paymentFrequency ?? existing.paymentFrequency,
+    nextPaymentDate:
+      input.nextPaymentDate !== undefined
+        ? input.nextPaymentDate
+        : toIsoDate(existing.nextPaymentDate),
+    riskGrade: input.riskGrade !== undefined ? input.riskGrade : existing.riskGrade,
   });
   const write = await prisma.crowdlendingPosition.updateMany({
     where: { id, userId },

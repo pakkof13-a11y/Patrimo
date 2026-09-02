@@ -16,7 +16,11 @@ import {
   type WizardStep,
 } from "@/components/ui/form-wizard";
 import { liabilitySchema, type LiabilityForm } from "@/app/lib/schemas";
-import { LIABILITY_LENDER_OPTIONS } from "@/app/lib/constants";
+import {
+  LIABILITY_CATEGORIES,
+  LIABILITY_CATEGORY_LABELS,
+  LIABILITY_LENDER_OPTIONS,
+} from "@/app/lib/constants";
 import { currencyLabel } from "@/app/lib/money/currencies";
 import {
   estimateRemainingInterest,
@@ -50,36 +54,17 @@ const WIZARD_STEPS: WizardStep[] = [
   },
 ];
 
-/** Types UX uniquement — guident placeholders, non stockés en API. */
-const LIABILITY_KINDS = [
-  {
-    id: "MORTGAGE",
-    label: "Immobilier",
-    namePh: "ex. Crédit immo résidence principale",
-  },
-  {
-    id: "AUTO",
-    label: "Auto",
-    namePh: "ex. Crédit auto 2024",
-  },
-  {
-    id: "CONSUMER",
-    label: "Conso",
-    namePh: "ex. Crédit conso travaux",
-  },
-  {
-    id: "PRIVATE",
-    label: "Dette privée",
-    namePh: "ex. Prêt familial",
-  },
-  {
-    id: "OTHER",
-    label: "Autre",
-    namePh: "ex. Prêt personnel, découvert…",
-  },
-] as const;
+type LiabilityCategory = (typeof LIABILITY_CATEGORIES)[number];
 
-type LiabilityKind = (typeof LIABILITY_KINDS)[number]["id"];
+/** Placeholder d'intitulé par catégorie — UI uniquement. */
+const LIABILITY_CATEGORY_PLACEHOLDERS: Record<LiabilityCategory, string> = {
+  IMMOBILIER: "ex. Crédit immo résidence principale",
+  AUTO: "ex. Crédit auto 2024",
+  CONSOMMATION: "ex. Crédit conso travaux",
+  DETTE_PRIVEE: "ex. Prêt familial",
+  PROFESSIONNEL: "ex. Prêt professionnel, crédit-bail…",
+  AUTRE: "ex. Prêt personnel, découvert…",
+};
 
 function LenderCombobox({
   value,
@@ -158,7 +143,7 @@ function LenderCombobox({
           <div className="border-b border-[var(--border)] px-2 py-1.5">
             <input
               autoFocus
-              className="input !border-0 !bg-transparent !px-1 !py-1 !shadow-none"
+              className="input w-full border-0 bg-transparent px-1 py-1 !shadow-none"
               placeholder="Rechercher (BNP, Crédit Agricole…)"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -196,7 +181,7 @@ function LenderCombobox({
       )}
       {customMode && (
         <input
-          className="input mt-2"
+          className="input mt-2 w-full"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder="Nom exact du prêteur"
@@ -215,23 +200,30 @@ const emptyDefaults = (): LiabilityForm => ({
   currency: "EUR",
   interestRate: "",
   monthlyPayment: "",
+  insuranceMonthly: "",
   startDate: new Date().toISOString().slice(0, 10),
   endDate: "",
   paymentDay: 5,
+  category: "AUTRE",
+  assetId: null,
   notes: "",
 });
+
+/** Sous-ensemble d'Asset pour le sélecteur « Bien lié » — passé par le parent. */
+type LinkableAssetOption = { id: string; name: string };
 
 export function LiabilityCreateForm({
   pending,
   onCancel,
   onSubmit,
+  linkableAssets,
 }: {
   pending: boolean;
   onCancel: () => void;
   onSubmit: (values: LiabilityForm) => void;
+  linkableAssets: LinkableAssetOption[];
 }) {
   const [step, setStep] = useState(0);
-  const [kind, setKind] = useState<LiabilityKind>("MORTGAGE");
   /** true = capital restant = montant initial (crédit neuf) */
   const [remainingLocked, setRemainingLocked] = useState(true);
   const [endDateManual, setEndDateManual] = useState(false);
@@ -246,13 +238,11 @@ export function LiabilityCreateForm({
   useEffect(() => {
     const draft = loadWizardDraft<{
       values?: LiabilityForm;
-      kind?: LiabilityKind;
       remainingLocked?: boolean;
       step?: number;
     }>(DRAFT_KEY);
     if (!draft?.values) return;
     form.reset({ ...emptyDefaults(), ...draft.values });
-    if (draft.kind) setKind(draft.kind);
     if (typeof draft.remainingLocked === "boolean")
       setRemainingLocked(draft.remainingLocked);
     if (typeof draft.step === "number")
@@ -268,10 +258,11 @@ export function LiabilityCreateForm({
   const remainingAmount = form.watch("remainingAmount") || "";
   const monthlyPayment = form.watch("monthlyPayment") || "";
   const interestRate = form.watch("interestRate") || "";
+  const insuranceMonthly = form.watch("insuranceMonthly") || "";
   const currency = form.watch("currency") || "EUR";
   const name = form.watch("name") || "";
-
-  const kindMeta = LIABILITY_KINDS.find((k) => k.id === kind)!;
+  const category = form.watch("category") || "AUTRE";
+  const assetId = form.watch("assetId") || "";
 
   // Mirror initial → remaining when locked
   useEffect(() => {
@@ -384,7 +375,6 @@ export function LiabilityCreateForm({
   function saveDraft() {
     saveWizardDraft(DRAFT_KEY, {
       values: form.getValues(),
-      kind,
       remainingLocked,
       step,
     });
@@ -404,6 +394,7 @@ export function LiabilityCreateForm({
         bankName: v.bankName || null,
         interestRate: v.interestRate || undefined,
         monthlyPayment: v.monthlyPayment || undefined,
+        insuranceMonthly: v.insuranceMonthly || undefined,
         notes: v.notes || null,
       });
     })();
@@ -444,13 +435,15 @@ export function LiabilityCreateForm({
                 role="group"
                 aria-label="Type de passif"
               >
-                {LIABILITY_KINDS.map((k) => {
-                  const active = kind === k.id;
+                {LIABILITY_CATEGORIES.map((c) => {
+                  const active = category === c;
                   return (
                     <button
-                      key={k.id}
+                      key={c}
                       type="button"
-                      onClick={() => setKind(k.id)}
+                      onClick={() =>
+                        form.setValue("category", c, { shouldDirty: true })
+                      }
                       className={cn(
                         "rounded-md px-2.5 py-1 text-[11px] font-medium transition",
                         "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
@@ -458,8 +451,9 @@ export function LiabilityCreateForm({
                           ? "bg-teal-700 text-white dark:bg-teal-500 dark:text-teal-950"
                           : "bg-transparent text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 dark:text-slate-300 dark:ring-slate-700 dark:hover:bg-slate-800/60"
                       )}
+                      data-testid={`liability-category-${c}`}
                     >
-                      {k.label}
+                      {LIABILITY_CATEGORY_LABELS[c]}
                     </button>
                   );
                 })}
@@ -469,9 +463,9 @@ export function LiabilityCreateForm({
               <Field label="Intitulé du crédit" htmlFor="liability-name">
                 <input
                   id="liability-name"
-                  className="input"
+                  className="input w-full"
                   {...form.register("name")}
-                  placeholder={kindMeta.namePh}
+                  placeholder={LIABILITY_CATEGORY_PLACEHOLDERS[category]}
                   data-testid="liability-name"
                   autoComplete="off"
                 />
@@ -490,6 +484,31 @@ export function LiabilityCreateForm({
                 />
               </Field>
             </div>
+            <Field label="Bien immobilier lié (optionnel)">
+              <select
+                className="input w-full"
+                value={assetId}
+                onChange={(e) =>
+                  form.setValue("assetId", e.target.value || null, {
+                    shouldDirty: true,
+                  })
+                }
+                data-testid="liability-linked-asset"
+              >
+                <option value="">— Aucun —</option>
+                {linkableAssets.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+              {linkableAssets.length === 0 && (
+                <span className="mt-1 block text-[10px] text-slate-400">
+                  Aucun bien immobilier détecté (catégorie « Immobilier
+                  direct » ou enveloppe IMMOBILIER).
+                </span>
+              )}
+            </Field>
           </div>
         )}
 
@@ -498,7 +517,7 @@ export function LiabilityCreateForm({
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Montant initial emprunté">
                 <input
-                  className="input tabular-nums"
+                  className="input w-full tabular-nums"
                   inputMode="decimal"
                   {...form.register("initialAmount")}
                   placeholder="ex. 250000"
@@ -506,7 +525,7 @@ export function LiabilityCreateForm({
                 />
               </Field>
               <Field label="Devise">
-                <select className="input" {...form.register("currency")}>
+                <select className="input w-full" {...form.register("currency")}>
                   {["EUR", "USD", "CHF", "GBP"].map((c) => (
                     <option key={c} value={c}>
                       {currencyLabel(c)}
@@ -548,7 +567,7 @@ export function LiabilityCreateForm({
                 }
               >
                 <input
-                  className="input tabular-nums"
+                  className="input w-full tabular-nums"
                   inputMode="decimal"
                   {...form.register("remainingAmount")}
                   data-testid="liability-remaining"
@@ -570,7 +589,7 @@ export function LiabilityCreateForm({
                 }
               >
                 <input
-                  className="input tabular-nums"
+                  className="input w-full tabular-nums"
                   inputMode="decimal"
                   {...form.register("monthlyPayment")}
                   placeholder="ex. 1250"
@@ -579,13 +598,29 @@ export function LiabilityCreateForm({
               </Field>
               <Field label="Taux d’intérêt annuel (%)">
                 <input
-                  className="input tabular-nums"
+                  className="input w-full tabular-nums"
                   inputMode="decimal"
                   {...form.register("interestRate")}
                   placeholder="ex. 3,45"
                 />
               </Field>
             </div>
+            <Field
+              label={
+                <span className="inline-flex items-center gap-1">
+                  Assurance mensuelle (€)
+                  <FinanceTip term="Assurance emprunteur" />
+                </span>
+              }
+            >
+              <input
+                className="input w-full tabular-nums"
+                inputMode="decimal"
+                {...form.register("insuranceMonthly")}
+                placeholder="ex. 25 (optionnel)"
+                data-testid="liability-insurance"
+              />
+            </Field>
           </div>
         )}
 
@@ -594,7 +629,7 @@ export function LiabilityCreateForm({
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Jour de prélèvement">
                 <select
-                  className="input"
+                  className="input w-full"
                   value={
                     paymentDay == null || !Number.isFinite(Number(paymentDay))
                       ? ""
@@ -656,7 +691,7 @@ export function LiabilityCreateForm({
             </div>
             <Field label="Notes">
               <input
-                className="input"
+                className="input w-full"
                 {...form.register("notes")}
                 placeholder="Réf. contrat, assurance emprunteur…"
               />
@@ -672,9 +707,13 @@ export function LiabilityCreateForm({
             <dl className="grid gap-2 text-[12px] sm:grid-cols-2">
               {(
                 [
-                  ["Type", kindMeta.label],
+                  ["Type", LIABILITY_CATEGORY_LABELS[category]],
                   ["Intitulé", name || "—"],
                   ["Prêteur", bankName || "—"],
+                  [
+                    "Bien lié",
+                    linkableAssets.find((a) => a.id === assetId)?.name || "—",
+                  ],
                   [
                     "Capital initial",
                     initialAmount
@@ -692,6 +731,12 @@ export function LiabilityCreateForm({
                     "Mensualité",
                     monthlyPayment
                       ? formatCurrency(monthlyPayment, currency)
+                      : "—",
+                  ],
+                  [
+                    "Assurance mensuelle",
+                    insuranceMonthly
+                      ? formatCurrency(insuranceMonthly, currency)
                       : "—",
                   ],
                   [

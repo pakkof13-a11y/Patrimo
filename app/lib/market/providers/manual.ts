@@ -23,7 +23,26 @@ export const manualProvider: MarketDataProvider = {
     }
     const nativeCurrency = (asset.currency || "EUR").toUpperCase();
     const priceNative = d(raw);
-    const priceEur = await toEurAmount(priceNative, nativeCurrency);
+    /*
+      La conversion peut désormais échouer : une devise qu'aucune source ne
+      fonde ne vaut plus « un euro par unité ». Yahoo et Finnhub convertissent
+      déjà dans leur `try` et rendent une cotation en erreur ; ce fournisseur
+      n'avait pas de garde, et l'exception serait sortie jusqu'au lot de
+      rafraîchissement. On reprend l'idiome qu'il emploie déjà quelques lignes
+      plus haut — une cotation `ERROR`, jamais un prix faux.
+    */
+    let priceEur: string;
+    try {
+      priceEur = await toEurAmount(priceNative, nativeCurrency);
+    } catch (e) {
+      return {
+        priceEur: "0",
+        currency: "EUR",
+        source: "manual",
+        status: "ERROR",
+        error: e instanceof Error ? e.message : "Conversion impossible",
+      };
+    }
     return {
       priceEur,
       priceNative: toFixed(priceNative, 8),

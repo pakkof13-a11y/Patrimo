@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
+import { serverErrorDetail } from "@/app/lib/api/error-response";
 import {
   getDeployBlockingConfigIssues,
   getDeployConfigWarnings,
@@ -20,7 +21,8 @@ export async function GET() {
     db = "error";
     // Détail uniquement en développement local (évite fuite infra en test/prod)
     if (process.env.NODE_ENV === "development" && !process.env.VERCEL) {
-      dbError = e instanceof Error ? e.message : "db error";
+      // Déjà borné au dev local : on veut ici le détail brut de l'erreur DB.
+      dbError = serverErrorDetail(e);
     }
   }
 
@@ -37,6 +39,17 @@ export async function GET() {
     uptimeSec: Math.floor(process.uptime()),
     latencyMs: Date.now() - started,
     timestamp: new Date().toISOString(),
+    /**
+     * Ce serveur a-t-il été lancé pour les tests de bout en bout ?
+     *
+     * Playwright réutilise un serveur déjà à l'écoute sur le port. Si celui-ci
+     * est un `npm run dev` ordinaire, la suite s'exécute alors contre la base
+     * de **travail** au lieu de la base isolée : les fixtures s'y accumulent,
+     * et les tests finissent par échouer pour une raison qui n'a rien à voir
+     * avec le code. Ce drapeau permet au `globalSetup` de refuser tout de
+     * suite plutôt que de laisser croire à une régression.
+     */
+    e2e: process.env.E2E === "1",
     env: {
       nodeEnv: env.nodeEnv,
       authSecretConfigured: env.authSecretConfigured,

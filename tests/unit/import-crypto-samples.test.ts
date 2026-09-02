@@ -4,7 +4,7 @@ import { importCsv } from "@/app/lib/import/import-csv";
 import { detectBestAdapter } from "@/app/lib/import/adapters/registry";
 import { detectFormatFromHeaders } from "@/app/lib/import/presets";
 
-/** En-têtes réels (échantillons Downloads/Patrimo) */
+/** En-têtes réels (échantillons Downloads/Aurea) */
 const HEADERS = {
   cryptocom:
     "Timestamp (UTC),Transaction Description,Currency,Amount,To Currency,To Amount,Native Currency,Native Amount,Native Amount (in USD),Transaction Kind,Transaction Hash",

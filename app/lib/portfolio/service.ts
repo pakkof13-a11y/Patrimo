@@ -1,17 +1,19 @@
 import { prisma } from "../prisma";
 import { d, max, toFixed, zero } from "../money/decimal";
 import {
-  applyTransaction,
-  createEmptyLedger,
   replayTransactions,
-  totalCash,
   totalCostBasis,
   totalRealizedPnl,
-  type LedgerTx,
-  type TxType,
 } from "../accounting";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
-import { parisDayKey } from "../dates/paris";
+import { endOfParisDay, parisDayKey, parisDayStart } from "../dates/paris";
+import { PortfolioValuationEngine } from "./historical/engine";
+import { loadHistoricalInputs } from "./historical/load";
+import type {
+  HistoricalDataStatus,
+  PortfolioValuationPoint,
+  ValuationComponent,
+} from "./historical/types";
 import { resolvePlatformLogo } from "../platforms/presets";
 import { resolveAssetLogo } from "../assets/logos";
 import {
@@ -25,6 +27,8 @@ import {
   type HoldingPlatformSlice,
 } from "./holdings-platform-slice";
 import { asAccountType } from "../types/account-type";
+import { remainingAmountAt } from "../liabilities/amortization";
+import { isNonOwnedStatus } from "../crypto/nft-taxonomy";
 import {
   asBaseAmount,
   asEurAmount,
@@ -39,53 +43,8 @@ import {
 } from "../types/money-brands";
 import type { AccountType } from "../constants";
 
-export function mapDbTx(row: {
-  id: string;
-  type: string;
-  platformId: string;
-  toPlatformId: string | null;
-  assetId: string | null;
-  quantity: { toString(): string } | null;
-  unitPrice: { toString(): string } | null;
-  fees: { toString(): string };
-  currency: string;
-  fxRateToEur: { toString(): string };
-  grossAmountEur: { toString(): string };
-  occurredAt: Date;
-}): LedgerTx {
-  const qty = row.quantity ? d(row.quantity.toString()) : null;
-  const unit = row.unitPrice ? d(row.unitPrice.toString()) : null;
-  const fees = d(row.fees.toString());
-  const fx = d(row.fxRateToEur.toString());
-  const grossEur = d(row.grossAmountEur.toString());
-  // For cash ops without qty/price, recover original amount from EUR / fx
-  const cashAmountOriginal =
-    qty && unit
-      ? qty.times(unit)
-      : ["APPORT", "RETRAIT", "FRAIS", "DIVIDENDE", "COUPON", "LOYER", "INTERET", "TRANSFERT_CASH"].includes(
-            row.type
-          )
-        ? fx.isZero()
-          ? grossEur
-          : grossEur.div(fx)
-        : null;
-
-  return {
-    id: row.id,
-    type: row.type as TxType,
-    platformId: row.platformId,
-    toPlatformId: row.toPlatformId,
-    assetId: row.assetId,
-    quantity: qty,
-    unitPrice: unit,
-    fees,
-    currency: row.currency,
-    fxRateToEur: fx,
-    cashAmountOriginal,
-    grossOriginal: qty && unit ? qty.times(unit) : null,
-    occurredAt: row.occurredAt,
-  };
-}
+import { mapDbTx } from "./tx-mapper";
+export { mapDbTx };
 
 /**
  * Charge + rejoue le ledger, avec cache process-local (fingerprint tx).
@@ -160,6 +119,10 @@ export type HoldingRow = {
   blockchainKey?: string | null;
   blockchainLabel?: string | null;
   assetLogoUrl: string | null;
+  /** Position adossée à un protocole DeFi — exclue du comptant. */
+  isDefiPosition?: boolean;
+  /** Position adossée à un NFT — exclue du comptant. */
+  isNftItem?: boolean;
   quantity: QuantityString;
   /** PRU / CUMP (EUR) — break-even unitaire frais inclus */
   avgCostEur: EurAmount;
@@ -198,6 +161,14 @@ export type HoldingRow = {
   tp2: string | null;
   tp3: string | null;
   tp4: string | null;
+  /** Ligne épinglée dans la watchlist du tableau de bord. */
+  watchlisted: boolean;
+  /**
+   * True si un niveau SL/TP existe sur une jambe non-principale (multi-plateforme).
+   * Les niveaux affichés (stopLoss/tpN) restent ceux de la jambe principale si
+   * elle en a, sinon ceux de la jambe secondaire — ce flag signale ce cas.
+   */
+  hasSecondaryLevels: boolean;
 };
 
 /** Helpers locaux — toFixed → montants brandés */
@@ -219,7 +190,24 @@ export async function getHoldings(
     loadLedgerForUser(userId),
     prisma.asset.findMany({
       where: { userId },
-      include: { platform: true, priceQuote: true },
+      include: {
+        platform: true,
+        priceQuote: true,
+        // Relations 1:1 : empêchent la fusion d'une position DeFi/NFT avec le
+        // solde comptant de même ticker (cf. `mergeKey`), et permettent à
+        // l'onglet Cryptos d'isoler le comptant de la DeFi et des NFT sans
+        // second aller-retour serveur.
+        // `isIgnoredInPortfolio` : une position DeFi/NFT que l'utilisateur a
+        // explicitement écartée des agrégats patrimoniaux. Lue ici et non
+        // seulement dans l'onglet DeFi/NFT, sinon le patrimoine net
+        // contredirait ces vues qui, elles, l'excluent. Distinct de
+        // `isHidden`, purement cosmétique, qui continue de compter.
+        defiPosition: { select: { id: true, isIgnoredInPortfolio: true } },
+        // `status` : un NFT `BORROWED_IN` est détenu sans être possédé — il
+        // doit être restitué, donc il ne s'ajoute jamais au patrimoine net
+        // (`isNonOwnedStatus`, même règle que `countsInTotals` côté onglet).
+        nftItem: { select: { id: true, isIgnoredInPortfolio: true, status: true } },
+      },
     }),
     prisma.transaction.findMany({
       where: { userId },
@@ -288,6 +276,15 @@ export async function getHoldings(
     if (pos.quantity.lte(0)) continue;
     const asset = assetMap.get(pos.assetId);
     if (!asset) continue;
+    // Position DeFi explicitement exclue du patrimoine : ses écritures restent
+    // au journal (l'historique et la fiscalité en dépendent), mais elle ne pèse
+    // plus dans aucun total. Une position *fermée* n'a pas besoin de ce test —
+    // son dénouement l'a ramenée à zéro, elle est déjà écartée plus haut.
+    if (asset.defiPosition?.isIgnoredInPortfolio) continue;
+    // Même règle pour les NFT — plus le cas d'un NFT emprunté, présent au
+    // journal mais qui n'appartient pas à l'utilisateur.
+    if (asset.nftItem?.isIgnoredInPortfolio) continue;
+    if (asset.nftItem && isNonOwnedStatus(asset.nftItem.status)) continue;
 
     const platform =
       platformMap.get(pos.platformId) ||
@@ -321,6 +318,7 @@ export async function getHoldings(
     const assetLogo = resolveAssetLogo({
       logoUrl: asset.logoUrl,
       ticker: asset.ticker,
+      isin: asset.isin,
       name: asset.name,
       assetClass: asset.assetClass,
     });
@@ -359,6 +357,12 @@ export async function getHoldings(
       blockchainKey: chainKey,
       blockchainLabel: blockchainLabel(chainKey),
       assetLogoUrl: assetLogo,
+      isDefiPosition: Boolean(
+        (asset as { defiPosition?: { id: string } | null }).defiPosition
+      ),
+      isNftItem: Boolean(
+        (asset as { nftItem?: { id: string } | null }).nftItem
+      ),
       quantity: qtyS(toFixed(pos.quantity, 8)),
       avgCostEur: eurS(toFixed(avg, 8)),
       costBasisEur: eurS(toFixed(pos.costBasisEur, 8)),
@@ -391,15 +395,28 @@ export async function getHoldings(
       tp2: asset.tp2?.toString() ?? null,
       tp3: asset.tp3?.toString() ?? null,
       tp4: asset.tp4?.toString() ?? null,
+      watchlisted: asset.watchlistedAt != null,
+      hasSecondaryLevels: false,
     };
     leg.platformSlices = [sliceFromHoldingLeg(leg)];
     rows.push(leg);
   }
 
+  /** Actifs adossés à une position DeFi — exclus de la fusion par ticker. */
+  const defiAssetIds = new Set(
+    assets.filter((a) => a.defiPosition).map((a) => a.id)
+  );
+
   // Merge :
   // 1) même assetId multi-plateforme
   // 2) crypto même ticker + enveloppe → une ligne (ETH Base + ETH Revolut)
   function mergeKey(row: HoldingRow): string {
+    // Un ETH staké chez Lido n'est pas un ETH en portefeuille : il porte un
+    // risque de protocole, un rendement et parfois une durée de déblocage.
+    // Les fondre en une ligne rendrait aussi la lecture « comptant + DeFi »
+    // trompeuse — le même ETH apparaîtrait dans les deux vues.
+    if (defiAssetIds.has(row.assetId)) return `id:${row.assetId}`;
+
     const tick = (row.ticker || "").trim().toUpperCase();
     const env = (row.accountType || "CTO").toUpperCase();
     const isCrypto =
@@ -466,6 +483,27 @@ export async function getHoldings(
         ? row.platformSlices
         : [sliceFromHoldingLeg(row)];
     const platformSlices = mergePlatformSlices(prevSlices, rowSlices);
+    // SL/TP : jambe principale prioritaire, repli jambe secondaire si absent
+    // (au lieu de ne garder que la jambe déterminée par takeRow — perdait les
+    // niveaux de la jambe secondaire quand la principale n'en avait pas).
+    const principalLeg = takeRow ? row : prev;
+    const secondaryLeg = takeRow ? prev : row;
+    const pickLevel = (a: string | null, b: string | null): string | null =>
+      a ?? b ?? null;
+    const stopLoss = pickLevel(principalLeg.stopLoss, secondaryLeg.stopLoss);
+    const tp1 = pickLevel(principalLeg.tp1, secondaryLeg.tp1);
+    const tp2 = pickLevel(principalLeg.tp2, secondaryLeg.tp2);
+    const tp3 = pickLevel(principalLeg.tp3, secondaryLeg.tp3);
+    const tp4 = pickLevel(principalLeg.tp4, secondaryLeg.tp4);
+    const secondaryHasOwnLevels = [
+      secondaryLeg.stopLoss,
+      secondaryLeg.tp1,
+      secondaryLeg.tp2,
+      secondaryLeg.tp3,
+      secondaryLeg.tp4,
+    ].some((v) => v != null);
+    const hasSecondaryLevels =
+      prev.hasSecondaryLevels || row.hasSecondaryLevels || secondaryHasOwnLevels;
     merged.set(key, {
       ...prev,
       // assetId principal = plus grosse position (détail + actions)
@@ -479,6 +517,10 @@ export async function getHoldings(
       platformLogoUrl: preferLive.platformLogoUrl || prev.platformLogoUrl,
       blockchainKey: prev.blockchainKey || row.blockchainKey,
       blockchainLabel: prev.blockchainLabel || row.blockchainLabel,
+      // Une jambe DeFi/NFT ne fusionne jamais avec du comptant (cf. mergeKey) :
+      // le OR ne fait que propager le marqueur entre jambes de même nature.
+      isDefiPosition: prev.isDefiPosition || row.isDefiPosition,
+      isNftItem: prev.isNftItem || row.isNftItem,
       quantity: qtyS(toFixed(qty, 8)),
       costBasisEur: eurS(toFixed(cost, 8)),
       avgCostEur: eurS(toFixed(avg, 8)),
@@ -503,13 +545,19 @@ export async function getHoldings(
       passiveIncomeGrossEur: eurS(toFixed(incomeGross, 8)),
       breakEvenEur: eurS(toFixed(avg, 8)),
       breakEvenBase: baseS(toBase(avg)),
-      // SL/TP de la jambe principale uniquement (sinon des niveaux d'une
-      // jambe secondaire arbitraire s'appliqueraient à la position fusionnée)
-      stopLoss: (takeRow ? row : prev).stopLoss,
-      tp1: (takeRow ? row : prev).tp1,
-      tp2: (takeRow ? row : prev).tp2,
-      tp3: (takeRow ? row : prev).tp3,
-      tp4: (takeRow ? row : prev).tp4,
+      // SL/TP : jambe principale prioritaire, repli sur la jambe secondaire
+      // si la principale n'a pas le niveau. Ne pas replier perdait les niveaux
+      // saisis sur la petite jambe ; `hasSecondaryLevels` trace la provenance
+      // pour que l'UI signale explicitement le cas (badge sur la colonne SL).
+      stopLoss,
+      tp1,
+      tp2,
+      tp3,
+      tp4,
+      // Une seule ligne affichée pour deux jambes : elle est suivie dès que
+      // l'une l'est, sinon l'étoile s'éteindrait en changeant de dépositaire.
+      watchlisted: prev.watchlisted || row.watchlisted,
+      hasSecondaryLevels,
     });
   }
 
@@ -539,14 +587,7 @@ export async function getPlatformCashBalances(
   userId: string,
   baseCurrency = "EUR",
   rates?: Record<string, number>,
-  ledger?: Awaited<ReturnType<typeof loadLedgerForUser>>,
-  /**
-   * walletApiKey exclue par défaut (secure by default) — seul /api/platforms
-   * (édition + sync inline) doit passer `includeWalletApiKey: true`. Évite
-   * qu'un futur endpoint appelant cette fonction directement ne fasse fuiter
-   * la clé sans s'en rendre compte.
-   */
-  opts?: { includeWalletApiKey?: boolean }
+  ledger?: Awaited<ReturnType<typeof loadLedgerForUser>>
 ) {
   const fx = rates ?? (await getEurRates());
   const { getBankPocketCashByNameEur } = await import("../cash/pockets");
@@ -565,6 +606,7 @@ export async function getPlatformCashBalances(
         select: {
           id: true,
           currency: true,
+          accountType: true,
           manualPrice: true,
           priceQuote: { select: { priceEur: true } },
         },
@@ -573,10 +615,25 @@ export async function getPlatformCashBalances(
     ]);
 
   const lastTxByPlatform = new Map<string, Date>();
+  /*
+    Le nombre d'opérations par plateforme se déduit du même balayage : les
+    lignes sont déjà chargées pour la date la plus récente, une requête de
+    comptage supplémentaire serait un aller-retour pour rien.
+  */
+  const txCountByPlatform = new Map<string, number>();
   for (const row of lastTxRows) {
     if (!lastTxByPlatform.has(row.platformId)) {
       lastTxByPlatform.set(row.platformId, row.occurredAt);
     }
+    txCountByPlatform.set(
+      row.platformId,
+      (txCountByPlatform.get(row.platformId) || 0) + 1
+    );
+  }
+
+  const accountTypeByAsset = new Map<string, string>();
+  for (const a of assetQuotes) {
+    accountTypeByAsset.set(a.id, a.accountType || "AUTRE");
   }
 
   const priceEurByAsset = new Map<string, ReturnType<typeof d>>();
@@ -592,7 +649,20 @@ export async function getPlatformCashBalances(
   }
 
   const positionsValueByPlatform = new Map<string, ReturnType<typeof zero>>();
+  const costBasisByPlatform = new Map<string, ReturnType<typeof zero>>();
   const openPositionCountByPlatform = new Map<string, number>();
+  /*
+    Répartition par enveloppe fiscale, plateforme par plateforme.
+
+    C'est la seule ventilation « par compte » que le modèle porte réellement :
+    Patrimo n'a pas d'entité compte générique sous une plateforme, mais chaque
+    actif déclare son enveloppe (CTO, PEA, CRYPTO…). Inventer une hiérarchie de
+    comptes pour coller à une maquette produirait une donnée qui n'existe pas.
+  */
+  const envelopesByPlatform = new Map<
+    string,
+    Map<string, { value: ReturnType<typeof zero>; count: number }>
+  >();
   for (const pos of led.positions.values()) {
     if (pos.quantity.lte(0)) continue;
     const platformId = pos.platformId;
@@ -609,6 +679,22 @@ export async function getPlatformCashBalances(
       platformId,
       (positionsValueByPlatform.get(platformId) || zero()).plus(mv)
     );
+    costBasisByPlatform.set(
+      platformId,
+      (costBasisByPlatform.get(platformId) || zero()).plus(pos.costBasisEur)
+    );
+
+    const envelope = accountTypeByAsset.get(pos.assetId) || "AUTRE";
+    let byEnvelope = envelopesByPlatform.get(platformId);
+    if (!byEnvelope) {
+      byEnvelope = new Map();
+      envelopesByPlatform.set(platformId, byEnvelope);
+    }
+    const cur = byEnvelope.get(envelope) || { value: zero(), count: 0 };
+    byEnvelope.set(envelope, {
+      value: cur.value.plus(mv),
+      count: cur.count + 1,
+    });
   }
 
   return platforms.map((p) => {
@@ -621,6 +707,11 @@ export async function getPlatformCashBalances(
     const positionsValueEur = positionsValueByPlatform.get(p.id) || zero();
     const totalValueEur = cashEur.plus(positionsValueEur);
     const lastAt = lastTxByPlatform.get(p.id);
+    const costBasisEur = costBasisByPlatform.get(p.id) || zero();
+    const unrealizedPnlEur = positionsValueEur.minus(costBasisEur);
+    const unrealizedPnlPct = costBasisEur.gt(0)
+      ? unrealizedPnlEur.div(costBasisEur).times(100)
+      : zero();
     return {
       id: p.id,
       name: p.name,
@@ -634,9 +725,11 @@ export async function getPlatformCashBalances(
         name: p.name,
       }),
       walletAddress: p.walletAddress,
-      walletApiKey: opts?.includeWalletApiKey
-        ? ((p as { walletApiKey?: string | null }).walletApiKey ?? null)
-        : null,
+      // Le secret ne quitte jamais le serveur (voir doc du paramètre plus haut) —
+      // seule sa présence est exposée, pour préremplir un hint côté UI.
+      hasWalletApiKey: Boolean(
+        (p as { walletApiKey?: string | null }).walletApiKey
+      ),
       cashEur: toFixed(cashEur, 8),
       cashBase: convertFromEurSync(cashEur, baseCurrency, fx),
       /** Cash issu des poches Banques/Livrets uniquement (hors ledger) */
@@ -647,34 +740,63 @@ export async function getPlatformCashBalances(
       positionsValueBase: convertFromEurSync(positionsValueEur, baseCurrency, fx),
       totalValueEur: toFixed(totalValueEur, 8),
       totalValueBase: convertFromEurSync(totalValueEur, baseCurrency, fx),
+      /** P&L latent des positions ouvertes (hors cash) — marché vs coût de revient */
+      unrealizedPnlEur: toFixed(unrealizedPnlEur, 8),
+      unrealizedPnlBase: convertFromEurSync(unrealizedPnlEur, baseCurrency, fx),
+      unrealizedPnlPct: toFixed(unrealizedPnlPct, 4),
       lastTransactionAt: lastAt ? lastAt.toISOString() : null,
+      transactionCount: txCountByPlatform.get(p.id) || 0,
+      /** Dernière synchronisation on-chain réussie — null pour une plateforme
+       *  tenue à la main, ce qui est le cas le plus fréquent. */
+      lastSyncedAt: p.lastSyncedAt ? p.lastSyncedAt.toISOString() : null,
+      createdAt: p.createdAt.toISOString(),
+      envelopes: [...(envelopesByPlatform.get(p.id) ?? new Map())]
+        .map(([accountType, { value, count }]) => ({
+          accountType,
+          valueEur: toFixed(value, 8),
+          valueBase: convertFromEurSync(value, baseCurrency, fx),
+          positionCount: count,
+        }))
+        .sort((a, b) => Number(b.valueEur) - Number(a.valueEur)),
     };
   });
 }
 
-/** FCPE / PEE / PER — valeur = parts × VL, convertie en EUR */
+/**
+ * FCPE / PEE / PER — valeur = parts × VL, convertie en EUR.
+ *
+ * Une erreur de lecture **remonte**. Elle était rattrapée ici et rendue comme
+ * `zero()`, ce qui retirait tout le compartiment de `totalAssets` puis de
+ * `netWorth` : une épargne salariale de 25 000 € devenue illisible faisait
+ * afficher un patrimoine inférieur de 25 000 €, sans aucune réserve, et le
+ * seul indice partait dans les journaux du serveur.
+ *
+ * Aucun compte, aucune ligne : le total vaut zéro, et c'est vrai. Une requête
+ * qui échoue ne dit rien du montant — c'est la distinction que le moteur
+ * historique tient déjà partout, et que les passifs et le cash explicite
+ * tiennent ici même, sans rattrapage.
+ *
+ * L'erreur a une destination : la route rend un 500, la requête cliente n'a
+ * pas de résumé, et la bande d'indicateurs affiche « — € » — son placeholder
+ * de montant inconnu. Rien à inventer pour la transporter.
+ */
 export async function getEmployeeSavingsTotalEur(
   userId: string,
   rates?: Record<string, number>
 ) {
   const fx = rates ?? (await getEurRates());
-  try {
-    const rows = await prisma.employeeSavingsLine.findMany({
-      where: { userId },
-      select: { units: true, nav: true, currency: true },
-    });
-    let total = zero();
-    for (const r of rows) {
-      const mv = d(r.units.toString()).times(d(r.nav.toString()));
-      total = total.plus(
-        d(convertToEurSync(mv.toString(), r.currency || "EUR", fx))
-      );
-    }
-    return total;
-  } catch (e) {
-    console.error("[portfolio] employee savings total failed:", e);
-    return zero();
+  const rows = await prisma.employeeSavingsLine.findMany({
+    where: { userId },
+    select: { units: true, nav: true, currency: true },
+  });
+  let total = zero();
+  for (const r of rows) {
+    const mv = d(r.units.toString()).times(d(r.nav.toString()));
+    total = total.plus(
+      d(convertToEurSync(mv.toString(), r.currency || "EUR", fx))
+    );
   }
+  return total;
 }
 
 export async function getLiabilitiesTotalEur(
@@ -685,7 +807,17 @@ export async function getLiabilitiesTotalEur(
   const items = await prisma.liability.findMany({ where: { userId } });
   let total = zero();
   for (const l of items) {
-    total = total.plus(d(convertToEurSync(l.remainingAmount.toString(), l.currency, fx)));
+    /*
+      Capital dû à aujourd'hui, mensualités en retard comprises.
+
+      Le solde stocké ne vieillit qu'à l'écriture ; s'en contenter faisait
+      dépendre le patrimoine net de l'écran ouvert en dernier — 64 020 € de
+      moins dès qu'on avait visité le module Crédits. La projection est pure :
+      elle ne matérialise rien, exactement comme les intérêts courus des
+      livrets quelques lignes plus haut dans le cash.
+    */
+    const remaining = remainingAmountAt(l);
+    total = total.plus(d(convertToEurSync(remaining, l.currency, fx)));
   }
   return total;
 }
@@ -709,17 +841,16 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
       getPlatformCashBalances(userId, base, rates, ledger),
       getLiabilitiesTotalEur(userId, rates),
       getExplicitCashTotalEur(userId),
-      getAlternativesPortfolioSlice(userId, rates).catch((err) => {
-        console.error("[portfolio] alternatives slice failed:", err);
-        return {
-          metalsEur: 0,
-          privateEquityEur: 0,
-          crowdlendingEur: 0,
-          tangiblesEur: 0,
-          totalEur: 0,
-          slices: [] as { id: string; name: string; value: number }[],
-        };
-      }),
+      /*
+        Pas de rattrapage : ce `.catch` rendait un compartiment entièrement à
+        zéro, que `totalAssets` additionnait sans réserve. Un patrimoine
+        amputé de tous les alternatifs se lisait comme un patrimoine exact.
+
+        Les passifs et le cash explicite, juste au-dessus, laissent déjà
+        remonter leurs erreurs. Aligner ce compartiment sur eux, plutôt que de
+        lui inventer une règle propre.
+      */
+      getAlternativesPortfolioSlice(userId, rates),
       getEmployeeSavingsTotalEur(userId, rates),
     ]);
 
@@ -727,8 +858,21 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
   const costBasis = totalCostBasis(ledger);
   // Cash pockets: only balances explicitly entered and > 0 (banks, livrets, CTO/PEA/AV)
   const cash = explicitCash.totalEur;
-  const alternativesEur = d(String(alternatives?.totalEur ?? 0));
+  /*
+    Ni `?.` ni `?? 0` : la promesse rend une tranche complète ou échoue. Ce
+    repli ne pouvait plus être atteint, et il aurait ramené par la porte de
+    derrière le zéro que ce chantier retire.
+  */
+  const alternativesEur = d(String(alternatives.totalEur));
   const employeeSavingsEur = esEur;
+  // Sous-totaux informatifs — déjà inclus dans marketValue (holdings), pas
+  // additifs au net worth (contrairement à alternatives/ES qui vivent hors holdings).
+  const realEstateEur = holdings
+    .filter((h) => h.accountType === "IMMOBILIER")
+    .reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
+  const lifeInsuranceEur = holdings
+    .filter((h) => h.accountType === "AV")
+    .reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
   const realized = totalRealizedPnl(ledger);
   const unrealized = marketValue.minus(costBasis);
   const cashIncome = ledger.cashIncomeEur;
@@ -750,6 +894,12 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     totalAlternativesBase: toBase(alternativesEur),
     totalEmployeeSavingsEur: toFixed(employeeSavingsEur, 8),
     totalEmployeeSavingsBase: toBase(employeeSavingsEur),
+    /** Sous-total holdings accountType=IMMOBILIER — déjà dans totalMarketValueEur */
+    totalRealEstateEur: toFixed(realEstateEur, 8),
+    totalRealEstateBase: toBase(realEstateEur),
+    /** Sous-total holdings accountType=AV — déjà dans totalMarketValueEur */
+    totalLifeInsuranceEur: toFixed(lifeInsuranceEur, 8),
+    totalLifeInsuranceBase: toBase(lifeInsuranceEur),
     /** Actif brut = cotés + cash + alternatifs + ES */
     portfolioPlusCashEur: toFixed(totalAssets, 8),
     totalGrossAssetsEur: toFixed(totalAssets, 8),
@@ -798,17 +948,9 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     byAccountType["CASH"] = (byAccountType["CASH"] ?? 0) + cashClassBase;
   }
 
-  // walletApiKey retiré ici : /api/holdings n'en a pas besoin (pas d'UI d'édition
-  // de plateforme sur cette page) — évite de faire circuler la clé à chaque
-  // rechargement du tableau de bord. /api/platforms (platforms-tab) la garde
-  // car l'édition + la sync inline en ont besoin.
-  const platformsWithoutApiKey = platforms.map(
-    ({ walletApiKey: _walletApiKey, ...rest }) => rest
-  );
-
   return {
     holdings,
-    platforms: platformsWithoutApiKey,
+    platforms,
     summary,
     allocation: {
       byClass: Object.entries(byClass).map(([name, value]) => ({ name, value })),
@@ -844,10 +986,17 @@ export async function recordPortfolioSnapshot(userId: string) {
   const cashIncomeEur = d(s.cashIncomeEur);
   const assetCount = Number(s.assetCount) || 0;
 
-  const dayStart = new Date();
-  dayStart.setUTCHours(0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+  /*
+    Journée civile **parisienne**, et non UTC.
+
+    Le découpage se faisait à minuit UTC, seul endroit de l'application à le
+    faire. En été, un relevé pris entre minuit et 2 h du matin retombait dans
+    le seau de la veille et en écrasait la clôture : la journée précédente
+    perdait sa valeur de fermeture, remplacée par une valeur d'ouverture.
+  */
+  const today = parisDayKey(new Date());
+  const dayStart = parisDayStart(today);
+  const dayEnd = new Date(endOfParisDay(today).getTime() + 1);
 
   const existing = await prisma.portfolioSnapshot.findFirst({
     where: {
@@ -907,6 +1056,35 @@ export type PortfolioHistoryPoint = {
   rentsBase?: number;
   totalCostBase?: number;
   isLive?: boolean;
+
+  /** Valeur brute des actifs — la métrique par défaut de la courbe. */
+  grossAssetsBase?: number;
+  /** `grossAssets - liabilities`. */
+  netWorthBase?: number;
+  liabilitiesBase?: number;
+  /** Capital externe entré (net) ce jour-là — jamais compté en performance. */
+  externalFlowsBase?: number;
+  /** Résultat du jour, flux neutralisés. */
+  investmentPerformanceBase?: number;
+
+  securitiesBase?: number;
+  cryptoBase?: number;
+  realEstateBase?: number;
+  lifeInsuranceBase?: number;
+  alternativesBase?: number;
+  employeeSavingsBase?: number;
+  otherAssetsBase?: number;
+
+  /** `EXACT` | `ESTIMATED` | `MISSING` — cf. moteur historique. */
+  status?: HistoricalDataStatus;
+  /** Compartiments qui n'étaient pas exacts ce jour-là. */
+  estimatedComponents?: ValuationComponent[];
+  /**
+   * Au moins une position n'avait aucun cours connu ce jour-là et a été
+   * retenue à son prix de revient. Le point reste utilisable, il n'est
+   * simplement pas exact — à l'UI de le dire plutôt que de le taire.
+   */
+  estimated?: boolean;
 };
 
 /**
@@ -951,340 +1129,272 @@ function attachIncomeSplit(
   }
 }
 
-/** Liste inclusive des jours civils YYYY-MM-DD (UTC noon step). */
-function enumerateDayKeysInclusive(first: string, last: string): string[] {
-  if (first > last) return [first];
-  const out: string[] = [];
-  const [y0, m0, d0] = first.split("-").map(Number);
-  const [y1, m1, d1] = last.split("-").map(Number);
-  let t = Date.UTC(y0!, m0! - 1, d0!, 12, 0, 0);
-  const end = Date.UTC(y1!, m1! - 1, d1!, 12, 0, 0);
-  const dayMs = 24 * 60 * 60 * 1000;
-  // Garde-fou : max ~15 ans
-  const hardCap = 5500;
-  while (t <= end && out.length < hardCap) {
-    const dt = new Date(t);
-    const y = dt.getUTCFullYear();
-    const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
-    const d = String(dt.getUTCDate()).padStart(2, "0");
-    out.push(`${y}-${m}-${d}`);
-    t += dayMs;
+/**
+ * Nombre de points renvoyés à l'écran. La série est toujours calculée au jour
+ * le jour ; seul l'affichage est échantillonné, et jamais en modifiant une
+ * valeur (cf. `downsampleSeries`).
+ */
+const HISTORY_DISPLAY_POINTS = 900;
+
+/**
+ * Réduit une série quotidienne pour l'affichage **sans jamais altérer une
+ * valeur**.
+ *
+ * Trois catégories de points sont conservées quoi qu'il arrive : le premier, le
+ * dernier, et tous ceux qui portent un mouvement notable — flux externe, saut
+ * de valeur. Le reste est échantillonné régulièrement. Un point conservé garde
+ * exactement la valeur calculée : l'échantillonnage retire des points, il n'en
+ * lisse aucun et n'en invente aucun.
+ */
+export function downsampleSeries<
+  T extends { grossAssets: number; externalFlows: number; status?: string },
+>(series: T[], maxPoints = HISTORY_DISPLAY_POINTS): T[] {
+  if (series.length <= maxPoints) return series;
+
+  const keep = new Set<number>([0, series.length - 1]);
+
+  /*
+    La fenêtre récente reste au jour le jour.
+
+    Les plages courtes — 7J, 1M, 3M, 6M, YTD, 1A — filtrent cette même série :
+    si l'échantillonnage y retirait des jours, « 7J » afficherait trois points
+    au lieu de sept et la granularité annoncée serait fausse. Seul le passé
+    lointain, que l'écran ne montre qu'écrasé sur quelques pixels, est
+    échantillonné.
+  */
+  const DAILY_TAIL_DAYS = 400;
+  for (let i = Math.max(0, series.length - DAILY_TAIL_DAYS); i < series.length; i++) {
+    keep.add(i);
   }
-  return out;
+
+  // Amplitude de référence : un mouvement compte s'il pèse dans la courbe.
+  let min = Infinity;
+  let max = -Infinity;
+  for (const p of series) {
+    if (p.grossAssets < min) min = p.grossAssets;
+    if (p.grossAssets > max) max = p.grossAssets;
+  }
+  const threshold = Math.max((max - min) * 0.005, 1e-9);
+
+  for (let i = 1; i < series.length; i++) {
+    const p = series[i]!;
+    /*
+      Un changement de statut est un mouvement notable, au même titre qu'un
+      flux.
+
+      L'échantillonnage régulier peut retirer précisément les deux points qui
+      encadrent le passage d'`ESTIMATED` à `EXACT`. Aucune valeur n'est alors
+      modifiée — mais l'écran ne sait plus dire où la mesure réelle a commencé,
+      et présente comme observé un passé qui ne l'était pas. C'est le seul
+      endroit où retirer un point change ce que la courbe affirme.
+    */
+    if (p.status !== series[i - 1]!.status) {
+      keep.add(i);
+      keep.add(i - 1);
+    }
+    if (p.externalFlows !== 0) keep.add(i);
+    else if (Math.abs(p.grossAssets - series[i - 1]!.grossAssets) >= threshold) {
+      keep.add(i);
+      // Garder la veille rend la marche lisible plutôt que rétroactive.
+      keep.add(i - 1);
+    }
+  }
+
+  const step = Math.max(1, Math.ceil(series.length / maxPoints));
+  for (let i = 0; i < series.length; i += step) keep.add(i);
+
+  return [...keep].sort((a, b) => a - b).map((i) => series[i]!);
 }
 
 /**
- * Reconstruit des points d’évolution à partir des dates d’opération (`occurredAt`),
- * pas de `createdAt` ni des seuls snapshots post-import.
+ * Rendement pondéré par le temps (TWR) d'une série.
  *
- * Valorisation historique = coût d’acquisition (CUMP) + cash ledger
- * (sans séries de cours journalières). Le point live du jour utilise le marché.
+ * Un apport n'est pas une performance : chaîner les rendements période par
+ * période, en retirant les flux de chaque période, est la seule façon de mesurer
+ * ce que les investissements ont produit indépendamment des versements. C'est
+ * la réponse au « +178 % » qui n'était qu'un changement de périmètre.
  *
- * Entre deux jours de transaction, la valeur (au coût) est reportée chaque jour
- * civil pour que les plages 7J / 1M / … reflètent la vraie profondeur temporelle.
+ * Renvoie `null` tant qu'aucune période n'a de base positive — un patrimoine
+ * qui démarre à zéro n'a pas de rendement, il a des versements.
  */
-export function buildHistoryFromOccurredAt(
-  txs: LedgerTx[],
-  toBase: (eur: ReturnType<typeof d>) => number,
-  opts?: { maxPoints?: number; untilDayKey?: string }
-): PortfolioHistoryPoint[] {
-  if (txs.length === 0) return [];
+export function timeWeightedReturnPct(
+  series: Array<{ grossAssets: number; externalFlows: number }>
+): number | null {
+  if (series.length < 2) return null;
+  let factor = 1;
+  let measured = false;
 
-  const sorted = [...txs].sort((a, b) => {
-    const t = a.occurredAt.getTime() - b.occurredAt.getTime();
-    if (t !== 0) return t;
-    return a.id.localeCompare(b.id);
-  });
-
-  const firstDay = parisDayKey(sorted[0]!.occurredAt);
-  const lastTxDay = parisDayKey(sorted[sorted.length - 1]!.occurredAt);
-  const lastDay =
-    opts?.untilDayKey && opts.untilDayKey > lastTxDay
-      ? opts.untilDayKey
-      : lastTxDay;
-
-  // Tous les jours civils du 1er occurredAt → fin (report de valorisation)
-  let keys = enumerateDayKeysInclusive(firstDay, lastDay);
-
-  // Échantillonner si trop dense : toujours conserver 1er, dernier, et jours de tx
-  const maxPoints = opts?.maxPoints ?? 800;
-  if (keys.length > maxPoints) {
-    const mustKeep = new Set<string>([firstDay, lastDay]);
-    for (const tx of sorted) {
-      mustKeep.add(parisDayKey(tx.occurredAt));
-    }
-    const step = Math.ceil(keys.length / maxPoints);
-    keys = keys.filter(
-      (k, i) => mustKeep.has(k) || i % step === 0 || i === keys.length - 1
-    );
-    // Déduplique en gardant l’ordre
-    const seenK = new Set<string>();
-    keys = keys.filter((k) => {
-      if (seenK.has(k)) return false;
-      seenK.add(k);
-      return true;
-    });
+  for (let i = 1; i < series.length; i++) {
+    const prev = series[i - 1]!.grossAssets;
+    const curr = series[i]!.grossAssets;
+    const flow = series[i]!.externalFlows;
+    // Le capital exposé sur la période inclut le flux du jour : sans lui, un
+    // versement le jour même compterait comme un gain sur la base de la veille.
+    const base = prev + flow;
+    if (base <= 0) continue;
+    factor *= curr / base;
+    measured = true;
   }
 
-  const points: PortfolioHistoryPoint[] = [];
-  let cursor = 0;
-  // Replay incrémental : `sorted` est trié une fois pour toutes, donc chaque
-  // jour ne fait qu'appliquer les tx NOUVELLEMENT couvertes par le curseur
-  // sur un état persistant, au lieu de rejouer tout `applied` depuis zéro à
-  // chaque itération (O(jours × tx) → O(jours + tx)).
-  const state = createEmptyLedger();
-
-  for (const day of keys) {
-    // Inclure toutes les tx du jour (et antérieures non encore appliquées)
-    // — tri strict par occurredAt, jamais createdAt
-    while (cursor < sorted.length) {
-      const tx = sorted[cursor]!;
-      const tk = parisDayKey(tx.occurredAt);
-      if (tk > day) break;
-      try {
-        applyTransaction(state, tx);
-      } catch {
-        applyTransaction(state, tx, { allowNegativeCash: true, clampOversell: true });
-      }
-      cursor += 1;
-    }
-
-    if (cursor === 0) continue;
-
-    const costEur = totalCostBasis(state);
-    const cashEur = totalCash(state);
-    const realizedEur = totalRealizedPnl(state);
-    const incomeEur = state.cashIncomeEur;
-    // Historique : positions au coût (pas de mark-to-market rétroactif)
-    const totalEur = costEur.plus(cashEur);
-    const totalBase = toBase(totalEur);
-    const cashBase = toBase(cashEur);
-    // Date à 12:00 UTC du jour civil pour un ancrage stable
-    const [yy, mm, dd] = day.split("-").map(Number);
-    const date = new Date(Date.UTC(yy!, mm! - 1, dd!, 12, 0, 0));
-
-    points.push({
-      date: date.toISOString(),
-      label: new Intl.DateTimeFormat("fr-FR", {
-        timeZone: "Europe/Paris",
-        day: "2-digit",
-        month: "short",
-        year: "2-digit",
-      }).format(date),
-      totalValueEur: totalEur.toNumber(),
-      cashTotalEur: cashEur.toNumber(),
-      totalValueBase: totalBase,
-      cashTotalBase: cashBase,
-      positionsBase: totalBase - cashBase,
-      realizedPnlBase: toBase(realizedEur),
-      // Latent historique non connu sans prix → 0
-      unrealizedPnlBase: 0,
-      cashIncomeBase: toBase(incomeEur),
-      totalCostBase: toBase(costEur),
-    });
-  }
-
-  return points;
+  return measured ? (factor - 1) * 100 : null;
 }
 
 /**
- * Version allégée de getPortfolioBundle — ne calcule que les 6 champs
- * scalaires nécessaires au point « live » de l'historique (getPortfolioHistory).
- * Évite getPlatformCashBalances (breakdown par plateforme + poches banques)
- * et les boucles d'allocation byClass/byPlatform/byAccountType, qui ne
- * servent qu'au dashboard complet et représentaient l'essentiel du coût
- * inutile de getPortfolioBundle() pour un simple point du graphique.
+ * Courbe d'évolution du patrimoine — **une seule** source de vérité.
+ *
+ * Toute la série, point du jour compris, sort du moteur de valorisation
+ * historique (`historical/engine.ts`). Il n'y a plus de fusion entre une
+ * reconstruction, des snapshots et un point « live » calculé autrement : ces
+ * trois définitions produisaient trois valeurs différentes, et la marche entre
+ * la dernière et les autres se lisait comme un mouvement de marché.
+ *
+ * Les `PortfolioSnapshot` ne sont **plus** injectés dans la courbe. Ils restent
+ * en base comme points de contrôle — ils ne couvrent que le périmètre
+ * « titres » et les mélanger réintroduirait l'incohérence de périmètre que ce
+ * chantier corrige.
  */
-async function getPortfolioLiveSummary(userId: string, baseCurrency = "EUR") {
-  const rates = await getEurRates();
-  const ledger = await loadLedgerForUser(userId);
-
-  const { getExplicitCashTotalEur } = await import("../cash/pockets");
-  const { getAlternativesPortfolioSlice } = await import(
-    "../alternatives/portfolio"
-  );
-
-  const [holdings, explicitCash, alternatives, esEur] = await Promise.all([
-    getHoldings(userId, baseCurrency, rates),
-    getExplicitCashTotalEur(userId),
-    getAlternativesPortfolioSlice(userId, rates).catch((err) => {
-      console.error("[portfolio] alternatives slice failed:", err);
-      return { totalEur: 0 };
-    }),
-    getEmployeeSavingsTotalEur(userId, rates),
-  ]);
-
-  const marketValue = holdings.reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
-  const costBasis = totalCostBasis(ledger);
-  const cash = explicitCash.totalEur;
-  const alternativesEur = d(String(alternatives?.totalEur ?? 0));
-  const employeeSavingsEur = esEur;
-  const realized = totalRealizedPnl(ledger);
-  const unrealized = marketValue.minus(costBasis);
-  const cashIncome = ledger.cashIncomeEur;
-  const totalAssets = marketValue.plus(cash).plus(alternativesEur).plus(employeeSavingsEur);
-
-  return {
-    portfolioPlusCashEur: toFixed(totalAssets, 8),
-    totalCashEur: toFixed(cash, 8),
-    realizedPnlEur: toFixed(realized, 8),
-    unrealizedPnlEur: toFixed(unrealized, 8),
-    cashIncomeEur: toFixed(cashIncome, 8),
-    totalCostBasisEur: toFixed(costBasis, 8),
-  };
-}
-
-/** Snapshots + reconstruction `occurredAt` + point live pour l’Évolution. */
 export async function getPortfolioHistory(
   userId: string,
   baseCurrency = "EUR",
-  /**
-   * Filtre optionnel des snapshots mark-to-market (date >= sinceDate).
-   * Omis = comportement actuel (take:2200, pas de filtre de date — export
-   * complet). Passer une date limite la fenêtre glissante pour un historique
-   * très long ; l'unique appelant actuel (api/portfolio) ne le passe pas
-   * pour préserver le comportement existant sans régression silencieuse.
-   */
   sinceDate?: Date
 ): Promise<PortfolioHistoryPoint[]> {
-  const [snapshots, rates, live, incomeRows, allTxRows] = await Promise.all([
-    prisma.portfolioSnapshot.findMany({
-      where: sinceDate ? { userId, date: { gte: sinceDate } } : { userId },
-      orderBy: { date: "desc" },
-      take: 2200,
-    }),
+  const [rates, inputs, incomeRows] = await Promise.all([
     getEurRates(),
-    getPortfolioLiveSummary(userId, baseCurrency),
+    loadHistoricalInputs(userId),
     prisma.transaction.findMany({
-      where: {
-        userId,
-        type: { in: ["DIVIDENDE", "COUPON", "LOYER"] },
-      },
+      where: { userId, type: { in: ["DIVIDENDE", "COUPON", "LOYER"] } },
       orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
-      select: {
-        type: true,
-        occurredAt: true,
-        netCashImpactEur: true,
-      },
-    }),
-    // Toutes les tx pour reconstruire l’historique sur occurredAt (pas createdAt)
-    prisma.transaction.findMany({
-      where: { userId },
-      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+      select: { type: true, occurredAt: true, netCashImpactEur: true },
     }),
   ]);
 
   const toBase = (eur: ReturnType<typeof d>) =>
     Number(convertFromEurSync(eur, baseCurrency, rates));
 
-  const ledgerTxs = allTxRows.map(mapDbTx);
-  // Jusqu’à aujourd’hui (Paris) : l’historique suit les occurredAt même si
-  // l’import a été fait le même jour (createdAt / snapshot bootstrap).
+  const engine = new PortfolioValuationEngine(inputs);
+  const earliest = engine.earliestDay();
+  if (!earliest) return [];
+
   const todayParis = parisDayKey(new Date());
-  const fromTx = buildHistoryFromOccurredAt(ledgerTxs, toBase, {
-    untilDayKey: todayParis,
+  const from =
+    sinceDate && parisDayKey(sinceDate) > earliest ? parisDayKey(sinceDate) : earliest;
+
+  const full = engine.buildSeries(from, todayParis);
+  if (full.length === 0) return [];
+
+  const shown = downsampleSeries(full);
+
+  /*
+    L'horodatage n'est calculé que pour les points réellement rendus.
+
+    `endOfParisDay` et `Intl.DateTimeFormat` passent par la base de fuseaux :
+    les appeler sur chaque jour de la série complète coûtait plusieurs secondes
+    sur un historique long, pour des points qui n'atteignaient jamais l'écran.
+  */
+  const labelFmt = new Intl.DateTimeFormat("fr-FR", {
+    timeZone: "Europe/Paris",
+    day: "2-digit",
+    month: "short",
+    year: "2-digit",
   });
 
-  // Snapshots marché (mark-to-market) — utile pour les jours récents post-import
-  const snapshotsAsc = [...snapshots].reverse();
-  const fromSnaps: PortfolioHistoryPoint[] = snapshotsAsc.map((s) => {
-    const totalEur = d(s.totalValueEur.toString());
-    const cashEur = d(s.cashTotalEur.toString());
-    const realizedEur = d(s.realizedPnlEur.toString());
-    const unrealizedEur = d(s.unrealizedPnlEur.toString());
-    const incomeEur = d(s.cashIncomeEur.toString());
-    const costEur = d(s.totalCostEur.toString());
-    const totalBase = toBase(totalEur);
-    const cashBase = toBase(cashEur);
+  const points: PortfolioHistoryPoint[] = shown.map((p, i) => {
+    const grossBase = toBase(d(p.grossAssets));
+    const cashBase = toBase(d(p.cash));
+    const at = endOfParisDay(p.day);
     return {
-      date: s.date.toISOString(),
-      label: new Intl.DateTimeFormat("fr-FR", {
-        timeZone: "Europe/Paris",
-        day: "2-digit",
-        month: "short",
-      }).format(s.date),
-      totalValueEur: totalEur.toNumber(),
-      cashTotalEur: cashEur.toNumber(),
-      totalValueBase: totalBase,
+      date: at.toISOString(),
+      label: labelFmt.format(at),
+
+      // Champs historiques conservés : la valeur affichée par défaut est la
+      // valeur brute des actifs (cf. §3 du chantier).
+      totalValueEur: p.grossAssets,
+      cashTotalEur: p.cash,
+      totalValueBase: grossBase,
       cashTotalBase: cashBase,
-      positionsBase: totalBase - cashBase,
-      realizedPnlBase: toBase(realizedEur),
-      unrealizedPnlBase: toBase(unrealizedEur),
-      cashIncomeBase: toBase(incomeEur),
-      totalCostBase: toBase(costEur),
+      positionsBase: grossBase - cashBase,
+
+      grossAssetsBase: grossBase,
+      netWorthBase: toBase(d(p.netWorth)),
+      liabilitiesBase: toBase(d(p.liabilities)),
+      externalFlowsBase: toBase(d(p.externalFlows)),
+      investmentPerformanceBase: toBase(d(p.investmentPerformance)),
+
+      /*
+        Seconde ventilation du même brut, par classe d'actif.
+
+        Convertie ici comme les autres montants : la base de restitution est
+        une décision d'affichage, et la faire deux fois à deux endroits ferait
+        deux arrondis.
+      */
+      byAssetClassBase: Object.fromEntries(
+        Object.entries(p.byAssetClass).map(([k, v]) => [k, toBase(d(v))])
+      ) as Record<string, number>,
+
+      /*
+        L'absence traverse la conversion telle quelle : convertir `null` en
+        zéro ici rendrait à l'affichage l'ignorance que le moteur vient
+        précisément de distinguer.
+      */
+      byAssetClassAndEnvelopeBase: Object.fromEntries(
+        Object.entries(p.byAssetClassAndEnvelope).map(([cls, parEnv]) => [
+          cls,
+          Object.fromEntries(
+            Object.entries(parEnv).map(([env, v]) => [
+              env,
+              v == null ? null : toBase(d(v)),
+            ])
+          ),
+        ])
+      ) as Record<string, Record<string, number | null>>,
+
+      flowsByAssetClassBase: Object.fromEntries(
+        Object.entries(p.flowsByAssetClass).map(([k, v]) => [k, toBase(d(v))])
+      ) as Record<string, number>,
+
+      performanceByAssetClassBase:
+        p.performanceByAssetClass == null
+          ? undefined
+          : (Object.fromEntries(
+              Object.entries(p.performanceByAssetClass).map(([k, v]) => [
+                k,
+                toBase(d(v)),
+              ])
+            ) as Record<string, number>),
+
+      securitiesBase: toBase(d(p.securities)),
+      cryptoBase: toBase(d(p.crypto)),
+      realEstateBase: toBase(d(p.realEstate)),
+      lifeInsuranceBase: toBase(d(p.lifeInsurance)),
+      alternativesBase: toBase(d(p.alternatives)),
+      employeeSavingsBase: toBase(d(p.employeeSavings)),
+      otherAssetsBase: toBase(d(p.otherAssets)),
+
+      status: p.status,
+      estimatedComponents: p.estimatedComponents,
+      estimated: p.status === "ESTIMATED" || undefined,
+      isLive: i === shown.length - 1 && p.day === todayParis ? true : undefined,
     };
   });
-
-  // Fusion : points ledger (occurredAt) + snapshots (jour civil).
-  // Source de vérité temporelle = occurredAt des transactions (jamais createdAt).
-  // Snapshots mark-to-market : utiles en fin de courbe, mais ne doivent pas
-  // « collapser » l’historique sur la date d’import seule.
-  const byDay = new Map<string, PortfolioHistoryPoint>();
-  for (const p of fromTx) {
-    byDay.set(parisDayKey(p.date), p);
-  }
-  const firstTxDay = fromTx.length > 0 ? parisDayKey(fromTx[0]!.date) : null;
-  for (const p of fromSnaps) {
-    const day = parisDayKey(p.date);
-    // Ne pas injecter de snapshot antérieur au 1er occurredAt (artefacts)
-    if (firstTxDay && day < firstTxDay) continue;
-    const existing = byDay.get(day);
-    // Sur un jour déjà reconstruit au coût : n’écraser que si le snapshot
-    // apporte un mark-to-market (latent ≠ 0) ou cash différent — sinon garder
-    // la reconstruction occurredAt (évite courbe plate « jour d’import »).
-    if (existing && Math.abs(p.unrealizedPnlBase ?? 0) < 1e-9) {
-      // Snapshot purement au coût / bootstrap : conserver fromTx
-      continue;
-    }
-    byDay.set(day, p);
-  }
-
-  const points = [...byDay.values()].sort(
-    (a, b) => Date.parse(a.date) - Date.parse(b.date)
-  );
-
-  // Always append current live valuation so the chart is never empty / stale
-  const liveTotal = d(live.portfolioPlusCashEur);
-  const liveCash = d(live.totalCashEur);
-  const liveRealized = d(String(live.realizedPnlEur ?? 0));
-  const liveUnrealized = d(String(live.unrealizedPnlEur ?? 0));
-  const liveIncome = d(String(live.cashIncomeEur ?? 0));
-  const liveCost = d(String(live.totalCostBasisEur ?? 0));
-  const todayKey = parisDayKey(new Date());
-  const last = points[points.length - 1];
-  const lastKey = last ? parisDayKey(last.date) : null;
-
-  const liveTotalBase = toBase(liveTotal);
-  const liveCashBase = toBase(liveCash);
-
-  const livePoint: PortfolioHistoryPoint = {
-    date: new Date().toISOString(),
-    label: "Aujourd'hui",
-    totalValueEur: liveTotal.toNumber(),
-    cashTotalEur: liveCash.toNumber(),
-    totalValueBase: liveTotalBase,
-    cashTotalBase: liveCashBase,
-    positionsBase: liveTotalBase - liveCashBase,
-    realizedPnlBase: toBase(liveRealized),
-    unrealizedPnlBase: toBase(liveUnrealized),
-    cashIncomeBase: toBase(liveIncome),
-    totalCostBase: toBase(liveCost),
-    isLive: true,
-  };
-
-  if (!last || lastKey !== todayKey) {
-    points.push(livePoint);
-  } else {
-    // Replace today's point with freshest live market value
-    points[points.length - 1] = {
-      ...livePoint,
-      label: last.label || "Aujourd'hui",
-    };
-  }
 
   attachIncomeSplit(points, incomeRows, toBase);
 
   return points;
+}
+
+/**
+ * Valeur du patrimoine aujourd'hui, par le moteur historique.
+ *
+ * Le dashboard et le dernier point de la courbe passent tous deux par ici : il
+ * n'existe plus de chemin « live » qui additionnerait les compartiments dans un
+ * ordre ou un périmètre différents.
+ */
+export async function getPortfolioValuationToday(
+  userId: string
+): Promise<PortfolioValuationPoint> {
+  const inputs = await loadHistoricalInputs(userId);
+  const engine = new PortfolioValuationEngine(inputs);
+  return engine.calculateAt(parisDayKey(new Date()));
 }
 
 export async function getAssetDetail(userId: string, assetId: string) {
@@ -1467,6 +1577,7 @@ export async function getAssetDetail(userId: string, assetId: string) {
       assetLogoUrl: resolveAssetLogo({
         logoUrl: asset.logoUrl,
         ticker: asset.ticker,
+        isin: asset.isin,
         name: asset.name,
         assetClass: asset.assetClass,
       }),

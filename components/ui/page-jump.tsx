@@ -48,7 +48,7 @@ export function PageJump({
         Aller à page&nbsp;:
       </span>
       <select
-        className="input !w-auto !min-w-[3.25rem] !py-1 text-xs font-semibold tabular-nums"
+        className="input w-auto !min-w-[3.25rem] py-1 text-xs font-semibold tabular-nums"
         value={pageIndex + 1}
         onChange={(e) => commit(e.target.value)}
         aria-label="Sélectionner une page"
@@ -65,7 +65,7 @@ export function PageJump({
         min={1}
         max={pageCount}
         inputMode="numeric"
-        className="input !w-14 !py-1 text-center text-xs font-semibold tabular-nums"
+        className="input w-14 py-1 text-center text-xs font-semibold tabular-nums"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => commit(draft)}

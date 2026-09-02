@@ -385,6 +385,72 @@ export function buildAmortizationSchedule(opts: {
   return rows;
 }
 
+export type EarlyRepaymentSimulation = {
+  newRemaining: string;
+  monthsBefore: number | null;
+  monthsAfter: number | null;
+  interestBefore: string;
+  interestAfter: string;
+  interestSaved: string;
+  isFullRepayment: boolean;
+};
+
+/**
+ * Simulation pure (aucune écriture) : effet d’un remboursement anticipé de
+ * `extraAmount` sur la durée et les intérêts restants, à mensualité et taux
+ * inchangés. Réutilise applyEarlyRepayment / estimateRemainingMonths /
+ * estimateRemainingInterest — pas de recalcul de maths ici.
+ */
+export function simulateEarlyRepayment(opts: {
+  remaining: DecimalInput;
+  monthlyPayment: DecimalInput;
+  annualPercent?: DecimalInput;
+  extraAmount: DecimalInput;
+}): EarlyRepaymentSimulation {
+  const remaining = d(opts.remaining);
+  const monthlyPayment = opts.monthlyPayment;
+  const annualPercent = opts.annualPercent ?? 0;
+  const extra = d(opts.extraAmount);
+
+  const monthsBefore = estimateRemainingMonths(remaining, monthlyPayment, annualPercent);
+  const interestBefore = estimateRemainingInterest(remaining, monthlyPayment, annualPercent);
+
+  if (remaining.lte(0) || extra.lte(0)) {
+    return {
+      newRemaining: toFixed(remaining.gt(0) ? remaining : d(0), 8),
+      monthsBefore,
+      monthsAfter: monthsBefore,
+      interestBefore,
+      interestAfter: interestBefore,
+      interestSaved: "0",
+      isFullRepayment: remaining.lte(0),
+    };
+  }
+
+  const isFullRepayment = extra.gte(remaining);
+  const { remaining: newRemaining } = applyEarlyRepayment(remaining, extra, isFullRepayment);
+
+  const monthsAfter = isFullRepayment
+    ? 0
+    : estimateRemainingMonths(newRemaining, monthlyPayment, annualPercent);
+  const interestAfter = isFullRepayment
+    ? "0"
+    : estimateRemainingInterest(newRemaining, monthlyPayment, annualPercent);
+
+  const saved = d(interestBefore).minus(d(interestAfter));
+  const interestSaved = toFixed(saved.gt(0) ? saved : d(0), 8);
+
+  return {
+    newRemaining,
+    monthsBefore,
+    monthsAfter,
+    interestBefore,
+    interestAfter,
+    interestSaved,
+    isFullRepayment,
+  };
+}
+
 /** Index (0-based) de l’échéance courante / prochaine dans le tableau. */
 export function currentScheduleIndex(
   schedule: AmortizationRow[],
@@ -411,4 +477,113 @@ export function currentScheduleIndex(
     }
   }
   return best;
+}
+
+/** Une échéance due, telle qu'elle sera matérialisée si on l'écrit. */
+export type DuePayment = {
+  eventDate: Date;
+  /** Montant réellement prélevé — plafonné au capital restant. */
+  debited: string;
+  /** Capital dû après ce prélèvement. */
+  remainingAfter: string;
+};
+
+export type DuePaymentProjection = {
+  /** Capital restant dû à la date de référence, échéances dues comprises. */
+  remaining: string;
+  /** Dernière échéance retenue — devient `lastPaymentAppliedAt` si matérialisée. */
+  lastAppliedAt: Date | null;
+  /** Les échéances dues, dans l'ordre. Vide si rien n'est dû. */
+  payments: DuePayment[];
+};
+
+/**
+ * Capital restant dû **à une date donnée**, sans rien écrire.
+ *
+ * Une mensualité n'attend pas qu'on la regarde pour être prélevée : entre deux
+ * visites, la dette baisse. Deux façons de le rendre : recalculer la valeur au
+ * moment de l'afficher, ou l'écrire en base quand on la découvre.
+ *
+ * Le dépôt faisait les deux — mais pas au même endroit. Le module Crédits
+ * écrivait (`applyDuePaymentsForUser`), le tableau de bord lisait le solde
+ * stocké. Le patrimoine net dépendait donc de l'écran ouvert en dernier :
+ * 64 020 € d'écart sur le compte de démonstration, et une assiette IFI qui
+ * bougeait de 57 820 € pour la même raison.
+ *
+ * Cette fonction est le versant « calcul » de cette séparation, sur le modèle
+ * de `savingsDisplayBalance()` pour les livrets. Elle ne touche ni la base ni
+ * ses arguments. `applyDuePaymentsForLiability` s'en sert pour décider quoi
+ * écrire, de sorte que les deux chemins ne peuvent pas diverger : la règle
+ * d'amortissement n'existe qu'ici.
+ */
+export function projectDuePayments(input: {
+  remainingAmount: DecimalInput;
+  monthlyPayment: DecimalInput | null;
+  paymentDay: number | null;
+  startDate: Date | null;
+  endDate: Date | null;
+  lastPaymentAppliedAt: Date | null;
+  now?: Date;
+}): DuePaymentProjection {
+  const remaining0 = toFixed(d(input.remainingAmount), 8);
+  const idle: DuePaymentProjection = {
+    remaining: remaining0,
+    lastAppliedAt: input.lastPaymentAppliedAt,
+    payments: [],
+  };
+
+  // Mêmes gardes que la matérialisation, dans le même ordre : une dette sans
+  // échéancier, sans mensualité ou déjà soldée ne bouge pas.
+  if (!input.paymentDay || input.monthlyPayment == null) return idle;
+  const payment = d(input.monthlyPayment).toString();
+  if (d(payment).lte(0)) return idle;
+  if (d(remaining0).lte(0)) return idle;
+
+  const dates = duePaymentDates({
+    paymentDay: input.paymentDay,
+    startDate: input.startDate,
+    endDate: input.endDate,
+    lastPaymentAppliedAt: input.lastPaymentAppliedAt,
+    now: input.now,
+  });
+  if (dates.length === 0) return idle;
+
+  let remaining = remaining0;
+  let lastAppliedAt = input.lastPaymentAppliedAt;
+  const payments: DuePayment[] = [];
+
+  for (const eventDate of dates) {
+    if (d(remaining).lte(0)) break;
+    const { remaining: next, debited } = applyMonthlyDebit(remaining, payment);
+    if (d(debited).lte(0)) break;
+    remaining = next;
+    lastAppliedAt = eventDate;
+    payments.push({ eventDate, debited, remainingAfter: remaining });
+  }
+
+  return { remaining, lastAppliedAt, payments };
+}
+
+/** Les seuls champs d'une dette dont dépend son amortissement. */
+export type AmortizableLiability = {
+  remainingAmount: DecimalInput;
+  monthlyPayment: DecimalInput | null;
+  paymentDay: number | null;
+  startDate: Date | null;
+  endDate: Date | null;
+  lastPaymentAppliedAt: Date | null;
+};
+
+/**
+ * Capital restant dû d'une dette à la date de référence.
+ *
+ * Raccourci de lecture sur `projectDuePayments` pour les appelants qui ne
+ * veulent que le montant. C'est la valeur que tout écran doit afficher : elle
+ * ne dépend ni de l'ordre de navigation, ni de la dernière matérialisation.
+ */
+export function remainingAmountAt(
+  liability: AmortizableLiability,
+  now?: Date
+): string {
+  return projectDuePayments({ ...liability, now }).remaining;
 }

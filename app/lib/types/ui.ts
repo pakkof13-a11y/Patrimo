@@ -51,6 +51,10 @@ export type Holding = {
   blockchainLabel?: string | null;
   assetLogoUrl?: string | null;
   logoUrl?: string | null;
+  /** Position adossée à un protocole DeFi — exclue de la vue Comptant. */
+  isDefiPosition?: boolean;
+  /** Position adossée à un NFT — exclue de la vue Comptant. */
+  isNftItem?: boolean;
   quantity: QuantityString;
   avgCostEur: EurAmount;
   costBasisEur: EurAmount;
@@ -78,6 +82,10 @@ export type Holding = {
   tp2?: string | null;
   tp3?: string | null;
   tp4?: string | null;
+  /** True si des niveaux SL/TP existent sur une jambe non-principale (multi-plateforme). */
+  hasSecondaryLevels?: boolean;
+  /** Ligne épinglée dans la watchlist du tableau de bord. */
+  watchlisted?: boolean;
 };
 
 export type MainTab =
@@ -88,13 +96,48 @@ export type MainTab =
   | "liabilities"
   | "banques"
   | "av"
-  | "cto"
-  | "pea"
+  /*
+    Ni `cto` ni `pea` : les deux ont été fusionnés dans `securities`, qui porte
+    la date d'ouverture, le plafond de versement et le régime propre à chaque
+    enveloppe. Les garder comme onglets laissait deux états qu'aucune
+    navigation ne produisait, dont l'URL canonique renvoyait ailleurs. Les
+    anciennes URL continuent de fonctionner — voir `tab-routes.ts`.
+  */
   | "crypto"
   | "immobilier"
   | "cfd"
   | "epargne-salariale"
   | "alternatifs"
+  /**
+   * Positions à levier / dérivés — futures crypto pour l'instant.
+   *
+   * Onglet à part et non un sous-onglet de `crypto` : une position à levier
+   * n'est pas un actif détenu mais un pari collatéralisé par une marge. Elle
+   * ne pèse au patrimoine ni par sa taille ni par son notionnel, seulement
+   * par marge + P&L latent. Elle n'a donc pas sa place à côté du comptant,
+   * de la DeFi et des NFT, qui sont tous trois des actifs détenus valorisés
+   * depuis le journal.
+   */
+  | "trading"
+  /**
+   * Saisie des contrats d'assurance-vie et de leurs supports.
+   *
+   * Distinct de `av`, qui est l'enveloppe côté Positions : celui-ci est un
+   * écran de saisie, comme `banques`, là où `av` filtre des positions déjà
+   * enregistrées.
+   */
+  | "assurance-vie"
+  /**
+   * Comptes titres — PEA, PEA-PME et compte-titres ordinaire.
+   *
+   * Onglet de premier niveau et non un filtre d'enveloppe, pour la même raison
+   * que l'immobilier et la crypto avant lui : un PEA porte une date
+   * d'ouverture, un plafond de versement et un régime d'imposition qui lui est
+   * propre — une vente interne n'y est pas un fait générateur, seul le retrait
+   * l'est. Le tableau Positions filtré ne montrait que la valeur, jamais rien
+   * de tout cela.
+   */
+  | "securities"
   | "fiscal";
 
 export type PlatformRow = {
@@ -110,7 +153,11 @@ export type PlatformRow = {
   logoUrl: string | null;
   logoKey?: string | null;
   walletAddress?: string | null;
-  walletApiKey?: string | null;
+  /**
+   * Le secret n'est jamais renvoyé au client (voir getPlatformCashBalances) —
+   * seul ce booléen indique qu'une clé est déjà enregistrée côté serveur.
+   */
+  hasWalletApiKey?: boolean;
   notes?: string | null;
   /** Positions titres ouvertes (qty > 0) */
   positionCount?: number;
@@ -119,7 +166,27 @@ export type PlatformRow = {
   /** Cash + titres */
   totalValueEur?: string;
   totalValueBase?: string;
+  /** P&L latent des positions ouvertes (hors cash) — marché vs coût de revient */
+  unrealizedPnlEur?: string;
+  unrealizedPnlBase?: string;
+  unrealizedPnlPct?: string;
   lastTransactionAt?: string | null;
+  /** Opérations rattachées à la plateforme (source du journal). */
+  transactionCount?: number;
+  /** Dernière synchronisation on-chain réussie — null si tenue à la main. */
+  lastSyncedAt?: string | null;
+  createdAt?: string;
+  /**
+   * Ventilation par enveloppe fiscale des positions ouvertes sur la
+   * plateforme. Patrimo n'a pas d'entité « compte » sous une plateforme :
+   * l'enveloppe portée par chaque actif est la seule ventilation réelle.
+   */
+  envelopes?: Array<{
+    accountType: string;
+    valueEur: string;
+    valueBase: string;
+    positionCount: number;
+  }>;
 };
 
 export type TxRow = {
@@ -188,6 +255,65 @@ export type HistoryPoint = {
   /** Coût de revient positions (base) */
   totalCostBase?: number;
   isLive?: boolean;
+
+  /** Valeur brute des actifs — métrique par défaut de la courbe. */
+  grossAssetsBase?: number;
+  /** `grossAssets - liabilities`. */
+  netWorthBase?: number;
+  liabilitiesBase?: number;
+  /** Capital externe entré (net) ce jour-là — jamais compté en performance. */
+  externalFlowsBase?: number;
+  /** Résultat du jour, flux neutralisés. */
+  investmentPerformanceBase?: number;
+
+  /**
+   * Le brut ventilé par classe d'actif : ACTIONS, OBLIGATIONS, CRYPTO,
+   * IMMOBILIER, CASH, AUTRE. Somme exactement égale à `grossAssetsBase`.
+   */
+  byAssetClassBase?: Record<string, number>;
+  /**
+   * Capital externe entré ou sorti ce jour-là, par classe. Somme égale à
+   * `externalFlowsBase`.
+   */
+  /**
+   * Valeur des titres par classe **puis** par enveloppe fiscale.
+   *
+   * Deux niveaux parce que la question l'est : « où sont mes actions » n'est
+   * pas « où sont mes titres ». Seules les classes qu'une enveloppe peut
+   * qualifier y figurent — ACTIONS et OBLIGATIONS.
+   *
+   * Résolue par le journal des enveloppes, jamais par l'état courant. `UNKNOWN`
+   * porte les lignes dont on sait qu'elles sont des titres mais dont
+   * l'enveloppe à cette date n'est pas démontrée — jamais zéro déguisé.
+   *
+   * `null` sur `PEA` ou `CTO` veut dire **absent** : rien ne démontre cette
+   * enveloppe à cette date. Le point n'est alors pas tracé, plutôt que d'être
+   * posé à zéro sur la courbe. Zéro subsiste là où il est vrai.
+   */
+  byAssetClassAndEnvelopeBase?: Record<string, Record<string, number | null>>;
+  flowsByAssetClassBase?: Record<string, number>;
+  /**
+   * `valeur(D) − valeur(D−1) − flux(D)` par classe. Absent au premier point
+   * d'une série : sans veille, rien n'est comparable.
+   *
+   * **Hors revenus encaissés** — dividendes, coupons et loyers restent hors
+   * périmètre, comme pour la performance globale.
+   */
+  performanceByAssetClassBase?: Record<string, number>;
+  securitiesBase?: number;
+  cryptoBase?: number;
+  realEstateBase?: number;
+  lifeInsuranceBase?: number;
+  alternativesBase?: number;
+  employeeSavingsBase?: number;
+  otherAssetsBase?: number;
+
+  /** `EXACT` | `ESTIMATED` | `MISSING`. */
+  status?: "EXACT" | "ESTIMATED" | "MISSING";
+  /** Compartiments non exacts ce jour-là. */
+  estimatedComponents?: string[];
+  /** Au moins un compartiment estimé ce jour-là. */
+  estimated?: boolean;
 };
 
 export type HoldingsResponse = {
@@ -200,8 +326,8 @@ export type HoldingsResponse = {
 
 /** Map main tabs that are filtered clones of Positions */
 export const TAB_TO_ACCOUNT_TYPE: Partial<Record<MainTab, AccountType>> = {
-  cto: "CTO",
-  pea: "PEA",
+  // Pas de `cto` ni `pea` : ces enveloppes ont leur onglet dédié
+  // (`securities`), qui ne passe pas par le tableau Positions filtré.
   av: "AV",
   crypto: "CRYPTO",
   immobilier: "IMMOBILIER",
@@ -211,11 +337,19 @@ export const TAB_TO_ACCOUNT_TYPE: Partial<Record<MainTab, AccountType>> = {
 /** Tabs that show the holdings table (with optional envelope filter). */
 export const POSITIONS_TABS: readonly MainTab[] = [
   "holdings",
-  "cto",
-  "pea",
+  // Ni `cto` ni `pea` : « PEA & CTO » rend son propre écran, pas le tableau
+  // Positions filtré. Les y laisser faisait surligner « Portefeuille » dans la
+  // barre latérale pour une URL qui n'appartenait plus à ce module.
   "av",
+  // `immobilier` n'est plus un clone filtré de Positions : l'onglet dédié
+  // rend sa propre vue. Le mapping vers l'enveloppe IMMOBILIER est conservé
+  // dans TAB_TO_ACCOUNT_TYPE, encore utilisé pour filtrer les positions
+  // affichées à l'intérieur de cet onglet.
+  //
+  // `crypto` reste ici (contrairement à `immobilier`) : son sous-onglet
+  // Comptant montre justement le tableau Positions filtré — c'est DeFi/NFT/
+  // Futures qui le masquent, via la condition posée dans portfolio-app.tsx.
   "crypto",
-  "immobilier",
   "cfd",
 ] as const;
 
@@ -229,11 +363,24 @@ export function isPositionsTab(tab: MainTab): boolean {
  */
 export const PRIMARY_NAV: { id: MainTab; label: string }[] = [
   { id: "dashboard", label: "Tableau de bord" },
-  { id: "holdings", label: "Positions" },
+  { id: "holdings", label: "Portefeuille" },
+  // Libellé volontairement explicite plutôt que « Titres » : les deux sigles
+  // parlent immédiatement, là où « Titres » demande un temps de traduction.
+  { id: "securities", label: "PEA & CTO" },
   { id: "banques", label: "Banques" },
+  // Catégorie à part entière, au même rang que Banques ou Épargne salariale :
+  // un bien porte un usage, un régime fiscal, un dispositif, un bail et une
+  // dette. Le réduire à un filtre d'enveloppe du tableau Positions n'en
+  // montrait que la valeur.
+  { id: "immobilier", label: "Immobilier" },
+  // Même raisonnement : comptant, DeFi et NFT sont trois lectures différentes
+  // du même patrimoine, avec leur propre vue d'ensemble et leurs propres flux
+  // de saisie — plus un simple filtre d'enveloppe.
+  { id: "crypto", label: "Cryptos" },
   { id: "epargne-salariale", label: "Épargne Salariale" },
   { id: "alternatifs", label: "Actifs Alternatifs" },
-  { id: "transactions", label: "Transactions" },
+  { id: "trading", label: "Trading" },
+  { id: "transactions", label: "Opérations" },
   { id: "fiscal", label: "Fiscalité" },
   { id: "liabilities", label: "Passifs" },
   { id: "platforms", label: "Mes plateformes" },
@@ -245,11 +392,10 @@ export const PRIMARY_NAV: { id: MainTab; label: string }[] = [
  */
 export const ENVELOPE_NAV: { id: MainTab; label: string; short: string }[] = [
   { id: "holdings", label: "Toutes", short: "Tout" },
-  { id: "cto", label: "Compte-Titres", short: "CTO" },
-  { id: "pea", label: "PEA", short: "PEA" },
   { id: "av", label: "Assurance-Vie", short: "AV" },
-  { id: "crypto", label: "Cryptomonnaies", short: "Crypto" },
-  { id: "immobilier", label: "Immobilier", short: "Immo" },
+  // `immobilier`, `crypto` et désormais les comptes titres (`securities`, sous
+  // le libellé « PEA & CTO ») sont passés en navigation primaire : les laisser
+  // aussi ici afficherait deux entrées pour la même vue.
   { id: "cfd", label: "CFD", short: "CFD" },
 ];
 
@@ -274,13 +420,20 @@ export const MAIN_TAB_IDS: readonly MainTab[] = [
   "liabilities",
   "banques",
   "av",
-  "cto",
-  "pea",
   "crypto",
   "immobilier",
   "cfd",
   "epargne-salariale",
   "alternatifs",
+  "trading",
+  "securities",
+  /*
+    `assurance-vie` manquait à cette liste alors qu'il appartient à `MainTab` :
+    `isMainTab("assurance-vie")` répondait faux. Sans conséquence visible — la
+    route a sa branche explicite — mais c'est exactement l'écart qui a laissé
+    `cto` et `pea` pourrir.
+  */
+  "assurance-vie",
   "fiscal",
 ] as const;
 
@@ -292,4 +445,76 @@ export const TAB_STORAGE_KEY = "patrimo.mainTab";
 
 export const HOLDINGS_PAGE_SIZE = 40;
 export const CHART_COLORS = ["#0f766e", "#0284c7", "#7c3aed", "#d97706", "#be123c", "#475569"];
+
+/** Luminance relative WCAG d'une couleur `#rrggbb`. */
+function relativeLuminance(hex: string): number {
+  const h = hex.replace("#", "");
+  const full =
+    h.length === 3
+      ? h
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : h;
+  const chan = (i: number) => {
+    const v = parseInt(full.slice(i * 2, i * 2 + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * chan(0) + 0.7152 * chan(1) + 0.0722 * chan(2);
+}
+
+function contrastWith(hex: string, luminance: number): number {
+  const l = relativeLuminance(hex);
+  const [hi, lo] = l > luminance ? [l, luminance] : [luminance, l];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * Couleur de texte lisible sur un aplat de la palette graphique.
+ *
+ * Le blanc systématique tombait sous le seuil WCAG AA (4.5:1) sur les teintes
+ * claires de la palette — 3.19:1 sur l'ambre `#d97706`, 4.1:1 sur le bleu
+ * `#0284c7`. On retient donc, entre blanc et encre foncée, celle qui contraste
+ * le mieux avec le fond ; le calcul suit la palette si elle évolue.
+ */
+export function readableInkOn(background: string): "#ffffff" | "#0b1220" {
+  const white = contrastWith("#ffffff", relativeLuminance(background));
+  const ink = contrastWith("#0b1220", relativeLuminance(background));
+  return ink > white ? "#0b1220" : "#ffffff";
+}
 export const EMPTY_HOLDINGS: Holding[] = [];
+
+/**
+ * Libellé lisible d'une source de cours.
+ *
+ * `priceSource` porte un jeton interne (`seed`, `yahoo`, `coingecko`…) qui était
+ * affiché brut, en capitales, sous chaque cours du tableau Positions : « SEED »,
+ * « COINGECKO ». Du vocabulaire de développeur exposé sur l'écran le plus
+ * consulté. On mappe donc vers le nom réel du fournisseur, et on laisse passer
+ * tel quel — simplement capitalisé — toute source inconnue, pour ne jamais
+ * masquer une provenance.
+ */
+const PRICE_SOURCE_LABELS: Record<string, string> = {
+  seed: "Démo",
+  yahoo: "Yahoo Finance",
+  "yahoo-finance": "Yahoo Finance",
+  binance: "Binance",
+  coingecko: "CoinGecko",
+  zerion: "Zerion",
+  solana: "Solana RPC",
+  monero: "Monero",
+  mock: "Simulé",
+  manual: "Saisie manuelle",
+  "coût": "Au coût",
+  cout: "Au coût",
+  cost: "Au coût",
+};
+
+export function priceSourceLabel(source: string | null | undefined): string {
+  const raw = (source ?? "").trim();
+  if (!raw) return "Source inconnue";
+  const hit = PRICE_SOURCE_LABELS[raw.toLowerCase()];
+  if (hit) return hit;
+  // Source non répertoriée : capitaliser sans crier.
+  return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+}

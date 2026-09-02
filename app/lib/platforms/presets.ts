@@ -1,5 +1,5 @@
 /**
- * Catalogue plateformes Patrimo (`PLATFORM_PRESETS`).
+ * Catalogue plateformes Aurea (`PLATFORM_PRESETS`).
  *
  * ## Classification (2026-07)
  * - Une banque / assureur remonte ici UNIQUEMENT si elle propose
@@ -32,6 +32,7 @@ export type PlatformPresetType =
   | "PORTEFEUILLE_HARDWARE"
   | "NOTAIRE_IMMOBILIER"
   | "BROKER_CFD"
+  | "CGP_CABINETS"
   | "AUTRE";
 
 /** Sous-catégories assurance-vie (ordre d’affichage dans le combobox) */
@@ -302,6 +303,18 @@ const COURTIERS: PlatformPreset[] = [
   p("YOMONI", "Yomoni", ["COURTIER", "ASSURANCE_VIE"], "yomoni.fr", {
     category: "Courtiers en bourse",
   }),
+  p("MILLEIS", "Milleis Banque", ["COURTIER", "BANQUE", "ASSURANCE_VIE"], "milleis.fr", {
+    category: "Banques privées",
+  }),
+  p("ODDO_BHF", "Oddo BHF", ["COURTIER", "BANQUE", "ASSURANCE_VIE"], "oddo-bhf.fr", {
+    category: "Banques privées",
+  }),
+  p("PALATINE", "Palatine", ["COURTIER", "BANQUE", "ASSURANCE_VIE"], null, {
+    category: "Banques privées",
+  }),
+  p("ROTHSCHILD_CO", "Rothschild & Co", ["COURTIER", "BANQUE", "ASSURANCE_VIE"], "rothschildandco.com", {
+    category: "Banques privées",
+  }),
 ].sort(sortByName);
 
 /**
@@ -389,6 +402,26 @@ const ASSURANCE_VIE: PlatformPreset[] = [
     category: "Courtiers en assurance vie",
     subtype: "Assureurs traditionnels",
   }),
+  p("AV_CARDIF", "Cardif", ["ASSURANCE_VIE"], "cardif.fr", {
+    category: "Courtiers en assurance vie",
+    subtype: "Assureurs traditionnels",
+  }),
+  p("AV_CORUM_LIFE", "Corum Life", ["ASSURANCE_VIE"], null, {
+    category: "Courtiers en assurance vie",
+    subtype: "Assureurs traditionnels",
+  }),
+  p("AV_MUTAVIE", "Mutavie", ["ASSURANCE_VIE"], "mutavie.fr", {
+    category: "Courtiers en assurance vie",
+    subtype: "Mutuelles d'épargne",
+  }),
+  p("AV_SPIRICA", "Spirica", ["ASSURANCE_VIE"], "spirica.fr", {
+    category: "Courtiers en assurance vie",
+    subtype: "Mutuelles d'épargne",
+  }),
+  p("AV_SURAVENIR", "Suravenir", ["ASSURANCE_VIE"], "suravenir.com", {
+    category: "Courtiers en assurance vie",
+    subtype: "Assureurs traditionnels",
+  }),
 ].sort(sortByName);
 
 /** CFD pure — marques déjà multi-types (eToro, IG, XTB…) absentes ici. */
@@ -448,6 +481,10 @@ const EXCHANGES: PlatformPreset[] = [
     category: "Exchange crypto",
     subtype: "CEX",
   }),
+  p("BITRUE", "Bitrue", ["EXCHANGE_CRYPTO"], "bitrue.com", {
+    category: "Exchange crypto",
+    subtype: "CEX",
+  }),
   p("BITSTAMP", "Bitstamp", ["EXCHANGE_CRYPTO"], "bitstamp.net", {
     category: "Exchange crypto",
     subtype: "CEX",
@@ -477,6 +514,10 @@ const EXCHANGES: PlatformPreset[] = [
     subtype: "CEX",
   }),
   p("GEMINI", "Gemini", ["EXCHANGE_CRYPTO"], "gemini.com", {
+    category: "Exchange crypto",
+    subtype: "CEX",
+  }),
+  p("HTX", "HTX", ["EXCHANGE_CRYPTO"], "htx.com", {
     category: "Exchange crypto",
     subtype: "CEX",
   }),
@@ -570,6 +611,10 @@ const EXCHANGES: PlatformPreset[] = [
     category: "DEX crypto",
     subtype: "Perps / futures",
   }),
+  p("PHEMEX", "Phemex", ["EXCHANGE_CRYPTO"], "phemex.com", {
+    category: "DEX crypto",
+    subtype: "Perps / futures",
+  }),
   p("REYA", "Reya", ["EXCHANGE_CRYPTO"], "reya.network", {
     category: "DEX crypto",
     subtype: "Perps / futures",
@@ -640,6 +685,55 @@ const NOTAIRES: PlatformPreset[] = [
   }),
 ].sort(sortByName);
 
+/** Cabinets en Gestion de Patrimoine (CGP) — indépendants et réseaux structurés. */
+const CGP_CABINETS: PlatformPreset[] = [
+  p("CGP_AGORA_FINANCE", "Agora Finance", ["CGP_CABINETS"], "agorafinance.fr", {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p(
+    "CGP_BANQUES_PRIVEES",
+    "Banques Privées / Gestion Privée",
+    ["CGP_CABINETS"],
+    null,
+    {
+      category: "Cabinets en Gestion de Patrimoine",
+      subtype: "Banques privées",
+    }
+  ),
+  p("CGP_CRYSTAL", "Crystal", ["CGP_CABINETS"], "crystalgestion.com", {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p("CGP_CYRUS_HEREZ", "Cyrus-Herez", ["CGP_CABINETS"], "cyrusherez.fr", {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p("CGP_EURIZON_PATRIMOINE", "Eurizon Patrimoine", ["CGP_CABINETS"], null, {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p("CGP_GENERIQUE", "Cabinet en Gestion de Patrimoine", ["CGP_CABINETS"], null, {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p("CGP_INDEPENDANT", "CGP Indépendant", ["CGP_CABINETS"], null, {
+    category: "Cabinets en Gestion de Patrimoine",
+    subtype: "CGP indépendant",
+  }),
+  p("CGP_PRIMONIAL", "Primonial", ["CGP_CABINETS"], "primonial.fr", {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p("CGP_PROSPER_CONSEIL", "Prosper Conseil", ["CGP_CABINETS"], "prosperconseil.com", {
+    category: "Cabinets en Gestion de Patrimoine",
+  }),
+  p(
+    "CGP_RESEAU_STRUCTURE",
+    "Réseau structuré de CGP",
+    ["CGP_CABINETS"],
+    null,
+    {
+      category: "Cabinets en Gestion de Patrimoine",
+      subtype: "Réseau structuré",
+    }
+  ),
+].sort(sortByName);
+
 const CHAINS_L1: PlatformPreset[] = [
   chain("ALGORAND", "Algorand (ALGO)", "algorand.com", "Layer 1"),
   chain("AVALANCHE", "Avalanche (AVAX)", "avax.network", "Layer 1"),
@@ -700,6 +794,7 @@ export const PLATFORM_PRESETS: PlatformPreset[] = [
   ...FINTECHS,
   ...HARDWARE,
   ...NOTAIRES,
+  ...CGP_CABINETS,
   ...CHAINS_L1,
   ...CHAINS_L2,
 ];

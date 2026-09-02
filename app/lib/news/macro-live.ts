@@ -190,7 +190,7 @@ export async function resolveMacroCalendarToday(): Promise<MacroLiveResult> {
         signal: AbortSignal.timeout(10_000),
         headers: {
           Accept: "application/json",
-          "User-Agent": "Patrimo/1.0 (portfolio; macro calendar)",
+          "User-Agent": "Aurea/1.0 (portfolio; macro calendar)",
         },
       }
     );

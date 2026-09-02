@@ -1,12 +1,15 @@
 "use client";
 
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { EmptyPlaceholder } from "@/components/ui/panel";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   ModuleCard,
   ModuleCardHeader,
-  ModuleGuidedEmpty,
   ModuleKpiStrip,
 } from "@/components/ui/module-shell";
-import { cn, getChangeColor } from "@/app/lib/utils";
+import { cn } from "@/app/lib/utils";
 
 /**
  * Shell UX partagé pour la section Actifs alternatifs.
@@ -150,47 +153,141 @@ export function AltEmptyState({
   secondary?: React.ReactNode;
 }) {
   return (
-    <ModuleGuidedEmpty
+    <EmptyPlaceholder
+      /*
+        `sm:py-12` reprend la respiration que portait l'ancien enrobage :
+        `EmptyPlaceholder` s'arrête à `py-10`, et ces états vides guidés
+        occupent une carte entière plutôt qu'un coin de tableau.
+      */
+      className="sm:py-12"
       title={title}
       description={description}
-      bullets={bullets}
-      primaryLabel={primaryLabel}
-      onPrimary={onPrimary}
-      primaryTestId={primaryTestId}
-      secondary={secondary}
-    />
+      action={
+        <>
+          <Button type="button" size="sm" onClick={onPrimary} data-testid={primaryTestId}>
+            <Plus className="h-3.5 w-3.5" />
+            {primaryLabel}
+          </Button>
+          {secondary}
+        </>
+      }
+    >
+      {bullets && bullets.length > 0 ? (
+        <ul className="mx-auto max-w-sm space-y-1.5 text-left text-[11px] text-[var(--muted-foreground)]">
+          {bullets.map((b) => (
+            <li key={b} className="flex gap-2">
+              <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--primary)]/70" />
+              <span>{b}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </EmptyPlaceholder>
   );
 }
 
+/**
+ * Le sens d'un P&L, pas sa valeur.
+ *
+ * Un résultat latent n'est ni positif ni négatif par nature : c'est son signe
+ * qui l'est, et zéro n'est ni l'un ni l'autre. La même fonction existe dans
+ * Trading depuis la factorisation des KPI ; les deux tiennent en trois lignes
+ * et vivent chacune près de leurs appelants plutôt que dans un utilitaire
+ * commun que personne n'irait chercher.
+ */
+export function pnlTone(v: number | null | undefined) {
+  if (v == null || v === 0) return undefined;
+  return v > 0 ? ("positive" as const) : ("negative" as const);
+}
+
+/**
+ * Tuile d'une bande d'indicateurs de famille.
+ *
+ * ## L'état de chargement
+ *
+ * Les appelants lisent leur donnée en `summary?.X ?? "0"` puis la formatent :
+ * l'absence devient un montant nul *avant* d'atteindre cette tuile, qui n'a
+ * donc aucun moyen de faire la différence. Elle a besoin qu'on le lui dise —
+ * d'où `loading`, alimenté par la requête elle-même et non déduit de la
+ * valeur reçue.
+ *
+ * Pendant le chargement, seuls le libellé et son infobulle restent : le
+ * squelette prend la place de la valeur, la tonalité s'efface — affirmer une
+ * tendance sur une donnée inconnue est faux — et la précision aussi, car
+ * elle est calculée sur cette même donnée absente et dirait « Sur 0,00 €
+ * investis » sous un squelette.
+ *
+ * Un zéro réel, lui, s'affiche comme un montant : c'en est un.
+ */
 export function AltMiniKpi({
   label,
   value,
   hint,
   tone,
   tip,
+  loading = false,
 }: {
   label: React.ReactNode;
   value: string;
   hint?: string;
-  tone?: number;
+  /**
+   * Le sens de la valeur, pas sa valeur.
+   *
+   * L'appelant calcule le signe — il sait ce que son nombre veut dire — et la
+   * tuile ne fait que le rendre. Elle recevait auparavant le montant lui-même
+   * et en déduisait la couleur, ce qui la rendait comptable d'une décision
+   * qui ne la regarde pas.
+   */
+  tone?: "positive" | "negative";
   tip?: React.ReactNode;
+  loading?: boolean;
 }) {
   return (
-    <div className="min-w-0">
+    <div
+      className="min-w-0"
+      data-loading={loading ? "true" : undefined}
+      aria-busy={loading || undefined}
+    >
       <div className="text-label flex items-center gap-1 normal-case tracking-wide">
         {label}
         {tip}
       </div>
-      <div
-        className={cn(
-          "mt-0.5 text-sm font-semibold tabular-nums tracking-tight",
-          tone != null && tone !== 0 && getChangeColor(String(tone))
-        )}
-      >
-        {value}
-      </div>
+      {loading ? (
+        <Skeleton
+          /*
+            Au gabarit exact de la valeur — `text-sm` à l'échelle Aurea, soit
+            17 px de hauteur de ligne. Un squelette plus haut de trois pixels
+            suffit à faire descendre tout ce qui suit à l'arrivée des données.
+          */
+          className="mt-0.5 h-[1.0625rem] w-24"
+        />
+      ) : (
+        <div
+          className={cn(
+            "mt-0.5 text-sm font-semibold tabular-nums tracking-tight",
+            tone === "positive" && "val-positive",
+            tone === "negative" && "val-negative"
+          )}
+        >
+          {value}
+        </div>
+      )}
       {hint ? (
-        <div className="mt-0.5 text-[10px] text-[var(--muted-foreground)]">
+        /*
+          La précision est masquée pendant le chargement, mais garde sa place.
+
+          `visibility: hidden` plutôt qu'un squelette : ces précisions tiennent
+          sur une ou deux lignes selon leur longueur, et un squelette de
+          hauteur fixe réserverait la mauvaise — les tuiles de Métaux
+          gagnaient quinze pixels à l'arrivée des données. Le texte occupe
+          exactement la place qu'il prendra, sans être lu ni annoncé.
+        */
+        <div
+          className={cn(
+            "mt-0.5 text-[10px] text-[var(--muted-foreground)]",
+            loading && "invisible"
+          )}
+        >
           {hint}
         </div>
       ) : null}
@@ -198,44 +295,70 @@ export function AltMiniKpi({
   );
 }
 
+/**
+ * Tuile de tête de la vue d'ensemble Cryptos.
+ *
+ * Trois des quatre ouvrent leur sous-module et sont donc des boutons ; la
+ * quatrième porte un P&L et n'a pas de destination — elle reste une division,
+ * et le chargement ne change pas ce rôle.
+ *
+ * Le chargement y masque plus que la valeur : les précisions de cet écran
+ * sont conditionnées au montant, si bien qu'une tuile en cours de chargement
+ * annonçait à la fois un montant nul, « non renseigné » et « 0 wallet(s)
+ * connecté(s) ». La précision garde donc sa place sans être lue, comme dans
+ * `AltMiniKpi` — sa longueur varie avec son contenu, et un squelette de
+ * hauteur fixe réserverait la mauvaise.
+ */
 export function AltDashKpi({
   label,
   value,
   hint,
   tone,
   onClick,
-  active,
+  loading = false,
 }: {
   label: string;
   value: string;
   hint?: string;
-  tone?: number;
+  /** Le sens de la valeur — voir `AltMiniKpi`. */
+  tone?: "positive" | "negative";
   onClick?: () => void;
-  active?: boolean;
+  loading?: boolean;
 }) {
   const Comp = onClick ? "button" : "div";
   return (
     <Comp
       type={onClick ? "button" : undefined}
       onClick={onClick}
+      data-loading={loading ? "true" : undefined}
+      aria-busy={loading || undefined}
       className={cn(
         "card p-4 text-left transition",
         onClick &&
-          "cursor-pointer hover:border-[var(--primary)]/25 hover:bg-[var(--primary-soft)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-        active && "ring-1 ring-[var(--primary)]/35 bg-[var(--primary-soft)]"
+          "cursor-pointer hover:border-[var(--primary)]/25 hover:bg-[var(--primary-soft)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
       )}
     >
       <div className="text-label">{label}</div>
-      <div
-        className={cn(
-          "kpi-value mt-1 text-xl tracking-tight",
-          tone != null && tone !== 0 && getChangeColor(String(tone))
-        )}
-      >
-        {value}
-      </div>
+      {loading ? (
+        /*
+          Au gabarit exact de la valeur : `text-xl` à l'échelle Aurea occupe
+          28 px de hauteur de ligne. Huit pixels de moins par tuile suffisent
+          à faire remonter tout ce qui suit la bande pendant le chargement.
+        */
+        <Skeleton className="mt-1 h-7 w-28" />
+      ) : (
+        <div
+          className={cn(
+            "kpi-value mt-1 text-xl tracking-tight",
+            tone === "positive" && "val-positive",
+            tone === "negative" && "val-negative"
+          )}
+        >
+          {value}
+        </div>
+      )}
       {hint ? (
-        <div className="text-meta mt-1">{hint}</div>
+        <div className={cn("text-meta mt-1", loading && "invisible")}>{hint}</div>
       ) : null}
     </Comp>
   );

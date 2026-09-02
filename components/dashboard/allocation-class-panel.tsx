@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { LayoutGrid, PieChart as PieIcon } from "lucide-react";
-import { CHART_COLORS } from "@/app/lib/types/ui";
+import { CHART_COLORS, readableInkOn } from "@/app/lib/types/ui";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import {
   EmptyPlaceholder,
@@ -146,6 +146,15 @@ function squarify(items: Item[]): LaidOutTile[] {
   }));
 }
 
+/**
+ * Une tuile peut-elle afficher son nom ? Seuil unique, partagé par le rendu des
+ * tuiles et par la légende — sinon les deux dérivent et une classe se retrouve
+ * soit dupliquée, soit nulle part.
+ */
+function fitsName(t: { w: number; h: number }): boolean {
+  return t.h * 192 >= 16 && t.w * 260 >= 40;
+}
+
 function AllocationTiles({
   data,
   baseCurrency,
@@ -174,12 +183,27 @@ function AllocationTiles({
     return squarify(colored);
   }, [data, total, baseCurrency]);
 
+  // Une tuile trop petite pour porter son nom devient un bloc de couleur non
+  // identifiable : le `title` natif exige un survol prolongé et n'existe pas au
+  // tactile. On les liste donc dans une légende sous la mosaïque.
+  const unlabeled = tiles.filter((t) => !fitsName(t));
+
+  // `role="img"` rend les enfants présentationnels : sans description explicite,
+  // toute la répartition est muette pour un lecteur d'écran. On énumère donc les
+  // classes dans l'aria-label.
+  const description = tiles.length
+    ? `Allocation par classe d’actifs : ${tiles
+        .map((t) => `${t.name} ${t.pct.toFixed(1)} %, ${t.amountLabel}`)
+        .join(" ; ")}`
+    : "Allocation par classe d’actifs : aucune donnée";
+
   return (
+    <>
     <div
       className="relative h-44 w-full overflow-hidden rounded-lg bg-black sm:h-48 lg:h-52"
       data-testid="allocation-tiles"
       role="img"
-      aria-label="Allocation par classe d’actifs"
+      aria-label={description}
     >
       {tiles.map((t) => {
         const area = t.w * t.h;
@@ -210,15 +234,23 @@ function AllocationTiles({
 
         const showAmount = pxH >= 42 && pxW >= 88;
         const showPct = pxH >= 24 && pxW >= 52;
-        const showName = pxH >= 16 && pxW >= 40;
+        const showName = fitsName(t);
         const rowMode = pxH < 48;
+        const ink = readableInkOn(t.color);
+        // L'ombre portée ne sert qu'à décoller le texte clair d'un aplat vif ;
+        // sur encre foncée elle salit le rendu.
+        const textShadow =
+          ink === "#ffffff" ? "0 1px 2px rgba(0,0,0,0.55)" : "none";
 
         return (
           <div
             key={t.name}
             title={`${t.name} · ${t.pct.toFixed(1)} % · ${t.amountLabel}`}
-            className="absolute box-border overflow-hidden text-white transition-[filter] duration-150 hover:brightness-110"
+            className="absolute box-border overflow-hidden transition-[filter] duration-150 hover:brightness-110"
             style={{
+              // Encre choisie selon la tuile : le blanc systématique passait
+              // sous 4.5:1 sur l'ambre et le bleu de la palette.
+              color: ink,
               left: `${t.x * 100}%`,
               top: `${t.y * 100}%`,
               width: `${t.w * 100}%`,
@@ -239,7 +271,7 @@ function AllocationTiles({
                 className="min-w-0 font-semibold leading-tight"
                 style={{
                   fontSize: nameFs,
-                  textShadow: "0 1px 2px rgba(0,0,0,0.55)",
+                  textShadow,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -251,7 +283,7 @@ function AllocationTiles({
             )}
             <div
               className="min-w-0 shrink-0"
-              style={{ textShadow: "0 1px 2px rgba(0,0,0,0.55)" }}
+              style={{ textShadow }}
             >
               {showPct && (
                 <div
@@ -280,6 +312,30 @@ function AllocationTiles({
         );
       })}
     </div>
+    {unlabeled.length > 0 && (
+      <ul
+        className="mt-2 flex flex-wrap gap-x-3 gap-y-1"
+        data-testid="allocation-tiles-legend"
+        aria-hidden="true"
+      >
+        {unlabeled.map((t) => (
+          <li
+            key={t.name}
+            className="inline-flex items-center gap-1.5 text-[10px] leading-none text-[var(--muted-foreground)]"
+          >
+            <span
+              className="inline-block h-2 w-2 shrink-0 rounded-[2px]"
+              style={{ backgroundColor: t.color }}
+            />
+            <span className="font-medium text-[var(--foreground)]/80">
+              {t.name}
+            </span>
+            <span className="tabular-nums">{t.pct.toFixed(1)}&nbsp;%</span>
+          </li>
+        ))}
+      </ul>
+    )}
+    </>
   );
 }
 

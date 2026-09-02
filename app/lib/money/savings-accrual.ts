@@ -1,6 +1,8 @@
 import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "../prisma";
 import { owned } from "../db/tenant-scope";
+import { d } from "./decimal";
+import { recordSavingsAccountInterest } from "../cash/account-events";
 import {
   creditDueInterest,
   type PayoutFrequency,
@@ -56,18 +58,56 @@ export async function applyDueInterestForSavings(
     return { account: row, periodsCredited: 0, totalInterest: "0" };
   }
 
-  const write = await prisma.savingsAccount.updateMany({
-    where: owned(savingsId, userId),
-    data: {
-      balance: new Prisma.Decimal(result.balance),
-      lastPayoutAt: result.lastPayoutAt,
-      lastAccruedAt: result.lastPayoutAt || row.lastAccruedAt,
-    },
-  });
-  if (write.count === 0) return null;
+  const updated = await prisma.$transaction(async (tx) => {
+    /*
+      Écriture conditionnée à l'état qui a servi au calcul.
 
-  const updated = await prisma.savingsAccount.findFirst({
-    where: owned(savingsId, userId),
+      Le filtre ne portait que sur l'identité de la ligne. Entre la lecture et
+      cette écriture, la ligne pouvait avoir changé, et l'accrual réécrivait
+      quand même un solde calculé à partir d'une valeur périmée. Un utilisateur
+      saisissant 12 000 € pendant qu'un accrual parti de 10 000 € calculait
+      10 100 € voyait sa saisie remplacée par 10 100 € — sans erreur, sans
+      trace.
+
+      Exiger `balance` et `lastPayoutAt` tels qu'ils ont été lus transforme
+      l'écriture en compare-and-set : le SGBD évalue le filtre et applique la
+      donnée en une seule instruction, donc rien ne peut s'intercaler entre les
+      deux. Si la ligne a bougé, aucune ligne ne correspond, et l'accrual
+      renonce plutôt que d'écraser.
+
+      Les deux champs, et pas seulement `lastPayoutAt` : une saisie de solde
+      repositionne bien ce dernier (`app/api/savings/route.ts`), mais se fier à
+      ce seul détour rendrait le garde-fou dépendant d'un choix distant. Le
+      solde est ce sur quoi le calcul s'appuie ; c'est lui qu'on exige.
+    */
+    const write = await tx.savingsAccount.updateMany({
+      where: {
+        ...owned(savingsId, userId),
+        balance: row.balance,
+        lastPayoutAt: row.lastPayoutAt,
+      },
+      data: {
+        balance: new Prisma.Decimal(result.balance),
+        lastPayoutAt: result.lastPayoutAt,
+        lastAccruedAt: result.lastPayoutAt || row.lastAccruedAt,
+      },
+    });
+    /*
+      Zéro ligne : la course est perdue. On ne crédite rien et on n'inscrit
+      aucun événement — c'est ce qui empêche aussi deux accruals concurrents
+      d'inscrire deux INTEREST pour le même intervalle, `lastPayoutAt` ayant
+      avancé sous le premier.
+    */
+    if (write.count === 0) return null;
+    await recordSavingsAccountInterest(
+      tx,
+      savingsId,
+      result.totalInterest,
+      result.balance,
+      result.periodsCredited,
+      result.lastPayoutAt ?? now
+    );
+    return tx.savingsAccount.findFirst({ where: owned(savingsId, userId) });
   });
   if (!updated) return null;
 
@@ -82,15 +122,43 @@ export async function applyDueInterestForSavings(
 export async function applyDueInterestForUser(userId: string, now: Date = new Date()) {
   const rows = await prisma.savingsAccount.findMany({ where: { userId } });
   let periods = 0;
-  let totalInterest = 0;
+  // Cumul en Decimal : sommer des intérêts en float dérive dès quelques
+  // livrets (0.1 + 0.2 ≠ 0.3) sur un montant restitué tel quel par l'API.
+  let totalInterest = d(0);
+  const errors: Array<{ savingsId: string; message: string }> = [];
+
   for (const r of rows) {
-    const res = await applyDueInterestForSavings(userId, r.id, now);
-    if (res) {
-      periods += res.periodsCredited;
-      totalInterest += Number(res.totalInterest || 0);
+    /*
+      Chaque livret est isolé.
+
+      La boucle laissait remonter la première exception : le job s'arrêtait là,
+      et tous les livrets suivants ne recevaient jamais leurs intérêts. Une
+      seule ligne en défaut bloquait ainsi les autres à chaque passage, sans
+      que la réponse dise jusqu'où le job était allé.
+
+      L'échec n'est pas avalé pour autant : il est journalisé et rapporté à
+      l'appelant, comme le fait déjà le cron intraday pour la collecte
+      quotidienne.
+    */
+    try {
+      const res = await applyDueInterestForSavings(userId, r.id, now);
+      if (res) {
+        periods += res.periodsCredited;
+        totalInterest = totalInterest.plus(d(res.totalInterest || 0));
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erreur inconnue";
+      console.error("[savings-accrual] livret", r.id, message);
+      errors.push({ savingsId: r.id, message });
     }
   }
-  return { accounts: rows.length, periodsCredited: periods, totalInterest };
+
+  return {
+    accounts: rows.length,
+    periodsCredited: periods,
+    totalInterest: totalInterest.toString(),
+    errors,
+  };
 }
 
 export function mapSavingsRowForApi(
@@ -110,6 +178,10 @@ export function mapSavingsRowForApi(
     currency: string;
     notes?: string | null;
     createdAt: Date;
+    productType?: string | null;
+    ceilingAmount?: { toString(): string } | null;
+    isPro?: boolean;
+    ownershipPct?: { toString(): string } | null;
   },
   now: Date = new Date()
 ) {
@@ -154,5 +226,9 @@ export function mapSavingsRowForApi(
     notes: s.notes ?? null,
     lastAccruedAt: s.lastAccruedAt.toISOString(),
     lastPayoutAt: s.lastPayoutAt?.toISOString() ?? null,
+    productType: s.productType ?? "AUTRE",
+    ceilingAmount: s.ceilingAmount?.toString() ?? null,
+    isPro: s.isPro ?? false,
+    ownershipPct: s.ownershipPct?.toString() ?? null,
   };
 }

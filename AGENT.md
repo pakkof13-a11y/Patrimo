@@ -1,4 +1,4 @@
-# Patrimo — Environnement de test (agent)
+# Aurea — Environnement de test (agent)
 
 Ce fichier documente l’accès à l’instance de test pour les agents (Grok, Cursor, Playwright, etc.).
 
@@ -6,7 +6,7 @@ Ce fichier documente l’accès à l’instance de test pour les agents (Grok, C
 
 - **Production (test agent)** : https://patrimo-psi.vercel.app
 - **Health check** : `GET /api/health`
-- **Dépôt GitHub** : https://github.com/pakkof13-a11y/Patrimo (privé, branche `staging`)
+- **Dépôt GitHub** : https://github.com/pakkof13-a11y/patrimo (privé, branche `staging`)
 
 ## Authentification
 

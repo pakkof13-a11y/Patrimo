@@ -11,6 +11,10 @@ import {
 import { listBankAccounts } from "@/app/lib/cash/pockets";
 import { findOrCreatePlatform } from "@/app/lib/platforms/upsert";
 import { findPreset, primaryType } from "@/app/lib/platforms/presets";
+import {
+  recordBankAccountBalanceChange,
+  recordBankAccountOpening,
+} from "@/app/lib/cash/account-events";
 
 /** Assure une plateforme homonyme pour afficher le cash en Sources → Plateformes. */
 async function ensureBankPlatform(userId: string, bankName: string) {
@@ -44,14 +48,20 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return validationErrorResponse(parsed.error);
   }
-  const account = await prisma.bankAccount.create({
-    data: {
-      userId,
-      bankName: parsed.data.bankName,
-      balance: new Prisma.Decimal(parsed.data.balance || "0"),
-      currency: (parsed.data.currency || "EUR").toUpperCase(),
-      notes: parsed.data.notes || null,
-    },
+  const account = await prisma.$transaction(async (tx) => {
+    const created = await tx.bankAccount.create({
+      data: {
+        userId,
+        bankName: parsed.data.bankName,
+        balance: new Prisma.Decimal(parsed.data.balance || "0"),
+        currency: (parsed.data.currency || "EUR").toUpperCase(),
+        isPro: parsed.data.isPro,
+        ownershipPct: parsed.data.ownershipPct ?? null,
+        notes: parsed.data.notes || null,
+      },
+    });
+    await recordBankAccountOpening(tx, created.id, created.balance.toString());
+    return created;
   });
   await ensureBankPlatform(userId, parsed.data.bankName);
   return NextResponse.json({ account }, { status: 201 });
@@ -74,19 +84,29 @@ export async function PUT(req: Request) {
   if (f.bankName !== undefined) data.bankName = f.bankName;
   if (f.balance !== undefined) data.balance = new Prisma.Decimal(f.balance || "0");
   if (f.currency !== undefined) data.currency = f.currency;
+  if (f.isPro !== undefined) data.isPro = f.isPro;
+  if (f.ownershipPct !== undefined) data.ownershipPct = f.ownershipPct ?? null;
   if (f.notes !== undefined) data.notes = f.notes || null;
 
-  const write = await prisma.bankAccount.updateMany({
-    where: { id, userId },
-    data,
+  const account = await prisma.$transaction(async (tx) => {
+    const write = await tx.bankAccount.updateMany({ where: { id, userId }, data });
+    if (write.count === 0) return null;
+    if (f.balance !== undefined) {
+      await recordBankAccountBalanceChange(
+        tx,
+        id,
+        existing.balance.toString(),
+        f.balance || "0"
+      );
+    }
+    return tx.bankAccount.findFirst({ where: { id, userId } });
   });
-  if (write.count === 0) {
+  if (!account) {
     return NextResponse.json({ error: "Introuvable" }, { status: 404 });
   }
   if (f.bankName) {
     await ensureBankPlatform(userId, f.bankName);
   }
-  const account = await prisma.bankAccount.findFirst({ where: { id, userId } });
   return NextResponse.json({ account });
 }
 

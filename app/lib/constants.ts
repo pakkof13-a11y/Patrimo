@@ -18,6 +18,41 @@ export const ASSET_CLASS_COLORS: Record<AssetClass, string> = {
   AUTRE: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
 };
 
+/**
+ * Teintes des classes d'actifs pour les graphiques (Recharts attend des
+ * couleurs CSS, pas des classes Tailwind). Les tons reprennent ceux des badges
+ * `ASSET_CLASS_COLORS` ci-dessus, à une saturation lisible sur fond clair
+ * comme sur fond sombre, pour qu'une classe garde la même identité visuelle
+ * d'un écran à l'autre.
+ *
+ * Une exception assumée : le badge « Obligations » est ardoise, mais deux gris
+ * voisins dans une même pile de colonnes ne se distinguent pas (dE ≈ 18 avec
+ * « Autre », sous le seuil où l'œil sépare deux teintes avec certitude). La
+ * classe passe donc au cyan sur les graphiques, ce qui porte la paire la plus
+ * proche de la palette à dE ≈ 28.
+ */
+export const ASSET_CLASS_CHART_COLORS: Record<AssetClass, string> = {
+  ACTIONS: "#2563eb",
+  CRYPTO: "#d97706",
+  IMMOBILIER: "#7c3aed",
+  OBLIGATIONS: "#0e7490",
+  CASH: "#059669",
+  AUTRE: "#94a3b8",
+};
+
+/** Couleur de graphique d'une classe, avec repli sur « Autre ». */
+export function assetClassChartColor(assetClass: string): string {
+  return (
+    ASSET_CLASS_CHART_COLORS[assetClass as AssetClass] ??
+    ASSET_CLASS_CHART_COLORS.AUTRE
+  );
+}
+
+/** Libellé d'une classe, avec repli sur le code brut. */
+export function assetClassLabel(assetClass: string): string {
+  return ASSET_CLASSES[assetClass as AssetClass] ?? assetClass;
+}
+
 /** Fiscal / storage envelope for holdings filtering (tabs + dropdown Positions) */
 export const ACCOUNT_TYPES = {
   CTO: "Compte-Titres",
@@ -65,6 +100,8 @@ export const TRANSACTION_TYPES = {
   TRANSFERT_TITRE: "Transfert titres",
   /** Ratio dans quantité (2 = doublement de titres, CUMP / 2). */
   SPLIT: "Split / division",
+  /** Travaux immobilisés : s'ajoutent au coût de revient, pas à la quantité. */
+  TRAVAUX: "Travaux capitalisés",
 } as const;
 
 export type TransactionTypeLabel = keyof typeof TRANSACTION_TYPES;
@@ -161,6 +198,28 @@ export const LIABILITY_LENDER_OPTIONS = [
   ...LIABILITY_LENDERS.map((l) => l.name),
   "Autre",
 ] as const;
+
+/** Catégorie de passif — regroupement d'affichage, indépendant du calcul. */
+export const LIABILITY_CATEGORIES = [
+  "IMMOBILIER",
+  "AUTO",
+  "CONSOMMATION",
+  "DETTE_PRIVEE",
+  "PROFESSIONNEL",
+  "AUTRE",
+] as const;
+
+export const LIABILITY_CATEGORY_LABELS: Record<
+  (typeof LIABILITY_CATEGORIES)[number],
+  string
+> = {
+  IMMOBILIER: "Immobilier",
+  AUTO: "Auto",
+  CONSOMMATION: "Consommation",
+  DETTE_PRIVEE: "Dette privée",
+  PROFESSIONNEL: "Professionnel",
+  AUTRE: "Autre",
+};
 
 export const BUSINESS_TIMEZONE = "Europe/Paris";
 

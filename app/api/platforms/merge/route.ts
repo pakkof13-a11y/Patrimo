@@ -4,6 +4,7 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { mergePlatforms } from "@/app/lib/platforms/upsert";
 import { validationErrorResponse } from "@/app/lib/api/validation";
 import { invalidateLedgerCache } from "@/app/lib/portfolio/ledger-cache";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 const mergeSchema = z.object({
   sourceId: z.string().min(1, "sourceId requis"),
@@ -36,7 +37,7 @@ export async function POST(req: Request) {
     invalidateLedgerCache(userId);
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Échec de la fusion";
+    const message = clientErrorMessage(e, "Échec de la fusion");
     const status =
       /introuvable|elle-même/i.test(message) ? 400 : 500;
     if (status === 500) console.error("[platforms/merge]", e);

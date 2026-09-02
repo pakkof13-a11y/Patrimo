@@ -10,11 +10,19 @@ test.describe("Ledger API achat/vente", () => {
     const platformId = await ensurePlatform(request);
     expect(platformId).toBeTruthy();
 
-    // Create a fresh asset for isolated CUMP
+    // Ticker ET nom uniques par run : POST /api/assets réutilise un actif
+    // existant soit par ticker (assetReuseByTickerWhere), soit — à défaut —
+    // par nom identique sur la même plateforme (comportements voulus en
+    // production, cf. app/api/assets/route.ts). Un ticker fixe à lui seul ne
+    // suffit pas : avec un nom fixe, la deuxième voie de réutilisation
+    // retombe quand même sur l'actif du run précédent, dont la position
+    // cumule au lieu de repartir de zéro.
+    const runSuffix = Date.now();
+    const uniqueTicker = `E2E${runSuffix}.PA`;
     const created = await request.post("/api/assets", {
       data: {
-        name: "E2E Test Equity",
-        ticker: "E2E.PA",
+        name: `E2E Test Equity ${runSuffix}`,
+        ticker: uniqueTicker,
         assetClass: "ACTIONS",
         platformId,
         currency: "EUR",

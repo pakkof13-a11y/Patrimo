@@ -11,6 +11,7 @@ import {
   GENERIC_LOGIN_ERROR,
 } from "./app/lib/auth/login-rate-limit";
 import { normalizeRole } from "./app/lib/auth/role";
+import { hasCronCredential, isCronPath } from "./app/lib/auth/cron-credential";
 import { resolveAuthTrustHost } from "./app/lib/auth/trust-host";
 import { assertAuthSecretConfigured } from "./app/lib/auth/startup-check";
 
@@ -66,38 +67,62 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const password = parsed.data.password;
         const ip = await getLoginClientIp();
 
-        const gate = await checkLoginAllowed(ip, login);
-        if (gate.blocked) {
-          throw new RateLimitedSignIn(gate.retryAfterSec);
+        try {
+          const gate = await checkLoginAllowed(ip, login);
+          if (gate.blocked) {
+            throw new RateLimitedSignIn(gate.retryAfterSec);
+          }
+
+          /**
+           * Select explicite (pas `include` / full model) : le login ne doit
+           * pas dépendre de colonnes métier ajoutées plus tard (ex. taxHousehold).
+           * Un `findFirst` sans select charge tout le modèle Prisma → si une
+           * migration n'est pas encore appliquée en prod, Auth.js renvoie
+           * `error=Configuration` (affiché à tort comme mauvais mot de passe).
+           */
+          const user = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { username: login },
+                { email: login },
+                { email: `${login}@patrimo.local` },
+              ],
+            },
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              username: true,
+              role: true,
+              passwordHash: true,
+            },
+          });
+
+          const hash = user?.passwordHash || getDummyPasswordHash();
+          const ok = await bcrypt.compare(password, hash);
+
+          if (!user?.passwordHash || !ok) {
+            await recordLoginFailure(ip, login);
+            return null; // → CredentialsSignin générique côté client
+          }
+
+          await clearLoginFailures(ip, login);
+
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name ?? user.username,
+            username: user.username,
+            role: normalizeRole(user.role),
+          };
+        } catch (e) {
+          // Rate-limit : laisser Auth.js propager le code stable
+          if (e instanceof RateLimitedSignIn) throw e;
+          // Toute autre erreur (DB, migration manquante, Upstash…) → log + null
+          // plutôt qu'un `Configuration` opaque côté navigateur.
+          console.error("[auth.authorize]", e);
+          return null;
         }
-
-        const user = await prisma.user.findFirst({
-          where: {
-            OR: [
-              { username: login },
-              { email: login },
-              { email: `${login}@patrimo.local` },
-            ],
-          },
-        });
-
-        const hash = user?.passwordHash || getDummyPasswordHash();
-        const ok = await bcrypt.compare(password, hash);
-
-        if (!user?.passwordHash || !ok) {
-          await recordLoginFailure(ip, login);
-          return null; // → CredentialsSignin générique côté client
-        }
-
-        await clearLoginFailures(ip, login);
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name ?? user.username,
-          username: user.username,
-          role: normalizeRole(user.role),
-        };
       },
     }),
   ],
@@ -115,12 +140,38 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         path.startsWith("/_next") ||
         path.startsWith("/patrimo") ||
         path === "/favicon.ico" ||
-        path === "/icon.jpg" ||
-        path === "/apple-icon.jpg" ||
+        path === "/icon.png" ||
+        path === "/apple-icon.png" ||
         path === "/api/health"
       ) {
         return true;
       }
+
+      /*
+        Couche 1 bis — tâches planifiées.
+
+        Le proxy couvre `/api/**`. Une tâche Vercel Cron n'a pas de session :
+        elle n'apporte qu'un `Authorization: Bearer $CRON_SECRET`. Elle était
+        donc redirigée vers `/login` avant d'atteindre son handler, et
+        `POST /api/savings/accrue` — documenté dans le README comme le cron des
+        intérêts de livrets — n'a jamais pu s'exécuter. Vérifié : 307 vers
+        `/login` avec le bon secret.
+
+        Le secret n'est **pas** comparé ici. `timingSafeEqualSecret` s'appuie
+        sur `node:crypto`, dont la disponibilité dans le proxy n'est pas
+        garantie ; et dupliquer la comparaison créerait deux autorités pour une
+        seule décision. Le proxy se contente donc de ne pas rediriger une
+        requête qui *présente* une créance de cron : le handler, lui, la vérifie
+        en temps constant et répond 401 si elle est fausse.
+
+        Le périmètre est étroit — `/api/cron/**`, réservé aux tâches planifiées,
+        et la route historique des livrets. Ailleurs, un en-tête inventé
+        n'ouvre rien.
+      */
+      if (isCronPath(path) && hasCronCredential(request)) {
+        return true;
+      }
+
       return !!session?.user;
     },
     async jwt({ token, user }) {

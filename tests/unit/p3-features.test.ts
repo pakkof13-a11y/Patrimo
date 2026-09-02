@@ -5,6 +5,7 @@ import { replayTransactions } from "@/app/lib/accounting/ledger";
 import type { LedgerTx } from "@/app/lib/accounting/types";
 import {
   buildBenchmarkSeries,
+  listBenchmarkOptions,
 } from "@/app/lib/portfolio/benchmark";
 import {
   decomposeUnrealizedPnl,
@@ -135,6 +136,23 @@ describe("FX PnL decomposition", () => {
     expect(d0.fxPnlEur).toBeGreaterThan(0);
   });
 
+  it("USD without buy lots falls back to estimated=true (drives the UI warning badge)", () => {
+    const d0 = decomposeUnrealizedPnl({
+      currency: "USD",
+      qty: 10,
+      costBasisEur: 900,
+      priceNowNative: 120,
+      priceNowEur: 114,
+      // pas de buyLots → FX d'achat inconnu
+    });
+    expect(d0.estimated).toBe(true);
+    expect(d0.isEur).toBe(false);
+    expect(d0.fxBuy).toBeNull();
+    expect(d0.fxPnlEur).toBe(0);
+    expect(d0.pricePnlEur).toBeCloseTo(d0.totalUnrealizedEur, 5);
+    expect(d0.note).toContain("FX d'achat inconnu");
+  });
+
   it("weightedBuyFx", () => {
     const w = weightedBuyFx([
       { quantity: 10, unitPriceNative: 100, fxRateToEur: 0.9 },
@@ -199,6 +217,88 @@ describe("benchmark price series", () => {
   });
 });
 
+describe("benchmark DCA base (renforts progressifs)", () => {
+  it("price mode integrates every contribution, not just the first", () => {
+    // 1000 € @100, puis renfort 4000 € @100, puis le cours monte à 110.
+    const series = [
+      {
+        date: "2024-01-01",
+        label: "j1",
+        close: 100,
+        qty: 10,
+        cashInvestedNet: 1000,
+        costBasisEur: 1000,
+      },
+      {
+        date: "2024-01-15",
+        label: "j2",
+        close: 100,
+        qty: 50,
+        cashInvestedNet: 5000,
+        costBasisEur: 5000,
+      },
+      {
+        date: "2024-02-01",
+        label: "j3",
+        close: 110,
+        qty: 50,
+        cashInvestedNet: 5000,
+        costBasisEur: 5000,
+      },
+    ] as unknown as import("@/app/lib/portfolio/total-return").TotalReturnPoint[];
+
+    const b = buildBenchmarkSeries(series, "price");
+    expect(b[0]!.benchmarkEur).toBeCloseTo(0, 5);
+    expect(b[1]!.benchmarkEur).toBeCloseTo(0, 5);
+    // 50 unités × 110 − 5000 = 500 (l'ancienne base figée à 1000 donnait 100)
+    expect(b[2]!.benchmarkEur).toBeCloseTo(500, 5);
+  });
+
+  it("accepts a rich BenchmarkConfig for an arbitrary index (S&P 500)", () => {
+    const series = [
+      {
+        date: "2024-01-01T12:00:00.000Z",
+        label: "j1",
+        close: 100,
+        qty: 10,
+        cashInvestedNet: 1000,
+        costBasisEur: 1000,
+      },
+      {
+        date: "2024-02-01T12:00:00.000Z",
+        label: "j2",
+        close: 100,
+        qty: 10,
+        cashInvestedNet: 1000,
+        costBasisEur: 1000,
+      },
+    ] as unknown as import("@/app/lib/portfolio/total-return").TotalReturnPoint[];
+
+    const b = buildBenchmarkSeries(series, {
+      kind: "index",
+      symbol: "^GSPC",
+      label: "S&P 500",
+      closes: [
+        { date: "2024-01-01T00:00:00.000Z", close: 4000 },
+        { date: "2024-02-01T00:00:00.000Z", close: 4400 },
+      ],
+    });
+    expect(b[0]!.benchmarkEur).toBeCloseTo(0, 5);
+    expect(b[1]!.benchmarkEur).toBeCloseTo(100, 5); // +10 % sur 1000
+  });
+
+  it("listBenchmarkOptions exposes base modes + every catalogued index", () => {
+    const ids = listBenchmarkOptions().map((o) => o.id);
+    expect(ids).toContain("none");
+    expect(ids).toContain("price");
+    expect(ids).toContain("sp500"); // ^GSPC
+    expect(ids).toContain("msciworld");
+    expect(
+      listBenchmarkOptions().filter((o) => o.kind === "index").length
+    ).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe("fiscal year", () => {
   it("aggregates sells and dividends by envelope", () => {
     const txs = [
@@ -247,6 +347,6 @@ describe("fiscal year", () => {
     const cto = report.byEnvelope.find((b) => b.accountType === "CTO")!;
     expect(cto.realizedPnlEur).toBeCloseTo(80, 5); // 4*(120-100)
     expect(cto.dividendsNetEur).toBeCloseTo(42.5, 5);
-    expect(report.totals.estimatedPfuEur).toBeCloseTo((80 + 42.5) * 0.3, 5);
+    expect(report.totals.estimatedPfuEur).toBeCloseTo((80 + 42.5) * 0.314, 5);
   });
 });

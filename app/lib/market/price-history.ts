@@ -65,6 +65,13 @@ export type GetAssetPriceHistoryOptions = {
    * viser un nombre optimal de bougies (INTERVAL_WINDOW_DAYS).
    */
   interval?: PriceBarInterval | null;
+  /**
+   * Borne basse explicite de la fenêtre de fetch. Court-circuite le calcul
+   * dérivé du `range` / de l'`interval`, qui vise un nombre de bougies confortable
+   * à l'écran — inadapté quand l'appelant veut une profondeur précise (remplissage
+   * du cache de clôtures journalières sur l'historique réel du portefeuille).
+   */
+  from?: Date | null;
 };
 
 /**
@@ -257,8 +264,14 @@ function buildMockSeries(
   let i = 0;
   for (let t = from.getTime(); t <= to.getTime(); t += step, i++) {
     const d0 = new Date(t);
-    // Skip weekends for day/week bars
-    if ((bar === "1d" || bar === "1wk") && (d0.getUTCDay() === 0 || d0.getUTCDay() === 6)) {
+    // Week-ends écartés pour les barres journalières uniquement.
+    //
+    // Une barre hebdomadaire couvre une semaine entière : la filtrer comme un
+    // week-end n'a pas de sens. Et le pas étant de 7 jours, tous les points
+    // générés tombent sur le même jour de la semaine — le filtre était donc
+    // tout-ou-rien : selon le jour sur lequel démarre la fenêtre, la série
+    // sortait complète ou entièrement vide.
+    if (bar === "1d" && (d0.getUTCDay() === 0 || d0.getUTCDay() === 6)) {
       continue;
     }
     // For intraday, skip off-hours roughly (weekends only — markets vary)
@@ -704,7 +717,9 @@ export async function getAssetPriceHistory(
   const bar = explicitInterval ?? barIntervalForRange(range, now);
   let from: Date;
   let extendedToFirstBuy = false;
-  if (explicitInterval) {
+  if (options?.from instanceof Date && !Number.isNaN(options.from.getTime())) {
+    from = options.from;
+  } else if (explicitInterval) {
     from = new Date(
       now.getTime() - INTERVAL_WINDOW_DAYS[explicitInterval] * 24 * 60 * 60 * 1000
     );

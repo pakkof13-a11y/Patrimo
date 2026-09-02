@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { safeParseBody } from "@/app/lib/api/validation";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 import {
   buildMoneroSnapshot,
   fetchMoneroMetaFromCoinGecko,
@@ -77,7 +78,7 @@ export async function POST(req: Request) {
         });
       } catch (e) {
         ledgerError =
-          e instanceof Error ? e.message : "Échec écriture ledger";
+          clientErrorMessage(e, "Échec écriture ledger");
       }
     }
 
@@ -96,9 +97,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          e instanceof Error
-            ? e.message
-            : "Échec récupération métadonnées Monero",
+          clientErrorMessage(e, "Échec récupération métadonnées Monero"),
         code: "MONERO_UNAVAILABLE",
       },
       { status: 502 }

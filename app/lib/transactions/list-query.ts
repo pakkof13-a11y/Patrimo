@@ -24,13 +24,16 @@ export const TX_TYPE_GROUPS: Record<string, string[] | null> = {
   all: null,
   buy: ["ACHAT"],
   sell: ["VENTE"],
-  reward: ["REWARD", "AIRDROP"],
+  // Distincts (voir TX_TYPE_FILTERS) : un airdrop ne doit compter que dans
+  // un seul badge.
+  reward: ["REWARD"],
   airdrop: ["AIRDROP"],
   dividend: ["DIVIDENDE", "COUPON", "LOYER", "INTERET"],
   fees: ["FRAIS"],
   cash: ["APPORT", "RETRAIT"],
   transfer: ["TRANSFERT_CASH", "TRANSFERT_TITRE"],
   split: ["SPLIT"],
+  works: ["TRAVAUX"],
 };
 
 export type TxListSortBy =
@@ -52,7 +55,18 @@ export type TxListQuery = {
   q: string | null;
   sortBy: TxListSortBy;
   sortDir: "asc" | "desc";
+  /** Bornes ISO "YYYY-MM-DD" (inclusives), ou null si absentes/invalides. */
+  dateFrom: string | null;
+  dateTo: string | null;
+  /** Plateforme (source OU destination d'un transfert) */
+  platformId: string | null;
 };
+
+/** "YYYY-MM-DD" strict — un `input[type=date]` renvoie toujours ce format. */
+function parseIsoDateParam(value: string | null): string | null {
+  if (!value) return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
 
 const SORT_BY_SET = new Set<TxListSortBy>([
   "date",
@@ -105,6 +119,10 @@ export function parseTxListQuery(
   const dirRaw = (searchParams.get("sortDir") || "desc").trim().toLowerCase();
   const sortDir: "asc" | "desc" = dirRaw === "asc" ? "asc" : "desc";
 
+  const dateFrom = parseIsoDateParam(searchParams.get("dateFrom"));
+  const dateTo = parseIsoDateParam(searchParams.get("dateTo"));
+  const platformId = searchParams.get("platformId")?.trim() || null;
+
   return {
     page,
     pageSize,
@@ -114,6 +132,9 @@ export function parseTxListQuery(
     q,
     sortBy,
     sortDir,
+    dateFrom,
+    dateTo,
+    platformId,
   };
 }
 
@@ -177,11 +198,11 @@ export function buildTxListWhere(
 ): Prisma.TransactionWhereInput {
   const types = opts?.omitTypeFilter ? null : resolveTypeFilter(query);
 
-  const nftNot = nftExcludePrismaClause();
+  const nftExclude = nftExcludePrismaClause();
   const where: Prisma.TransactionWhereInput = {
     userId,
     // Vue principale : pas de NFT (toutes blockchains)
-    AND: [{ NOT: nftNot.NOT as Prisma.TransactionWhereInput[] }],
+    AND: nftExclude.AND as Prisma.TransactionWhereInput[],
   };
 
   if (types && types.length > 0) {
@@ -190,6 +211,24 @@ export function buildTxListWhere(
 
   if (query.accountType) {
     where.asset = { accountType: query.accountType };
+  }
+
+  if (query.dateFrom || query.dateTo) {
+    const occurredAt: Prisma.DateTimeFilter = {};
+    if (query.dateFrom) occurredAt.gte = new Date(`${query.dateFrom}T00:00:00.000Z`);
+    if (query.dateTo) occurredAt.lte = new Date(`${query.dateTo}T23:59:59.999Z`);
+    where.occurredAt = occurredAt;
+  }
+
+  if (query.platformId) {
+    // Source OU destination d'un transfert — `where.OR` déjà réservé à la
+    // recherche texte, donc combiné via AND plutôt que d'écraser ce dernier.
+    (where.AND as Prisma.TransactionWhereInput[]).push({
+      OR: [
+        { platformId: query.platformId },
+        { toPlatformId: query.platformId },
+      ],
+    });
   }
 
   if (query.q) {
@@ -227,6 +266,69 @@ export function mapTypeCountsToGroups(
     out[id] = types.reduce((s, t) => s + (byType.get(t) || 0), 0);
   }
   return out;
+}
+
+export type TxKpis = {
+  /** Σ grossAmountEur des ACHAT (valeur brute investie, hors frais) */
+  buysEur: number;
+  /** Σ grossAmountEur des VENTE (produit brut de cession, hors frais) */
+  sellsEur: number;
+  /** Σ feesEur, tous types confondus */
+  feesEur: number;
+  /** Σ netCashImpactEur des revenus cash (dividende, coupon, loyer, intérêt)
+   *  + Σ grossAmountEur (FMV) des REWARD (staking…), qui n'ont pas d'impact
+   *  cash mais restent un revenu au sens patrimonial. */
+  incomeEur: number;
+};
+
+type TxGroupSums = {
+  type: string;
+  _sum: {
+    grossAmountEur: { toString(): string } | number | null;
+    feesEur: { toString(): string } | number | null;
+    netCashImpactEur: { toString(): string } | number | null;
+  };
+};
+
+function sumOf(v: TxGroupSums["_sum"][keyof TxGroupSums["_sum"]]): number {
+  if (v == null) return 0;
+  const n = Number(typeof v === "number" ? v : v.toString());
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * KPI agrégés (Σ) sur le périmètre filtré — même `where` que typeCounts
+ * (hors filtre de type, pour que les 4 totaux restent lisibles ensemble
+ * quel que soit le quick-filter actif).
+ *
+ * ACHAT/VENTE : `netCashImpactEur` est stocké à 0 pour les trades (le cash
+ * est suivi par ailleurs, voir `computeNetCashImpactEur`) — on utilise donc
+ * `grossAmountEur`, comme `txNetPriceEur` côté affichage ligne par ligne.
+ *
+ * REWARD : même chose — `netCashImpactEur` vaut toujours 0 (réception
+ * gratuite, aucun mouvement de cash), donc on utilise `grossAmountEur`
+ * (FMV qty × prix unitaire si renseigné, sinon 0) pour le compter dans les
+ * revenus. AIRDROP reste hors "Revenus" (voir TX_TYPE_GROUPS : distinct de
+ * reward, traité comme une entrée patrimoniale gratuite plutôt qu'un revenu).
+ */
+export function computeTxKpis(rows: TxGroupSums[]): TxKpis {
+  let buysEur = 0;
+  let sellsEur = 0;
+  let feesEur = 0;
+  let incomeEur = 0;
+
+  for (const r of rows) {
+    feesEur += sumOf(r._sum.feesEur);
+    if (r.type === "ACHAT") buysEur += sumOf(r._sum.grossAmountEur);
+    else if (r.type === "VENTE") sellsEur += sumOf(r._sum.grossAmountEur);
+    else if (["DIVIDENDE", "COUPON", "LOYER", "INTERET"].includes(r.type)) {
+      incomeEur += sumOf(r._sum.netCashImpactEur);
+    } else if (r.type === "REWARD") {
+      incomeEur += sumOf(r._sum.grossAmountEur);
+    }
+  }
+
+  return { buysEur, sellsEur, feesEur, incomeEur };
 }
 
 export const TX_LIST_SELECT = {

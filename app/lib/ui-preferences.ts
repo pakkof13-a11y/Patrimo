@@ -78,6 +78,12 @@ export type SavedHoldingsView = {
   /** colonnes visibles */
   visibility?: Record<string, boolean>;
   pageSize?: number;
+  /** Regroupement (none | assetCategory | blockchain) — absent = vues créées avant son ajout */
+  groupBy?: string;
+  /** Tri TanStack (id + direction) — absent = tri par défaut à l'application */
+  sorting?: { id: string; desc: boolean }[];
+  /** Filtre rapide P&L (all | gain | loss) — absent = vues créées avant son ajout */
+  pnlFilter?: string;
   createdAt: string;
 };
 
@@ -158,4 +164,27 @@ export function loadOnboardingDismissState(): {
   }
 
   return { dismissed: Boolean(permanent), showEveryStart: false };
+}
+/**
+ * Abonnement aux changements de préférences, pour `useSyncExternalStore`.
+ *
+ * Le localStorage n'émet `storage` que vers les **autres** onglets : un
+ * composant qui écrit sa propre préférence ne serait jamais notifié. On ajoute
+ * donc un événement local, diffusé par `notifyUiPrefsChanged`.
+ */
+const UI_PREFS_EVENT = "patrimo:ui-prefs";
+
+export function subscribeUiPrefs(onChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener(UI_PREFS_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(UI_PREFS_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+export function notifyUiPrefsChanged(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(UI_PREFS_EVENT));
 }

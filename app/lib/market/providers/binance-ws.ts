@@ -5,9 +5,12 @@
  * Vercel ne garde pas de WebSocket persistant dans un Route Handler. On utilise
  * donc l'API REST publique Binance (aucune clé requise) :
  *   GET https://api.binance.com/api/v3/ticker/price?symbols=["BTCEUR",...]
- * avec un cache mémoire TTL 30 s côté serveur. Le refresh périodique existant
- * (server-side, app/lib/market/refresh.ts) et le Route Handler
- * /api/market/crypto-prices partagent ce cache.
+ * avec un cache mémoire TTL 30 s côté serveur. Le seul consommateur est le
+ * refresh périodique (app/lib/market/refresh.ts, via le registry) : il est
+ * élu leader entre les onglets ouverts, de sorte qu'un seul interroge Binance.
+ * Un Route Handler `/api/market/crypto-prices` a existé pour un polling client
+ * direct ; il a été retiré parce qu'il court-circuitait cette élection — chaque
+ * onglet ouvert aurait sondé Binance toutes les 30 s pour le même résultat.
  *
  * Le nom du fichier conserve le suffixe `-ws` pour la nomenclature de la tâche ;
  * l'implémentation est REST+cache (pas de socket serveur).

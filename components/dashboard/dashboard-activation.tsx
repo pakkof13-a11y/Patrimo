@@ -16,6 +16,7 @@ import {
   type DashboardMaturity,
   type OnboardingSignals,
 } from "@/app/lib/dashboard/maturity";
+import { BRAND } from "@/components/branding/brand-assets";
 
 type Props = {
   maturity: Extract<DashboardMaturity, "empty" | "setup">;
@@ -91,7 +92,7 @@ export function DashboardActivation({
     {
       id: "portfolio",
       done: progress.portfolio,
-      title: "Positions",
+      title: "Portefeuille",
       body: "Calculées depuis les transactions.",
       cta: "Nouvel achat",
       onClick: onAddTransaction,
@@ -108,7 +109,7 @@ export function DashboardActivation({
       data-testid="dashboard-activation"
       data-maturity={maturity}
       aria-label={
-        isEmpty ? "Bienvenue — démarrer Patrimo" : "Configuration en cours"
+        isEmpty ? "Bienvenue — démarrer Aurea" : "Configuration en cours"
       }
     >
       <div className="border-b border-[var(--border)] px-4 py-5 sm:px-6 sm:py-6">
@@ -118,14 +119,21 @@ export function DashboardActivation({
               <Sparkles className="h-3.5 w-3.5" aria-hidden />
               {isEmpty ? "Votre cockpit patrimonial" : "Configuration en cours"}
             </p>
-            <h2 className="text-xl font-semibold tracking-tight text-[var(--foreground)] sm:text-[1.35rem]">
+            <h2
+              className={cn(
+                "text-xl sm:text-[1.35rem]",
+                isEmpty
+                  ? "brand-gold-text brand-gold-shine brand-slogan"
+                  : "font-semibold tracking-tight text-[var(--foreground)]"
+              )}
+            >
               {isEmpty
-                ? "Prenez le contrôle de votre patrimoine"
+                ? BRAND.slogan
                 : "Encore quelques pas pour activer le tableau de bord"}
             </h2>
             <p className="text-sm leading-relaxed text-[var(--muted-foreground)]">
               {isEmpty
-                ? "Patrimo construit positions, P&L et allocations à partir de votre journal. Commencez par une plateforme, puis importez ou saisissez vos opérations."
+                ? "Aurea construit positions, P&L et allocations à partir de votre journal. Commencez par une plateforme, puis importez ou saisissez vos opérations."
                 : "Les modules d’analyse (courbes, allocations, actualité) s’afficheront dès que le journal et les positions seront en place — sans bruit inutile d’ici là."}
             </p>
             <p className="text-meta font-medium text-[var(--primary)]">

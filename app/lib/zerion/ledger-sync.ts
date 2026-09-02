@@ -1,5 +1,5 @@
 /**
- * Écrit les soldes Zerion / Monero dans le ledger Patrimo.
+ * Écrit les soldes Zerion / Monero dans le ledger Aurea.
  */
 
 import { Prisma } from "@/app/lib/prisma-client/client";
@@ -427,7 +427,7 @@ export async function repairZerionReconciliationDates(
 }
 
 /**
- * Importe l’historique Zerion (transfers) dans le journal Patrimo.
+ * Importe l’historique Zerion (transfers) dans le journal Aurea.
  * Date = mined_at on-chain (Europe/Paris côté affichage).
  * Dédup : notes contiennent `[zerion:<hash>]`.
  * @returns aussi firstSeenByKey pour dater les réconciliations soldes

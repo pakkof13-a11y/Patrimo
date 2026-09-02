@@ -1,5 +1,5 @@
 /**
- * Dates on-chain Solana → ISO pour le journal Patrimo.
+ * Dates on-chain Solana → ISO pour le journal Aurea.
  *
  * Important : `toISOString().slice(0, 16)` sans `Z` est interprété par
  * `new Date(...)` en **heure locale** → décalage (souvent −1h / jour faux).

@@ -8,10 +8,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/app/lib/utils";
 import { fetchJson } from "@/app/lib/api-client";
-import {
-  BASE_CURRENCY_OPTIONS,
-  currencyLabel,
-} from "@/app/lib/money/currencies";
 import { formatDateTimeParis } from "@/app/lib/money/format";
 import { PreferencesPanel } from "@/components/layout/preferences-panel";
 import {
@@ -128,7 +124,7 @@ export function HeaderAccountMenu({
             className="h-5 w-5 shrink-0 rounded-full object-cover"
           />
         ) : (
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-[9px] font-bold text-white">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-[9px] font-bold text-[var(--primary-foreground)]">
             {initials}
           </span>
         )}
@@ -145,21 +141,27 @@ export function HeaderAccountMenu({
       {open && (
         <div
           className={cn(
-            "absolute right-0 z-[60] mt-2 w-[min(22rem,calc(100vw-1.25rem))] origin-top-right",
+            "absolute right-0 z-[60] mt-2 w-[min(24rem,calc(100vw-1.25rem))] origin-top-right",
             "max-h-[min(85vh,36rem)] overflow-y-auto overscroll-contain",
-            "rounded-xl border border-[var(--border)] bg-[var(--card)] p-2 shadow-xl",
+            "rounded-[var(--radius-xl)] border border-[var(--border)] bg-[var(--card)] p-[var(--space-2)]",
+            "shadow-[var(--shadow-md)]",
             "animate-in fade-in-0 zoom-in-95"
           )}
           role="menu"
           aria-label="Compte et préférences"
           data-testid="header-account-dropdown"
         >
-          {/* Identité + avatar (sélection à droite du bandeau) */}
+          {/*
+            Bandeau d'identité : c'est l'ancrage du menu — on doit savoir en
+            un coup d'œil sous quel compte on agit avant de toucher au moindre
+            réglage. D'où l'avatar large, le rôle affiché, et le fuseau, qui
+            détermine la lecture de toutes les dates de l'application.
+          */}
           <div
-            className="mb-2 rounded-lg bg-[var(--muted)]/50 px-3 py-2.5"
+            className="mb-[var(--space-3)] rounded-[var(--radius-lg)] bg-[var(--surface-sunken)] px-[var(--space-3)] py-[var(--space-3)]"
             data-testid="header-account-identity"
           >
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-[var(--space-3)]">
               {avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -168,7 +170,7 @@ export function HeaderAccountMenu({
                   className="h-10 w-10 shrink-0 rounded-full object-cover"
                 />
               ) : (
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-sm font-bold text-white">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-sm font-bold text-[var(--primary-foreground)] ring-1 ring-[var(--gold-border)]">
                   {initials}
                 </span>
               )}
@@ -181,10 +183,10 @@ export function HeaderAccountMenu({
                     </span>
                   )}
                 </p>
-                <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                <p className="truncate text-[length:var(--text-2xs)] text-[var(--foreground-secondary)]">
                   {email}
                 </p>
-                <p className="text-[10px] text-slate-400">Europe/Paris</p>
+                <p className="text-label mt-0.5">Europe/Paris</p>
               </div>
               {/* Bouton avatar à droite du bandeau user (sélection JPG/PNG) */}
               <div
@@ -229,37 +231,22 @@ export function HeaderAccountMenu({
             </div>
           </div>
 
-          {/* Devise */}
-          <label className="mb-2 block px-1">
-            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-              Devise de reporting
-            </span>
-            <select
-              className="input !w-full !py-1.5 text-sm"
-              value={baseCurrency}
-              onChange={(e) => onBaseCurrencyChange(e.target.value)}
-              aria-label="Devise de reporting"
-              data-testid="header-currency-select"
-            >
-              {BASE_CURRENCY_OPTIONS.map((c) => (
-                <option key={c} value={c}>
-                  {currencyLabel(c)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {/* Préférences (thème, avatar, P&L latent, benchmark, sécurité…) */}
+          {/* Préférences — la devise y a rejoint l'onglet Affichage. */}
           <div
             className="mb-2 border-t border-[var(--border)] pt-2"
             data-testid="header-preferences-slot"
           >
-            <PreferencesPanel placement="header" embedded />
+            <PreferencesPanel
+              placement="header"
+              embedded
+              baseCurrency={baseCurrency}
+              onBaseCurrencyChange={onBaseCurrencyChange}
+            />
           </div>
 
           {/* Sync statut */}
           <div
-            className="mb-2 flex items-start gap-2 border-t border-[var(--border)] px-2.5 pt-2 text-[11px] text-slate-500 dark:text-slate-400"
+            className="mb-[var(--space-2)] flex items-start gap-[var(--space-2)] border-t border-[var(--border)] px-[var(--space-2)] pt-[var(--space-2)] text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
             data-testid="header-price-status"
           >
             <span

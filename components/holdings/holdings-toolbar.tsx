@@ -1,9 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, HelpCircle, SlidersHorizontal } from "lucide-react";
+import {
+  ChevronDown,
+  Download,
+  HelpCircle,
+  RotateCcw,
+  SlidersHorizontal,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ColumnPicker } from "@/components/ui/column-picker";
+import {
+  FilterChip,
+  type FilterChipOption,
+} from "@/components/ui/filter-chip";
 import { TableFilters } from "@/components/ui/table-filters";
 import { ACCOUNT_TYPES, type AccountType } from "@/app/lib/constants";
 import { cn } from "@/app/lib/utils";
@@ -14,13 +24,14 @@ import {
 } from "@/app/lib/assets/categories";
 import type { SavedHoldingsView } from "@/app/lib/ui-preferences";
 import type { VisibilityState } from "@tanstack/react-table";
+import type { PnlFilter } from "@/app/lib/portfolio/pnl-filter";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 export type HoldingsPageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
 const CTRL_LABEL =
   "flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300";
-const CTRL_SELECT = "input !w-auto min-w-0 !py-1.5 text-sm";
+const CTRL_SELECT = "input w-auto min-w-0 py-1.5 text-sm";
 
 type ColumnPickerProps = {
   visibility: Record<string, boolean>;
@@ -36,6 +47,12 @@ export type HoldingsToolbarProps = {
   sourceCount: number;
   filteredCount: number;
   loading?: boolean;
+  /**
+   * Niveau de détail courant, ou `null` quand les colonnes ont été composées
+   * à la main et ne correspondent à aucun des trois modes.
+   */
+  /** Exporte les lignes affichées. Absent = pas de bouton. */
+  onExportCsv?: () => void;
   /** Enveloppes sélectionnées (multi). Vide = aucune (liste vide). */
   envelopeFilters: AccountType[];
   onEnvelopeFiltersChange?: (v: AccountType[]) => void;
@@ -49,9 +66,26 @@ export type HoldingsToolbarProps = {
   onSearchChange: (v: string) => void;
   accountFilter: string;
   onAccountFilterChange: (v: string) => void;
-  /** Filtre plateforme actif (deep-link Mes plateformes) */
+  /** Filtre rapide P&L latent : tout / gagnants / perdants */
+  pnlFilter: PnlFilter;
+  onPnlFilterChange: (v: PnlFilter) => void;
+  /** Puce Type d'actif */
+  assetClassOptions: FilterChipOption[];
+  assetClassFilters: string[];
+  onAssetClassFiltersChange: (v: string[]) => void;
+  /** Puce Devise */
+  currencyOptions: FilterChipOption[];
+  currencyFilters: string[];
+  onCurrencyFiltersChange: (v: string[]) => void;
+  /** Puce Plateforme — mono-valeur (redécoupe les positions multi-dépositaires) */
+  platformOptions: FilterChipOption[];
+  platformFilterId: string;
+  onPlatformFilterChange: (id: string | null) => void;
+  /** Libellé résolu du filtre plateforme (deep-link Mes plateformes) */
   platformFilterLabel?: string | null;
-  onClearPlatformFilter?: () => void;
+  /** Au moins un filtre restreint l'affichage → bouton de réinitialisation */
+  hasActiveFilters: boolean;
+  onResetFilters: () => void;
   pageSize: number;
   onPageSizeChange: (n: HoldingsPageSize) => void;
   savedViews: SavedHoldingsView[];
@@ -75,6 +109,7 @@ export function HoldingsToolbar({
   filteredCount,
   loading,
   envelopeFilters,
+  onExportCsv,
   onEnvelopeFiltersChange,
   groupBy,
   onGroupByChange,
@@ -86,8 +121,20 @@ export function HoldingsToolbar({
   onSearchChange,
   accountFilter,
   onAccountFilterChange: _onAccountFilterChange,
+  pnlFilter,
+  onPnlFilterChange,
+  assetClassOptions,
+  assetClassFilters,
+  onAssetClassFiltersChange,
+  currencyOptions,
+  currencyFilters,
+  onCurrencyFiltersChange,
+  platformOptions,
+  platformFilterId,
+  onPlatformFilterChange,
   platformFilterLabel,
-  onClearPlatformFilter,
+  hasActiveFilters,
+  onResetFilters,
   pageSize,
   onPageSizeChange,
   savedViews,
@@ -98,7 +145,6 @@ export function HoldingsToolbar({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [prevGroupMode, setPrevGroupMode] = useState(groupMode);
   const [tipsOpen, setTipsOpen] = useState(false);
-  const [envelopeOpen, setEnvelopeOpen] = useState(false);
   const hasSource = sourceCount > 0;
   // Toujours afficher la zone filtres si le sélecteur d’enveloppes est dispo
   // (évite la disparition du bouton quand le filtre vide la liste)
@@ -108,25 +154,6 @@ export function HoldingsToolbar({
     Boolean(accountFilter) ||
     Boolean(platformFilterLabel) ||
     Boolean(onEnvelopeFiltersChange);
-
-  const selectedCount = envelopeFilters.length;
-  const allSelected = selectedCount === ALL_ENVELOPES.length;
-  const envelopeLabel = allSelected
-    ? "Toutes"
-    : selectedCount === 0
-      ? "Aucune"
-      : selectedCount === 1
-        ? ACCOUNT_TYPES[envelopeFilters[0]!]
-        : `${selectedCount} enveloppes`;
-
-  function toggleEnvelope(k: AccountType) {
-    if (!onEnvelopeFiltersChange) return;
-    if (envelopeFilters.includes(k)) {
-      onEnvelopeFiltersChange(envelopeFilters.filter((x) => x !== k));
-    } else {
-      onEnvelopeFiltersChange([...envelopeFilters, k]);
-    }
-  }
 
   // Ouvrir les options si regroupement actif (contrôles groupe visibles)
   if (groupMode !== prevGroupMode) {
@@ -167,6 +194,27 @@ export function HoldingsToolbar({
           className="flex shrink-0 flex-wrap items-center gap-1.5"
           data-testid="holdings-toolbar-group-c"
         >
+          {/*
+            Les trois niveaux de détail — Synthèse, Analyse, Expert — ont été
+            retirés. Ils proposaient trois compositions de colonnes là où le
+            sélecteur « Colonnes » permet déjà toutes les autres : deux outils
+            pour un même réglage, dont l'un contredisait l'autre dès qu'on y
+            touchait. Reste l'export, que le tableau seul ne sait pas offrir.
+          */}
+          {onExportCsv && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 px-2 text-xs"
+              onClick={onExportCsv}
+              title="Exporter les lignes affichées au format CSV"
+              data-testid="holdings-export-csv"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+              Exporter
+            </Button>
+          )}
           <div className="relative">
             <Button
               type="button"
@@ -218,7 +266,7 @@ export function HoldingsToolbar({
             columns={HOLDINGS_COLUMN_META.map((c) => ({
               id: c.id,
               label: c.label,
-              locked: c.group === "mandatory" || Boolean(c.locked),
+              locked: Boolean(c.locked),
               group: c.group,
             }))}
             visibility={columns.visibility}
@@ -230,7 +278,7 @@ export function HoldingsToolbar({
         </div>
       </div>
 
-      {/* ── 2. Filtres primaires ── */}
+      {/* ── 2. Recherche + puces de filtre ── */}
       {showFilters && (
         <div
           className={cn(
@@ -240,132 +288,135 @@ export function HoldingsToolbar({
           data-testid="holdings-toolbar-primary"
         >
           <TableFilters
-            className="min-w-0 w-full sm:min-w-[14rem] sm:flex-1"
+            className="min-w-0 w-full sm:min-w-[16rem] sm:max-w-[24rem] sm:flex-1"
             search={search}
             onSearchChange={onSearchChange}
             showAccountFilter={false}
             searchFirst
             placeholder="Rechercher nom, ticker, ISIN…"
-            rightSlot={
-              onEnvelopeFiltersChange ? (
-                <div
-                  className={cn(CTRL_LABEL, "relative w-full sm:w-auto")}
-                  data-testid="holdings-toolbar-group-a"
-                >
-                  <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
-                    Enveloppe
-                  </span>
-                  <button
-                    type="button"
-                    className={cn(
-                      CTRL_SELECT,
-                      "inline-flex w-full min-w-[10rem] items-center justify-between gap-2 sm:!w-auto"
-                    )}
-                    aria-expanded={envelopeOpen}
-                    aria-haspopup="listbox"
-                    data-testid="envelope-select"
-                    aria-label="Filtrer par enveloppe"
-                    onClick={() => setEnvelopeOpen((v) => !v)}
-                  >
-                    <span className="truncate">{envelopeLabel}</span>
-                    <ChevronDown
-                      className={cn(
-                        "h-3.5 w-3.5 shrink-0 opacity-60 transition",
-                        envelopeOpen && "rotate-180"
-                      )}
-                      aria-hidden
-                    />
-                  </button>
-                  {envelopeOpen && (
-                    <div
-                      className="absolute left-0 top-full z-40 mt-1 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-[var(--border)] bg-[var(--card)] p-2 shadow-lg"
-                      role="listbox"
-                      aria-multiselectable
-                      data-testid="envelope-multiselect"
-                    >
-                      <ul className="max-h-56 space-y-0.5 overflow-y-auto">
-                        {ALL_ENVELOPES.map((k) => {
-                          const checked = envelopeFilters.includes(k);
-                          return (
-                            <li key={k}>
-                              <label
-                                className={cn(
-                                  "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] hover:bg-[var(--muted)]/60",
-                                  checked && "bg-teal-500/10"
-                                )}
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="rounded border-[var(--border)]"
-                                  checked={checked}
-                                  onChange={() => toggleEnvelope(k)}
-                                  data-testid={`envelope-check-${k}`}
-                                />
-                                <span>{ACCOUNT_TYPES[k]}</span>
-                              </label>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                      <div className="mt-2 flex gap-1.5 border-t border-[var(--border)] pt-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="flex-1 !text-[11px]"
-                          data-testid="envelope-select-all"
-                          onClick={() =>
-                            onEnvelopeFiltersChange([...ALL_ENVELOPES])
-                          }
-                        >
-                          Tout sélectionner
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="flex-1 !text-[11px]"
-                          data-testid="envelope-select-none"
-                          onClick={() => onEnvelopeFiltersChange([])}
-                        >
-                          Tout désélectionner
-                        </Button>
-                      </div>
-                      <button
-                        type="button"
-                        className="mt-1.5 w-full rounded-md py-1 text-[11px] text-[var(--muted-foreground)] hover:bg-[var(--muted)]/50"
-                        onClick={() => setEnvelopeOpen(false)}
-                        data-testid="envelope-close"
-                      >
-                        Fermer
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : undefined
-            }
           />
-          {platformFilterLabel && onClearPlatformFilter && (
+
+          <div
+            className="flex min-w-0 flex-wrap items-center gap-[var(--space-2)]"
+            data-testid="holdings-filter-chips"
+          >
+            {onEnvelopeFiltersChange && (
+              <FilterChip
+                label="Enveloppe"
+                testId="envelope-select"
+                pluralNoun="enveloppes"
+                /* Ici le vide veut dire « aucune position », pas « toutes » :
+                   d'où les deux raccourcis nommés en pied de menu. */
+                emptyMeans="none"
+                allLabel="Toutes"
+                options={ALL_ENVELOPES.map((k) => ({
+                  value: k,
+                  label: ACCOUNT_TYPES[k],
+                }))}
+                selected={envelopeFilters}
+                onChange={(next) =>
+                  onEnvelopeFiltersChange(next as AccountType[])
+                }
+                shortcuts={[
+                  {
+                    label: "Toutes",
+                    next: [...ALL_ENVELOPES],
+                    testId: "envelope-select-all",
+                  },
+                  {
+                    label: "Aucune",
+                    next: [],
+                    testId: "envelope-select-none",
+                  },
+                ]}
+              />
+            )}
+
+            <FilterChip
+              label="Type"
+              testId="asset-class-filter"
+              pluralNoun="types"
+              options={assetClassOptions}
+              selected={assetClassFilters}
+              onChange={onAssetClassFiltersChange}
+            />
+
+            <FilterChip
+              label="Plateforme"
+              testId="platform-filter"
+              pluralNoun="plateformes"
+              allLabel="Toutes"
+              singleSelect
+              options={
+                /* Le libellé résolu depuis l'URL prévaut : un lien profond peut
+                   viser une plateforme absente des positions filtrées, et la
+                   puce doit tout de même savoir quoi afficher. */
+                platformFilterId &&
+                platformFilterLabel &&
+                !platformOptions.some((o) => o.value === platformFilterId)
+                  ? [
+                      ...platformOptions,
+                      { value: platformFilterId, label: platformFilterLabel },
+                    ]
+                  : platformOptions
+              }
+              selected={platformFilterId ? [platformFilterId] : []}
+              onChange={(next) => onPlatformFilterChange(next[0] ?? null)}
+            />
+
+            <FilterChip
+              label="Devise"
+              testId="currency-filter"
+              pluralNoun="devises"
+              allLabel="Toutes"
+              options={currencyOptions}
+              selected={currencyFilters}
+              onChange={onCurrencyFiltersChange}
+            />
+
+            {/* P&L : trois états exclusifs, donc un segmenté et non une puce —
+                cocher « gagnants » et « perdants » ensemble ne voudrait rien
+                dire de plus que ne rien cocher. */}
+            <span className="term-chip-label shrink-0">P&amp;L</span>
             <div
-              className="flex min-w-0 items-center gap-1.5"
-              data-testid="holdings-platform-filter"
+              className="term-seg"
+              role="group"
+              aria-label="Filtrer par P&L latent"
+              data-testid="holdings-pnl-filter"
             >
-              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-teal-700/30 bg-teal-700/10 px-2.5 py-1 text-[11px] font-medium text-teal-900 dark:text-teal-100">
-                <span className="truncate" title={platformFilterLabel}>
-                  Plateforme · {platformFilterLabel}
-                </span>
+              {(
+                [
+                  { key: "all", label: "Tous" },
+                  { key: "gain", label: "Gagnants" },
+                  { key: "loss", label: "Perdants" },
+                ] as const
+              ).map((opt) => (
                 <button
+                  key={opt.key}
                   type="button"
-                  className="shrink-0 rounded p-0.5 hover:bg-teal-700/15"
-                  onClick={onClearPlatformFilter}
-                  aria-label="Retirer le filtre plateforme"
-                  data-testid="holdings-clear-platform-filter"
+                  className="term-seg-item"
+                  data-active={pnlFilter === opt.key ? "true" : "false"}
+                  aria-pressed={pnlFilter === opt.key}
+                  data-testid={`pnl-filter-${opt.key}`}
+                  onClick={() => onPnlFilterChange(opt.key)}
                 >
-                  ×
+                  {opt.label}
                 </button>
-              </span>
+              ))}
             </div>
-          )}
+
+            {hasActiveFilters && (
+              <button
+                type="button"
+                className="term-chip"
+                data-testid="holdings-reset-filters"
+                onClick={onResetFilters}
+              >
+                <RotateCcw className="h-3 w-3 shrink-0" aria-hidden />
+                Réinitialiser
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -422,11 +473,12 @@ export function HoldingsToolbar({
                   data-testid="holdings-group-by"
                   aria-label="Regrouper les positions"
                 >
-                  <option value="none">Aucun</option>
+                  <option value="assetClass">Classe d&apos;actifs</option>
                   <option value="assetCategory">
                     Sous-catégorie d&apos;actif
                   </option>
                   <option value="blockchain">Blockchain (crypto)</option>
+                  <option value="none">Aucun</option>
                 </select>
               </label>
 

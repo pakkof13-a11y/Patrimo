@@ -103,7 +103,9 @@ export async function gotoDashboard(page: Page) {
   await expect(page.getByTestId("holdings-table")).toBeVisible({
     timeout: 45_000,
   });
-  await expect(page.getByTestId("kpi-cash")).toBeVisible();
+  // Le portefeuille porte ses propres indicateurs (le bandeau générique
+  // `kpi-*` n'y est plus affiché : il ferait doublon avec ces cinq cartes).
+  await expect(page.getByTestId("portfolio-kpi-cards")).toBeVisible();
 }
 
 /** Select a platform in PlatformCombobox by typing + clicking option */
@@ -160,15 +162,25 @@ const ENVELOPE_SELECT_VALUES: Record<string, string> = {
 const ENVELOPE_URL: Record<string, string> = {
   CTO: "/positions?envelope=cto",
   PEA: "/positions?envelope=pea",
-  CRYPTO: "/positions?envelope=crypto",
   AV: "/positions?envelope=av",
-  IMMOBILIER: "/positions?envelope=immobilier",
   CFD: "/positions?envelope=cfd",
   "": "/positions",
 };
 
 /**
- * Sélecteur Enveloppe = <button> + listbox multi-cases (plus de <select>).
+ * CRYPTO / IMMOBILIER ont leur propre onglet de premier niveau (app/lib/types/
+ * nav-groups.ts, ENVELOPE_SELECT_OPTIONS) : les sélectionner depuis le
+ * sélecteur d'enveloppe générique de Positions ne pousse *volontairement*
+ * aucune query `?envelope=` — l'app resterait sur /positions et ne filtrerait
+ * que le tableau. Un fallback `page.goto("/positions?envelope=crypto")`
+ * casserait ce filtre : `envelopeParamToTab` ne connaît pas ce paramètre et
+ * retombe sur "holdings" (toutes enveloppes) — d'où le sélecteur affichant
+ * « Toutes » au lieu de « Cryptomonnaies ». Pas de vérif/fallback URL ici.
+ */
+const NO_URL_ENVELOPES = new Set(["CRYPTO", "IMMOBILIER"]);
+
+/**
+ * Sélecteur Enveloppe = puce de filtre + menu d'options (`FilterChip`).
  * `code` = CTO | PEA | … ou "" pour tout sélectionner.
  */
 export async function selectEnvelopeFilter(
@@ -178,7 +190,7 @@ export async function selectEnvelopeFilter(
   const trigger = page.getByTestId("envelope-select");
   await expect(trigger).toBeVisible({ timeout: 15_000 });
   // Ouvrir le menu si fermé
-  const listbox = page.getByTestId("envelope-multiselect");
+  const listbox = page.getByTestId("envelope-select-menu");
   if (!(await listbox.isVisible().catch(() => false))) {
     await trigger.click();
   }
@@ -187,23 +199,16 @@ export async function selectEnvelopeFilter(
   if (!code) {
     await page.getByTestId("envelope-select-all").click();
   } else {
-    // Une seule enveloppe : tout décocher puis cocher la cible
+    // Une seule enveloppe : tout désélectionner puis cocher la cible
     await page.getByTestId("envelope-select-none").click();
-    const check = page.getByTestId(`envelope-check-${code}`);
-    await expect(check).toBeVisible();
-    // Après « tout désélectionner », la case est décochée → cocher
-    if (!(await check.isChecked().catch(() => false))) {
-      await check.check();
-    }
+    const option = page.getByTestId(`envelope-select-option-${code}`);
+    await expect(option).toBeVisible();
+    await option.click();
   }
 
-  // Fermer le popover (évite de masquer d’autres contrôles)
-  const close = page.getByTestId("envelope-close");
-  if (await close.isVisible().catch(() => false)) {
-    await close.click();
-  } else {
-    await page.keyboard.press("Escape").catch(() => undefined);
-  }
+  // Fermer le menu (évite de masquer d’autres contrôles)
+  await page.keyboard.press("Escape").catch(() => undefined);
+  await expect(listbox).toBeHidden({ timeout: 5_000 });
 }
 
 /** Chemins URL pour les onglets (secours si le clic nav ne navigue pas). */
@@ -213,10 +218,10 @@ const NAV_PATH: Record<string, string> = {
   Transactions: "/transactions",
   Fiscalité: "/fiscalite",
   /** Libellé produit actuel */
-  "Mes plateformes": "/comptes",
+  "Mes plateformes": "/plateformes",
   /** Alias historiques — même destination */
-  "Mes comptes": "/comptes",
-  Plateformes: "/comptes",
+  "Mes comptes": "/plateformes",
+  Plateformes: "/plateformes",
   Passifs: "/passifs",
   Banques: "/banques",
   "Épargne Salariale": "/epargne-salariale",
@@ -234,6 +239,7 @@ export async function clickNav(page: Page, label: string) {
     "Tableau de bord": "nav-dashboard",
     Positions: "nav-holdings",
     Transactions: "nav-transactions",
+    "Opérations": "nav-transactions",
     Fiscalité: "nav-fiscal",
     "Mes plateformes": "nav-platforms",
     "Mes comptes": "nav-platforms",
@@ -263,6 +269,9 @@ export async function clickNav(page: Page, label: string) {
     if (await sel.isVisible().catch(() => false)) {
       // Multi-select (button + listbox), pas de <select>
       await selectEnvelopeFilter(page, val);
+      // CRYPTO / IMMOBILIER : filtre client-side uniquement, jamais dans
+      // l'URL (voir NO_URL_ENVELOPES) — rien à vérifier/fallback ici.
+      if (NO_URL_ENVELOPES.has(val)) return;
       try {
         if (val) {
           await expect(page).toHaveURL(new RegExp(`envelope=${val}`, "i"), {
@@ -288,13 +297,29 @@ export async function clickNav(page: Page, label: string) {
   const tid = map[label];
   const fallbackPath = NAV_PATH[label];
 
-  const groupForTid: Record<string, string> = {
-    "nav-platforms": "sources",
-    "nav-banques": "sources",
-    "nav-epargne-salariale": "extended",
-    "nav-alternatifs": "extended",
-    "nav-liabilities": "extended",
-    "nav-fiscal": "tax",
+  /**
+   * Entrées rangées derrière l'une des trois familles de la barre latérale
+   * (Avoirs, Engagements, Suivi).
+   *
+   * Chaque famille est son propre dépliant : il faut savoir lequel ouvrir
+   * avant de pouvoir cliquer l'entrée visée. Sans cette table, le helper
+   * tombait systématiquement sur le repli par URL et ne testait plus la
+   * navigation réelle.
+   */
+  const WEALTH_GROUP_OF: Record<string, string> = {
+    "nav-holdings": "nav-group-avoirs",
+    "nav-securities": "nav-group-avoirs",
+    "nav-banques": "nav-group-avoirs",
+    "nav-assurance-vie": "nav-group-avoirs",
+    "nav-immobilier": "nav-group-avoirs",
+    "nav-crypto": "nav-group-avoirs",
+    "nav-epargne-salariale": "nav-group-avoirs",
+    "nav-alternatifs": "nav-group-avoirs",
+    "nav-liabilities": "nav-group-engagements",
+    "nav-trading": "nav-group-engagements",
+    "nav-transactions": "nav-group-suivi",
+    "nav-platforms": "nav-group-suivi",
+    "nav-fiscal": "nav-group-suivi",
   };
 
   async function ensureUrl() {
@@ -317,9 +342,8 @@ export async function clickNav(page: Page, label: string) {
       return;
     }
 
-    const preferred = groupForTid[tid];
-    if (preferred) {
-      const gb = page.getByTestId(`nav-group-${preferred}`);
+    if (tid in WEALTH_GROUP_OF) {
+      const gb = page.getByTestId(WEALTH_GROUP_OF[tid]!);
       if (await gb.isVisible().catch(() => false)) {
         await gb.click();
         try {
@@ -351,9 +375,10 @@ export async function clickNav(page: Page, label: string) {
   await page.getByRole("button", { name: label, exact: true }).click();
 }
 
+/** Indicateurs du portefeuille (page /positions). */
 export async function expectKpiVisible(page: Page) {
-  await expect(page.getByTestId("kpi-cash")).toBeVisible();
-  await expect(page.getByTestId("kpi-realized")).toBeVisible();
+  await expect(page.getByTestId("pkpi-total")).toBeVisible();
+  await expect(page.getByTestId("pkpi-pnl")).toBeVisible();
 }
 
 export async function waitForHoldingsReady(page: Page) {
@@ -445,19 +470,40 @@ export async function openImportCsvModal(page: Page) {
     await page.goto(url.pathname + url.search, { waitUntil: "domcontentloaded" });
   }
 
-  // 2) Secours clic header
-  const byTestId = page.getByTestId("import-csv-modal");
-  if (!(await byTestId.isVisible().catch(() => false))) {
+  /*
+    2) Secours clic header — seulement si le deep-link n'a vraiment pas ouvert.
+
+    Le test d'ouverture était un `isVisible()` immédiat, lancé alors que la
+    page venait de naviguer : la modale n'était pas encore montée, on tombait
+    dans le secours, et son `click({ force: true })` partait vers le bouton
+    d'en-tête — désormais recouvert par l'overlay de la modale qui venait de
+    s'ouvrir. `force` ignore justement ce recouvrement : le mousedown
+    atterrissait sur l'overlay, dont le gestionnaire ferme la modale.
+
+    La fermeture passe par `router.replace` pour retirer `?import=1`, donc elle
+    n'était visible qu'une seconde plus tard. L'assertion d'ouverture qui suit
+    passait, le test continuait, et la modale disparaissait en plein milieu :
+    l'échec tombait bien après sa cause, sur une assertion sans rapport.
+
+    On attend donc réellement la modale avant de conclure à un échec du
+    deep-link, et l'on clique sans `force` : si quelque chose recouvre le
+    bouton, le test doit le dire, pas passer outre.
+  */
+  const modal = page.getByTestId("import-csv-modal");
+  const opened = await modal
+    .waitFor({ state: "visible", timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (!opened) {
     const btn = page.getByTestId("open-import-csv");
     if (await btn.isVisible().catch(() => false)) {
-      await btn.click({ force: true });
+      await btn.click();
     }
   }
 
   // Un seul locator (éviter .or() + strict mode quand titre + body matchent)
-  await expect(page.getByTestId("import-csv-modal")).toBeVisible({
-    timeout: 15_000,
-  });
+  await expect(modal).toBeVisible({ timeout: 15_000 });
 }
 
 /**

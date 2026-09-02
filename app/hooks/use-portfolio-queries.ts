@@ -61,6 +61,12 @@ export type TransactionsListResponse = {
   pageSize: number;
   pageCount: number;
   typeCounts?: Partial<Record<string, number>>;
+  kpis?: {
+    buysEur: number;
+    sellsEur: number;
+    feesEur: number;
+    incomeEur: number;
+  };
 };
 
 export type TransactionsListParams = {
@@ -72,6 +78,10 @@ export type TransactionsListParams = {
   q?: string;
   sortBy?: string;
   sortDir?: "asc" | "desc";
+  /** Bornes "YYYY-MM-DD" (inclusives) */
+  dateFrom?: string;
+  dateTo?: string;
+  platformId?: string;
 };
 
 /** Clé RQ pour le journal — invalidation `["transactions"]` couvre list + meta. */
@@ -86,6 +96,9 @@ export function transactionsListQueryKey(params: TransactionsListParams) {
     params.q?.trim() || "",
     params.sortBy || "date",
     params.sortDir || "desc",
+    params.dateFrom || "",
+    params.dateTo || "",
+    params.platformId || "",
   ] as const;
 }
 
@@ -99,6 +112,9 @@ function buildTransactionsListUrl(params: TransactionsListParams): string {
   if (params.q?.trim()) sp.set("q", params.q.trim());
   if (params.sortBy) sp.set("sortBy", params.sortBy);
   if (params.sortDir) sp.set("sortDir", params.sortDir);
+  if (params.dateFrom) sp.set("dateFrom", params.dateFrom);
+  if (params.dateTo) sp.set("dateTo", params.dateTo);
+  if (params.platformId) sp.set("platformId", params.platformId);
   return `/api/transactions?${sp.toString()}`;
 }
 
@@ -197,3 +213,66 @@ export function useAssetDetailQuery(detailAssetId: string | null) {
     staleTime: 15_000,
   });
 }
+
+/**
+ * P&L journalier par classe d'actifs — alimente les courbes et la variation
+ * du jour des en-têtes de groupe du portefeuille.
+ *
+ * Requête à part, jamais fusionnée dans `usePortfolioHistoryQuery` : le calcul
+ * peut déclencher des appels fournisseurs pour compléter le cache de clôtures
+ * (voir `class-pnl-service`). Le cache est donc volontairement long, et la
+ * requête ne se relance ni au montage ni au retour de focus — un tableau qui
+ * reste lisible vaut mieux qu'une courbe rafraîchie à la seconde.
+ */
+const CLASS_PNL_STALE_MS = 5 * 60_000;
+
+export type ClassPnlPoint = {
+  day: string;
+  valueByClass: Record<string, number>;
+  pnlByClass: Record<string, number>;
+  incompleteClasses: string[];
+};
+
+export function useClassPnlQuery(range: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["portfolio-class-pnl", range],
+    queryFn: () =>
+      fetchJson<{
+        points: ClassPnlPoint[];
+        classes: string[];
+        estimated: boolean;
+      }>(`/api/portfolio/class-pnl?range=${encodeURIComponent(range)}`),
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: CLASS_PNL_STALE_MS,
+    gcTime: 15 * 60_000,
+    retry: 1,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Le compte porte-t-il la moindre donnée patrimoniale ?
+ *
+ * Seule cette réponse décide entre le cockpit d'accueil et le tableau de bord.
+ * Elle n'est jamais servie depuis le cache : après une remise à zéro ou la
+ * création d'une première ligne, l'écran doit basculer immédiatement, et une
+ * valeur gardée quelques secondes montrerait le mauvais des deux.
+ */
+export function usePatrimonyStateQuery() {
+  return useQuery({
+    queryKey: PATRIMONY_STATE_KEY,
+    queryFn: () =>
+      fetchJson<{ isEmpty: boolean; families: string[] }>(
+        "/api/patrimony-state"
+      ),
+    staleTime: 0,
+    gcTime: 60_000,
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/** Clé partagée — l'invalidation vit chez les écrans qui créent des données. */
+export const PATRIMONY_STATE_KEY = ["patrimony-state"] as const;

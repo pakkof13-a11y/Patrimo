@@ -20,11 +20,33 @@ const roundQty = (n: number, dec = 4) => {
   return Math.max(1 / f, Math.round(n * f) / f);
 };
 
-const THREE_YEARS = 1095;
+const THREE_YEARS = 1825;
+
+/** Jour civil parisien `YYYY-MM-DD` — clé des clôtures journalières. */
+function dayKeyOf(date: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+/** Graine stable dérivée d'une chaîne : la démo doit être reproductible. */
+function hashSeed(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
 
 type AssetSeed = {
   name: string;
   ticker: string;
+  /** Épinglé dans la watchlist du tableau de bord (démo). */
+  watched?: boolean;
   isin?: string;
   assetClass: string;
   category?:
@@ -117,6 +139,7 @@ export async function seedUserPortfolio(
     {
       name: "LVMH",
       ticker: "MC.PA",
+      watched: true,
       isin: "FR0000121014",
       assetClass: "ACTIONS",
       category: "EQUITY",
@@ -346,6 +369,7 @@ export async function seedUserPortfolio(
     {
       name: "Bitcoin",
       ticker: "BTC",
+      watched: true,
       assetClass: "CRYPTO",
       category: "CRYPTO",
       accountType: "CRYPTO",
@@ -544,6 +568,7 @@ export async function seedUserPortfolio(
     {
       name: "Nvidia",
       ticker: "NVDA",
+      watched: true,
       assetClass: "ACTIONS",
       category: "EQUITY",
       accountType: "CTO",
@@ -594,7 +619,19 @@ export async function seedUserPortfolio(
   const positions: Pos[] = [];
 
   for (const s of assetSeeds) {
-    const asset = await prisma.asset.create({
+    /*
+      Création et constat d'enveloppe dans la même transaction.
+
+      Les lignes du seed doivent porter le même niveau de vérité historique
+      que celles créées par l'application : sans événement, `resolveEnvelopeAt`
+      rend `UNKNOWN` sur tout leur passé, y compris sur des périodes où le seed
+      connaît parfaitement l'enveloppe qu'il vient d'établir.
+
+      La transaction évite le seul état incohérent possible : un actif créé
+      dont l'événement manquerait à cause d'une écriture partielle.
+    */
+    const asset = await prisma.$transaction(async (tx) => {
+      const cree = await tx.asset.create({
       data: {
         userId,
         platformId: s.platformId,
@@ -612,7 +649,44 @@ export async function seedUserPortfolio(
         stopLoss: s.stopLoss != null ? D(s.stopLoss) : null,
         tp1: s.tp1 != null ? D(s.tp1) : null,
         acquisitionDate: daysAgo(s.openDaysAgo),
+        // Quelques lignes suivies d'emblée : une carte « Watchlist » vide au
+        // premier lancement se lit comme une fonctionnalité en panne plutôt
+        // que comme une liste à composer.
+        watchlistedAt: s.watched ? daysAgo(Math.min(s.openDaysAgo, 30)) : null,
       },
+      });
+
+      /*
+        Seules les enveloppes titres sont journalisées — le périmètre du
+        journal, inchangé, est celui de l'amorçage de sa migration. Inventer un
+        événement pour une ligne AV, CRYPTO ou IMMOBILIER élargirait ce
+        périmètre sans que rien ne le demande.
+
+        La date retenue est celle de **création de la ligne**, jamais sa date
+        d'acquisition. `acquisitionDate` remonte à plusieurs années : s'en
+        servir affirmerait que l'enveloppe était connue à cette date, alors que
+        le seed ne l'établit qu'à l'instant présent. Ce serait exactement la
+        rétro-projection que le journal existe pour interdire.
+
+        Aucun compte titres n'est rattaché : le seed n'en crée aucun, et les
+        supprime tous au nettoyage. `securitiesAccountId` à `null` enregistre
+        donc une absence de rattachement **constatée**, pas une ignorance.
+      */
+      if (cree.accountType === "CTO" || cree.accountType === "PEA") {
+        await tx.assetEnvelopeEvent.create({
+          data: {
+            assetId: cree.id,
+            userId,
+            occurredAt: cree.createdAt,
+            kind: "OBSERVED",
+            accountType: cree.accountType,
+            securitiesAccountId: null,
+            envelopeType: null,
+          },
+        });
+      }
+
+      return cree;
     });
     positions.push({ ...s, id: asset.id });
   }
@@ -662,6 +736,8 @@ export async function seedUserPortfolio(
     occurredAt: Date;
     notes: string;
     whtRate?: number;
+    /** Plateforme de destination — transferts uniquement. */
+    toPlatformId?: string | null;
   }) {
     const currency = (partial.currency || "EUR").toUpperCase();
     const fx = fxNum(currency);
@@ -678,6 +754,15 @@ export async function seedUserPortfolio(
     } else if (type === "APPORT") {
       grossEur = moneyN((partial.cashAmount ?? 0) * fx);
       net = grossEur;
+    } else if (type === "TRANSFERT_CASH") {
+      /*
+        Un transfert déplace de l'argent sans en créer ni en détruire : son
+        impact net sur le patrimoine est nul, mais son montant brut doit être
+        renseigné — le rejeu du journal le refuse à zéro, et le compte de
+        départ resterait crédité de ce qu'il a envoyé.
+      */
+      grossEur = moneyN((partial.cashAmount ?? 0) * fx);
+      net = 0;
     } else if (type === "RETRAIT" || type === "FRAIS") {
       grossEur = moneyN((partial.cashAmount ?? 0) * fx);
       net = -moneyN(grossEur + feesEur);
@@ -702,7 +787,7 @@ export async function seedUserPortfolio(
       userId,
       type,
       platformId: partial.platformId,
-      toPlatformId: null,
+      toPlatformId: partial.toPlatformId ?? null,
       assetId: partial.assetId ?? null,
       quantity:
         partial.quantity != null ? D(String(partial.quantity)) : null,
@@ -734,7 +819,7 @@ export async function seedUserPortfolio(
     });
   }
   // Apports annuels
-  for (const year of [1, 2]) {
+  for (const year of [1, 2, 3, 4]) {
     pushTx({
       type: "APPORT",
       platformId: boursorama.id,
@@ -771,6 +856,33 @@ export async function seedUserPortfolio(
       notes: note(`Ouverture ${p.name}`),
     });
   }
+
+  /*
+    Transfert interne entre deux plateformes du patrimoine.
+
+    Ni gain ni perte : l'argent change de place sans changer de propriétaire.
+    Sans une opération de ce type dans le jeu de démonstration, le module
+    Transactions n'a rien à montrer sous son filtre « Transferts », et la fiche
+    à deux plateformes reste invisible.
+  */
+  pushTx({
+      type: "TRANSFERT_CASH",
+      platformId: boursorama.id,
+      toPlatformId: fortuneo.id,
+      cashAmount: 3000,
+      currency: "EUR",
+      occurredAt: daysAgo(120),
+      notes: note("Transfert CTO → PEA"),
+  });
+  pushTx({
+      type: "TRANSFERT_CASH",
+      platformId: binance.id,
+      toPlatformId: boursorama.id,
+      cashAmount: 1500,
+      currency: "EUR",
+      occurredAt: daysAgo(210),
+      notes: note("Transfert crypto → CTO"),
+  });
 
   const lastDay = new Map(positions.map((p) => [p.id, p.openDaysAgo]));
   const activityPlan: Array<() => void> = [];
@@ -975,6 +1087,57 @@ export async function seedUserPortfolio(
     }),
   });
 
+  /*
+    Clôtures journalières.
+
+    Sans elles, le moteur de valorisation historique retient chaque position à
+    son prix de revient : la courbe est une suite de paliers qui ne bougent
+    qu'aux transactions. Un jeu de démonstration doit porter une vraie
+    chronologie de cours, sinon il ne démontre rien — et surtout pas que la
+    courbe sait suivre le marché entre deux opérations.
+
+    La marche est déterministe (générateur ensemencé par l'actif) : deux seeds
+    successifs produisent la même histoire, ce dont les tests e2e dépendent.
+  */
+  const closeRows: Array<{
+    assetId: string;
+    day: string;
+    closeEur: Prisma.Decimal;
+    source: string;
+  }> = [];
+
+  for (const p of positions) {
+    const fx = fxNum(p.currency);
+    const days = Math.min(p.openDaysAgo, THREE_YEARS);
+    // Interpole la tendance achat → marché, puis y superpose une volatilité
+    // journalière bornée : le prix final retombe exactement sur le cours coté.
+    let rnd = hashSeed(p.ticker);
+    const drift = (p.marketPrice - p.buyPrice) / Math.max(days, 1);
+    let wobble = 0;
+    for (let k = days; k >= 0; k--) {
+      rnd = (rnd * 1664525 + 1013904223) >>> 0;
+      const shock = (rnd / 0xffffffff - 0.5) * 0.02;
+      // Retour à la moyenne : l'écart ne dérive pas indéfiniment.
+      wobble = wobble * 0.9 + shock;
+      const trend = p.buyPrice + drift * (days - k);
+      const native = k === 0 ? p.marketPrice : Math.max(trend * (1 + wobble), 0.0001);
+      const dt = daysAgo(k);
+      closeRows.push({
+        assetId: p.id,
+        day: dayKeyOf(dt),
+        closeEur: D(String(moneyN(native * fx))),
+        source: "seed",
+      });
+    }
+  }
+
+  for (let i = 0; i < closeRows.length; i += 500) {
+    await prisma.assetDailyClose.createMany({
+      data: closeRows.slice(i, i + 500),
+      skipDuplicates: true,
+    });
+  }
+
   // ── Cash / banques / livrets ────────────────────────────────────────────────
   await prisma.envelopeCash.createMany({
     data: [
@@ -1013,6 +1176,11 @@ export async function seedUserPortfolio(
       {
         userId,
         name: "Livret A",
+        // Sans banque de détention, le livret se range sous « établissement non
+        // renseigné » dans la synthèse par établissement — ce qui est exact,
+        // mais ne démontre rien.
+        bankName: "BoursoBank",
+        productType: "LIVRET_A",
         balance: D("22950"),
         apyPercent: D("2.4"),
         rateType: "APY",
@@ -1025,6 +1193,11 @@ export async function seedUserPortfolio(
       {
         userId,
         name: "LDDS",
+        // Sans banque de détention, le livret se range sous « établissement non
+        // renseigné » dans la synthèse par établissement — ce qui est exact,
+        // mais ne démontre rien.
+        bankName: "Crédit Agricole",
+        productType: "LDDS",
         balance: D("12000"),
         apyPercent: D("2.4"),
         rateType: "APY",
@@ -1037,6 +1210,11 @@ export async function seedUserPortfolio(
       {
         userId,
         name: "PEL",
+        // Sans banque de détention, le livret se range sous « établissement non
+        // renseigné » dans la synthèse par établissement — ce qui est exact,
+        // mais ne démontre rien.
+        bankName: "Crédit Agricole",
+        productType: "PEL",
         balance: D("18500"),
         apyPercent: D("2.25"),
         rateType: "APY",
@@ -1050,7 +1228,7 @@ export async function seedUserPortfolio(
   });
 
   // ── Assurance-vie (onglet AV dédié) ─────────────────────────────────────────
-  await prisma.lifeInsurance.create({
+  const avLinxea = await prisma.lifeInsurance.create({
     data: {
       userId,
       insurer: "Spirica / Linxea Spirit 2",
@@ -1058,18 +1236,10 @@ export async function seedUserPortfolio(
       cashEuro: D("15200"),
       currency: "EUR",
       notes: note("Contrat multi-supports"),
+      // Le fonds euro vit dans `cashEuro` ci-dessus — le répéter ici le
+      // compterait deux fois au patrimoine.
       products: {
         create: [
-          {
-            name: "Fonds euro Spirica",
-            currentValue: D("15200"),
-            currency: "EUR",
-          },
-          {
-            name: "UC Amundi MSCI World",
-            currentValue: D("28500"),
-            currency: "EUR",
-          },
           {
             name: "UC Carmignac Patrimoine",
             currentValue: D("8400"),
@@ -1079,7 +1249,7 @@ export async function seedUserPortfolio(
       },
     },
   });
-  await prisma.lifeInsurance.create({
+  const avGenerali = await prisma.lifeInsurance.create({
     data: {
       userId,
       insurer: "Generali / Boursorama Vie",
@@ -1087,13 +1257,9 @@ export async function seedUserPortfolio(
       cashEuro: D("5000"),
       currency: "EUR",
       notes: note("Second contrat"),
+      // Idem : pas de reprise du fonds euro en support.
       products: {
         create: [
-          {
-            name: "Fonds euro Generali",
-            currentValue: D("5000"),
-            currency: "EUR",
-          },
           {
             name: "ETF World tracker",
             currentValue: D("9200"),
@@ -1103,6 +1269,158 @@ export async function seedUserPortfolio(
       },
     },
   });
+
+  /*
+    Fiche immobilière des biens détenus en direct.
+
+    Le journal sait qu'un appartement vaut 312 000 €, il ne sait rien du reste :
+    ni la ville, ni la surface, ni le loyer, ni le DPE, ni le prêt qui le
+    finance. Sans `RealEstateDetail`, l'onglet Immobilier n'avait donc aucun
+    bien à montrer — la valeur remontait bien au patrimoine, mais le module
+    restait vide.
+
+    Seuls les biens détenus en direct en reçoivent une : une SCPI est une part
+    de société, elle n'a ni étage ni taxe foncière propre, et lui inventer une
+    adresse serait faux.
+  */
+  const directProperties = await prisma.asset.findMany({
+    where: { userId, accountType: "IMMOBILIER", category: "REAL_ESTATE_DIRECT" },
+    select: { id: true, name: true },
+  });
+
+  for (const a of directProperties) {
+    await prisma.realEstateDetail.create({
+      data: {
+        assetId: a.id,
+        propertyType: "APPARTEMENT",
+        usage: "LOCATIF_NU",
+        rooms: 3,
+        livingAreaM2: 68,
+        addressLine: "12 rue de la République",
+        postalCode: "69003",
+        city: "Lyon",
+        valuationMode: "MANUAL",
+        lastValuedAt: daysAgo(45),
+        monthlyRentEur: D("1250"),
+        monthlyChargesEur: D("180"),
+        annualPropertyTaxEur: D("1420"),
+        occupancyRatePct: D("100"),
+        rentDay: 5,
+        rentalStartDate: daysAgo(900),
+        rentalRegime: "MICRO_FONCIER",
+        taxScheme: "AUCUN",
+        constructionYear: 2010,
+        energyRating: "C",
+        gesRating: "C",
+        dpeKwhM2Year: 145,
+        heatingType: "COLLECTIF_GAZ",
+        floor: 3,
+        totalFloors: 6,
+        hasElevator: true,
+        orientation: "SUD",
+        hasBalcony: true,
+        balconyAreaM2: 6,
+        hasCellar: true,
+        parkingSpots: 1,
+        bathroomCount: 1,
+        isCopropriete: true,
+        annualCoproChargesEur: D("1200"),
+      },
+    });
+  }
+
+  /*
+    Fiche des véhicules immobiliers indirects.
+
+    Le raisonnement ci-dessus — une SCPI n'a ni étage ni taxe foncière, lui
+    inventer une adresse serait faux — est juste, et il ne dit rien de la table
+    faite pour elle. `IndirectRealEstateDetail` ne demande aucune adresse : elle
+    porte la société de gestion, le taux de distribution, l'endettement du
+    véhicule et la part imposable à l'IFI.
+
+    Sans elle, deux SCPI comptaient 25 240 € au patrimoine sans apparaître dans
+    aucun onglet du module Immobilier, et échappaient à l'assiette IFI alors
+    qu'une part de SCPI y est assujettie comme un bien détenu en direct.
+
+    Cette fiche ne porte aucune valeur : la valorisation reste celle de la
+    position au journal, exactement comme le fait `createIndirectHolding()`
+    quand un utilisateur souscrit depuis l'onglet SCPI.
+  */
+  const INDIRECT_VEHICLES_SEED: Record<
+    string,
+    { manager: string; distributionRatePct: string; debtRatioPct: string }
+  > = {
+    "SCPI Primovie": {
+      manager: "Primonial REIM",
+      distributionRatePct: "4.52",
+      debtRatioPct: "18.400",
+    },
+    "SCPI Épargne Pierre": {
+      manager: "Atland Voisin",
+      distributionRatePct: "5.28",
+      debtRatioPct: "12.100",
+    },
+  };
+
+  const indirectProperties = await prisma.asset.findMany({
+    where: { userId, accountType: "IMMOBILIER", category: "SCPI" },
+    select: { id: true, name: true },
+  });
+
+  for (const a of indirectProperties) {
+    const preset = INDIRECT_VEHICLES_SEED[a.name];
+    if (!preset) continue;
+    await prisma.indirectRealEstateDetail.create({
+      data: {
+        assetId: a.id,
+        vehicle: "SCPI",
+        manager: preset.manager,
+        distributionRatePct: D(preset.distributionRatePct),
+        debtRatioPct: D(preset.debtRatioPct),
+        // Une SCPI de rendement classique est immobilière à 100 % : toute la
+        // part entre dans l'assiette IFI (art. 965 2°).
+        realEstateSharePct: D("100"),
+        // Société de personnes : les revenus sont imposés chez l'associé.
+        taxTransparency: "IR",
+        ifiExcluded: false,
+        notes: "[Admin seed] Véhicule immobilier indirect",
+      },
+    });
+  }
+
+  /*
+    Rattachement des supports aux contrats.
+
+    Sans lui, les trois lignes AV du journal restent orphelines : elles
+    comptent bien dans l'encours du patrimoine, mais chaque contrat s'affiche à
+    zéro euro et zéro support, et ni la répartition fonds euro / UC ni
+    l'antériorité fiscale ne peuvent se calculer. Un jeu de démonstration qui
+    montre deux contrats vides ne démontre rien.
+  */
+  const avAssets = await prisma.asset.findMany({
+    where: { userId, accountType: "AV" },
+    select: { id: true, name: true, assetClass: true },
+  });
+
+  for (const a of avAssets) {
+    const isEuroFund = a.name.toLowerCase().includes("fonds euro");
+    await prisma.lifeInsuranceSupport.create({
+      data: {
+        assetId: a.id,
+        // Le fonds euro et le tracker monde sur le contrat Linxea, le reste
+        // sur le contrat Generali : deux contrats réellement garnis, avec des
+        // répartitions différentes à lire.
+        lifeInsuranceId: isEuroFund || a.name.includes("MSCI World")
+          ? avLinxea.id
+          : avGenerali.id,
+        kind: isEuroFund ? "FONDS_EURO" : "UC",
+        issuer: isEuroFund ? "Spirica" : "Amundi",
+        // Frais de gestion : sans eux, la vue « Frais » n'a rien à pondérer.
+        managementFeePct: D(isEuroFund ? "0.60" : "0.85"),
+        entryFeePct: D("0"),
+      },
+    });
+  }
 
   // ── Passifs / crédits ──────────────────────────────────────────────────────
   const mortgage = await prisma.liability.create({
@@ -1118,6 +1436,10 @@ export async function seedUserPortfolio(
       endDate: daysAgo(-(25 * 365)),
       paymentDay: 5,
       bankName: "Crédit Agricole",
+      // Sans catégorie, tous les crédits se rangent sous « Autre » et la
+      // répartition par type de l'onglet Passifs ne distingue plus rien.
+      category: "IMMOBILIER",
+      insuranceMonthly: D("28"),
       notes: note("Prêt 25 ans"),
     },
   });
@@ -1133,6 +1455,25 @@ export async function seedUserPortfolio(
       },
     });
   }
+  /*
+    Rattachement du prêt au bien qu'il finance.
+
+    C'est la lecture la plus parlante du module Passifs pour un particulier :
+    « ce prêt finance ce bien, le bien vaut X, il reste Y, donc mon equity est
+    Z ». Sans ce lien, le panneau d'un crédit immobilier n'affiche aucun bien,
+    et le rapprochement reste à faire de tête.
+  */
+  const financedProperty = await prisma.asset.findFirst({
+    where: { userId, accountType: "IMMOBILIER", category: "REAL_ESTATE_DIRECT" },
+    select: { id: true },
+  });
+  if (financedProperty) {
+    await prisma.liability.update({
+      where: { id: mortgage.id },
+      data: { assetId: financedProperty.id },
+    });
+  }
+
   await prisma.liability.create({
     data: {
       userId,
@@ -1146,6 +1487,7 @@ export async function seedUserPortfolio(
       endDate: daysAgo(-200),
       paymentDay: 12,
       bankName: "Cetelem",
+      category: "CONSOMMATION",
       notes: note("Voiture"),
     },
   });
@@ -1158,6 +1500,8 @@ export async function seedUserPortfolio(
         planType: "PEE",
         manager: "Amundi",
         fundName: "Amundi Label Actions Euro",
+        contributedAmount: D("3200"),
+        fundCategory: "EQUITY",
         isin: "FR0010135103",
         units: D("145.5"),
         nav: D("28.40"),
@@ -1173,6 +1517,8 @@ export async function seedUserPortfolio(
         planType: "PEE",
         manager: "Amundi",
         fundName: "Amundi Monétaire",
+        contributedAmount: D("3800"),
+        fundCategory: "MONETARY",
         units: D("320"),
         nav: D("12.10"),
         currency: "EUR",
@@ -1187,6 +1533,8 @@ export async function seedUserPortfolio(
         planType: "PER",
         manager: "Natixis",
         fundName: "Natixis Horizon 2040",
+        contributedAmount: D("3000"),
+        fundCategory: "DIVERSIFIED",
         units: D("88.2"),
         nav: D("42.75"),
         currency: "EUR",
@@ -1201,6 +1549,8 @@ export async function seedUserPortfolio(
         planType: "PERCO",
         manager: "AXA",
         fundName: "AXA Diversifié",
+        contributedAmount: D("950"),
+        fundCategory: "DIVERSIFIED",
         units: D("55"),
         nav: D("18.90"),
         currency: "EUR",
@@ -1217,42 +1567,83 @@ export async function seedUserPortfolio(
   await prisma.preciousMetalPosition.createMany({
     data: [
       {
+        // Poids **brut** 6,4516 g au titre 900 : 5,806 g d'or fin. Le seed
+        // portait auparavant 5,81 g comme poids brut, ce qui revenait à
+        // compter le titre deux fois.
         userId,
-        assetKind: "METAL",
+        metal: "GOLD",
         format: "PHYSICAL",
+        productType: "COIN",
         denomination: "Napoléon 20F",
+        fineness: D("900"),
         quantity: D("12"),
-        unitWeightG: D("5.81"),
+        unitWeightG: D("6.4516"),
         weightUnit: "GRAM",
         purchasePriceUnit: D("320"),
+        acquisitionFees: D("60"),
+        acquiredAt: new Date("2016-04-12"),
+        hasInvoice: true,
         currentValue: D("4200"),
         currency: "EUR",
         storageLocation: "Coffre banque",
         notes: note("Or physique"),
       },
       {
+        // Lot sans facture : l'option pour le régime réel lui est fermée, ce
+        // qui donne à l'écran un cas d'avertissement réel à afficher.
         userId,
-        assetKind: "METAL",
+        metal: "GOLD",
         format: "PHYSICAL",
-        denomination: "Lingotin 50g",
+        productType: "BAR",
+        denomination: "Lingotin 50 g",
+        fineness: D("999.9"),
         quantity: D("2"),
         unitWeightG: D("50"),
         weightUnit: "GRAM",
         purchasePriceUnit: D("3100"),
+        acquisitionFees: D("0"),
+        acquiredAt: new Date("2022-09-05"),
+        hasInvoice: false,
         currentValue: D("6800"),
         currency: "EUR",
         storageLocation: "Domicile coffre",
         notes: note("Or"),
       },
       {
+        // Détention de plus de 22 ans : exonération acquise par l'ancienneté.
         userId,
-        assetKind: "METAL",
+        metal: "SILVER",
+        format: "PHYSICAL",
+        productType: "COIN",
+        denomination: "Écu 5F Semeuse",
+        fineness: D("835"),
+        quantity: D("40"),
+        unitWeightG: D("12"),
+        weightUnit: "GRAM",
+        purchasePriceUnit: D("6"),
+        acquisitionFees: D("0"),
+        acquiredAt: new Date("1998-06-20"),
+        hasInvoice: false,
+        currentValue: D("520"),
+        currency: "EUR",
+        storageLocation: "Domicile coffre",
+        notes: note("Argent"),
+      },
+      {
+        // Papier : relève du PFU comme tout titre, pas de l'article 150 VI.
+        userId,
+        metal: "GOLD",
         format: "PAPER",
+        productType: "ETC",
         denomination: "ETC Physical Gold",
+        fineness: D("999.9"),
         quantity: D("15"),
-        unitWeightG: D("1"),
+        unitWeightG: D("31.1034768"),
         weightUnit: "OZ",
         purchasePriceUnit: D("180"),
+        acquisitionFees: D("0"),
+        acquiredAt: new Date("2021-02-10"),
+        hasInvoice: true,
         currentValue: D("3100"),
         currency: "EUR",
         storageLocation: "CTO",
@@ -1352,6 +1743,8 @@ export async function seedUserPortfolio(
   await prisma.tangibleAsset.createMany({
     data: [
       {
+        // Au-dessus du seuil de 5 000 €, daté et certifié : l'option pour le
+        // régime réel lui est ouverte.
         userId,
         category: "WATCHES",
         brandOrArtist: "Rolex",
@@ -1361,9 +1754,35 @@ export async function seedUserPortfolio(
         estimatedValue: D("12800"),
         currency: "EUR",
         hasCertificate: true,
+        certificateRef: "126610LN-2019",
+        certificateIssuer: "Rolex",
+        purchaseDate: new Date("2019-06-14"),
+        purchaseSource: "Concessionnaire agréé",
+        hasPurchaseProof: true,
+        acquisitionFees: D("150"),
+        watchMovement: "AUTOMATIC",
+        watchDiameterMm: D("41"),
+        watchReference: "126610LN",
+        watchBoxPapers: true,
+        storageLocation: "Coffre domicile",
+        insuranceValue: D("14000"),
+        // Garde externalisée et assurée : le cas sain, qui sert de témoin.
+        storageType: "BANK_VAULT",
+        storageCostAnnual: D("180"),
+        storageProvider: "Coffre BNP",
+        // Dates relatives : une date fixe change de sens en vieillissant, et
+        // le seed cesserait d'illustrer le cas qu'il est censé montrer.
+        storageRenewalDate: daysAgo(-300),
+        insurancePremiumAnnual: D("120"),
+        insuranceProvider: "AXA Objets de valeur",
+        insurancePolicyRef: "AXA-OV-2019-8841",
+        insuranceType: "WATCH",
+        insuranceExpiryDate: daysAgo(-20),
         notes: note("Montre"),
       },
       {
+        // Sous le seuil de 5 000 € : aucune imposition à la revente, quel que
+        // soit le gain — le cas le plus fréquent d'une collection.
         userId,
         category: "WINE",
         brandOrArtist: "Château Margaux",
@@ -1373,6 +1792,11 @@ export async function seedUserPortfolio(
         estimatedValue: D("3100"),
         currency: "EUR",
         hasCertificate: false,
+        purchaseDate: new Date("2018-11-02"),
+        wineAppellation: "Margaux",
+        wineBottleCount: 6,
+        wineBottleFormat: "BOTTLE_75",
+        wineStorageType: "CAVE_PERSO",
         notes: note("Cave 6 bouteilles"),
       },
       {
@@ -1385,9 +1809,66 @@ export async function seedUserPortfolio(
         estimatedValue: D("2200"),
         currency: "EUR",
         hasCertificate: true,
+        certificateIssuer: "Galerie",
+        purchaseDate: new Date("2021-03-18"),
+        hasPurchaseProof: true,
+        acquisitionFees: D("120"),
+        appraisalValue: D("2500"),
+        appraisalDate: new Date("2025-09-10"),
+        appraisalProvider: "Galerie",
+        // Conservée au domicile sans prime : l'alerte ne se déclenche pas,
+        // la valeur restant sous le seuil de 5 000 €.
+        storageType: "HOME",
         notes: note("Toile"),
       },
       {
+        // Bijou serti : deux jeux de champs cohabitent, ceux du bijou et ceux
+        // de la pierre principale.
+        userId,
+        category: "JEWELRY",
+        brandOrArtist: "Cartier",
+        modelName: "Solitaire 1895",
+        yearOrVintage: "2012",
+        purchasePrice: D("7800"),
+        estimatedValue: D("9200"),
+        currency: "EUR",
+        hasCertificate: true,
+        certificateRef: "GIA-2185463201",
+        certificateIssuer: "GIA",
+        purchaseDate: new Date("2012-12-20"),
+        // Certifiée mais sans facture : le certificat atteste la pierre, pas
+        // son prix. L'option pour le régime réel lui reste fermée.
+        hasPurchaseProof: false,
+        jewelryType: "RING",
+        metalBase: "PLATINUM_950",
+        metalWeightG: D("4.2"),
+        hasPunchmarks: true,
+        gemType: "DIAMOND",
+        caratWeight: D("1.05"),
+        gemClarity: "VS1",
+        gemColor: "F",
+        gemCut: "ROUND",
+        gemTreatment: "NONE",
+        storageLocation: "Coffre banque",
+        // Garde chère au regard de la valeur : 1,6 %/an déclenche l'alerte.
+        storageType: "PRO_VAULT",
+        storageCostAnnual: D("150"),
+        storageProvider: "Brink's",
+        storageContractRef: "BR-2012-4471",
+        storageRenewalDate: daysAgo(-45),
+        // Assuré 6 000 € pour 9 200 € de valeur : sous-assurance de 35 %.
+        insurancePremiumAnnual: D("95"),
+        insuranceValue: D("6000"),
+        insuranceType: "JEWELRY",
+        insuranceExpiryDate: daysAgo(-500),
+        appraisalValue: D("9000"),
+        appraisalDate: new Date("2018-05-12"),
+        appraisalProvider: "Expert indépendant",
+        notes: note("Bijou"),
+      },
+      {
+        // Véhicule de collection : l'exonération par nature de l'article
+        // 150 UA II 1° tombe, la cession redevient imposable.
         userId,
         category: "AUTO",
         brandOrArtist: "Porsche",
@@ -1397,29 +1878,359 @@ export async function seedUserPortfolio(
         estimatedValue: D("55000"),
         currency: "EUR",
         hasCertificate: false,
+        purchaseDate: new Date("2015-05-30"),
+        isCollectible: true,
+        autoMileageKm: 96000,
+        autoInspectionOk: true,
+        autoPreviousOwners: 3,
+        // Objet de forte valeur au domicile sans assurance déclarée : c'est
+        // l'alerte la plus utile du module.
+        storageType: "HOME",
+        // Déjà donné en nue-propriété : hors assiette successorale.
+        includeInEstate: false,
+        estateNote: "Donation en nue-propriété consentie en 2023",
         notes: note("Véhicule de collection"),
+      },
+      {
+        // Le témoin : même catégorie, sans qualification de collection. Aucun
+        // impôt n'est dû malgré une plus-value de 3 000 €.
+        userId,
+        category: "AUTO",
+        brandOrArtist: "Volkswagen",
+        modelName: "Golf GTI",
+        yearOrVintage: "2020",
+        purchasePrice: D("28000"),
+        estimatedValue: D("31000"),
+        currency: "EUR",
+        hasCertificate: false,
+        purchaseDate: new Date("2020-09-01"),
+        isCollectible: false,
+        autoMileageKm: 42000,
+        autoInspectionOk: true,
+        autoPreviousOwners: 1,
+        notes: note("Véhicule d'usage"),
       },
     ],
   });
 
-  // ── Snapshots dashboard (~36 mois) ─────────────────────────────────────────
-  for (let m = 36; m >= 0; m--) {
-    const day = m * 30;
-    const base = 320000 + (36 - m) * 2200 + (m % 5) * 400;
-    await prisma.portfolioSnapshot.create({
-      data: {
-        userId,
-        date: daysAgo(day),
-        totalValueEur: D(base.toFixed(2)),
-        totalCostEur: D("340000"),
-        cashTotalEur: D(String(28000 + (36 - m) * 200)),
-        realizedPnlEur: D(String(2000 + (36 - m) * 80)),
-        unrealizedPnlEur: D((base - 340000).toFixed(2)),
-        cashIncomeEur: D(String(800 + (36 - m) * 40)),
-        assetCount: positions.length,
+  /*
+    Historique daté des poches de cash, des tangibles et du private equity.
+
+    Le moteur de valorisation historique ne sait remonter le temps que par des
+    constats datés : sans eux, il rattache le solde courant à la date de
+    création du compte et signale la journée comme estimée. Ces écritures
+    donnent au jeu de démonstration ce que porte un vrai patrimoine — un relevé
+    par mouvement, une expertise par revalorisation.
+  */
+  const bankRows = await prisma.bankAccount.findMany({ where: { userId } });
+  const savingsRows = await prisma.savingsAccount.findMany({ where: { userId } });
+
+  for (const [idx, b] of bankRows.entries()) {
+    const finalBalance = Number(b.balance.toString());
+    const openDay = THREE_YEARS - 10 - idx * 20;
+    // Le solde d'ouverture représente environ la moitié du solde actuel ; le
+    // reste arrive par versements, de sorte que la somme retombe au centime.
+    let running = moneyN(finalBalance * 0.45);
+    const events: Array<{
+      bankAccountId: string;
+      type: string;
+      amount: Prisma.Decimal;
+      balanceAfter: Prisma.Decimal;
+      occurredAt: Date;
+    }> = [
+      {
+        bankAccountId: b.id,
+        type: "OPENING",
+        amount: D(String(running)),
+        balanceAfter: D(String(running)),
+        occurredAt: daysAgo(openDay),
       },
-    });
+    ];
+
+    const steps = 14;
+    const remainder = finalBalance - running;
+    for (let k = 1; k <= steps; k++) {
+      const day = Math.max(5, Math.round(openDay - (openDay * k) / steps));
+      // Alternance dépôt / retrait : un compte courant ne monte pas en ligne
+      // droite, et la courbe doit pouvoir descendre.
+      const share = remainder / steps;
+      const delta = moneyN(k % 4 === 0 ? -Math.abs(share) * 1.5 : share * 1.5);
+      const isLast = k === steps;
+      const after = isLast ? finalBalance : moneyN(running + delta);
+      const amount = moneyN(after - running);
+      running = after;
+      events.push({
+        bankAccountId: b.id,
+        type: amount >= 0 ? "DEPOSIT" : "WITHDRAWAL",
+        amount: D(String(amount)),
+        balanceAfter: D(String(after)),
+        occurredAt: daysAgo(day),
+      });
+    }
+    await prisma.bankAccountEvent.createMany({ data: events });
   }
+
+  for (const [idx, sv] of savingsRows.entries()) {
+    const finalBalance = Number(sv.balance.toString());
+    const openDay = THREE_YEARS - 30 - idx * 40;
+    let running = moneyN(finalBalance * 0.3);
+    const events: Array<{
+      savingsAccountId: string;
+      type: string;
+      amount: Prisma.Decimal;
+      balanceAfter: Prisma.Decimal;
+      occurredAt: Date;
+    }> = [
+      {
+        savingsAccountId: sv.id,
+        type: "OPENING",
+        amount: D(String(running)),
+        balanceAfter: D(String(running)),
+        occurredAt: daysAgo(openDay),
+      },
+    ];
+
+    const steps = 18;
+    const remainder = finalBalance - running;
+    for (let k = 1; k <= steps; k++) {
+      const day = Math.max(3, Math.round(openDay - (openDay * k) / steps));
+      const isLast = k === steps;
+      const after = isLast ? finalBalance : moneyN(running + remainder / steps);
+      const amount = moneyN(after - running);
+      running = after;
+      events.push({
+        savingsAccountId: sv.id,
+        // Un versement sur trois est un intérêt crédité : le moteur doit le
+        // compter en performance, pas en apport.
+        type: k % 3 === 0 ? "INTEREST" : "DEPOSIT",
+        amount: D(String(amount)),
+        balanceAfter: D(String(after)),
+        occurredAt: daysAgo(day),
+      });
+    }
+    await prisma.savingsAccountEvent.createMany({ data: events });
+  }
+
+  const tangibleRows = await prisma.tangibleAsset.findMany({ where: { userId } });
+  for (const t of tangibleRows) {
+    if (!t.purchaseDate) continue;
+    const purchase = Number(t.purchasePrice.toString());
+    const current = Number(t.estimatedValue.toString());
+    const heldDays = Math.round(
+      (Date.now() - t.purchaseDate.getTime()) / 86_400_000
+    );
+    if (heldDays < 400) continue;
+    // Une expertise tous les dix-huit mois environ : c'est le rythme réel d'un
+    // objet de collection, et cela suffit à dessiner une progression par
+    // paliers plutôt qu'un saut unique.
+    const steps = Math.min(5, Math.floor(heldDays / 400));
+    const rows = [];
+    for (let k = 1; k <= steps; k++) {
+      const day = Math.max(2, Math.round(heldDays - (heldDays * k) / (steps + 1)));
+      const ratio = k / (steps + 1);
+      rows.push({
+        tangibleId: t.id,
+        userId,
+        valuedAt: daysAgo(day),
+        valueEur: D(String(moneyN(purchase + (current - purchase) * ratio))),
+        source: k % 2 === 0 ? "APPRAISAL" : "MARKET",
+        note: note("Revalorisation périodique"),
+      });
+    }
+    rows.push({
+      tangibleId: t.id,
+      userId,
+      valuedAt: daysAgo(15),
+      valueEur: D(String(current)),
+      source: "APPRAISAL",
+      note: note("Dernière expertise"),
+    });
+    if (rows.length > 0) await prisma.tangibleValuation.createMany({ data: rows });
+  }
+
+  const peRows = await prisma.privateEquityPosition.findMany({ where: { userId } });
+  for (const pe of peRows) {
+    if (!pe.investmentDate) continue;
+    const invested = Number(pe.shares.toString()) * Number(pe.acquisitionPricePerShare.toString());
+    const current = Number(pe.currentNav.toString());
+    const heldDays = Math.round(
+      (Date.now() - pe.investmentDate.getTime()) / 86_400_000
+    );
+    if (heldDays < 200) continue;
+    // NAV semestrielle : le rythme auquel un fonds communique réellement.
+    const steps = Math.max(1, Math.floor(heldDays / 180));
+    const rows = [];
+    for (let k = 1; k <= steps; k++) {
+      const day = Math.max(2, heldDays - k * 180);
+      const ratio = 1 - day / heldDays;
+      rows.push({
+        privateEquityPositionId: pe.id,
+        valuedAt: daysAgo(day),
+        nav: D(String(moneyN(invested + (current - invested) * ratio))),
+        note: note("NAV semestrielle"),
+      });
+    }
+    await prisma.privateEquityValuation.createMany({ data: rows });
+  }
+
+  /*
+    Pas de série de snapshots fabriquée.
+
+    Trente-sept points étaient posés ici par une formule arithmétique — un
+    patrimoine partant de 320 000 € et progressant de 2 200 € par mois, avec
+    un prix de revient figé à 340 000 €. Ils ne décrivaient rien du
+    portefeuille effectivement semé, qui pèse près de 918 000 € bruts.
+
+    La courbe ne les lit pas : elle est reconstruite par
+    `PortfolioValuationEngine`, et `getPortfolioHistory` documente pourquoi
+    les mélanger réintroduirait une incohérence de périmètre. Ils étaient donc
+    invisibles — et c'est ce qui les rendait dangereux : une table peuplée,
+    cohérente de forme, aux noms de champs engageants, qu'un futur écran
+    lirait de bonne foi pour afficher une courbe plausible et fausse.
+
+    `PortfolioSnapshot` garde son rôle de point de contrôle : trois écritures
+    réelles l'alimentent — première visite, rafraîchissement des cours, import
+    terminé. La première visite du compte de démonstration en posera un, juste,
+    plutôt que d'en hériter trente-sept qui ne le sont pas.
+  */
+
+  // ── Trading à levier ───────────────────────────────────────────────────────
+  //
+  // Le module Trading n'avait aucune donnée de démonstration : l'écran ne
+  // pouvait ni être vu ni être testé. Cinq positions couvrent les cas qui
+  // changent l'affichage — long et short, ouverte et clôturée, crypto et CFD,
+  // avec et sans prix de marque actualisé, avec et sans stop.
+  const tradingAccount = await prisma.tradingAccount.create({
+    data: {
+      userId,
+      brokerName: "IG Markets",
+      accountType: "CFD",
+      currency: "EUR",
+      balance: D("12500"),
+      marginAvailable: D("8200"),
+      openDate: daysAgo(600),
+      notes: note("Compte CFD indices et forex"),
+    },
+  });
+
+  await prisma.tradingPosition.createMany({
+    data: [
+      {
+        userId,
+        underlyingType: "CRYPTO",
+        exchange: "HYPERLIQUID",
+        pair: "BTC/USD-PERP",
+        contractType: "PERPETUAL",
+        marginType: "USDT_M",
+        baseCurrency: "BTC",
+        quoteCurrency: "USD",
+        direction: "LONG",
+        leverage: D("5"),
+        sizeContracts: D("0.42"),
+        entryPrice: D("61200"),
+        markPrice: D("63480"),
+        // Observation récente : le P&L latent est crédible.
+        markPriceUpdatedAt: daysAgo(1),
+        fundingPaid: D("2.35"),
+        commissionPaid: D("15.80"),
+        stopLoss: D("58000"),
+        takeProfit: D("72000"),
+        isOpen: true,
+        openedAt: daysAgo(35),
+      },
+      {
+        userId,
+        underlyingType: "CRYPTO",
+        exchange: "BYBIT",
+        pair: "SOL/USD-PERP",
+        contractType: "PERPETUAL",
+        marginType: "USDT_M",
+        baseCurrency: "SOL",
+        quoteCurrency: "USD",
+        // Un short ouvert : c'est lui qui vérifie le signe de l'exposition
+        // nette et la symétrie du P&L latent.
+        direction: "SHORT",
+        leverage: D("3"),
+        sizeContracts: D("25"),
+        entryPrice: D("168.30"),
+        markPrice: D("162.45"),
+        // Observation vieille de trois semaines : au-delà du seuil, l'écran
+        // doit le dire au lieu de présenter le latent comme actuel.
+        markPriceUpdatedAt: daysAgo(21),
+        fundingPaid: D("-4.10"),
+        commissionPaid: D("6.20"),
+        isOpen: true,
+        openedAt: daysAgo(12),
+      },
+      {
+        userId,
+        underlyingType: "FOREX",
+        exchange: "IG",
+        tradingAccountId: tradingAccount.id,
+        pair: "EUR/USD",
+        contractType: "CFD",
+        baseCurrency: "EUR",
+        quoteCurrency: "USD",
+        direction: "LONG",
+        leverage: D("10"),
+        sizeContracts: D("50000"),
+        entryPrice: D("1.08120"),
+        // Prix de marque laissé au prix d'entrée et jamais horodaté : le cas
+        // « jamais observé », que l'écran doit signaler au lieu d'afficher un
+        // P&L nul crédible.
+        markPrice: D("1.08120"),
+        markPriceUpdatedAt: null,
+        commissionPaid: D("4.50"),
+        isOpen: true,
+        openedAt: daysAgo(5),
+      },
+      {
+        userId,
+        underlyingType: "INDEX",
+        exchange: "IG",
+        tradingAccountId: tradingAccount.id,
+        pair: "NAS100",
+        contractType: "CFD",
+        baseCurrency: "USD",
+        quoteCurrency: "USD",
+        direction: "LONG",
+        leverage: D("20"),
+        sizeContracts: D("1"),
+        entryPrice: D("18520"),
+        markPrice: D("18735.50"),
+        markPriceUpdatedAt: daysAgo(2),
+        tickValue: D("1"),
+        commissionPaid: D("3.20"),
+        isOpen: true,
+        openedAt: daysAgo(3),
+      },
+      {
+        userId,
+        underlyingType: "CRYPTO",
+        exchange: "BINANCE",
+        pair: "ETH/USDT-PERP",
+        contractType: "PERPETUAL",
+        marginType: "USDT_M",
+        baseCurrency: "ETH",
+        quoteCurrency: "USDT",
+        direction: "LONG",
+        leverage: D("4"),
+        sizeContracts: D("3.25"),
+        entryPrice: D("2480.50"),
+        markPrice: D("2712.00"),
+        // Prix de sortie : définitif, pas périmé — une position close ne bouge
+        // plus, donc l'ancienneté ne la concerne pas.
+        markPriceUpdatedAt: daysAgo(48),
+        realizedPnl: D("752.38"),
+        fundingPaid: D("11.20"),
+        commissionPaid: D("18.40"),
+        exchangeTradeId: "BNB-DEMO-772109",
+        isOpen: false,
+        openedAt: daysAgo(90),
+        closedAt: daysAgo(48),
+      },
+    ],
+  });
 
   return {
     platforms: allPlatforms.length,

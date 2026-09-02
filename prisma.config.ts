@@ -1,18 +1,30 @@
 import "dotenv/config";
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
 
 /**
- * Configuration Prisma 7 (remplace le chargement auto de .env + les réglages
- * dans le bloc datasource). Le client runtime utilise le driver adapter Neon
- * (voir app/lib/prisma.ts) ; ce fichier sert au CLI (generate, migrate,
- * introspection) qui lit DATABASE_URL via dotenv.
+ * Configuration Prisma 7 (CLI : generate, migrate, introspection).
+ * Le client runtime utilise le driver adapter Neon (voir app/lib/prisma.ts).
+ *
+ * ## DATABASE_URL optionnelle au `generate`
+ *
+ * Sur Vercel, `npm ci` lance `postinstall` → `prisma generate` **avant** que
+ * certaines variables ne soient toujours présentes (ou sur un env Preview
+ * sans DATABASE_URL). `env("DATABASE_URL")` de prisma/config **jette** si la
+ * var manque → build cassé avec PrismaConfigEnvError.
+ *
+ * `prisma generate` n'a pas besoin d'une vraie base : un placeholder suffit.
+ * `migrate deploy` / seed doivent toujours avoir la vraie URL (runtime / job).
  */
+const datasourceUrl =
+  process.env.DATABASE_URL?.trim() ||
+  "postgresql://prisma:prisma@127.0.0.1:5432/prisma_generate_placeholder";
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
   },
   datasource: {
-    url: env("DATABASE_URL"),
+    url: datasourceUrl,
   },
 });

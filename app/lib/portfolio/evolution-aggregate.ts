@@ -30,6 +30,8 @@ export type EvolutionSeriesPoint = {
   periodLabel: string;
   /** Valeur totale (stock) en fin de bucket */
   total: number;
+  /** Capital externe entré (net) sur le bucket — jamais de la performance. */
+  flows: number;
   cash: number;
   positions: number;
   realized: number;
@@ -62,6 +64,45 @@ export type EvolutionSeriesPoint = {
   /** Δ période de la série comparative */
   benchmarkDelta?: number;
   intervalType: EvolutionInterval;
+  /**
+   * `ESTIMATED` dès qu'un jour du bucket repose sur une valeur reportée plutôt
+   * qu'observée. L'information vient de `PortfolioValuationEngine` et n'est
+   * plus perdue par l'agrégation : c'est ce qui permet à l'écran de dire d'où
+   * vient un point, au lieu de tout présenter comme mesuré.
+   */
+  status?: "EXACT" | "ESTIMATED";
+  /**
+   * Le brut ventilé par classe d'actif, transporté tel quel.
+   *
+   * C'est un **stock**, comme `total` : la dernière observation du bucket
+   * gagne, jamais une somme. Additionner les valeurs de trente jours donnerait
+   * trente fois le patrimoine.
+   *
+   * Cette couche perdait la ventilation : le moteur la produisait, l'API la
+   * publiait, et le graphique ne pouvait en tracer aucune parce qu'elle
+   * s'arrêtait ici.
+   */
+  byAssetClass?: Record<string, number>;
+  /**
+   * Valeur des titres par classe puis par enveloppe fiscale.
+   *
+   * `null` sur `PEA` ou `CTO` veut dire absent : rien ne démontre cette
+   * enveloppe à cette date. Le distinguer de zéro est tout l'objet du champ.
+   */
+  byAssetClassAndEnvelope?: Record<string, Record<string, number | null>>;
+  /**
+   * Croissance cumulée de la grandeur affichée, flux retirés, base 1 au premier
+   * point de la fenêtre.
+   *
+   * C'est elle que l'on compare à un indice, et non la valeur : un versement
+   * augmente la valeur sans qu'aucun investissement n'ait rien produit, quand
+   * un indice ne reçoit jamais d'apport. Comparer les deux revenait à créditer
+   * le portefeuille de ses propres dépôts.
+   *
+   * `undefined` quand le résultat d'investissement de la grandeur affichée
+   * n'est pas connu — la comparaison est alors tue plutôt que faussée.
+   */
+  growth?: number;
   isLive?: boolean;
 };
 
@@ -102,7 +143,19 @@ function parisStartOfCalendarDay(now = new Date()): Date {
   return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
 }
 
-function startOfRange(range: EvolutionRange, now = new Date()): Date | null {
+/**
+ * Début de la fenêtre affichée, ou `null` quand la plage porte tout
+ * l'historique.
+ *
+ * Exportée pour que l'écran puisse raisonner sur la **même** fenêtre que la
+ * série : l'avertissement d'historique incomplet doit couvrir exactement ce que
+ * l'œil voit, et redériver ces bornes ailleurs les ferait diverger à la
+ * première évolution des plages.
+ */
+export function startOfRange(
+  range: EvolutionRange,
+  now = new Date()
+): Date | null {
   const day = 24 * 60 * 60 * 1000;
   switch (range) {
     case "7d": {
@@ -288,6 +341,15 @@ function formatPeriodLabel(iso: string, interval: EvolutionInterval): string {
 type StockAcc = {
   date: string;
   total: number;
+  /**
+   * Capital externe entré (net) sur le bucket.
+   *
+   * Contrairement aux autres champs, qui sont des **stocks** relevés en fin de
+   * bucket, celui-ci est un **flux** : il s'additionne. Prendre la dernière
+   * valeur du bucket perdrait tous les versements du mois sauf le dernier, et
+   * le rendement pondéré par le temps les recompterait en performance.
+   */
+  flows: number;
   cash: number;
   positions: number;
   realized: number;
@@ -296,6 +358,52 @@ type StockAcc = {
   dividends: number;
   coupons: number;
   rents: number;
+  /**
+   * Statut de valorisation du bucket, agrégé au plus faible.
+   *
+   * `PortfolioValuationEngine` marque chaque jour `EXACT` ou `ESTIMATED` ;
+   * cette couche laissait tomber l'information, si bien que la courbe
+   * quotidienne ne pouvait pas dire ce que le moteur savait. Un bucket qui
+   * contient un seul jour estimé est estimé : c'est le seul agrégat honnête,
+   * puisque le total du bucket repose alors sur une valeur non observée.
+   */
+  status?: "EXACT" | "ESTIMATED";
+  /**
+   * Valeur de chaque classe d'actif à ce point, en devise de base.
+   *
+   * `sum(byAssetClass) === total` quand `total` est la valeur brute — c'est la
+   * même partition que celle vérifiée dans le moteur, transportée sans
+   * recalcul. Absent quand la source ne l'a pas fourni : un graphique ne doit
+   * pas pouvoir confondre « classe à zéro » et « ventilation inconnue ».
+   */
+  byAssetClass?: Record<string, number>;
+  /**
+   * Valeur des titres par classe puis par enveloppe fiscale.
+   *
+   * `null` sur `PEA` ou `CTO` veut dire absent : rien ne démontre cette
+   * enveloppe à cette date. Le distinguer de zéro est tout l'objet du champ.
+   */
+  byAssetClassAndEnvelope?: Record<string, Record<string, number | null>>;
+  /**
+   * Résultat d'investissement de la période, en devise : ce que le moteur
+   * calcule comme `valeur(D) − valeur(D−1) − flux(D)`, transporté tel quel.
+   *
+   * `undefined` quand la grandeur affichée n'en a pas.
+   */
+  perf?: number;
+  /**
+   * Croissance cumulée de la grandeur affichée, flux retirés, base 1 au premier
+   * point de la fenêtre.
+   *
+   * C'est elle que l'on compare à un indice, et non la valeur : un versement
+   * augmente la valeur sans qu'aucun investissement n'ait rien produit, quand
+   * un indice ne reçoit jamais d'apport. Comparer les deux revenait à créditer
+   * le portefeuille de ses propres dépôts.
+   *
+   * `undefined` quand le résultat d'investissement de la grandeur affichée
+   * n'est pas connu — la comparaison est alors tue plutôt que faussée.
+   */
+  growth?: number;
   isLive?: boolean;
 };
 
@@ -346,6 +454,13 @@ function densifyDailyCalendar(
       out.push({
         ...carry,
         date: new Date(Date.UTC(y, m - 1, d, 12, 0, 0)).toISOString(),
+        // Le report reconduit un **stock**, jamais un flux : sans cette remise
+        // à zéro, le versement du dernier jour connu serait recompté à chaque
+        // journée sans observation.
+        flows: 0,
+        // Une valeur reconduite depuis un jour antérieur n'a pas été observée
+        // ce jour-là : c'est la définition même d'`ESTIMATED`.
+        status: "ESTIMATED",
         isLive: false,
       });
     }
@@ -358,6 +473,7 @@ function densifyDailyCalendar(
 function normalizePoint(p: HistoryPoint): {
   date: string;
   total: number;
+  flows: number;
   cash: number;
   positions: number;
   realized: number;
@@ -366,6 +482,18 @@ function normalizePoint(p: HistoryPoint): {
   dividends: number;
   coupons: number;
   rents: number;
+  status?: "EXACT" | "ESTIMATED";
+  byAssetClass?: Record<string, number>;
+  byAssetClassAndEnvelope?: Record<string, Record<string, number | null>>;
+  /**
+   * Résultat d'investissement de la période, en devise : ce que le moteur
+   * calcule comme `valeur(D) − valeur(D−1) − flux(D)`, transporté tel quel.
+   *
+   * `undefined` quand la grandeur affichée n'en a pas.
+   */
+  perf?: number;
+  /** Croissance cumulée, posée après coup par le chaînage du rendement. */
+  growth?: number;
   isLive?: boolean;
 } {
   const total = Number(p.totalValueBase) || 0;
@@ -377,9 +505,15 @@ function normalizePoint(p: HistoryPoint): {
   const rents = Number(p.rentsBase) || 0;
   const income =
     Number(p.cashIncomeBase) || dividends + coupons + rents || 0;
+  const perfRaw = p.investmentPerformanceBase;
   return {
     date: p.date,
     total,
+    flows: Number(p.externalFlowsBase) || 0,
+    perf:
+      perfRaw == null || !Number.isFinite(Number(perfRaw))
+        ? undefined
+        : Number(perfRaw),
     cash,
     positions,
     realized: Number(p.realizedPnlBase) || 0,
@@ -388,6 +522,19 @@ function normalizePoint(p: HistoryPoint): {
     dividends,
     coupons,
     rents,
+    /*
+      Tout ce qui n'est pas `EXACT` est traité comme non observé.
+
+      Le moteur connaît un troisième état, `MISSING`. Le réduire à `ESTIMATED`
+      ici est délibéré : cette couche n'a que deux façons de présenter un point,
+      et ranger un jour sans donnée du côté du « mesuré » serait la seule
+      erreur vraiment coûteuse. Un statut absent — un appelant qui ne le fournit
+      pas — reste `undefined`, et n'affirme donc rien.
+    */
+    status:
+      p.status == null ? undefined : p.status === "EXACT" ? "EXACT" : "ESTIMATED",
+    byAssetClass: p.byAssetClassBase,
+    byAssetClassAndEnvelope: p.byAssetClassAndEnvelopeBase,
     isLive: p.isLive,
   };
 }
@@ -426,6 +573,49 @@ export function buildEvolutionSeries(
     // sinon garder tout (historique trop court)
   }
 
+  /*
+    Rendement chaîné, jour par jour, sur la fenêtre affichée.
+
+    C'est la seule grandeur du portefeuille comparable à un indice. La variation
+    de valeur ne l'est pas : elle contient les apports et les retraits, quand un
+    indice n'en reçoit jamais. Sur le compte de démonstration, l'écart entre les
+    deux atteint près de sept points.
+
+    On chaîne plutôt qu'on ne divise la somme des résultats par la valeur
+    initiale, parce qu'un versement déplace la base en cours de route : les
+    journées qui le suivent produisent leur résultat sur un capital plus grand,
+    et le rapporter à la mise de départ le surévaluerait. Chaîner
+    `1 + résultat(D) / valeur(D−1)` neutralise exactement cela — c'est ce que
+    fait un indice, et c'est ce qui rend les deux comparables.
+
+    Le numérateur est le résultat d'investissement du moteur, transporté sans
+    recalcul : `valeur(D) − valeur(D−1) − flux(D)`. La convention de performance
+    du produit est donc la même ici que partout ailleurs.
+
+    Une journée dont la base est nulle ou négative ne produit pas de rendement
+    définissable : la croissance est reportée telle quelle plutôt que d'inventer
+    un pourcentage. Et si le résultat d'investissement manque, la croissance
+    reste absente — la comparaison sera tue, pas approximée.
+  */
+  {
+    let facteur: number | undefined = 1;
+    for (let i = 0; i < filtered.length; i++) {
+      const pt = filtered[i]!;
+      if (i === 0) {
+        pt.growth = facteur;
+        continue;
+      }
+      const base = filtered[i - 1]!.total;
+      const perf = pt.perf;
+      if (facteur == null || perf == null) {
+        facteur = undefined;
+      } else if (base > 0) {
+        facteur = facteur * (1 + perf / base);
+      }
+      pt.growth = facteur;
+    }
+  }
+
   const interval = resolveEvolutionInterval(range, filtered.length);
 
   // Bucket : dernière observation du bucket (stock)
@@ -434,11 +624,21 @@ export function buildEvolutionSeries(
 
   for (const p of filtered) {
     const key = bucketKey(p.date, interval);
-    if (!buckets.has(key)) {
+    const prev = buckets.get(key);
+    if (!prev) {
       order.push(key);
       buckets.set(key, { ...p });
     } else {
-      buckets.set(key, { ...p });
+      // Stocks : dernière observation du bucket. Flux : somme du bucket.
+      buckets.set(key, {
+        ...p,
+        flows: prev.flows + p.flows,
+        // Un seul jour estimé suffit à rendre le bucket estimé.
+        status:
+          prev.status === "ESTIMATED" || p.status === "ESTIMATED"
+            ? "ESTIMATED"
+            : (p.status ?? prev.status),
+      });
     }
   }
 
@@ -467,6 +667,7 @@ export function buildEvolutionSeries(
       label: formatAxisLabel(labelIso, interval),
       periodLabel: formatPeriodLabel(labelIso, interval),
       total: s.total,
+      flows: s.flows,
       cash: s.cash,
       positions: s.positions,
       realized: s.realized,
@@ -486,7 +687,12 @@ export function buildEvolutionSeries(
       dDividends: prev ? s.dividends - prev.dividends : 0,
       dCoupons: prev ? s.coupons - prev.coupons : 0,
       dRents: prev ? s.rents - prev.rents : 0,
+      // Stock, comme `total` : la croissance de fin de bucket fait foi.
+      growth: s.growth,
       intervalType: interval,
+      status: s.status,
+      byAssetClass: s.byAssetClass,
+      byAssetClassAndEnvelope: s.byAssetClassAndEnvelope,
       isLive: s.isLive,
     };
   });
@@ -504,18 +710,49 @@ export function buildEvolutionSeries(
   return { points: display, interval };
 }
 
+/**
+ * Variation de la période, et **rendement** de la période.
+ *
+ * Les deux chiffres ne mesurent pas la même chose et le libellé doit les
+ * distinguer : `delta` est la variation du patrimoine, versements compris ;
+ * `pct` est le rendement pondéré par le temps, versements neutralisés.
+ *
+ * Le calcul naïf `(fin − début) / début` affichait « +382 430 % » sur la plage
+ * complète du jeu de démonstration — non parce que le portefeuille avait été
+ * multiplié par quatre mille, mais parce qu'il avait commencé à 240 € et reçu
+ * des apports pendant vingt-huit ans. Un versement n'est pas une performance.
+ */
 export function evolutionDeltaSummary(points: EvolutionSeriesPoint[]): {
   first: number;
   last: number;
   delta: number;
   pct: number;
+  /** Capital externe net apporté sur la période, hors valeur de départ. */
+  flows: number;
 } | null {
   if (points.length < 1) return null;
   const first = points[0]!.total;
   const last = points[points.length - 1]!.total;
   const delta = last - first;
-  const pct = first > 0 ? (delta / first) * 100 : 0;
-  return { first, last, delta, pct };
+
+  let flows = 0;
+  let factor = 1;
+  let measured = false;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1]!.total;
+    const curr = points[i]!.total;
+    const flow = points[i]!.flows;
+    flows += flow;
+    // Le capital exposé sur le sous-période inclut le flux : sans lui, un
+    // versement compterait comme un gain sur la base de la veille.
+    const base = prev + flow;
+    if (base <= 0) continue;
+    factor *= curr / base;
+    measured = true;
+  }
+
+  const pct = measured ? (factor - 1) * 100 : first > 0 ? (delta / first) * 100 : 0;
+  return { first, last, delta, pct, flows };
 }
 
 /** Périodes activables selon profondeur d’historique disponible. */
@@ -549,26 +786,11 @@ export function isEvolutionRangeEnabled(
   }
 }
 
-export type EvolutionBenchmarkMode = "none" | "inflation" | "index";
+
+export type EvolutionBenchmarkMode = "none" | "index";
 
 /** Clôture d'indice brute (rebasée ensuite sur le premier total du portefeuille). */
 export type IndexClosePoint = { date: string; close: number };
-
-/**
- * Inflation France — glissement annuel de l'IPC (indice des prix à la
- * consommation, INSEE). Constante documentée : moyenne annuelle 2024 ≈ 2,0 %.
- * À rafraîchir quand l'INSEE publie une nouvelle référence annuelle.
- * Utilisée comme taux annualisé et appliquée au prorata du temps écoulé, donc
- * automatiquement adaptée à la périodicité affichée (jour / semaine / mois…).
- */
-export const FRENCH_ANNUAL_CPI_RATE = 0.02;
-
-export type BenchmarkOptions = {
-  /** Clôtures d'indice (mode "index"), brutes — rebasées sur baseTotal. */
-  indexCloses?: IndexClosePoint[];
-  /** Taux d'inflation annuel (défaut : IPC France). */
-  annualInflationRate?: number;
-};
 
 /** Sélectionne la dernière clôture d'indice ≤ date de barre (tolérance 36 h). */
 function makeIndexPicker(indexCloses: IndexClosePoint[]) {
@@ -587,14 +809,18 @@ function makeIndexPicker(indexCloses: IndexClosePoint[]) {
   };
 }
 
+export type BenchmarkOptions = {
+  /** Clôtures d'indice, brutes — rebasées sur `baseTotal`. */
+  indexCloses?: IndexClosePoint[];
+};
+
 /**
  * Attache une série comparative **rebasée** sur le premier total du portefeuille.
  * Alignement temporel : même dates que la série principale.
  *
- * - inflation : capital initial revalorisé au taux IPC France (pouvoir d'achat),
- *   appliqué au prorata du temps → s'adapte à la périodicité choisie.
- * - index : performance réelle de l'indice choisi (clôtures Yahoo), rebasée sur
- *   le premier total → directement comparable au portefeuille en €.
+ * Une seule comparaison possible : la performance réelle de l'indice choisi
+ * (clôtures Yahoo), rebasée sur le premier total du portefeuille → directement
+ * comparable en €.
  *
  * En mode périodique, `benchmark` reste le stock rebasé ; le graphe dérive le Δ
  * via le point précédent.
@@ -608,25 +834,14 @@ export function withBenchmarkSeries(
     return points.map((p) => ({ ...p, benchmark: undefined }));
   }
 
-  const t0 = Date.parse(points[0]!.date);
   const baseTotal = points[0]!.total;
   if (!Number.isFinite(baseTotal) || baseTotal <= 0) {
     return points.map((p) => ({ ...p, benchmark: undefined }));
   }
 
-  function yearsSince(iso: string): number {
-    const t = Date.parse(iso);
-    if (!Number.isFinite(t0) || !Number.isFinite(t)) return 0;
-    return Math.max(0, (t - t0) / (365.25 * 24 * 60 * 60 * 1000));
-  }
-
+  // index : rebasage des clôtures réelles sur baseTotal
   let levelAt: (iso: string) => number;
-
-  if (mode === "inflation") {
-    const rate = opts.annualInflationRate ?? FRENCH_ANNUAL_CPI_RATE;
-    levelAt = (iso) => baseTotal * Math.pow(1 + rate, yearsSince(iso));
-  } else {
-    // index : rebasage des clôtures réelles sur baseTotal
+  {
     const closes = opts.indexCloses ?? [];
     const pick = makeIndexPicker(closes);
     const baseClose = pick(points[0]!.date);
@@ -651,12 +866,63 @@ export function withBenchmarkSeries(
   });
 }
 
+export type EvolutionPercentPoint = {
+  date: string;
+  label: string;
+  periodLabel: string;
+  /** Performance du portefeuille depuis le premier point affiché, en %. */
+  portfolioPct: number;
+  /** Performance du benchmark sur la même fenêtre, rebasée à 0 % au même point. */
+  benchmarkPct?: number;
+};
+
+/**
+ * Reprojette une série déjà rebasée par `withBenchmarkSeries` en performance
+ * relative : les deux courbes partent à 0 % au premier point affiché. C'est
+ * la seule transformation qui rend portefeuille et benchmark comparables sans
+ * mélanger unité monétaire et pourcentage sur le même axe — l'un des deux
+ * axes doit céder, jamais un affichage mixte.
+ */
+export function toPercentSeries(
+  points: EvolutionSeriesPoint[]
+): EvolutionPercentPoint[] {
+  if (points.length === 0) return [];
+  const base = points[0]!.total;
+  const safeBase = base > 0 ? base : null;
+  /*
+    Base de croissance : celle du premier point **affiché**.
+
+    La fenêtre peut commencer bien après le début de la série, et la croissance
+    est cumulée depuis ce début. La ramener ici fait partir la courbe à 0 %,
+    comme celle de l'indice.
+  */
+  const g0 = points[0]!.growth;
+  const growthBase = g0 != null && g0 > 0 ? g0 : null;
+  return points.map((p) => ({
+    date: p.date,
+    label: p.label,
+    periodLabel: p.periodLabel,
+    /*
+      Le portefeuille est rendu par son rendement chaîné, jamais par sa
+      variation de valeur : celle-ci contient les apports, que l'indice ne
+      connaît pas. `growthBase` ramène la croissance au premier point affiché,
+      la fenêtre pouvant commencer bien après le début de la série.
+    */
+    portfolioPct:
+      growthBase != null && p.growth != null
+        ? (p.growth / growthBase - 1) * 100
+        : 0,
+    benchmarkPct:
+      safeBase && p.benchmark != null
+        ? ((p.benchmark - safeBase) / safeBase) * 100
+        : undefined,
+  }));
+}
+
 export function benchmarkLabel(mode: EvolutionBenchmarkMode): string {
   switch (mode) {
     case "none":
       return "Aucun";
-    case "inflation":
-      return "Inflation (IPC France)";
     case "index":
       return "Indice";
   }
@@ -674,7 +940,19 @@ export function benchmarkGapPct(
   const first = points[0]!;
   const last = points[points.length - 1]!;
   if (!(first.total > 0)) return null;
-  const portfolioPct = ((last.total - first.total) / first.total) * 100;
+  /*
+    Même grandeur des deux côtés.
+
+    `portfolioPct` valait la variation de valeur entre les bornes, apports
+    compris. Sur la fenêtre par défaut du compte de démonstration, cela donnait
+    +8,71 % là où les investissements avaient produit +1,96 % : les 61 325 € de
+    versements de la période étaient comptés comme de la performance, et
+    l'écart annoncé avec l'indice s'en trouvait faux de près de sept points.
+  */
+  if (first.growth == null || last.growth == null || !(first.growth > 0)) {
+    return null;
+  }
+  const portfolioPct = (last.growth / first.growth - 1) * 100;
   const b0 = first.benchmark;
   const b1 = last.benchmark;
   if (b0 == null || b1 == null || !(b0 > 0)) return null;

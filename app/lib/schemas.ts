@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TX_TYPES } from "./accounting/types";
+import { LIABILITY_CATEGORIES } from "./constants";
 
 export const assetClasses = [
   "ACTIONS",
@@ -124,6 +125,7 @@ export const createTransactionSchema = z
       "COUPON",
       "LOYER",
       "SPLIT",
+      "TRAVAUX",
     ].includes(data.type);
     if (needsAsset && !data.assetId) {
       ctx.addIssue({ code: "custom", message: "Actif requis", path: ["assetId"] });
@@ -171,9 +173,19 @@ export const createTransactionSchema = z
       });
     }
     if (
-      ["APPORT", "RETRAIT", "FRAIS", "TRANSFERT_CASH", "DIVIDENDE", "COUPON", "LOYER", "INTERET"].includes(
-        data.type
-      )
+      [
+        "APPORT",
+        "RETRAIT",
+        "FRAIS",
+        "TRANSFERT_CASH",
+        "DIVIDENDE",
+        "COUPON",
+        "LOYER",
+        "INTERET",
+        // Travaux capitalisés : le montant EST la dépense immobilisée,
+        // il n'y a ni quantité ni prix unitaire pour la déduire.
+        "TRAVAUX",
+      ].includes(data.type)
     ) {
       if (!data.cashAmount || Number(data.cashAmount) <= 0) {
         if (!["DIVIDENDE", "COUPON", "LOYER"].includes(data.type) || !data.cashAmount) {
@@ -248,6 +260,8 @@ export const liabilitySchema = z.object({
   currency: z.string().min(3).max(3).default("EUR"),
   interestRate: decimalString.optional(),
   monthlyPayment: decimalString.optional(),
+  /** Assurance emprunteur mensuelle, hors intérêts. Absent/vide = 0. */
+  insuranceMonthly: decimalString.optional(),
   startDate: z.string().optional().nullable(),
   endDate: z.string().optional().nullable(),
   /** Day of month 1–31 for automatic monthly debit */
@@ -262,24 +276,47 @@ export const liabilitySchema = z.object({
       return Math.max(1, Math.min(31, n));
     }),
   bankName: z.string().optional().nullable(),
+  category: z.enum(LIABILITY_CATEGORIES).default("AUTRE"),
+  /** Bien (Asset) financé par ce prêt — appartenance vérifiée côté service. */
+  assetId: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 
 export type LiabilityForm = z.infer<typeof liabilitySchema>;
 
+/** Part détenue sur un compte joint, 0–100. Vide/null = compte individuel. */
+const ownershipPctField = z.preprocess(
+  (v) => (v === "" || v == null ? null : Number(v)),
+  z.number().min(0).max(100).nullable().optional()
+);
+
 export const bankAccountSchema = z.object({
   bankName: z.string().min(1, "Banque requise"),
   balance: decimalString.default("0"),
   currency: z.string().min(3).max(3).default("EUR"),
+  isPro: z.boolean().default(false),
+  ownershipPct: ownershipPctField,
   notes: z.string().optional().nullable(),
 });
 
 export type BankAccountForm = z.infer<typeof bankAccountSchema>;
 
+export const regulatedProductTypes = [
+  "LIVRET_A",
+  "LDDS",
+  "LEP",
+  "PEL",
+  "CEL",
+  "AUTRE",
+] as const;
+
 export const savingsAccountSchema = z.object({
   name: z.string().min(1, "Nom du livret requis"),
   /** Banque de détention (optionnel mais recommandé) */
   bankName: z.string().min(1).optional().nullable(),
+  productType: z.enum(regulatedProductTypes).default("AUTRE"),
+  /** Plafond de versement — pré-rempli côté UI depuis `productType`, jamais imposé serveur. */
+  ceilingAmount: decimalString.optional().nullable(),
   balance: decimalString.default("0"),
   /** Taux annuel en % (APR ou APY selon rateType) */
   apyPercent: decimalString.default("0"),
@@ -299,10 +336,33 @@ export const savingsAccountSchema = z.object({
     z.number().int().min(1).max(12).nullable().optional()
   ),
   currency: z.string().min(3).max(3).default("EUR"),
+  isPro: z.boolean().default(false),
+  ownershipPct: ownershipPctField,
   notes: z.string().optional().nullable(),
 });
 
 export type SavingsAccountForm = z.infer<typeof savingsAccountSchema>;
+
+export const termDepositSchema = z.object({
+  bankName: z.string().optional().nullable(),
+  principal: decimalString,
+  ratePercent: decimalString,
+  currency: z.string().min(3).max(3).default("EUR"),
+  openedAt: z.string().min(1, "Date d'ouverture requise"),
+  maturityDate: z.string().min(1, "Date d'échéance requise"),
+  earlyWithdrawalPenaltyPct: decimalString.optional().nullable(),
+  isPro: z.boolean().default(false),
+  ownershipPct: ownershipPctField,
+  notes: z.string().optional().nullable(),
+});
+
+export type TermDepositForm = z.infer<typeof termDepositSchema>;
+
+export const termDepositUpdateSchema = termDepositSchema.partial();
+
+export type TermDepositUpdateForm = z.infer<typeof termDepositUpdateSchema>;
+
+export const taxHouseholds = ["SINGLE", "COUPLE"] as const;
 
 export const lifeInsuranceSchema = z.object({
   insurer: z.string().min(1, "Assureur requis"),
@@ -310,6 +370,15 @@ export const lifeInsuranceSchema = z.object({
   cashEuro: decimalString.default("0"),
   currency: z.string().min(3).max(3).default("EUR"),
   notes: z.string().optional().nullable(),
+  /** Versements avant le 27/09/2017 (régime antérieur PFU). */
+  premiumsBefore2017Eur: decimalString.default("0"),
+  /** Versements à compter du 27/09/2017. */
+  premiumsAfter2017Eur: decimalString.default("0"),
+  /**
+   * Total versé déclaré (optionnel). S'il est fourni, il doit égaler
+   * avant + après — contrôlé côté serveur via `checkPremiumsSplit`.
+   */
+  totalPremiumsEur: decimalString.optional().nullable(),
 });
 
 export const employeeSavingsPlanTypes = ["PEE", "PER", "PERCO"] as const;
@@ -320,6 +389,13 @@ export const employeeSavingsSources = [
   "ABONDEMENT",
 ] as const;
 export const employeeSavingsUnlockModes = ["DATE", "RETIREMENT"] as const;
+export const employeeSavingsFundCategories = [
+  "EQUITY",
+  "DIVERSIFIED",
+  "BOND",
+  "MONETARY",
+  "OTHER",
+] as const;
 
 export const employeeSavingsLineSchema = z.object({
   planType: z.enum(employeeSavingsPlanTypes),
@@ -331,6 +407,9 @@ export const employeeSavingsLineSchema = z.object({
   currency: z.string().min(3).max(3).default("EUR"),
   sourceType: z.enum(employeeSavingsSources).default("VOLUNTARY"),
   contributionDate: z.string().optional().nullable(),
+  /** Montant versé — facultatif, et distinct de zéro quand il manque. */
+  contributedAmount: z.union([decimalString, z.literal("")]).optional().nullable(),
+  fundCategory: z.enum(employeeSavingsFundCategories).optional().nullable(),
   unlockDate: z.string().optional().nullable(),
   unlockMode: z.enum(employeeSavingsUnlockModes).optional().nullable(),
   notes: z.string().optional().nullable(),
@@ -339,13 +418,23 @@ export const employeeSavingsLineSchema = z.object({
 export type EmployeeSavingsLineForm = z.infer<typeof employeeSavingsLineSchema>;
 
 export const preciousMetalSchema = z.object({
-  assetKind: z.enum(["METAL", "OTHER"]).default("METAL"),
+  metal: z
+    .enum(["GOLD", "SILVER", "PLATINUM", "PALLADIUM", "OTHER"])
+    .default("GOLD"),
   format: z.enum(["PHYSICAL", "PAPER"]).default("PHYSICAL"),
+  productType: z
+    .enum(["COIN", "BAR", "JEWELRY", "ETC", "MINING", "OTHER"])
+    .default("COIN"),
   denomination: z.string().min(1, "Dénomination requise"),
+  /** Millièmes : 900 pour un Napoléon, 999,9 pour un lingot. */
+  fineness: decimalString.default("999"),
   quantity: decimalString.default("0"),
   unitWeight: decimalString.default("0"),
   weightUnit: z.enum(["GRAM", "OZ"]).default("GRAM"),
   purchasePriceUnit: decimalString.default("0"),
+  acquisitionFees: decimalString.default("0"),
+  acquiredAt: z.string().optional().nullable(),
+  hasInvoice: z.boolean().default(false),
   currentValue: decimalString.default("0"),
   currency: z.string().min(3).max(3).default("EUR"),
   storageLocation: z.string().optional().nullable(),
@@ -353,6 +442,25 @@ export const preciousMetalSchema = z.object({
 });
 
 export type PreciousMetalForm = z.infer<typeof preciousMetalSchema>;
+
+/**
+ * Cession d'un lot.
+ *
+ * Ni le prix de revient ni la date d'acquisition ne sont acceptés en entrée :
+ * ils viennent du lot cédé, faute de quoi la plus-value serait déclarative.
+ */
+export const preciousMetalSaleSchema = z.object({
+  positionId: z.string().min(1).optional().nullable(),
+  denomination: z.string().optional().nullable(),
+  quantity: decimalString,
+  salePriceEur: decimalString,
+  saleFeesEur: decimalString.default("0"),
+  soldAt: z.string().min(1, "Date de cession requise"),
+  regime: z.enum(["FORFAIT", "PLUS_VALUE"]).default("FORFAIT"),
+  notes: z.string().optional().nullable(),
+});
+
+export type PreciousMetalSaleForm = z.infer<typeof preciousMetalSaleSchema>;
 
 export const privateEquitySchema = z.object({
   companyName: z.string().min(1, "Nom de la société requis"),
@@ -364,6 +472,20 @@ export const privateEquitySchema = z.object({
   currentNav: decimalString.default("0"),
   currency: z.string().min(3).max(3).default("EUR"),
   notes: z.string().optional().nullable(),
+  committedCapital: decimalString.default("0"),
+  /**
+   * Pas de `.default()`, contrairement aux autres champs monétaires :
+   * private-equity.ts#normalize() distingue "absent" (dérive shares × PRU
+   * à la création) de "fourni, y compris 0" (stocke tel quel). Un défaut
+   * Zod appliquerait "0" même quand le champ est omis et empêcherait cette
+   * dérivation côté création via l'API.
+   */
+  calledCapital: decimalString.optional(),
+  distributionsReceived: decimalString.default("0"),
+  ownershipPercent: decimalString.optional().nullable(),
+  expectedExitDate: z.string().optional().nullable(),
+  vehicleName: z.string().optional().nullable(),
+  round: z.string().optional().nullable(),
 });
 
 export type PrivateEquityForm = z.infer<typeof privateEquitySchema>;
@@ -383,12 +505,45 @@ export const crowdlendingSchema = z.object({
   status: z.enum(["ACTIVE", "LATE", "REPAID", "DEFAULT"]).default("ACTIVE"),
   currency: z.string().min(3).max(3).default("EUR"),
   notes: z.string().optional().nullable(),
+  remainingCapital: decimalString.default("0"),
+  interestReceivedToDate: decimalString.default("0"),
+  paymentFrequency: z.enum(["MONTHLY", "QUARTERLY", "ANNUAL", "IN_FINE"]).default("MONTHLY"),
+  nextPaymentDate: z.string().optional().nullable(),
+  riskGrade: z.string().optional().nullable(),
 });
 
 export type CrowdlendingForm = z.infer<typeof crowdlendingSchema>;
 
+/** Decimal optionnel : une chaîne vide vaut « non renseigné », pas zéro. */
+const optionalDecimalString = z
+  .union([decimalString, z.literal("")])
+  .optional()
+  .nullable()
+  .transform((v) => (v === "" ? null : v));
+
+const optionalInt = z
+  .union([z.coerce.number().int().min(0), z.literal("")])
+  .optional()
+  .nullable()
+  .transform((v) => (v === "" ? null : v));
+
 export const tangibleAssetSchema = z.object({
-  category: z.enum(["WATCHES", "WINE", "ART", "AUTO", "OTHER"]).default("OTHER"),
+  category: z
+    .enum([
+      "WATCHES",
+      "JEWELRY",
+      "GEMSTONE",
+      "ART",
+      "WINE",
+      "HANDBAG",
+      "INSTRUMENT",
+      "NUMISMATICS",
+      "PHILATELY",
+      "FURNITURE",
+      "AUTO",
+      "OTHER",
+    ])
+    .default("OTHER"),
   brandOrArtist: z.string().min(1, "Marque / artiste requis"),
   modelName: z.string().min(1, "Modèle / nom requis"),
   yearOrVintage: z.string().optional().nullable(),
@@ -397,6 +552,116 @@ export const tangibleAssetSchema = z.object({
   currency: z.string().min(3).max(3).default("EUR"),
   hasCertificate: z.boolean().default(false),
   notes: z.string().optional().nullable(),
+
+  // Acquisition
+  purchaseDate: z.string().optional().nullable(),
+  purchaseSource: z.string().max(200).optional().nullable(),
+  certificateRef: z.string().max(120).optional().nullable(),
+  certificateIssuer: z.string().max(120).optional().nullable(),
+  /** Facture d'achat — distincte du certificat d'authenticité. */
+  hasPurchaseProof: z.boolean().default(false),
+  acquisitionFees: optionalDecimalString,
+
+  // Valorisation & conservation
+  appraisalValue: optionalDecimalString,
+  appraisalDate: z.string().optional().nullable(),
+  appraisalProvider: z.string().max(160).optional().nullable(),
+  insuranceValue: optionalDecimalString,
+  storageLocation: z.string().max(200).optional().nullable(),
+  /** Qualification d'objet de collection — décisive pour AUTO et FURNITURE. */
+  isCollectible: z.boolean().default(false),
+
+  // Assurance — la prime est un coût, le capital assuré une couverture
+  insurancePremiumAnnual: optionalDecimalString,
+  insuranceProvider: z.string().max(160).optional().nullable(),
+  insurancePolicyRef: z.string().max(120).optional().nullable(),
+  insuranceExpiryDate: z.string().optional().nullable(),
+  insuranceType: z
+    .enum(["MULTI_RISK", "FINE_ART", "JEWELRY", "WATCH", "OTHER"])
+    .optional()
+    .nullable(),
+
+  // Garde / conservation
+  storageType: z
+    .enum(["HOME", "BANK_VAULT", "PRO_VAULT", "THIRD_PARTY"])
+    .optional()
+    .nullable(),
+  storageCostAnnual: optionalDecimalString,
+  storageProvider: z.string().max(160).optional().nullable(),
+  storageContractRef: z.string().max(120).optional().nullable(),
+  storageRenewalDate: z.string().optional().nullable(),
+
+  // Transmission — marqueur seul, aucun barème de droits n'est calculé
+  includeInEstate: z.boolean().default(true),
+  estateNote: z.string().max(2000).optional().nullable(),
+
+  // Pierres
+  gemType: z
+    .enum(["DIAMOND", "RUBY", "EMERALD", "SAPPHIRE", "PEARL", "OTHER"])
+    .optional()
+    .nullable(),
+  caratWeight: optionalDecimalString,
+  gemClarity: z
+    .enum(["FL", "IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2"])
+    .optional()
+    .nullable(),
+  gemColor: z.string().max(60).optional().nullable(),
+  gemCut: z
+    .enum([
+      "ROUND",
+      "PRINCESS",
+      "OVAL",
+      "PEAR",
+      "CUSHION",
+      "EMERALD_CUT",
+      "OTHER",
+    ])
+    .optional()
+    .nullable(),
+  gemTreatment: z
+    .enum(["NONE", "HEATED", "FRACTURE_FILLED", "SYNTHETIC"])
+    .optional()
+    .nullable(),
+  gemOrigin: z.string().max(120).optional().nullable(),
+
+  // Bijoux
+  jewelryType: z
+    .enum(["RING", "NECKLACE", "BRACELET", "EARRINGS", "BROOCH", "OTHER"])
+    .optional()
+    .nullable(),
+  metalBase: z
+    .enum(["GOLD_750", "GOLD_585", "SILVER_925", "PLATINUM_950"])
+    .optional()
+    .nullable(),
+  metalWeightG: optionalDecimalString,
+  hasPunchmarks: z.boolean().optional().nullable(),
+
+  // Horlogerie
+  watchMovement: z
+    .enum(["AUTOMATIC", "MANUAL", "QUARTZ", "SOLAR"])
+    .optional()
+    .nullable(),
+  watchDiameterMm: optionalDecimalString,
+  watchReference: z.string().max(120).optional().nullable(),
+  watchBoxPapers: z.boolean().optional().nullable(),
+
+  // Vins
+  wineAppellation: z.string().max(160).optional().nullable(),
+  wineBottleCount: optionalInt,
+  wineBottleFormat: z
+    .enum(["BOTTLE_75", "MAGNUM", "JEROBOAM", "OTHER"])
+    .optional()
+    .nullable(),
+  wineStorageType: z
+    .enum(["CAVE_PERSO", "CAVE_LOUEE", "COURTIER"])
+    .optional()
+    .nullable(),
+
+  // Automobiles
+  autoMileageKm: optionalInt,
+  autoRegistration: z.string().max(32).optional().nullable(),
+  autoInspectionOk: z.boolean().optional().nullable(),
+  autoPreviousOwners: optionalInt,
 });
 
 export type TangibleAssetForm = z.infer<typeof tangibleAssetSchema>;
@@ -504,10 +769,13 @@ export const liabilityUpdateSchema = z.object({
   currency: currencyCode.optional(),
   interestRate: clearableDecimal.optional(),
   monthlyPayment: clearableDecimal.optional(),
+  insuranceMonthly: clearableDecimal.optional(),
   startDate: optionalDateString.optional(),
   endDate: optionalDateString.optional(),
   paymentDay: optionalClearableInt(1, 31).optional(),
   bankName: z.string().optional().nullable(),
+  category: z.enum(LIABILITY_CATEGORIES).optional(),
+  assetId: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 
@@ -518,6 +786,8 @@ export const bankAccountUpdateSchema = z.object({
   bankName: z.string().min(1, "Banque requise").optional(),
   balance: decimalString.optional(),
   currency: currencyCode.optional(),
+  isPro: z.boolean().optional(),
+  ownershipPct: ownershipPctField,
   notes: z.string().optional().nullable(),
 });
 
@@ -527,6 +797,8 @@ export type BankAccountUpdateForm = z.infer<typeof bankAccountUpdateSchema>;
 export const savingsAccountUpdateSchema = z.object({
   name: z.string().min(1, "Nom du livret requis").optional(),
   bankName: z.string().min(1).optional().nullable(),
+  productType: z.enum(regulatedProductTypes).optional(),
+  ceilingAmount: decimalString.optional().nullable(),
   balance: decimalString.optional(),
   apyPercent: decimalString.optional(),
   rateType: z.enum(["APR", "APY"]).optional(),
@@ -535,6 +807,8 @@ export const savingsAccountUpdateSchema = z.object({
   payoutDayOfMonth: optionalClearableInt(1, 31).optional(),
   payoutMonth: optionalClearableInt(1, 12).optional(),
   currency: currencyCode.optional(),
+  isPro: z.boolean().optional(),
+  ownershipPct: ownershipPctField,
   notes: z.string().optional().nullable(),
 });
 
@@ -547,6 +821,15 @@ export const lifeInsuranceUpdateSchema = z.object({
   cashEuro: decimalString.optional(),
   currency: currencyCode.optional(),
   notes: z.string().optional().nullable(),
+  premiumsBefore2017Eur: decimalString.optional(),
+  premiumsAfter2017Eur: decimalString.optional(),
+  totalPremiumsEur: decimalString.optional().nullable(),
+});
+
+/** PUT /api/life-insurance kind=tax-profile — situation fiscale du foyer */
+export const lifeInsuranceTaxProfileSchema = z.object({
+  kind: z.literal("tax-profile"),
+  taxHousehold: z.enum(taxHouseholds),
 });
 
 export type LifeInsuranceUpdateForm = z.infer<typeof lifeInsuranceUpdateSchema>;
@@ -650,3 +933,16 @@ export const updateAccountTypeSchema = z.object({
 });
 
 export type UpdateAccountTypeForm = z.infer<typeof updateAccountTypeSchema>;
+
+/**
+ * Suivi d'un actif dans la watchlist du tableau de bord.
+ *
+ * L'état voulu est envoyé explicitement plutôt qu'une bascule : deux clics
+ * partis en même temps depuis deux onglets laisseraient une bascule dans un
+ * état imprévisible, alors qu'ils convergent ici vers le même résultat.
+ */
+export const updateWatchlistSchema = z.object({
+  watchlisted: z.boolean(),
+});
+
+export type UpdateWatchlistForm = z.infer<typeof updateWatchlistSchema>;

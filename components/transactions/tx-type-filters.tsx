@@ -16,7 +16,8 @@ export type TxTypeFilterId =
   | "fees"
   | "cash"
   | "transfer"
-  | "split";
+  | "split"
+  | "works";
 
 export const TX_TYPE_FILTERS: Array<{
   id: TxTypeFilterId;
@@ -46,13 +47,15 @@ export const TX_TYPE_FILTERS: Array<{
     label: "Ventes",
     types: ["VENTE"],
     emptyHint: "Aucune vente enregistrée",
-    accent: "bg-sky-700 text-white dark:bg-sky-400 dark:text-sky-950",
+    accent: "bg-stone-700 text-white dark:bg-stone-400 dark:text-stone-950",
   },
   {
     id: "reward",
     label: "Rewards",
-    types: ["REWARD", "AIRDROP"],
-    emptyHint: "Aucun staking / reward / airdrop enregistré",
+    // Distinct de "airdrop" (voir plus bas) : un airdrop ne doit être compté
+    // que dans un seul badge, pas les deux à la fois.
+    types: ["REWARD"],
+    emptyHint: "Aucun staking / reward enregistré",
     accent: "bg-fuchsia-700 text-white dark:bg-fuchsia-400 dark:text-fuchsia-950",
   },
   {
@@ -98,6 +101,13 @@ export const TX_TYPE_FILTERS: Array<{
     emptyHint: "Aucun split enregistré",
     accent: "bg-teal-700 text-white dark:bg-teal-400 dark:text-teal-950",
   },
+  {
+    id: "works",
+    label: "Travaux",
+    types: ["TRAVAUX"],
+    emptyHint: "Aucuns travaux / charges enregistrés",
+    accent: "bg-orange-700 text-white dark:bg-orange-400 dark:text-orange-950",
+  },
 ];
 
 export function matchesTxTypeFilter(
@@ -122,7 +132,7 @@ export function txTypeChipClass(txType: string): string {
     case "ACHAT":
       return "bg-emerald-50 text-emerald-800 ring-emerald-200/80 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-800/60";
     case "VENTE":
-      return "bg-sky-50 text-sky-800 ring-sky-200/80 dark:bg-sky-950/50 dark:text-sky-200 dark:ring-sky-800/60";
+      return "bg-stone-50 text-stone-800 ring-stone-200/80 dark:bg-stone-950/50 dark:text-stone-200 dark:ring-stone-800/60";
     case "REWARD":
       return "bg-fuchsia-50 text-fuchsia-900 ring-fuchsia-200/80 dark:bg-fuchsia-950/40 dark:text-fuchsia-200 dark:ring-fuchsia-800/50";
     case "AIRDROP":
@@ -163,51 +173,53 @@ export function TxTypeFilters({
 }) {
   return (
     <div
-      className={cn(
-        "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5",
-        className
-      )}
+      className={cn("flex min-w-0 flex-wrap items-center gap-[var(--space-2)]", className)}
       role="group"
       aria-label="Filtrer par type de transaction"
       data-testid="tx-type-filters"
     >
-      {!compact && (
-        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-          Type
-        </span>
-      )}
-      {TX_TYPE_FILTERS.map((f) => {
-        const active = value === f.id;
-        const count = counts?.[f.id];
-        return (
-          <button
-            key={f.id}
-            type="button"
-            aria-pressed={active}
-            data-testid={`tx-filter-${f.id}`}
-            onClick={() => onChange(f.id)}
-            className={cn(
-              "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition",
-              "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-              active
-                ? f.accent
-                : "bg-transparent text-slate-600 ring-1 ring-inset ring-slate-200/90 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:ring-slate-700 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
-            )}
-          >
-            {f.label}
-            {typeof count === "number" && (
-              <span
-                className={cn(
-                  "tabular-nums text-[10px]",
-                  active ? "opacity-80" : "text-slate-400 dark:text-slate-500"
-                )}
-              >
-                {count}
-              </span>
-            )}
-          </button>
-        );
-      })}
+      {!compact && <span className="text-label shrink-0">Type</span>}
+
+      {/*
+        Barre segmentée dorée, comme partout ailleurs dans Aurea.
+
+        Chaque groupe portait auparavant sa propre teinte à l'état actif : dix
+        couleurs pour dix filtres, qui entraient en concurrence avec le seul
+        code couleur qui compte dans ce module — vert pour ce qui entre, rouge
+        pour ce qui sort. Le compteur reste, lui : c'est l'information utile
+        avant même de cliquer.
+      */}
+      <div className="term-seg flex-wrap">
+        {TX_TYPE_FILTERS.map((f) => {
+          const active = value === f.id;
+          const count = counts?.[f.id];
+          return (
+            <button
+              key={f.id}
+              type="button"
+              aria-pressed={active}
+              data-active={active}
+              data-testid={`tx-filter-${f.id}`}
+              onClick={() => onChange(f.id)}
+              className="term-seg-item inline-flex items-center gap-[var(--space-2)]"
+            >
+              {f.label}
+              {typeof count === "number" && (
+                <span
+                  className={cn(
+                    "num text-[length:var(--text-2xs)]",
+                    active
+                      ? "opacity-80"
+                      : "text-[var(--foreground-faint)]"
+                  )}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

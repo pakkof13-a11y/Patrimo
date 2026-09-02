@@ -31,9 +31,17 @@ test.describe("Import CSV", () => {
     const platformId = await ensurePlatform(request);
     expect(platformId).toBeTruthy();
 
+    // `fees` rendu unique par run : le commit déduplique par empreinte
+    // économique (plateforme + type + ticker + quantité + prix + frais). Un
+    // run répété sur le serveur réutilisé retomberait sinon sur la même
+    // empreinte que la fois précédente et serait skippé comme doublon —
+    // comportement d'import voulu, mais qui rend ce test non déterministe
+    // avec des frais fixes.
+    const uniqueFees = (1 + (Date.now() % 1_000_000) / 10_000_000).toFixed(7);
     const rows = previewJson.rows.map((r: { selected: boolean }) => ({
       ...r,
       selected: true,
+      fees: uniqueFees,
     }));
 
     const commit = await request.post("/api/import/commit", {
@@ -59,7 +67,7 @@ test.describe("Import CSV", () => {
     await expect(page.getByTestId("import-mode-select")).toBeVisible();
     await expect(page.getByTestId("import-mode-select")).toHaveValue("csv");
 
-    // Modèle téléchargeable uniquement pour le format Patrimo
+    // Modèle téléchargeable uniquement pour le format Aurea
     await page.getByTestId("import-format-select").selectOption("patrimo");
     await expect(
       page.getByRole("button", { name: /Télécharger le modèle/i })

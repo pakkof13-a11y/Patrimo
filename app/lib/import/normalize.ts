@@ -53,12 +53,92 @@ function normalizeMonthToken(raw: string): string {
 }
 
 /**
+ * Séparateur décimal d'une colonne, quand il a pu être établi.
+ * `"comma"` = 1.234,56 (FR) · `"dot"` = 1,234.56 (EN).
+ */
+export type DecimalSeparator = "comma" | "dot";
+
+/** `1,234` : une virgule suivie d'exactement 3 chiffres, sans autre séparateur. */
+function isAmbiguousCommaGroup(s: string): boolean {
+  return /^-?\d{1,3},\d{3}$/.test(s);
+}
+
+/**
+ * Déduit le séparateur décimal d'une **colonne** à partir de toutes ses valeurs.
+ *
+ * Une valeur isolée comme `1,234` est indécidable (1.234 en FR, 1234 en EN),
+ * mais un fichier est presque toujours homogène : il suffit qu'une seule valeur
+ * de la colonne lève l'ambiguïté pour trancher les autres.
+ *
+ * Signaux retenus, par ordre de force :
+ *  1. Les deux séparateurs présents (`1,234.56` / `1.234,56`) → le dernier est
+ *     le décimal. Signal le plus fiable.
+ *  2. Virgule suivie d'un nombre de chiffres ≠ 3 (`0,00000502`, `1,23`) →
+ *     virgule décimale : aucun groupe de milliers ne fait 2 ou 8 chiffres.
+ *  3. Virgules multiples (`1,234,567`) → virgule séparatrice de milliers.
+ *  4. Point suivi d'un nombre de chiffres ≠ 3 (`12.5`) → point décimal, donc
+ *     les virgules de la colonne sont des milliers.
+ *
+ * Renvoie `undefined` si la colonne ne contient que des cas ambigus — l'appelant
+ * garde alors le comportement par défaut.
+ */
+export function inferDecimalSeparator(
+  values: Iterable<string | number | null | undefined>
+): DecimalSeparator | undefined {
+  let sawCommaThousands = false;
+
+  for (const rawValue of values) {
+    if (rawValue == null) continue;
+    const s = String(rawValue).trim().replace(/[\s ']/g, "");
+    if (!s || !/\d/.test(s)) continue;
+
+    const hasComma = s.includes(",");
+    const hasDot = s.includes(".");
+
+    // 1. Les deux présents → le dernier rencontré est le séparateur décimal.
+    if (hasComma && hasDot) {
+      return s.lastIndexOf(",") > s.lastIndexOf(".") ? "comma" : "dot";
+    }
+
+    if (hasComma) {
+      const commas = (s.match(/,/g) || []).length;
+      // 2. Groupe décimal de taille ≠ 3 → virgule décimale.
+      const tail = s.slice(s.lastIndexOf(",") + 1);
+      if (commas === 1 && tail.length !== 3 && /^\d+$/.test(tail)) {
+        return "comma";
+      }
+      // 3. Plusieurs virgules → milliers (mais on continue : un signal plus
+      //    fort peut apparaître plus loin dans la colonne).
+      if (commas > 1) sawCommaThousands = true;
+      continue;
+    }
+
+    if (hasDot) {
+      const dots = (s.match(/\./g) || []).length;
+      const tail = s.slice(s.lastIndexOf(".") + 1);
+      // 4. Point décimal de taille ≠ 3 → point décimal pour la colonne.
+      if (dots === 1 && tail.length !== 3 && /^\d+$/.test(tail)) {
+        return "dot";
+      }
+    }
+  }
+
+  return sawCommaThousands ? "dot" : undefined;
+}
+
+/**
  * Nettoie et parse un nombre :
  * - symboles monétaires (€, $, EUR…), espaces insécables
  * - décimales FR (1.234,56) / EN (1,234.56) / crypto FR (0,00000502)
  * - parenthèses négatives
+ *
+ * `decimalSeparator` (optionnel) lève l'ambiguïté de `1,234` — voir
+ * `inferDecimalSeparator` pour le déduire d'une colonne entière.
  */
-export function parseNumber(raw: string | undefined | null): number | null {
+export function parseNumber(
+  raw: string | undefined | null,
+  decimalSeparator?: DecimalSeparator
+): number | null {
   if (raw == null) return null;
   let s = String(raw).trim();
   if (!s) return null;
@@ -92,16 +172,19 @@ export function parseNumber(raw: string | undefined | null): number | null {
       s = s.replace(/,/g, "");
     }
   } else if (/,/.test(s) && !/\./.test(s)) {
-    // Uniquement virgules :
+    // Uniquement des virgules :
     // - 1,234,567 → milliers EN (plusieurs virgules)
-    // - 1,23 ou 0,00000502 ou 2,53384547 → décimal FR (une virgule)
-    // - 1,234 → ambigu : si exactement 3 chiffres après et partie entière ≥ 4? On privilégie
-    //   décimal FR pour 1 seule virgule (crypto / cours FR) sauf motif milliers répété.
+    // - 1,23 · 0,00000502 · 2,53384547 → décimal FR (nombre de décimales ≠ 3)
+    // - 1,234 → RÉELLEMENT ambigu : 1.234 en FR, 1234 en EN. Indécidable sur la
+    //   valeur seule → on suit `decimalSeparator` quand l'appelant a pu
+    //   l'inférer sur l'ensemble de la colonne (cf. inferDecimalSeparator),
+    //   sinon on garde le décimal FR par défaut (quantités crypto).
     const commas = (s.match(/,/g) || []).length;
     if (commas > 1) {
       s = s.replace(/,/g, "");
+    } else if (isAmbiguousCommaGroup(s) && decimalSeparator === "dot") {
+      s = s.replace(",", "");
     } else {
-      // Une seule virgule → toujours décimal FR (quantités crypto multi-décimales)
       s = s.replace(",", ".");
     }
   }

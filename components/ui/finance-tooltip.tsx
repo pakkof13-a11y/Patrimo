@@ -41,6 +41,8 @@ const TIPS: Record<string, string> = {
     "Montant de capital encore à rembourser. Diminue à chaque prélèvement mensuel ou remboursement anticipé.",
   Mensualité:
     "Montant prélevé périodiquement. Utilisée pour le décrément auto du capital et l’estimation de durée restante.",
+  "Assurance emprunteur":
+    "Prime mensuelle hors intérêts (décès, invalidité…). Ajoutée à la mensualité dans le tableau d’amortissement, sans réduire le capital restant dû.",
   Avenant:
     "Modification contractuelle (mensualité ou taux) : les projections (durée, intérêts restants) sont recalculées.",
   "Remboursement anticipé":
@@ -52,7 +54,7 @@ const TIPS: Record<string, string> = {
   "WHT fiscal":
     "Withholding Tax : impôt prélevé à la source à l’étranger sur certains revenus. Peut ouvrir droit à crédit d’impôt selon conventions — non automatisé ici.",
   "PFU estimé":
-    "Prélèvement forfaitaire unique ~30 % (12,8 % IR + 17,2 % PS) appliqué de façon indicative aux gains positifs CTO / crypto / CFD uniquement. Ce n’est pas votre impôt dû.",
+    "Prélèvement forfaitaire unique ~31,4 % (12,8 % IR + 18,6 % PS depuis 2026) appliqué de façon indicative aux gains positifs CTO / crypto / CFD uniquement. Ce n’est pas votre impôt dû.",
   PEA:
     "Plan d’épargne en actions : fiscalité avantageuse sous conditions de durée — le PFU estimé de cette page ne s’y applique pas automatiquement.",
   "Assurance-vie":
@@ -91,6 +93,55 @@ export function FinanceTip({
         role="tooltip"
       >
         {text}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Badge d'avertissement discret (hover + focus clavier) — signale une donnée
+ * calculée/estimée plutôt que mesurée. Même idiome accessible que `FinanceTip`
+ * (title + aria-label + role="tooltip" pour le contenu flottant), packagé en
+ * badge visuel (⚠️ + libellé court) plutôt qu'une icône seule.
+ */
+export function EstimatedBadge({
+  label = "Estimé",
+  message,
+  className,
+  testId,
+}: {
+  /** Libellé visible du badge (court). */
+  label?: string;
+  /** Texte complet de l'infobulle + aria-label. */
+  message: string;
+  className?: string;
+  testId?: string;
+}) {
+  return (
+    <span
+      role="status"
+      aria-label={message}
+      title={message}
+      tabIndex={0}
+      data-testid={testId}
+      className={cn(
+        "group relative inline-flex items-center gap-1 rounded-full border border-amber-300/70 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-700",
+        "dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-400",
+        "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+        className
+      )}
+    >
+      <span aria-hidden="true">⚠️</span>
+      {label}
+      <span
+        className={cn(
+          "pointer-events-none absolute bottom-full left-1/2 z-40 mb-1.5 w-56 -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-left text-[10px] font-normal leading-snug text-slate-600 opacity-0 shadow-lg transition",
+          "group-hover:opacity-100 group-focus:opacity-100 dark:text-slate-300",
+          "motion-reduce:transition-none"
+        )}
+        role="tooltip"
+      >
+        {message}
       </span>
     </span>
   );

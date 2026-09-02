@@ -157,7 +157,7 @@ export function CommandPalette({
       },
       {
         id: "nav-tx",
-        label: "Aller aux Transactions",
+        label: "Aller aux Opérations",
         section: "Navigation",
         icon: <List className="h-3.5 w-3.5" />,
         run: () => onNavigate("transactions"),
@@ -268,7 +268,7 @@ export function CommandPalette({
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-start justify-center bg-slate-950/55 p-4 pt-[12vh] backdrop-blur-sm"
+      className="fixed inset-0 z-[80] flex items-start justify-center bg-black/55 p-4 pt-[12vh] backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label="Palette de commandes"

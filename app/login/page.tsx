@@ -1,10 +1,12 @@
 "use client";
 
 import { FormEvent, useState, useSyncExternalStore } from "react";
-import Image from "next/image";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { ArrowRight, Eye, EyeOff, Lock, User } from "lucide-react";
+import { BrandLogo } from "@/components/branding/brand-logo";
+import { BRAND } from "@/components/branding/brand-assets";
+import { cn } from "@/app/lib/utils";
 import {
   ONBOARDING_SESSION_DISMISS_KEY,
   clearSessionPref,
@@ -40,6 +42,7 @@ export default function LoginPage() {
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   /** Marqueur d’hydratation — e2e attend avant submit (évite GET natif). */
@@ -59,12 +62,17 @@ export default function LoginPage() {
         callbackUrl,
       });
       if (!res || res.error) {
-        // Messages génériques — pas de distinction « user existe / mauvais mdp ».
-        // rate_limited : cooldown sans confirmer l’existence du compte.
         const code = (res as { code?: string } | undefined)?.code;
+        const err = res?.error;
         if (code === "rate_limited") {
+          setError("Trop de tentatives. Réessayez dans quelques instants.");
+        } else if (
+          err === "Configuration" ||
+          err === "MissingSecret" ||
+          err === "UntrustedHost"
+        ) {
           setError(
-            "Trop de tentatives. Réessayez dans quelques instants."
+            "Erreur de configuration auth (serveur). Vérifiez AUTH_SECRET, AUTH_URL et les migrations Prisma sur Vercel — ce n’est pas un mauvais mot de passe."
           );
         } else {
           setError("Identifiant ou mot de passe incorrect.");
@@ -72,10 +80,7 @@ export default function LoginPage() {
         setPending(false);
         return;
       }
-      // Nouveau login → l'aide réapparaît si « Afficher à chaque démarrage »
-      // (dismiss permanent en localStorage n'est pas touché).
       clearSessionPref(ONBOARDING_SESSION_DISMISS_KEY);
-      // Ne pas utiliser res.url absolu (AUTH_URL=localhost alors que e2e = 127.0.0.1)
       router.replace(toAppPath(callbackUrl, "/dashboard"));
       router.refresh();
     } catch {
@@ -85,77 +90,176 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center bg-slate-950 px-4 text-slate-100">
-      {/* Fond discret */}
-      <div
-        className="pointer-events-none absolute inset-0 opacity-40"
-        style={{
-          background:
-            "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(13,148,136,0.25), transparent), radial-gradient(ellipse 60% 40% at 100% 100%, rgba(30,58,138,0.2), transparent)",
-        }}
+    <div className="login-stage" data-testid="login-stage">
+      {/*
+        Fond fixe, indépendant du thème de l'application — voir le
+        commentaire sur `.login-stage` dans globals.css. Pas de bouton
+        clair/sombre ici : le réglage reste une affaire du terminal, une fois
+        connecté.
+      */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- photo de marque plein cadre, pas un composant Next/Image */}
+      <img
+        src={BRAND.background.login}
+        alt=""
+        aria-hidden
+        decoding="async"
+        fetchPriority="high"
+        className="login-bg-image"
       />
 
-      <div className="relative z-10 w-full max-w-sm">
-        <div className="mb-8 flex flex-col items-center text-center">
-          <Image
-            src="/patrimo.jpg"
-            alt="Patrimo"
-            width={120}
-            height={120}
-            priority
-            className="rounded-2xl object-cover shadow-lg ring-1 ring-white/10"
-          />
-          <p className="mt-5 text-base font-medium tracking-wide text-gray-400 sm:text-lg">
-            Prenez les commandes de votre avenir financier.
-          </p>
+      {/*
+        ── Contenu ──
+        `relative` sans `z-index` : dans la pile d'empilement de `.login-stage`
+        (isolée), un élément positionné à z-index:auto peint après ses
+        frères de niveau 0 quand il les suit dans le DOM — donc au-dessus de
+        la photo, sans qu'il soit nécessaire de lui donner un z-index propre.
+      */}
+      <main
+        className={cn(
+          "relative mx-auto flex min-h-svh w-full max-w-[var(--login-card-w)] flex-col",
+          "items-center justify-center px-[var(--space-5)] py-[var(--space-12)]"
+        )}
+      >
+        {/*
+          Sigle sur fond réellement transparent (contrairement à l'ancien
+          asset) : un rendu normal suffit, plus besoin de fusion pour
+          neutraliser une tuile derrière la lettre.
+        */}
+        <BrandLogo
+          size={72}
+          priority
+          alt=""
+          className="h-[3.25rem] w-[3.25rem] object-contain"
+        />
+
+        <p
+          className="login-eyebrow mt-[var(--space-4)] text-[length:var(--text-sm)]"
+          data-testid="login-wordmark"
+        >
+          {BRAND.name}
+        </p>
+
+        <h1
+          className={cn(
+            "login-title mt-[var(--space-8)] text-center",
+            "text-[2rem] sm:text-[2.5rem]"
+          )}
+        >
+          Donner du sens
+          <br />à votre patrimoine.
+        </h1>
+
+        {/* Filet doré : seule sa largeur respire, sur quatre secondes. */}
+        <div className="mt-[var(--space-7)] flex justify-center">
+          <span className="login-rule" aria-hidden />
         </div>
 
+        <p
+          className="login-eyebrow mt-[var(--space-6)] text-[length:var(--text-2xs)]"
+          data-testid="login-slogan"
+        >
+          Personal wealth terminal
+        </p>
+
+        {/* ── Panneau ── */}
         <form
           method="post"
           action="#"
           onSubmit={onSubmit}
-          className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl backdrop-blur"
+          className={cn(
+            "login-card mt-[var(--space-10)] p-[var(--space-7)]",
+            "flex flex-col gap-[var(--space-5)]"
+          )}
           data-testid="login-form"
           data-hydrated={hydrated ? "true" : "false"}
         >
-          <h1 className="mb-1 text-center text-lg font-semibold text-white">
-            Connexion
-          </h1>
-          <p className="mb-5 text-center text-xs text-slate-500">
-            Accès sécurisé multi-compte
-          </p>
+          <div>
+            <label
+              htmlFor="login-username"
+              className="login-label mb-[var(--space-2)] block"
+            >
+              Identifiant
+            </label>
+            <div className="relative">
+              <User
+                className="pointer-events-none absolute left-[var(--space-4)] top-1/2 h-[0.9375rem] w-[0.9375rem] -translate-y-1/2 text-[var(--login-placeholder)]"
+                strokeWidth={1.5}
+                aria-hidden
+              />
+              <input
+                id="login-username"
+                className="login-field pl-[calc(var(--space-4)*2+0.9375rem)] pr-[var(--space-4)]"
+                autoComplete="username"
+                name="username"
+                placeholder="Votre identifiant"
+                data-testid="login-username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                autoFocus
+              />
+            </div>
+          </div>
 
-          <label className="mb-3 block text-xs font-medium text-slate-400">
-            Identifiant
-            <input
-              className="input mt-1 w-full border-slate-700 bg-slate-950 text-slate-100"
-              autoComplete="username"
-              name="username"
-              data-testid="login-username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              autoFocus
-            />
-          </label>
-
-          <label className="mb-4 block text-xs font-medium text-slate-400">
-            Mot de passe
-            <input
-              className="input mt-1 w-full border-slate-700 bg-slate-950 text-slate-100"
-              type="password"
-              autoComplete="current-password"
-              name="password"
-              data-testid="login-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </label>
+          <div>
+            <label
+              htmlFor="login-password"
+              className="login-label mb-[var(--space-2)] block"
+            >
+              Mot de passe
+            </label>
+            <div className="relative">
+              <Lock
+                className="pointer-events-none absolute left-[var(--space-4)] top-1/2 h-[0.9375rem] w-[0.9375rem] -translate-y-1/2 text-[var(--login-placeholder)]"
+                strokeWidth={1.5}
+                aria-hidden
+              />
+              <input
+                id="login-password"
+                className="login-field pl-[calc(var(--space-4)*2+0.9375rem)] pr-[calc(var(--space-4)*2+1rem)]"
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                name="password"
+                placeholder="Votre mot de passe"
+                data-testid="login-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-pressed={showPassword}
+                aria-label={
+                  showPassword
+                    ? "Masquer le mot de passe"
+                    : "Afficher le mot de passe"
+                }
+                data-testid="login-toggle-password"
+                className={cn(
+                  "absolute right-[var(--space-3)] top-1/2 -translate-y-1/2 rounded-[var(--radius-sm)]",
+                  "p-[var(--space-2)] text-[var(--login-placeholder)]",
+                  "transition-colors duration-[120ms] ease-[var(--ease-out)]",
+                  "hover:text-[var(--login-title)]",
+                  "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                )}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-[0.9375rem] w-[0.9375rem]" strokeWidth={1.5} />
+                ) : (
+                  <Eye className="h-[0.9375rem] w-[0.9375rem]" strokeWidth={1.5} />
+                )}
+              </button>
+            </div>
+          </div>
 
           {error && (
             <p
-              className="mb-3 rounded-lg bg-rose-950/50 px-3 py-2 text-center text-xs text-rose-300"
+              className={cn(
+                "rounded-[var(--login-field-radius)] px-[var(--space-3)] py-[var(--space-2)]",
+                "text-center text-[length:var(--text-xs)] text-[var(--negative)]",
+                "bg-[color-mix(in_srgb,var(--negative)_10%,transparent)]"
+              )}
               data-testid="login-error"
               role="alert"
             >
@@ -163,20 +267,31 @@ export default function LoginPage() {
             </p>
           )}
 
-          <Button
+          <button
             type="submit"
-            className="w-full"
+            className="login-submit inline-flex items-center justify-center gap-[var(--space-3)]"
             disabled={pending || !hydrated}
             data-testid="login-submit"
           >
-            {pending ? "Connexion…" : "Se connecter"}
-          </Button>
+            {pending ? "Connexion…" : "Accéder à mon patrimoine"}
+            {!pending && (
+              <ArrowRight className="h-[0.9375rem] w-[0.9375rem]" strokeWidth={1.75} aria-hidden />
+            )}
+          </button>
         </form>
 
-        <p className="mt-6 text-center text-[10px] text-slate-600">
-          Patrimo · Europe/Paris
+        {/*
+          Pas de lien « mot de passe oublié » : aucune route de
+          réinitialisation n'existe côté serveur. Un lien mort sur l'écran
+          d'entrée coûterait plus de confiance qu'il n'en gagnerait.
+        */}
+
+        <p className="login-footer mt-[var(--space-12)] text-center">
+          {BRAND.name}
+          <span className="mx-[var(--space-3)] opacity-60">•</span>
+          Europe / Paris
         </p>
-      </div>
+      </main>
     </div>
   );
 }

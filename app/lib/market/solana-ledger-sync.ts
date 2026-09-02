@@ -1,5 +1,5 @@
 /**
- * Écrit les soldes d’un snapshot Solana dans le ledger Patrimo
+ * Écrit les soldes d’un snapshot Solana dans le ledger Aurea
  * (positions → Positions / patrimoine).
  *
  * Idempotent : à chaque sync, ajuste la quantité ledger vers le solde on-chain

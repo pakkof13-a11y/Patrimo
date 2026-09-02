@@ -3,7 +3,12 @@ import {
   COLUMN_RESIZE_MAX,
   COLUMN_RESIZE_MIN,
   HOLDINGS_COLUMN_META,
+  columnAlign,
+  columnLabel,
+  columnMeta,
   columnMinWidth,
+  columnOrderStorageKey,
+  columnsStorageKey,
   compareAssetNames,
   computeFlexColumnLayout,
   defaultColumnOrder,
@@ -40,30 +45,77 @@ describe("mandatory / optional column defaults", () => {
     const vis = defaultHoldingsVisibility();
     for (const c of HOLDINGS_COLUMN_META) {
       expect(vis[c.id]).toBe(c.group === "mandatory");
-      if (c.group === "mandatory") expect(c.locked).toBe(true);
+      /*
+        `locked` est plus fort que `mandatory`, et non son synonyme : une
+        colonne verrouillée est visible par défaut *et* indécochable. La
+        réciproque est fausse — la vignette de tendance s'affiche d'emblée
+        mais reste décochable, puisqu'elle ne porte aucun chiffre sans lequel
+        la ligne cesserait d'être lisible.
+      */
+      if (c.locked) expect(c.group).toBe("mandatory");
     }
-    expect(vis.ticker).toBe(true);
+    expect(HOLDINGS_COLUMN_META.find((c) => c.id === "trend")?.locked).toBe(
+      undefined
+    );
+    expect(vis.trend).toBe(true);
+    // Ticker et PRU sont désormais optionnels (accessibles en un clic) — le
+    // socle par défaut ne garde que ce qui est indispensable à la lecture
+    // d'une position (Actif, Enveloppe, Cours, Valeur, P&L, Quantité, Plateforme).
+    expect(vis.ticker).toBe(false);
+    expect(vis.avgCostEur).toBe(false);
+    expect(vis.quantity).toBe(true);
+    // La plateforme a quitté le socle obligatoire : elle répond à « où est-ce
+    // gardé ? », question de garde que le panneau de détail et les modes
+    // Analyse / Expert traitent, pas la lecture de synthèse.
+    expect(vis.platformName).toBe(false);
     expect(vis.currency).toBe(false);
     expect(vis.stopLoss).toBe(false);
     expect(HOLDINGS_COLUMN_META.find((c) => c.id === "tp1")?.label).toBe("TP1");
   });
 
-  it("orders mandatory then optional, alpha by label within each group", () => {
+  it("suit l'ordre de lecture d'une position, pas l'alphabet", () => {
     const order = defaultColumnOrder();
-    const mandatory = HOLDINGS_COLUMN_META.filter((c) => c.group === "mandatory").map(
-      (c) => c.id
+
+    /*
+      L'ordre raconte une phrase : quoi, combien, ce que ça vaut, ce que ça a
+      fait, ce que ça pèse. L'alphabet plaçait « Cours » avant « Enveloppe » et
+      « PRU » après « Allocation » — chaque colonne à sa place dans le
+      dictionnaire, aucune dans le raisonnement.
+    */
+    expect(order.slice(0, 11)).toEqual([
+      "name",
+      "ticker",
+      "accountType",
+      "quantity",
+      "avgCostEur",
+      "currentPriceNative",
+      "marketValueBase",
+      // La vignette se lit entre la valeur et ce qu'elle a fait : elle dit par
+      // quel chemin le P&L qui suit est arrivé là.
+      "trend",
+      "unrealizedPnlBase",
+      "unrealizedPnlPct",
+      "allocationPct",
+    ]);
+  });
+
+  it("range les colonnes restantes par ordre alphabétique, sans en perdre", () => {
+    const order = defaultColumnOrder();
+    const all = HOLDINGS_COLUMN_META.map((c) => c.id);
+
+    // Aucune colonne oubliée, aucun identifiant fantôme.
+    expect([...order].sort()).toEqual([...all].sort());
+    expect(new Set(order).size).toBe(order.length);
+
+    // La queue suit le libellé : une colonne ajoutée demain s'y range seule.
+    const tail = order.slice(11);
+    const labels = tail.map(
+      (id) => HOLDINGS_COLUMN_META.find((c) => c.id === id)!.label
     );
-    const optional = HOLDINGS_COLUMN_META.filter((c) => c.group === "optional").map(
-      (c) => c.id
+    const sorted = [...labels].sort((a, b) =>
+      a.localeCompare(b, "fr", { sensitivity: "base", numeric: true })
     );
-    expect(order.slice(0, mandatory.length).sort()).toEqual([...mandatory].sort());
-    expect(order.slice(mandatory.length).sort()).toEqual([...optional].sort());
-    // first mandatory by fr label should be Actif
-    expect(order[0]).toBe("name");
-    // ticker is mandatory and present
-    expect(order).toContain("ticker");
-    // stop loss after all mandatory
-    expect(order.indexOf("stopLoss")).toBeGreaterThan(order.indexOf("ticker"));
+    expect(labels).toEqual(sorted);
   });
 
   it("resetHoldingsColumns restores mandatory visibility + default order", () => {
@@ -72,6 +124,35 @@ describe("mandatory / optional column defaults", () => {
     for (const c of HOLDINGS_COLUMN_META) {
       expect(r.visibility[c.id]).toBe(c.group === "mandatory" || Boolean(c.locked));
     }
+  });
+});
+
+describe("index des colonnes", () => {
+  it("résout chaque colonne de la méta, et rien d'autre", () => {
+    /*
+      L'index est construit une fois au chargement du module. S'il venait à
+      être déclaré avant le tableau qu'il indexe, ou à ne plus le refléter,
+      il rendrait `undefined` partout — et les colonnes retomberaient
+      silencieusement sur leurs valeurs de repli : largeur 100, alignement à
+      gauche, libellé remplacé par l'identifiant.
+    */
+    for (const c of HOLDINGS_COLUMN_META) {
+      expect(columnMeta(c.id)).toBe(c);
+      expect(columnLabel(c.id)).toBe(c.label);
+      expect(columnAlign(c.id)).toBe(c.align);
+    }
+    expect(columnMeta("colonne-inexistante")).toBeUndefined();
+    expect(columnLabel("colonne-inexistante")).toBe("colonne-inexistante");
+  });
+
+  it("les nombres sont alignés à droite, l'actif à gauche", () => {
+    expect(columnAlign("unrealizedPnlBase")).toBe("right");
+    expect(columnAlign("marketValueBase")).toBe("right");
+    expect(columnAlign("quantity")).toBe("right");
+    // Pastille et vignette sont centrées ; le nom de l'actif reste à gauche.
+    expect(columnAlign("accountType")).toBe("center");
+    expect(columnAlign("trend")).toBe("center");
+    expect(columnAlign("name")).toBeUndefined();
   });
 });
 
@@ -213,19 +294,19 @@ describe("localStorage column prefs", () => {
 
   it("resets visibility when stored blob is corrupt", () => {
     mem.set(
-      "patrimo.display.columns.holdings.v4",
+      columnsStorageKey("holdings"),
       JSON.stringify({ totally: "wrong", schema: 1 })
     );
     const fallback = defaultHoldingsVisibility();
     const loaded = loadColumnVisibility("holdings", fallback);
     expect(loaded).toEqual(fallback);
     // corrupt key wiped
-    expect(mem.get("patrimo.display.columns.holdings.v4")).toBeUndefined();
+    expect(mem.get(columnsStorageKey("holdings"))).toBeUndefined();
   });
 
   it("resets order when stored value is not an array", () => {
     mem.set(
-      "patrimo.display.columnOrder.holdings.v4",
+      columnOrderStorageKey("holdings"),
       JSON.stringify({ not: "array" })
     );
     expect(loadColumnOrder("holdings")).toEqual(defaultColumnOrder());
@@ -234,7 +315,7 @@ describe("localStorage column prefs", () => {
   it("ignores non-boolean visibility values", () => {
     const fallback = defaultHoldingsVisibility("standard");
     mem.set(
-      "patrimo.display.columns.holdings.v4",
+      columnsStorageKey("holdings"),
       JSON.stringify({ ...fallback, quantity: "yes", currency: false })
     );
     const loaded = loadColumnVisibility("holdings", fallback);
@@ -246,7 +327,7 @@ describe("localStorage column prefs", () => {
   it("keeps locked columns always visible", () => {
     const fallback = defaultHoldingsVisibility("standard");
     mem.set(
-      "patrimo.display.columns.holdings.v4",
+      columnsStorageKey("holdings"),
       JSON.stringify({ ...fallback, name: false, marketValueBase: false })
     );
     const loaded = loadColumnVisibility("holdings", fallback);
@@ -256,14 +337,17 @@ describe("localStorage column prefs", () => {
 });
 
 describe("sanitize column prefs", () => {
-  it("sanitizeColumnVisibility forces mandatory on", () => {
+  it("sanitizeColumnVisibility forces locked on, respecte le reste", () => {
     const fallback = defaultHoldingsVisibility();
     const s = sanitizeColumnVisibility(
-      { name: false, currency: true, unknownCol: true },
+      { name: false, currency: true, trend: false, unknownCol: true },
       fallback
     );
     expect(s).not.toBeNull();
-    expect(s!.name).toBe(true); // mandatory
+    expect(s!.name).toBe(true); // verrouillée : indécochable
+    // Affichée par défaut mais décochable : le réglage doit survivre au
+    // rechargement, sinon il s'annule tout seul d'une visite à l'autre.
+    expect(s!.trend).toBe(false);
     expect(s!.currency).toBe(true);
     expect(
       Object.prototype.hasOwnProperty.call(s, "unknownCol")

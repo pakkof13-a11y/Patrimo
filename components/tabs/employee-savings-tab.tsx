@@ -23,7 +23,8 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DateInput } from "@/components/ui/date-input";
-import { FinanceTip } from "@/components/ui/finance-tooltip";
+import { EmptyPlaceholder } from "@/components/ui/panel";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import {
   COMMON_MANAGERS,
@@ -37,9 +38,6 @@ import {
 import { PEE_LOCK_YEARS } from "@/app/lib/employee-savings/logic";
 import { CHART_COLORS } from "@/app/lib/types/ui";
 import {
-  ModuleGuidedEmpty,
-  ModuleKpi,
-  ModulePageHeader,
   ModuleCard,
   ModuleCardHeader,
   moduleTableHeadClass,
@@ -60,7 +58,14 @@ import {
 
 const emptyForm = emptyEsForm;
 
-export function EmployeeSavingsTab({
+/**
+ * Gestion des supports d'épargne salariale — saisie, import, déblocages.
+ *
+ * Cet écran reste ce qu'il était : une surface de **saisie**. Il vit désormais
+ * sous un repli, derrière la vue d'ensemble, parce qu'on consulte son épargne
+ * bien plus souvent qu'on ne la modifie.
+ */
+export function EmployeeSavingsManagement({
   baseCurrency = "EUR",
 }: {
   baseCurrency?: string;
@@ -80,6 +85,18 @@ export function EmployeeSavingsTab({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [managerOther, setManagerOther] = useState("");
+  /*
+    La suppression passait par `window.confirm()`, alors que `ConfirmDialog`
+    est justement le composant prévu pour le remplacer. L'utilisateur était
+    protégé — seule la forme différait du reste du produit.
+
+    Le comportement est repris à l'identique : même action, mêmes conditions,
+    seule la boîte native cède la place au dialogue commun.
+  */
+  const [suppressionCiblee, setSuppressionCiblee] = useState<{
+    id: string;
+    fundName: string;
+  } | null>(null);
   const [showUnlockHelp, setShowUnlockHelp] = useState(false);
 
   const lines = q.data?.lines ?? [];
@@ -186,8 +203,6 @@ export function EmployeeSavingsTab({
   const total = Number(summary?.totalValue || 0);
   const available = Number(summary?.availableValue || 0);
   const blocked = Number(summary?.blockedValue || 0);
-  const availPct = summary?.availablePct ?? 0;
-  const blockedPct = summary?.blockedPct ?? 0;
 
   function scrollToForm() {
     requestAnimationFrame(() => {
@@ -244,93 +259,13 @@ export function EmployeeSavingsTab({
   }, [form.units, form.nav]);
 
   return (
-    <div className="section-stack" data-testid="employee-savings-tab">
-      <ModulePageHeader
-        title="Épargne salariale"
-        subtitle={
-          <>
-            Positions{" "}
-            <span className="inline-flex items-center gap-0.5 font-medium text-[var(--foreground)]/80">
-              FCPE
-              <FinanceTip term="FCPE" />
-            </span>{" "}
-            (PEE, PER, PERCO) — valorisation (parts ×{" "}
-            <span className="inline-flex items-center gap-0.5">
-              VL
-              <FinanceTip term="VL" />
-            </span>
-            ), origine des fonds et calendrier de déblocage théorique.
-          </>
-        }
-      />
-
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <ModuleKpi
-          label="Valeur totale"
-          value={formatCurrency(summary?.totalValue || "0", baseCurrency)}
-          hint={
-            hasLines
-              ? `${summary?.lineCount ?? 0} position${(summary?.lineCount ?? 0) !== 1 ? "s" : ""} FCPE`
-              : "Somme des positions (parts × VL)"
-          }
-        />
-        <ModuleKpi
-          label={
-            <span className="inline-flex items-center gap-1.5 text-[var(--success)]">
-              <Unlock className="h-3.5 w-3.5" />
-              Disponible
-            </span>
-          }
-          tip={<FinanceTip term="Déblocage" />}
-          value={formatCurrency(summary?.availableValue || "0", baseCurrency)}
-          valueClassName="text-[var(--success)]"
-          hint={
-            hasLines
-              ? `${availPct} % du total`
-              : "Montant dont la date de déblocage est passée"
-          }
-        />
-        <ModuleKpi
-          label={
-            <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-              <Lock className="h-3.5 w-3.5" />
-              Bloqué
-            </span>
-          }
-          value={formatCurrency(summary?.blockedValue || "0", baseCurrency)}
-          valueClassName="text-amber-700 dark:text-amber-300"
-          hint={
-            hasLines
-              ? `${blockedPct} % du total`
-              : "Encore sous contrainte (date future ou retraite)"
-          }
-        />
-        <div className="card p-3.5 sm:p-4">
-          <div className="text-label">Liquidité</div>
-          {hasLines ? (
-            <>
-              <div className="mt-3 h-3 overflow-hidden rounded-full bg-[var(--muted)]">
-                <div
-                  className="h-full rounded-full bg-[var(--success)] transition-all"
-                  style={{ width: `${total > 0 ? availPct : 0}%` }}
-                  title="Disponible"
-                />
-              </div>
-              <div className="mt-2 flex justify-between text-[11px] text-[var(--muted-foreground)]">
-                <span className="text-[var(--success)]">Dispo {availPct}%</span>
-                <span className="text-amber-600 dark:text-amber-400">
-                  Bloqué {blockedPct}%
-                </span>
-              </div>
-            </>
-          ) : (
-            <p className="text-meta mt-2 leading-relaxed">
-              Barre disponible / bloqué une fois les positions renseignées.
-            </p>
-          )}
-        </div>
-      </section>
-
+    <div className="section-stack" data-testid="es-management">
+      {/*
+        Ni titre ni indicateurs ici : la vue d'ensemble, juste au-dessus, porte
+        déjà les deux. Cette section est le prolongement de cet écran — la
+        saisie, l'import, les dates de déblocage — pas un second écran complet.
+        Elle en avait la forme tant qu'elle vivait seule, avant la refonte.
+      */}
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="card overflow-hidden p-4">
           <h3 className="text-title mb-0.5">Répartition par plan</h3>
@@ -422,7 +357,7 @@ export function EmployeeSavingsTab({
           </div>
           <button
             type="button"
-            className="text-[11px] font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
+            className="text-[11px] font-medium text-stone-700 underline-offset-2 hover:underline dark:text-stone-300"
             onClick={() => setShowUnlockHelp((v) => !v)}
             aria-expanded={showUnlockHelp}
           >
@@ -431,10 +366,10 @@ export function EmployeeSavingsTab({
         </div>
 
         {showUnlockHelp && (
-          <div className="mb-3 space-y-1.5 rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2.5 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+          <div className="mb-3 space-y-1.5 rounded-lg border border-stone-500/20 bg-stone-500/5 px-3 py-2.5 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
             <p>
               <strong>PEE</strong> — blocage usuel de {PEE_LOCK_YEARS} ans après
-              la date de versement. Sans date de déblocage saisie, Patrimo
+              la date de versement. Sans date de déblocage saisie, Aurea
               calcule versement + {PEE_LOCK_YEARS} ans.
             </p>
             <p>
@@ -608,7 +543,7 @@ export function EmployeeSavingsTab({
               <label className="block min-w-0">
                 <FieldLabel tip={form.planType}>Type de plan</FieldLabel>
                 <select
-                  className="input"
+                  className="input w-full"
                   value={form.planType}
                   onChange={(e) => setPlanType(e.target.value)}
                   data-testid="es-plan-type"
@@ -638,7 +573,7 @@ export function EmployeeSavingsTab({
               <label className="block min-w-0 sm:col-span-2">
                 <FieldLabel tip="FCPE">Fonds (FCPE)</FieldLabel>
                 <input
-                  className="input"
+                  className="input w-full"
                   value={form.fundName}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, fundName: e.target.value }))
@@ -650,7 +585,7 @@ export function EmployeeSavingsTab({
               <label className="block min-w-0">
                 <FieldLabel>ISIN</FieldLabel>
                 <input
-                  className="input font-mono uppercase"
+                  className="input w-full font-mono uppercase"
                   value={form.isin}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, isin: e.target.value }))
@@ -661,7 +596,7 @@ export function EmployeeSavingsTab({
               <label className="block min-w-0">
                 <FieldLabel>Nombre de parts</FieldLabel>
                 <input
-                  className="input"
+                  className="input w-full"
                   value={form.units}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, units: e.target.value }))
@@ -673,7 +608,7 @@ export function EmployeeSavingsTab({
               <label className="block min-w-0">
                 <FieldLabel tip="VL">Valeur liquidative (VL)</FieldLabel>
                 <input
-                  className="input"
+                  className="input w-full"
                   value={form.nav}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, nav: e.target.value }))
@@ -685,7 +620,7 @@ export function EmployeeSavingsTab({
               <label className="block min-w-0">
                 <FieldLabel>Devise</FieldLabel>
                 <input
-                  className="input uppercase"
+                  className="input w-full uppercase"
                   value={form.currency}
                   onChange={(e) =>
                     setForm((f) => ({
@@ -705,7 +640,7 @@ export function EmployeeSavingsTab({
               <label className="block min-w-0 sm:col-span-2">
                 <FieldLabel tip="Abondement">Origine</FieldLabel>
                 <select
-                  className="input"
+                  className="input w-full"
                   value={form.sourceType}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, sourceType: e.target.value }))
@@ -739,7 +674,7 @@ export function EmployeeSavingsTab({
               <label className="block min-w-0">
                 <FieldLabel tip="Déblocage">Mode de déblocage</FieldLabel>
                 <select
-                  className="input"
+                  className="input w-full"
                   value={form.unlockMode}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, unlockMode: e.target.value }))
@@ -780,7 +715,7 @@ export function EmployeeSavingsTab({
               <label className="block min-w-0 sm:col-span-2 lg:col-span-3">
                 <FieldLabel>Commentaire (optionnel)</FieldLabel>
                 <input
-                  className="input"
+                  className="input w-full"
                   value={form.notes}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, notes: e.target.value }))
@@ -858,35 +793,54 @@ export function EmployeeSavingsTab({
               {!q.isLoading && lines.length === 0 && (
                 <tr>
                   <td colSpan={11} className="px-2 py-4">
-                    <ModuleGuidedEmpty
+                    <EmptyPlaceholder
                       testId="es-empty"
+                      className="sm:py-12"
                       title="Aucune position FCPE pour l’instant"
                       description="Ajoutez une ligne manuellement pour alimenter les KPI et graphiques — ou importez un export gestionnaire via le modèle CSV."
-                      bullets={[
-                        "Plan (PEE / PER / PERCO) et gestionnaire",
-                        "Parts × VL pour la valorisation",
-                        "Origine des fonds et date de déblocage",
-                      ]}
-                      primaryLabel="Ajouter une position"
-                      onPrimary={startCreate}
-                      primaryTestId="es-empty-add"
-                      secondary={
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            window.open(
-                              "/api/employee-savings/template",
-                              "_blank"
-                            )
-                          }
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          Télécharger le modèle
-                        </Button>
+                      action={
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={startCreate}
+                            data-testid="es-empty-add"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Ajouter une position
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              window.open(
+                                "/api/employee-savings/template",
+                                "_blank"
+                              )
+                            }
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Télécharger le modèle
+                          </Button>
+                        </>
                       }
-                    />
+                    >
+                      {/* Les trois colonnes qu'une ligne FCPE demande — le
+                          guide de saisie propre à ce formulaire. */}
+                      <ul className="mx-auto max-w-sm space-y-1.5 text-left text-[11px] text-[var(--muted-foreground)]">
+                        {[
+                          "Plan (PEE / PER / PERCO) et gestionnaire",
+                          "Parts × VL pour la valorisation",
+                          "Origine des fonds et date de déblocage",
+                        ].map((b) => (
+                          <li key={b} className="flex gap-2">
+                            <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--primary)]/70" />
+                            <span>{b}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </EmptyPlaceholder>
                   </td>
                 </tr>
               )}
@@ -970,11 +924,13 @@ export function EmployeeSavingsTab({
                         size="sm"
                         variant="ghost"
                         className="!h-7 !w-7 !px-0 text-slate-400 hover:text-red-600 dark:hover:text-red-400"
-                        onClick={() => {
-                          if (confirm("Supprimer cette position ?")) {
-                            delMut.mutate(l.id);
-                          }
-                        }}
+                        onClick={() =>
+                          setSuppressionCiblee({
+                            id: l.id,
+                            fundName: l.fundName,
+                          })
+                        }
+                        data-testid="es-line-delete"
                         title="Supprimer"
                         aria-label="Supprimer la position"
                       >
@@ -988,6 +944,24 @@ export function EmployeeSavingsTab({
           </table>
         </div>
       </ModuleCard>
+
+      <ConfirmDialog
+        open={suppressionCiblee != null}
+        danger
+        title="Supprimer cette position ?"
+        message={
+          suppressionCiblee
+            ? `${suppressionCiblee.fundName} — la ligne est retirée de votre épargne salariale. Cette action est définitive.`
+            : ""
+        }
+        testId="es-line-delete-confirm"
+        onCancel={() => setSuppressionCiblee(null)}
+        onConfirm={() => {
+          const cible = suppressionCiblee;
+          setSuppressionCiblee(null);
+          if (cible) delMut.mutate(cible.id);
+        }}
+      />
     </div>
   );
 }

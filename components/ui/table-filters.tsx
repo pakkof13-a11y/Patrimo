@@ -56,7 +56,7 @@ export function TableFilters({
           {accountFilterLabel}
         </span>
         <select
-          className="input !w-full min-w-0 max-w-full !py-1.5 text-sm sm:!w-auto sm:min-w-[10rem]"
+          className="input w-full min-w-0 max-w-full py-1.5 text-sm sm:w-auto sm:min-w-[10rem]"
           value={accountType ?? ""}
           onChange={(e) => onAccountTypeChange(e.target.value)}
           data-testid="table-account-filter"
@@ -84,7 +84,7 @@ export function TableFilters({
         value={search}
         onChange={(e) => onSearchChange(e.target.value)}
         placeholder={placeholder}
-        className="input !w-full min-w-0 !py-1.5 !pl-9 !pr-9 text-sm"
+        className="input w-full min-w-0 py-1.5 pl-9 pr-9 text-sm"
         data-testid="table-search"
         aria-label="Rechercher"
       />

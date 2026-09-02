@@ -15,6 +15,7 @@ import { AccountingError } from "@/app/lib/accounting";
 import {
   buildTxListOrderBy,
   buildTxListWhere,
+  computeTxKpis,
   mapTypeCountsToGroups,
   parseTxListQuery,
   TX_LIST_SELECT,
@@ -145,6 +146,7 @@ export async function GET(req: Request) {
       by: ["type"],
       where: whereForCounts,
       _count: { _all: true },
+      _sum: { grossAmountEur: true, feesEur: true, netCashImpactEur: true },
     }),
   ]);
 
@@ -157,6 +159,16 @@ export async function GET(req: Request) {
       _count: g._count._all,
     }))
   );
+  const kpis = computeTxKpis(
+    grouped.map((g) => ({
+      type: g.type,
+      _sum: {
+        grossAmountEur: g._sum.grossAmountEur,
+        feesEur: g._sum.feesEur,
+        netCashImpactEur: g._sum.netCashImpactEur,
+      },
+    }))
+  );
 
   return NextResponse.json(
     {
@@ -167,6 +179,7 @@ export async function GET(req: Request) {
       pageSize: query.pageSize,
       pageCount,
       typeCounts,
+      kpis,
     },
     {
       headers: {
@@ -242,7 +255,13 @@ export async function PUT(req: Request) {
       ...parsed.data,
       userId,
       id,
-      autoFundCash: Boolean(bodyObj.autoFundCash),
+      // Édition : n'écrase autoFundCash que si le champ est explicitement
+      // présent dans le body (pattern presentFields) — absent du body ne
+      // doit jamais couper silencieusement l'auto-funding.
+      autoFundCash:
+        bodyObj.autoFundCash === undefined
+          ? undefined
+          : Boolean(bodyObj.autoFundCash),
       allowNegativeCash: Boolean(bodyObj.allowNegativeCash),
     });
     return NextResponse.json({ transaction: updated });

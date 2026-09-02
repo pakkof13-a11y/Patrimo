@@ -11,17 +11,20 @@ import {
   type VisibilityState,
 } from "@tanstack/react-table";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   GripVertical,
   Pencil,
+  Plus,
+  SlidersHorizontal,
   Trash2,
   RefreshCw,
   Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CurrencyBadge } from "@/components/ui/currency-badge";
-import { PlatformLogo } from "@/components/ui/platform-logo";
+import { AssetLogo } from "@/components/ui/platform-logo";
 import { TableFilters } from "@/components/ui/table-filters";
 import { PageJump } from "@/components/ui/page-jump";
 import { ColumnPicker, type ColumnPickerItem } from "@/components/ui/column-picker";
@@ -41,7 +44,9 @@ import {
   formatDate,
   formatQuantity,
   cn,
+  MONTANT_INCONNU,
 } from "@/app/lib/utils";
+import { DataRow } from "@/components/ui/data-row";
 import type { TxRow } from "@/app/lib/types/ui";
 import {
   formatPageLabel,
@@ -49,6 +54,10 @@ import {
   shouldShowPaginationNav,
 } from "@/app/lib/ui/pagination";
 import { EmptyPlaceholder } from "@/components/ui/panel";
+import { Skeleton } from "@/components/ui/skeleton";
+import { KpiBandTile } from "@/components/ui/kpi-tiles";
+import { TransactionPanel } from "@/components/transactions/transaction-panel";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   ModuleCard,
   moduleTableHeadClass,
@@ -87,7 +96,7 @@ const TX_COLUMN_META: ColumnPickerItem[] = [
   { id: "blockchain", label: "Blockchain", group: "optional" },
   { id: "quantity", label: "Quantité", group: "optional" },
   { id: "currency", label: "Devise", group: "optional" },
-  { id: "netPrice", label: "Prix net uniquement", group: "optional" },
+  { id: "netPrice", label: "Montant net (€)", group: "optional" },
   { id: "actions", label: "Actions", locked: true, group: "mandatory" },
 ];
 
@@ -95,7 +104,11 @@ const TX_VISIBILITY_KEY = "patrimo.display.txColumnVisibility.v1";
 
 function defaultTxColumnVisibility(): VisibilityState {
   const map: VisibilityState = {};
-  for (const c of TX_COLUMN_META) map[c.id] = true;
+  for (const c of TX_COLUMN_META) {
+    // Masquée par défaut : "—" pour tout portefeuille sans actif crypto,
+    // pollution visuelle pour rien. Activable en un clic (ColumnPicker).
+    map[c.id] = c.id === "blockchain" ? false : true;
+  }
   return map;
 }
 
@@ -153,14 +166,47 @@ export function TransactionsTab({
   onEdit,
   onDelete,
   onImport,
+  onCreate,
+  onOpenPlatform,
+  platforms,
+  initialPlatformId,
 }: {
+  /**
+   * Plateforme sur laquelle ouvrir le journal — utilisé par le lien « Voir les
+   * transactions » du module Plateformes. Le filtre reste ensuite pilotable
+   * normalement : c'est une valeur d'entrée, pas un verrou.
+   */
+  initialPlatformId?: string;
+  /** Ouvre la plateforme d'une opération depuis le panneau de détail. */
+  onOpenPlatform?: (platformId: string) => void;
   onEdit: (t: TxRow) => void;
   onDelete: (id: string) => void;
   onImport?: () => void;
+  /** Ouvre le flux de création existant (openNewTransaction côté parent) — pas de flux dupliqué ici. */
+  onCreate?: () => void;
+  /** Pour le filtre plateforme (courtier / exchange) */
+  platforms?: Array<{ id: string; name: string }>;
 }) {
   const [search, setSearch] = useState("");
   const [accountType, setAccountType] = useState("");
   const [typeFilter, setTypeFilter] = useState<TxTypeFilterId>("all");
+  const [platformFilter, setPlatformFilter] = useState(initialPlatformId ?? "");
+  /*
+    Ajustement pendant le rendu plutôt qu'un effet : revenir depuis Plateformes
+    sur une autre plateforme doit changer le filtre sans provoquer un premier
+    rendu affichant le journal complet, puis un second filtré.
+  */
+  const [prevInitialPlatformId, setPrevInitialPlatformId] =
+    useState(initialPlatformId);
+  if (initialPlatformId !== prevInitialPlatformId) {
+    setPrevInitialPlatformId(initialPlatformId);
+    setPlatformFilter(initialPlatformId ?? "");
+  }
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  // Repliés par défaut sur mobile pour ne pas saturer la toolbar — toujours
+  // visibles en ligne dès sm: (voir wrapper "sm:contents" plus bas).
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const debouncedSearch = useDebouncedValue(search, 300);
   const [pageSize, setPageSize] = useState<PageSize>(50);
   const [pageIndex, setPageIndex] = useState(0);
@@ -177,14 +223,9 @@ export function TransactionsTab({
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const [draggingCol, setDraggingCol] = useState<string | null>(null);
   const skipSortRef = useRef(false);
-
-  // Reset page quand filtres / tri / pageSize changent
-  const filterKey = `${debouncedSearch}|${accountType}|${pageSize}|${typeFilter}|${sorting[0]?.id}|${sorting[0]?.desc}`;
-  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
-  if (filterKey !== prevFilterKey) {
-    setPrevFilterKey(filterKey);
-    if (pageIndex !== 0) setPageIndex(0);
-  }
+  const [deleteTarget, setDeleteTarget] = useState<TxRow | null>(null);
+  /** Ligne ouverte dans la colonne de détail. */
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     saveColumnOrder(TX_TABLE_KEY, columnOrder);
@@ -193,6 +234,24 @@ export function TransactionsTab({
   useEffect(() => {
     saveTxColumnVisibility(columnVisibility);
   }, [columnVisibility]);
+
+  // Reset page quand filtres / tri / pageSize changent
+  useEffect(() => {
+    setPageIndex(0);
+    /*
+      La sélection tombe avec le jeu de résultats.
+
+      Elle désigne une ligne de la page courante ; après un changement de
+      filtre ou de tri, cette ligne peut avoir disparu — le panneau restait
+      alors ouvert sur un vide, au lieu de se refermer franchement.
+    */
+    setSelectedId(null);
+  }, [debouncedSearch, accountType, pageSize, typeFilter, platformFilter, dateFrom, dateTo, sorting]);
+
+  // Changer de page vide aussi la sélection : la ligne n'y est plus.
+  useEffect(() => {
+    setSelectedId(null);
+  }, [pageIndex]);
 
   const sortBy = sorting[0]?.id || "date";
   const sortDir = sorting[0]?.desc ? "desc" : "asc";
@@ -205,6 +264,9 @@ export function TransactionsTab({
     q: debouncedSearch.trim() || undefined,
     sortBy,
     sortDir,
+    platformId: platformFilter || undefined,
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
   });
 
   const pageRows = listQ.data?.transactions ?? [];
@@ -212,14 +274,41 @@ export function TransactionsTab({
   const totalDb = listQ.data?.totalAll ?? 0;
   const pageCount = Math.max(1, listQ.data?.pageCount ?? 1);
   const typeCounts = listQ.data?.typeCounts ?? {};
+  const kpis = listQ.data?.kpis;
+  /*
+    La route rend toujours `kpis`, à zéro compris quand le filtre ne ramène
+    rien. Son absence ne signifie donc jamais « aucune opération » : elle
+    signifie que la requête n'a pas abouti — chargement en cours, ou échec.
+
+    Les tuiles affichaient `?? 0`, soit « 0,00 € » d'achats, de ventes, de
+    revenus et de frais pendant qu'une bannière annonçait l'échec juste
+    au-dessus. Quatre montants faux présentés comme certains. La bande
+    d'indicateurs du tableau de bord tient déjà cette distinction avec son
+    placeholder « — € » ; c'est la même règle ici.
+  */
+  const kpisConnus = kpis != null;
 
   // Clamp pageIndex si hors bornes (données chargées)
-  const safePageIndex = Math.min(pageIndex, Math.max(0, pageCount - 1));
-  if (safePageIndex !== pageIndex && listQ.data) {
-    setPageIndex(safePageIndex);
-  }
+  useEffect(() => {
+    const safePageIndex = Math.min(pageIndex, Math.max(0, pageCount - 1));
+    if (safePageIndex !== pageIndex) {
+      setPageIndex(safePageIndex);
+    }
+  }, [pageIndex, pageCount]);
 
   const loading = listQ.isPending || listQ.isFetching;
+  /*
+    Squelette tant que rien n'est jamais arrivé.
+
+    Le rafraîchissement d'une page suivante ne doit pas le déclencher : la
+    table garderait ses lignes précédentes et n'aurait pas à clignoter. Ce qui
+    doit être couvert, c'est le tout premier chargement, où afficher
+    « 0 transaction » serait une affirmation fausse.
+  */
+  const showSkeleton = listQ.isPending && !listQ.data;
+  /** La ligne ouverte, résolue sur la page courante. */
+  const selectedTx =
+    (listQ.data?.transactions ?? []).find((t) => t.id === selectedId) ?? null;
   const hasLoadedOnce = Boolean(listQ.data) || listQ.isFetched;
   const errorMessage =
     listQ.error instanceof Error
@@ -232,7 +321,14 @@ export function TransactionsTab({
   const hasActiveFilters =
     typeFilter !== "all" ||
     Boolean(accountType) ||
-    Boolean(debouncedSearch.trim());
+    Boolean(debouncedSearch.trim()) ||
+    Boolean(platformFilter) ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
+  // Badge du panneau replié mobile — plateforme + période (Enveloppe/recherche
+  // restent visibles hors panneau, pas de double comptage).
+  const mobileFilterCount =
+    (platformFilter ? 1 : 0) + (dateFrom || dateTo ? 1 : 0);
 
   const columns = useMemo<ColumnDef<TxRow>[]>(
     () => [
@@ -279,9 +375,12 @@ export function TransactionsTab({
           const name = a?.name || "—";
           return (
             <div className="flex min-w-0 max-w-[16rem] items-center gap-2.5">
-              <PlatformLogo
+              <AssetLogo
                 src={a?.logoUrl || null}
                 name={name === "—" ? "?" : name}
+                ticker={a?.ticker}
+                isin={a?.isin}
+                assetClass={a?.assetClass}
                 size={28}
               />
               <div className="min-w-0">
@@ -334,6 +433,10 @@ export function TransactionsTab({
         id: "blockchain",
         accessorFn: (r) => r.blockchainLabel || r.blockchainKey || "",
         header: "Blockchain",
+        // blockchainKey est calculé applicativement (non stocké), donc pas
+        // triable côté serveur — sans ce flag la flèche de tri s'affichait
+        // alors que le clic n'avait aucun effet (retombe sur "date").
+        enableSorting: false,
         cell: ({ row }) => {
           const isCrypto =
             row.original.asset?.accountType === "CRYPTO" ||
@@ -391,7 +494,7 @@ export function TransactionsTab({
       {
         id: "netPrice",
         accessorFn: (r) => txNetPriceEur(r) ?? 0,
-        header: "Prix net uniquement",
+        header: "Montant net (€)",
         cell: ({ row }) => {
           const net = txNetPriceEur(row.original);
           return (
@@ -430,13 +533,10 @@ export function TransactionsTab({
               variant="ghost"
               size="sm"
               className="!h-7 !w-7 !px-0 text-[var(--muted-foreground)] hover:text-[var(--danger)]"
-              onClick={() => {
-                if (confirm("Supprimer cette transaction ?")) {
-                  onDelete(row.original.id);
-                }
-              }}
+              onClick={() => setDeleteTarget(row.original)}
               title="Supprimer"
               aria-label="Supprimer la transaction"
+              data-testid={`tx-delete-${row.original.id}`}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
@@ -444,7 +544,7 @@ export function TransactionsTab({
         ),
       },
     ],
-    [onEdit, onDelete]
+    [onEdit]
   );
 
   const table = useReactTable({
@@ -474,6 +574,12 @@ export function TransactionsTab({
 
   function formatCountSummary(): string {
     if (loading && !hasLoadedOnce) return "Chargement…";
+    /*
+      Sans réponse, on ne sait pas combien il y a d'opérations. Annoncer
+      « Aucune transaction » affirmait un journal vide là où il n'a pas pu être
+      lu — la bannière d'erreur disait déjà le contraire, deux lignes plus haut.
+    */
+    if (!listQ.data) return "Journal indisponible";
     if (totalDb === 0 && filteredTotal === 0) return "Aucune transaction";
     const base = `${totalDb} transaction${totalDb !== 1 ? "s" : ""}`;
     if (filteredTotal !== totalDb) {
@@ -483,25 +589,23 @@ export function TransactionsTab({
   }
 
   return (
+    <div
+      className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)] xl:items-start"
+      data-testid="transactions-shell"
+    >
     <ModuleCard testId="transactions-tab">
-      <div className="flex min-w-0 flex-col gap-3.5 border-b border-[var(--border)] px-4 py-4 sm:gap-4 sm:px-5 sm:py-4">
-        <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+      <div className="flex min-w-0 flex-col gap-[var(--space-4)] border-b border-[var(--border)] px-[var(--space-4)] py-[var(--space-4)] sm:px-5">
+        {/* ── En-tête ──────────────────────────────────────────── */}
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-[var(--space-3)]">
           <div className="min-w-0">
-            <h2 className="break-words text-base font-semibold leading-snug tracking-tight text-[var(--foreground)]">
-              Journal des transactions
-            </h2>
-            <p className="module-intro text-meta">
-              Source de vérité pour positions, cash et fiscalité — édition,
-              filtres et import
-            </p>
-            <p
-              className="kpi-value mt-2 text-sm text-[var(--primary)]"
-              data-testid="tx-total-count"
-            >
-              {formatCountSummary()}
+            <h2 className="text-title">Transactions</h2>
+            <p className="text-meta">
+              Historique complet de vos opérations
+              <span className="mx-1 opacity-40">·</span>
+              <span data-testid="tx-total-count">{formatCountSummary()}</span>
             </p>
             {errorMessage && (
-              <p className="mt-1 text-xs text-[var(--danger)]">
+              <p className="mt-[var(--space-1)] text-[length:var(--text-xs)] text-[var(--danger)]">
                 Impossible de charger le journal —{" "}
                 <button
                   type="button"
@@ -513,6 +617,75 @@ export function TransactionsTab({
               </p>
             )}
           </div>
+
+          <div className="flex shrink-0 flex-wrap items-center gap-[var(--space-2)]">
+            {onImport && (
+              <Button
+                variant="ghost"
+                onClick={onImport}
+                data-testid="tx-import-open"
+              >
+                <Upload className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                Importer
+              </Button>
+            )}
+            {onCreate && (
+              <Button onClick={onCreate} data-testid="tx-create-open">
+                <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                Nouvelle transaction
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* ── KPI ──────────────────────────────────────────────── */}
+        {/*
+          Cinq tuiles, toutes issues des agrégats serveur : le frontend ne
+          recalcule aucun total. Elles portent sur le **périmètre filtré**,
+          pas sur le journal entier — c'est ce que compte déjà `computeTxKpis`.
+        */}
+        <div
+          className="grid grid-cols-2 divide-x divide-y divide-[var(--border)] overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] sm:grid-cols-3 sm:divide-y-0 lg:grid-cols-5"
+          data-testid="tx-kpis"
+        >
+          <KpiBandTile
+            testId="tx-kpi-count"
+            label="Transactions"
+            value={kpisConnus ? filteredTotal.toLocaleString("fr-FR") : "—"}
+            secondary="Opérations"
+            loading={showSkeleton}
+          />
+          <KpiBandTile
+            testId="tx-kpi-buys"
+            label="Achats"
+            value={kpisConnus ? formatCurrency(kpis!.buysEur, "EUR") : MONTANT_INCONNU}
+            secondary="Sur la période"
+            loading={showSkeleton}
+          />
+          <KpiBandTile
+            testId="tx-kpi-sells"
+            label="Ventes"
+            value={kpisConnus ? formatCurrency(kpis!.sellsEur, "EUR") : MONTANT_INCONNU}
+            secondary="Sur la période"
+            tone="positive"
+            loading={showSkeleton}
+          />
+          <KpiBandTile
+            testId="tx-kpi-income"
+            label="Revenus"
+            value={kpisConnus ? formatCurrency(kpis!.incomeEur, "EUR") : MONTANT_INCONNU}
+            secondary="Dividendes, intérêts…"
+            tone="positive"
+            loading={showSkeleton}
+          />
+          <KpiBandTile
+            testId="tx-kpi-fees"
+            label="Frais"
+            value={kpisConnus ? formatCurrency(kpis!.feesEur, "EUR") : MONTANT_INCONNU}
+            secondary="Total des frais"
+            tone="negative"
+            loading={showSkeleton}
+          />
         </div>
 
         <div
@@ -532,27 +705,129 @@ export function TransactionsTab({
             placeholder="Nom, ticker, ISIN, plateforme…"
           />
 
+          {/* Repli mobile : plateforme + période sont peu consultées au
+              quotidien — un panneau replié évite d'empiler 2 rangées de
+              plus sous la recherche sur petit écran. Dès sm:, "sm:contents"
+              neutralise ce wrapper et les deux filtres reprennent leur
+              place normale dans la rangée flex du parent. */}
+          <button
+            type="button"
+            className="inline-flex w-full items-center justify-between gap-2 rounded-md border border-[var(--border)] px-2.5 py-1.5 text-xs font-medium text-[var(--muted-foreground)] sm:hidden"
+            onClick={() => setShowMobileFilters((v) => !v)}
+            aria-expanded={showMobileFilters}
+            data-testid="tx-mobile-filters-toggle"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Filtres
+              {mobileFilterCount > 0 && (
+                <span className="tabular-nums text-[10px] text-[var(--primary)]">
+                  ({mobileFilterCount})
+                </span>
+              )}
+            </span>
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 transition-transform",
+                showMobileFilters && "rotate-180"
+              )}
+            />
+          </button>
+
+          <div
+            className={cn(
+              "w-full min-w-0 flex-col gap-2",
+              showMobileFilters ? "flex" : "hidden",
+              "sm:contents"
+            )}
+          >
+            {platforms && platforms.length > 0 && (
+              <label className="flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+                <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
+                  Plateforme
+                </span>
+                <select
+                  className="input w-auto min-w-0 max-w-full py-1.5 text-sm"
+                  value={platformFilter}
+                  onChange={(e) => setPlatformFilter(e.target.value)}
+                  data-testid="tx-filter-platform"
+                  aria-label="Filtrer par plateforme"
+                >
+                  <option value="">Toutes</option>
+                  {platforms.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            <div className="flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+              <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
+                Du
+              </span>
+              <input
+                type="date"
+                className="input w-auto py-1.5 text-sm"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => setDateFrom(e.target.value)}
+                data-testid="tx-filter-from"
+                aria-label="Date de début"
+              />
+              <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
+                Au
+              </span>
+              <input
+                type="date"
+                className="input w-auto py-1.5 text-sm"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => setDateTo(e.target.value)}
+                data-testid="tx-filter-to"
+                aria-label="Date de fin"
+              />
+              {(dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                  }}
+                  aria-label="Effacer la période"
+                  title="Effacer la période"
+                  data-testid="tx-date-clear"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/*
+            Créer et importer ont rejoint l'en-tête : les garder aussi ici les
+            faisait exister à deux endroits à quinze pixels d'écart. Ne restent
+            que les deux commandes propres à la table — recharger, et choisir
+            les colonnes.
+          */}
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:shrink-0">
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={() => void listQ.refetch()}
               disabled={listQ.isFetching}
               title="Recharger le journal"
               aria-label="Actualiser le journal"
+              data-testid="tx-refresh"
             >
               <RefreshCw
                 className={cn("h-3.5 w-3.5", listQ.isFetching && "animate-spin")}
               />
               <span className="hidden sm:inline">Actualiser</span>
             </Button>
-            {onImport && (
-              <Button variant="outline" size="sm" onClick={onImport}>
-                <Upload className="h-3.5 w-3.5" />
-                Import CSV
-              </Button>
-            )}
             <ColumnPicker
               columns={TX_COLUMN_META}
               visibility={columnVisibility}
@@ -583,11 +858,14 @@ export function TransactionsTab({
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="tabular-nums">
               {formatRangeLabel(pageIndex, pageSize, filteredTotal)}
+              {totalDb > 0 && filteredTotal !== totalDb
+                ? ` · ${totalDb} au total`
+                : ""}
             </span>
             <label className="flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
               <span className="sr-only sm:not-sr-only sm:inline">Par page</span>
               <select
-                className="input !h-7 !w-auto !min-w-0 !py-0 !pl-1.5 !pr-6 text-[11px] tabular-nums"
+                className="input !h-7 w-auto !min-w-0 py-0 pl-1.5 pr-6 text-[11px] tabular-nums"
                 value={pageSize}
                 onChange={(e) =>
                   setPageSize(Number(e.target.value) as PageSize)
@@ -770,13 +1048,16 @@ export function TransactionsTab({
           </thead>
           <tbody>
             {table.getRowModel().rows.map((row) => (
-              <tr
+              <DataRow
                 key={row.id}
-                className={cn(
-                  moduleTableRowClass,
-                  "cursor-pointer"
-                )}
-                title="Double-clic pour modifier"
+                className={moduleTableRowClass}
+                selected={selectedId === row.original.id}
+                onSelect={() => setSelectedId(row.original.id)}
+                /*
+                  Un clic ouvre la fiche à droite ; le double-clic reste le
+                  raccourci d'édition qu'il a toujours été. Retirer ce dernier
+                  aurait cassé un geste acquis pour rien.
+                */
                 onDoubleClick={() => onEdit(row.original)}
                 data-testid={`tx-row-${row.original.id}`}
               >
@@ -803,8 +1084,22 @@ export function TransactionsTab({
                     </td>
                   );
                 })}
-              </tr>
+              </DataRow>
             ))}
+            {/*
+              Squelette au tout premier chargement : afficher une table vide,
+              puis « 0 transaction », affirmerait quelque chose de faux le
+              temps d'un aller-retour réseau.
+            */}
+            {showSkeleton &&
+              Array.from({ length: 8 }).map((_, i) => (
+                <tr key={`sk-${i}`} data-testid="tx-skeleton-row">
+                  <td colSpan={visibleColumnCount} className="px-4 py-2">
+                    <Skeleton className="h-6 w-full" />
+                  </td>
+                </tr>
+              ))}
+
             {filteredTotal === 0 && !loading && (
               <tr>
                 <td colSpan={visibleColumnCount} className="px-4 py-6">
@@ -812,17 +1107,36 @@ export function TransactionsTab({
                     <EmptyPlaceholder
                       title="Aucune transaction pour l’instant"
                       description="Importez un CSV courtier ou saisissez une opération (achat, vente, dividende…) pour démarrer le journal."
+                      /*
+                        Deux chemins, pas un. Le cockpit d'accueil ne concerne
+                        qu'un compte entièrement vierge : posséder du patrimoine
+                        sans aucune transaction est un cas normal, et il se
+                        traite ici.
+                      */
                       action={
-                        onImport ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={onImport}
-                          >
-                            <Upload className="h-3.5 w-3.5" />
-                            Importer un CSV
-                          </Button>
-                        ) : undefined
+                        <span className="flex flex-wrap items-center justify-center gap-[var(--space-2)]">
+                          {onCreate ? (
+                            <Button
+                              size="sm"
+                              onClick={onCreate}
+                              data-testid="tx-empty-create"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              Ajouter une transaction
+                            </Button>
+                          ) : null}
+                          {onImport ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={onImport}
+                              data-testid="tx-empty-import"
+                            >
+                              <Upload className="h-3.5 w-3.5" />
+                              Importer
+                            </Button>
+                          ) : null}
+                        </span>
                       }
                     />
                   ) : (
@@ -905,6 +1219,49 @@ export function TransactionsTab({
           </span>
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget != null}
+        danger
+        title="Supprimer la transaction"
+        message={
+          deleteTarget
+            ? [
+                `${TRANSACTION_TYPES[deleteTarget.type as keyof typeof TRANSACTION_TYPES] || deleteTarget.type} · ${deleteTarget.asset?.name ?? deleteTarget.platform?.name ?? "—"} · ${formatDate(deleteTarget.occurredAt)}.`,
+                /*
+                  Une transaction est une source de vérité : les positions, le
+                  prix de revient et le cash en découlent par rejeu du journal.
+                  La supprimer ne retire donc pas qu'une ligne d'historique —
+                  et l'avertissement ne le dit que lorsque c'est réellement le
+                  cas, c'est-à-dire quand l'opération porte un actif ou une
+                  quantité.
+                */
+                deleteTarget.assetId || deleteTarget.quantity
+                  ? "Elle sert au calcul de vos positions et de votre prix de revient : les supprimer les recalculera."
+                  : "",
+                "Cette action est irréversible.",
+              ]
+                .filter(Boolean)
+                .join(" ")
+            : ""
+        }
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) onDelete(deleteTarget.id);
+          if (deleteTarget && selectedId === deleteTarget.id) setSelectedId(null);
+          setDeleteTarget(null);
+        }}
+        testId="tx-delete-confirm"
+      />
     </ModuleCard>
+
+    <TransactionPanel
+      tx={selectedTx}
+      onClose={() => setSelectedId(null)}
+      onEdit={(t) => onEdit(t)}
+      onDelete={(t) => setDeleteTarget(t)}
+      onOpenPlatform={onOpenPlatform}
+    />
+    </div>
   );
 }

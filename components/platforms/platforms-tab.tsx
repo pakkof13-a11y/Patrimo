@@ -1,26 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Eye,
-  GitMerge,
-  LayoutList,
-  MoreHorizontal,
-  Pencil,
-  Plus,
-  Receipt,
-  RefreshCw,
-  Trash2,
-  Wallet,
-} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Plus, RefreshCw, Trash2, Upload, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PlatformLogo } from "@/components/ui/platform-logo";
-import { TableFilters, matchesSearchQuery } from "@/components/ui/table-filters";
+import { matchesSearchQuery } from "@/components/ui/table-filters";
 import { Modal } from "@/components/ui/modal";
 import { Field } from "@/components/ui/field";
 import { PLATFORM_TYPES } from "@/app/lib/constants";
 import { useDebouncedValue } from "@/app/hooks/use-debounced-value";
 import { formatCurrency, cn } from "@/app/lib/utils";
+import { KpiCardTile } from "@/components/ui/kpi-tiles";
 import { fetchJson } from "@/app/lib/api-client";
 import type { PlatformRow } from "@/app/lib/types/ui";
 import type { SolanaPortfolioSnapshot } from "@/app/lib/solana";
@@ -33,6 +23,29 @@ import {
   resolveChainSyncForPlatform,
 } from "@/app/lib/market/chain-wallet-sync";
 import { toast } from "sonner";
+import {
+  comparePlatforms,
+  parsePlatformSortMode,
+  type PlatformSortMode,
+} from "@/app/lib/platforms/sort";
+import {
+  buildPlatformViews,
+  computePlatformsOverview,
+  matchesStatusFilter,
+  platformSearchFields,
+  type PlatformStatusFilter,
+  type PlatformView,
+} from "@/app/lib/platforms/connection";
+import { PlatformList } from "./platform-list";
+import { PlatformPanel } from "./platform-panel";
+
+const STATUS_FILTERS: Array<{ id: PlatformStatusFilter; label: string }> = [
+  { id: "ALL", label: "Toutes" },
+  { id: "ATTENTION", label: "À traiter" },
+  { id: "SYNCED", label: "Synchronisées" },
+  { id: "MANUAL", label: "Manuelles" },
+];
+
 
 /** Base58 Solana (aligné côté serveur) — pas d’appel API si EVM. */
 function looksLikeSolanaAddress(addr: string | null | undefined): boolean {
@@ -41,10 +54,6 @@ function looksLikeSolanaAddress(addr: string | null | undefined): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a);
 }
 
-function shortAddr(addr: string): string {
-  if (addr.length <= 12) return addr;
-  return `${addr.slice(0, 4)}…${addr.slice(-4)}`;
-}
 
 function formatUsd(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
@@ -72,18 +81,7 @@ function typeLabel(type: string) {
   return PLATFORM_TYPES[type as keyof typeof PLATFORM_TYPES] || type;
 }
 
-function formatLastTx(iso: string | null | undefined): string {
-  if (!iso) return "Aucune transaction";
-  try {
-    return new Date(iso).toLocaleDateString("fr-FR", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
-  } catch {
-    return "—";
-  }
-}
+
 
 /** Types éditables = enum backend `platformTypes` (aligné Zod / API). */
 const TYPE_OPTIONS = Object.entries(PLATFORM_TYPES).sort(([, a], [, b]) =>
@@ -100,7 +98,18 @@ export function PlatformsTab({
   onAddPlatform,
   onNewTransaction,
   onViewPositions,
+  onImportForPlatform,
+  onViewTransactions,
+  loading,
 }: {
+  /**
+   * Chargement de la liste en cours.
+   *
+   * Sans cette information, une liste encore vide est indiscernable d'un
+   * compte sans plateforme : l'écran annonçait « Aucune plateforme » le temps
+   * de la requête, ce qui est faux et alarmant.
+   */
+  loading?: boolean;
   platforms: PlatformRow[];
   baseCurrency: string;
   onDelete?: (platform: PlatformRow, opts?: { force?: boolean }) => void;
@@ -113,13 +122,25 @@ export function PlatformsTab({
   onNewTransaction?: (platform: PlatformRow) => void;
   /** Ouvre Positions avec filtre plateforme. */
   onViewPositions?: (platform: PlatformRow) => void;
+  /** Ouvre l'import CSV avec cette plateforme préselectionnée. */
+  onImportForPlatform?: (platform: PlatformRow) => void;
+  /** Ouvre Transactions avec filtre plateforme. */
+  onViewTransactions?: (platform: PlatformRow) => void;
 }) {
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
+  const [statusFilter, setStatusFilter] = useState<PlatformStatusFilter>("ALL");
+  const [sortMode, setSortMode] = useState<PlatformSortMode>("value");
   const [search, setSearch] = useState("");
-  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const cardRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const debouncedSearch = useDebouncedValue(search, 300);
+  /**
+   * Horloge figée au montage.
+   *
+   * L'ancienneté d'une synchronisation se compare à un instant, et lire
+   * `Date.now()` pendant le rendu rendrait celui-ci impur. Une plateforme ne
+   * bascule pas de « à jour » à « ancienne » pendant qu'on la regarde.
+   */
+  const [clock] = useState(() => new Date());
 
   const [editTarget, setEditTarget] = useState<PlatformRow | null>(null);
   const [editName, setEditName] = useState("");
@@ -139,6 +160,15 @@ export function PlatformsTab({
 
   /** Suppression plateforme (cascade txs/actifs) */
   const [deleteTarget, setDeleteTarget] = useState<PlatformRow | null>(null);
+  /** Crédits qui perdraient leur bien si la plateforme était supprimée. */
+  const [detachedLiabilities, setDetachedLiabilities] = useState<
+    Array<{
+      id: string;
+      name: string;
+      remainingAmountEur: string;
+      propertyName: string | null;
+    }>
+  >([]);
   const [deleteConfirmChecked, setDeleteConfirmChecked] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const DELETE_CONFIRM_WORD = "SUPPRIMER";
@@ -146,11 +176,20 @@ export function PlatformsTab({
     deleteConfirmChecked &&
     deleteConfirmText.trim().toUpperCase() === DELETE_CONFIRM_WORD;
 
-  /** Snapshots Solana lecture seule (hors ledger) — clé = platformId */
-  const [solanaSnaps, setSolanaSnaps] = useState<
-    Record<string, SolanaPortfolioSnapshot>
-  >({});
-  const [solanaLoadingId, setSolanaLoadingId] = useState<string | null>(null);
+  /** Plateformes en cours de synchro (Solana RPC ou Zerion EVM) — un Set, pas
+   * un seul id, pour permettre des syncs parallèles sur deux plateformes
+   * différentes sans que l'une écrase visuellement l'état de l'autre. */
+  const [syncingPlatformIds, setSyncingPlatformIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  function markSyncing(id: string, syncing: boolean) {
+    setSyncingPlatformIds((prev) => {
+      const next = new Set(prev);
+      if (syncing) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
   /** Sync Zerion plafonnée (800 txs) — bannière par plateforme */
   const [historyTruncatedByPlatform, setHistoryTruncatedByPlatform] = useState<
     Record<string, boolean>
@@ -175,9 +214,6 @@ export function PlatformsTab({
     }>
   >([]);
   const [onchainTxsLoading, setOnchainTxsLoading] = useState(false);
-
-  /** Aperçu rapide (double-clic / menu / Entrée) */
-  const [previewTarget, setPreviewTarget] = useState<PlatformRow | null>(null);
 
   // Vide la liste dès que la plateforme sélectionnée n'a plus d'id Solana,
   // et arme le loading dès qu'un (re)fetch va démarrer (adjust state while rendering).
@@ -212,20 +248,6 @@ export function PlatformsTab({
     };
   }, [solanaDetail?.platform.id, solanaDetail?.snapshot.fetchedAt]);
 
-  function openPreview(p: PlatformRow) {
-    setMenuOpenId(null);
-    setPreviewTarget(p);
-  }
-
-  useEffect(() => {
-    if (!menuOpenId) return;
-    function onDoc(e: MouseEvent) {
-      if (!menuRef.current?.contains(e.target as Node)) setMenuOpenId(null);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [menuOpenId]);
-
   const typesPresent = useMemo(() => {
     const set = new Set(platforms.map((p) => p.type));
     return [...set].sort((a, b) => {
@@ -235,31 +257,43 @@ export function PlatformsTab({
     });
   }, [platforms]);
 
-  const sorted = useMemo(() => {
-    const list =
-      typeFilter === "ALL"
-        ? [...platforms]
-        : platforms.filter((p) => p.type === typeFilter);
-    const searched = list.filter((p) =>
-      matchesSearchQuery(debouncedSearch, [
-        p.name,
-        p.type,
-        typeLabel(p.type),
-        p.walletAddress,
-        p.subtype,
-        p.notes,
-      ])
-    );
-    return searched.sort((a, b) => {
-      const va = Number(b.totalValueBase || b.totalValueEur || b.cashBase || 0);
-      const vb = Number(a.totalValueBase || a.totalValueEur || a.cashBase || 0);
-      if (va !== vb) return va - vb;
-      return a.name.localeCompare(b.name, "fr", { sensitivity: "base" });
-    });
-  }, [platforms, typeFilter, debouncedSearch]);
+  const views = useMemo(
+    () => buildPlatformViews(platforms, clock),
+    [platforms, clock]
+  );
+
+  /*
+    La synthèse porte sur **toutes** les plateformes, jamais sur la sélection
+    filtrée : un compteur « à traiter » qui tomberait à zéro parce qu'on a
+    filtré sur « synchronisées » ne signalerait plus rien.
+  */
+  const overview = useMemo(() => computePlatformsOverview(views), [views]);
+
+  const visible = useMemo(() => {
+    const list = views
+      .filter((v) => typeFilter === "ALL" || v.type === typeFilter)
+      .filter((v) => matchesStatusFilter(v, statusFilter))
+      .filter((v) => matchesSearchQuery(debouncedSearch, platformSearchFields(v)));
+    return list.sort((a, b) => comparePlatforms(a.row, b.row, sortMode));
+  }, [views, typeFilter, statusFilter, debouncedSearch, sortMode]);
+
+  /*
+    La sélection est cherchée dans les lignes **visibles**, pas dans toutes.
+
+    Une plateforme masquée par un filtre ne peut pas rester affichée à droite :
+    le panneau montrerait un détail que la table ne contient plus. La dériver
+    ainsi, plutôt que de remettre l'état à zéro dans un effet, évite un rendu
+    en cascade et retrouve naturellement la sélection si le filtre est annulé.
+  */
+  const showSkeleton = Boolean(loading) && platforms.length === 0;
+
+  const selected: PlatformView | null =
+    visible.find((v) => v.id === selectedId) ?? null;
+
+  const historyTruncatedPlatform =
+    views.find((v) => historyTruncatedByPlatform[v.id]) ?? null;
 
   function openEdit(p: PlatformRow) {
-    setMenuOpenId(null);
     setEditTarget(p);
     setEditName(p.name);
     // Normalise type inconnu / legacy → AUTRE pour coller à l’enum select
@@ -274,16 +308,13 @@ export function PlatformsTab({
       type: p.type,
       logoKey: p.logoKey,
     });
-    setEditApiKey(
-      (p as { walletApiKey?: string | null }).walletApiKey ||
-        cap?.defaultApiKey ||
-        ""
-    );
+    // Le secret n'est jamais renvoyé par le serveur — champ vide par défaut ;
+    // `hasWalletApiKey` alimente juste un hint dans le placeholder (voir JSX).
+    setEditApiKey(cap?.defaultApiKey || "");
     setEditMoneroAmount("");
   }
 
   function openMerge(p: PlatformRow) {
-    setMenuOpenId(null);
     setMergeSource(p);
     const other = platforms.find((x) => x.id !== p.id);
     setMergeTargetId(other?.id || "");
@@ -321,7 +352,10 @@ export function PlatformsTab({
           logoUrl: logo.length > 0 ? logo : null,
           notes: editNotes.trim().length > 0 ? editNotes.trim() : null,
           walletAddress: wallet.length > 0 ? wallet : null,
-          walletApiKey: apiKey.length > 0 ? apiKey : null,
+          // Champ vide = ne pas toucher à la clé déjà enregistrée (jamais
+          // renvoyée par le serveur, donc jamais "vide" pour une vraie mise à
+          // jour) — omis plutôt que null, sinon on écraserait la clé existante.
+          ...(apiKey.length > 0 ? { walletApiKey: apiKey } : {}),
         }),
       });
       toast.success("Plateforme mise à jour");
@@ -403,9 +437,10 @@ export function PlatformsTab({
         body: JSON.stringify({
           id: editTarget.id,
           walletAddress: wallet,
+          // Vide = ne pas toucher à la clé déjà enregistrée (voir saveEdit)
           walletApiKey:
-            cap.provider === "zerion"
-              ? apiKey || null
+            cap.provider === "zerion" && apiKey.length > 0
+              ? apiKey
               : undefined,
           type: editType === "BLOCKCHAIN" ? editType : "BLOCKCHAIN",
         }),
@@ -501,7 +536,6 @@ export function PlatformsTab({
           syncTransactions: true,
         }),
       });
-      setSolanaSnaps((prev) => ({ ...prev, [editTarget.id]: res.snapshot }));
       const txN = res.txSync?.newTransactions ?? 0;
       const txPart =
         txN > 0
@@ -536,12 +570,9 @@ export function PlatformsTab({
     if (!mergeSource || !mergeTargetId) return;
     const target = platforms.find((p) => p.id === mergeTargetId);
     if (!target) return;
-    const ok = window.confirm(
-      `Fusionner « ${mergeSource.name} » dans « ${target.name} » ?\n\n` +
-        `Tous les actifs et transactions de « ${mergeSource.name} » seront rattachés à « ${target.name} », ` +
-        `puis « ${mergeSource.name} » sera supprimé. Irréversible.`
-    );
-    if (!ok) return;
+    // La modale de fusion (bouton "Fusionner") est déjà la confirmation —
+    // ce window.confirm() natif était redondant (double-prompt, bloquant,
+    // ignore le thème, parfois bloqué en iframe/mobile).
     setMergePending(true);
     try {
       await fetchJson("/api/platforms/merge", {
@@ -562,12 +593,35 @@ export function PlatformsTab({
     }
   }
 
-  function handleDelete(p: PlatformRow) {
+  /**
+   * Ouvre la confirmation, après avoir demandé ce que la suppression emporte.
+   *
+   * L'appel sans `force` ne supprime rien : il répond 409 avec l'inventaire.
+   * On s'en sert pour nommer les crédits qui perdraient leur bien — sans quoi
+   * la boîte annonçait « actifs et transactions » et taisait le détachement,
+   * qui change pourtant l'assiette IFI.
+   *
+   * L'échec de cette vérification n'empêche pas d'ouvrir la boîte : elle
+   * afficherait alors son avertissement habituel, jamais un avertissement faux.
+   */
+  async function handleDelete(p: PlatformRow) {
     if (!onDelete) return;
-    setMenuOpenId(null);
     setDeleteTarget(p);
     setDeleteConfirmChecked(false);
     setDeleteConfirmText("");
+    setDetachedLiabilities([]);
+    try {
+      const res = await fetch(
+        `/api/platforms?id=${encodeURIComponent(p.id)}`,
+        { method: "DELETE" }
+      );
+      const body = await res.json();
+      if (Array.isArray(body?.detachedLiabilities)) {
+        setDetachedLiabilities(body.detachedLiabilities);
+      }
+    } catch {
+      /* la boîte reste utilisable sans l'inventaire */
+    }
   }
 
   async function syncSolanaWallet(p: PlatformRow) {
@@ -575,8 +629,7 @@ export function PlatformsTab({
       toast.error("Adresse Solana manquante ou invalide sur cette plateforme");
       return;
     }
-    setMenuOpenId(null);
-    setSolanaLoadingId(p.id);
+    markSyncing(p.id, true);
     try {
       const res = await fetchJson<{
         ok: boolean;
@@ -605,7 +658,6 @@ export function PlatformsTab({
           syncTransactions: true,
         }),
       });
-      setSolanaSnaps((prev) => ({ ...prev, [p.id]: res.snapshot }));
       const txPart =
         res.txSync && res.txSync.newTransactions > 0
           ? ` · ${res.txSync.newTransactions} tx on-chain`
@@ -640,7 +692,7 @@ export function PlatformsTab({
         err instanceof Error ? err.message : "Échec lecture wallet Solana"
       );
     } finally {
-      setSolanaLoadingId(null);
+      markSyncing(p.id, false);
     }
   }
 
@@ -667,8 +719,7 @@ export function PlatformsTab({
       toast.error("Synchronisation non disponible pour cette plateforme");
       return;
     }
-    setMenuOpenId(null);
-    setSolanaLoadingId(p.id);
+    markSyncing(p.id, true);
     try {
       const res = await fetchJson<{
         ok?: boolean;
@@ -706,7 +757,8 @@ export function PlatformsTab({
           // Filtre chaîne plateforme (évite de fusionner toutes les EVM)
           allChains: false,
           chainPreset: p.logoKey || cap?.presetKey,
-          apiKey: (p as { walletApiKey?: string | null }).walletApiKey || undefined,
+          // Pas de clé côté client à renvoyer : le serveur retombe sur celle
+          // déjà enregistrée pour cette plateforme si `apiKey` est omis.
         }),
       });
       const pos =
@@ -762,388 +814,266 @@ export function PlatformsTab({
         err instanceof Error ? err.message : "Échec synchronisation wallet"
       );
     } finally {
-      setSolanaLoadingId(null);
+      markSyncing(p.id, false);
     }
   }
-
   return (
-    <section className="space-y-4" data-testid="platforms-tab">
-      <header className="flex flex-wrap items-end justify-between gap-2 px-0.5">
+    <section className="space-y-[var(--space-4)]" data-testid="platforms-tab">
+      <header className="flex flex-wrap items-end justify-between gap-[var(--space-3)]">
         <div>
-          <h2 className="text-title">Mes plateformes</h2>
-          <p className="module-intro text-meta">
-            Synthèse des courtiers, banques et exchanges utilisés dans vos
-            transactions
+          <h1 className="text-title">Plateformes</h1>
+          <p className="text-meta mt-[var(--space-1)]">
+            Vos comptes et connexions patrimoniales
           </p>
         </div>
-        {platforms.length > 0 && (
-          <span className="text-meta tabular-nums">
-            {sorted.length === platforms.length
-              ? `${platforms.length} plateforme${platforms.length !== 1 ? "s" : ""}`
-              : `${sorted.length} / ${platforms.length}`}
-          </span>
-        )}
-      </header>
-
-      <div
-        className={cn(
-          "flex min-w-0 flex-col gap-2.5",
-          "sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
-        )}
-        data-testid="platforms-toolbar"
-      >
-        <div
-          className={cn(
-            "flex min-w-0 w-full flex-col gap-2",
-            "sm:w-auto sm:flex-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2.5"
-          )}
-        >
-          <TableFilters
-            className="min-w-0 w-full sm:min-w-[14rem] sm:max-w-md sm:flex-1"
-            search={search}
-            onSearchChange={setSearch}
-            showAccountFilter={false}
-            searchFirst
-            placeholder="Rechercher une plateforme…"
-          />
-          <label className="flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
-            <span className="shrink-0 font-medium text-[var(--muted-foreground)]">
-              Type
-            </span>
-            <select
-              className="input !w-full min-w-0 !py-1.5 text-sm sm:!w-auto sm:min-w-[11rem]"
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              data-testid="platforms-type-filter"
-              aria-label="Filtrer par type de plateforme"
+        <div className="flex flex-wrap items-center gap-[var(--space-2)]">
+          {onImportForPlatform ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onImportForPlatform(selected?.row ?? platforms[0]!)}
+              disabled={platforms.length === 0}
+              data-testid="platforms-import"
             >
-              <option value="ALL">Tous ({platforms.length})</option>
-              {typesPresent.map((t) => (
-                <option key={t} value={t}>
-                  {typeLabel(t)} (
-                  {platforms.filter((p) => p.type === t).length})
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        {onAddPlatform && (
-          <Button
-            size="sm"
-            onClick={onAddPlatform}
-            className="w-full shrink-0 sm:w-auto"
-            data-testid="platforms-add-platform"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Ajouter une plateforme
-          </Button>
-        )}
-      </div>
-
-      {sorted.length === 0 ? (
-        <div
-          className="card p-8 text-center"
-          data-testid="platforms-empty-state"
-        >
-          <p className="text-sm font-medium text-[var(--foreground)]">
-            {platforms.length === 0
-              ? "Aucune plateforme pour l’instant"
-              : "Aucun résultat pour ces filtres"}
-          </p>
-          <p className="text-meta mx-auto mt-1.5 max-w-sm">
-            {platforms.length === 0
-              ? "Ajoutez un courtier, une banque, un exchange ou un wallet blockchain. Vous pourrez ensuite importer un CSV ou saisir des transactions."
-              : "Modifiez la recherche ou le type."}
-          </p>
-          {platforms.length === 0 && onAddPlatform && (
+              <Upload className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              Importer un relevé
+            </Button>
+          ) : null}
+          {onAddPlatform ? (
             <Button
               size="sm"
-              className="mt-4"
               onClick={onAddPlatform}
-              data-testid="platforms-empty-cta"
+              data-testid="platforms-add-platform"
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
               Ajouter une plateforme
             </Button>
-          )}
+          ) : null}
         </div>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {sorted.map((p) => {
-            const total = p.totalValueBase || p.totalValueEur || p.cashBase || p.cashEur;
-            const posCount = p.positionCount ?? 0;
-            return (
-              <article
-                key={p.id}
-                ref={(el) => {
-                  if (el) cardRefs.current.set(p.id, el);
-                  else cardRefs.current.delete(p.id);
-                }}
-                tabIndex={0}
-                aria-label={`${p.name} — Entrée ou double-clic pour l’aperçu`}
-                className={cn(
-                  "card group relative flex flex-col p-4 transition outline-none",
-                  "hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-xs)]",
-                  "focus-visible:ring-2 focus-visible:ring-teal-600/40"
-                )}
-                data-testid={`platform-${p.name}`}
-                onDoubleClick={(e) => {
-                  // éviter double-clic sur menu / boutons internes
-                  if ((e.target as HTMLElement).closest("button,a,input")) return;
-                  openPreview(p);
-                }}
-                onKeyDown={(e) => {
-                  if (e.target !== e.currentTarget) return;
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    openPreview(p);
-                  }
-                }}
+      </header>
+
+      {/*
+        Cinq indicateurs, tous adossés à une donnée réelle.
+
+        Pas de « patrimoine couvert » en pourcentage : les plateformes ne
+        portent ni immobilier, ni épargne salariale, ni actifs alternatifs.
+        Rapporter leur somme au patrimoine net produirait un ratio
+        systématiquement faux.
+      */}
+      <div
+        className="grid grid-cols-2 gap-[var(--space-2)] sm:grid-cols-3 lg:grid-cols-5"
+        data-testid="platforms-summary"
+      >
+        <KpiCardTile
+          label="Plateformes"
+          value={String(overview.platformCount)}
+          hint={
+            overview.dormantCount > 0
+              ? `dont ${overview.dormantCount} sans mouvement`
+              : "connectées"
+          }
+          testId="platforms-kpi-count"
+        />
+        <KpiCardTile
+          label="Enveloppes"
+          value={String(overview.envelopeCount)}
+          hint={`${overview.positionCount} position${overview.positionCount > 1 ? "s" : ""}`}
+          testId="platforms-kpi-envelopes"
+        />
+        <KpiCardTile
+          label="Valeur suivie"
+          value={formatCurrency(String(overview.totalValue), baseCurrency)}
+          hint="espèces et titres"
+          testId="platforms-summary-total"
+        />
+        <KpiCardTile
+          label="Synchronisées"
+          value={
+            overview.syncableCount > 0
+              ? `${overview.syncedCount}/${overview.syncableCount}`
+              : "—"
+          }
+          hint={
+            overview.syncableCount > 0
+              ? "wallets à jour"
+              : "aucun wallet connecté"
+          }
+          testId="platforms-kpi-synced"
+        />
+        <KpiCardTile
+          label="À traiter"
+          value={String(overview.attentionCount)}
+          hint={
+            overview.attentionCount > 0
+              ? "action requise"
+              : "rien à signaler"
+          }
+          tone={overview.attentionCount > 0 ? "warning" : undefined}
+          testId="platforms-kpi-attention"
+        />
+      </div>
+
+      <div className="panel">
+        <div
+          className="flex flex-wrap items-center gap-[var(--space-2)] border-b border-[var(--border)] p-[var(--space-3)]"
+          data-testid="platforms-toolbar"
+        >
+          <input
+            className="input min-w-[14rem] flex-1"
+            placeholder="Rechercher une plateforme, un réseau, une enveloppe…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            data-testid="platforms-search"
+            aria-label="Rechercher une plateforme"
+          />
+
+          <div className="term-seg" role="group" aria-label="Filtrer par état">
+            {STATUS_FILTERS.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                className="term-seg-item"
+                data-active={statusFilter === f.id ? "true" : "false"}
+                onClick={() => setStatusFilter(f.id)}
+                data-testid={`platforms-status-${f.id.toLowerCase()}`}
               >
-                <div className="flex items-start gap-3">
-                  <PlatformLogo src={p.logoUrl} name={p.name} size={40} />
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-sm font-semibold tracking-tight text-[var(--foreground)]">
-                      {p.name}
-                    </h3>
-                    <div className="mt-1.5 flex flex-wrap gap-1">
-                      <span
-                        className={cn(
-                          "inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                          "bg-teal-50 text-teal-900 dark:bg-teal-950 dark:text-teal-200"
-                        )}
-                      >
-                        {typeLabel(p.type)}
-                      </span>
-                      {p.subtype && (
-                        <span className="inline-flex rounded-full bg-[var(--muted)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted-foreground)]">
-                          {p.subtype}
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                {f.label}
+              </button>
+            ))}
+          </div>
 
-                  <div
-                    className="relative shrink-0"
-                    ref={menuOpenId === p.id ? menuRef : undefined}
-                  >
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 text-[var(--muted-foreground)] opacity-70 transition group-hover:opacity-100"
-                      title="Actions"
-                      aria-label={`Actions pour ${p.name}`}
-                      aria-expanded={menuOpenId === p.id}
-                      data-testid={`platform-menu-${p.id}`}
-                      onClick={() =>
-                        setMenuOpenId((id) => (id === p.id ? null : p.id))
-                      }
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                    {menuOpenId === p.id && (
-                      <div
-                        className="absolute right-0 top-full z-20 mt-1 min-w-[11rem] rounded-lg border border-[var(--border)] bg-[var(--card)] py-1 shadow-lg"
-                        role="menu"
-                      >
-                        <button
-                          type="button"
-                          role="menuitem"
-                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[var(--muted)]"
-                          data-testid={`preview-platform-${p.id}`}
-                          onClick={() => openPreview(p)}
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          Aperçu rapide
-                        </button>
-                        {onNewTransaction && (
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[var(--muted)]"
-                            data-testid={`new-tx-platform-${p.id}`}
-                            onClick={() => {
-                              setMenuOpenId(null);
-                              onNewTransaction(p);
-                            }}
-                          >
-                            <Receipt className="h-3.5 w-3.5" />
-                            Nouvelle transaction
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          role="menuitem"
-                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[var(--muted)]"
-                          onClick={() => openEdit(p)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                          Enrichir
-                        </button>
-                        {platforms.length > 1 && (
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[var(--muted)]"
-                            data-testid={`merge-platform-${p.id}`}
-                            onClick={() => openMerge(p)}
-                          >
-                            <GitMerge className="h-3.5 w-3.5" />
-                            Fusionner…
-                          </button>
-                        )}
-                        {onDelete && (
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40"
-                            data-testid={`delete-platform-${p.id}`}
-                            disabled={deletePendingId === p.id}
-                            onClick={() => handleDelete(p)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Supprimer
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
+          <select
+            className="input w-auto"
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            data-testid="platforms-type-filter"
+            aria-label="Filtrer par nature"
+          >
+            <option value="ALL">Toutes natures</option>
+            {typesPresent.map((t) => (
+              <option key={t} value={t}>
+                {typeLabel(t)}
+              </option>
+            ))}
+          </select>
 
-                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-                  <div className="rounded-lg bg-[var(--muted)]/40 px-2 py-1.5">
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                      Positions
-                    </p>
-                    <p className="mt-0.5 font-semibold tabular-nums">
-                      {posCount}
-                    </p>
-                  </div>
-                  <div className="rounded-lg bg-[var(--muted)]/40 px-2 py-1.5">
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                      Dernière op.
-                    </p>
-                    <p className="mt-0.5 truncate font-medium">
-                      {formatLastTx(p.lastTransactionAt)}
-                    </p>
-                  </div>
-                </div>
-
-                {p.walletAddress && (
-                  <p
-                    className="mt-2 truncate font-mono text-[10px] text-[var(--muted-foreground)]"
-                    title={p.walletAddress}
-                  >
-                    {shortAddr(p.walletAddress)}
-                  </p>
-                )}
-
-                {/* Sync wallet : Solana RPC ou EVM/Zerion si adresse publique */}
-                {Boolean(p.walletAddress?.trim()) &&
-                  (p.type === "BLOCKCHAIN" ||
-                    looksLikeSolanaAddress(p.walletAddress) ||
-                    resolveChainSyncForPlatform({
-                      logoKey: p.logoKey,
-                      name: p.name,
-                      type: p.type,
-                    })) && (
-                  <div className="mt-2 space-y-1.5">
-                    {looksLikeSolanaAddress(p.walletAddress) &&
-                      solanaSnaps[p.id] && (
-                      <button
-                        type="button"
-                        className="w-full rounded-lg border border-violet-200/80 bg-violet-50/80 px-2 py-1.5 text-left transition hover:bg-violet-100/80 dark:border-violet-900 dark:bg-violet-950/40 dark:hover:bg-violet-950/70"
-                        onClick={() =>
-                          setSolanaDetail({
-                            platform: p,
-                            snapshot: solanaSnaps[p.id],
-                          })
-                        }
-                        data-testid={`solana-snapshot-${p.id}`}
-                      >
-                        <p className="text-[10px] font-medium uppercase tracking-wide text-violet-800 dark:text-violet-200">
-                          On-chain (RPC Solana)
-                        </p>
-                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-violet-950 dark:text-violet-100">
-                          {formatUsd(solanaSnaps[p.id].totalValueUsd)}
-                          <span className="ml-1 text-[10px] font-normal text-violet-700/80 dark:text-violet-300/80">
-                            USD · hors ledger
-                          </span>
-                        </p>
-                      </button>
-                    )}
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="w-full"
-                      disabled={solanaLoadingId === p.id}
-                      onClick={() => void syncChainWallet(p)}
-                      data-testid={
-                        looksLikeSolanaAddress(p.walletAddress)
-                          ? `solana-sync-${p.id}`
-                          : `chain-sync-${p.id}`
-                      }
-                    >
-                      <RefreshCw
-                        className={cn(
-                          "h-3.5 w-3.5",
-                          solanaLoadingId === p.id && "animate-spin"
-                        )}
-                      />
-                      {solanaLoadingId === p.id
-                        ? "Sync…"
-                        : looksLikeSolanaAddress(p.walletAddress) &&
-                            solanaSnaps[p.id]
-                          ? "Rafraîchir + txs"
-                          : "Lire wallet + txs"}
-                    </Button>
-                    {historyTruncatedByPlatform[p.id] && (
-                      <p
-                        className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] leading-snug text-amber-950 dark:text-amber-100"
-                        data-testid={`history-truncated-notice-${p.id}`}
-                      >
-                        Historique limité aux 800 dernières transactions. Pour
-                        un historique complet, importez un CSV depuis votre
-                        exchange.
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                <div className="mt-auto border-t border-[var(--border)] pt-3">
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                    Valeur totale
-                  </p>
-                  <p className="mt-0.5 text-lg font-semibold tabular-nums tracking-tight text-teal-800 dark:text-teal-300">
-                    {formatCurrency(total, baseCurrency)}
-                  </p>
-                  <p className="mt-0.5 text-[10px] text-[var(--muted-foreground)]">
-                    Cash{" "}
-                    {formatCurrency(p.cashBase || p.cashEur, baseCurrency)}
-                    {p.positionsValueBase != null && (
-                      <>
-                        {" "}
-                        · Titres{" "}
-                        {formatCurrency(
-                          p.positionsValueBase || p.positionsValueEur || "0",
-                          baseCurrency
-                        )}
-                      </>
-                    )}
-                  </p>
-                </div>
-              </article>
-            );
-          })}
+          <select
+            className="input w-auto"
+            value={sortMode}
+            onChange={(e) => setSortMode(parsePlatformSortMode(e.target.value))}
+            data-testid="platforms-sort-mode"
+            aria-label="Trier"
+          >
+            <option value="value">Valeur</option>
+            <option value="name">Nom</option>
+            <option value="activity">Activité</option>
+            <option value="positions">Positions</option>
+            <option value="type">Nature</option>
+          </select>
         </div>
-      )}
 
-      {/* Enrichissement optionnel */}
+        <div className="grid gap-[var(--space-4)] p-[var(--space-3)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)]">
+          <div className="min-w-0">
+            {showSkeleton ? (
+              <div className="space-y-[var(--space-2)]" data-testid="platforms-skeleton">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="h-[2.75rem] animate-pulse rounded-[var(--radius-sm)] bg-[var(--surface-hover)]"
+                  />
+                ))}
+              </div>
+            ) : platforms.length === 0 ? (
+              /*
+                État vide **local** : ne pas posséder de plateforme n'a rien à
+                voir avec un compte vierge. Le cockpit d'accueil reste piloté
+                par `isPatrimonyEmpty`, et n'a pas sa place ici.
+              */
+              <div
+                className="asset-panel-empty py-[var(--space-8)]"
+                data-testid="platforms-empty-state"
+              >
+                <p className="text-[length:var(--text-sm)] font-medium text-[var(--foreground)]">
+                  Aucune plateforme
+                </p>
+                <p className="text-meta max-w-[22rem]">
+                  Ajoutez votre premier établissement pour centraliser votre
+                  patrimoine, ou importez un relevé si vous partez d&apos;un fichier.
+                </p>
+                <div className="mt-[var(--space-3)] flex flex-wrap justify-center gap-[var(--space-2)]">
+                  {onAddPlatform ? (
+                    <Button
+                      size="sm"
+                      onClick={onAddPlatform}
+                      data-testid="platforms-empty-cta"
+                    >
+                      <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                      Ajouter une plateforme
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : visible.length === 0 ? (
+              <div
+                className="asset-panel-empty py-[var(--space-8)]"
+                data-testid="platforms-no-match"
+              >
+                <p className="text-[length:var(--text-sm)] text-[var(--foreground-secondary)]">
+                  Aucune plateforme ne correspond
+                </p>
+                <p className="text-meta">Ajustez la recherche ou les filtres.</p>
+              </div>
+            ) : (
+              <PlatformList
+                views={visible}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                baseCurrency={baseCurrency}
+                now={clock}
+              />
+            )}
+          </div>
+
+          <PlatformPanel
+            view={selected}
+            baseCurrency={baseCurrency}
+            syncing={selected ? syncingPlatformIds.has(selected.id) : false}
+            onClose={() => setSelectedId(null)}
+            onEdit={(v) => openEdit(v.row)}
+            onSync={(v) => void syncChainWallet(v.row)}
+            onMerge={(v) => openMerge(v.row)}
+            onDelete={(v) => handleDelete(v.row)}
+            onNewTransaction={
+              onNewTransaction ? (v) => onNewTransaction(v.row) : undefined
+            }
+            onViewPositions={
+              onViewPositions ? (v) => onViewPositions(v.row) : undefined
+            }
+            onViewTransactions={
+              onViewTransactions ? (v) => onViewTransactions(v.row) : undefined
+            }
+            onImport={
+              onImportForPlatform ? (v) => onImportForPlatform(v.row) : undefined
+            }
+          />
+        </div>
+      </div>
+
+      {historyTruncatedPlatform ? (
+        <p
+          className="text-meta px-[var(--space-1)]"
+          data-testid="history-truncated-notice"
+        >
+          L&apos;historique de « {historyTruncatedPlatform.name} » est limité aux 800
+          dernières transactions renvoyées par l&apos;API. Pour un historique
+          complet, importez un relevé CSV depuis votre exchange.
+        </p>
+      ) : null}
+
+      {/* Modification optionnelle (nom, type, logo, wallet/API…) */}
       {editTarget && (
         <Modal
-          title={`Enrichir · ${editTarget.name}`}
+          title={`Modifier · ${editTarget.name}`}
           onClose={() => setEditTarget(null)}
           panelClassName="max-w-md"
         >
@@ -1220,7 +1150,11 @@ export function PlatformsTab({
                           className="input w-full font-mono text-sm"
                           value={editApiKey}
                           onChange={(e) => setEditApiKey(e.target.value)}
-                          placeholder="zk_…"
+                          placeholder={
+                            editTarget?.hasWalletApiKey
+                              ? "Clé déjà enregistrée — laisser vide pour la conserver"
+                              : "zk_…"
+                          }
                           autoComplete="off"
                           spellCheck={false}
                           data-testid="platform-edit-api-key"
@@ -1335,176 +1269,6 @@ export function PlatformsTab({
           </form>
         </Modal>
       )}
-
-      {/* Aperçu rapide plateforme */}
-      {previewTarget && (
-        <Modal
-          title={`Aperçu · ${previewTarget.name}`}
-          onClose={() => setPreviewTarget(null)}
-          panelClassName="max-w-md"
-          testId="platform-preview-modal"
-        >
-          <div className="space-y-3" data-testid="platform-preview">
-            <div className="flex items-start gap-3">
-              <PlatformLogo
-                src={previewTarget.logoUrl}
-                name={previewTarget.name}
-                size={44}
-              />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold tracking-tight">
-                  {previewTarget.name}
-                </p>
-                <p className="mt-0.5 text-[11px] text-[var(--muted-foreground)]">
-                  {typeLabel(previewTarget.type)}
-                  {previewTarget.subtype ? ` · ${previewTarget.subtype}` : ""}
-                </p>
-                {previewTarget.walletAddress && (
-                  <p
-                    className="mt-1 break-all font-mono text-[10px] text-[var(--muted-foreground)]"
-                    title={previewTarget.walletAddress}
-                  >
-                    {previewTarget.walletAddress}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-[12px]">
-              <div className="rounded-lg bg-[var(--muted)]/50 px-2.5 py-2">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                  Positions ouvertes
-                </p>
-                <p className="mt-0.5 text-base font-semibold tabular-nums">
-                  {previewTarget.positionCount ?? 0}
-                </p>
-              </div>
-              <div className="rounded-lg bg-[var(--muted)]/50 px-2.5 py-2">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                  Dernière opération
-                </p>
-                <p className="mt-0.5 font-medium">
-                  {formatLastTx(previewTarget.lastTransactionAt)}
-                </p>
-              </div>
-              <div className="rounded-lg bg-[var(--muted)]/50 px-2.5 py-2">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                  Cash
-                </p>
-                <p className="mt-0.5 font-semibold tabular-nums">
-                  {formatCurrency(
-                    previewTarget.cashBase || previewTarget.cashEur,
-                    baseCurrency
-                  )}
-                </p>
-              </div>
-              <div className="rounded-lg bg-[var(--muted)]/50 px-2.5 py-2">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                  Valeur titres
-                </p>
-                <p className="mt-0.5 font-semibold tabular-nums">
-                  {formatCurrency(
-                    previewTarget.positionsValueBase ||
-                      previewTarget.positionsValueEur ||
-                      "0",
-                    baseCurrency
-                  )}
-                </p>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-[var(--border)] px-3 py-2.5">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                Valeur totale (cash + titres)
-              </p>
-              <p className="mt-0.5 text-xl font-semibold tabular-nums tracking-tight text-teal-800 dark:text-teal-300">
-                {formatCurrency(
-                  previewTarget.totalValueBase ||
-                    previewTarget.totalValueEur ||
-                    previewTarget.cashBase ||
-                    "0",
-                  baseCurrency
-                )}
-              </p>
-            </div>
-
-            {previewTarget.notes && (
-              <p className="rounded-md bg-[var(--muted)]/40 px-2.5 py-2 text-[11px] leading-relaxed text-[var(--muted-foreground)]">
-                {previewTarget.notes}
-              </p>
-            )}
-
-            {solanaSnaps[previewTarget.id] && (
-              <button
-                type="button"
-                className="w-full rounded-lg border border-violet-200/80 bg-violet-50/80 px-2.5 py-2 text-left text-[11px] dark:border-violet-900 dark:bg-violet-950/40"
-                onClick={() => {
-                  setSolanaDetail({
-                    platform: previewTarget,
-                    snapshot: solanaSnaps[previewTarget.id],
-                  });
-                }}
-              >
-                Snapshot on-chain :{" "}
-                <strong>
-                  {formatUsd(solanaSnaps[previewTarget.id].totalValueUsd)}
-                </strong>{" "}
-                USD (hors ledger)
-              </button>
-            )}
-
-            <div className="flex flex-col gap-2 border-t border-[var(--border)] pt-3 sm:flex-row sm:flex-wrap sm:justify-end">
-              {onNewTransaction && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="w-full sm:w-auto"
-                  data-testid="platform-preview-new-tx"
-                  onClick={() => {
-                    const p = previewTarget;
-                    setPreviewTarget(null);
-                    onNewTransaction(p);
-                  }}
-                >
-                  <Receipt className="h-3.5 w-3.5" />
-                  Nouvelle transaction
-                </Button>
-              )}
-              {onViewPositions && (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="w-full sm:w-auto"
-                  data-testid="platform-preview-positions"
-                  onClick={() => {
-                    const p = previewTarget;
-                    setPreviewTarget(null);
-                    onViewPositions(p);
-                  }}
-                >
-                  <LayoutList className="h-3.5 w-3.5" />
-                  Voir dans Positions
-                </Button>
-              )}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="w-full sm:w-auto"
-                onClick={() => setPreviewTarget(null)}
-              >
-                Fermer
-              </Button>
-            </div>
-            <p className="text-center text-[10px] text-[var(--muted-foreground)] sm:text-left">
-              Astuce : double-clic sur une carte, Entrée au focus, ou menu ⋯ →
-              Aperçu rapide
-            </p>
-          </div>
-        </Modal>
-      )}
-
       {/* Snapshot Solana lecture seule */}
       {solanaDetail && (
         <Modal
@@ -1665,13 +1429,13 @@ export function PlatformsTab({
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={solanaLoadingId === solanaDetail.platform.id}
+                disabled={syncingPlatformIds.has(solanaDetail.platform.id)}
                 onClick={() => void syncSolanaWallet(solanaDetail.platform)}
               >
                 <RefreshCw
                   className={cn(
                     "h-3.5 w-3.5",
-                    solanaLoadingId === solanaDetail.platform.id &&
+                    syncingPlatformIds.has(solanaDetail.platform.id) &&
                       "animate-spin"
                   )}
                 />
@@ -1713,6 +1477,40 @@ export function PlatformsTab({
               </p>
             </div>
 
+            {detachedLiabilities.length > 0 && (
+              /*
+                Le crédit survit à son bien : il reste au passif, et le
+                patrimoine net ne bouge pas. Ce qu'il perd, c'est le bien
+                auquel il était adossé — donc sa déductibilité de l'assiette
+                IFI. Dire les deux, puisque l'un se voit et l'autre pas.
+              */
+              <div
+                className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-[12px] leading-relaxed text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-50"
+                data-testid="platform-delete-liabilities"
+              >
+                <p className="font-semibold">
+                  {detachedLiabilities.length} crédit
+                  {detachedLiabilities.length > 1 ? "s" : ""} perdra
+                  {detachedLiabilities.length > 1 ? "ont" : ""} son bien
+                </p>
+                <ul className="mt-1 space-y-0.5">
+                  {detachedLiabilities.map((l) => (
+                    <li key={l.id}>
+                      <strong>{l.name}</strong>
+                      {l.propertyName ? ` — adossé à ${l.propertyName}` : null}
+                      {" · "}
+                      {formatCurrency(l.remainingAmountEur, "EUR")} restant dû
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1.5">
+                  {detachedLiabilities.length > 1
+                    ? "Ces dettes resteront au passif et votre patrimoine net ne changera pas. Mais elles ne seront plus déductibles de l’assiette IFI, qui augmentera d’autant."
+                    : "Cette dette restera au passif et votre patrimoine net ne changera pas. Mais elle ne sera plus déductible de l’assiette IFI, qui augmentera d’autant."}
+                </p>
+              </div>
+            )}
+
             <label className="flex cursor-pointer items-start gap-2 text-[12px] text-[var(--foreground)]">
               <input
                 type="checkbox"
@@ -1738,7 +1536,7 @@ export function PlatformsTab({
                 type="text"
                 autoComplete="off"
                 spellCheck={false}
-                className="input !border-red-200 !bg-white !py-1.5 text-sm dark:!border-red-900/50 dark:!bg-[var(--input-bg)]"
+                className="input w-full border-red-200 bg-white py-1.5 dark:border-red-900/50 dark:bg-[var(--input-bg)]"
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
                 placeholder={DELETE_CONFIRM_WORD}

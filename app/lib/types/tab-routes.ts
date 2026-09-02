@@ -12,24 +12,26 @@ export function tabToPath(tab: MainTab): string {
       return "/dashboard";
     case "holdings":
       return "/positions";
-    case "cto":
-      return "/positions/cto";
-    case "pea":
-      return "/positions/pea";
     case "av":
       return "/positions/av";
     case "crypto":
-      return "/positions/crypto";
+      return "/cryptos";
+    case "securities":
+      return "/pea-cto";
     case "immobilier":
-      return "/positions/immobilier";
+      return "/immobilier";
     case "cfd":
       return "/positions/cfd";
     case "banques":
       return "/banques";
+    case "assurance-vie":
+      return "/assurance-vie";
     case "epargne-salariale":
       return "/epargne-salariale";
     case "alternatifs":
       return "/alternatifs";
+    case "trading":
+      return "/trading";
     case "transactions":
       return "/transactions";
     case "fiscal":
@@ -37,7 +39,13 @@ export function tabToPath(tab: MainTab): string {
     case "liabilities":
       return "/passifs";
     case "platforms":
-      return "/comptes";
+      /*
+        `/plateformes` plutôt que `/comptes` : le vocabulaire fixé au chantier
+        précédent réserve « compte » à une entité réelle — bancaire, titres,
+        courtage — et une plateforme n'en est pas une. `/comptes` reste résolu
+        plus bas, aucun favori ne casse.
+      */
+      return "/plateformes";
     default:
       return "/dashboard";
   }
@@ -45,7 +53,7 @@ export function tabToPath(tab: MainTab): string {
 
 /**
  * Parse un slug catch-all Next.js → MainTab.
- * ex. undefined → dashboard, ["positions","pea"] → pea, ["dashboard"] → dashboard
+ * ex. undefined → dashboard, ["positions","pea"] → securities, ["dashboard"] → dashboard
  */
 export function pathToTab(slug?: string[] | null): MainTab {
   if (!slug || slug.length === 0) return "dashboard";
@@ -67,15 +75,34 @@ export function pathToTab(slug?: string[] | null): MainTab {
     return "platforms";
   }
   if (head === "banques" || head === "banks") return "banques";
+  // Écran de saisie des contrats. `/positions/assurance-vie` reste l'enveloppe
+  // `av` — c'est la branche `positions` plus bas qui le résout.
+  if (head === "assurance-vie" || head === "life-insurance") {
+    return "assurance-vie";
+  }
   if (head === "epargne-salariale" || head === "epargne") {
     return "epargne-salariale";
   }
   if (head === "alternatifs" || head === "alternatives") return "alternatifs";
+  if (head === "trading") return "trading";
+  // `/cryptos` est l'URL canonique ; `/crypto` reste accepté (anciens liens,
+  // favoris) et redirige vers le même onglet.
+  if (head === "cryptos" || head === "crypto" || head === "cryptomonnaies") {
+    return "crypto";
+  }
+  // `/pea-cto` est l'URL canonique des comptes titres ; les autres formes
+  // restent acceptées pour les liens directs et les favoris.
+  if (head === "pea-cto" || head === "titres" || head === "securities") {
+    return "securities";
+  }
 
   if (head === "positions" || head === "holdings" || head === "portefeuille") {
     if (!sub || sub === "all" || sub === "tout") return "holdings";
-    if (sub === "cto" || sub === "compte-titres") return "cto";
-    if (sub === "pea") return "pea";
+    // Anciennes URL d'enveloppe : elles mènent désormais à l'onglet dédié,
+    // exactement comme `/positions/crypto` mène à l'onglet Cryptos. Une seule
+    // destination par sujet, et aucun lien existant ne casse.
+    if (sub === "cto" || sub === "compte-titres") return "securities";
+    if (sub === "pea") return "securities";
     if (sub === "av" || sub === "assurance-vie") return "av";
     if (sub === "crypto" || sub === "cryptomonnaies") return "crypto";
     if (sub === "immobilier" || sub === "immo") return "immobilier";
@@ -84,7 +111,19 @@ export function pathToTab(slug?: string[] | null): MainTab {
     return "holdings";
   }
 
-  // Anciens / liens directs type /pea
+  /*
+    Anciennes URL de premier niveau des enveloppes titres.
+    `/cto` et `/pea` menaient à des onglets qui n'existent plus depuis leur
+    fusion dans « PEA & CTO » : sans cette branche, le repli `isMainTab`
+    ci-dessous les laissait résoudre vers eux-mêmes, produisant un état dont
+    l'URL canonique renvoyait ailleurs. Les liens et favoris existants
+    continuent de fonctionner, ils aboutissent simplement au bon écran.
+  */
+  if (head === "cto" || head === "compte-titres" || head === "pea") {
+    return "securities";
+  }
+
+  // Anciens / liens directs type /alternatifs
   if (isMainTab(head)) return head;
 
   return "dashboard";

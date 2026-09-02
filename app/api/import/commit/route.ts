@@ -10,6 +10,7 @@ import type { ImportDraftRow } from "@/app/lib/import/map-rows";
 import type { ColumnMapping } from "@/app/lib/import/types";
 import { AccountingError } from "@/app/lib/accounting";
 import { recordPortfolioSnapshot } from "@/app/lib/portfolio/service";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 /**
  * POST /api/import/commit
@@ -21,7 +22,16 @@ import { recordPortfolioSnapshot } from "@/app/lib/portfolio/service";
  *    cochées/décochées dans l’aperçu ; les lignes hors aperçu restent sélectionnées
  *    si valides.
  * 2. **rows** (legacy) — envoi direct des drafts (petits fichiers uniquement).
+ *
+ * maxDuration : un relevé courtier fait couramment plusieurs centaines de
+ * lignes, chacune écrite en base individuellement (une transaction = une
+ * insertion). Sur une base réseau, la somme des allers-retours dépasse les
+ * 10 s par défaut — constaté en production sur un CSV Revolut.
  */
+
+/** Vercel serverless — jusqu’à 60 s (Hobby Fluid / Pro) */
+export const maxDuration = 60;
+
 export async function POST(req: Request) {
   const userId = await requireUserId();
   if (!userId) {
@@ -148,7 +158,7 @@ export async function POST(req: Request) {
     }
     console.error("import commit", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erreur d'import" },
+      { error: clientErrorMessage(e, "Erreur d'import") },
       { status: 500 }
     );
   }

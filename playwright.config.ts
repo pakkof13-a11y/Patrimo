@@ -23,6 +23,34 @@ const authFile = path.join(__dirname, "e2e", ".auth", "user.json");
 const reuseExistingServer =
   !isCI && process.env.PLAYWRIGHT_FORCE_SERVER !== "1";
 
+/** Budget d'un test, réutilisé plus bas pour borner la vie d'un socket. */
+const TEST_TIMEOUT_MS = 90_000;
+
+/**
+ * Seuil d'inactivité des connexions du serveur E2E.
+ *
+ * Le serveur Next ferme par défaut un socket inactif au bout de ~6 s (6 006 ms
+ * mesurés). Le client HTTP de Playwright — un `http.Agent({ keepAlive: true })`
+ * de Node — n'a, lui, aucun délai d'inactivité : il ne retire jamais un socket
+ * de son pool de sa propre initiative, il attend le FIN du serveur. Le serveur
+ * est donc toujours celui qui ferme, et quand sa fermeture tombe pendant qu'une
+ * requête part sur ce même socket, elle échoue en ECONNRESET / socket hang up.
+ * Mesuré sur HEAD : 2 échecs sur 25 avec une inactivité de 5 990 ms, juste en
+ * deçà du seuil — la signature d'une course, et non d'un socket expiré.
+ *
+ * La documentation de Next prescrit exactement ce remède : le seuil du serveur
+ * doit être *supérieur* à celui du client en aval. Ici le client n'en a pas ;
+ * ce qui borne la vie d'un socket est donc la vie de son contexte, et un
+ * contexte de requêtes ne survit pas au test qui le porte. Un seuil serveur
+ * supérieur au budget d'un test garantit que le serveur ne peut jamais fermer
+ * un socket encore utilisable : la fermeture vient toujours du client, à la
+ * libération du contexte — ce qui n'est pas une course.
+ *
+ * Le double du budget d'un test laisse de la marge sans rien masquer : un
+ * socket réellement bloqué au-delà se voit toujours, par le délai du test.
+ */
+const KEEP_ALIVE_TIMEOUT_MS = TEST_TIMEOUT_MS * 2;
+
 export default defineConfig({
   testDir: "./e2e",
   globalSetup: "./e2e/global-setup.ts",
@@ -34,7 +62,7 @@ export default defineConfig({
   reporter: isCI
     ? [["list"], ["html", { open: "never", outputFolder: "playwright-report" }], ["github"]]
     : [["list"]],
-  timeout: 90_000,
+  timeout: TEST_TIMEOUT_MS,
   expect: { timeout: 15_000 },
   use: {
     baseURL,
@@ -46,10 +74,35 @@ export default defineConfig({
       : undefined,
   },
   webServer: {
-    // Webpack plus stable que Turbopack pour e2e
-    command: isCI
-      ? "npm run start"
-      : "npx next dev --hostname 127.0.0.1 -p 3000 --webpack",
+    /*
+      Serveur de production pour les longues séries.
+
+      En local, la suite tourne par défaut contre `next dev`, pratique quand on
+      itère sur quelques specs. Sur la suite **complète**, ce choix se paie :
+      le serveur de développement conserve modules compilés, source maps et
+      état HMR de chaque route visitée, et après trois cents tests il atteint
+      son propre seuil mémoire — « Server is approaching the used memory
+      threshold, restarting... ». Le redémarrage tombe au milieu d'un test, qui
+      échoue sur une donnée jamais chargée : un faux négatif que rien dans le
+      code applicatif n'explique, et qu'un retry masquerait au lieu de le
+      supprimer.
+
+      `PLAYWRIGHT_PROD_SERVER=1` lance le serveur de production à la place — le
+      même que la CI, qui ne connaît pas ce problème. Il exige un `npm run
+      build` préalable, d'où le choix d'une option explicite plutôt que d'un
+      défaut.
+
+      Webpack plutôt que Turbopack en développement : plus stable pour l'e2e.
+
+      `--keepAliveTimeout` : voir KEEP_ALIVE_TIMEOUT_MS ci-dessus. L'option
+      n'existe que sur `next start` ; le serveur de développement conserve donc
+      son seuil par défaut, ce qui est acceptable pour les quelques specs qu'on
+      y lance mais pas pour une longue série.
+    */
+    command:
+      isCI || process.env.PLAYWRIGHT_PROD_SERVER === "1"
+        ? `npm run start -- --keepAliveTimeout ${KEEP_ALIVE_TIMEOUT_MS}`
+        : "npx next dev --hostname 127.0.0.1 -p 3000 --webpack",
     url: baseURL,
     reuseExistingServer,
     timeout: 180_000,

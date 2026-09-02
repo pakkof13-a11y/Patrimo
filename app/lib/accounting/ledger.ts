@@ -2,6 +2,7 @@ import { d, zero, type Decimal } from "../money/decimal";
 import { toEur } from "./fx";
 import {
   applyBuy,
+  applyCapitalisedCost,
   applySell,
   applySplit,
   applyTransferIn,
@@ -165,15 +166,17 @@ export function applyTransaction(
     case "COUPON":
     case "LOYER":
     case "INTERET": {
-      // Cash income net de WHT (prélèvement source) et frais courtier
-      const grossEur = toEur(cashAmountOriginal(tx), tx.fxRateToEur);
-      let whtEur = d(0);
-      if (tx.withholdingTaxEur != null && !d(tx.withholdingTaxEur).isZero()) {
-        whtEur = d(tx.withholdingTaxEur);
-      } else if (tx.withholdingTaxRate != null && d(tx.withholdingTaxRate).gt(0)) {
-        whtEur = grossEur.times(d(tx.withholdingTaxRate));
-      }
-      const amountEur = grossEur.minus(whtEur).minus(feesEur);
+      /*
+        Revenu net de retenue à la source et de frais.
+
+        Le calcul n'est pas refait ici : `computeNetCashImpactEur` est la
+        fonction qui produit le `netCashImpactEur` écrit en base à la création.
+        La même formule vivait aux deux endroits, à l'identique — mais rien ne
+        les tenait ensemble, et une correction appliquée d'un seul côté aurait
+        fait diverger la trésorerie du journal du montant stocké, sans qu'aucun
+        écran ne le dise.
+      */
+      const amountEur = computeNetCashImpactEur(tx).netCashImpactEur;
       if (amountEur.lt(0)) {
         throw new AccountingError("INVALID_AMOUNT", "Le revenu net ne peut pas être négatif");
       }
@@ -246,6 +249,22 @@ export function applyTransaction(
       setPos(state, assetId, tx.platformId, remaining);
       setPos(state, assetId, tx.toPlatformId, applyTransferIn(getPos(state, assetId, tx.toPlatformId), moved));
       // No cash impact for title transfers
+      break;
+    }
+    case "TRAVAUX": {
+      // Travaux capitalisés : le coût de revient monte, la quantité ne bouge
+      // pas. Pas d'impact cash — comme ACHAT / VENTE, le financement est suivi
+      // ailleurs (prêt, apport) plutôt que sur la trésorerie du portefeuille.
+      //
+      // Les travaux ne sont pas comptés dans `totalFeesPaidEur` : ce sont des
+      // dépenses immobilisées, pas des frais.
+      const assetId = requireAsset(tx);
+      const amountEur = toEur(cashAmountOriginal(tx), tx.fxRateToEur).plus(feesEur);
+      const next = applyCapitalisedCost(
+        getPos(state, assetId, tx.platformId),
+        amountEur
+      );
+      setPos(state, assetId, tx.platformId, next);
       break;
     }
     case "SPLIT": {
@@ -381,6 +400,13 @@ export function computeNetCashImpactEur(tx: LedgerTx): {
     case "SPLIT": {
       // Ratio stocké en quantity — pas de cash, pas de P&L
       return { grossAmountEur: zero(), feesEur: zero(), netCashImpactEur: zero() };
+    }
+    case "TRAVAUX": {
+      // Le brut porte la dépense immobilisée : sans ce cas, le montant serait
+      // enregistré à zéro et le rejeu du journal rejetterait la transaction.
+      // Pas d'impact cash — comme un achat, le financement est suivi ailleurs.
+      const gross = toEur(cashAmountOriginal(tx), tx.fxRateToEur);
+      return { grossAmountEur: gross, feesEur, netCashImpactEur: zero() };
     }
     default:
       return { grossAmountEur: zero(), feesEur, netCashImpactEur: zero() };

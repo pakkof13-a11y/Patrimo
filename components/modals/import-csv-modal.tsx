@@ -388,11 +388,17 @@ export function ImportCsvModal({
     /** Résumé générique (Zerion / multi) */
     summaryLine?: string | null;
   } | null>(null);
-  /** Adresse/clé réutilisées depuis une blockchain déjà configurée (pré-remplissage) */
+  /**
+   * Adresse réutilisée depuis une blockchain déjà configurée.
+   *
+   * La clé API, elle, ne descend plus jusqu'ici : le serveur la possède et ne
+   * la renvoie plus. Seuls son masque et sa présence arrivent, pour dire à
+   * l'utilisateur qu'il n'a rien à ressaisir.
+   */
   const [blockchainDefaults, setBlockchainDefaults] = useState<{
     evmAddress: string | null;
-    evmApiKey: string | null;
-    solanaApiKey: string | null;
+    evmApiKeyMasked: string | null;
+    hasEvmApiKey: boolean;
   } | null>(null);
 
   const chainPresets = useMemo(() => blockchainCatalogPresets(), []);
@@ -414,8 +420,8 @@ export function ImportCsvModal({
     let cancelled = false;
     fetchJson<{
       evmAddress: string | null;
-      evmApiKey: string | null;
-      solanaApiKey: string | null;
+      evmApiKeyMasked: string | null;
+      hasEvmApiKey: boolean;
     }>("/api/platforms/blockchain-defaults")
       .then((data) => {
         if (cancelled) return;
@@ -423,9 +429,12 @@ export function ImportCsvModal({
         const cap = getChainSyncCapability(walletPresetKey);
         if (cap?.provider === "zerion") {
           setWalletAddress((prev) => prev || data.evmAddress || "");
-          setWalletApiKey(
-            (prev) => prev || data.evmApiKey || cap.defaultApiKey || ""
-          );
+          /*
+            Le champ clé reste vide : le secret ne descend plus au navigateur.
+            `cap.defaultApiKey` est vide par construction — aucun secret n'est
+            embarqué dans le bundle — donc rien à préremplir. Champ vide =
+            le serveur résout lui-même la clé (voir `submitWalletPlatform`).
+          */
         }
       })
       .catch(() => {
@@ -1027,8 +1036,9 @@ export function ImportCsvModal({
     }
     const cap = getChainSyncCapability(preset.key);
     const addr = walletAddress.trim();
-    // Clé préremplie : l’utilisateur n’a PAS besoin de la saisir pour que ça marche
-    // Vide → le backend résout ZERION_API_KEY (env serveur)
+    // Champ vide = cas nominal : le serveur résout la clé lui-même (clé déjà
+    // enregistrée sur la plateforme, sinon ZERION_API_KEY). L'utilisateur ne
+    // saisit une clé que s'il en fournit une nouvelle.
     const apiKey = walletApiKey.trim();
 
     // ── Monero ────────────────────────────────────────────────────────────
@@ -1118,7 +1128,13 @@ export function ImportCsvModal({
           logoKey: preset.key,
           logoUrl: preset.logoUrl,
           walletAddress: addr,
-          walletApiKey: cap?.provider === "zerion" ? apiKey : null,
+          /*
+            Chaîne vide écrite telle quelle auparavant : la nouvelle plateforme
+            portait alors `""` au lieu de rien. `null` dit la même chose sans
+            ambiguïté, et le serveur résout la clé de son côté.
+          */
+          walletApiKey:
+            cap?.provider === "zerion" && apiKey.length > 0 ? apiKey : null,
           upsert: true,
         }),
       });
@@ -1134,7 +1150,12 @@ export function ImportCsvModal({
           body: JSON.stringify({
             id: platformId,
             walletAddress: addr,
-            ...(cap?.provider === "zerion" ? { walletApiKey: apiKey } : {}),
+            // Vide = ne pas toucher à la clé déjà enregistrée : le champ est
+            // omis plutôt qu'envoyé vide, sinon on écraserait une clé
+            // existante à chaque resync sans nouvelle clé saisie.
+            ...(cap?.provider === "zerion" && apiKey.length > 0
+              ? { walletApiKey: apiKey }
+              : {}),
           }),
         });
       }
@@ -1177,7 +1198,14 @@ export function ImportCsvModal({
             body: JSON.stringify({
               platformId,
               address: addr,
-              apiKey,
+              /*
+                Omis, pas vide. Le serveur fait `apiKeyIn ?? platformApiKey` :
+                une chaîne vide n'étant pas nullish, elle l'emporterait sur la
+                clé enregistrée et ferait retomber la résolution sur la variable
+                d'environnement. Tant que le champ était prérempli le cas ne se
+                présentait pas ; il devient le cas nominal.
+              */
+              ...(apiKey.length > 0 ? { apiKey } : {}),
               chainPreset: preset.key,
               allChains: false,
               writeLedger: true,
@@ -1333,7 +1361,7 @@ export function ImportCsvModal({
 
         {phase !== "success" && importMode === "csv" && (
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Importez un export broker/exchange ou le modèle Patrimo. Les actifs
+            Importez un export broker/exchange ou le modèle Aurea. Les actifs
             manquants sont créés automatiquement. Les{" "}
             <strong className="font-medium text-[var(--foreground)]">
               doublons
@@ -1372,9 +1400,9 @@ export function ImportCsvModal({
                     const cap = getChainSyncCapability(key);
                     if (cap?.provider === "zerion") {
                       setWalletAddress(blockchainDefaults?.evmAddress || "");
-                      setWalletApiKey(
-                        blockchainDefaults?.evmApiKey || cap.defaultApiKey || ""
-                      );
+                      // Clé volontairement non préremplie — voir l'effet de
+                      // chargement plus haut.
+                      setWalletApiKey("");
                     }
                   }}
                   data-testid="import-wallet-chain"
@@ -1412,11 +1440,25 @@ export function ImportCsvModal({
                     className="input w-full font-mono text-sm"
                     value={walletApiKey}
                     onChange={(e) => setWalletApiKey(e.target.value)}
-                    placeholder="zk_…"
+                    /*
+                      Le masque sert d'indice, pas de valeur : un `placeholder`
+                      n'est jamais soumis. Le champ reste donc vide, et le
+                      serveur résout la clé lui-même.
+                    */
+                    placeholder={
+                      blockchainDefaults?.evmApiKeyMasked
+                        ? `Clé enregistrée · ${blockchainDefaults.evmApiKeyMasked}`
+                        : "zk_…"
+                    }
                     autoComplete="off"
                     spellCheck={false}
                     data-testid="import-wallet-api-key"
                   />
+                  <p className="text-meta mt-1" data-testid="import-wallet-api-key-hint">
+                    {blockchainDefaults?.hasEvmApiKey
+                      ? "Une clé est déjà enregistrée côté serveur : laissez vide pour la réutiliser."
+                      : "Laissez vide pour utiliser la clé du serveur, ou collez la vôtre."}
+                  </p>
                 </Field>
               )}
 
@@ -1787,7 +1829,7 @@ export function ImportCsvModal({
                 onClick={goToJournal}
                 data-testid="import-success-journal"
               >
-                Voir les positions
+                Voir le portefeuille
               </Button>
             </div>
           </div>
@@ -1798,7 +1840,7 @@ export function ImportCsvModal({
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Format">
                 <select
-                  className="input"
+                  className="input w-full"
                   value={formatId}
                   data-testid="import-format-select"
                   onChange={(e) => {
@@ -1818,7 +1860,7 @@ export function ImportCsvModal({
                 </select>
                 <p className="mt-1 text-[11px] text-slate-500">
                   {formatId === "auto"
-                    ? "Détecte Crypto.com, Nexo, Coinbase, Binance, Revolut, AscendEX, Fortuneo, IBKR, Trade Republic, Boursorama, Patrimo — sinon mapping dynamique."
+                    ? "Détecte Crypto.com, Nexo, Coinbase, Binance, Revolut, AscendEX, Fortuneo, IBKR, Trade Republic, Boursorama, Aurea — sinon mapping dynamique."
                     : IMPORT_FORMATS.find((f) => f.id === formatId)
                         ?.description}
                 </p>
@@ -1948,7 +1990,7 @@ export function ImportCsvModal({
                 "TRADE_REPUBLIC",
                 "REVOLUT",
               ].includes(platformId) && (
-                <Field label="Type de compte (enveloppe fiscale)">
+                <Field label="Enveloppe fiscale">
                   <select
                     className="input w-full"
                     value={accountEnvelopeType}
@@ -1992,7 +2034,7 @@ export function ImportCsvModal({
                   </p>
                   <p className="mt-0.5 text-[11px] text-[var(--muted-foreground)]">
                     ou sélectionnez un fichier · formats broker / modèle
-                    Patrimo
+                    Aurea
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center justify-center gap-2">
@@ -2009,7 +2051,7 @@ export function ImportCsvModal({
                       }
                     />
                   </label>
-                  {/* Modèle Patrimo uniquement si format = modèle Patrimo */}
+                  {/* Modèle Aurea uniquement si format = modèle Aurea */}
                   {formatId === "patrimo" && (
                     <Button
                       type="button"
@@ -2149,7 +2191,7 @@ export function ImportCsvModal({
                               </span>
                               <select
                                 className={cn(
-                                  "input py-1 text-xs",
+                                  "input w-full py-1 text-xs",
                                   isMissing && "ring-1 ring-red-500/50"
                                 )}
                                 value={currentHeader}
@@ -2187,7 +2229,7 @@ export function ImportCsvModal({
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
                           Aperçu brut (5 premières lignes)
                         </p>
-                        <div className="max-h-40 overflow-auto rounded-lg border border-[var(--border)] bg-slate-950/40">
+                        <div className="max-h-40 overflow-auto rounded-lg border border-[var(--border)] bg-black/40">
                           <table className="w-full text-left text-[10px]">
                             <thead className="sticky top-0 bg-slate-900/90 text-slate-400">
                               <tr>
@@ -2265,7 +2307,7 @@ export function ImportCsvModal({
                       <label className="flex items-center gap-1.5">
                         Lignes / page
                         <select
-                          className="input !h-7 !w-auto !py-0 text-[11px]"
+                          className="input !h-7 w-auto py-0 text-[11px]"
                           value={pageSize}
                           onChange={(e) => {
                             setPageSize(

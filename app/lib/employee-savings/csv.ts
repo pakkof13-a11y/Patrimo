@@ -4,6 +4,7 @@
  */
 
 import type { CreateEmployeeSavingsInput } from "./service";
+import { FUND_CATEGORIES as EMPLOYEE_SAVINGS_FUND_CATEGORIES } from "./fund-category";
 import {
   EMPLOYEE_SAVINGS_PLAN_TYPES,
   EMPLOYEE_SAVINGS_SOURCES,
@@ -11,12 +12,12 @@ import {
 } from "./types";
 
 export const EMPLOYEE_SAVINGS_CSV_HEADER =
-  "plan_type;manager;fund_name;isin;units;nav;currency;source_type;contribution_date;unlock_date;unlock_mode;notes";
+  "plan_type;manager;fund_name;isin;units;nav;currency;source_type;contribution_date;contributed_amount;fund_category;unlock_date;unlock_mode;notes";
 
 export const EMPLOYEE_SAVINGS_CSV_TEMPLATE = `${EMPLOYEE_SAVINGS_CSV_HEADER}
-PEE;Amundi;FCPE Actions Monde;FR0010123456;12.5;28.40;EUR;ABONDEMENT;2021-06-15;;;Versement intéressement 2021
-PEE;Amundi;FCPE Monétaire;FR0010654321;50;10.12;EUR;PARTICIPATION;2022-07-01;;;
-PER;Natixis Interépargne;FCPE Diversifié;;100;15;EUR;VOLUNTARY;2023-01-10;;RETIREMENT;PER entreprise
+PEE;Amundi;FCPE Actions Monde;FR0010123456;12.5;28.40;EUR;ABONDEMENT;2021-06-15;300;EQUITY;;;Versement intéressement 2021
+PEE;Amundi;FCPE Monétaire;FR0010654321;50;10.12;EUR;PARTICIPATION;2022-07-01;480;MONETARY;;;
+PER;Natixis Interépargne;FCPE Diversifié;;100;15;EUR;VOLUNTARY;2023-01-10;1400;DIVERSIFIED;;RETIREMENT;PER entreprise
 `;
 
 function detectDelimiter(headerLine: string): string {
@@ -85,6 +86,12 @@ const ALIASES: Record<string, string> = {
   origine: "source_type",
   contribution_date: "contribution_date",
   date_versement: "contribution_date",
+  contributed_amount: "contributed_amount",
+  montant_verse: "contributed_amount",
+  montant: "contributed_amount",
+  fund_category: "fund_category",
+  categorie: "fund_category",
+  famille: "fund_category",
   unlock_date: "unlock_date",
   date_deblocage: "unlock_date",
   unlock_mode: "unlock_mode",
@@ -92,6 +99,21 @@ const ALIASES: Record<string, string> = {
   notes: "notes",
   commentaire: "notes",
 };
+
+/**
+ * Famille de support déclarée dans le fichier.
+ *
+ * Rend `null` sur une valeur absente ou inconnue plutôt que « Autres » : la
+ * déduction depuis le nom du fonds fera mieux, et « Autres » est un choix,
+ * pas un défaut.
+ */
+function mapFundCategory(raw: string | undefined): string | null {
+  const s = (raw || "").trim().toUpperCase();
+  if (!s) return null;
+  return (EMPLOYEE_SAVINGS_FUND_CATEGORIES as readonly string[]).includes(s)
+    ? s
+    : null;
+}
 
 function mapSource(raw: string): string {
   const s = raw.trim().toUpperCase();
@@ -174,6 +196,8 @@ export function parseEmployeeSavingsCsv(text: string): {
       currency: get(cells, "currency") || "EUR",
       sourceType: mapSource(get(cells, "source_type") || "VOLUNTARY"),
       contributionDate: get(cells, "contribution_date") || null,
+      contributedAmount: get(cells, "contributed_amount") || null,
+      fundCategory: mapFundCategory(get(cells, "fund_category")),
       unlockDate: get(cells, "unlock_date") || null,
       unlockMode: mapUnlockMode(get(cells, "unlock_mode"), planType),
       notes: get(cells, "notes") || null,

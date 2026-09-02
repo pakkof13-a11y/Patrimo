@@ -4,115 +4,387 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /**
- * Patrimo design tokens — finance premium
+ * Aurea design tokens — finance premium
  * Palette sobre : papier chaud / navy profond, accent teal institutionnel.
  * Spacing 4px-based ; densité confortable sans aérer comme un SaaS marketing.
  */
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  PATRIMO — DESIGN SYSTEM « TERMINAL PATRIMONIAL »
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ *  Références : Bloomberg Terminal (densité, chiffres monospacés, hiérarchie
+ *  stricte) × Apple (calme, espace, matière) × Porsche Design (précision
+ *  usinée). Ni SaaS, ni crypto.
+ *
+ *  RÈGLE ABSOLUE — aucun composant ne code en dur une couleur, un espace, un
+ *  rayon, une durée, une graisse ou une taille. Tout passe par ces tokens. Un
+ *  écran qui a besoin d'une valeur absente d'ici ajoute un token ; il ne crée
+ *  pas d'exception locale.
+ *
+ *  Le thème sombre est la RÉFÉRENCE de design. Le thème clair en est la
+ *  transposition rigoureuse — même structure, mêmes rôles, contrastes
+ *  recalculés — et non une seconde interprétation.
+ *
+ *  Contraste : chaque couleur porteuse de texte est vérifiée ≥ 4,5:1 sur sa
+ *  surface (AA), chaque trait de graphique ≥ 3:1. Voir
+ *  `tests/unit/design-tokens-contrast.test.ts` : la suite échoue si une
+ *  valeur de ce fichier passe sous le seuil.
+ */
 :root {
-  /* Surfaces */
-  --background: #f4f3ef;
-  --background-gradient: linear-gradient(
-    180deg,
-    #faf9f6 0%,
-    #f4f3ef 48%,
-    #efeee9 100%
-  );
-  --foreground: #12141a;
-  --card: #ffffff;
-  --card-foreground: #12141a;
-  --elevated: #ffffff;
-  --muted: #ebeae4;
-  --muted-foreground: #5c6370;
-  --border: #dddcd5;
-  --border-strong: #c9c8c0;
-  --input-bg: #ffffff;
-  --table-head: #f7f6f2;
-  --header-bg: rgba(255, 255, 255, 0.86);
+  /* ══ 1. ESPACEMENT — base 4 px ═══════════════════════════════════════ */
+  --space-0: 0;
+  --space-px: 1px;
+  --space-1: 0.25rem;   /*  4 */
+  --space-2: 0.5rem;    /*  8 */
+  --space-3: 0.75rem;   /* 12 */
+  --space-4: 1rem;      /* 16 */
+  --space-5: 1.25rem;   /* 20 */
+  --space-6: 1.5rem;    /* 24 */
+  --space-7: 1.75rem;   /* 28 */
+  --space-8: 2rem;      /* 32 */
+  --space-10: 2.5rem;   /* 40 */
+  --space-12: 3rem;     /* 48 */
+  --space-16: 4rem;     /* 64 */
 
-  /* Brand & status */
-  --primary: #0d6b63;
-  --primary-foreground: #ffffff;
-  --primary-soft: rgba(13, 107, 99, 0.08);
-  --success: #147a3f;
-  --danger: #b42318;
-  --accent: #1d6fbf;
-  --ring: rgb(13 107 99 / 0.28);
-  --focus-ring: 0 0 0 2px var(--card), 0 0 0 4px var(--ring);
+  /* Rythmes de composition — dérivés, jamais réécrits en dur */
+  --gap-card: var(--space-3);          /* entre cartes d'une même rangée */
+  --gap-section: var(--space-4);       /* entre blocs du dashboard */
+  --pad-card: var(--space-4);          /* respiration interne d'une carte */
+  --pad-card-lg: var(--space-5);
+  --section-gap: var(--space-4);
+  --section-gap-lg: var(--space-5);
+  --module-after-kpi: var(--space-4);
+  --module-after-kpi-lg: var(--space-5);
+  --module-intro-gap: var(--space-1);
 
-  /* Elevation */
-  --shadow-xs: 0 1px 0 rgb(18 20 26 / 0.04);
-  --shadow-sm: 0 1px 2px rgb(18 20 26 / 0.05), 0 1px 1px rgb(18 20 26 / 0.03);
-  --shadow-md: 0 4px 16px rgb(18 20 26 / 0.06), 0 1px 3px rgb(18 20 26 / 0.04);
+  /*
+    Largeur de la colonne de détail (`.asset-panel`) des onze modules qui
+    posent une liste à gauche et une fiche à droite au-delà de 1280 px.
 
-  /* Radius — angular enough for finance, not toy-like */
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 0.875rem;
+    Elle valait 23, 24 ou 25 rem selon la date de la refonte du module, jamais
+    selon son contenu : les fiches y sont bâties sur les mêmes blocs et le même
+    corps de texte. 25 rem — la valeur des six derniers modules refondus — les
+    aligne toutes. La colonne contextuelle de PEA & CTO (19 rem) n'en est pas
+    une : elle porte des repères de marché, pas la fiche d'un actif.
+  */
+  --panel-width: 25rem;
 
-  /* Spacing scale (4px) */
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.25rem;
-  --space-6: 1.5rem;
-  --space-8: 2rem;
-  --section-gap: 1.25rem;
-  --section-gap-lg: 1.75rem;
-  /* Transition KPI bandeau → module (Positions, Transactions, etc.) */
-  --module-after-kpi: 1.125rem;
-  --module-after-kpi-lg: 1.5rem;
-  /* Sous-titre d’intro sous le titre de module */
-  --module-intro-gap: 0.375rem;
+  /* ══ 2. TYPOGRAPHIE ══════════════════════════════════════════════════
+     IBM Plex Sans porte les libellés, IBM Plex Mono TOUS les nombres —
+     l'alignement vertical des chiffres est ce qui fait lire « terminal »
+     plutôt que « site web ». */
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
 
-  --app-max-width: 2560px;
-  --shell-pad-x: 0.875rem;
-  --shell-pad-y: 1rem;
+  --text-2xs: 0.625rem;    /* 10 — micro-labels, unités */
+  --text-xs: 0.6875rem;    /* 11 — méta, légendes */
+  --text-sm: 0.75rem;      /* 12 — libellés, cellules */
+  --text-base: 0.8125rem;  /* 13 — corps */
+  --text-md: 0.875rem;     /* 14 */
+  --text-lg: 1rem;         /* 16 */
+  --text-xl: 1.25rem;      /* 20 — valeurs KPI */
+  --text-2xl: 1.5rem;      /* 24 */
+  --text-3xl: 2rem;        /* 32 */
+  --text-4xl: 2.75rem;     /* 44 */
+  --text-5xl: 3.75rem;     /* 60 — patrimoine net */
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+
+  /* Les titres sont en capitales, très légèrement espacés — signature
+     Bloomberg. Les grands nombres se resserrent au contraire. */
+  --tracking-title: 0.09em;
+  --tracking-label: 0.055em;
+  --tracking-normal: 0;
+  --tracking-tight: -0.02em;
+  --tracking-tighter: -0.035em;
+
+  /* ══ 3. RAYONS ═══════════════════════════════════════════════════════
+     10 px sur les cartes (mockup). Rien d'arrondi au point de paraître
+     ludique : l'objet doit sembler usiné. */
+  --radius-xs: 0.25rem;    /*  4 */
+  --radius-sm: 0.375rem;   /*  6 */
+  --radius-md: 0.5rem;     /*  8 */
+  --radius-lg: 0.625rem;   /* 10 — rayon canonique des cartes */
+  --radius-xl: 0.75rem;    /* 12 */
+  --radius-full: 9999px;
+
+  /* ══ 4. BORDURES ═════════════════════════════════════════════════════
+     Encre légèrement chaude plutôt que grise : sur un fond ivoire, un trait
+     neutre tire au bleu et rend la page plus froide qu'elle ne devrait. */
+  --border-width: 1px;
+  --border: rgba(32, 27, 20, 0.10);
+  --border-strong: rgba(32, 27, 20, 0.17);
+  --border-subtle: rgba(32, 27, 20, 0.055);
+
+  /* ══ 5. OMBRES — quasi absentes, la profondeur vient des bordures ════ */
+  --shadow-xs: 0 1px 0 rgba(32, 27, 20, 0.03);
+  --shadow-sm: 0 1px 2px rgba(32, 27, 20, 0.05);
+  --shadow-md: 0 4px 16px rgba(32, 27, 20, 0.07);
+  --shadow-lg: 0 12px 32px rgba(32, 27, 20, 0.1);
+  /* Voile des surfaces plein écran (panneaux, modales). */
+  --overlay: rgba(24, 20, 15, 0.32);
+  --shadow-lift: 0 6px 20px rgba(32, 27, 20, 0.09);
+
+  /* ══ 6. MOUVEMENT ════════════════════════════════════════════════════
+     150 ms ease-out par défaut. Aucun rebond : un terminal financier ne
+     joue pas, il répond. */
+  --duration-instant: 80ms;
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+  --duration-slow: 320ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --transition-fast: var(--duration-fast) var(--ease-out);
+
+  /* ══ 7. MISE EN PAGE ═════════════════════════════════════════════════ */
+  --app-max-width: 1800px;      /* pensé 1440p → 4K, le dashboard respire */
+  --shell-pad-x: var(--space-5);
+  --shell-pad-y: var(--space-5);
+  /* 6,5 rem : largeur minimale qui laisse « TRANSACTIONS » tenir sur une
+     ligne à --text-2xs. En dessous, le mot se coupait en deux. */
+  --sidebar-width: 6.5rem;
+  --header-height: 3.5rem;
+  --ticker-height: 1.875rem;
+
+  /* ══ 8. COULEURS — PRIMITIVES ════════════════════════════════════════
+     Palette brute. Aucun composant ne les appelle : ils passent par les
+     rôles sémantiques du §9. */
+  --gold-base: #d9a64d;     /* accent de marque — aplats, traits, focus */
+  --gold-bright: #e8bd72;
+  --gold-deep: #a8781f;
+  --gold-ink-light: #7d5a12; /* teinte lisible sur fond clair (AA) */
+
+  --green-base: #63c48b;
+  --green-ink-light: #17794a;
+  --red-base: #e06a6a;
+  --red-ink-light: #b8342a;
+  --cyan-base: #4fb8c9;
+  --cyan-ink-light: #0d6f80;
+
+  /* ══ 9. COULEURS — RÔLES SÉMANTIQUES (thème clair) ═══════════════════
+     Transposition du mockup sombre : papier chaud plutôt que blanc pur,
+     pour que l'or reste un accent et non une alerte. */
+
+  /*
+    Surfaces, de la plus profonde à la plus élevée.
+
+    Ivoire plutôt que blanc : #ffffff partout donnait une page clinique où
+    l'or ne se posait sur rien. Chaque niveau garde un écart faible mais
+    lisible sans son trait de bordure — c'est la condition pour qu'une carte
+    reste une carte quand la bordure s'efface au survol.
+
+    Le blanc pur n'est pas abandonné : il devient le sommet de la pile, celui
+    des modales et des menus, et se distingue donc de tout ce qui est en
+    dessous au lieu de se confondre avec.
+  */
+  --background: #f4f2ed;
+  /*
+    Un dégradé de profondeur, pas un aplat décoratif : quelques niveaux de
+    clarté en plus vers le haut de la fenêtre, éteints avant la moitié. Vu de
+    face on ne le remarque pas ; masqué, la page paraît plate.
+  */
+  --background-gradient: linear-gradient(180deg, #f8f7f3 0%, #f4f2ed 46%);
+  --surface: #fcfbf8;
+  --surface-raised: #ffffff;
+  --surface-sunken: #eae8e2;
+  --surface-hover: #f6f4f0;
+  --card: var(--surface);
+  --elevated: var(--surface-raised);
+  --muted: var(--surface-sunken);
+  --input-bg: #fdfdfb;
+  --table-head: #f7f5f1;
+  --header-bg: rgba(244, 242, 237, 0.88);
+  --ticker-bg: #ebe9e3;
+
+  /* Texte — trois niveaux, jamais plus */
+  --foreground: #14161a;
+  --card-foreground: var(--foreground);
+  --foreground-secondary: #5e636b;
+  --foreground-faint: #8a8f97;
+  --muted-foreground: var(--foreground-secondary);
+
+  /* Accent de marque */
+  --primary: var(--gold-base);
+  --primary-foreground: #17130a;   /* encre sombre sur aplat doré */
+  --primary-soft: rgba(217, 166, 77, 0.12);
+  --primary-text: var(--gold-ink-light);
+  --accent: #57534e;
+
+  /* Statuts — variante « ink » pour le texte, « base » pour les traits */
+  --positive: var(--green-ink-light);
+  --negative: var(--red-ink-light);
+  --warning: #a8600f;
+  --info: var(--cyan-ink-light);
+  --success: var(--positive);
+  --danger: var(--negative);
+
+  /* Graphiques — traits (seuil 3:1, pas 4,5:1) */
+  --chart-gold: var(--gold-deep);
+  /* Inflation : or du design system, jamais vert/rouge de P&L. */
+  --chart-inflation: var(--chart-gold);
+  --chart-positive: #2e9e63;
+  --chart-negative: #d0453a;
+  --chart-cyan: #0e8ba3;
+  /* Cinquième teinte des répartitions — assez éloignée des quatre autres pour
+     rester distincte dans un anneau, y compris en vision déficiente. */
+  --chart-violet: #6d4aad;
+  --chart-neutral: #9a9ea6;
+  --chart-grid: rgba(16, 17, 20, 0.06);
+  --chart-glow: rgba(217, 166, 77, 0.1);
+
+  /* Focus */
+  --ring: rgba(217, 166, 77, 0.42);
+  --focus-ring: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+
+  /* Compat marque (bannières, nav) — alias, pas de nouvelle teinte */
+  --gold-1: var(--gold-bright);
+  --gold-2: var(--gold-base);
+  --gold-3: var(--gold-deep);
+  --gold-muted: rgba(217, 166, 77, 0.1);
+  --gold-border: rgba(217, 166, 77, 0.24);
+  --nav-active-gold: var(--gold-ink-light);
+  --banner-fill: #f7f5f1;
+  --banner-edge: #f4f2ed;
+
   color-scheme: light;
 }
 
+/**
+ * ─────────────────────────────────────────────────────────────────────────
+ *  THÈME SOMBRE — la référence du mockup
+ *  Fond #090909, cartes #111214, bordures rgba(255,255,255,.06).
+ *  Seuls les rôles changent de valeur : aucune structure n'est redéfinie.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
 .dark {
-  --background: #0a101c;
-  --background-gradient: linear-gradient(
-    180deg,
-    #0d1524 0%,
-    #0a101c 55%,
-    #080e18 100%
-  );
-  --foreground: #e6ebf4;
-  --card: rgba(14, 22, 38, 0.94);
-  --card-foreground: #e6ebf4;
-  --elevated: #121c30;
-  --muted: #152033;
-  --muted-foreground: #8b97ab;
-  --border: rgba(148, 163, 184, 0.12);
-  --border-strong: rgba(148, 163, 184, 0.22);
-  --input-bg: #0c1424;
-  --table-head: rgba(10, 18, 32, 0.95);
-  --header-bg: rgba(10, 16, 28, 0.9);
+  /* Trait à peine plus froid que blanc, comme les surfaces qu'il délimite. */
+  --border: rgba(232, 238, 255, 0.07);
+  --border-strong: rgba(232, 238, 255, 0.14);
+  --border-subtle: rgba(232, 238, 255, 0.04);
 
-  --primary: #2dd4bf;
-  --primary-foreground: #042f2e;
-  --primary-soft: rgba(45, 212, 191, 0.1);
-  --success: #34d399;
-  --danger: #f87171;
-  --accent: #5ba3e8;
-  --ring: rgb(45 212 191 / 0.32);
+  /* Sur fond noir, une ombre portée ne se voit pas : la profondeur passe
+     entièrement par la bordure et le niveau de surface. */
+  --shadow-xs: 0 1px 0 rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --overlay: rgba(0, 0, 0, 0.55);
+  --shadow-lift: 0 6px 20px rgba(0, 0, 0, 0.5);
+
+  /*
+    Midnight graphite — noir profond très légèrement indigo.
+
+    Deux passes ont mené ici. La première a quitté le noir presque pur du
+    mockup ; elle l'a fait vers le brun, ce qui adoucissait la matière mais
+    laissait le fond trop proche du noir : chaque carte s'en détachait comme
+    une découpe. La seconde remonte le fond de quatre niveaux et le décale
+    d'un souffle vers l'indigo.
+
+    Ce qui compte n'est pas la teinte mais l'écart : de fond à carte, le
+    rapport passe de 1,078 à 1,027. Les surfaces se distinguent encore —
+    aucun palier n'est confondu — mais elles cessent de se découper. L'or de
+    la marque, lui, ne bouge pas : il reste le seul accent.
+
+    Le bleu s'arrête là où il commencerait à se voir. #11131b tient six
+    points de bleu au-dessus du rouge, assez pour refroidir la matière, trop
+    peu pour lire comme une interface bleue. La variante #11151f, essayée,
+    ramenait l'écart fond/carte à 1,011 : deux paliers qui se confondent.
+  */
+  --background: #11131b;
+  /*
+    Même geste que dans le thème clair : une remontée de quelques niveaux vers
+    le haut de la fenêtre, éteinte avant la moitié sur la couleur de fond.
+    Aucun halo, aucune tache colorée — six niveaux de clarté, pas davantage.
+  */
+  --background-gradient: linear-gradient(180deg, #171a25 0%, #11131b 46%);
+  --surface: #15161c;
+  --surface-raised: #181920;
+  --surface-sunken: #0e1017;
+  --surface-hover: #1c1d25;
+  --card: var(--surface);
+  --elevated: var(--surface-raised);
+  --muted: var(--surface-raised);
+  --input-bg: #0e1017;
+  --table-head: #16181f;
+  --header-bg: rgba(17, 19, 27, 0.88);
+  --ticker-bg: #101219;
+
+  /* Encre adoucie d'un cran — 15:1 sur la carte reste très au-dessus du
+     seuil, et le blanc pur cesse de vibrer sur le graphite. */
+  --foreground: #ece9e3;
+  --card-foreground: var(--foreground);
+  --foreground-secondary: #a5a099;
+  /*
+    Quatrième niveau : micro-libellés du rail, en-têtes de colonne, unités.
+    À #736e66 il tombait à 3,66:1 sur le fond — sous le seuil AA, et c'est ce
+    palier, pas le secondaire, qui rendait les petits textes durs à lire de
+    nuit. Remonté dans la même famille chaude à 4,86:1 sur le fond et 4,73:1
+    sur les panneaux. La hiérarchie tient : 15,3 — 7,1 — 4,9.
+  */
+  --foreground-faint: #87827a;
+  --muted-foreground: var(--foreground-secondary);
+
+  --primary: var(--gold-base);
+  --primary-foreground: #17130a;
+  --primary-soft: rgba(217, 166, 77, 0.14);
+  --primary-text: var(--gold-base);
+  --accent: #a8a29e;
+
+  /* En sombre, les teintes « base » atteignent déjà l'AA sur #111214 :
+     aucune variante assombrie n'est nécessaire. */
+  --positive: var(--green-base);
+  --negative: var(--red-base);
+  --warning: #e0a04d;
+  --info: var(--cyan-base);
+  --success: var(--positive);
+  --danger: var(--negative);
+
+  --chart-gold: var(--gold-base);
+  --chart-inflation: var(--chart-gold);
+  --chart-positive: var(--green-base);
+  --chart-negative: var(--red-base);
+  --chart-cyan: var(--cyan-base);
+  --chart-violet: #9d7fe0;
+  --chart-neutral: #736e66;
+  --chart-grid: rgba(232, 238, 255, 0.06);
+  --chart-glow: rgba(217, 166, 77, 0.14);
+
+  --ring: rgba(217, 166, 77, 0.45);
   --focus-ring: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
 
-  --shadow-xs: 0 1px 0 rgb(0 0 0 / 0.25);
-  --shadow-sm: 0 2px 8px rgb(0 0 0 / 0.28);
-  --shadow-md: 0 8px 28px rgb(0 0 0 / 0.35);
+  --gold-1: var(--gold-bright);
+  --gold-2: var(--gold-base);
+  --gold-3: var(--gold-deep);
+  --gold-muted: rgba(217, 166, 77, 0.12);
+  --gold-border: rgba(217, 166, 77, 0.26);
+  --nav-active-gold: var(--gold-base);
+  --banner-fill: #15161c;
+  --banner-edge: #11131b;
 
   color-scheme: dark;
 }
 
 body {
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
-  background: var(--background);
+  font-family: var(--font-sans);
+  background-color: var(--background);
+  /*
+    Le dégradé ne couvre que la première hauteur de fenêtre et ne se répète
+    pas : au-delà, l'aplat de `--background` prend le relais. Comme le dégradé
+    s'éteint sur cette même couleur avant sa moitié, la jonction n'existe pas.
+    `scroll` plutôt que `fixed` : un fond ancré à la fenêtre scintille au
+    défilement sur mobile, pour un effet que personne ne cherchait.
+  */
   background-image: var(--background-gradient);
-  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: 100% 100vh;
+  background-attachment: scroll;
   color: var(--foreground);
   min-height: 100vh;
   max-width: 100%;
@@ -137,7 +409,7 @@ html {
   max-width: 100%;
 }
 
-/* Sticky chrome — séparé du contenu par bordure fine + blur */
+/* Sticky chrome — séparé du contenu par bordure fine + blur liquid glass */
 .app-header {
   width: 100%;
   max-width: 100%;
@@ -145,6 +417,8 @@ html {
   border-bottom: 1px solid var(--border);
   background: var(--header-bg);
   box-shadow: var(--shadow-xs);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
 }
 
 /* Stack vertical de zones (KPI → toolbar → table) */
@@ -184,43 +458,421 @@ html {
   min-width: 0;
 }
 
+/* Transitions marque (logos / fonds) — 300ms, sans flash structurel */
+.brand-logo,
+.brand-banner img,
+.brand-page-bg {
+  transition-property: opacity, filter;
+  transition-duration: 300ms;
+  transition-timing-function: ease-in-out;
+}
+
+/* Logo toujours plein opaque (jamais glass) */
+.brand-logo {
+  opacity: 1 !important;
+  isolation: isolate;
+}
+
+/* ── Bannière KPI : fondus latéraux thématiques ──────────────── */
+.brand-banner-fade-x {
+  background: linear-gradient(
+    90deg,
+    var(--banner-edge) 0%,
+    color-mix(in srgb, var(--banner-fill) 88%, transparent) 8%,
+    transparent 22%,
+    transparent 78%,
+    color-mix(in srgb, var(--banner-fill) 88%, transparent) 92%,
+    var(--banner-edge) 100%
+  );
+}
+
+/* Prolonge le motif sous le Cockpit (padding bas du surface) */
+.brand-banner--extend-below {
+  margin-bottom: -0.75rem;
+}
+
+@media (min-width: 640px) {
+  .brand-banner--extend-below {
+    margin-bottom: -1rem;
+  }
+}
+
+/* ── Typographie or premium + brillance ──────────────────────── */
+.brand-gold-text {
+  display: inline-block;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  background-image: linear-gradient(
+    125deg,
+    var(--gold-1) 0%,
+    var(--gold-2) 45%,
+    var(--gold-3) 100%
+  );
+  background-size: 100% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Slogan type Apple — aéré, confident, tracking ouvert */
+.brand-slogan {
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1.45;
+}
+
+/* Shine : bande claire qui traverse le dégradé métallique */
+.brand-gold-shine {
+  background-image: linear-gradient(
+    110deg,
+    var(--gold-1) 0%,
+    var(--gold-2) 22%,
+    #fef3c7 38%,
+    var(--gold-2) 52%,
+    var(--gold-3) 72%,
+    var(--gold-1) 100%
+  );
+  background-size: 220% 100%;
+  background-position: 0% 50%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: brand-gold-shine 4.5s ease-in-out infinite;
+}
+
+@keyframes brand-gold-shine {
+  0%,
+  12% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  88%,
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-gold-shine {
+    animation: none;
+    background-image: linear-gradient(
+      125deg,
+      var(--gold-1) 0%,
+      var(--gold-2) 45%,
+      var(--gold-3) 100%
+    );
+    background-size: 100% 100%;
+    background-position: 0 0;
+  }
+}
+
+/* Cockpit — halo or discret + CTA primaire + liquid glass */
+.cockpit-panel {
+  background: color-mix(in srgb, var(--card) 80%, transparent);
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 1px color-mix(in srgb, var(--gold-2) 18%, transparent);
+}
+
+.cockpit-btn-primary {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold-2) 20%, transparent);
+}
+
+/* Card sélectionnée / focus patrimonial */
+.card--gold-active {
+  border-color: var(--gold-border);
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 1px color-mix(in srgb, var(--gold-2) 12%, transparent);
+}
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  ÉCRAN DE CONNEXION — « entrance experience »
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ *  Cet écran est le seul de l'application où la marque a le premier rôle.
+ *  Il ne suit plus next-themes : la photo de fond (halo doré, poussière
+ *  d'étoiles, horizon en pointillés) fixe elle-même une ambiance sombre, et la
+ *  composition n'a plus de sens en clair. Un seul jeu de tokens, donc — pas de
+ *  bloc `.dark .login-stage`.
+ */
+.login-stage {
+  --login-halo: rgba(217, 166, 77, 0.13);
+
+  --login-card-bg: rgba(18, 18, 20, 0.9);
+  --login-card-border: rgba(255, 255, 255, 0.05);
+  --login-card-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+
+  --login-field-bg: rgba(9, 9, 10, 0.85);
+  --login-field-border: rgba(255, 255, 255, 0.08);
+  --login-placeholder: rgba(255, 255, 255, 0.28);
+
+  --login-title: #f3f2f0;
+  --login-subtitle: rgba(255, 255, 255, 0.6);
+  --login-footer: rgba(255, 255, 255, 0.45);
+
+  --login-card-w: 28.75rem;      /* 460 px */
+  --login-card-radius: 1.125rem; /* 18 px */
+  --login-field-h: 3.5rem;       /* 56 px */
+  --login-field-radius: 0.75rem; /* 12 px */
+  --login-btn-h: 3.375rem;       /* 54 px */
+  --login-rule-min: 3.75rem;     /* 60 px */
+  --login-rule-max: 5.625rem;    /* 90 px */
+
+  position: relative;
+  min-height: 100svh;
+  isolation: isolate;
+  /* Aplat de secours : visible une fraction de seconde si la photo tarde,
+     dans la même teinte qu'elle pour qu'aucun flash clair n'apparaisse. */
+  background: #090909;
+  overflow: hidden;
+}
+
+/*
+ * Photo de fond — un <img> et non un `background-image` CSS : c'est la
+ * convention du dépôt pour les assets de marque volumineux (source unique
+ * dans `brand-assets.ts`, cf. l'ancien `BrandPageBackground`), et elle laisse
+ * l'image participer au flux de chargement (`decoding="async"`, repli
+ * `onError`) plutôt que de dépendre silencieusement d'une URL CSS.
+ */
+.login-bg-image {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+  object-position: center;
+  pointer-events: none;
+}
+
+/* ── Titre ─────────────────────────────────────────────────────────── */
+.login-title {
+  font-family: var(--font-sans);
+  font-weight: 300;
+  letter-spacing: -0.015em;
+  line-height: 1.28;
+  color: var(--login-title);
+  text-wrap: balance;
+}
+
+/*
+ * Filet doré animé.
+ *
+ * Seule la largeur bouge : ni opacité, ni lueur. Une respiration de 30 px sur
+ * quatre secondes se situe juste sous le seuil où l'œil identifie un
+ * mouvement — on la ressent sans jamais la regarder.
+ */
+.login-rule {
+  height: 1px;
+  width: var(--login-rule-min);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--gold-2) 50%,
+    transparent
+  );
+  animation: login-rule-breathe 4s ease-in-out infinite;
+}
+
+@keyframes login-rule-breathe {
+  0%,
+  100% {
+    width: var(--login-rule-min);
+  }
+  50% {
+    width: var(--login-rule-max);
+  }
+}
+
+.login-eyebrow {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.45em;
+  /* L'interlettrage ajoute l'espace après la dernière lettre : sans cette
+     correction, le bloc paraît décalé vers la gauche. */
+  text-indent: 0.45em;
+  color: var(--login-subtitle);
+}
+
+/* ── Panneau ───────────────────────────────────────────────────────── */
+.login-card {
+  width: 100%;
+  max-width: var(--login-card-w);
+  border-radius: var(--login-card-radius);
+  background: var(--login-card-bg);
+  border: 1px solid var(--login-card-border);
+  box-shadow: var(--login-card-shadow);
+  /* Ni flou d'arrière-plan ni transparence : le panneau doit se lire comme
+     une pièce d'aluminium usinée posée sur le fond, pas comme un calque. */
+}
+
+.login-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.25em;
+  color: var(--login-subtitle);
+}
+
+.login-field {
+  width: 100%;
+  height: var(--login-field-h);
+  border-radius: var(--login-field-radius);
+  background: var(--login-field-bg);
+  border: 1px solid var(--login-field-border);
+  color: var(--login-title);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  transition:
+    border-color 180ms var(--ease-out),
+    box-shadow 180ms var(--ease-out);
+}
+
+.login-field::placeholder {
+  color: var(--login-placeholder);
+}
+
+.login-field:focus {
+  outline: none;
+  border-color: var(--gold-2);
+  box-shadow: 0 0 0 3px var(--login-halo);
+}
+
+.login-submit {
+  width: 100%;
+  height: var(--login-btn-h);
+  border-radius: var(--login-field-radius);
+  background: linear-gradient(180deg, var(--gold-1) 0%, var(--gold-2) 100%);
+  color: var(--primary-foreground);
+  font-family: var(--font-sans);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.02em;
+  transition:
+    transform 120ms var(--ease-out),
+    filter 120ms var(--ease-out),
+    box-shadow 120ms var(--ease-out);
+}
+
+.login-submit:hover:not(:disabled) {
+  /* Aucun changement d'échelle : un bouton qui grossit au survol appartient
+     au registre du jeu, pas à celui de la banque privée. */
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 8px 24px var(--login-halo);
+}
+
+.login-submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.login-footer {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--login-footer);
+}
+
+/* Mouvement réduit : la scène devient parfaitement immobile. */
+@media (prefers-reduced-motion: reduce) {
+  .login-rule {
+    animation: none;
+    width: var(--login-rule-min);
+  }
+  .login-field,
+  .login-submit {
+    transition: none;
+  }
+  .login-submit:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
 /* Sous-titre de présentation sous le titre d’onglet (transition visuelle) */
 .module-intro {
   margin-top: var(--module-intro-gap);
   line-height: 1.5;
 }
 
-/* Typographie utilitaire */
+/* ── Typographie utilitaire — 100 % pilotée par les tokens ─────────── */
 .text-label {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-title);
   text-transform: uppercase;
-  color: var(--muted-foreground);
-  line-height: 1.3;
+  color: var(--foreground-faint);
+  line-height: var(--leading-snug);
 }
 
 .text-meta {
-  font-size: 0.75rem;
-  line-height: 1.45;
-  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--foreground-secondary);
 }
 
+/*
+ * Titre de carte — capitales légèrement espacées. C'est la signature
+ * Bloomberg : un en-tête qui s'annonce comme une étiquette d'instrument, pas
+ * comme un titre de page web.
+ */
 .text-title {
-  font-size: 0.9375rem;
-  font-weight: 600;
-  letter-spacing: -0.015em;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  text-transform: uppercase;
   color: var(--foreground);
-  line-height: 1.35;
+  line-height: var(--leading-snug);
 }
 
 /* Section page (hors carte) — « Votre patrimoine », « Contexte marché » */
 .section-heading {
-  font-size: 0.875rem;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  color: var(--foreground);
-  line-height: 1.35;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  text-transform: uppercase;
+  color: var(--foreground-secondary);
+  line-height: var(--leading-snug);
+}
+
+/*
+ * Tout nombre affiché passe par `.num`.
+ *
+ * `tabular-nums` fige la chasse des chiffres : sans lui, une colonne de
+ * montants danse d'une ligne à l'autre au moindre changement de valeur, et
+ * c'est précisément ce qui distingue un tableau de bord amateur d'un
+ * terminal. Le léger resserrement compense la largeur naturelle du mono.
+ */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+  font-feature-settings: "zero" on;
+}
+
+/* Titre de module mis en avant (identité or, sans shine) */
+.section-heading--gold {
+  background-image: linear-gradient(
+    125deg,
+    var(--gold-1) 0%,
+    var(--gold-2) 45%,
+    var(--gold-3) 100%
+  );
+  background-size: 100% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
 }
 
 /* Contrôle segmenté (mode Global / Camembert…) */
@@ -356,6 +1008,20 @@ input:focus-visible {
   width: 100%;
   max-width: 100%;
   min-width: 0; /* allow shrink inside flex/grid parents */
+  /*
+    Bloc conteneur des descendants en position absolue.
+
+    Sans lui, un enfant absolument positionné se cale sur le document, pas sur
+    ce conteneur : le rognage ne l'atteint pas et il étire la page jusqu'à la
+    largeur du tableau. C'est ce que faisait le `sr-only` de la colonne
+    d'actions des Actifs alternatifs — un point de 1 px, invisible, qui
+    emportait la fenêtre entière de plus de 900 px sur mobile.
+
+    `relative` seul ne crée pas de contexte d'empilement et ne déplace rien :
+    il rend simplement vraie la promesse de ce conteneur, à savoir que rien de
+    ce qu'il contient ne déborde ailleurs que dans son propre défilement.
+  */
+  position: relative;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
@@ -459,6 +1125,27 @@ input:focus-visible {
   border-right: none;
 }
 
+/*
+ * Portefeuille : aucun séparateur, ni vertical ni horizontal.
+ *
+ * Le quadrillage appartient au tableur, pas au relevé. Ce que l'œil doit
+ * suivre ici est une colonne de nombres alignés ; les filets qui les
+ * encadraient ajoutaient trente-six traits pour n'aider en rien, et le
+ * regroupement par classe donne déjà le seul découpage qui compte.
+ *
+ * L'alignement suffit à tenir les colonnes, la rangée survolée à tenir la
+ * ligne. Portée à la seule table du portefeuille : les autres écrans gardent
+ * leur grille.
+ */
+.holdings-table-scroll .table-fluid th,
+.holdings-table-scroll .table-fluid td {
+  border-right: none;
+}
+
+.holdings-table-scroll .holdings-row {
+  border-top: none;
+}
+
 .table-fluid th.col-tight,
 .table-fluid td.col-tight {
   min-width: 5rem;
@@ -485,16 +1172,6 @@ input:focus-visible {
 .dark .table-fluid th.col-drag-over {
   box-shadow: inset 3px 0 0 0 rgb(45 212 191);
 }
-.table-fluid th .col-drag-hint {
-  opacity: 0.35;
-  vertical-align: middle;
-  margin-right: 0.25rem;
-  cursor: grab;
-}
-.table-fluid th:hover .col-drag-hint {
-  opacity: 0.75;
-}
-
 /* Manual column resize (Excel-like) + flex-fill widths from JS */
 .table-fluid.table-col-resize {
   table-layout: fixed;
@@ -511,11 +1188,58 @@ input:focus-visible {
 
 /* Holdings scroll host — always allow horizontal scroll when content overflows */
 .holdings-table-scroll {
+  /* Même bloc conteneur que les deux autres hôtes de défilement — voir plus
+     haut : un descendant en position absolue ne doit pas pouvoir étirer la
+     page depuis l'intérieur d'un tableau. */
+  position: relative;
   overflow-x: auto;
   overflow-y: hidden;
   width: 100%;
   max-width: 100%;
   min-width: 0;
+}
+
+/*
+ * Barre de défilement horizontale visible, et non flottante.
+ *
+ * Ces conteneurs défilaient déjà — mais avec une barre superposée, de hauteur
+ * nulle, qui n'apparaît qu'en cours de défilement. Sur un poste sans molette
+ * horizontale ni pavé tactile, le tableau était donc tronqué sans aucun moyen
+ * d'atteindre les colonnes de droite : ni poignée à saisir, ni indice qu'il y
+ * avait quelque chose à aller chercher. On réserve une piste permanente, avec
+ * un curseur assez épais pour être attrapé.
+ */
+.table-container-responsive,
+.table-fluid-wrap,
+.holdings-table-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.table-container-responsive::-webkit-scrollbar,
+.table-fluid-wrap::-webkit-scrollbar,
+.holdings-table-scroll::-webkit-scrollbar {
+  height: 0.625rem;
+}
+
+.table-container-responsive::-webkit-scrollbar-track,
+.table-fluid-wrap::-webkit-scrollbar-track,
+.holdings-table-scroll::-webkit-scrollbar-track {
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.table-container-responsive::-webkit-scrollbar-thumb,
+.table-fluid-wrap::-webkit-scrollbar-thumb,
+.holdings-table-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.table-container-responsive::-webkit-scrollbar-thumb:hover,
+.table-fluid-wrap::-webkit-scrollbar-thumb:hover,
+.holdings-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground-faint);
 }
 
 .table-fluid th.col-header-resizable {
@@ -571,52 +1295,64 @@ body.col-resizing {
   user-select: none !important;
 }
 
+/**
+ * Surfaces — opaques et plates.
+ *
+ * Le design system précédent empilait un « liquid glass » (semi-transparence
+ * + blur 18–26 px) sur chaque carte. Sur un fond #090909 ce flou ne produit
+ * plus aucune matière visible : il coûte du GPU, fait baver les bordures à
+ * 1 px et brouille les chiffres — l'inverse exact d'un terminal. La
+ * profondeur vient désormais du seul empilement de surfaces (--background <
+ * --surface < --surface-raised) et d'une bordure filaire.
+ */
 .card {
-  background: var(--card);
+  background: var(--surface);
   color: var(--card-foreground);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-sm);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
   max-width: 100%;
   min-width: 0;
 }
 
-.dark .card {
-  box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(10px);
-}
-
 /* Carte plate (toolbar / table chrome) — moins de « boîte dans boîte » */
 .card-flat {
-  background: var(--card);
+  background: var(--surface);
   color: var(--card-foreground);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
   box-shadow: none;
   max-width: 100%;
   min-width: 0;
 }
 
 .surface-inset {
-  background: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+  border: var(--border-width) solid var(--border-subtle);
+  border-radius: var(--radius-md);
 }
 
 .kpi-tile {
-  background: var(--card);
+  background: var(--surface);
   color: var(--card-foreground);
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xs);
   max-width: 100%;
   min-width: 0;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
+/* Survol : éclaircissement + soulèvement d'1 px. Aucun rebond. */
 .kpi-tile:hover {
+  background: var(--surface-hover);
   border-color: var(--border-strong);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-lift);
+  transform: translateY(-1px);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -631,32 +1367,62 @@ body.col-resizing {
   font-weight: 600;
 }
 
-.input {
-  width: 100%;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  padding: 0.45rem 0.7rem;
-  font-size: 0.8125rem;
-  line-height: 1.4;
-  outline: none;
-  background: var(--input-bg);
-  color: var(--foreground);
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+/* Valeur patrimoniale de tête (ex. patrimoine net) */
+.kpi-value--primary {
+  color: var(--gold-2);
+  -webkit-text-fill-color: var(--gold-2);
 }
 
-.input:hover:not(:disabled):not(:focus) {
-  border-color: var(--border-strong);
-}
+/*
+  Champ de saisie — la peau commune des `input`, `select` et `textarea`.
 
-.input:focus {
-  border-color: var(--primary);
-  box-shadow: var(--focus-ring);
-}
+  ## Pourquoi cette couche
 
-.input:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-  background: var(--muted);
+  Le reste de ce fichier est hors couche, et l'emporte donc sur les
+  utilitaires Tailwind quelle que soit la spécificité. Pour `.input`, dont les
+  appelants posent couramment une taille ou une largeur, cela signifiait qu'un
+  `text-xs` ou un `w-auto` écrit à côté n'avait aucun effet — d'où les `!`
+  semés dans le dépôt pour reprendre la main.
+
+  Rendue à `@layer components`, la classe repasse sous les utilitaires : ce
+  qu'un appelant écrit à côté d'elle s'applique. C'est l'ordre attendu d'un
+  primitif — il pose une base, l'appel l'ajuste.
+
+  ## Pourquoi la largeur n'y est plus
+
+  `width: 100%` a quitté cette déclaration. La largeur d'un champ appartient à
+  la mise en page qui l'accueille, jamais à sa peau : c'était la seule
+  propriété de `.input` dont la portée fût indéfendable, et à elle seule la
+  cause de la majorité des conflits. Les appels qui remplissaient leur
+  conteneur le disent maintenant eux-mêmes, avec `w-full`.
+*/
+@layer components {
+  .input {
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    padding: 0.45rem 0.7rem;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    outline: none;
+    background: var(--input-bg);
+    color: var(--foreground);
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+
+  .input:hover:not(:disabled):not(:focus) {
+    border-color: var(--border-strong);
+  }
+
+  .input:focus {
+    border-color: var(--primary);
+    box-shadow: var(--focus-ring);
+  }
+
+  .input:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+    background: var(--muted);
+  }
 }
 
 .table-head {
@@ -668,48 +1434,75 @@ body.col-resizing {
   border-color: var(--border);
 }
 
-.holdings-row {
+/*
+ * Ligne cliquable : la ligne entière ouvre la fiche de l'actif, pas une
+ * case ni un chevron dédiés — les deux ont disparu avec la sélection multiple
+ * et l'historique dépliable, remplacés par le panneau de détail.
+ */
+.holdings-row--clickable {
   cursor: pointer;
   transition: background 0.12s ease;
 }
 
-.holdings-row:hover {
-  background: var(--primary-soft);
+.holdings-row--clickable:hover {
+  background: var(--gold-muted);
 }
 
-.holdings-row:focus-visible {
+/*
+ * Ligne affichée dans la colonne de détail.
+ *
+ * Filet doré à gauche plutôt qu'un aplat franc : la sélection doit se voir
+ * sans écraser les nombres de la ligne, qui restent le sujet.
+ */
+.holdings-row[data-selected="true"] {
+  background: var(--gold-muted);
+}
+
+.holdings-row[data-selected="true"] > td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--primary);
+}
+
+.holdings-row--clickable:focus-visible {
   outline: none;
   box-shadow: inset var(--focus-ring);
 }
 
-/* Expand / collapse control column — always visible under table-layout:fixed */
-.table-fluid.table-col-resize th.holdings-expand-col,
-.table-fluid.table-col-resize td.holdings-expand-col {
-  width: 44px;
-  min-width: 44px !important;
-  max-width: 44px;
-  padding-left: 0.25rem;
-  padding-right: 0.25rem;
-  overflow: visible;
-  white-space: nowrap;
-  position: sticky;
-  left: 0;
-  z-index: 3;
-  background: var(--card);
-  box-shadow: 1px 0 0 0 var(--border);
+.dark .holdings-row--clickable:hover {
+  background: var(--gold-muted);
 }
 
-.table-fluid.table-col-resize thead th.holdings-expand-col {
-  background: var(--table-head);
-  z-index: 4;
+/*
+ * Prix périmé : jusqu'ici seule une mention « · périmé » en amber-500
+ * text-[10px] dans la cellule Cours signalait l'état — trop discret pour
+ * une donnée qui affecte la fiabilité de toute la ligne (valeur, P&L). La
+ * teinte de fond couvre la ligne entière, pas seulement la cellule où le
+ * texte l'annonçait.
+ */
+.holdings-row[data-stale="true"] {
+  background: color-mix(in srgb, var(--warning, #d97706) 7%, transparent);
 }
 
-.holdings-row:hover td.holdings-expand-col {
-  background: var(--muted);
+.holdings-row[data-stale="true"]:hover {
+  background: color-mix(in srgb, var(--warning, #d97706) 13%, transparent);
 }
 
-.dark .holdings-row:hover {
-  background: var(--primary-soft);
+/* Nav produit — indicateur or sous l’onglet actif */
+.nav-item-active {
+  position: relative;
+  color: var(--nav-active-gold);
+  background: var(--gold-muted);
+}
+
+.nav-item-active::after {
+  content: "";
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  bottom: 0.15rem;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--gold-2);
+  pointer-events: none;
 }
 
 /* Recharts tooltip readable in dark */
@@ -782,8 +1575,8 @@ body.col-resizing {
 }
 
 [data-sonner-toast][data-type="warning"] {
-  --normal-bg: color-mix(in srgb, #f59e0b 12%, var(--card));
-  --normal-border: color-mix(in srgb, #f59e0b 40%, var(--border));
+  --normal-bg: color-mix(in srgb, var(--warning) 12%, var(--card));
+  --normal-border: color-mix(in srgb, var(--warning) 40%, var(--border));
 }
 
 [data-sonner-toast][data-type="info"] {
@@ -823,7 +1616,7 @@ body.col-resizing {
   background: var(--danger);
 }
 [data-sonner-toast][data-type="warning"]::after {
-  background: #f59e0b;
+  background: var(--warning);
 }
 [data-sonner-toast][data-type="info"]::after {
   background: var(--accent);
@@ -993,3 +1786,1227 @@ textarea:focus-visible,
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  COUCHE COMPOSANTS — TERMINAL
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Variantes réutilisables construites exclusivement sur les tokens du haut
+ *  de ce fichier. Toute valeur littérale ici serait un bug.
+ */
+
+/* ── Bandeau marchés — la ligne la plus fine de l'interface ────────── */
+.term-ticker {
+  height: var(--ticker-height);
+  background: var(--ticker-bg);
+  border-bottom: var(--border-width) solid var(--border);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-normal);
+  color: var(--foreground-secondary);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.term-ticker-rail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding-inline: var(--space-4);
+  white-space: nowrap;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.term-ticker-rail::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+  Défilement continu.
+
+  L'animation translate la piste de la moitié de sa largeur : les deux copies
+  étant identiques, la position finale est visuellement la position initiale,
+  et la boucle est sans couture. `will-change` évite le repaint de toute la
+  barre à chaque image.
+*/
+.term-ticker-marquee {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--space-6),
+    #000 calc(100% - var(--space-6)),
+    transparent
+  );
+}
+
+.term-ticker-track {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding-inline-end: var(--space-6);
+  white-space: nowrap;
+  flex: none;
+  will-change: transform;
+  animation: term-ticker-scroll 90s linear infinite;
+}
+
+/* Le défilement est une commodité, pas une information : on l'arrête dès que
+   l'utilisateur veut lire ou pointer une cotation. */
+.term-ticker:hover .term-ticker-track,
+.term-ticker:focus-within .term-ticker-track {
+  animation-play-state: paused;
+}
+
+@keyframes term-ticker-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+/* Mouvement réduit : la piste s'immobilise et redevient défilable à la main.
+   Une seule des deux copies suffit alors — la seconde n'existait que pour la
+   boucle, et laissée visible elle afficherait chaque cotation en double. */
+@media (prefers-reduced-motion: reduce) {
+  .term-ticker-marquee {
+    overflow-x: auto;
+    scrollbar-width: none;
+    mask-image: none;
+  }
+
+  .term-ticker-marquee::-webkit-scrollbar {
+    display: none;
+  }
+
+  .term-ticker-track {
+    animation: none;
+  }
+
+  .term-ticker-track:nth-child(2) {
+    display: none;
+  }
+}
+
+.term-ticker-closed {
+  color: var(--foreground-faint);
+  font-style: italic;
+}
+
+/* Cours de clôture : présent, mais visiblement moins vif qu'un cours vivant. */
+.term-ticker-price--stale {
+  color: var(--foreground-faint);
+}
+
+.term-ticker-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.term-ticker-symbol {
+  color: var(--foreground-faint);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+}
+
+.term-ticker-price {
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+  Pastille d'enveloppe du portefeuille.
+
+  L'apparence d'un badge, le comportement d'un champ — mais en deux éléments
+  et non un seul. Un `<select>`, même en `width: fit-content`, prend la largeur
+  de sa plus longue option : « AV » réservait la place d'« IMMOBILIER ». Le
+  libellé est donc un `<span>`, qui ne mesure que ce qu'il affiche, et le
+  `<select>` s'étend par-dessus, transparent, pour garder son menu natif.
+*/
+.holdings-envelope-cell {
+  display: flex;
+  /* Centrées : de largeurs inégales, alignées à gauche, les pastilles
+     dessinaient un bord droit en dents de scie le long de la colonne. */
+  justify-content: center;
+}
+
+.holdings-envelope-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: var(--space-2);
+  height: 1.25rem;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-full, 999px);
+  background: var(--surface-raised);
+  color: var(--foreground-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.holdings-envelope-pill:hover {
+  border-color: var(--border-strong);
+  color: var(--foreground);
+}
+
+/* Le focus vit sur le `<select>` invisible : c'est la pastille qui le montre. */
+.holdings-envelope-pill:focus-within {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.holdings-envelope-pill__label {
+  /* Le clic doit atteindre le `<select>` qui recouvre la pastille. */
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.holdings-envelope-pill__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* ── Coquille : colonne de navigation + zone de travail ───────────── */
+.term-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  min-height: 0;
+}
+
+@media (max-width: 900px) {
+  /* Sous 900 px la colonne passe en barre horizontale : une sidebar de
+     72 px ampute trop la largeur utile des tableaux. */
+  .term-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.term-sidebar {
+  background: var(--background);
+  border-right: var(--border-width) solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /*
+    La colonne de navigation passe devant la zone de travail.
+
+    `.term-shell` est une grille : sans cette pile, la colonne de contenu —
+    déclarée après — recouvrait les dépliants, qui devenaient inutilisables dès
+    qu'ils descendaient à hauteur d'une barre d'outils. Le symptôme est apparu
+    en allongeant le menu « Avoirs » ; la cause, elle, était là depuis le
+    début.
+
+    Reste sous les panneaux ancrés (45) et les modales : un dépliant de
+    navigation ne doit jamais passer devant eux.
+  */
+  z-index: 20;
+  gap: var(--space-1);
+  padding-block: var(--space-3);
+  /* `sticky` suffit à porter le z-index — pas besoin d'un second `position`. */
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+}
+
+/*
+ * Barre latérale repliée en rail horizontal sous 900 px.
+ *
+ * Elle défilait alors, barre masquée : les dernières entrées — Fiscalité,
+ * Paramètres — sortaient de l'écran sans aucun moyen de les atteindre à la
+ * souris, puisqu'une molette verticale ne fait pas défiler à l'horizontale et
+ * qu'aucune poignée n'était visible. Le rail passe donc à la ligne : huit
+ * entrées sur deux rangs se voient entièrement, sans geste à deviner.
+ */
+@media (max-width: 900px) {
+  .term-sidebar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    height: auto;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: visible;
+    border-right: none;
+    border-bottom: var(--border-width) solid var(--border);
+    padding-inline: var(--space-2);
+  }
+}
+
+/*
+ * Entrée de navigation : icône + micro-libellé.
+ * L'état actif se signale par un filet doré à gauche plutôt que par un aplat
+ * — sur une colonne étroite, un fond plein écrase l'icône et alourdit la
+ * page ; le filet suffit et reste dans le registre « instrument ».
+ */
+.term-nav-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  width: calc(var(--sidebar-width) - var(--space-3));
+  padding-block: var(--space-2);
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-md);
+  color: var(--foreground-faint);
+  /*
+    11 px et non 10 : ces capitales sont les plus petites de l'interface et
+    portaient en plus le palier de couleur le plus faible. Le gain de lecture
+    est net, et la colonne l'absorbe — « ENGAGEMENTS », le plus long mot du
+    rail, tient toujours sur une ligne. Repassé à 10 px sous 900 px, où le
+    rail se resserre.
+  */
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  /* Pas d'interlettrage ici, contrairement aux autres capitales du système :
+     sur 80 px utiles il ferait déborder « TRANSACTIONS ». */
+  letter-spacing: var(--tracking-normal);
+  text-transform: uppercase;
+  text-align: center;
+  line-height: var(--leading-tight);
+  /* Coupure aux espaces uniquement : « TRANSACTIONS » doit rester entier,
+     « TABLEAU DE BORD » a le droit de passer à la ligne. */
+  overflow-wrap: normal;
+  hyphens: none;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.term-nav-item:hover {
+  color: var(--foreground);
+  background: var(--surface-hover);
+}
+
+.term-nav-item[data-active="true"] {
+  color: var(--primary-text);
+  background: var(--primary-soft);
+}
+
+/* Filet doré collé au bord de la colonne — repère périphérique qui survit à
+   la vision floue, là où un simple changement de teinte d'icône se perd. */
+.term-nav-item[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--space-1);
+  bottom: var(--space-1);
+  width: calc(var(--space-px) * 2);
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  box-shadow: 0 0 var(--space-2) var(--chart-glow);
+}
+
+@media (max-width: 900px) {
+  .term-nav-item[data-active="true"]::before {
+    left: var(--space-2);
+    right: var(--space-2);
+    top: auto;
+    bottom: 0;
+    width: auto;
+    height: calc(var(--space-px) * 2);
+  }
+
+  /*
+    Le rail devient une barre horizontale : la largeur par entrée n'est plus
+    celle de la colonne mais celle de l'écran divisée par le nombre d'entrées.
+    Les 11 px du bureau y feraient déborder les libellés longs — on garde 10.
+  */
+  .term-nav-item {
+    font-size: var(--text-2xs);
+  }
+}
+
+/* ── Carte / panneau ─────────────────────────────────────────────── */
+.panel {
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  min-width: 0;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.panel--interactive:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--pad-card) var(--pad-card) var(--space-3);
+  min-width: 0;
+}
+
+.panel-body {
+  padding: 0 var(--pad-card) var(--pad-card);
+  min-width: 0;
+}
+
+/* ── Contrôle segmenté (1M · 3M · 1A · Tout) ──────────────────────── */
+.term-seg {
+  display: inline-flex;
+  padding: var(--space-px);
+  gap: var(--space-px);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.term-seg-item {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-label);
+  color: var(--foreground-faint);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.term-seg-item:hover:not([data-active="true"]) {
+  color: var(--foreground);
+}
+
+.term-seg-item[data-active="true"] {
+  color: var(--primary-text);
+  background: var(--surface);
+  border-color: var(--gold-border);
+  box-shadow: inset 0 0 0 var(--border-width) var(--gold-border);
+}
+
+/* ── Puce de filtre (Enveloppe · Type · Plateforme · Devise) ──────── */
+.term-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--foreground-secondary);
+  white-space: nowrap;
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.term-chip:hover {
+  color: var(--foreground);
+  border-color: var(--border-strong);
+}
+
+/* Un filtre qui restreint réellement l'affichage se signale en or : sans
+   marqueur, on cherche pendant dix secondes pourquoi le tableau est court. */
+.term-chip[data-filtered="true"] {
+  color: var(--primary-text);
+  border-color: var(--gold-border);
+  background: var(--surface);
+}
+
+.term-chip-label {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-title);
+  text-transform: uppercase;
+  color: var(--foreground-faint);
+}
+
+.term-chip[data-filtered="true"] .term-chip-label {
+  color: inherit;
+}
+
+.term-chip-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: var(--weight-medium);
+}
+
+/* Menu déroulant partagé par les puces de filtre. */
+.term-chip-menu {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-2);
+}
+
+.term-chip-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--foreground);
+  cursor: pointer;
+  text-align: left;
+}
+
+.term-chip-option:hover {
+  background: var(--surface-hover);
+}
+
+/* ── Ligne de groupe du portefeuille (classe d'actifs) ────────────── */
+.group-row {
+  border-top: var(--border-width) solid var(--border);
+  background: var(--surface-sunken);
+}
+
+.group-row:first-child {
+  border-top: 0;
+}
+
+.group-row td {
+  font-size: var(--text-sm);
+}
+
+.group-row:hover {
+  background: var(--surface-hover);
+  cursor: pointer;
+}
+
+/**
+ * Le clic est porté par la ligne entière (surface confortable), mais le point
+ * focusable reste ce bouton, en tête de la cellule « Actif » — au bord gauche
+ * du tableau, là où le regard cherche l'ouverture d'un groupe.
+ */
+.group-row-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  color: var(--foreground-faint);
+  transition: color var(--transition-fast);
+}
+
+.group-row-toggle:hover {
+  color: var(--foreground);
+}
+
+.group-row-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+
+/* ── Ligne d'une table de module ──────────────────────────────────── */
+
+/*
+  La ligne sélectionnable des huit tables patrimoniales — biens, plans,
+  investissements, crédits, opérations, plateformes, lignes fiscales,
+  positions. Chacune avait recopié ces quatre règles sous son propre nom de
+  classe ; aucune n'en avait dévié.
+
+  La sélection reste volontairement discrète : un liseré doré au bord gauche et
+  une surface à peine relevée, jamais une ligne colorée en entier. Le journal
+  des transactions, le plus dense, l'impose aux autres : une teinte de fond y
+  ferait perdre la lecture des montants, verts au crédit et rouges au débit.
+*/
+.data-row {
+  cursor: pointer;
+}
+
+.data-row.is-selected > td {
+  background: var(--surface-hover);
+}
+
+.data-row.is-selected > td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.data-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ── Colonne de détail de l'actif sélectionné ─────────────────────── */
+
+/*
+  Ancrée dans la grille de la page, pas en surimpression : le tableau reste
+  visible et gardé à gauche. `sticky` la maintient à hauteur d'œil quand la
+  liste défile, et `max-height` la borne à la fenêtre pour que son propre corps
+  défile plutôt que la page entière.
+*/
+.asset-panel {
+  position: sticky;
+  top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - var(--space-8));
+  min-height: 0;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  overflow: hidden;
+}
+
+/*
+  Entrée du contenu au changement d'actif : fondu et glissement discret, sous
+  200 ms. Au-delà, la sélection donnerait l'impression d'attendre ; le contenu
+  est déjà là, l'animation ne doit que signaler qu'il a changé.
+*/
+.asset-panel > * {
+  animation: asset-panel-in 160ms var(--ease-out);
+}
+
+@keyframes asset-panel-in {
+  from {
+    transform: translateX(var(--space-2));
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/*
+  ─── Panneau de travail modal ───────────────────────────────────────────────
+
+  Utilisé par la fiche d'un contrat d'assurance-vie (`contract-workspace`).
+  Ces règles ont été supprimées par erreur en même temps que la fiche actif,
+  qui les partageait : le panneau AV s'est retrouvé sans position, donc sous
+  son propre voile, et ses onglets sont devenus inatteignables. Elles vivent
+  ici tant qu'un second écran les utilise ; le jour où il n'en restera qu'un,
+  elles descendront avec lui.
+
+  `position: relative` n'est pas décoratif : le voile est en `absolute` et le
+  précède dans le DOM. Sans contexte de positionnement sur le panneau, c'est
+  le voile qui passe devant.
+*/
+.workspace-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(52rem, calc(100vw - var(--space-6)));
+  height: 100%;
+  background: var(--surface);
+  border-left: var(--border-width) solid var(--border);
+  box-shadow: var(--shadow-lg);
+  animation: workspace-in var(--duration-normal) var(--ease-out);
+}
+
+@keyframes workspace-in {
+  from {
+    transform: translateX(var(--space-6));
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.workspace-head {
+  flex-shrink: 0;
+  padding: var(--pad-card);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.workspace-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--pad-card);
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.workspace-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.workspace-tab {
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--foreground-faint);
+  white-space: nowrap;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.workspace-tab:hover:not([data-active="true"]) {
+  color: var(--foreground);
+  background: var(--surface-hover);
+}
+
+.workspace-tab[data-active="true"] {
+  color: var(--primary-text);
+  background: var(--surface-sunken);
+  box-shadow: inset 0 0 0 var(--border-width) var(--gold-border);
+}
+
+/* Section dont le back-end n'existe pas encore : signalée avant le clic. */
+.workspace-tab[data-backing="pending"]::after {
+  content: "";
+  display: inline-block;
+  width: var(--space-1);
+  height: var(--space-1);
+  margin-left: var(--space-2);
+  border-radius: 50%;
+  background: var(--foreground-faint);
+  vertical-align: middle;
+}
+
+.workspace-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--pad-card);
+}
+
+/*
+  Bandeau du panneau : il nomme la colonne et porte sa fermeture, à part de
+  l'actif. La croix posée au niveau du nom se lisait comme « retirer cet
+  actif » plutôt que « refermer le détail ».
+*/
+.asset-panel-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: var(--space-2) var(--pad-card);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.asset-panel-head {
+  flex-shrink: 0;
+  padding: var(--pad-card);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.asset-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--pad-card);
+}
+
+.asset-panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-8) var(--pad-card);
+  text-align: center;
+}
+
+.asset-panel-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  color: var(--foreground-faint);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.asset-panel-close:hover {
+  color: var(--foreground);
+  background: var(--surface-hover);
+}
+
+/* Étoile de suivi — même gabarit que la fermeture, elles vivent côte à côte. */
+.asset-panel-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  color: var(--foreground-faint);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.asset-panel-star:hover {
+  color: var(--primary-text);
+  background: var(--surface-hover);
+}
+
+/* Suivi : l'or du thème, la même couleur que partout où l'on marque une
+   ligne comme retenue. */
+.asset-panel-star[data-on="true"] {
+  color: var(--chart-gold);
+}
+
+.asset-panel-star:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/*
+  Aucun filet entre les lignes : l'étiquette à gauche et la valeur à droite
+  suffisent à les tenir séparées, et sept traits dans un panneau de 360 px
+  pèsent plus lourd que les sept chiffres qu'ils encadrent.
+*/
+.asset-panel-facts {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Liste des sections — chacune ouvre son contenu dans ce même panneau. */
+.asset-panel-sections {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-4);
+  border-top: var(--border-width) solid var(--border);
+}
+
+.asset-panel-section-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3) var(--space-1);
+  border-bottom: var(--border-width) solid var(--border-subtle);
+  font-size: var(--text-sm);
+  color: var(--foreground-secondary);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.asset-panel-section-link:hover {
+  color: var(--foreground);
+  background: var(--surface-hover);
+}
+
+.asset-panel-section-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Section dont le back-end n'existe pas encore : signalée avant le clic, pour
+   qu'on sache qu'on n'y trouvera pas de chiffres. */
+.asset-panel-section-link[data-backing="pending"] > span:first-child::after {
+  content: "";
+  display: inline-block;
+  width: var(--space-1);
+  height: var(--space-1);
+  margin-left: var(--space-2);
+  border-radius: 50%;
+  background: var(--foreground-faint);
+  vertical-align: middle;
+}
+
+.asset-panel-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--foreground-faint);
+  transition: color var(--transition-fast);
+}
+
+.asset-panel-back:hover {
+  color: var(--foreground);
+}
+
+/*
+  Sous 1280 px la colonne se superpose au lieu de partager la largeur : à deux
+  colonnes, le tableau tomberait sous les 600 px utiles et ses dix colonnes
+  deviendraient illisibles. Le bouton de fermeture reprend alors tout son sens.
+*/
+@media (max-width: 1279px) {
+  /*
+    Sans sélection, la colonne superposée n'a rien à montrer et masquerait le
+    tableau entier. Elle s'efface donc, et ne revient qu'au clic sur une ligne.
+  */
+  .asset-panel[data-open="false"] {
+    display: none;
+  }
+
+  .asset-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 45;
+    width: min(24rem, 100vw);
+    max-height: none;
+    border-radius: 0;
+    border-left: var(--border-width) solid var(--border-strong);
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+/* Mobile : plein écran, la liste n'a de toute façon plus la place. */
+@media (max-width: 700px) {
+  .asset-panel {
+    width: 100vw;
+    border-left: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asset-panel > * {
+    animation: none;
+  }
+}
+
+/* ── Tableau terminal ─────────────────────────────────────────────── */
+.term-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.term-table thead th {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-title);
+  text-transform: uppercase;
+  color: var(--foreground-faint);
+  border-bottom: var(--border-width) solid var(--border);
+  white-space: nowrap;
+}
+
+.term-table tbody td {
+  padding: var(--space-3);
+  border-bottom: var(--border-width) solid var(--border-subtle);
+  color: var(--foreground);
+  vertical-align: middle;
+}
+
+.term-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.term-table tbody tr {
+  transition: background-color var(--transition-fast);
+}
+
+.term-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+/* Colonnes de nombres : alignées à droite et monospacées, sans exception. */
+.term-table .col-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+  white-space: nowrap;
+}
+
+/* ── Graphiques ───────────────────────────────────────────────────── */
+.term-chart-grid line,
+.term-chart-grid path {
+  stroke: var(--chart-grid);
+}
+
+/* Infobulle Recharts — même matière que les cartes */
+.term-tooltip {
+  background: var(--surface-raised);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+}
+
+.term-tooltip-label {
+  color: var(--foreground-faint);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  margin-bottom: var(--space-1);
+}
+
+.term-tooltip-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+  font-weight: var(--weight-medium);
+}
+
+/* ── Statuts ──────────────────────────────────────────────────────── */
+.val-positive {
+  color: var(--positive);
+}
+.val-negative {
+  color: var(--negative);
+}
+.val-neutral {
+  color: var(--foreground-secondary);
+}
+/*
+  Trois teintes de plus, prises sur des jetons existants plutôt que sur des
+  couleurs Tailwind arbitraires : chacun a déjà sa variante claire et sombre,
+  calibrée pour rester lisible sur les deux fonds.
+
+  Elles servent à distinguer des **natures** d'opération — un revenu récurrent
+  n'est ni un achat ni une vente — là où `val-positive` et `val-negative`
+  disent un sens. La couleur n'est jamais seule à porter l'information : le
+  libellé (« Dividende », « Loyer », « Coupon ») reste affiché.
+*/
+.val-warning {
+  color: var(--warning);
+}
+.val-info {
+  color: var(--info);
+}
+.val-accent {
+  color: var(--chart-violet);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .term-nav-item,
+  .term-seg-item,
+  .panel,
+  .kpi-tile,
+  .term-table tbody tr {
+    transition: none;
+  }
+  .kpi-tile:hover {
+    transform: none;
+  }
+}
+
+/* ── Onglet Banques : synthèse par établissement ──────────────────── */
+
+/*
+  L'établissement est le premier niveau de lecture, ses produits le second.
+  La hiérarchie est portée par le retrait et le poids typographique plutôt que
+  par des cartes imbriquées : trois encadrés dans trois encadrés auraient
+  ajouté du bruit là où la lecture demande de la densité.
+*/
+.bank-institution + .bank-institution {
+  border-top: var(--border-width) solid var(--border);
+}
+
+.bank-institution-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.bank-institution-head:hover {
+  background: var(--surface-hover);
+}
+
+.bank-institution-head:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/*
+  Ligne d'un produit rattaché.
+
+  Le filet vertical à gauche matérialise le rattachement à l'établissement :
+  sans lui, une liste de produits à plat se confond avec la liste des banques
+  dès que l'on fait défiler.
+*/
+.bank-product-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4) var(--space-2) var(--space-10);
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.bank-product-row::before {
+  content: "";
+  position: absolute;
+  left: var(--space-7);
+  width: var(--border-width);
+  height: var(--space-5);
+  background: var(--border);
+  transform: translateX(-50%);
+}
+
+.bank-product-row {
+  position: relative;
+}
+
+.bank-product-row:hover {
+  background: var(--surface-hover);
+}
+
+.bank-product-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/*
+  Sélection.
+
+  Un liseré doré à gauche et un fond légèrement surélevé — la même grammaire
+  que la ligne sélectionnée du portefeuille. Assez pour retrouver sa ligne d'un
+  coup d'œil quand le panneau de droite change, jamais assez pour crier.
+*/
+.bank-institution-head.is-selected,
+.bank-product-row.is-selected,
+.bank-table-row.is-selected > td {
+  background: var(--surface-hover);
+}
+
+.bank-institution-head.is-selected,
+.bank-product-row.is-selected {
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.bank-table-row {
+  cursor: pointer;
+}
+
+.bank-table-row.is-selected > td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.bank-table-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ── Assurance-vie : ligne d'un contrat ───────────────────────────── */
+
+/*
+  Cinq colonnes alignées d'une ligne à l'autre — identité, valeur, performance,
+  versements, répartition. C'est ce qui rend deux contrats comparables sans
+  faire défiler, ce que les cartes de treize centimètres empêchaient.
+
+  Sous 1100 px, la grille se replie en deux colonnes : à cette largeur, cinq
+  colonnes rendraient chaque nombre illisible avant de le rendre comparable.
+*/
+.av-contract-row {
+  display: grid;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-4);
+  grid-template-columns:
+    minmax(0, 2.4fr) minmax(0, 1fr) minmax(0, 1fr)
+    minmax(0, 1fr) minmax(0, 1.2fr);
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.av-contract-row:hover {
+  background: var(--surface-hover);
+}
+
+.av-contract-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Sélection : la même grammaire que la ligne choisie du Portefeuille. */
+.av-contract-row.is-selected {
+  background: var(--surface-hover);
+  box-shadow: inset 2px 0 0 0 var(--gold-border);
+}
+
+.av-contract-list > li + li {
+  border-top: var(--border-width) solid var(--border);
+}
+
+@media (max-width: 1100px) {
+  .av-contract-row {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: var(--space-2) var(--space-3);
+  }
+}
+
+/*
+  Contexte global de l'assurance-vie, sous la liste.
+
+  Il occupait une colonne de droite, à côté du panneau de détail : deux
+  colonnes latérales pour un écran, et le contrat sélectionné se retrouvait
+  décrit à deux endroits. Ce qui relève de l'enveloppe entière — synthèse,
+  statut fiscal, opérations récentes — descend donc sous la liste, en bande
+  horizontale, et laisse la droite au seul contrat choisi.
+*/
+.av-context-inline {
+  display: grid;
+  gap: var(--gap-card);
+}
+
+@media (min-width: 900px) {
+  .av-context-inline {
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    align-items: start;
+  }
+}
+
+/*
+  Contexte global, sous la liste plutôt qu'en colonne de droite : le panneau de
+  détail occupe désormais cette place, et le plan sélectionné n'a pas à être
+  décrit à deux endroits.
+*/
+.es-context-inline {
+  display: grid;
+  gap: var(--gap-card);
+}
+
+@media (min-width: 900px) {
+  .es-context-inline {
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    align-items: start;
+  }
+}
+

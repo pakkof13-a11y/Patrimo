@@ -18,7 +18,7 @@ export type TransactionImport = {
   quantity: number;
   price: number;
   fees?: number;
-  /** Métadonnées optionnelles pour le commit Patrimo */
+  /** Métadonnées optionnelles pour le commit Aurea */
   currency?: string;
   name?: string;
   cashAmount?: number;

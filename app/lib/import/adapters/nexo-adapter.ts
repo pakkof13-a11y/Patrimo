@@ -21,7 +21,7 @@ const meta: PlatformAdapterMeta = {
   description: "Nexo Transactions CSV (Transaction, Type, Input/Output Currency & Amount, Date / Time)",
 };
 
-function mapNexoType(type: string): "BUY" | "SELL" | "OTHER" {
+function mapNexoType(type: string): "BUY" | "SELL" | "DIVIDEND" | "OTHER" {
   const t = type.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
   // Interest-related types
@@ -31,7 +31,10 @@ function mapNexoType(type: string): "BUY" | "SELL" | "OTHER" {
     t.includes("fixedterm") ||
     t.includes("additional")
   ) {
-    return "BUY"; // Interest income → canonical DIVIDEND
+    // Revenu, pas une acquisition. Renvoyait "BUY", ce qui affichait « Achat »
+    // dans l'aperçu alors que le commit classe bien la ligne en INTERET —
+    // l'aperçu annonçait donc autre chose que ce qui allait être importé.
+    return "DIVIDEND";
   }
 
   // Deposit/Top-up types (inbound cash or crypto) — handle "top up" with spaces
@@ -196,7 +199,7 @@ export const nexoAdapter: PlatformCsvAdapter = {
       // Determine ticker and amount based on transaction direction
       let ticker = inputCurrencyRaw.trim().toUpperCase();
       let quantity = parseNumber(inputAmountRaw);
-      let cashAmount = parseNumber(usdEquivalentRaw);
+      const cashAmount = parseNumber(usdEquivalentRaw);
 
       // For exchanges/swaps, prefer output currency
       if (type === "BUY" && outputCurrencyRaw && outputAmountRaw) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { PlatformLogo } from "./platform-logo";
+import { AssetLogo } from "./platform-logo";
 import { cn } from "@/app/lib/utils";
 
 export type AssetSuggestion = {
@@ -201,7 +201,7 @@ export function AssetAutocomplete({
   return (
     <div ref={wrapRef} className={cn("relative", className)}>
       <input
-        className="input"
+        className="input w-full"
         data-testid="tx-asset"
         placeholder="Rechercher un actif (LVMH, AAPL, Bitcoin…)"
         value={query}
@@ -239,7 +239,13 @@ export function AssetAutocomplete({
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-teal-50 dark:hover:bg-teal-950/40"
               onClick={() => pick(h)}
             >
-              <PlatformLogo src={h.logoUrl} name={h.name} size={22} />
+              <AssetLogo
+                src={h.logoUrl}
+                name={h.name}
+                ticker={h.ticker}
+                assetClass={h.assetClass}
+                size={22}
+              />
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">
                   {h.name}

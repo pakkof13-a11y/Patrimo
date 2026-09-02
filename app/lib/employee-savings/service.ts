@@ -7,6 +7,7 @@ import {
   resolveUnlock,
   sourceLabel,
 } from "./logic";
+import { isFundCategory } from "./fund-category";
 import type {
   EmployeeSavingsLineDto,
   EmployeeSavingsPlanType,
@@ -19,6 +20,20 @@ function dec(v: string | number | undefined | null, fallback = "0"): Prisma.Deci
   const s = String(v ?? fallback).trim().replace(",", ".");
   const n = Number(s);
   return new Prisma.Decimal(Number.isFinite(n) ? s : fallback);
+}
+
+/**
+ * Décimal facultatif : une chaîne vide n'est pas un zéro.
+ *
+ * Le formulaire envoie "" quand l'utilisateur ne sait pas ; l'enregistrer à 0
+ * ferait apparaître un gain égal à la valeur entière de la position.
+ */
+function optionalDec(v: string | number | null | undefined): Prisma.Decimal | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim().replace(",", ".");
+  if (s === "") return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? new Prisma.Decimal(s) : null;
 }
 
 function toIsoDate(d: Date | null | undefined): string | null {
@@ -37,6 +52,8 @@ function mapLine(row: {
   currency: string;
   sourceType: string;
   contributionDate: Date | null;
+  contributedAmount: Prisma.Decimal | null;
+  fundCategory: string | null;
   unlockDate: Date | null;
   unlockMode: string;
   notes: string | null;
@@ -62,6 +79,11 @@ function mapLine(row: {
     currency: row.currency,
     sourceType: row.sourceType as EmployeeSavingsSource,
     contributionDate: toIsoDate(row.contributionDate),
+    // Deux champs facultatifs : `null` veut dire « non renseigné », jamais
+    // « zéro ». C'est ce qui permet à l'écran de ne pas annoncer un gain qu'il
+    // ne peut pas calculer.
+    contributedAmount: row.contributedAmount ? row.contributedAmount.toString() : null,
+    fundCategory: row.fundCategory,
     unlockDate: unlock.unlockDate ? toIsoDate(unlock.unlockDate) : toIsoDate(row.unlockDate),
     unlockMode: unlock.unlockMode,
     notes: row.notes,
@@ -159,6 +181,8 @@ export type CreateEmployeeSavingsInput = {
   currency?: string;
   sourceType?: string;
   contributionDate?: string | null;
+  contributedAmount?: string | number | null;
+  fundCategory?: string | null;
   unlockDate?: string | null;
   unlockMode?: string | null;
   notes?: string | null;
@@ -198,6 +222,12 @@ function normalizeCreate(input: CreateEmployeeSavingsInput) {
     currency: (input.currency || "EUR").toUpperCase().slice(0, 3),
     sourceType: String(input.sourceType || "VOLUNTARY").toUpperCase(),
     contributionDate,
+    contributedAmount: optionalDec(input.contributedAmount),
+    fundCategory: isFundCategory(
+      String(input.fundCategory || "").toUpperCase()
+    )
+      ? String(input.fundCategory).toUpperCase()
+      : null,
     unlockDate,
     unlockMode: unlockMode as EmployeeSavingsUnlockMode,
     notes: input.notes ? String(input.notes) : null,
@@ -235,6 +265,12 @@ export async function updateEmployeeSavingsLine(
       input.contributionDate !== undefined
         ? input.contributionDate
         : toIsoDate(existing.contributionDate),
+    contributedAmount:
+      input.contributedAmount !== undefined
+        ? input.contributedAmount
+        : existing.contributedAmount?.toString() ?? null,
+    fundCategory:
+      input.fundCategory !== undefined ? input.fundCategory : existing.fundCategory,
     unlockDate:
       input.unlockDate !== undefined ? input.unlockDate : toIsoDate(existing.unlockDate),
     unlockMode: input.unlockMode ?? existing.unlockMode,

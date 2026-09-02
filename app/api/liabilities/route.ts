@@ -3,6 +3,7 @@ import { Prisma } from "@/app/lib/prisma-client/client";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { liabilitySchema, liabilityUpdateSchema } from "@/app/lib/schemas";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 import {
   presentFields,
   requireBodyId,
@@ -23,7 +24,7 @@ export async function GET() {
     const data = await listLiabilities(userId);
     return NextResponse.json(data);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Erreur passifs";
+    const msg = clientErrorMessage(e, "Erreur passifs");
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
@@ -48,7 +49,7 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ liability });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Erreur";
+      const msg = clientErrorMessage(e, "Erreur");
       return NextResponse.json({ error: msg }, { status: 400 });
     }
   }
@@ -64,7 +65,7 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ liability });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Erreur";
+      const msg = clientErrorMessage(e, "Erreur");
       return NextResponse.json({ error: msg }, { status: 400 });
     }
   }
@@ -80,7 +81,7 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ liability });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Erreur";
+      const msg = clientErrorMessage(e, "Erreur");
       return NextResponse.json({ error: msg }, { status: 400 });
     }
   }
@@ -88,6 +89,16 @@ export async function POST(req: Request) {
   const parsed = liabilitySchema.safeParse(body);
   if (!parsed.success) {
     return validationErrorResponse(parsed.error);
+  }
+
+  if (parsed.data.assetId) {
+    const asset = await prisma.asset.findFirst({
+      where: { id: parsed.data.assetId, userId },
+      select: { id: true },
+    });
+    if (!asset) {
+      return NextResponse.json({ error: "Bien introuvable" }, { status: 400 });
+    }
   }
 
   const paymentDay =
@@ -108,10 +119,15 @@ export async function POST(req: Request) {
       monthlyPayment: parsed.data.monthlyPayment
         ? new Prisma.Decimal(parsed.data.monthlyPayment)
         : null,
+      insuranceMonthly: parsed.data.insuranceMonthly
+        ? new Prisma.Decimal(parsed.data.insuranceMonthly)
+        : null,
       startDate: parsed.data.startDate ? new Date(parsed.data.startDate) : null,
       endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
       paymentDay,
       bankName: parsed.data.bankName || null,
+      category: parsed.data.category,
+      assetId: parsed.data.assetId || null,
       notes: parsed.data.notes || null,
     },
   });
@@ -134,7 +150,23 @@ export async function PUT(req: Request) {
   if (!parsed.success) return validationErrorResponse(parsed.error);
 
   const f = presentFields(body, parsed.data as Record<string, unknown>) as typeof parsed.data;
-  const data: Prisma.LiabilityUpdateInput = {};
+
+  if (f.assetId) {
+    const asset = await prisma.asset.findFirst({
+      where: { id: f.assetId, userId },
+      select: { id: true },
+    });
+    if (!asset) {
+      return NextResponse.json({ error: "Bien introuvable" }, { status: 400 });
+    }
+  }
+
+  /*
+    `UncheckedUpdateMany` et non `Update` : l'écriture passe par `updateMany`,
+    qui n'accepte aucune écriture de relation imbriquée. Le type le dit, et le
+    rattachement au bien se fait par sa clé étrangère — comme à la création.
+  */
+  const data: Prisma.LiabilityUncheckedUpdateManyInput = {};
 
   if (f.name !== undefined) data.name = f.name;
   if (f.initialAmount !== undefined)
@@ -147,7 +179,23 @@ export async function PUT(req: Request) {
   if (f.monthlyPayment !== undefined)
     data.monthlyPayment =
       f.monthlyPayment != null ? new Prisma.Decimal(f.monthlyPayment) : null;
+  if (f.insuranceMonthly !== undefined)
+    data.insuranceMonthly =
+      f.insuranceMonthly != null ? new Prisma.Decimal(f.insuranceMonthly) : null;
   if (f.bankName !== undefined) data.bankName = f.bankName || null;
+  if (f.category !== undefined) data.category = f.category;
+  if (f.assetId !== undefined) {
+    /*
+      `data.asset = { connect } / { disconnect }` était rejeté par Prisma :
+      `updateMany` ne connaît pas les écritures de relation. Toute modification
+      du bien financé — rattachement comme détachement — échouait donc en
+      erreur serveur, sans que rien d'autre ne soit écrit.
+
+      L'appartenance du bien est vérifiée plus haut ; il ne reste qu'à poser la
+      clé, chaîne vide valant détachement.
+    */
+    data.assetId = f.assetId || null;
+  }
   if (f.notes !== undefined) data.notes = f.notes || null;
   if (f.startDate !== undefined) data.startDate = f.startDate ? new Date(f.startDate) : null;
   if (f.endDate !== undefined) data.endDate = f.endDate ? new Date(f.endDate) : null;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@/app/lib/prisma-client/client";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
+import { remainingAmountAt } from "@/app/lib/liabilities/amortization";
 import { platformSchema } from "@/app/lib/schemas";
 import {
   presentFields,
@@ -11,6 +12,7 @@ import {
 import { getPlatformCashBalances } from "@/app/lib/portfolio/service";
 import { PLATFORM_PRESETS } from "@/app/lib/platforms/presets";
 import { findOrCreatePlatform } from "@/app/lib/platforms/upsert";
+import { clientErrorMessage } from "@/app/lib/api/error-response";
 
 export async function GET() {
   const userId = await requireUserId();
@@ -19,10 +21,7 @@ export async function GET() {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   const platforms = await getPlatformCashBalances(
     userId,
-    user?.baseCurrency || "EUR",
-    undefined,
-    undefined,
-    { includeWalletApiKey: true }
+    user?.baseCurrency || "EUR"
   );
   return NextResponse.json({ platforms, presets: PLATFORM_PRESETS });
 }
@@ -108,7 +107,7 @@ export async function POST(req: Request) {
         { status: 409 }
       );
     }
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = clientErrorMessage(e);
     console.error("[platforms POST]", msg);
     // Message client non verbeux mais actionnable (pas de stack / SQL)
     const schemaLag = /walletApiKey|column .* does not exist|Unknown arg/i.test(
@@ -197,7 +196,7 @@ export async function DELETE(req: Request) {
   const existing = await prisma.platform.findFirst({ where: { id, userId } });
   if (!existing) return NextResponse.json({ error: "Introuvable" }, { status: 404 });
 
-  const [assetCount, txCount] = await Promise.all([
+  const [assetCount, txCount, detachedRows] = await Promise.all([
     prisma.asset.count({ where: { platformId: id, userId } }),
     prisma.transaction.count({
       where: {
@@ -205,7 +204,44 @@ export async function DELETE(req: Request) {
         OR: [{ platformId: id }, { toPlatformId: id }],
       },
     }),
+    /*
+      Crédits qui perdraient leur bien.
+
+      `Liability.assetId` est en `SetNull` : effacer un actif financé laisse le
+      crédit au passif — le patrimoine net ne bouge pas — mais lui retire le
+      bien auquel il était rattaché. La dette cesse alors d'être déductible de
+      l'assiette IFI, qui augmente d'autant, sans qu'aucun écran ne relie les
+      deux événements.
+
+      La suppression reste permise : c'est une décision légitime, déjà protégée
+      par une confirmation écrite. Ce qui manquait, c'est qu'elle dise ce
+      qu'elle va faire.
+    */
+    prisma.liability.findMany({
+      where: { userId, asset: { is: { platformId: id, userId } } },
+      select: {
+        id: true,
+        name: true,
+        // Champs d'amortissement : le capital dû s'y projette comme partout
+        // ailleurs. Rendre le solde stocké ferait annoncer ici un montant que
+        // le module Crédits n'affiche plus.
+        remainingAmount: true,
+        monthlyPayment: true,
+        paymentDay: true,
+        startDate: true,
+        endDate: true,
+        lastPaymentAppliedAt: true,
+        asset: { select: { name: true } },
+      },
+    }),
   ]);
+
+  const detachedLiabilities = detachedRows.map((l) => ({
+    id: l.id,
+    name: l.name,
+    remainingAmountEur: remainingAmountAt(l),
+    propertyName: l.asset?.name ?? null,
+  }));
 
   if (!force && (assetCount > 0 || txCount > 0)) {
     return NextResponse.json(
@@ -214,6 +250,7 @@ export async function DELETE(req: Request) {
         code: "HAS_DEPENDENCIES",
         assetCount,
         txCount,
+        detachedLiabilities,
         name: existing.name,
       },
       { status: 409 }
@@ -281,6 +318,8 @@ export async function DELETE(req: Request) {
       return NextResponse.json({
         ok: true,
         force: true,
+        // Rendus après coup aussi : l'écran peut dire ce qui vient d'être détaché.
+        detachedLiabilities,
         deleted: {
           assets: assetCount,
           transactions: deletedTxs || txCount,
@@ -293,7 +332,7 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ ok: true, force: false });
   } catch (e) {
     console.error("[platforms DELETE]", e);
-    const msg = e instanceof Error ? e.message : "Erreur serveur";
+    const msg = clientErrorMessage(e, "Erreur serveur");
     // Prisma FK / timeout : message utile côté UI
     const friendly =
       /Foreign key|Restrict|P2003/i.test(msg)
