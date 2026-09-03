@@ -70,18 +70,35 @@ const HERO_MODE_TITLE: Record<HeroMode, string> = {
  * donc la valeur **et** la courbe ensemble — afficher un montant net au-dessus
  * d'une trajectoire brute était le défaut de la version précédente.
  *
- * **Cette carte ignore délibérément le sélecteur de période du tableau de
- * bord.** Elle répond à « où en est le patrimoine, et d'où vient-il », qui n'a
- * pas de fenêtre : la courbe part du premier point disponible, toujours. Les
- * questions à horizon — sur un mois, sur un an — sont celles du bandeau
- * d'indicateurs et du graphique d'évolution, qui, eux, suivent le sélecteur.
- * C'est aussi pourquoi la carte n'affiche aucune variation : une variation sans
- * période affichée ne veut rien dire, et en remettre une ici rouvrirait la
- * question de la fenêtre.
+ * ## Période
  *
- * Le graphique de droite est délibérément sans axe ni graduation. Il ne sert
- * pas à lire une valeur — la carte « Évolution du portefeuille », plus bas,
- * s'en charge — mais à donner la forme du trajet en moins d'une seconde.
+ * La carte porte **ses propres** périodes — 1M · 3M · YTD · 1A · 5A · Max —
+ * retenues sous `HERO_RANGE_KEY`. Elles sont indépendantes du sélecteur du
+ * bandeau d'indicateurs et du graphique d'évolution : les deux blocs répondent
+ * à des questions différentes, et un test vérifie que le sélecteur global ne
+ * déplace pas le chiffre de tête. Le fenêtrage lui-même est celui du tableau de
+ * bord (`windowForRange`), pas une seconde découpe.
+ *
+ * ## Ce que la carte affiche, et quand
+ *
+ * - **Hors survol** : le chiffre est la valorisation courante, et la ligne en
+ *   dessous porte le Δ de la fenêtre — montant, pourcentage, libellé de
+ *   période. Si `heroAttribution` aboutit, deux pastilles disent d'où vient ce
+ *   Δ : Marché et Flux. Elles disparaissent ensemble quand l'historique ne
+ *   publie pas les flux, plutôt que d'annoncer un « Flux 0 € » qui affirmerait
+ *   qu'aucun capital n'est entré.
+ * - **Au survol** : le chiffre suit le point désigné, et le Δ de fenêtre est
+ *   **caché sans être démonté** — sa boîte reste réservée, faute de quoi la
+ *   carte se contracte sous le curseur et le survol se perd. Le Δ d'un jour à
+ *   l'autre, lui, vit dans l'info-bulle : les deux ne répondent pas à la même
+ *   question et les réunir sous le même chiffre les rendrait illisibles.
+ *
+ * Le graphique reste sans axe ni graduation : il ne sert pas à lire une valeur
+ * — l'info-bulle s'en charge, et la carte « Évolution du portefeuille » plus
+ * bas également — mais à donner la forme du trajet en moins d'une seconde. Son
+ * échelle verticale est cadrée sur la fenêtre par `sparklineGeometry`, sans
+ * base zéro imposée : sur un mois, quinze mille euros de mouvement sur deux
+ * millions doivent rester visibles.
  */
 export function TerminalHero({
   netWorth,
@@ -102,18 +119,6 @@ export function TerminalHero({
 
   const currentValue = mode === "net" ? netWorth : grossAssets;
 
-  /*
-    L'historique entier, sans fenêtrage d'aucune sorte.
-
-    Aucun `range`, aucun `slice`, aucun nombre de points : la série est
-    l'historique tel qu'il arrive, du premier point disponible à aujourd'hui.
-    C'est ce qui rend la carte insensible au sélecteur global, et un test le
-    vérifie plutôt que de s'en remettre à la lecture du code.
-
-    `kpiSeries` porte la même règle qu'ailleurs : si un point ne contient pas la
-    grandeur, la série est déclarée inconnue au lieu d'être comblée par des
-    zéros. Une carte sans courbe vaut mieux qu'une courbe qui ne décrit rien.
-  */
   /*
     Période de la carte, retenue d'une session à l'autre.
 
@@ -147,6 +152,11 @@ export function TerminalHero({
     [history, range]
   );
 
+  /*
+    `kpiSeries` porte la même règle qu'ailleurs : si un point ne contient pas la
+    grandeur, la série est déclarée inconnue au lieu d'être comblée par des
+    zéros. Une carte sans courbe vaut mieux qu'une courbe qui ne décrit rien.
+  */
   const values = useMemo(
     () => kpiSeries(windowed, mode === "net" ? netWorthAt : grossAssetsAt),
     [windowed, mode]
@@ -645,8 +655,27 @@ export function TerminalHero({
                 className="term-seg-item"
                 data-testid={`hero-range-${r}`}
                 onClick={() => {
-                  setChosenRange(r);
                   saveUiPref(HERO_RANGE_KEY, r);
+                  setChosenRange(r);
+                  /*
+                    Le survol ne survit pas au changement de fenêtre.
+
+                    Le rang désigné n'a de sens que dans la série qui l'a
+                    produit : conservé, il pointerait le même rang dans une
+                    série qui couvre dix ans au lieu d'un mois — un autre jour,
+                    un autre montant, sans que rien ne le signale. Le bornage du
+                    hook ne protège que du rang hors tableau, pas du rang valide
+                    mais devenu faux.
+
+                    Aujourd'hui redondant, et assumé comme tel : activer un chip
+                    suppose de sortir le pointeur du graphique ou de lui prendre
+                    le focus, et `pointerleave` comme `blur` relâchent déjà le
+                    survol. Le dire ici rend l'invariant explicite au lieu de le
+                    faire reposer sur deux effets de bord — le jour où les chips
+                    passeraient à l'intérieur du cadre, aucun des deux ne se
+                    produirait plus.
+                  */
+                  hover.reset();
                 }}
               >
                 {HERO_RANGE_LABEL[r]}

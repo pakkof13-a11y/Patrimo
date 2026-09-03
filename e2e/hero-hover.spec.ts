@@ -315,6 +315,46 @@ test.describe("Carte de tête — survol de la courbe", () => {
     }
   });
 
+  test("changer de période relâche le survol", async ({ page }) => {
+    const chart = await heroChart(page);
+    const montant = page.getByTestId("hero-net-worth");
+
+    await page.getByTestId("hero-range-1m").click();
+
+    /*
+      Point désigné au clavier, le chemin le plus exposé.
+
+      Honnêteté sur ce que ce test prouve : mesuré, il passe **aussi** sans
+      l'appel explicite à `reset` au clic d'un chip. Activer un chip suppose en
+      effet soit de sortir le pointeur du graphique — `pointerleave` —, soit de
+      lui prendre le focus — `blur` —, et les deux relâchent déjà le survol. Le
+      rang périmé n'est donc pas atteignable aujourd'hui.
+
+      Ce test ne certifie pas une correction : il fixe l'invariant. Il
+      échouerait le jour où les chips passeraient à l'intérieur du conteneur du
+      graphique, où ni l'un ni l'autre de ces deux événements ne se produirait.
+    */
+    await chart.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(montant).toHaveAttribute("data-hovering", "true");
+    await expect(chart).toHaveAttribute("data-active-index", /\d+/);
+
+    /*
+      Le rang désigné n'a de sens que dans la série qui l'a produit.
+
+      Conservé d'une fenêtre à l'autre, il pointerait le même rang dans une
+      série qui couvre dix ans au lieu d'un mois : un autre jour, un autre
+      montant, et rien à l'écran pour dire que la date a changé. Le bornage du
+      hook ne protège que du rang hors tableau, pas du rang valide mais devenu
+      faux.
+    */
+    await page.getByTestId("hero-range-all").click();
+    await expect(montant).not.toHaveAttribute("data-hovering", "true");
+    await expect(page.getByTestId("hero-chart-crosshair")).toHaveCount(0);
+    await expect(page.getByTestId("hero-chart-tooltip")).toHaveCount(0);
+    await expect(chart).not.toHaveAttribute("data-active-index", /\d+/);
+  });
+
   test("changer de période ne fait pas sauter la carte", async ({ page }) => {
     const chart = await heroChart(page);
     const carte = page.getByTestId("terminal-hero");
