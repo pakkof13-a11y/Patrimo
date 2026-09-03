@@ -107,6 +107,17 @@ export const KPI_EXPANDED_KEY = "positionsKpiExpanded";
  */
 export const KPI_VISIBLE_KEY = "kpiStripVisible";
 
+/**
+ * Période de la carte de tête du tableau de bord.
+ *
+ * Propre à cette carte, et non partagée avec le sélecteur du bloc
+ * « Évolution » : les deux répondent à des questions différentes et se
+ * règlent séparément (cf. `app/lib/portfolio/hero-range.ts`).
+ *
+ * Valeurs : "1m" | "3m" | "ytd" | "1y" | "5y" | "all".
+ */
+export const HERO_RANGE_KEY = "heroRange";
+
 /** Regroupement Positions : "none" | "assetCategory" */
 export const HOLDINGS_GROUP_BY_KEY = "holdingsGroupBy";
 

@@ -196,11 +196,17 @@ test.describe("Tableau de bord", () => {
     ).toBeVisible();
 
     /*
-      Aucune période propre à la carte : ni les anciens boutons du hero, ni
-      ceux du sélecteur global — qui vit dans le panneau « Évolution », pas
-      ici. C'est la séparation que ce chantier établit.
+      La carte a désormais ses propres périodes — six chips, sur la courbe.
+
+      Ce que la séparation d'avec le panneau « Évolution » interdit n'a pas
+      changé pour autant : le sélecteur global n'a rien à faire ici, et la
+      suite de ce test vérifie qu'il ne touche pas au chiffre de tête.
     */
-    await expect(carte.locator("[data-testid^='hero-range-']")).toHaveCount(0);
+    // `role="tab"` pour ne compter que les chips : le conteneur porte lui aussi
+    // un testid préfixé `hero-range-`.
+    await expect(
+      carte.locator("[role='tab'][data-testid^='hero-range-']")
+    ).toHaveCount(6);
     await expect(
       carte.locator("[data-testid^='evolution-range-']")
     ).toHaveCount(0);
