@@ -12,26 +12,22 @@ import {
   kpiSeries,
   netWorthAt,
 } from "@/app/lib/portfolio/kpi-series";
-
-/**
- * Montant sans symbole ni décimales — réservé au chiffre de tête.
- *
- * Le code devise est affiché à côté comme libellé (mockup), et les centimes
- * n'apportent rien à 60 px : sur un patrimoine à six chiffres, ils ajoutent du
- * bruit là où on cherche un ordre de grandeur.
- */
-function formatHeadline(v: number): string {
-  return Math.round(v).toLocaleString("fr-FR", { maximumFractionDigits: 0 });
-}
+import { buildHeroSeries, type HeroMode } from "@/app/lib/portfolio/hero-series";
+import { useHeroChartHover } from "@/app/hooks/use-hero-chart-hover";
+import { HeroChart } from "@/components/dashboard/hero-chart";
+import {
+  formatDayMonthParis,
+  formatHeroAmount,
+  formatLongDateParis,
+  formatShortDateParis,
+  formatSignedAmount,
+  formatSignedPct,
+  formatValuationTimeParis,
+} from "@/app/lib/ui/hero-format";
 
 function formatPct(v: number): string {
-  return `${v >= 0 ? "+" : "−"}${Math.abs(v).toLocaleString("fr-FR", {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  })} %`;
+  return formatSignedPct(v);
 }
-
-type HeroMode = "net" | "gross";
 
 /** Ce que chaque mode désigne — libellé du contrôle, pas du titre. */
 const HERO_MODE_LABEL: Record<HeroMode, string> = {
@@ -88,7 +84,7 @@ export function TerminalHero({
   const [mode, setMode] = useState<HeroMode>("net");
   const [amountsHidden] = useAmountsHidden();
 
-  const displayValue = mode === "net" ? netWorth : grossAssets;
+  const currentValue = mode === "net" ? netWorth : grossAssets;
 
   /*
     L'historique entier, sans fenêtrage d'aucune sorte.
@@ -109,6 +105,133 @@ export function TerminalHero({
 
   const stroke =
     mode === "net" ? "var(--chart-gold)" : "var(--chart-cyan)";
+
+  /*
+    Série lisible — la même que celle tracée, augmentée de quoi la décrire.
+
+    Reconstruite au changement de mode : le sélecteur ne change pas seulement
+    la couleur du trait, il change la grandeur, donc les montants, les écarts
+    et la décomposition que l'info-bulle rapporte.
+  */
+  const series = useMemo(
+    () => buildHeroSeries(history, values, mode),
+    [history, values, mode]
+  );
+
+  const hover = useHeroChartHover(series);
+  const active = hover.activePoint;
+
+  /*
+    Le chiffre de tête suit le curseur, et rien d'autre ne bouge.
+
+    Hors survol il reprend la valorisation courante — celle du résumé, pas le
+    dernier point de la courbe : les deux coïncident presque toujours, mais
+    c'est le résumé qui fait foi pour « aujourd'hui », et c'est lui que le reste
+    du tableau de bord affiche.
+  */
+  const headlineValue = active ? active.value : currentValue;
+
+  /** Montant du survol : deux décimales, comme dans l'info-bulle. */
+  const money = (v: number) =>
+    maskAmount(formatCurrency(v, baseCurrency), amountsHidden);
+
+  /*
+    Sous-titre : la date de ce qu'on regarde.
+
+    Au survol, la date longue du point désigné. Hors survol, la date du dernier
+    point — précédée de « valo au », qui dit qu'il s'agit d'une valorisation
+    arrêtée et non d'un instant. L'heure n'apparaît que si elle en est
+    réellement une (cf. `formatValuationTimeParis`).
+  */
+  const lastPoint = series.length > 0 ? series[series.length - 1] : undefined;
+  const lastTime = lastPoint ? formatValuationTimeParis(lastPoint.date) : null;
+  const dateLabel = active
+    ? formatLongDateParis(active.date)
+    : lastPoint
+      ? `valo au ${formatShortDateParis(lastPoint.date)}${
+          lastTime ? ` · ${lastTime}` : ""
+        }`
+      : null;
+
+  const tooltip = active ? (
+    <div className="space-y-[var(--space-1)] text-[length:var(--text-xs)]">
+      {/* 1. Date longue */}
+      <p className="text-[var(--foreground-secondary)]">
+        {formatLongDateParis(active.date)}
+      </p>
+
+      {/* 2. Montant */}
+      <p
+        className="num text-[length:var(--text-sm)] font-semibold text-[var(--foreground)]"
+        data-testid="hero-tooltip-amount"
+      >
+        {money(active.value)}
+      </p>
+
+      {/* 3. Écart avec le point précédent disponible */}
+      {active.deltaAbs !== undefined && (
+        <p
+          className={cn(
+            "num flex flex-wrap items-baseline gap-[var(--space-1)]",
+            active.deltaAbs >= 0 ? "val-positive" : "val-negative"
+          )}
+          data-testid="hero-tooltip-delta"
+        >
+          <span>
+            {formatSignedAmount(active.deltaAbs, (v) => money(v))}
+          </span>
+          {active.deltaPct !== undefined && (
+            <>
+              <span className="text-[var(--foreground-faint)]">·</span>
+              <span>{formatSignedPct(active.deltaPct)}</span>
+            </>
+          )}
+        </p>
+      )}
+
+      {/* 4. Décomposition — en net seulement, et seulement si elle est portée */}
+      {mode === "net" &&
+        active.grossAssets !== undefined &&
+        active.liabilities !== undefined && (
+          <p
+            className="num text-[var(--foreground-secondary)]"
+            data-testid="hero-tooltip-split"
+          >
+            Actifs {money(active.grossAssets)}
+            <span className="mx-[var(--space-1)] text-[var(--foreground-faint)]">
+              ·
+            </span>
+            Passifs {money(active.liabilities)}
+          </p>
+        )}
+
+      {/* 5. Événement du jour — aujourd'hui, un mouvement de capital externe */}
+      {active.externalFlow !== undefined && (
+        <p
+          className="flex items-center gap-[var(--space-1)] text-[var(--foreground-secondary)]"
+          data-testid="hero-tooltip-event"
+        >
+          <span
+            aria-hidden
+            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--primary-text)]"
+          />
+          Événement ·{" "}
+          {active.externalFlow >= 0 ? "apport" : "retrait"} de{" "}
+          <span className="num">{money(Math.abs(active.externalFlow))}</span>
+        </p>
+      )}
+
+      {/* 6. Journée non observée : dire d'où vient la valeur */}
+      {active.carried && active.lastObservedDate && (
+        <p
+          className="text-[var(--foreground-faint)]"
+          data-testid="hero-tooltip-carried"
+        >
+          dernière valo : {formatDayMonthParis(active.lastObservedDate)}
+        </p>
+      )}
+    </div>
+  ) : null;
 
   return (
     <section
@@ -155,12 +278,19 @@ export function TerminalHero({
           </div>
 
           <div className="mt-[var(--space-3)] flex flex-wrap items-baseline gap-[var(--space-3)]">
-            {loading && displayValue === null ? (
+            {loading && headlineValue === null ? (
               <span
                 className="num block h-[var(--text-4xl)] w-[14rem] rounded-[var(--radius-sm)] bg-[var(--surface-sunken)]"
                 aria-hidden
               />
             ) : (
+              /*
+                `aria-live` sur le montant, et non sur la carte entière : un
+                lecteur d'écran doit annoncer la valeur du point atteint à la
+                flèche, pas relire le titre et le sélecteur à chaque
+                déplacement. L'annonce ne part qu'au changement de point, le
+                survol ne provoquant aucun rendu tant que le rang ne change pas.
+              */
               <span
                 className={cn(
                   "num text-[length:var(--text-4xl)] font-semibold leading-none",
@@ -168,10 +298,13 @@ export function TerminalHero({
                   "sm:text-[length:var(--text-5xl)]"
                 )}
                 data-testid="hero-net-worth"
+                data-hovering={active ? "true" : undefined}
+                aria-live="polite"
+                aria-atomic="true"
               >
-                {displayValue === null
+                {headlineValue === null
                   ? "—"
-                  : maskAmount(formatHeadline(displayValue), amountsHidden)}
+                  : maskAmount(formatHeroAmount(headlineValue), amountsHidden)}
               </span>
             )}
             <span className="text-label">{baseCurrency}</span>
@@ -189,30 +322,46 @@ export function TerminalHero({
             className="mt-[var(--space-3)] text-[length:var(--text-sm)] text-[var(--foreground-secondary)]"
             data-testid="hero-scope"
           >
-            {HERO_MODE_TITLE[mode]}
-            {values && (
+            {dateLabel && (
               <>
+                <span data-testid="hero-date">{dateLabel}</span>
                 <span className="mx-[var(--space-2)] text-[var(--foreground-faint)]">
                   ·
                 </span>
-                depuis l&apos;origine de l&apos;historique
               </>
             )}
+            {HERO_MODE_TITLE[mode]}
           </p>
         </div>
 
         {/* ── Graphique — historique entier, sans sélecteur ── */}
-        <div className="flex min-w-0 flex-1 flex-col items-end gap-[var(--space-3)]">
+        {/*
+          Largeur arrêtée, et non déduite de la place restante.
+
+          Le chiffre de tête suit désormais le curseur, donc sa largeur change
+          en cours de survol : « 240,00 » n'occupe pas la place de « 918 073 ».
+          Tant que le graphique prenait ce qui restait, il s'élargissait à
+          chaque changement de valeur — c'est-à-dire sous le curseur, pendant le
+          geste. Le point visé se dérobait : mesuré, le même pixel désignait le
+          rang 661 en net et le rang 606 en brut.
+
+          Une base fixe rend la colonne insensible à son voisin. Sur mobile elle
+          reprend toute la largeur, comme avant, le bloc passant à la ligne.
+        */}
+        <div className="flex w-full min-w-0 flex-col items-end gap-[var(--space-3)] sm:w-[55%] sm:flex-none">
           <div className="h-[5.5rem] w-full min-w-0 sm:h-[6.5rem]">
             {values && values.length >= 2 ? (
-              <Sparkline
+              <HeroChart
                 values={values}
                 stroke={stroke}
-                fill
-                width={640}
-                height={104}
-                strokeWidth={2}
-                className="h-full w-full"
+                activeIndex={hover.activeIndex}
+                setContainer={hover.setContainer}
+                handlers={hover.handlers}
+                carriedActive={active?.carried ?? false}
+                tooltip={tooltip}
+                ariaLabel={`Courbe du patrimoine ${
+                  mode === "net" ? "net" : "brut"
+                } — flèches gauche et droite pour parcourir les points, Échap pour revenir à aujourd'hui`}
               />
             ) : (
               <div className="flex h-full items-center justify-end text-[length:var(--text-xs)] text-[var(--foreground-faint)]">

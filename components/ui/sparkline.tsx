@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useMemo } from "react";
+import { sparklineGeometry } from "@/app/lib/ui/sparkline-geometry";
 
 /**
  * Sparkline SVG — trait seul ou trait + aire dégradée.
@@ -36,24 +37,8 @@ export function Sparkline({
   const gradientId = useId();
 
   const { line, area } = useMemo(() => {
-    const clean = values.filter((v) => Number.isFinite(v));
-    if (clean.length < 2) return { line: "", area: "" };
-    const min = Math.min(...clean);
-    const max = Math.max(...clean);
-    const span = max - min || 1;
-    const stepX = width / (clean.length - 1);
-    // Marge d'un demi-trait en haut et en bas : sans elle, un maximum ou un
-    // minimum se retrouve rogné par le bord du viewBox.
-    const pad = strokeWidth;
-    const usable = height - pad * 2;
-    const pts = clean.map((v, i) => {
-      const x = i * stepX;
-      const y = pad + usable - ((v - min) / span) * usable;
-      return [x, y] as const;
-    });
-    const line = pts.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
-    const area = `${line} ${width.toFixed(2)},${height} 0,${height}`;
-    return { line, area };
+    const geom = sparklineGeometry(values, width, height, strokeWidth);
+    return geom ?? { line: "", area: "" };
   }, [values, width, height, strokeWidth]);
 
   if (!line) return null;
