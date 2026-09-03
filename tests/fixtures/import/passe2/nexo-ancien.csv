@@ -1,0 +1,4 @@
+Transaction,Type,Currency,Amount,USD Equivalent,Details,Outstanding Loan,Date / Time
+NXTNT9rX3IPGT,LockingTermDeposit,EURX,-1000.00000000,$1174.75,approved / Transfer from Savings Wallet to Term Wallet,$0.00,2021-08-09 20:37:03
+NXTYIFa9J0PCE,ExchangeDepositedOn,EUR,1000.00000000,$1174.515,approved / EUR to EURX,$0.00,2021-08-09 20:18:30
+NXThL5AW9GWZh,DepositToExchange,EUR,1000.00000000,$1174.515,approved / EUR Top Up,$0.00,2021-08-09 20:18:28

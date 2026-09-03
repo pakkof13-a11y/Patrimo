@@ -154,6 +154,78 @@ function chain(
  * Multi-types quand la marque couvre plusieurs usages (PEA/CTO + AV + crypto…).
  */
 const COURTIERS: PlatformPreset[] = [
+  /*
+    Courtiers étrangers ajoutés pour préparer l'import de leurs exports.
+
+    Le catalogue décrit **où l'on détient**, pas ce qu'on sait lire : une
+    plateforme y figure dès qu'elle peut porter des positions, indépendamment
+    de l'existence d'un parser pour son CSV. Aucun de ceux-ci n'en a à ce jour,
+    et leurs fichiers passeront par le mapping dynamique jusqu'à ce que les
+    exports réels aient été analysés.
+  */
+  p("AJ_BELL", "AJ Bell", ["COURTIER"], "ajbell.co.uk", {
+    category: "Courtiers en bourse",
+  }),
+  p("AVANZA", "Avanza", ["COURTIER"], "avanza.se", {
+    category: "Courtiers en bourse",
+  }),
+  // Multi-types, donc ici et non dans `CFD` — cette section ne prend que les
+  // marques purement CFD (cf. son commentaire).
+  p("BUX", "BUX", ["COURTIER", "BROKER_CFD"], "getbux.com", {
+    category: "Courtiers en bourse",
+  }),
+  p("DIRECTA", "Directa", ["COURTIER"], "directa.it", {
+    category: "Courtiers en bourse",
+  }),
+  p("DISNAT", "Disnat", ["COURTIER"], "disnat.com", {
+    category: "Courtiers en bourse",
+  }),
+  p("FREETRADE", "Freetrade", ["COURTIER"], "freetrade.io", {
+    category: "Courtiers en bourse",
+  }),
+  p("INVESTENGINE", "InvestEngine", ["COURTIER"], "investengine.com", {
+    category: "Courtiers en bourse",
+  }),
+  p("SCHWAB", "Charles Schwab", ["COURTIER"], "schwab.com", {
+    category: "Courtiers en bourse",
+  }),
+  /*
+    Grands courtiers actions/ETF anglo-saxons.
+
+    `COURTIER` seul pour tous, y compris Robinhood : leur activité de détention
+    est celle d'un compte-titres. Robinhood propose bien de la crypto, mais lui
+    ajouter `EXCHANGE_CRYPTO` le ferait remonter dans les filtres d'exchanges
+    à côté de Binance ou Kraken, ce que son usage principal ne justifie pas.
+  */
+  p("ETRADE", "E*TRADE", ["COURTIER"], "etrade.com", {
+    category: "Courtiers en bourse",
+  }),
+  p("FIDELITY", "Fidelity", ["COURTIER"], "fidelity.com", {
+    category: "Courtiers en bourse",
+  }),
+  p(
+    "HARGREAVES_LANSDOWN",
+    "Hargreaves Lansdown",
+    ["COURTIER"],
+    "hl.co.uk",
+    { category: "Courtiers en bourse" }
+  ),
+  p(
+    "INTERACTIVE_INVESTOR",
+    "Interactive Investor",
+    ["COURTIER"],
+    "ii.co.uk",
+    { category: "Courtiers en bourse" }
+  ),
+  p("MERRILL_EDGE", "Merrill Edge", ["COURTIER"], "merrilledge.com", {
+    category: "Courtiers en bourse",
+  }),
+  p("ROBINHOOD", "Robinhood", ["COURTIER"], "robinhood.com", {
+    category: "Courtiers en bourse",
+  }),
+  p("VANGUARD", "Vanguard", ["COURTIER"], "vanguard.com", {
+    category: "Courtiers en bourse",
+  }),
   p(
     "BANQUE_POPULAIRE",
     "Banque Populaire",
@@ -465,6 +537,24 @@ const CFD: PlatformPreset[] = [
  */
 const EXCHANGES: PlatformPreset[] = [
   // ── CEX (réf. + catalogue FR déjà présents) ─────────────────────────────
+  /*
+    AscendEX manquait au catalogue alors que son format d'import existe.
+
+    `FORMAT_DEFAULT_PLATFORM` le désignait déjà par la clé `ASCENDEX`, sans
+    qu'aucune entrée ne porte ce nom : choisir ce format fabriquait une
+    plateforme synthétique introuvable ensuite au catalogue. Défaut préexistant,
+    révélé par le test qui vérifie que tout format vise une plateforme réelle.
+  */
+  p("ASCENDEX", "AscendEX", ["EXCHANGE_CRYPTO"], "ascendex.com", {
+    category: "Exchange crypto",
+    subtype: "CEX",
+  }),
+  // Achat/vente BTC en euro (CH) — pas de carnet d'ordres, mais bien un lieu
+  // de détention crypto au sens du catalogue.
+  p("RELAI", "Relai", ["EXCHANGE_CRYPTO"], "relai.app", {
+    category: "Exchange crypto",
+    subtype: "CEX",
+  }),
   p("BINANCE", "Binance", ["EXCHANGE_CRYPTO"], "binance.com", {
     category: "Exchange crypto",
     subtype: "CEX",
@@ -645,7 +735,21 @@ const EXCHANGES: PlatformPreset[] = [
 
 /** Fintechs cash + éventuelle crypto (pas de pure N26 ici). */
 const FINTECHS: PlatformPreset[] = [
+  /*
+    Prévoyance suisse — aucun type dédié dans cette taxonomie.
+
+    `AUTRE` plutôt qu'un rapprochement flatteur : un pilier 3a n'est ni un
+    compte-titres ni une assurance-vie française, et le ranger dans l'un des
+    deux ferait porter à ses avoirs des règles fiscales qui ne sont pas les
+    leurs.
+  */
+  p("FINPENSION", "Finpension", ["AUTRE"], "finpension.ch", {
+    category: "Fintechs",
+  }),
   p("NICKEL", "Nickel", ["BANQUE"], "nickel.eu", {
+    category: "Fintechs",
+  }),
+  p("RABOBANK", "Rabobank", ["BANQUE"], "rabobank.nl", {
     category: "Fintechs",
   }),
   p("SUMERIA", "Sumeria", ["BANQUE", "EXCHANGE_CRYPTO"], "sumeria.eu", {
@@ -857,6 +961,40 @@ export const PRESET_SEARCH_ALIASES: Record<string, string> = {
   dydx: "DYDX",
   gmx: "GMX",
   hyperliquid: "HYPERLIQUID",
+  ascendex: "ASCENDEX",
+  // Plateformes ajoutées pour préparer l'import de leurs exports (chantier 33).
+  avanza: "AVANZA",
+  bux: "BUX",
+  directa: "DIRECTA",
+  disnat: "DISNAT",
+  freetrade: "FREETRADE",
+  investengine: "INVESTENGINE",
+  schwab: "SCHWAB",
+  "charles schwab": "SCHWAB",
+  rabobank: "RABOBANK",
+  rabo: "RABOBANK",
+  relai: "RELAI",
+  finpension: "FINPENSION",
+  // Courtiers anglo-saxons (addendum chantier 33).
+  robinhood: "ROBINHOOD",
+  fidelity: "FIDELITY",
+  vanguard: "VANGUARD",
+  etrade: "ETRADE",
+  "e*trade": "ETRADE",
+  "e trade": "ETRADE",
+  "merrill edge": "MERRILL_EDGE",
+  merrill: "MERRILL_EDGE",
+  "hargreaves lansdown": "HARGREAVES_LANSDOWN",
+  hargreaves: "HARGREAVES_LANSDOWN",
+  hl: "HARGREAVES_LANSDOWN",
+  "aj bell": "AJ_BELL",
+  ajbell: "AJ_BELL",
+  /*
+    Pas d'alias « ii » : deux caractères qui apparaissent dans quantité de
+    saisies, pour une marque déjà atteignable par son nom complet. Et à ne pas
+    confondre avec Interactive Brokers, que `ibkr` / `ib` couvrent déjà.
+  */
+  "interactive investor": "INTERACTIVE_INVESTOR",
   youhodler: "YOUHODLER",
   finblox: "FINBLOX",
   swissborg: "SWISSBORG",
@@ -926,6 +1064,29 @@ export function findPreset(keyOrName: string): PlatformPreset | undefined {
       (p) => normalizePlatformSearch(p.name) === q
     ) ||
     PLATFORM_PRESETS.find((p) => matchesPlatformLabelPrefix(p.name, raw))
+  );
+}
+
+/**
+ * Cette plateforme peut-elle abriter plusieurs enveloppes fiscales ?
+ *
+ * Un courtier français ouvre indifféremment un PEA ou un compte-titres pour le
+ * même client, et rien dans un export CSV ne dit lequel : aucun format
+ * d'import ne colonne l'enveloppe. Il faut donc la demander — sans quoi tout
+ * atterrit en CTO, et un PEA importé perd son régime fiscal en silence.
+ *
+ * La question n'a de sens que pour un teneur de compte-titres ou un assureur.
+ * Un exchange crypto, un wallet matériel ou une banque de dépôt n'ont qu'une
+ * façon de détenir : leur poser la question serait un choix inutile.
+ */
+export function supportsMultipleEnvelopes(
+  keyOrName: string | null | undefined
+): boolean {
+  if (!keyOrName) return false;
+  const preset = findPreset(keyOrName);
+  if (!preset) return false;
+  return preset.types.some(
+    (t) => t === "COURTIER" || t === "ASSURANCE_VIE" || t === "BROKER_CFD"
   );
 }
 

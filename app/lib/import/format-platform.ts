@@ -19,7 +19,17 @@ export const FORMAT_DEFAULT_PLATFORM: Partial<
     logoKey: "INTERACTIVE_BROKERS",
     name: "Interactive Brokers",
   },
+  avanza: { logoKey: "AVANZA", name: "Avanza" },
   binance: { logoKey: "BINANCE", name: "Binance" },
+  bitvavo: { logoKey: "BITVAVO", name: "Bitvavo" },
+  bux: { logoKey: "BUX", name: "BUX" },
+  degiro: { logoKey: "DEGIRO", name: "DEGIRO" },
+  directa: { logoKey: "DIRECTA", name: "Directa" },
+  etoro: { logoKey: "ETORO", name: "eToro" },
+  saxo: { logoKey: "SAXO_BANK", name: "Saxo Bank" },
+  swissquote: { logoKey: "SWISSQUOTE", name: "Swissquote" },
+  trading212: { logoKey: "TRADING_212", name: "Trading 212" },
+  xtb: { logoKey: "XTB", name: "XTB" },
   coinbase: { logoKey: "COINBASE", name: "Coinbase" },
   boursorama: { logoKey: "BOURSOBANK", name: "BoursoBank" },
   fortuneo: { logoKey: "FORTUNEO", name: "Fortuneo" },
@@ -27,11 +37,63 @@ export const FORMAT_DEFAULT_PLATFORM: Partial<
   revolut: { logoKey: "REVOLUT", name: "Revolut" },
   cryptocom: { logoKey: "CRYPTO_COM", name: "Crypto.com" },
   cryptocom_transfer: { logoKey: "CRYPTO_COM", name: "Crypto.com" },
+  bitpanda: { logoKey: "BITPANDA", name: "Bitpanda" },
+  bybit: { logoKey: "BYBIT", name: "Bybit" },
+  revolut_crypto: { logoKey: "REVOLUT", name: "Revolut" },
   nexo: { logoKey: "NEXO", name: "Nexo" },
   ascendex: { logoKey: "ASCENDEX", name: "AscendEX" },
   ledger_live: { logoKey: "LEDGER", name: "Ledger" },
+  /*
+    Deux formats, une plateforme.
+
+    `hyperliquid_trade` et `hyperliquid_funding` décrivent deux exports du même
+    compte : les rattacher tous deux à la même destination est ce qui distingue
+    un format d'une plateforme. Ils restent techniquement séparés — leurs
+    adaptateurs ne lisent pas les mêmes colonnes.
+  */
+  hyperliquid_trade: { logoKey: "HYPERLIQUID", name: "Hyperliquid" },
+  hyperliquid_funding: { logoKey: "HYPERLIQUID", name: "Hyperliquid" },
+  paradex: { logoKey: "PARADEX", name: "Paradex" },
   // patrimo / generic / dynamic → pas de plateforme forcée
 };
+
+/**
+ * Formats d'import dédiés à une plateforme du catalogue.
+ *
+ * Lecture inverse de `FORMAT_DEFAULT_PLATFORM` : une plateforme peut en avoir
+ * plusieurs — Crypto.com en a deux, Hyperliquid aussi — comme elle peut n'en
+ * avoir aucun.
+ *
+ * Le tableau vide est le cas le plus courant et le plus important : figurer au
+ * catalogue veut dire « on peut y détenir des actifs », pas « on sait lire son
+ * export ». Les deux questions sont distinctes, et l'écran d'import doit
+ * pouvoir dire laquelle il ne sait pas encore résoudre.
+ */
+export function formatsForPlatform(
+  logoKey: string | null | undefined
+): ImportFormatId[] {
+  if (!logoKey) return [];
+  const key = logoKey.toUpperCase();
+  return (
+    Object.entries(FORMAT_DEFAULT_PLATFORM) as Array<
+      [ImportFormatId, FormatPlatformHint]
+    >
+  )
+    .filter(([, hint]) => hint.logoKey.toUpperCase() === key)
+    .map(([id]) => id);
+}
+
+/**
+ * Cette plateforme dispose-t-elle d'un format d'import dédié ?
+ *
+ * `false` ne signifie pas « import impossible » : le mapping générique et la
+ * détection dynamique restent disponibles pour n'importe quel CSV. Cela
+ * signifie qu'aucun parser ne connaît la structure de ce fichier, et que
+ * l'utilisateur devra désigner les colonnes lui-même.
+ */
+export function hasDedicatedFormat(logoKey: string | null | undefined): boolean {
+  return formatsForPlatform(logoKey).length > 0;
+}
 
 export function platformHintForFormat(
   formatId: ImportFormatId | string | null | undefined

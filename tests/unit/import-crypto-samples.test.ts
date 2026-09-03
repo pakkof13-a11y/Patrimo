@@ -82,7 +82,7 @@ describe("auto-détection formats crypto (échantillons Downloads)", () => {
 });
 
 describe("importCsv — mini fixtures crypto", () => {
-  it("importe une ligne Crypto.com withdrawal (sortie qty → VENTE ledger)", () => {
+  it("importe une ligne Crypto.com withdrawal (mouvement de portefeuille)", () => {
     const csv = `${HEADERS.cryptocom}
 2023-12-13 21:19:39,Withdraw CRO,CRO,-10.3,,,USD,1.02,1.02,crypto_withdrawal,abc
 `;
@@ -90,8 +90,13 @@ describe("importCsv — mini fixtures crypto", () => {
     expect(r.formatId).toBe("cryptocom");
     expect(r.drafts.length).toBeGreaterThanOrEqual(1);
     const row = r.drafts[0]!;
-    // Ledger: sortie crypto sans cash → VENTE @ 0 (pas RETRAIT cash)
-    expect(["VENTE", "RETRAIT"]).toContain(row.type);
+    /*
+      Un retrait Crypto.com sort des jetons vers un portefeuille externe : la
+      quantité détenue ne change pas, seul son emplacement. Typé VENTE — ce
+      qu'attendait ce test —, il fabriquait une cession imposable à chaque
+      transfert. C'est un TRANSFERT_TITRE, non importé au commit.
+    */
+    expect(row.type).toBe("TRANSFERT_TITRE");
     expect(row.ticker?.toUpperCase()).toBe("CRO");
     expect(row.status).not.toBe("error");
   });
@@ -107,14 +112,19 @@ NXT1,Interest,ETH,0.0001,ETH,0.0001,$0.15,"approved / ETH Interest",2023-10-16 0
     expect(r.drafts[0]?.ticker?.toUpperCase()).toBe("ETH");
   });
 
-  it("importe Crypto.com deposit (entrée qty → REWARD ledger)", () => {
+  it("importe Crypto.com deposit (mouvement de portefeuille)", () => {
     const csv = `${HEADERS.cryptocomDeposit}
 2021-11-19 11:17:48.000,USDC,100.0,0,ADDR,Completed,tx1
 `;
     const r = importCsv(csv, { formatId: "auto" });
     expect(r.formatId).toBe("cryptocom_transfer");
-    // APPORT + qty crypto → REWARD (pas apport cash)
-    expect(["APPORT", "REWARD"]).toContain(r.drafts[0]?.type);
+    /*
+      Symétrique du retrait : un dépôt fait entrer des jetons déjà détenus.
+      Typé REWARD, il leur donnait un prix de revient nul — sur le relevé réel,
+      6 263 USDC seraient entrés gratuitement et leur revente aurait affiché
+      100 % de plus-value.
+    */
+    expect(r.drafts[0]?.type).toBe("TRANSFERT_TITRE");
     expect(r.drafts[0]?.ticker?.toUpperCase()).toBe("USDC");
   });
 

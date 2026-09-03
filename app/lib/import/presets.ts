@@ -4,7 +4,20 @@ import type { TxType } from "../accounting/types";
 export type ImportFormatId =
   | "patrimo"
   | "generic"
+  | "avanza"
   | "binance"
+  | "bitvavo"
+  | "bux"
+  | "degiro"
+  | "directa"
+  | "etoro"
+  | "saxo"
+  | "swissquote"
+  | "bitpanda"
+  | "bybit"
+  | "revolut_crypto"
+  | "trading212"
+  | "xtb"
   | "boursorama"
   | "revolut"
   | "coinbase"
@@ -46,6 +59,45 @@ export type FormatPreset = {
   /** Possible header aliases (normalized) → role */
   aliases: Record<string, ColumnRole>;
 };
+
+/**
+ * Devises dans lesquelles un compte eToro peut être tenu.
+ *
+ * L'USD reste le défaut, mais eToro ouvre aussi des comptes en devise locale —
+ * EUR (résidents UE), GBP, AUD, DKK — dont les relevés sont libellés dans cette
+ * devise. Le compte n'est donc pas nécessairement en dollars, et rien ne permet
+ * de le supposer.
+ */
+export const ETORO_ACCOUNT_CURRENCIES = [
+  "USD",
+  "EUR",
+  "GBP",
+  "AUD",
+  "DKK",
+] as const;
+
+/**
+ * En-têtes eToro portant la devise du compte : « Amount in (USD) ».
+ *
+ * Les relevés récents inscrivent la devise dans l'intitulé de colonne plutôt
+ * que dans une colonne dédiée. `normalizeHeader` en fait `amount_in_usd`, qui
+ * ne correspondait à aucun alias : la colonne des montants n'était alors pas
+ * reconnue du tout, et le relevé remontait sans un seul montant.
+ *
+ * Les soldes courants restent ignorés — c'est leur devise qui nous intéresse,
+ * pas leur valeur — mais ils sont déclarés pour que le mapping le dise.
+ */
+const ETORO_COLONNES_DEVISEES: Record<string, ColumnRole> = Object.fromEntries(
+  ETORO_ACCOUNT_CURRENCIES.flatMap((devise) => {
+    const d = devise.toLowerCase();
+    return [
+      [`amount_in_${d}`, "cashAmount" as ColumnRole],
+      [`balance_in_${d}`, "ignore" as ColumnRole],
+      [`realized_equity_in_${d}`, "ignore" as ColumnRole],
+      [`realized_equity_change_in_${d}`, "ignore" as ColumnRole],
+    ];
+  })
+);
 
 export const IMPORT_FORMATS: FormatPreset[] = [
   {
@@ -154,7 +206,7 @@ export const IMPORT_FORMATS: FormatPreset[] = [
   },
   {
     id: "binance",
-    label: "Binance (Trade History)",
+    label: "Binance",
     description: "Export Spot Trade History (Date, Pair, Side, Price, Executed, Amount, Fee)",
     aliases: {
       date_utc_: "date",
@@ -175,8 +227,383 @@ export const IMPORT_FORMATS: FormatPreset[] = [
     },
   },
   {
+    /*
+      Avanza — export suédois, séparateur `;` et virgule décimale.
+
+      Deux devises cohabitent sur une même ligne : `Belopp` (montant) est en
+      couronnes, `Kurs` (cours) dans la devise de l'instrument, et `Valutakurs`
+      donne le taux entre les deux. Le cours n'est donc **pas** exprimé dans la
+      devise du montant — c'est le cas particulier que traite `map-rows`.
+    */
+    id: "avanza",
+    label: "Avanza",
+    description:
+      "Export « Transaktioner » (Datum, Typ av transaktion, Antal, Kurs, Belopp, Courtage, ISIN)",
+    aliases: {
+      datum: "date",
+      konto: "ignore",
+      typ_av_transaktion: "type",
+      vardepapper_beskrivning: "name",
+      antal: "quantity",
+      kurs: "unitPrice",
+      belopp: "cashAmount",
+      transaktionsvaluta: "currency",
+      courtage_sek: "fees",
+      courtage: "fees",
+      valutakurs: "ignore",
+      instrumentvaluta: "ignore",
+      isin: "ticker",
+      resultat: "ignore",
+    },
+  },
+  {
+    /*
+      Bitvavo — un journal unifié : trades, virements et staking.
+
+      `Amount` porte la quantité de crypto, signée ; `Received / Paid Amount`
+      le mouvement d'euros correspondant. La colonne `Status` distingue les
+      lignes réellement exécutées de celles qui ne le sont pas — elle est lue
+      par `map-rows`, jamais ignorée.
+    */
+    id: "bitvavo",
+    label: "Bitvavo",
+    description:
+      "Export Transaction history (Date, Time, Type, Currency, Amount, Quote Price, Fee, Status)",
+    aliases: {
+      timezone: "ignore",
+      date: "date",
+      time: "ignore",
+      type: "type",
+      currency: "ticker",
+      amount: "quantity",
+      quote_currency: "currency",
+      quote_price: "unitPrice",
+      received_paid_currency: "ignore",
+      received_paid_amount: "cashAmount",
+      fee_currency: "ignore",
+      fee_amount: "fees",
+      status: "ignore",
+      transaction_id: "ignore",
+      address: "notes",
+    },
+  },
+  {
+    /*
+      BUX — journal de compte, actifs et trésorerie mêlés.
+
+      `Transaction Type` porte le libellé exploitable (« Buy Trade », « Cash
+      Dividend »…), `Transaction Category` n'en est qu'un regroupement. Le
+      montant est toujours en devise du compte, tandis que `Asset Price` peut
+      être en devise étrangère — `Exchange Rate` fait le lien.
+    */
+    id: "etoro",
+    label: "eToro",
+    description:
+      "Account Statement — onglet Account Activity (Date, Type, Details, Amount, Units, Position ID)",
+    /*
+      Les colonnes `Realized Equity`, `Balance` et `NWA` sont des soldes courants
+      recalculés à chaque ligne, pas des mouvements : les importer créerait une
+      transaction par état du compte. Seul `Amount` porte le flux de la ligne.
+    */
+    aliases: {
+      date: "date",
+      type: "type",
+      details: "description",
+      amount: "cashAmount",
+      units: "quantity",
+      realized_equity_change: "ignore",
+      realized_equity: "ignore",
+      balance: "ignore",
+      position_id: "notes",
+      asset_type: "assetClass",
+      nwa: "ignore",
+      ...ETORO_COLONNES_DEVISEES,
+    },
+  },
+  {
+    /*
+      Saxo — un journal unique où le sens de l'opération est en toutes lettres.
+
+      `Type` ne dit que la famille (Trade, Cash Transfer, Corporate action,
+      Cash amount) ; c'est `Event` qui porte l'opération réelle — « Buy 3 @
+      139.74 USD », « Dividend », « Custody Fee », « Deposit ». Les deux sont
+      donc lues, `Event` faisant foi.
+
+      `Amount` inclut déjà la commission : 3 × 134,85 = 404,55 pour un débit de
+      405,55. Les frais s'en déduisent exactement, ils ne sont pas colonnés.
+    */
+    id: "saxo",
+    label: "Saxo Bank",
+    description:
+      "Export « Transactions » (Trade Date, Type, Instrument ISIN, Instrument currency, Event, Amount)",
+    aliases: {
+      trade_date: "date",
+      value_date: "ignore",
+      client_id: "ignore",
+      type: "type",
+      instrument: "name",
+      instrument_isin: "ticker",
+      instrument_currency: "currency",
+      exchange_description: "ignore",
+      instrument_symbol: "ignore",
+      event: "description",
+      amount: "cashAmount",
+      order_id: "notes",
+      /*
+        `Conversion Rate` donne le taux vers la devise du compte, que le
+        fichier ne nomme jamais. L'appliquer reviendrait à convertir vers une
+        devise inconnue : il est ignoré, et les montants restent dans la devise
+        de l'instrument, la seule que le relevé énonce.
+      */
+      conversion_rate: "ignore",
+    },
+  },
+  {
+    /*
+      Swissquote — relevé de transactions, séparateur `;`.
+
+      Particularité : sur tout ce qui n'est pas un achat ou une vente
+      (dividende, frais de garde, intérêts, change, retrait), `Quantity` vaut
+      1.0 et `Unit price` porte le **montant**, pas un cours. Prendre ces 1.0
+      pour une quantité de titres créerait une position d'une part à chaque
+      dividende — d'où le traitement dans `map-rows`.
+    */
+    id: "swissquote",
+    label: "Swissquote",
+    description:
+      "Export Transactions (Date, Transaction, Symbol, ISIN, Quantity, Unit price, Costs, Net Amount, Currency)",
+    aliases: {
+      date: "date",
+      // « Order # » est un numéro d'ordre, pas un type.
+      order: "notes",
+      transaction: "type",
+      symbol: "ticker",
+      name: "name",
+      isin: "notes",
+      quantity: "quantity",
+      unit_price: "unitPrice",
+      costs: "fees",
+      // Toujours 0,00 dans les relevés observés : le coupon couru n'est pas
+      // représentable séparément, il n'est donc pas déclaré supporté.
+      accrued_interest: "ignore",
+      net_amount: "cashAmount",
+      balance: "ignore",
+      currency: "currency",
+    },
+  },
+  {
+    /*
+      Bitpanda — un relevé où l'actif n'est pas forcément un titre.
+
+      Le fichier mêle euros, métaux précieux et matières premières : `Asset`
+      vaut « Silver » ou « Palladium », et `Asset class` le dit. Les deux
+      montants sont séparés — `Amount Fiat` pour l'euro engagé, `Amount Asset`
+      pour la quantité reçue — ce qui évite toute déduction.
+
+      Cinq lignes de préambule précèdent les en-têtes ; `parseCsv` les écarte
+      déjà en cherchant la ligne d'en-tête la plus dense.
+    */
+    id: "bitpanda",
+    label: "Bitpanda",
+    description:
+      "Export Trades (Transaction ID, Timestamp, Transaction Type, Amount Fiat, Amount Asset, Asset, Fee)",
+    aliases: {
+      transaction_id: "notes",
+      timestamp: "date",
+      transaction_type: "type",
+      in_out: "ignore",
+      amount_fiat: "cashAmount",
+      fiat: "currency",
+      amount_asset: "quantity",
+      asset: "ticker",
+      asset_market_price: "unitPrice",
+      asset_market_price_currency: "ignore",
+      asset_class: "assetClass",
+      product_id: "ignore",
+      fee: "fees",
+      fee_asset: "ignore",
+      spread: "ignore",
+      spread_currency: "ignore",
+      tax_fiat: "ignore",
+    },
+  },
+  {
+    /*
+      Bybit — seul l'export « Asset Change Details » du compte spot décrit des
+      actifs réellement détenus.
+
+      Les trois autres exports (Trade History, Closed P&L, Asset Change du
+      compte contrat) portent sur des perpétuels : levier, financement,
+      liquidation, résultat de position. Patrimo ne modélise pas les dérivés ;
+      les importer créerait des positions qui n'existent pas. Ils sont
+      reconnus — pour pouvoir le dire — mais pas convertis en opérations.
+    */
+    id: "bybit",
+    label: "Bybit",
+    description:
+      "Export Asset Change Details compte spot (Type, Coin, Amount, Wallet Balance, Time)",
+    aliases: {
+      type: "type",
+      coin: "ticker",
+      amount: "quantity",
+      wallet_balance: "ignore",
+      time_utc: "date",
+      time: "date",
+      // Colonnes des exports dérivés, reconnues pour identifier le fichier.
+      contracts: "ticker",
+      contract: "ticker",
+      direction: "ignore",
+      closing_direction: "ignore",
+      leverage: "ignore",
+      filled_qty: "ignore",
+      filled_price: "ignore",
+      qty: "ignore",
+      entry_price: "ignore",
+      exit_price: "ignore",
+      closed_p_l: "ignore",
+      fees_paid: "ignore",
+      fee_paid: "ignore",
+      funding: "ignore",
+      cash_flow: "ignore",
+      change: "ignore",
+      transaction_time_utc_0: "date",
+      trade_time_utc_0: "date",
+    },
+  },
+  {
+    /*
+      Revolut — le relevé crypto n'a pas le même sens que le relevé bancaire.
+
+      Les deux partagent les en-têtes `Amount` et `Currency`, mais pas leur
+      signification : sur le relevé bancaire, `Amount` est un montant en euros ;
+      sur le relevé crypto, c'est une **quantité de jetons** et `Currency` en
+      porte le symbole (DOT, ALGO…), la contre-valeur vivant dans `Fiat amount`
+      et sa devise dans `Base currency`.
+
+      Un `FormatPreset` associe un rôle unique à chaque en-tête : les deux sens
+      ne peuvent pas cohabiter dans le même. D'où ce second format — le seul de
+      ce chantier —, distingué à la détection par `Fiat amount` et
+      `Base currency`, absents du relevé bancaire.
+    */
+    id: "revolut_crypto",
+    label: "Revolut — relevé crypto",
+    description:
+      "Account statement crypto (Type, Product, Amount = quantité, Currency = jeton, Fiat amount, Base currency)",
+    aliases: {
+      type: "type",
+      product: "product",
+      started_date: "date",
+      completed_date: "date",
+      description: "description",
+      amount: "quantity",
+      currency: "ticker",
+      fiat_amount: "cashAmount",
+      // Contre-valeur frais inclus : le montant hors frais fait foi, les frais
+      // ayant leur propre colonne. La retenir aussi les compterait deux fois.
+      fiat_amount_inc_fees: "ignore",
+      fee: "fees",
+      base_currency: "currency",
+      state: "notes",
+      balance: "ignore",
+    },
+  },
+  {
+    id: "bux",
+    label: "BUX",
+    description:
+      "Export Transactions (Transaction Time, Transaction Type, Asset Id, Asset Quantity, Asset Price)",
+    aliases: {
+      transaction_time_cet: "date",
+      transaction_time: "date",
+      transaction_category: "ignore",
+      transaction_type: "type",
+      transfer_type: "ignore",
+      transaction_amount: "cashAmount",
+      transaction_currency: "currency",
+      cash_balance_amount: "ignore",
+      asset_id: "ticker",
+      asset_name: "name",
+      asset_quantity: "quantity",
+      asset_price: "unitPrice",
+      asset_currency: "ignore",
+      currency_pair: "ignore",
+      exchange_rate: "ignore",
+      profit_and_loss_amount: "ignore",
+      profit_and_loss_currency: "ignore",
+      dividend_currency: "ignore",
+      dividend_gross_amount: "ignore",
+      dividend_net_amount: "ignore",
+      dividend_tax_amount: "ignore",
+      transaction_description: "notes",
+    },
+  },
+  {
+    /*
+      DEGIRO — relevé de compte (Rekeningoverzicht), pas l'export Transactions.
+
+      Deux particularités structurelles. D'abord, les montants vivent dans des
+      colonnes **sans en-tête** : `Mutatie` porte la devise et la colonne
+      suivante le montant (idem `Saldo`). `dedupeHeaders` les nomme
+      « Mutatie 2 » / « Saldo 2 » — sans quoi les deux colonnes anonymes
+      s'écrasaient et le montant de l'opération était remplacé par le solde.
+
+      Ensuite, il n'y a pas de colonne de type : tout est dans `Omschrijving`,
+      un libellé libre rédigé dans la langue du compte — le fichier d'exemple
+      en mélange cinq. La quantité et le cours d'une transaction n'y figurent
+      que sous forme de texte (« Koop 1 @ 33,9 USD ») ; `map-rows` les en
+      extrait.
+    */
+    id: "degiro",
+    label: "DEGIRO",
+    description:
+      "Relevé de compte (Datum, Omschrijving, Mutatie, Saldo) — libellés multilingues",
+    aliases: {
+      datum: "date",
+      tijd: "ignore",
+      valutadatum: "ignore",
+      product: "name",
+      isin: "ticker",
+      omschrijving: "type",
+      fx: "ignore",
+      mutatie: "currency",
+      mutatie_2: "cashAmount",
+      saldo: "ignore",
+      saldo_2: "ignore",
+      order_id: "ignore",
+    },
+  },
+  {
+    /*
+      Directa — relevé « Tutti i movimenti », précédé de neuf lignes d'en-tête
+      libre (titre du compte, période, nombre de mouvements). `parseCsv` trouve
+      seul la vraie ligne de colonnes.
+
+      Pas de colonne de cours : le prix unitaire se déduit du montant et de la
+      quantité. `Importo euro` est signé — négatif à l'achat, positif à la
+      vente et sur les revenus.
+    */
+    id: "directa",
+    label: "Directa",
+    description:
+      "Export « Tutti i movimenti » (Data operazione, Tipo operazione, Isin, Quantità, Importo euro)",
+    aliases: {
+      data_operazione: "date",
+      data_valuta: "ignore",
+      tipo_operazione: "type",
+      ticker: "ignore",
+      isin: "ticker",
+      protocollo: "ignore",
+      descrizione: "name",
+      quantita: "quantity",
+      importo_euro: "cashAmount",
+      importo_divisa: "ignore",
+      divisa: "currency",
+      riferimento_ordine: "ignore",
+    },
+  },
+  {
     id: "boursorama",
-    label: "Boursorama (opérations)",
+    label: "Boursorama",
     description: "Exports type opérations (Date, Libellé, Code, Quantité, Prix, Montant)",
     aliases: {
       date: "date",
@@ -205,7 +632,7 @@ export const IMPORT_FORMATS: FormatPreset[] = [
   },
   {
     id: "revolut",
-    label: "Revolut (compte / trading / crypto)",
+    label: "Revolut",
     description:
       "Statement compte (Type, Product, Amount…) ; export crypto FR (Symbol, Type, Quantity, Price, Value, Fees, Date) ; export Invest (Ticker, Price per share)",
     aliases: {
@@ -248,7 +675,7 @@ export const IMPORT_FORMATS: FormatPreset[] = [
   },
   {
     id: "ledger_live",
-    label: "Ledger Live (operations export)",
+    label: "Ledger Live",
     description:
       "Export Ledger Live « operations » (Operation Date, Status, Currency Ticker, Operation Type IN/OUT/FEES/REWARD, Operation Amount/Fees, Account Name, Countervalue…)",
     aliases: {
@@ -276,7 +703,7 @@ export const IMPORT_FORMATS: FormatPreset[] = [
   },
   {
     id: "coinbase",
-    label: "Coinbase (Transaction history)",
+    label: "Coinbase",
     description:
       "Export Transaction history Coinbase (Timestamp, Transaction Type, Asset, Quantity, Price/Spot Price, Fees) — y compris format 2024–2026 avec ID et Price at Transaction",
     aliases: {
@@ -347,9 +774,19 @@ export const IMPORT_FORMATS: FormatPreset[] = [
     },
   },
   {
+    /*
+      Trade Republic — le relevé réel est en néerlandais.
+
+      Les alias anglais génériques ci-dessous ne rencontraient aucune de ses
+      colonnes : `Datum`, `Transactietype`, `Waarde (netto)`, `Aantal`,
+      `Kosten`, `Belasting`. Tout le fichier remontait sans date, sans type et
+      sans montant. Les deux jeux cohabitent — un même compte peut produire
+      l'un ou l'autre selon la langue choisie.
+    */
     id: "trade_republic",
     label: "Trade Republic",
-    description: "Exports transactions Trade Republic",
+    description:
+      "Export transactions (Datum, Transactietype, Waarde (netto), ISIN, Aantal, Kosten, Belasting)",
     aliases: {
       date: "date",
       datetime: "date",
@@ -366,6 +803,81 @@ export const IMPORT_FORMATS: FormatPreset[] = [
       currency: "currency",
       note: "notes",
       name: "name",
+      // Relevé néerlandais
+      datum: "date",
+      transactietype: "type",
+      waarde_netto: "cashAmount",
+      waarde: "cashAmount",
+      opmerking: "name",
+      aantal: "quantity",
+      kosten: "fees",
+      /*
+        `Belasting` est l'impôt retenu, distinct des frais de courtage. Le
+        modèle n'a qu'une colonne de frais et l'y additionner mélangerait deux
+        natures ; vide dans tous les relevés observés, elle est conservée en
+        note plutôt que déclarée supportée.
+      */
+      belasting: "notes",
+    },
+  },
+  {
+    /*
+      Trading 212 — trois devises peuvent cohabiter sur une seule ligne.
+
+      `Price / share` est coté dans la devise du marché (USD, voire GBX pour
+      Londres), `Total` dans celle du compte, et la retenue à la source dans
+      une troisième. Chaque montant porte donc sa propre colonne de devise ;
+      c'est `Currency (Total)` qui fait foi pour la trésorerie.
+    */
+    id: "trading212",
+    label: "Trading 212",
+    description:
+      "Export Transactions (Action, Time, ISIN, Ticker, No. of shares, Price / share, Total, Withholding tax)",
+    aliases: {
+      action: "type",
+      time: "date",
+      isin: "ticker",
+      ticker: "ignore",
+      name: "name",
+      no_of_shares: "quantity",
+      price_share: "unitPrice",
+      currency_price_share: "ignore",
+      exchange_rate: "ignore",
+      // Plus-value déjà réalisée, calculée par le courtier : une information
+      // de suivi, pas un mouvement à importer.
+      result: "ignore",
+      currency_result: "ignore",
+      total: "cashAmount",
+      currency_total: "currency",
+      withholding_tax: "ignore",
+      currency_withholding_tax: "ignore",
+      notes: "notes",
+      id: "ignore",
+      currency_conversion_fee: "fees",
+      currency_currency_conversion_fee: "ignore",
+    },
+  },
+  {
+    /*
+      XTB — tout tient dans `Comment`.
+
+      Le relevé ne colonne ni quantité ni cours : ils sont écrits en clair,
+      « OPEN BUY 34/42.5658 @ 11.7480 » — 34 titres exécutés sur un ordre de
+      42,5658. Seul le nombre avant la barre est la quantité de la ligne.
+
+      Il n'y a aucune colonne de devise : le compte n'en a qu'une, que le
+      fichier n'énonce jamais.
+    */
+    id: "xtb",
+    label: "XTB",
+    description: "Export Cash Operations (ID, Type, Time, Symbol, Comment, Amount)",
+    aliases: {
+      id: "notes",
+      type: "type",
+      time: "date",
+      symbol: "ticker",
+      comment: "description",
+      amount: "cashAmount",
     },
   },
   {
@@ -397,11 +909,32 @@ export const IMPORT_FORMATS: FormatPreset[] = [
       notes: "notes",
       assetclass: "assetClass",
       asset_class: "assetClass",
+      /*
+        Flex Query — l'autre façon dont IBKR exporte, à plat.
+
+        Ces relevés ne colonnent pas `Symbol` mais `ISIN`, écrivent le cours
+        sous `TradePrice` et le montant sous `TradeMoney` ; le relevé de
+        dividendes a ses propres `Type` / `SettleDate` / `Amount`. Faute de ces
+        alias, chaque ligne remontait sans date, sans actif et sans prix.
+      */
+      isin: "ticker",
+      tradeprice: "unitPrice",
+      trade_price: "unitPrice",
+      trademoney: "cashAmount",
+      trade_money: "cashAmount",
+      settledate: "date",
+      settle_date: "date",
+      reportdate: "date",
+      type: "type",
+      amount: "cashAmount",
+      // La devise de la commission peut différer de celle de l'opération :
+      // conservée en note plutôt que confondue avec la devise du montant.
+      ibcommissioncurrency: "notes",
     },
   },
   {
     id: "cryptocom",
-    label: "Crypto.com (App — crypto / carte / fiat)",
+    label: "Crypto.com — transactions",
     description:
       "Export app : Timestamp (UTC), Transaction Description, Currency, Amount, To Currency, To Amount, Native Amount, Transaction Kind",
     aliases: {
@@ -412,10 +945,19 @@ export const IMPORT_FORMATS: FormatPreset[] = [
       description: "description",
       currency: "ticker",
       amount: "quantity",
-      to_currency: "name", // buy side of conversion
-      to_amount: "cashAmount", // temporarily; map-rows specializes
+      /*
+        `To Currency` / `To Amount` ne décrivent pas la même jambe que
+        `Currency` / `Amount` : ils sont lus directement dans la ligne brute
+        par `map-rows`, qui en fait une seconde opération. Leur donner ici un
+        rôle de colonne les aurait fait écraser la première jambe.
+      */
+      to_currency: "ignore",
+      to_amount: "ignore",
       native_currency: "currency",
-      native_amount: "notes", // numeric in notes path — specialized in map-rows
+      // `Native Amount` est la contre-valeur en devise du compte : c'est le
+      // montant de l'opération, pas une note. Sans lui, aucune conversion
+      // n'avait de prix et toutes remontaient en erreur.
+      native_amount: "cashAmount",
       native_amount_in_usd: "ignore",
       transaction_kind: "type",
       transaction_hash: "ignore",
@@ -423,7 +965,7 @@ export const IMPORT_FORMATS: FormatPreset[] = [
   },
   {
     id: "cryptocom_transfer",
-    label: "Crypto.com (Deposit / Withdrawal / Supercharger)",
+    label: "Crypto.com — dépôts/retraits",
     description:
       "Exports wallet : Time (UTC), Coin, Deposit/Withdrawal Amount, Fee, Status",
     aliases: {
@@ -465,7 +1007,7 @@ export const IMPORT_FORMATS: FormatPreset[] = [
   },
   {
     id: "ascendex",
-    label: "AscendEX (staking / DeFi rewards)",
+    label: "AscendEX",
     description:
       "Exports staking/DeFi : Time, Type, Projects, Token, Size / Reward, Status",
     aliases: {
@@ -482,7 +1024,7 @@ export const IMPORT_FORMATS: FormatPreset[] = [
   },
   {
     id: "paradex",
-    label: "Paradex (Fills — StarkNet)",
+    label: "Paradex",
     description:
       "Export Fills Paradex pré-aplati (Date, Ticker, Side, Quantity, Price, Fee, Currency, Notes) — asset/type/strike extraits du champ market",
     aliases: {
@@ -498,7 +1040,7 @@ export const IMPORT_FORMATS: FormatPreset[] = [
   },
   {
     id: "hyperliquid_trade",
-    label: "Hyperliquid (Trade History)",
+    label: "Hyperliquid — transactions",
     description:
       "Export Trade History pré-aplati (Date, Ticker, Type, Quantity, Price, Fee, Currency)",
     aliases: {
@@ -513,7 +1055,7 @@ export const IMPORT_FORMATS: FormatPreset[] = [
   },
   {
     id: "hyperliquid_funding",
-    label: "Hyperliquid (Funding History)",
+    label: "Hyperliquid — financement",
     description:
       "Export Funding History pré-aplati (Date, Ticker, Type, CashAmount, Currency, Notes)",
     aliases: {
@@ -681,6 +1223,153 @@ const TYPE_ALIASES: Record<string, TxType> = {
   transferout: "RETRAIT",
   interestadditional: "INTERET",
   fixedterminterest: "INTERET",
+  /*
+    Avanza — libellés suédois.
+
+    `normalizeHeader` retire les diacritiques : « Köp » arrive donc en `kop`,
+    « Sälj » en `salj`. Les deux orthographes sont enregistrées pour ne pas
+    dépendre de ce détail de normalisation.
+
+    `Övrigt` (« divers ») n'est délibérément pas mappé : il recouvre aussi bien
+    un remboursement de frais qu'un échange de parts de fonds, et lui choisir
+    un type unique serait une invention. Ces lignes remontent en avertissement.
+  */
+  kop: "ACHAT",
+  köp: "ACHAT",
+  salj: "VENTE",
+  sälj: "VENTE",
+  utdelning: "DIVIDENDE",
+  ranta: "INTERET",
+  ränta: "INTERET",
+  insattning: "APPORT",
+  insättning: "APPORT",
+  uttag: "RETRAIT",
+  "utlandsk kallskatt": "FRAIS",
+  "utländsk källskatt": "FRAIS",
+  /*
+    DEGIRO — libellés du relevé, dans les langues où le compte les rend.
+
+    Le rapprochement se fait par sous-chaîne, la plus longue d'abord : c'est ce
+    qui fait que « Verkoop » l'emporte sur « Koop », et « Impôts sur dividende »
+    sur « dividende ». Sans cet ordre, une vente serait lue comme un achat et un
+    impôt comme un revenu.
+  */
+  koop: "ACHAT",
+  compra: "ACHAT",
+  verkoop: "VENTE",
+  vendita: "VENTE",
+  // « Kosten » couvre les trois libellés de frais du relevé : transaction,
+  // aansluiting (connexion place de marché) et corporate action.
+  kosten: "FRAIS",
+  /*
+    « Giro Exchange Connection Fee » contient « exchange », qui vaut ACHAT dans
+    les exports crypto. Le libellé complet, plus long, l'emporte — sans quoi un
+    abonnement annuel de 2,50 € entrait au portefeuille comme un achat.
+  */
+  "connection fee": "FRAIS",
+  "impots sur dividende": "FRAIS",
+  /*
+    « Dividendbelasting » est la retenue à la source néerlandaise : un débit,
+    toujours négatif. Le mot contient « dividend », qui l'emportait faute de
+    plus long : l'impôt entrait en revenu, et le dividende était compté deux
+    fois — une fois brut, une fois pour sa propre retenue.
+  */
+  dividendbelasting: "FRAIS",
+  /*
+    Retenue à la source IBKR : montant toujours négatif, et le libellé ne
+    contient aucun mot déjà typé. Le repli libre en faisait un APPORT — la
+    ligne s'ajoutait donc au patrimoine du montant qu'elle en retire.
+  */
+  "withholding tax": "FRAIS",
+  /*
+    eToro — les libellés de son relevé d'activité.
+
+    « Open Position » / « Position closed » sont les deux sens d'un trade ;
+    les autres sont des frais aux noms qui ne se devinent pas : SDRT est le
+    droit de timbre britannique, « Overnight fee » le coût de portage d'un CFD.
+    Sans ces alias, une ligne sur deux du relevé remontait non typée.
+  */
+  "open position": "ACHAT",
+  "position closed": "VENTE",
+  "withdraw request": "RETRAIT",
+  "withdraw fee": "FRAIS",
+  "withdrawal conversion fee": "FRAIS",
+  "overnight fee": "FRAIS",
+  // « interest payment » est déjà déclaré plus bas (BUX) : même libellé, même sens.
+  sdrt: "FRAIS",
+  /*
+    Saxo & Swissquote — libellés d'opérations propres à ces deux relevés.
+
+    « Custody Fee » / « Custody Fees » sont les droits de garde ; « Forex
+    credit/debit » les deux jambes d'un change, exclues dans `map-rows`.
+    « Debit » chez Swissquote désigne un retrait d'espèces, jamais un achat.
+  */
+  /*
+    Trade Republic — libellés néerlandais du relevé.
+    « Aankoop » / « Verkoop » cohabitent avec Buy / Sell dans un même fichier :
+    la langue du relevé change avec celle de l'application, pas le compte.
+  */
+  aankoop: "ACHAT",
+  storting: "APPORT",
+  onttrekking: "RETRAIT",
+
+  /*
+    Trading 212 — « Market buy » contient « buy », mais « Stock split open »
+    et « Transfer out » ne se devinent pas. Les scissions sont traitées à part
+    dans `map-rows` : ce sont deux lignes de même valeur, pas deux mouvements.
+  */
+  "market buy": "ACHAT",
+  "market sell": "VENTE",
+  "limit buy": "ACHAT",
+  "limit sell": "VENTE",
+  "interest on cash": "INTERET",
+  "transfer out": "TRANSFERT_TITRE",
+  "transfer in": "TRANSFERT_TITRE",
+
+  /*
+    XTB — le type est colonné, mais dans la langue du compte : le même relevé
+    mêle « Stocks/ETF purchase » et « Ações/ETF compra ».
+  */
+  "stocks/etf purchase": "ACHAT",
+  "stocks/etf sale": "VENTE",
+  "acoes/etf compra": "ACHAT",
+  "acoes/etf vende": "VENTE",
+  "free funds interests tax": "FRAIS",
+  "free funds interests": "INTERET",
+
+  "custody fee": "FRAIS",
+  "custody fees": "FRAIS",
+  "droits de garde": "FRAIS",
+  // Variante portugaise de « Transactiekosten », déjà couverte en NL/FR/IT.
+  "comissoes de transacao": "FRAIS",
+  ingreso: "APPORT",
+  retirada: "RETRAIT",
+  levantamento: "RETRAIT",
+  /*
+    Directa — libellés italiens.
+
+    Les retenues (`Rit.` / `Ritenuta`) sont plus longues que le revenu qu'elles
+    ponctionnent, donc reconnues d'abord : « Rit.provento etf » est un
+    prélèvement, pas un dividende.
+  */
+  acquisto: "ACHAT",
+  "conferimento con bonifico": "APPORT",
+  "provento etf": "DIVIDENDE",
+  "rit.provento etf": "FRAIS",
+  "cedola obb.": "COUPON",
+  "rit.cedola obb.": "FRAIS",
+  "coupon certif.": "COUPON",
+  "ritenuta su plusvalenza": "FRAIS",
+  ritenuta: "FRAIS",
+  // BUX — le libellé exploitable est `Transaction Type`.
+  "buy trade": "ACHAT",
+  "sell trade": "VENTE",
+  "cash dividend": "DIVIDENDE",
+  "interest payment": "INTERET",
+  "trading fee": "FRAIS",
+  "subscription fee": "FRAIS",
+  "sepa deposit": "APPORT",
+  "sepa withdrawal": "RETRAIT",
   // AscendEX
   compound: "REWARD",
   regular_redemption: "RETRAIT",
@@ -791,6 +1480,34 @@ export function detectFormatFromHeaders(headers: string[]): ImportFormatId {
   // Priorité de détection (spécifique → générique) :
   // Paradex > Nexo > Hyperliquid Funding > Hyperliquid Trades > IBKR > reste
   if (has("fill_type") && has("realized_funding")) return "paradex";
+  /*
+    Bitpanda — « Amount Fiat » et « Amount Asset » côte à côte ne se
+    rencontrent nulle part ailleurs : le fichier sépare la somme engagée de la
+    quantité reçue. Sans cette règle il se faisait passer pour un export
+    Coinbase, sur le seul mot `Timestamp`.
+  */
+  if (hasAny("amount_fiat") && hasAny("amount_asset", "asset_class")) {
+    return "bitpanda";
+  }
+  /*
+    Bybit — quatre exports, une signature chacun. Le compte spot se reconnaît à
+    `Wallet Balance` ; les exports dérivés à leurs colonnes de contrats. Tous
+    passent par le même format, qui écarte les dérivés en le disant.
+  */
+  if (hasAny("wallet_balance") && hasAny("coin", "currency")) {
+    return "bybit";
+  }
+  if (hasAny("contracts") && hasAny("closed_p_l", "filled_qty", "leverage")) {
+    return "bybit";
+  }
+  /*
+    Revolut crypto — `Fiat amount` et `Base currency` n'existent que sur ce
+    relevé. Le relevé bancaire, qui partage tous ses autres en-têtes, ne les a
+    pas : c'est ce qui permet de ne pas les confondre.
+  */
+  if (hasAny("fiat_amount") && hasAny("base_currency")) {
+    return "revolut_crypto";
+  }
   // Nexo — avant Hyperliquid/Binance (signature "Transaction" NXT très spécifique)
   if (
     has("transaction") &&
@@ -846,12 +1563,21 @@ export function detectFormatFromHeaders(headers: string[]): ImportFormatId {
       return "cryptocom";
     }
   }
-  // Crypto.com Deposit / Withdrawal
+  // Crypto.com Deposit / Withdrawal / Supercharger
   if (
     hasAny("time_utc", "time") &&
     has("coin") &&
     hasAny("deposit_amount", "withdrawal_amount")
   ) {
+    return "cryptocom_transfer";
+  }
+  /*
+    `SUPERCHARGER_REWARDS.csv` n'a que trois colonnes — Time (UTC), Coin,
+    Amount — et aucun montant nommé « deposit » ou « withdrawal ». Il tombait
+    donc sur le format générique et remontait sans date ni type. Le trio est
+    assez court et assez particulier pour signer ce fichier à lui seul.
+  */
+  if (keys.length === 3 && hasAny("time_utc") && has("coin") && has("amount")) {
     return "cryptocom_transfer";
   }
   // Nexo
@@ -902,10 +1628,68 @@ export function detectFormatFromHeaders(headers: string[]): ImportFormatId {
   ) {
     return "revolut";
   }
+  /*
+    eToro — `Position ID` et `Realized Equity` n'existent nulle part ailleurs.
+
+    Ses autres colonnes (Date, Type, Amount…) sont trop banales pour signer un
+    format : c'est le couple identifiant-de-position / capitaux-réalisés qui le
+    distingue, et il est assez spécifique pour ne reconnaître aucun autre
+    courtier par erreur.
+  */
+  if (hasAny("position_id") && hasAny("realized_equity", "realized_equity_change")) {
+    return "etoro";
+  }
+  /*
+    Saxo — `Instrument ISIN` et `Instrument currency` sont préfixés, ce qu'aucun
+    autre relevé ne fait, et `Event` porte l'opération en toutes lettres.
+  */
+  if (hasAny("instrument_isin", "instrument_currency") && hasAny("event")) {
+    return "saxo";
+  }
+  /*
+    Swissquote — le trio `Accrued Interest` / `Net Amount` / `Unit price` ne se
+    rencontre nulle part ailleurs. `Net Amount` seul serait trop faible : c'est
+    le coupon couru, colonne de relevé de titres suisse, qui signe le format.
+  */
+  if (hasAny("accrued_interest") && hasAny("net_amount", "unit_price")) {
+    return "swissquote";
+  }
+  /*
+    Trading 212 — chaque montant y porte sa propre colonne de devise, ce que
+    ne fait aucun autre relevé : « Currency (Total) », « Currency (Price /
+    share) ». Le couple avec `No. of shares` suffit à le signer.
+  */
+  if (hasAny("currency_total") && hasAny("no_of_shares", "price_share")) {
+    return "trading212";
+  }
+  /*
+    XTB — six colonnes seulement, dont `Comment` qui porte toute la
+    transaction. La combinaison Type + Comment + Amount lui est propre.
+  */
+  if (has("comment") && has("type") && has("amount") && has("time")) {
+    return "xtb";
+  }
+  /*
+    Trade Republic néerlandais — `Transactietype` ne se rencontre nulle part
+    ailleurs. Sans cette règle, le relevé tombait sur le repli « ISIN » et se
+    faisait passer pour un export Boursorama.
+  */
+  if (hasAny("transactietype") || hasAny("waarde_netto")) {
+    return "trade_republic";
+  }
   if (
     hasAny("ib_commission", "ibcommission", "t_price") &&
     hasAny("symbol", "tradedate", "trade_date", "buy_sell")
   ) {
+    return "interactive_brokers";
+  }
+  /*
+    Flex Query IBKR de dividendes : aucune commission, donc aucune des
+    signatures ci-dessus. `CurrencyPrimary` est propre à IBKR ; sans cette
+    règle le fichier tombait sur le repli « ISIN » et se faisait passer pour
+    un relevé Boursorama.
+  */
+  if (hasAny("currencyprimary") && hasAny("settledate", "isin", "tradedate")) {
     return "interactive_brokers";
   }
   // Activity Statement aplati (headers synthétiques)

@@ -1,0 +1,11 @@
+Transaction,Type,Input Currency,Input Amount,Output Currency,Output Amount,USD Equivalent,Details,Outstanding Loan,Date / Time
+NXThL5AW9GWZh,DepositToExchange,EUR,1000.00000000,EURX,1000.00000000,$1174.515,"approved / EUR Top Up",$0.00,2021-08-09 20:18:28
+NXTYIFa9J0PCE,ExchangeDepositedOn,EUR,1000.00000000,EURX,1000.00000000,$1174.515,"approved / EUR to EURX",$0.00,2021-08-09 20:18:30
+NXTNT9rX3IPGT,LockingTermDeposit,EURX,-1000.00000000,EURX,1000.00000000,$1174.75,"approved / Transfer from Savings Wallet to Term Wallet",$0.00,2021-08-09 20:37:03
+NXTy7PzhZPlfb,FixedTermInterest,NEXO,15.67720263,NEXO,15.67720263,$52.45311378,"approved / Term Deposit Interest",$0.00,2021-11-09 04:00:02
+NXTLnhBpBV8nQ,UnlockingTermDeposit,EURX,1000.00000000,EURX,1000.00000000,$1158.527,"approved / Transfer from Term Wallet to Savings Wallet",$0.00,2021-11-09 04:00:02
+NXTCAr6BC5Nh9,ExchangeToWithdraw,EURX,-1000.00000000,EUR,1000.00000000,$1159.064,"rejected / EURX to EUR",$0.00,2021-11-09 09:13:06
+NXTVdA6a3Yv8a,Exchange,NEXO,-15.67720263,EURX,44.74149498,$51.9,"approved / Exchange NEXO Token to EURX",$0.00,2021-11-09 09:25:43
+NXTUceb4U1tG6,ExchangeToWithdraw,EURX,-44.74000000,EUR,44.74000000,$51.83008202,"rejected / EURX to EUR",$0.00,2021-11-09 09:27:34
+NXTbGL6EW09zw,ExchangeToWithdraw,EURX,-1044.74000000,EUR,1044.74000000,$1210.94873134,"approved / EURX to EUR",$0.00,2021-11-09 11:59:33
+NXTinPQKzxjYg,WithdrawExchanged,EUR,-1044.74000000,EUR,1044.74000000,$1211.15976882,"approved / EUR withdrawal",$0.00,2021-11-09 12:02:49
