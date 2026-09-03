@@ -13,6 +13,18 @@ import {
   netWorthAt,
 } from "@/app/lib/portfolio/kpi-series";
 import { buildHeroSeries, type HeroMode } from "@/app/lib/portfolio/hero-series";
+import { windowForRange } from "@/app/lib/portfolio/evolution-aggregate";
+import {
+  defaultHeroRange,
+  heroRangeSubtitle,
+  heroWindowChange,
+  heroWindowReference,
+  HERO_RANGES,
+  HERO_RANGE_LABEL,
+  isHeroRange,
+  type HeroRange,
+} from "@/app/lib/portfolio/hero-range";
+import { HERO_RANGE_KEY, loadUiPref, saveUiPref } from "@/app/lib/ui-preferences";
 import { useHeroChartHover } from "@/app/hooks/use-hero-chart-hover";
 import { HeroChart } from "@/components/dashboard/hero-chart";
 import {
@@ -98,9 +110,42 @@ export function TerminalHero({
     grandeur, la série est déclarée inconnue au lieu d'être comblée par des
     zéros. Une carte sans courbe vaut mieux qu'une courbe qui ne décrit rien.
   */
+  /*
+    Période de la carte, retenue d'une session à l'autre.
+
+    Lue paresseusement dans l'initialiseur, comme les autres préférences du
+    tableau de bord : la lire dans un effet afficherait un premier rendu à la
+    période par défaut puis un second à la période retenue — un clignotement à
+    chaque ouverture.
+
+    `null` tant qu'aucun choix n'a été fait : le défaut dépend de la profondeur
+    de l'historique, que le composant ne connaît pas au montage.
+  */
+  const [chosenRange, setChosenRange] = useState<HeroRange | null>(() => {
+    if (typeof window === "undefined") return null;
+    const stored = loadUiPref<string | null>(HERO_RANGE_KEY, null);
+    return isHeroRange(stored) ? stored : null;
+  });
+
+  const range: HeroRange = chosenRange ?? defaultHeroRange(history);
+
+  /*
+    L'historique, coupé à la période.
+
+    Le fenêtrage est celui du tableau de bord (`windowForRange`), pas une
+    seconde découpe : le point qui précède la fenêtre y est conservé en tête, et
+    c'est lui qui donne la valeur de départ sans laquelle aucune variation de
+    période n'aurait de référence. L'instant de référence est la dernière
+    valorisation, non l'horloge — voir `heroWindowReference`.
+  */
+  const windowed = useMemo(
+    () => windowForRange(history, range, heroWindowReference(history)),
+    [history, range]
+  );
+
   const values = useMemo(
-    () => kpiSeries(history, mode === "net" ? netWorthAt : grossAssetsAt),
-    [history, mode]
+    () => kpiSeries(windowed, mode === "net" ? netWorthAt : grossAssetsAt),
+    [windowed, mode]
   );
 
   const stroke =
@@ -114,9 +159,32 @@ export function TerminalHero({
     et la décomposition que l'info-bulle rapporte.
   */
   const series = useMemo(
-    () => buildHeroSeries(history, values, mode),
-    [history, values, mode]
+    () => buildHeroSeries(windowed, values, mode),
+    [windowed, values, mode]
   );
+
+  /*
+    Variation de la période affichée — la ligne sous le chiffre.
+
+    Elle décrit toujours la fenêtre courante : changer de chip recoupe la
+    série, donc la recalcule. Le Δ face au point précédent reste dans
+    l'info-bulle ; les deux répondent à deux questions, et les réunir sous le
+    même chiffre les rendrait illisibles.
+  */
+  const windowChange = useMemo(
+    () => (values ? heroWindowChange(values) : null),
+    [values]
+  );
+
+  /** Passifs en fin de fenêtre — « dont passifs », en mode net seulement. */
+  const liabilitiesNow = useMemo(() => {
+    if (mode !== "net") return undefined;
+    const v = windowed[windowed.length - 1]?.liabilitiesBase;
+    return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+  }, [windowed, mode]);
+
+  /** Origine de **tout** l'historique, indépendante de la période choisie. */
+  const historyStart = history[0]?.date;
 
   const hover = useHeroChartHover(series);
   const active = hover.activePoint;
@@ -275,6 +343,30 @@ export function TerminalHero({
                 </button>
               ))}
             </div>
+
+            {/*
+              L'aide en une ligne, sans coûter une ligne.
+
+              La phrase complète tient dans l'infobulle native et dans le nom
+              accessible du repère ; l'écrire en clair à côté du sélecteur
+              poussait le bloc à la ligne suivante et faisait grandir la carte
+              de près de deux cents pixels — pour une phrase que le libellé
+              actif rappelle déjà juste en dessous.
+            */}
+            <span
+              className={cn(
+                "inline-flex h-4 w-4 cursor-help select-none items-center justify-center",
+                "rounded-full border border-[var(--border-strong)]",
+                "text-[10px] leading-none text-[var(--foreground-faint)]"
+              )}
+              tabIndex={0}
+              role="note"
+              data-testid="hero-mode-help"
+              title="Net = actifs − dettes. Brut = actifs seuls."
+              aria-label="Net = actifs moins dettes. Brut = actifs seuls."
+            >
+              ?
+            </span>
           </div>
 
           <div className="mt-[var(--space-3)] flex flex-wrap items-baseline gap-[var(--space-3)]">
@@ -311,26 +403,100 @@ export function TerminalHero({
           </div>
 
           {/*
-            Ce qu'on lit, dit en toutes lettres.
+            Variation de la période affichée.
 
-            Remplace la variation de période, qui n'a plus d'objet ici : la
-            courbe n'a pas de fenêtre, donc aucune variation ne peut en être
-            rapportée sans inventer un horizon. Ce que la carte doit annoncer,
-            c'est l'étendue de ce qu'elle montre.
+            Masquée pendant le survol : le chiffre au-dessus n'est plus celui
+            d'aujourd'hui mais celui du point visé, et lui accoler une variation
+            de période ferait lire un écart qui ne part pas de ce montant.
+            L'info-bulle prend le relais avec l'écart au point précédent.
+
+            La hauteur est réservée en toutes circonstances : sans elle, la
+            carte se contracterait au premier survol et se rouvrirait à la
+            sortie, sous le curseur.
+          */}
+          <div className="mt-[var(--space-2)] min-h-[1.25rem]">
+            {!active && windowChange && (
+              <p
+                className="flex flex-wrap items-baseline gap-[var(--space-2)] text-[length:var(--text-sm)] leading-none"
+                data-testid="hero-window-change"
+                data-direction={windowChange.abs >= 0 ? "up" : "down"}
+              >
+                <span
+                  className={cn(
+                    "num font-medium",
+                    windowChange.abs >= 0 ? "val-positive" : "val-negative"
+                  )}
+                  data-testid="hero-window-change-abs"
+                >
+                  {formatSignedAmount(windowChange.abs, (v) => money(v))}
+                </span>
+                <span className="text-[var(--foreground-faint)]">·</span>
+                <span
+                  className={cn(
+                    "num",
+                    windowChange.pct === null
+                      ? "text-[var(--foreground-faint)]"
+                      : windowChange.abs >= 0
+                        ? "val-positive"
+                        : "val-negative"
+                  )}
+                  data-testid="hero-window-change-pct"
+                >
+                  {/*
+                    Une fenêtre partie de zéro n'a pas de pourcentage — ni petit
+                    ni grand : aucun. « n/a » le dit ; « +100 % » l'inventerait.
+                  */}
+                  {windowChange.pct === null
+                    ? "n/a"
+                    : formatSignedPct(windowChange.pct)}
+                </span>
+                <span
+                  className="text-[var(--foreground-secondary)]"
+                  data-testid="hero-window-label"
+                >
+                  {heroRangeSubtitle(range, windowed[0]?.date)}
+                </span>
+              </p>
+            )}
+          </div>
+
+          {/*
+            La date lue, la part des dettes, et la profondeur de l'historique
+            complet — laquelle ne dépend pas de la période choisie.
+
+            Le libellé du mode n'y figure plus : le repère « ? » au-dessus le
+            porte désormais, et la ligne doit tenir sur une seule ligne pour ne
+            pas faire grandir la carte.
           */}
           <p
-            className="mt-[var(--space-3)] text-[length:var(--text-sm)] text-[var(--foreground-secondary)]"
+            className="mt-[var(--space-2)] text-[length:var(--text-xs)] leading-none text-[var(--foreground-secondary)]"
             data-testid="hero-scope"
           >
-            {dateLabel && (
+            {dateLabel && <span data-testid="hero-date">{dateLabel}</span>}
+            {liabilitiesNow !== undefined && (
               <>
-                <span data-testid="hero-date">{dateLabel}</span>
                 <span className="mx-[var(--space-2)] text-[var(--foreground-faint)]">
                   ·
                 </span>
+                <span data-testid="hero-liabilities">
+                  dont passifs{" "}
+                  <span className="num">{money(liabilitiesNow)}</span>
+                </span>
               </>
             )}
-            {HERO_MODE_TITLE[mode]}
+            {historyStart && (
+              <>
+                <span className="mx-[var(--space-2)] text-[var(--foreground-faint)]">
+                  ·
+                </span>
+                <span
+                  className="text-[var(--foreground-faint)]"
+                  data-testid="hero-history-start"
+                >
+                  depuis {formatShortDateParis(historyStart)}
+                </span>
+              </>
+            )}
           </p>
         </div>
 
@@ -348,7 +514,40 @@ export function TerminalHero({
           Une base fixe rend la colonne insensible à son voisin. Sur mobile elle
           reprend toute la largeur, comme avant, le bloc passant à la ligne.
         */}
-        <div className="flex w-full min-w-0 flex-col items-end gap-[var(--space-3)] sm:w-[55%] sm:flex-none">
+        <div className="flex w-full min-w-0 flex-col items-end gap-[var(--space-2)] sm:w-[55%] sm:flex-none">
+          {/*
+            Périodes, posées sur la courbe qu'elles découpent.
+
+            Même habillage que le sélecteur net/brut : deux réglages de la même
+            carte, deux apparences auraient suggéré deux natures. Elles logent
+            dans la colonne du graphique, plus courte que celle du chiffre — la
+            carte ne grandit donc pas d'un pixel pour les accueillir.
+          */}
+          <div
+            className="term-seg"
+            role="tablist"
+            aria-label="Période de la courbe"
+            data-testid="hero-range-toggle"
+          >
+            {HERO_RANGES.map((r) => (
+              <button
+                key={r}
+                type="button"
+                role="tab"
+                aria-selected={range === r}
+                data-active={range === r}
+                className="term-seg-item"
+                data-testid={`hero-range-${r}`}
+                onClick={() => {
+                  setChosenRange(r);
+                  saveUiPref(HERO_RANGE_KEY, r);
+                }}
+              >
+                {HERO_RANGE_LABEL[r]}
+              </button>
+            ))}
+          </div>
+
           <div className="h-[5.5rem] w-full min-w-0 sm:h-[6.5rem]">
             {values && values.length >= 2 ? (
               <HeroChart

@@ -75,17 +75,19 @@ test.describe("Carte de tête — survol de la courbe", () => {
     await expect(page.getByTestId("hero-chart-dot")).toBeVisible();
 
     /*
-      Le montant du hero doit valoir celui de l'info-bulle, aux décimales
-      près : c'est la même valeur, écrite deux fois à deux tailles. Les
-      comparer chiffre à chiffre attraperait un décalage d'un point entre la
-      croix et le chiffre — le défaut que ce chantier doit rendre impossible.
+      Le hero et l'info-bulle désignent la même valeur, à l'arrondi près.
+
+      Les deux ne s'écrivent pas pareil, et c'est voulu : au-delà de 10 000 €
+      le chiffre de tête laisse tomber les centimes que l'info-bulle conserve.
+      La comparaison porte donc sur les nombres, avec un euro de tolérance —
+      elle attraperait un décalage d'un point entre la croix et le chiffre, qui
+      se compterait en milliers.
     */
-    const tooltipMontant = (
+    const tooltipMontant = nombre(
       await page.getByTestId("hero-tooltip-amount").innerText()
-    ).trim();
-    const heroSurvol = (await montant.innerText()).trim();
-    const chiffres = (s: string) => s.replace(/[^\d]/g, "");
-    expect(chiffres(tooltipMontant).startsWith(chiffres(heroSurvol))).toBe(true);
+    );
+    const heroSurvol = nombre(await montant.innerText());
+    expect(Math.abs(tooltipMontant - heroSurvol)).toBeLessThan(1);
 
     // Sortie : retour à la valorisation courante, à l'identique.
     await page.mouse.move(0, 0);
@@ -173,6 +175,98 @@ test.describe("Carte de tête — survol de la courbe", () => {
       question ne se pose pas, et la ligne ne doit pas suivre le bouton.
     */
     await expect(page.getByTestId("hero-tooltip-split")).toHaveCount(0);
+  });
+
+  test("la ligne de variation suit la période choisie", async ({ page }) => {
+    const chart = await heroChart(page);
+    const ligne = page.getByTestId("hero-window-change");
+    const montant = page.getByTestId("hero-net-worth");
+
+    await expect(ligne).toBeVisible();
+    const valeurDuJour = (await montant.innerText()).trim();
+
+    /*
+      Deux périodes opposées sur le même patrimoine.
+
+      Sur un décor qui a beaucoup bougé en trois ans, la variation « 1M » et la
+      variation « Max » ne peuvent pas coïncider — et si elles coïncidaient, ce
+      serait que la ligne ne se recalcule pas.
+    */
+    await page.getByTestId("hero-range-1m").click();
+    await expect(page.getByTestId("hero-range-1m")).toHaveAttribute(
+      "data-active",
+      "true"
+    );
+    const varCourte = (await ligne.innerText()).trim();
+    await expect(page.getByTestId("hero-window-label")).toHaveText("sur 1 mois");
+
+    await page.getByTestId("hero-range-all").click();
+    await expect(page.getByTestId("hero-range-all")).toHaveAttribute(
+      "data-active",
+      "true"
+    );
+    const varLongue = (await ligne.innerText()).trim();
+
+    expect(varLongue).not.toBe(varCourte);
+    // « depuis mars 2021 » et non « sur … » : Max nomme son point de départ.
+    await expect(page.getByTestId("hero-window-label")).toContainText("depuis");
+
+    /*
+      Le chiffre de tête, lui, ne bouge pas.
+
+      Il annonce la valorisation d'aujourd'hui, qui n'a pas de période. Seule
+      la variation en dépend — c'est toute la distinction que cette carte doit
+      tenir.
+    */
+    await expect(montant).toHaveText(valeurDuJour);
+
+    // La période choisie survit au rechargement.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("hero-range-all")).toHaveAttribute(
+      "data-active",
+      "true",
+      { timeout: 20_000 }
+    );
+
+    // Le survol reste opérant dans la fenêtre, et la variation de période
+    // s'efface le temps du geste : le chiffre au-dessus n'est plus celui du jour.
+    await survolerA(page, chart, 0.5);
+    await expect(page.getByTestId("hero-chart-tooltip")).toBeVisible();
+    await expect(ligne).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await expect(ligne).toBeVisible();
+  });
+
+  test("changer de période ne fait pas sauter la carte", async ({ page }) => {
+    const chart = await heroChart(page);
+    const carte = page.getByTestId("terminal-hero");
+
+    const hauteurs: number[] = [];
+    for (const periode of ["1m", "3m", "ytd", "1y", "5y", "all"]) {
+      await page.getByTestId(`hero-range-${periode}`).click();
+      await expect(page.getByTestId(`hero-range-${periode}`)).toHaveAttribute(
+        "data-active",
+        "true"
+      );
+      const box = await carte.boundingBox();
+      expect(box).not.toBeNull();
+      hauteurs.push(box!.height);
+    }
+
+    /*
+      La carte doit garder sa taille d'une période à l'autre.
+
+      Une hauteur qui varie ferait remonter ou descendre tout ce qui suit —
+      indicateurs, courbe d'évolution, répartition — à chaque clic sur un chip.
+    */
+    expect(Math.max(...hauteurs) - Math.min(...hauteurs)).toBeLessThanOrEqual(2);
+
+    // Et elle ne doit pas non plus bouger au survol.
+    const avant = (await carte.boundingBox())!.height;
+    await survolerA(page, chart, 0.4);
+    await expect(page.getByTestId("hero-chart-tooltip")).toBeVisible();
+    const pendant = (await carte.boundingBox())!.height;
+    expect(Math.abs(pendant - avant)).toBeLessThanOrEqual(2);
   });
 
   test("montants masqués : le hero et l'info-bulle le sont aussi", async ({
