@@ -248,6 +248,14 @@ export type HistoryPoint = {
   unrealizedPnlBase?: number;
   /** Revenus cash cumulés — div. / coupons / loyers agrégés (base) */
   cashIncomeBase?: number;
+  /**
+   * Revenus cumulés tels que le journal comptable les connaît : dividendes,
+   * coupons, loyers **et intérêts** (base).
+   *
+   * Distinct de `cashIncomeBase`, qui n'agrège que les trois premiers types.
+   * C'est celui-ci qui reproduit le `cashIncomeEur` du patrimoine du jour.
+   */
+  ledgerCashIncomeBase?: number;
   /** Split revenus (base) — dérivé du journal */
   dividendsBase?: number;
   couponsBase?: number;

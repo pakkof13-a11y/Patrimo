@@ -1,0 +1,6 @@
+Timestamp (UTC),Transaction Description,Currency,Amount,To Currency,To Amount,Native Currency,Native Amount,Native Amount (in USD),Transaction Kind,Transaction Hash
+2022-11-10 03:37:53,Revolut**9754*,EUR,-29.92,,,EUR,-29.92,-33.14673362,,
+2022-11-09 21:15:32,EUR Deposit,EUR,29.91,,,EUR,29.91,33.13565516625,,
+2022-09-18 05:11:00,Canal Sat,EUR,-29.99,,,EUR,-29.99,-33.22428279625,,
+2022-09-17 13:27:08,EUR -> EUR,EUR,29.92,EUR,29.92,EUR,29.92,33.14673362,,
+2022-09-17 13:26:07,EUR Deposit,EUR,0.08,,,EUR,0.08,0.08862763,,

@@ -241,6 +241,43 @@ export type PortfolioValuationPoint = {
   /** Cash du journal — hors périmètre, exposé pour le contrôle (cf. engine). */
   ledgerCash: number;
 
+  /**
+   * Prix de revient des positions du journal à cette date.
+   *
+   * Somme des `costBasisEur` de l'état comptable rejoué — exactement ce que
+   * `totalCostBasis` additionne pour le patrimoine du jour. Le moteur tenait
+   * déjà cette information à chaque date pour retenir au coût les lignes sans
+   * cours ; elle n'était simplement jamais publiée.
+   *
+   * Toutes les positions y figurent, y compris celles qu'un utilisateur a
+   * écartées du patrimoine (DeFi/NFT ignorés) et dont la valeur de marché, elle,
+   * est exclue. C'est l'asymétrie du calcul du jour — `marketValue` filtre,
+   * `totalCostBasis` non — et la reproduire est ce qui fait qu'un P&L latent
+   * historique se termine sur le montant affiché plutôt qu'à côté.
+   */
+  positionsCostBasis: number;
+
+  /**
+   * Plus-values réalisées cumulées jusqu'à cette date.
+   *
+   * Somme des lots réalisés de l'état comptable, soit la même chose que
+   * `totalRealizedPnl` sur le patrimoine du jour. Cumulatif par nature : chaque
+   * vente y ajoute son résultat, rien ne l'en retire.
+   */
+  realizedPnl: number;
+
+  /**
+   * Revenus encaissés cumulés jusqu'à cette date, tels que le journal les
+   * connaît : dividendes, coupons, loyers **et intérêts**.
+   *
+   * Distinct de la ventilation `dividendsBase / couponsBase / rentsBase` publiée
+   * par ailleurs, qui ne couvre que les trois premiers types. Les deux ont leur
+   * usage — celle-ci reproduit `cashIncomeEur` du patrimoine du jour, et c'est
+   * la seule qui permette à un indicateur « réalisé + revenus » de se terminer
+   * sur le montant qu'il affiche.
+   */
+  ledgerCashIncome: number;
+
   status: HistoricalDataStatus;
   /** Compartiments qui n'étaient pas exacts ce jour-là. */
   estimatedComponents: ValuationComponent[];

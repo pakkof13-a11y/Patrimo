@@ -22,9 +22,11 @@ import {
   type ColumnRole,
 } from "@/app/lib/import/presets";
 import {
+  hasDedicatedFormat,
   platformHintForFormat,
   resolvePlatformOptionForFormat,
 } from "@/app/lib/import/format-platform";
+import { supportsMultipleEnvelopes } from "@/app/lib/platforms/presets";
 import type { ImportDraftRow } from "@/app/lib/import/map-rows";
 import { parseCsv } from "@/app/lib/import/csv-parse";
 import { decodeCsvBuffer } from "@/app/lib/import/normalize";
@@ -409,6 +411,25 @@ export function ImportCsvModal({
   const selectedChainPreset = useMemo(
     () => chainPresets.find((p) => p.key === walletPresetKey),
     [chainPresets, walletPresetKey]
+  );
+
+  /**
+   * La plateforme choisie a-t-elle un format d'import dédié ?
+   *
+   * Figurer au catalogue et savoir lire son export sont deux choses
+   * différentes : la plupart des plateformes n'ont aucun parser, et l'écran
+   * doit le dire plutôt que de laisser croire qu'un choix suffit. Le fichier
+   * reste importable — par le mapping des colonnes — mais l'utilisateur doit
+   * savoir que c'est à lui de désigner ces colonnes.
+   */
+  const selectedPlatformKey = useMemo(() => {
+    const opt = platformOptions.find((o) => o.value === platformId);
+    return opt?.preset?.key ?? null;
+  }, [platformOptions, platformId]);
+
+  const platformSansFormat = useMemo(
+    () => Boolean(selectedPlatformKey) && !hasDedicatedFormat(selectedPlatformKey),
+    [selectedPlatformKey]
   );
 
   // Récupère les valeurs déjà configurées sur une autre blockchain pour
@@ -1864,6 +1885,27 @@ export function ImportCsvModal({
                     : IMPORT_FORMATS.find((f) => f.id === formatId)
                         ?.description}
                 </p>
+
+                {/*
+                  Dire ce qu'on ne sait pas encore lire.
+
+                  Sans cet avertissement, sélectionner une plateforme
+                  récemment ajoutée au catalogue laissait croire que son export
+                  était reconnu — alors qu'aucun parser ne connaît sa
+                  structure. L'import reste possible par le mapping des
+                  colonnes ; c'est la promesse implicite qui était fausse, pas
+                  la fonctionnalité.
+                */}
+                {platformSansFormat && (
+                  <p
+                    className="mt-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-sky-950 dark:text-sky-50"
+                    data-testid="import-format-unsupported"
+                  >
+                    Aucun format dédié n’existe encore pour cette plateforme.
+                    L’import reste possible : laissez « Auto-détection » et
+                    désignez les colonnes à l’étape suivante.
+                  </p>
+                )}
                 {preview?.needsFormatConfirm &&
                   (preview.ambiguousFormats?.length ?? 0) > 1 &&
                   formatId === "auto" && (
@@ -1981,15 +2023,22 @@ export function ImportCsvModal({
               </Field>
             </div>
 
-            {/* Sélecteur enveloppe fiscale — courtiers titres uniquement */}
-            {platformId &&
-              [
-                "INTERACTIVE_BROKERS",
-                "BOURSOBANK",
-                "FORTUNEO",
-                "TRADE_REPUBLIC",
-                "REVOLUT",
-              ].includes(platformId) && (
+            {/*
+              Sélecteur d'enveloppe fiscale — teneurs de compte titres / AV.
+
+              La condition comparait `platformId` — l'identifiant de la
+              plateforme en base — à une liste de clés catalogue. Les deux ne
+              se rencontrent jamais : le sélecteur n'était affiché pour aucune
+              plateforme, et `accountEnvelopeType` restait à sa valeur initiale
+              « CTO », que la soumission écarte. Tout import atterrissait donc
+              en compte-titres, PEA compris, sans que la question soit posée.
+
+              La clé catalogue (`selectedPlatformKey`) est ce qu'il fallait
+              comparer, et le catalogue lui-même décide quelles plateformes
+              peuvent porter plusieurs enveloppes — la liste figée en oubliait
+              (Bourse Direct, Saxo, DEGIRO…) et n'aurait pas suivi les ajouts.
+            */}
+            {platformId && supportsMultipleEnvelopes(selectedPlatformKey) && (
                 <Field label="Enveloppe fiscale">
                   <select
                     className="input w-full"

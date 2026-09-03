@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { NewsMacroPanel } from "@/components/dashboard/news-macro-panel";
 import type { PortfolioTickerProp } from "@/components/dashboard/market-calendar-panel";
 import { PortfolioEvolutionPanel } from "@/components/dashboard/portfolio-evolution-panel";
@@ -27,13 +27,30 @@ import {
   type DashboardMaturity,
   type DashboardMaturityInput,
 } from "@/app/lib/dashboard/maturity";
+import {
+  isEvolutionRangeEnabled,
+  windowForRange,
+  type EvolutionRange,
+} from "@/app/lib/portfolio/evolution-aggregate";
+import {
+  DEFAULT_EVOLUTION_PREFS,
+  loadEvolutionPrefs,
+  saveEvolutionRange,
+} from "@/app/lib/portfolio/evolution-prefs";
+import {
+  kpiSeries,
+  latentPnlAt,
+  listedValueAt,
+  realizedPlusIncomeAt,
+  seriesChangeAbs,
+  seriesChangePct,
+} from "@/app/lib/portfolio/kpi-series";
 
-/**
- * Profondeur d'historique des tuiles KPI (sparkline + variation).
- * Trente points ≈ un mois de relevés quotidiens : assez pour dessiner une
- * tendance, assez court pour que le pourcentage reste interprétable.
- */
-const KPI_WINDOW_POINTS = 30;
+const emptySubscribe = () => () => undefined;
+
+function useIsClient() {
+  return useSyncExternalStore(emptySubscribe, () => true, () => false);
+}
 
 function round2(n: number): number {
   if (!Number.isFinite(n)) return 0;
@@ -43,28 +60,6 @@ function round2(n: number): number {
 function num(v: unknown): number {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
-}
-
-/**
- * Variation d'une série d'historique, en %.
- *
- * La base est la première valeur **non nulle**, pas la première valeur tout
- * court : un portefeuille commence à zéro, et prendre ce zéro comme référence
- * rendait la variation incalculable sur presque tous les indicateurs — tous
- * affichaient « — » alors que l'historique existait. Les zéros de tête sont
- * l'absence de position, pas une valeur mesurée.
- *
- * `null` quand la série est trop courte ou entièrement nulle : mieux vaut ne
- * rien afficher qu'un pourcentage inventé.
- */
-function seriesChangePct(values: number[]): number | null {
-  if (values.length < 2) return null;
-  const baseIdx = values.findIndex((v) => Number.isFinite(v) && v !== 0);
-  if (baseIdx < 0 || baseIdx === values.length - 1) return null;
-  const first = values[baseIdx]!;
-  const last = values[values.length - 1]!;
-  if (!Number.isFinite(last)) return null;
-  return ((last - first) / Math.abs(first)) * 100;
 }
 
 export type DashboardTabProps = {
@@ -170,28 +165,104 @@ export function DashboardTab({
     Boolean(historyLoading) && stableHistory.length === 0 && history.length === 0;
 
   /**
+   * Période commune du tableau de bord.
+   *
+   * Un seul réglage pour la courbe d'évolution et pour le bandeau
+   * d'indicateurs. Le sélecteur reste affiché dans le panneau « Évolution du
+   * portefeuille » — c'est là qu'on le cherche —, mais l'état vit ici, au-dessus
+   * des deux blocs qui en dépendent.
+   *
+   * Le bandeau utilisait auparavant une fenêtre fixe de trente points, sans
+   * rapport avec ce que l'utilisateur venait de choisir : deux périodes sur un
+   * même écran, dont une que rien n'affichait. Passer de 1M à 1A changeait la
+   * courbe et laissait les tuiles inchangées.
+   *
+   * La préférence enregistrée reste celle du panneau (`evolutionPrefs.v5`) :
+   * partager l'état ne devait pas créer une seconde période mémorisée.
+   */
+  const isClient = useIsClient();
+  const [range, setRange] = useState<EvolutionRange>(
+    DEFAULT_EVOLUTION_PREFS.range
+  );
+  const [rangeHydrated, setRangeHydrated] = useState(false);
+  // Seed depuis localStorage au passage client (adjust state while rendering)
+  if (isClient && !rangeHydrated) {
+    setRangeHydrated(true);
+    setRange(loadEvolutionPrefs().range);
+  }
+
+  function changeRange(next: EvolutionRange) {
+    setRange(next);
+    saveEvolutionRange(next);
+  }
+
+  /*
+    Repli 7J quand l'historique ne couvre pas la période enregistrée.
+
+    Déplacé du panneau vers ici avec l'état qu'il corrige : un composant ne
+    peut pas écrire l'état de son parent pendant son propre rendu. Le repli
+    n'est délibérément **pas** enregistré — c'est une adaptation à un
+    historique encore court, pas un choix de l'utilisateur, et l'écraser lui
+    ferait perdre sa période dès que la courbe s'allonge.
+  */
+  const firstHistoryDate = stableHistory[0]?.date ?? null;
+  if (
+    rangeHydrated &&
+    range !== "7d" &&
+    !isEvolutionRangeEnabled(range, firstHistoryDate)
+  ) {
+    setRange("7d");
+  }
+
+  /**
    * Indicateurs — l'ordre du mockup, qui est aussi l'ordre de pilotage :
    * d'abord l'exposition cotée et le résultat, puis les poches annexes.
    *
-   * Une sparkline n'est fournie que là où l'historique porte réellement la
-   * grandeur. Alternatifs, épargne salariale et passifs n'y figurent pas :
-   * leur tracer une courbe reviendrait à inventer une trajectoire.
+   * Les sept tuiles lisent désormais la même chaîne : période commune →
+   * fenêtre → série → courbe, variation € et variation %. Aucune n'a de
+   * fenêtre propre, et aucune ne fabrique de zéro pour faire tenir un tracé —
+   * `kpiSeries` déclare la série inconnue plutôt que de la combler.
+   *
+   * Le P&L latent et le réalisé sont reconstruits par le moteur historique
+   * avec la définition du patrimoine du jour, à partir de l'état comptable
+   * qu'il rejoue déjà (cf. `latentPnlAt`, `realizedPlusIncomeAt`). Ils
+   * affichaient auparavant une courbe plate à zéro, faute que ces champs
+   * soient calculés.
    */
   const kpis = useMemo<TerminalKpi[]>(() => {
-    // Fenêtre glissante plutôt que l'historique entier : sur un portefeuille
-    // parti de zéro, une variation « depuis l'origine » affiche +30 000 % et
-    // n'apprend rien. Un indicateur de tête répond à « où en est-on
-    // récemment ? », pas à « qu'a-t-on accumulé depuis toujours ? ».
-    const h = stableHistory.slice(-KPI_WINDOW_POINTS);
-    const seriesOf = (pick: (p: HistoryPoint) => number) =>
-      h.length >= 2 ? h.map(pick) : undefined;
+    /*
+      La période choisie, et rien d'autre.
 
-    const listed = seriesOf((p) => num(p.positionsBase));
-    const latent = seriesOf((p) => num(p.unrealizedPnlBase));
-    const cash = seriesOf((p) => num(p.cashTotalBase));
-    const realized = seriesOf(
-      (p) => num(p.realizedPnlBase) + num(p.cashIncomeBase)
-    );
+      `windowForRange` est la fonction qu'emploie la courbe d'évolution : même
+      découpe, même point d'ancrage en tête pour la valeur de départ. La
+      variation de chaque tuile porte donc exactement sur la tranche de temps
+      que le graphique dessine juste en dessous.
+
+      La fenêtre glissante de trente points qui régnait ici évitait la variation
+      « depuis l'origine », illisible sur un portefeuille parti de zéro. Ce
+      compromis n'a plus à être arbitré dans le code : l'utilisateur choisit sa
+      période, « Tout » compris, et `seriesChangePct` prend de toute façon pour
+      base la première valeur non nulle.
+    */
+    const h = windowForRange(stableHistory, range);
+
+    /*
+      Une grandeur absente ne devient pas zéro.
+
+      `kpiSeries` rend `undefined` dès qu'un point ne porte pas le champ
+      demandé, au lieu de le remplacer par zéro pour faire tenir la courbe.
+      Une ligne parfaitement plate à zéro est indiscernable d'un patrimoine
+      réellement stable : c'est précisément la confusion que la doctrine du
+      projet interdit. Un zéro véritable, lui, passe — une poche vide vaut
+      zéro, et la courbe doit le dire.
+    */
+    const listed = kpiSeries(h, listedValueAt);
+    const cash = kpiSeries(h, (p) => p.cashTotalBase);
+    const alternatives = kpiSeries(h, (p) => p.alternativesBase);
+    const employeeSavings = kpiSeries(h, (p) => p.employeeSavingsBase);
+    const liabilities = kpiSeries(h, (p) => p.liabilitiesBase);
+    const latent = kpiSeries(h, latentPnlAt);
+    const realized = kpiSeries(h, realizedPlusIncomeAt);
 
     return [
       {
@@ -199,7 +270,8 @@ export function DashboardTab({
         label: "Cotés",
         value: num(summary?.totalMarketValueBase ?? summary?.totalMarketValueEur),
         spark: listed,
-        changePct: listed ? seriesChangePct(listed) : null,
+        changeAbs: seriesChangeAbs(listed),
+        changePct: seriesChangePct(listed),
         tone: "gold",
       },
       {
@@ -207,21 +279,25 @@ export function DashboardTab({
         label: "P&L latent",
         value: num(summary?.unrealizedPnlBase ?? summary?.unrealizedPnlEur),
         spark: latent,
-        changePct: latent ? seriesChangePct(latent) : null,
+        changeAbs: seriesChangeAbs(latent),
+        changePct: seriesChangePct(latent),
       },
       {
         key: "cash",
         label: "Cash",
         value: num(summary?.totalCashBase ?? summary?.totalCashEur),
         spark: cash,
-        changePct: cash ? seriesChangePct(cash) : null,
+        changeAbs: seriesChangeAbs(cash),
+        changePct: seriesChangePct(cash),
         tone: "cyan",
       },
       {
         key: "alternatives",
         label: "Alternatifs",
         value: num(summary?.totalAlternativesBase ?? summary?.totalAlternativesEur),
-        changePct: null,
+        spark: alternatives,
+        changeAbs: seriesChangeAbs(alternatives),
+        changePct: seriesChangePct(alternatives),
         tone: "neutral",
       },
       {
@@ -230,14 +306,23 @@ export function DashboardTab({
         value: num(
           summary?.totalEmployeeSavingsBase ?? summary?.totalEmployeeSavingsEur
         ),
-        changePct: null,
+        spark: employeeSavings,
+        changeAbs: seriesChangeAbs(employeeSavings),
+        changePct: seriesChangePct(employeeSavings),
         tone: "neutral",
       },
       {
         key: "liabilities",
         label: "Passifs",
         value: num(summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur),
-        changePct: null,
+        spark: liabilities,
+        /*
+          Le signe n'est pas retourné : une dette qui baisse affiche bien une
+          variation négative. Inverser la convention ici ferait de cette tuile
+          la seule dont le signe ne décrit pas le mouvement du montant.
+        */
+        changeAbs: seriesChangeAbs(liabilities),
+        changePct: seriesChangePct(liabilities),
         tone: "negative",
       },
       {
@@ -247,10 +332,11 @@ export function DashboardTab({
           num(summary?.realizedPnlBase ?? summary?.realizedPnlEur) +
           num(summary?.cashIncomeBase ?? summary?.cashIncomeEur),
         spark: realized,
-        changePct: realized ? seriesChangePct(realized) : null,
+        changeAbs: seriesChangeAbs(realized),
+        changePct: seriesChangePct(realized),
       },
     ];
-  }, [summary, stableHistory]);
+  }, [summary, stableHistory, range]);
 
   const netWorth = summary
     ? num(summary.netWorthBase ?? summary.netWorthEur)
@@ -293,7 +379,11 @@ export function DashboardTab({
 
       {/* —— 2. Indicateurs —— */}
       {blocks.showKpiStrip && (
-        <TerminalKpiRow items={kpis} baseCurrency={baseCurrency} />
+        <TerminalKpiRow
+          items={kpis}
+          baseCurrency={baseCurrency}
+          range={range}
+        />
       )}
 
       {/* —— 3 & 4. Évolution · Répartition + Watchlist —— */}
@@ -313,6 +403,8 @@ export function DashboardTab({
               baseCurrency={baseCurrency}
               loading={showHistoryLoading}
               className="min-h-[22rem]"
+              range={range}
+              onRangeChange={changeRange}
             />
           )}
 

@@ -6,18 +6,12 @@ import { Eye, EyeOff } from "lucide-react";
 import { maskAmount, useAmountsHidden } from "@/app/lib/ui/privacy-prefs";
 import type { HistoryPoint } from "@/app/lib/types/ui";
 import { Sparkline } from "@/components/ui/sparkline";
+import type { EvolutionRange } from "@/app/lib/portfolio/evolution-aggregate";
 import {
-  buildEvolutionSeries,
-  type EvolutionRange,
-} from "@/app/lib/portfolio/evolution-aggregate";
-
-/** Périodes du hero — sous-ensemble volontairement court du mockup. */
-const HERO_RANGES: { id: EvolutionRange; label: string; noun: string }[] = [
-  { id: "1m", label: "1M", noun: "1 mois" },
-  { id: "3m", label: "3M", noun: "3 mois" },
-  { id: "1y", label: "1A", noun: "12 mois" },
-  { id: "all", label: "Tout", noun: "depuis l'origine" },
-];
+  grossAssetsAt,
+  kpiSeries,
+  netWorthAt,
+} from "@/app/lib/portfolio/kpi-series";
 
 /**
  * Montant sans symbole ni décimales — réservé au chiffre de tête.
@@ -39,26 +33,39 @@ function formatPct(v: number): string {
 
 type HeroMode = "net" | "gross";
 
+/** Ce que chaque mode désigne — libellé du contrôle, pas du titre. */
 const HERO_MODE_LABEL: Record<HeroMode, string> = {
-  net: "Patrimoine net",
-  gross: "Patrimoine brut",
+  net: "Net",
+  gross: "Brut",
+};
+
+const HERO_MODE_TITLE: Record<HeroMode, string> = {
+  net: "Actifs moins passifs",
+  gross: "Total des actifs, passifs non déduits",
 };
 
 /**
- * Carte de tête — le patrimoine, net ou brut selon le sélecteur.
+ * Carte de tête — le patrimoine total, net ou brut selon le sélecteur.
  *
  * C'est le seul chiffre de l'écran qui a droit à `--text-5xl` : la hiérarchie
  * du tableau de bord tient entièrement à ce qu'aucun autre nombre ne vienne
  * lui disputer le premier regard.
  *
  * Net/Brut ne recalcule rien : les deux valeurs viennent telles quelles du
- * même `summary` que le reste du tableau de bord (`netWorthBase`/`Eur` et
- * `totalGrossAssetsBase`/`Eur`, cf. app/lib/portfolio/service.ts). Le
- * graphique et la variation en dessous restent inchangés quel que soit le
- * mode — ils décrivent déjà la valeur brute des actifs par défaut
- * (`totalValueBase`, cf. commentaire de `service.ts`), donc rester silencieux
- * ici ne casse rien côté « Net » (comportement identique à avant ce
- * sélecteur) et devient même cohérent côté « Brut ».
+ * même `summary` que le reste du tableau de bord (`netWorthBase`,
+ * `totalGrossAssetsBase`), et les deux courbes des champs que le moteur publie
+ * pour ces mêmes grandeurs (`netWorthBase`, `grossAssetsBase`). Le mode change
+ * donc la valeur **et** la courbe ensemble — afficher un montant net au-dessus
+ * d'une trajectoire brute était le défaut de la version précédente.
+ *
+ * **Cette carte ignore délibérément le sélecteur de période du tableau de
+ * bord.** Elle répond à « où en est le patrimoine, et d'où vient-il », qui n'a
+ * pas de fenêtre : la courbe part du premier point disponible, toujours. Les
+ * questions à horizon — sur un mois, sur un an — sont celles du bandeau
+ * d'indicateurs et du graphique d'évolution, qui, eux, suivent le sélecteur.
+ * C'est aussi pourquoi la carte n'affiche aucune variation : une variation sans
+ * période affichée ne veut rien dire, et en remettre une ici rouvrirait la
+ * question de la fenêtre.
  *
  * Le graphique de droite est délibérément sans axe ni graduation. Il ne sert
  * pas à lire une valeur — la carte « Évolution du portefeuille », plus bas,
@@ -78,31 +85,30 @@ export function TerminalHero({
   baseCurrency: string;
   loading?: boolean;
 }) {
-  const [range, setRange] = useState<EvolutionRange>("1y");
   const [mode, setMode] = useState<HeroMode>("net");
   const [amountsHidden] = useAmountsHidden();
 
   const displayValue = mode === "net" ? netWorth : grossAssets;
 
-  const series = useMemo(
-    () => buildEvolutionSeries(history, range, "cumul").points,
-    [history, range]
+  /*
+    L'historique entier, sans fenêtrage d'aucune sorte.
+
+    Aucun `range`, aucun `slice`, aucun nombre de points : la série est
+    l'historique tel qu'il arrive, du premier point disponible à aujourd'hui.
+    C'est ce qui rend la carte insensible au sélecteur global, et un test le
+    vérifie plutôt que de s'en remettre à la lecture du code.
+
+    `kpiSeries` porte la même règle qu'ailleurs : si un point ne contient pas la
+    grandeur, la série est déclarée inconnue au lieu d'être comblée par des
+    zéros. Une carte sans courbe vaut mieux qu'une courbe qui ne décrit rien.
+  */
+  const values = useMemo(
+    () => kpiSeries(history, mode === "net" ? netWorthAt : grossAssetsAt),
+    [history, mode]
   );
 
-  const values = useMemo(() => series.map((p) => p.total), [series]);
-
-  const delta = useMemo(() => {
-    if (series.length < 2) return null;
-    const first = series[0]!.total;
-    const last = series[series.length - 1]!.total;
-    if (!(first > 0)) return null;
-    return { abs: last - first, pct: ((last - first) / first) * 100 };
-  }, [series]);
-
-  const up = (delta?.abs ?? 0) >= 0;
-  const stroke = up ? "var(--chart-positive)" : "var(--chart-negative)";
-  const rangeNoun =
-    HERO_RANGES.find((r) => r.id === range)?.noun ?? "la période";
+  const stroke =
+    mode === "net" ? "var(--chart-gold)" : "var(--chart-cyan)";
 
   return (
     <section
@@ -114,42 +120,37 @@ export function TerminalHero({
         {/* ── Chiffre de tête ── */}
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-[var(--space-2)]">
+            {/*
+              Le titre ne change plus avec le mode : « Patrimoine net » puis
+              « Patrimoine brut » faisaient croire à deux cartes selon le
+              bouton pressé. Ce qu'on regarde est le patrimoine total ; net ou
+              brut n'en est qu'une lecture, et c'est le sélecteur qui la porte.
+            */}
             <h2 id="hero-heading" className="text-label">
-              {HERO_MODE_LABEL[mode]}
+              Patrimoine total
             </h2>
 
-            {/*
-              Discret, à côté du libellé plutôt que dans un bloc séparé —
-              même logique visuelle que le sélecteur de période à droite.
-            */}
             <div
               className="term-seg"
               role="tablist"
-              aria-label="Net ou brut"
+              aria-label="Patrimoine net ou brut"
               data-testid="hero-mode-toggle"
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "net"}
-                data-active={mode === "net"}
-                className="term-seg-item"
-                data-testid="hero-mode-net"
-                onClick={() => setMode("net")}
-              >
-                Net
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "gross"}
-                data-active={mode === "gross"}
-                className="term-seg-item"
-                data-testid="hero-mode-gross"
-                onClick={() => setMode("gross")}
-              >
-                Brut
-              </button>
+              {(["net", "gross"] as HeroMode[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === m}
+                  data-active={mode === m}
+                  title={HERO_MODE_TITLE[m]}
+                  className="term-seg-item"
+                  data-testid={`hero-mode-${m}`}
+                  onClick={() => setMode(m)}
+                >
+                  {HERO_MODE_LABEL[m]}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -176,71 +177,34 @@ export function TerminalHero({
             <span className="text-label">{baseCurrency}</span>
           </div>
 
-          {/* Variation sur la période sélectionnée */}
+          {/*
+            Ce qu'on lit, dit en toutes lettres.
+
+            Remplace la variation de période, qui n'a plus d'objet ici : la
+            courbe n'a pas de fenêtre, donc aucune variation ne peut en être
+            rapportée sans inventer un horizon. Ce que la carte doit annoncer,
+            c'est l'étendue de ce qu'elle montre.
+          */}
           <p
-            className="mt-[var(--space-3)] flex flex-wrap items-center gap-[var(--space-2)] text-[length:var(--text-sm)]"
-            data-testid="hero-delta"
+            className="mt-[var(--space-3)] text-[length:var(--text-sm)] text-[var(--foreground-secondary)]"
+            data-testid="hero-scope"
           >
-            {delta ? (
+            {HERO_MODE_TITLE[mode]}
+            {values && (
               <>
-                <span
-                  className={cn(
-                    "num font-medium",
-                    up ? "val-positive" : "val-negative"
-                  )}
-                >
-                  {/* Flèche en plus du signe : la couleur seule ne suffit pas
-                      à distinguer hausse et baisse pour un œil daltonien. */}
-                  {up ? "▲" : "▼"} {formatPct(delta.pct)}
+                <span className="mx-[var(--space-2)] text-[var(--foreground-faint)]">
+                  ·
                 </span>
-                <span className="text-[var(--foreground-faint)]">·</span>
-                <span
-                  className={cn("num", up ? "val-positive" : "val-negative")}
-                >
-                  {delta.abs >= 0 ? "+" : "−"}
-                  {maskAmount(
-                    formatCurrency(Math.abs(delta.abs), baseCurrency),
-                    amountsHidden
-                  )}
-                </span>
-                <span className="text-[var(--foreground-faint)]">·</span>
-                <span className="text-[var(--foreground-secondary)]">
-                  {rangeNoun}
-                </span>
+                depuis l&apos;origine de l&apos;historique
               </>
-            ) : (
-              <span className="text-[var(--foreground-faint)]">
-                Historique insuffisant sur cette période
-              </span>
             )}
           </p>
         </div>
 
-        {/* ── Graphique + sélecteur ── */}
+        {/* ── Graphique — historique entier, sans sélecteur ── */}
         <div className="flex min-w-0 flex-1 flex-col items-end gap-[var(--space-3)]">
-          <div
-            className="term-seg"
-            role="tablist"
-            aria-label="Période du patrimoine net"
-          >
-            {HERO_RANGES.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                role="tab"
-                aria-selected={range === r.id}
-                data-active={range === r.id}
-                className="term-seg-item"
-                data-testid={`hero-range-${r.id}`}
-                onClick={() => setRange(r.id)}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
-
           <div className="h-[5.5rem] w-full min-w-0 sm:h-[6.5rem]">
-            {values.length >= 2 ? (
+            {values && values.length >= 2 ? (
               <Sparkline
                 values={values}
                 stroke={stroke}
@@ -271,7 +235,14 @@ export type TerminalKpi = {
   spark?: number[];
   /** Teinte du trait ; par défaut dérivée du signe de la variation. */
   tone?: "gold" | "positive" | "negative" | "cyan" | "neutral";
-  /** Variation en % sur la fenêtre d'historique, si calculable. */
+  /**
+   * Variation en montant sur la période, si calculable.
+   *
+   * `null` — et non zéro — quand la série manque ou ne porte qu'un point :
+   * « on ne sait pas » et « rien n'a bougé » ne s'affichent pas pareil.
+   */
+  changeAbs?: number | null;
+  /** Variation en % sur la période, si calculable. */
   changePct?: number | null;
 };
 
@@ -290,13 +261,30 @@ const TONE_STROKE: Record<string, string> = {
  * de sparkline : la zone du graphique est réservée en toutes circonstances.
  * Sans cela, les trois indicateurs sans historique (alternatifs, épargne
  * salariale, passifs) créeraient un décrochement dans la grille.
+ *
+ * La rangée ne choisit pas sa période : elle la reçoit du tableau de bord, la
+ * même que celle de la courbe d'évolution, et se contente de l'annoncer.
  */
 export function TerminalKpiRow({
   items,
   baseCurrency,
+  range,
 }: {
   items: TerminalKpi[];
   baseCurrency: string;
+  /**
+   * Période sur laquelle les séries et les variations ont été construites.
+   *
+   * Requise, et non optionnelle : c'est le contrat de ce composant depuis que
+   * la période est partagée. Un appelant qui l'oublierait afficherait des
+   * variations dont personne ne saurait dire sur quelle tranche de temps elles
+   * portent — ce que ce chantier vient précisément de corriger.
+   *
+   * Reportée en `data-range` : c'est la seule façon de vérifier de l'extérieur
+   * que les tuiles et la courbe parlent bien de la même période, les deux blocs
+   * ne partageant aucun texte à l'écran.
+   */
+  range: EvolutionRange;
 }) {
   const [amountsHidden, setAmountsHidden] = useAmountsHidden();
 
@@ -349,11 +337,27 @@ export function TerminalKpiRow({
           "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7"
         )}
         data-testid="terminal-kpi-row"
+        data-range={range}
       >
       {items.map((item) => {
-        const pct = item.changePct;
-        const signed = typeof pct === "number" && Number.isFinite(pct);
-        const up = signed && pct >= 0;
+        /*
+          Montant et pourcentage décrivent la même variation, sur la même
+          période et la même série. L'un peut manquer sans l'autre : un
+          pourcentage n'est pas définissable sur une série partie de zéro,
+          alors que l'écart en euros, lui, l'est toujours.
+        */
+        const abs =
+          typeof item.changeAbs === "number" && Number.isFinite(item.changeAbs)
+            ? item.changeAbs
+            : null;
+        const pct =
+          typeof item.changePct === "number" && Number.isFinite(item.changePct)
+            ? item.changePct
+            : null;
+        const signed = abs !== null || pct !== null;
+        // Le sens du mouvement se lit d'abord sur le montant : il est défini
+        // même là où le pourcentage ne l'est pas.
+        const up = abs !== null ? abs >= 0 : pct !== null ? pct >= 0 : false;
         const tone =
           item.tone ?? (signed ? (up ? "positive" : "negative") : "neutral");
         return (
@@ -380,12 +384,49 @@ export function TerminalKpiRow({
               )}
             </p>
 
-            <p className="text-[length:var(--text-xs)] leading-none">
+            <p
+              className={cn(
+                "flex min-w-0 items-baseline gap-[var(--space-1)]",
+                "text-[length:var(--text-xs)] leading-none"
+              )}
+              data-testid={`kpi-${item.key}-change`}
+            >
               {signed ? (
-                <span className={cn("num", up ? "val-positive" : "val-negative")}>
-                  {formatPct(pct)}
-                </span>
+                <>
+                  {abs !== null && (
+                    <span
+                      className={cn(
+                        "num truncate",
+                        up ? "val-positive" : "val-negative"
+                      )}
+                    >
+                      {abs >= 0 ? "+" : "−"}
+                      {maskAmount(
+                        formatCurrency(Math.abs(abs), baseCurrency),
+                        amountsHidden
+                      )}
+                    </span>
+                  )}
+                  {abs !== null && pct !== null && (
+                    <span className="text-[var(--foreground-faint)]">·</span>
+                  )}
+                  {pct !== null && (
+                    <span
+                      className={cn(
+                        "num shrink-0",
+                        up ? "val-positive" : "val-negative"
+                      )}
+                    >
+                      {formatPct(pct)}
+                    </span>
+                  )}
+                </>
               ) : (
+                /*
+                  Ni montant ni pourcentage : l'historique ne porte pas cette
+                  grandeur sur la période. Un tiret le dit ; « 0 % » l'aurait
+                  nié.
+                */
                 <span className="text-[var(--foreground-faint)]">—</span>
               )}
             </p>

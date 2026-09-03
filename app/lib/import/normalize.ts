@@ -230,6 +230,25 @@ export function parseDate(raw: string | undefined | null): Date | null {
     return null;
   }
 
+  /*
+    YYYYMMDD compact — format de date des Flex Queries Interactive Brokers
+    (`TradeDate` = 20230522, `SettleDate` = 20230623).
+
+    Le test doit précéder le repli « Excel serial » : huit chiffres y passaient
+    sans encombre et 20230522 y valait un jour de l'an 1955. Il est borné à des
+    années plausibles pour ne pas capturer un identifiant numérique.
+  */
+  const compact = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) {
+    const year = Number(compact[1]);
+    const month = Number(compact[2]);
+    const day = Number(compact[3]);
+    if (year >= 1970 && year <= 2999 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const d = new Date(year, month - 1, day, 12, 0, 0);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+  }
+
   // DD/MM/YYYY[ HH:mm[:ss]] or DD-MM-YYYY or DD.MM.YYYY
   const m = s.match(
     /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/
@@ -272,22 +291,42 @@ export function parseDate(raw: string | undefined | null): Date | null {
   }
 
   // "Mar 15, 2024" / "Mar 15 2024"
+  /*
+    L'export crypto Revolut écrit « May 5, 2020, 10:10:57 PM » : une virgule
+    sépare l'année de l'heure, et l'heure est sur 12 h. Le motif n'acceptait
+    qu'une espace et ignorait le suffixe — l'heure était alors perdue et
+    remplacée par midi, décalant d'une demi-journée la moitié des opérations.
+  */
   const enNamed = s.match(
-    /^([A-Za-z.]+)\s+(\d{1,2}),?\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/
+    /^([A-Za-z.]+)\s+(\d{1,2}),?\s+(\d{4})(?:,?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp])\.?[Mm]\.?)?)?/
   );
   if (enNamed) {
     const mon = FR_MONTHS[normalizeMonthToken(enNamed[1]!)];
     const day = Number(enNamed[2]);
     const year = Number(enNamed[3]);
     if (mon && day >= 1 && day <= 31) {
-      const hour = Number(enNamed[4] ?? 12);
+      let hour = Number(enNamed[4] ?? 12);
       const min = Number(enNamed[5] ?? 0);
       const sec = Number(enNamed[6] ?? 0);
+      const meridien = (enNamed[7] || "").toLowerCase();
+      // 12 h du matin est minuit, 12 h du soir est midi : les deux seuls cas
+      // où l'heure affichée n'est pas celle qu'on ajoute ou garde telle quelle.
+      if (meridien === "p" && hour < 12) hour += 12;
+      if (meridien === "a" && hour === 12) hour = 0;
       const d = new Date(year, mon - 1, day, hour, min, sec);
       if (!Number.isNaN(d.getTime())) return d;
     }
   }
 
+  /*
+    Un quantième à trois chiffres n'existe pas.
+
+    Le relevé XTB contient « 010.09.2024 » — une coquille pour le 10 septembre.
+    Aucun des motifs ci-dessus ne l'accepte, mais le repli sur le constructeur
+    `Date` du moteur y lisait le 9 octobre : une date plausible, fausse, et
+    donnée sans réserve. Mieux vaut ne pas savoir.
+  */
+  if (/^\d{3,}[./-]\d{1,2}[./-]\d{4}/.test(s)) return null;
   // "15 Mar 2024" / "Mar 15, 2024" via engine (EN only)
   const named = Date.parse(s);
   if (!Number.isNaN(named)) {
@@ -313,6 +352,7 @@ export function parseDate(raw: string | undefined | null): Date | null {
       return Number.isNaN(d.getTime()) ? null : d;
     }
   }
+
 
   const fallback = new Date(s);
   return Number.isNaN(fallback.getTime()) ? null : fallback;
@@ -391,7 +431,16 @@ export function extractCurrencyHint(
   for (const f of fields) {
     if (!f) continue;
     const s = String(f);
-    const code = s.match(/\b(EUR|USD|GBP|CHF|JPY|CAD|AUD)\b/i);
+    /*
+      Les couronnes nordiques manquaient à cette liste.
+      L'export crypto Revolut d'un compte suédois écrit ses montants « 50.00
+      SEK » : faute de reconnaître le code, la devise restait inconnue et le
+      repli générique retenait l'euro — un achat de 50 SEK entrait au
+      portefeuille pour 50 €, soit onze fois sa valeur.
+    */
+    const code = s.match(
+      /\b(EUR|USD|GBP|CHF|JPY|CAD|AUD|SEK|NOK|DKK|PLN|CZK|HUF|SGD|HKD|NZD)\b/i
+    );
     if (code) return code[1]!.toUpperCase();
     if (/€/.test(s)) return "EUR";
     if (/\$/.test(s)) return "USD";

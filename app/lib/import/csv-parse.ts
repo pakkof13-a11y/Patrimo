@@ -99,6 +99,39 @@ export function normalizeHeader(h: string): string {
 }
 
 /**
+ * Rend chaque en-tête unique, sans renommer le premier de son nom.
+ *
+ * Les lignes sont indexées par nom d'en-tête : deux colonnes portant le même
+ * intitulé — ou deux colonnes sans intitulé — s'écrasaient donc l'une l'autre,
+ * et la valeur conservée était celle de la **dernière**. Une donnée disparaissait
+ * sans que rien ne le signale.
+ *
+ * Le cas se rencontre pour de bon : le relevé de compte DEGIRO écrit la devise
+ * sous `Mutatie` et le montant dans la colonne suivante, laissée sans nom, puis
+ * recommence pour `Saldo`. Les deux colonnes vides se confondaient, et le
+ * montant de l'opération était remplacé par le solde.
+ *
+ * Une colonne sans nom hérite de celle qui la précède — c'est presque toujours
+ * son complément (devise/montant) — et les collisions reçoivent un rang :
+ * `Mutatie`, `Mutatie 2`, `Saldo`, `Saldo 2`. Le premier de chaque nom reste
+ * intact, si bien qu'aucun format déjà pris en charge ne change de mapping.
+ */
+export function dedupeHeaders(headers: string[]): string[] {
+  const vus = new Map<string, number>();
+  const out: string[] = [];
+
+  headers.forEach((h, i) => {
+    // Une colonne anonyme prend le nom de sa voisine de gauche, faute de mieux.
+    const base = h || out[i - 1]?.replace(/ \d+$/, "") || "";
+    const rang = (vus.get(base) ?? 0) + 1;
+    vus.set(base, rang);
+    out.push(rang === 1 ? base : `${base} ${rang}`);
+  });
+
+  return out;
+}
+
+/**
  * Parse un texte CSV.
  * @param text contenu déjà en UTF-8 (ou latin1 décodé)
  * @param delimiter forcé optionnel
@@ -223,8 +256,10 @@ export function parseCsv(text: string, delimiter?: string): ParsedCsv {
     return { headers: [], rows: [], delimiter: delim, rawLineCount: 0 };
   }
 
-  const headers = parseLine(lines[headerIdx]!, effectiveDelim).map((h) =>
-    h.replace(/^\uFEFF/, "").trim()
+  const headers = dedupeHeaders(
+    parseLine(lines[headerIdx]!, effectiveDelim).map((h) =>
+      h.replace(/^\uFEFF/, "").trim()
+    )
   );
   const rows: Record<string, string>[] = [];
 

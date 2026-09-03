@@ -1,0 +1,9 @@
+Timestamp (UTC),Transaction Description,Currency,Amount,To Currency,To Amount,Native Currency,Native Amount,Native Amount (in USD),Transaction Kind,Transaction Hash
+2021-11-16 06:00:45,EUR -> USDC,EUR,399.92,USDC,453.63,USD,453.63,453.63,viban_purchase,
+2021-11-16 05:49:14,EUR Deposit (via SEPA),EUR,400.0,EUR,400.0,EUR,400.0,409.61236,viban_deposit,
+2021-10-09 09:48:47,EUR -> USDC,EUR,298.0,USDC,341.85,USD,341.85,341.85,viban_purchase,
+2021-10-09 09:43:10,EUR Deposit (via SEPA),EUR,298.0,EUR,298.0,EUR,298.0,305.1612082,viban_deposit,
+2021-10-09 08:55:26,EUR -> USDC,EUR,2.0,USDC,2.29,USD,2.29,2.29,viban_purchase,
+2021-10-09 08:38:47,EUR Deposit (via SEPA),EUR,2.0,EUR,2.0,EUR,2.0,2.0480618,viban_deposit,
+2021-03-21 19:20:11,EUR -> CRO,EUR,50.0,CRO,268.72,USD,59.16,59.16,viban_purchase,
+2021-03-21 08:07:21,EUR Deposit (via SEPA),EUR,50.0,EUR,50.0,EUR,50.0,51.201545,viban_deposit,

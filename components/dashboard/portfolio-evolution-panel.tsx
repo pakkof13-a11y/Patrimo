@@ -251,11 +251,23 @@ export function PortfolioEvolutionPanel({
   baseCurrency,
   loading,
   className,
+  range,
+  onRangeChange,
 }: {
   history: HistoryPoint[];
   baseCurrency: string;
   loading?: boolean;
   className?: string;
+  /**
+   * Période affichée — détenue par le tableau de bord, pas par ce panneau.
+   *
+   * Le sélecteur reste ici, là où on le lit ; la valeur, elle, est remontée
+   * d'un cran parce qu'un second bloc en dépend — le bandeau d'indicateurs.
+   * Deux états séparés auraient donné deux périodes sur un même écran, dont
+   * une que rien n'affichait.
+   */
+  range: EvolutionRange;
+  onRangeChange: (range: EvolutionRange) => void;
 }) {
   const isClient = useIsClient();
   const [prefs, setPrefs] = useState<EvolutionPrefsV5>(DEFAULT_EVOLUTION_PREFS);
@@ -267,7 +279,13 @@ export function PortfolioEvolutionPanel({
     setPrefs(loadEvolutionPrefs());
   }
 
-  const { range, versus, indexKey, scope } = prefs;
+  /*
+    `prefs.range` n'est plus lu : la période vient du prop. Le champ subsiste
+    dans l'objet stocké — c'est la même préférence enregistrée qu'avant — mais
+    la valeur qui fait foi à l'écran est celle du tableau de bord, et toute
+    écriture la réinjecte (voir `update`).
+  */
+  const { versus, indexKey, scope } = prefs;
   const assetClass = prefs.assetClass ?? null;
   const classMetric = prefs.classMetric ?? "value";
   const envelope = prefs.envelope ?? null;
@@ -298,13 +316,30 @@ export function PortfolioEvolutionPanel({
         ...fusion,
         envelope: normalizeEnvelopeFor(fusion.assetClass, fusion.envelope),
       };
-      if (hydrated) saveEvolutionPrefs(next);
+      /*
+        La période partagée est réinjectée à chaque écriture.
+
+        Sans cela, changer la comparaison ou la classe réécrirait l'objet
+        stocké avec la période que ce composant portait encore en mémoire —
+        celle d'avant le partage —, et le rechargement suivant aurait ramené
+        une période que l'utilisateur avait quittée.
+      */
+      if (hydrated) saveEvolutionPrefs({ ...next, range });
       return next;
     });
   };
 
   const firstDate = history[0]?.date ?? null;
 
+  /*
+    Périodes proposées, selon la profondeur de l'historique.
+
+    Sert ici au seul rendu des boutons — la correction de la période elle-même,
+    quand l'historique ne la couvre pas, appartient au tableau de bord qui en
+    détient l'état. Écrire l'état d'un parent pendant le rendu d'un enfant
+    n'est pas permis, et la règle est de toute façon commune aux deux blocs :
+    c'est la même fonction qui la tranche des deux côtés.
+  */
   const rangeEnabled = useMemo(() => {
     const map = {} as Record<EvolutionRange, boolean>;
     for (const r of RANGES) {
@@ -312,11 +347,6 @@ export function PortfolioEvolutionPanel({
     }
     return map;
   }, [firstDate]);
-
-  // Repli 7j si la période courante devient indisponible (adjust state while rendering)
-  if (hydrated && !rangeEnabled[range] && range !== "7d") {
-    setPrefs((p) => ({ ...p, range: "7d", v: 5 as const }));
-  }
 
   /*
     Le périmètre est choisi **avant** l'agrégation, pas après.
@@ -521,7 +551,7 @@ export function PortfolioEvolutionPanel({
                     : "Historique trop court pour cette période"
                 }
                 data-testid={`evolution-range-${r.id}`}
-                onClick={() => enabled && update({ range: r.id })}
+                onClick={() => enabled && onRangeChange(r.id)}
                 className={cn(
                   "rounded-[var(--radius-sm)] px-2 py-1 text-[11px] font-medium transition",
                   "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
