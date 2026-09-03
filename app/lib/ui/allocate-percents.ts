@@ -35,7 +35,7 @@ export function allocatePercents(
     d(w).div(total).mul(target).toNumber()
   );
   const floors = exact.map((x) => Math.floor(x));
-  let remainder = target - floors.reduce((s, x) => s + x, 0);
+  const remainder = target - floors.reduce((s, x) => s + x, 0);
 
   const order = exact
     .map((x, i) => ({ i, frac: x - floors[i]! }))
