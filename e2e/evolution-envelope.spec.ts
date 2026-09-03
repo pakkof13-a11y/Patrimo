@@ -226,8 +226,7 @@ test.describe("Évolution — croisement classe × enveloppe", () => {
 
     await page.getByTestId("evolution-class-all").click();
     await expect(panel).toContainText("Actifs bruts", { timeout: 15_000 });
-    // Le choix brut/net redevient disponible hors classe.
-    await expect(page.getByTestId("evolution-scope-gross")).toBeVisible();
+    await expect(page.getByTestId("evolution-scope-gross")).toHaveCount(0);
   });
 
   test("la performance disparaît dès qu'une enveloppe est choisie", async ({

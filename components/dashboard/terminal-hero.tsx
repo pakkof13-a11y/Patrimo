@@ -73,11 +73,12 @@ const HERO_MODE_TITLE: Record<HeroMode, string> = {
  * ## Période
  *
  * La carte porte **ses propres** périodes — 1M · 3M · YTD · 1A · 5A · Max —
- * retenues sous `HERO_RANGE_KEY`. Elles sont indépendantes du sélecteur du
- * bandeau d'indicateurs et du graphique d'évolution : les deux blocs répondent
- * à des questions différentes, et un test vérifie que le sélecteur global ne
- * déplace pas le chiffre de tête. Le fenêtrage lui-même est celui du tableau de
- * bord (`windowForRange`), pas une seconde découpe.
+ * retenues sous `HERO_RANGE_KEY`. Elles restent indépendantes du sélecteur
+ * partagé évolution + indicateurs (`evolutionPrefs.v5`) : les deux blocs
+ * répondent à des questions différentes, et un test vérifie que le sélecteur
+ * d'évolution ne déplace pas le chiffre de tête. Le fenêtrage, lui, est
+ * `windowForRange` + `heroWindowReference` — la même horloge, pas une
+ * seconde découpe. Voir `hero-range.ts`.
  *
  * ## Ce que la carte affiche, et quand
  *
@@ -318,12 +319,20 @@ export function TerminalHero({
       {/* 5. Événement du jour — aujourd'hui, un mouvement de capital externe */}
       {active.externalFlow !== undefined && (
         <p
-          className="flex items-center gap-[var(--space-1)] text-[var(--foreground-secondary)]"
+          className={cn(
+            "flex items-center gap-[var(--space-1)]",
+            active.externalFlow >= 0 ? "val-positive" : "val-negative"
+          )}
           data-testid="hero-tooltip-event"
         >
           <span
             aria-hidden
-            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--primary-text)]"
+            className={cn(
+              "inline-block h-1.5 w-1.5 shrink-0 rounded-full",
+              active.externalFlow >= 0
+                ? "bg-[var(--chart-positive)]"
+                : "bg-[var(--chart-negative)]"
+            )}
           />
           Événement ·{" "}
           {active.externalFlow >= 0 ? "apport" : "retrait"} de{" "}
@@ -687,6 +696,7 @@ export function TerminalHero({
             {values && values.length >= 2 ? (
               <HeroChart
                 values={values}
+                dates={windowed.map((p) => p.date)}
                 stroke={stroke}
                 activeIndex={hover.activeIndex}
                 setContainer={hover.setContainer}
@@ -717,6 +727,11 @@ export type TerminalKpi = {
   value: number;
   /** Série d'historique — omise quand aucune donnée réelle n'existe. */
   spark?: number[];
+  /**
+   * Horodatages alignés sur `spark`. Même axe temporel que la courbe de tête
+   * quand ils sont fournis — un palier occupe la durée qu'il a vraiment duré.
+   */
+  sparkDates?: string[];
   /** Teinte du trait ; par défaut dérivée du signe de la variation. */
   tone?: "gold" | "positive" | "negative" | "cyan" | "neutral";
   /**
@@ -858,7 +873,7 @@ export function TerminalKpiRow({
               className={cn(
                 "num text-[length:var(--text-xl)] font-semibold leading-none",
                 item.tone === "gold"
-                  ? "text-[var(--primary-text)]"
+                  ? "text-[var(--chart-gold)]"
                   : "text-[var(--foreground)]"
               )}
             >
@@ -920,6 +935,7 @@ export function TerminalKpiRow({
               {item.spark && item.spark.length >= 2 && (
                 <Sparkline
                   values={item.spark}
+                  dates={item.sparkDates}
                   stroke={TONE_STROKE[tone] ?? TONE_STROKE.neutral!}
                   width={180}
                   height={28}

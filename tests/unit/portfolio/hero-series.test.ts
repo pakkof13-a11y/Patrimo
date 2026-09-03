@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildHeroSeries } from "@/app/lib/portfolio/hero-series";
-import { nearestPointIndex, sparklineGeometry } from "@/app/lib/ui/sparkline-geometry";
+import {
+  nearestPointByFraction,
+  nearestPointIndex,
+  sparklineGeometry,
+  sparklineXFractions,
+} from "@/app/lib/ui/sparkline-geometry";
 import type { HistoryPoint } from "@/app/lib/types/ui";
 
 /**
@@ -169,5 +174,41 @@ describe("géométrie et aimantation", () => {
     expect(nearestPointIndex(5, -0.4)).toBe(0);
     expect(nearestPointIndex(5, 1.8)).toBe(4);
     expect(nearestPointIndex(0, 0.5)).toBe(-1);
+  });
+
+  it("avec des dates, l'abscisse suit le temps et non le rang", () => {
+    const t0 = Date.parse("2026-01-01T00:00:00.000Z");
+    const t1 = Date.parse("2026-06-01T00:00:00.000Z");
+    const t2 = Date.parse("2026-07-01T00:00:00.000Z");
+    const fractions = sparklineXFractions(3, [t0, t1, t2]);
+    expect(fractions[0]).toBe(0);
+    expect(fractions[2]).toBe(1);
+    // Six mois puis un mois : le milieu n'est pas à 0,5.
+    expect(fractions[1]!).toBeGreaterThan(0.7);
+    expect(fractions[1]!).toBeLessThan(0.9);
+
+    const geom = sparklineGeometry(
+      [10, 10, 40],
+      100,
+      20,
+      2,
+      [
+        "2026-01-01T00:00:00.000Z",
+        "2026-06-01T00:00:00.000Z",
+        "2026-07-01T00:00:00.000Z",
+      ]
+    );
+    expect(geom).not.toBeNull();
+    expect(geom!.points[1]!.x).toBeCloseTo(fractions[1]! * 100, 5);
+
+    // À 10 % de largeur on est encore sur le palier de six mois, pas au rang 0.
+    expect(nearestPointByFraction(fractions, 0.1)).toBe(0);
+    expect(nearestPointByFraction(fractions, 0.85)).toBe(1);
+  });
+
+  it("sans dates lisibles, le pas d'indice reste le défaut", () => {
+    expect(sparklineXFractions(4)).toEqual([0, 1 / 3, 2 / 3, 1]);
+    const geom = sparklineGeometry([10, 20, 30], 90, 20, 2);
+    expect(geom!.points.map((p) => p.x)).toEqual([0, 45, 90]);
   });
 });

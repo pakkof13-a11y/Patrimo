@@ -179,7 +179,7 @@ test.describe("Tableau de bord", () => {
     await verifierCoherence("7J");
   });
 
-  test("carte Patrimoine total : une seule, Net/Brut, sans période propre", async ({
+  test("carte Patrimoine total : une seule, Net/Brut, périodes propres", async ({
     page,
     request,
   }) => {

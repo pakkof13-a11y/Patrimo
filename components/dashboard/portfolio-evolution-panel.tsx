@@ -30,13 +30,13 @@ import {
   type EvolutionBenchmark,
   type EvolutionPrefsV5,
   type EvolutionAssetClass,
-  type EvolutionScope,
 } from "@/app/lib/portfolio/evolution-prefs";
 import {
   MARKET_INDICES,
   marketIndexLabel,
   type MarketIndexKey,
 } from "@/app/lib/portfolio/market-indices";
+import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
 import {
   PortfolioPercentChart,
   PortfolioValueChart,
@@ -133,22 +133,6 @@ const METRIC_CHOICES: {
   },
 ];
 
-const SCOPE_CHOICES: {
-  id: EvolutionScope;
-  label: string;
-  title: string;
-}[] = [
-  {
-    id: "gross",
-    label: "Portefeuille",
-    title: "Valeur brute des actifs — titres, cash, alternatifs, épargne salariale",
-  },
-  {
-    id: "net",
-    label: "Patrimoine net",
-    title: "Valeur brute des actifs moins le capital restant dû",
-  },
-];
 
 /**
  * Échelle de lecture — quotidienne ou horaire.
@@ -285,7 +269,17 @@ export function PortfolioEvolutionPanel({
     la valeur qui fait foi à l'écran est celle du tableau de bord, et toute
     écriture la réinjecte (voir `update`).
   */
-  const { versus, indexKey, scope } = prefs;
+  const { versus, indexKey } = prefs;
+  /*
+    Brut seulement.
+
+    Net/Brut vit sur la carte de tête : le reproposer ici faisait deux
+    sélecteurs pour la même question, et le second n'avait rien à dire que
+    le premier n'ait déjà tranché. La courbe d'évolution trace les actifs
+    bruts — c'est ce que « portefeuille » désigne, et ce qui se compare à
+    un indice.
+  */
+  const scope = "gross" as const;
   const assetClass = prefs.assetClass ?? null;
   const classMetric = prefs.classMetric ?? "value";
   const envelope = prefs.envelope ?? null;
@@ -380,7 +374,7 @@ export function PortfolioEvolutionPanel({
    */
   const unknownEnvelopeEur = useMemo(() => {
     if (!assetClass || !envelope) return 0;
-    const from = startOfRange(range);
+    const from = startOfRange(range, heroWindowReference(history));
     const fromT = from ? from.getTime() : -Infinity;
     let max = 0;
     for (const p of history) {
@@ -394,8 +388,14 @@ export function PortfolioEvolutionPanel({
   }, [history, assetClass, envelope, range]);
 
   const { points: rawPoints, interval } = useMemo(
-    () => buildEvolutionSeries(scopedHistory, range, "cumul"),
-    [scopedHistory, range]
+    () =>
+      buildEvolutionSeries(
+        scopedHistory,
+        range,
+        "cumul",
+        heroWindowReference(history)
+      ),
+    [scopedHistory, range, history]
   );
 
   // Mode "index" : récupère les clôtures réelles de l'indice choisi sur la
@@ -470,9 +470,7 @@ export function PortfolioEvolutionPanel({
               ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass} en ${envelope} — valeur`
               : assetClass
               ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass}${assetClass === "OBLIGATIONS" ? " (CTO)" : ""} — ${classMetric === "performance" ? "performance" : "valeur"}`
-              : scope === "net"
-                ? "Patrimoine net"
-                : "Actifs bruts"}
+              : "Actifs bruts"}
             <span className="mx-1 opacity-40">·</span>
             {evolutionIntervalLabel(interval)}
             <span className="sr-only"> ({evolutionIntervalHint(interval)})</span>
@@ -642,20 +640,6 @@ export function PortfolioEvolutionPanel({
               onChange={(v) => update({ classMetric: v })}
               ariaLabel="Grandeur tracée"
               testIdPrefix="evolution-metric"
-            />
-          )}
-          {/*
-            Brut ou net ne se pose que sur le patrimoine entier : les dettes
-            n'appartiennent à aucune classe, et proposer « Crypto nette »
-            n'aurait pas de sens.
-          */}
-          {!assetClass && !envelope && (
-            <Segmented
-              items={SCOPE_CHOICES}
-              value={scope}
-              onChange={(v) => update({ scope: v })}
-              ariaLabel="Périmètre"
-              testIdPrefix="evolution-scope"
             />
           )}
           <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">

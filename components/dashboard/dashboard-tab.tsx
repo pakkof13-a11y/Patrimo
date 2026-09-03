@@ -37,6 +37,7 @@ import {
   loadEvolutionPrefs,
   saveEvolutionRange,
 } from "@/app/lib/portfolio/evolution-prefs";
+import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
 import {
   kpiSeries,
   latentPnlAt,
@@ -50,11 +51,6 @@ const emptySubscribe = () => () => undefined;
 
 function useIsClient() {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
-}
-
-function round2(n: number): number {
-  if (!Number.isFinite(n)) return 0;
-  return Math.round(n * 100) / 100;
 }
 
 function num(v: unknown): number {
@@ -145,11 +141,19 @@ export function DashboardTab({
   }
   const displayAllocation = stableAllocation ?? allocation;
 
+  /*
+    Les valeurs brutes, sans `round2`.
+
+    Arrondir ici avant que Hamilton ne répartisse les pourcentages faisait
+    somner 100,1 % : chaque part était déjà écornée, puis `formatPct` arrondissait
+    une seconde fois. `AllocationCard` applique `allocatePercents` sur ces
+    montants tels quels.
+  */
   const classChart = useMemo(
     () =>
       displayAllocation?.byClass.map((x) => ({
         name: getAssetClassLabel(x.name),
-        value: round2(num(x.value)),
+        value: num(x.value),
       })) ?? [],
     [displayAllocation?.byClass]
   );
@@ -179,6 +183,11 @@ export function DashboardTab({
    *
    * La préférence enregistrée reste celle du panneau (`evolutionPrefs.v5`) :
    * partager l'état ne devait pas créer une seconde période mémorisée.
+   *
+   * Le hero, lui, garde ses propres chips (`HERO_RANGE_KEY`) : unifier les
+   * trois blocs dans un seul sélecteur mélangerait deux questions (voir
+   * `hero-range.ts`). Les fenêtres, en revanche, s'ouvrent toutes depuis
+   * `heroWindowReference` — la dernière valorisation, pas l'horloge.
    */
   const isClient = useIsClient();
   const [range, setRange] = useState<EvolutionRange>(
@@ -244,7 +253,12 @@ export function DashboardTab({
       période, « Tout » compris, et `seriesChangePct` prend de toute façon pour
       base la première valeur non nulle.
     */
-    const h = windowForRange(stableHistory, range);
+    const h = windowForRange(
+      stableHistory,
+      range,
+      heroWindowReference(stableHistory)
+    );
+    const sparkDates = h.map((p) => p.date);
 
     /*
       Une grandeur absente ne devient pas zéro.
@@ -268,8 +282,19 @@ export function DashboardTab({
       {
         key: "listed",
         label: "Cotés",
-        value: num(summary?.totalMarketValueBase ?? summary?.totalMarketValueEur),
+        /*
+          Montant aligné sur la série : titres + crypto, immo et AV retirés.
+          `totalMarketValue` les compte encore — c'est le résidu historique.
+        */
+        value:
+          listed?.[listed.length - 1] ??
+          num(summary?.totalMarketValueBase ?? summary?.totalMarketValueEur) -
+            num(summary?.totalRealEstateBase ?? summary?.totalRealEstateEur) -
+            num(
+              summary?.totalLifeInsuranceBase ?? summary?.totalLifeInsuranceEur
+            ),
         spark: listed,
+        sparkDates,
         changeAbs: seriesChangeAbs(listed),
         changePct: seriesChangePct(listed),
         tone: "gold",
@@ -279,6 +304,7 @@ export function DashboardTab({
         label: "P&L latent",
         value: num(summary?.unrealizedPnlBase ?? summary?.unrealizedPnlEur),
         spark: latent,
+        sparkDates,
         changeAbs: seriesChangeAbs(latent),
         changePct: seriesChangePct(latent),
       },
@@ -287,6 +313,7 @@ export function DashboardTab({
         label: "Cash",
         value: num(summary?.totalCashBase ?? summary?.totalCashEur),
         spark: cash,
+        sparkDates,
         changeAbs: seriesChangeAbs(cash),
         changePct: seriesChangePct(cash),
         tone: "cyan",
@@ -296,6 +323,7 @@ export function DashboardTab({
         label: "Alternatifs",
         value: num(summary?.totalAlternativesBase ?? summary?.totalAlternativesEur),
         spark: alternatives,
+        sparkDates,
         changeAbs: seriesChangeAbs(alternatives),
         changePct: seriesChangePct(alternatives),
         tone: "neutral",
@@ -307,6 +335,7 @@ export function DashboardTab({
           summary?.totalEmployeeSavingsBase ?? summary?.totalEmployeeSavingsEur
         ),
         spark: employeeSavings,
+        sparkDates,
         changeAbs: seriesChangeAbs(employeeSavings),
         changePct: seriesChangePct(employeeSavings),
         tone: "neutral",
@@ -316,6 +345,7 @@ export function DashboardTab({
         label: "Passifs",
         value: num(summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur),
         spark: liabilities,
+        sparkDates,
         /*
           Le signe n'est pas retourné : une dette qui baisse affiche bien une
           variation négative. Inverser la convention ici ferait de cette tuile
@@ -332,6 +362,7 @@ export function DashboardTab({
           num(summary?.realizedPnlBase ?? summary?.realizedPnlEur) +
           num(summary?.cashIncomeBase ?? summary?.cashIncomeEur),
         spark: realized,
+        sparkDates,
         changeAbs: seriesChangeAbs(realized),
         changePct: seriesChangePct(realized),
       },
@@ -410,7 +441,12 @@ export function DashboardTab({
 
           {blocks.showAllocations && (
             <div className="flex min-w-0 flex-col gap-[var(--gap-card)]">
-              <AllocationCard data={classChart} baseCurrency={baseCurrency} />
+              <AllocationCard
+                data={classChart}
+                holdings={holdings}
+                periodRange={range}
+                baseCurrency={baseCurrency}
+              />
               <WatchlistCard
                 holdings={holdings}
                 onUnwatch={onUnwatch}

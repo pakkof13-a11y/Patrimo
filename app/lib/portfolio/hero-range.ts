@@ -11,12 +11,21 @@
  * feraient déborder — mais rien n'interdit de les rouvrir : ce sont les mêmes
  * valeurs côté calcul.
  *
- * TODO — synchronisation éventuelle avec le sélecteur du bloc « Évolution du
- * portefeuille ». Les deux répondent aujourd'hui à des questions différentes
- * (« d'où vient le patrimoine » contre « comment il s'est comporté sur la
- * période étudiée ») et gardent donc des périodes indépendantes. Si un jour
- * elles devaient se suivre, c'est ici et dans `dashboard-tab.tsx` que la
- * période remonterait, pas dans deux états séparés.
+ * ## Deux sélecteurs, volontairement
+ *
+ * La carte de tête et le bloc « Évolution + indicateurs » ne partagent **pas**
+ * leur période. Unifier les deux dans `DashboardTab` casserait la lecture :
+ *
+ * - le hero répond à « d'où vient le patrimoine » (1M · 3M · YTD · 1A · 5A ·
+ *   Max, six chips dans la carte, retenus sous `HERO_RANGE_KEY`) ;
+ * - l'évolution et les KPI répondent à « comment il s'est comporté sur la
+ *   période étudiée » (7J…Tout, `evolutionPrefs.v5`, un seul état soulevé
+ *   dans `DashboardTab`).
+ *
+ * Les fenêtres, elles, s'appuient sur le même `windowForRange` et le même
+ * `heroWindowReference` : deux questions, une horloge. Si un jour les
+ * sélecteurs devaient se suivre, c'est ici et dans `dashboard-tab.tsx` que
+ * la période remonterait, pas dans deux états séparés.
  */
 
 import type { EvolutionRange } from "@/app/lib/portfolio/evolution-aggregate";

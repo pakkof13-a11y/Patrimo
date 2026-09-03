@@ -33,6 +33,8 @@ function pt(partial: {
   latent?: number;
   realized?: number;
   ledgerIncome?: number;
+  securities?: number;
+  crypto?: number;
 }): HistoryPoint {
   const cash = partial.cash ?? 0;
   const gross = partial.gross;
@@ -54,19 +56,55 @@ function pt(partial: {
     ...(partial.ledgerIncome === undefined
       ? {}
       : { ledgerCashIncomeBase: partial.ledgerIncome }),
+    ...(partial.securities === undefined
+      ? {}
+      : { securitiesBase: partial.securities }),
+    ...(partial.crypto === undefined ? {} : { cryptoBase: partial.crypto }),
   };
 }
 
 describe("listedValueAt — périmètre du KPI « Cotés »", () => {
   /*
-    L'équation du résumé, transposée telle quelle :
-
-      totalAssets = marketValue + cash + alternatives + employeeSavings
-                                                    (getPortfolioBundle)
-
-    La série doit donc rendre `marketValue`, et rien d'autre.
+    Titres + crypto, dès que le moteur les publie. Le résidu
+    `gross − cash − alt − ES` ne sert que de repli : il réintroduit immo et AV.
   */
-  it("reproduit exactement `summary.totalMarketValue`", () => {
+  it("additionne securitiesBase + cryptoBase quand le moteur les publie", () => {
+    const point = pt({
+      date: "2026-09-02T21:59:59.000Z",
+      gross: 200_000,
+      cash: 30_000,
+      alternatives: 15_000,
+      employeeSavings: 5_000,
+      securities: 80_000,
+      crypto: 20_000,
+    });
+    expect(listedValueAt(point)).toBe(100_000);
+  });
+
+  it("ignore immobilier et AV dès que les champs moteur sont là", () => {
+    const avant = pt({
+      date: "2026-09-01T21:59:59.000Z",
+      gross: 200_000,
+      cash: 30_000,
+      alternatives: 15_000,
+      employeeSavings: 5_000,
+      securities: 80_000,
+      crypto: 20_000,
+    });
+    // Un appartement revalorisé de 10 000 € : le brut monte, les cotés non.
+    const apres = pt({
+      date: "2026-09-02T21:59:59.000Z",
+      gross: 210_000,
+      cash: 30_000,
+      alternatives: 15_000,
+      employeeSavings: 5_000,
+      securities: 80_000,
+      crypto: 20_000,
+    });
+    expect(listedValueAt(avant)).toBe(listedValueAt(apres));
+  });
+
+  it("repli : reproduisait `summary.totalMarketValue` sans champs moteur", () => {
     const marketValue = 120_000;
     const cash = 30_000;
     const alternatives = 15_000;
@@ -137,9 +175,10 @@ describe("listedValueAt — périmètre du KPI « Cotés »", () => {
 /**
  * Carte « Patrimoine total » — deux lectures, un seul historique.
  *
- * La carte n'est pas un indicateur du bandeau : elle ne suit aucune fenêtre, et
- * sa courbe part du premier point disponible quoi qu'il arrive. Ces tests
- * protègent cette indépendance, que rien à l'écran ne rend visible.
+ * `kpiSeries` lui-même est aveugle à la période : il rend ce qu'on lui passe.
+ * `TerminalHero` fenêtre ensuite avec **ses** chips (`HERO_RANGES`), pas avec
+ * le sélecteur partagé évolution + indicateurs. Ces tests protègent les
+ * grandeurs net/brut, pas le fenêtrage — celui-ci vit dans `hero-range.ts`.
  */
 describe("patrimoine total — net et brut", () => {
   const historique = [
@@ -203,14 +242,13 @@ describe("patrimoine total — net et brut", () => {
 });
 
 /**
- * L'indépendance vis-à-vis du sélecteur global (chantier 29).
+ * L'indépendance vis-à-vis du sélecteur d'évolution (chantier 29).
  *
- * C'est la propriété qui distingue cette carte du bandeau : les indicateurs se
- * lisent sur une fenêtre, le patrimoine se lit depuis l'origine. Les deux
- * cohabitent sur le même écran et sur le même historique — d'où ce test, qui
- * les fait diverger volontairement.
+ * `kpiSeries` sur l'historique entier ne bouge pas quand on change la fenêtre
+ * du bandeau. `TerminalHero` applique ensuite `windowForRange` avec **sa**
+ * période, distincte de `evolutionPrefs.v5`. Voir `hero-range.ts`.
  */
-describe("la carte Patrimoine ignore la période globale", () => {
+describe("la série patrimoine n'emprunte pas la fenêtre d'évolution", () => {
   const now = new Date("2026-09-02T12:00:00.000Z");
   const historique = Array.from({ length: 400 }, (_, i) =>
     pt({
@@ -220,14 +258,14 @@ describe("la carte Patrimoine ignore la période globale", () => {
     })
   );
 
-  it("la série du patrimoine est la même quelle que soit la période choisie", () => {
+  it("kpiSeries sur l'historique entier ignore la fenêtre d'évolution", () => {
     const reference = kpiSeries(historique, netWorthAt);
 
     for (const range of ["7d", "1m", "1y", "all"] as EvolutionRange[]) {
       // Ce que ferait un indicateur du bandeau avec cette période…
       const fenetre = windowForRange(historique, range, now);
       const indicateur = kpiSeries(fenetre, netWorthAt);
-      // …et ce que fait la carte : l'historique entier, toujours.
+      // …et ce que `kpiSeries` reçoit sans fenêtrage : l'historique entier.
       const carte = kpiSeries(historique, netWorthAt);
 
       expect(carte).toEqual(reference);
@@ -238,7 +276,7 @@ describe("la carte Patrimoine ignore la période globale", () => {
     }
   });
 
-  it("changer de période déplace l'indicateur, jamais la carte", () => {
+  it("changer la fenêtre d'évolution déplace l'indicateur, pas la série brute", () => {
     const sept_jours = kpiSeries(windowForRange(historique, "7d", now), netWorthAt)!;
     const un_an = kpiSeries(windowForRange(historique, "1y", now), netWorthAt)!;
     expect(sept_jours.length).not.toBe(un_an.length);

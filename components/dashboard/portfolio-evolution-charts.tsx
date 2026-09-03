@@ -61,6 +61,54 @@ export function inflationUnavailableLabel(benchmarkName: string): string {
     : `${benchmarkName} indisponible`;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Tick d'un axe temporel — granularité selon l'étendue de la fenêtre. */
+export function formatTimeTick(ms: number, spanMs: number): string {
+  if (!Number.isFinite(ms)) return "";
+  const d = new Date(ms);
+  if (spanMs <= 45 * DAY_MS) {
+    return new Intl.DateTimeFormat("fr-FR", {
+      timeZone: "Europe/Paris",
+      day: "numeric",
+      month: "short",
+    }).format(d);
+  }
+  if (spanMs <= 400 * DAY_MS) {
+    return new Intl.DateTimeFormat("fr-FR", {
+      timeZone: "Europe/Paris",
+      day: "numeric",
+      month: "short",
+    }).format(d);
+  }
+  return new Intl.DateTimeFormat("fr-FR", {
+    timeZone: "Europe/Paris",
+    month: "short",
+    year: "2-digit",
+  }).format(d);
+}
+
+function TimeXAxis({ data }: { data: Array<{ t?: number; date?: string }> }) {
+  const times = data
+    .map((p) => p.t ?? (p.date ? Date.parse(p.date) : NaN))
+    .filter((t) => Number.isFinite(t));
+  const span =
+    times.length >= 2 ? times[times.length - 1]! - times[0]! : DAY_MS;
+  return (
+    <XAxis
+      dataKey="t"
+      type="number"
+      scale="time"
+      domain={["dataMin", "dataMax"]}
+      tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+      tickFormatter={(ms: number) => formatTimeTick(ms, span)}
+      axisLine={false}
+      tickLine={false}
+      minTickGap={40}
+    />
+  );
+}
+
 const tooltipBoxStyle = {
   borderRadius: 12,
   border: "1px solid var(--border)",
@@ -162,14 +210,7 @@ export function PortfolioValueChart({
           </linearGradient>
         </defs>
         <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
-        <XAxis
-          dataKey="label"
-          tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-          axisLine={false}
-          tickLine={false}
-          interval="preserveStartEnd"
-          minTickGap={40}
-        />
+        <TimeXAxis data={data} />
         <YAxis
           tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
           tickFormatter={yTick}
@@ -289,14 +330,7 @@ export function PortfolioPercentChart({
           </linearGradient>
         </defs>
         <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
-        <XAxis
-          dataKey="label"
-          tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-          axisLine={false}
-          tickLine={false}
-          interval="preserveStartEnd"
-          minTickGap={40}
-        />
+        <TimeXAxis data={data} />
         <YAxis
           tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
           tickFormatter={(v: number) => `${v.toFixed(0)} %`}

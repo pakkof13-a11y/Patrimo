@@ -18,30 +18,32 @@
 import type { HistoryPoint } from "@/app/lib/types/ui";
 
 /**
- * Valeur des positions « cotées » à une date.
+ * Valeur des positions **cotées** à une date : titres + crypto.
  *
- * Le périmètre est celui de `summary.totalMarketValue`, et il est obtenu par la
- * même équation que le résumé emploie pour le construire :
+ * « Cotés » désigne ce qui a un cours, pas le résidu du brut. Le moteur publie
+ * `securitiesBase` et `cryptoBase` ; les additionner est le périmètre exact.
+ * Immobilier et assurance-vie restent hors de cette tuile — ils ont leur
+ * propre lecture, et les compter ici faisait bouger « Cotés » à chaque
+ * revalorisation d'un appartement.
  *
- * ```
- * // getPortfolioBundle (service.ts)
- * totalAssets = marketValue + cash + alternatives + employeeSavings
- * ```
- *
- * d'où `marketValue = grossAssets − cash − alternatives − employeeSavings`.
- * Côté moteur, la même soustraction laisse exactement les compartiments issus
- * du journal — `securities + crypto + realEstate + lifeInsurance +
- * otherAssets` —, c'est-à-dire les lignes que `getHoldings` additionne.
- *
- * La série lisait auparavant `positionsBase` (= brut − cash), qui compte en
- * plus les alternatifs et l'épargne salariale : la tuile bougeait quand un
- * métal était revalorisé, alors que son montant, lui, ne le voyait pas. Les
- * deux poches ont d'ailleurs leur propre tuile dans le même bandeau.
- *
- * `undefined` dès qu'un des termes manque : mieux vaut pas de courbe qu'une
+ * Repli, uniquement si le moteur ne publie pas encore ces champs (réponse
+ * ancienne, cache) : `gross − cash − alternatives − employeeSavings`. Ce
+ * résidu réintroduit immo et AV ; on ne l'emploie que faute de mieux, et on
+ * le déclare `undefined` dès qu'un terme manque plutôt que de tracer une
  * courbe dont on ne sait pas ce qu'elle couvre.
  */
 export function listedValueAt(p: HistoryPoint): number | undefined {
+  const securities = p.securitiesBase;
+  const crypto = p.cryptoBase;
+  if (
+    securities != null &&
+    crypto != null &&
+    Number.isFinite(securities) &&
+    Number.isFinite(crypto)
+  ) {
+    return securities + crypto;
+  }
+
   const gross = p.grossAssetsBase;
   const cash = p.cashTotalBase;
   const alternatives = p.alternativesBase;
