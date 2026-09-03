@@ -25,6 +25,10 @@ import {
   type HeroRange,
 } from "@/app/lib/portfolio/hero-range";
 import { HERO_RANGE_KEY, loadUiPref, saveUiPref } from "@/app/lib/ui-preferences";
+import {
+  heroAttribution,
+  heroEventMarkers,
+} from "@/app/lib/portfolio/hero-attribution";
 import { useHeroChartHover } from "@/app/hooks/use-hero-chart-hover";
 import { HeroChart } from "@/components/dashboard/hero-chart";
 import {
@@ -186,6 +190,34 @@ export function TerminalHero({
   /** Origine de **tout** l'historique, indépendante de la période choisie. */
   const historyStart = history[0]?.date;
 
+  /*
+    D'où vient la variation : du marché, ou des capitaux apportés.
+
+    Calculée hors du composant, dans un utilitaire pur qui porte la définition
+    et ses cas limites. `null` quand l'historique ne publie pas les flux — les
+    deux pastilles disparaissent alors, et seule la variation reste. « Flux
+    0 € » affirmerait qu'aucun capital n'est entré, ce qu'on ne sait pas.
+  */
+  const attribution = useMemo(
+    () => heroAttribution(windowed, mode),
+    [windowed, mode]
+  );
+
+  /*
+    Repères des mouvements de capitaux, au plus cinq.
+
+    Ils expliquent les marches que la courbe montre sans les justifier. Les
+    autres journées à flux restent atteignables au survol, où l'info-bulle les
+    nomme — c'est ce qui évite deux cents pastilles sur dix ans d'historique.
+  */
+  const markers = useMemo(
+    () =>
+      heroEventMarkers(
+        series.map((p) => ({ index: p.index, amount: p.externalFlow }))
+      ),
+    [series]
+  );
+
   const hover = useHeroChartHover(series);
   const active = hover.activePoint;
 
@@ -309,7 +341,17 @@ export function TerminalHero({
     >
       <div className="flex flex-wrap items-start justify-between gap-[var(--space-5)]">
         {/* ── Chiffre de tête ── */}
-        <div className="min-w-0">
+        {/*
+          Colonne élastique, et non dimensionnée par son contenu.
+
+          Sans `flex-1`, cette colonne prenait la largeur de sa plus longue
+          ligne — celle de la variation, que les deux pastilles ont allongée à
+          504 px. Ajoutée aux 55 % du graphique, la somme dépassait de peu la
+          carte, et la colonne de droite passait à la ligne : le graphique se
+          retrouvait sous le chiffre, et la carte gagnait 151 pixels. Élastique,
+          elle prend ce qui reste et replie son texte plutôt que la mise en page.
+        */}
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-[var(--space-2)]">
             {/*
               Le titre ne change plus avec le mode : « Patrimoine net » puis
@@ -414,10 +456,30 @@ export function TerminalHero({
             carte se contracterait au premier survol et se rouvrirait à la
             sortie, sous le curseur.
           */}
-          <div className="mt-[var(--space-2)] min-h-[1.25rem]">
-            {!active && windowChange && (
+          <div className="mt-[var(--space-2)]">
+            {windowChange && (
               <p
-                className="flex flex-wrap items-baseline gap-[var(--space-2)] text-[length:var(--text-sm)] leading-none"
+                className={cn(
+                  "flex flex-wrap items-baseline gap-[var(--space-2)] text-[length:var(--text-sm)] leading-none",
+                  /*
+                    Cachée pendant le survol, mais jamais démontée.
+
+                    La démonter faisait disparaître sa hauteur — et cette ligne
+                    se replie en plusieurs lignes dès que la carte est étroite.
+                    Mesuré à 1 280 px : la carte passait de 347 à 188 pixels au
+                    premier survol, le graphique remontait de 166 pixels sous un
+                    curseur immobile, le navigateur émettait `pointerleave`, et
+                    le survol se perdait aussitôt — pour recommencer. Le
+                    `min-height` d'une ligne que j'avais posé ne réservait que
+                    le cas où la ligne ne se replie pas.
+
+                    `invisible` conserve exactement la boîte, quel que soit le
+                    nombre de lignes : la carte ne bouge plus d'un pixel, et il
+                    n'y a plus de hauteur à deviner.
+                  */
+                  active && "invisible"
+                )}
+                aria-hidden={active ? true : undefined}
                 data-testid="hero-window-change"
                 data-direction={windowChange.abs >= 0 ? "up" : "down"}
               >
@@ -456,6 +518,50 @@ export function TerminalHero({
                 >
                   {heroRangeSubtitle(range, windowed[0]?.date)}
                 </span>
+
+                {/*
+                  D'où vient cette variation.
+
+                  Sur la même ligne, à droite du libellé de période : les trois
+                  chiffres décrivent le même écart et se lisent d'un seul
+                  regard. Les poser sur une ligne à part ferait grandir la
+                  carte pour une information qui tient ici.
+
+                  Le flux ne prend pas la couleur du marché : un apport de
+                  50 k€ n'est ni une bonne ni une mauvaise nouvelle, c'est un
+                  déplacement d'argent. Le teinter en vert le ferait lire comme
+                  une réussite.
+                */}
+                {attribution && (
+                  <>
+                    <span className="text-[var(--foreground-faint)]">·</span>
+                    <span
+                      className={cn(
+                        "num rounded-[var(--radius-sm)] px-[var(--space-1)]",
+                        "bg-[var(--surface-sunken)]",
+                        attribution.market >= 0
+                          ? "val-positive"
+                          : "val-negative"
+                      )}
+                      data-testid="hero-pill-market"
+                      title="Ce que la valeur des actifs a produit, mouvements de capitaux retirés"
+                    >
+                      Marché{" "}
+                      {formatSignedAmount(attribution.market, (v) => money(v))}
+                    </span>
+                    <span
+                      className={cn(
+                        "num rounded-[var(--radius-sm)] px-[var(--space-1)]",
+                        "bg-[var(--surface-sunken)] text-[var(--primary-text)]"
+                      )}
+                      data-testid="hero-pill-flow"
+                      title="Capitaux entrés ou sortis sur la période — apports, retraits, acquisitions, emprunts"
+                    >
+                      Flux{" "}
+                      {formatSignedAmount(attribution.flow, (v) => money(v))}
+                    </span>
+                  </>
+                )}
               </p>
             )}
           </div>
@@ -557,6 +663,7 @@ export function TerminalHero({
                 setContainer={hover.setContainer}
                 handlers={hover.handlers}
                 carriedActive={active?.carried ?? false}
+                eventMarkers={markers}
                 tooltip={tooltip}
                 ariaLabel={`Courbe du patrimoine ${
                   mode === "net" ? "net" : "brut"

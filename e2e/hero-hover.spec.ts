@@ -228,13 +228,91 @@ test.describe("Carte de tête — survol de la courbe", () => {
       { timeout: 20_000 }
     );
 
-    // Le survol reste opérant dans la fenêtre, et la variation de période
-    // s'efface le temps du geste : le chiffre au-dessus n'est plus celui du jour.
+    /*
+      Le survol reste opérant dans la fenêtre, et la variation de période
+      s'efface le temps du geste : le chiffre au-dessus n'est plus celui du
+      jour, et lui accoler une variation de période le ferait mal lire.
+
+      Effacée, mais **toujours montée** : sa boîte reste réservée. La démonter
+      faisait rétrécir la carte de cent cinquante pixels au premier survol, le
+      graphique remontait sous un curseur immobile, et le navigateur émettait
+      un `pointerleave` qui annulait le survol aussitôt posé.
+    */
     await survolerA(page, chart, 0.5);
     await expect(page.getByTestId("hero-chart-tooltip")).toBeVisible();
-    await expect(ligne).toHaveCount(0);
+    await expect(ligne).toBeHidden();
+    await expect(ligne).toHaveCount(1);
     await page.mouse.move(0, 0);
     await expect(ligne).toBeVisible();
+  });
+
+  test("la variation se décompose en marché et flux, et les trois se recalculent", async ({
+    page,
+  }) => {
+    await heroChart(page);
+
+    /** Les trois chiffres de la période courante. */
+    async function trio() {
+      const variation = nombre(
+        await page.getByTestId("hero-window-change-abs").innerText()
+      );
+      const marche = nombre(
+        await page.getByTestId("hero-pill-market").innerText()
+      );
+      const flux = nombre(await page.getByTestId("hero-pill-flow").innerText());
+      return { variation, marche, flux };
+    }
+
+    await page.getByTestId("hero-range-all").click();
+    const longue = await trio();
+
+    /*
+      L'identité, vérifiée à l'écran et pas seulement dans l'utilitaire :
+      variation = marché + flux, aux arrondis d'affichage près.
+    */
+    expect(Math.abs(longue.marche + longue.flux - longue.variation)).toBeLessThan(1);
+
+    /*
+      Le décor porte une acquisition immobilière et des apports réguliers : sur
+      tout l'historique, l'essentiel de la hausse vient donc des capitaux
+      apportés, non du marché. C'est précisément ce que la décomposition doit
+      rendre visible — sans elle, la courbe se lirait comme une performance.
+    */
+    expect(longue.flux).toBeGreaterThan(longue.marche);
+
+    // Changer de période recalcule les trois ensemble.
+    await page.getByTestId("hero-range-1m").click();
+    await expect(page.getByTestId("hero-window-label")).toHaveText("sur 1 mois");
+    const courte = await trio();
+
+    expect(courte.variation).not.toBe(longue.variation);
+    expect(courte.flux).not.toBe(longue.flux);
+    expect(Math.abs(courte.marche + courte.flux - courte.variation)).toBeLessThan(1);
+  });
+
+  test("les repères d'événements restent lisibles, même sur tout l'historique", async ({
+    page,
+  }) => {
+    await heroChart(page);
+
+    await page.getByTestId("hero-range-all").click();
+    const reperes = page.getByTestId("hero-chart-event");
+    const nb = await reperes.count();
+
+    /*
+      Dix ans d'historique portent des centaines de journées à flux. En poser
+      une pastille par journée rendrait la courbe illisible et n'expliquerait
+      plus rien : seules les cinq plus grosses sont montrées, les autres
+      restant atteignables au survol du jour.
+    */
+    expect(nb).toBeGreaterThan(0);
+    expect(nb).toBeLessThanOrEqual(5);
+
+    // Chaque repère désigne un rang réel de la série tracée.
+    for (let i = 0; i < nb; i++) {
+      const rang = await reperes.nth(i).getAttribute("data-index");
+      expect(Number(rang)).toBeGreaterThanOrEqual(0);
+    }
   });
 
   test("changer de période ne fait pas sauter la carte", async ({ page }) => {

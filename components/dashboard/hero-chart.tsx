@@ -39,6 +39,7 @@ export function HeroChart({
   setContainer,
   handlers,
   carriedActive,
+  eventMarkers,
   tooltip,
   ariaLabel,
 }: {
@@ -58,6 +59,14 @@ export function HeroChart({
   handlers: HeroChartHover["handlers"];
   /** Le point actif est une valeur reportée : repère plus discret. */
   carriedActive: boolean;
+  /**
+   * Journées à mouvement de capitaux notable — au plus cinq, déjà triées.
+   *
+   * Le composant ne décide ni du seuil ni du nombre : il pose des repères là
+   * où on le lui dit. La sélection vit dans `hero-attribution.ts`, où elle est
+   * testable sans monter de SVG.
+   */
+  eventMarkers?: ReadonlyArray<{ index: number; amount: number }>;
   /** Contenu de l'info-bulle, mis en forme par l'appelant. */
   tooltip?: ReactNode;
   ariaLabel: string;
@@ -87,6 +96,29 @@ export function HeroChart({
   const tooltipOnLeft =
     marker !== null && parseFloat(marker.left) > 55;
 
+  /*
+    Position des repères d'événements.
+
+    Ils lisent la même géométrie que le trait, comme la croix : un repère posé
+    à côté de la marche qu'il explique serait pire que pas de repère du tout.
+    Un rang absent du tracé — valeur non finie écartée — ne reçoit rien plutôt
+    qu'un repère au hasard.
+  */
+  const eventDots = useMemo(() => {
+    if (!geometry || !eventMarkers?.length) return [];
+    return eventMarkers.flatMap((e) => {
+      const p = geometry.points.find((q) => q.sourceIndex === e.index);
+      if (!p) return [];
+      return [
+        {
+          index: e.index,
+          amount: e.amount,
+          left: `${(p.x / VIEW_WIDTH) * 100}%`,
+        },
+      ];
+    });
+  }, [geometry, eventMarkers]);
+
   return (
     <div
       ref={setContainer}
@@ -113,6 +145,34 @@ export function HeroChart({
         strokeWidth={STROKE_WIDTH}
         className="h-full w-full"
       />
+
+      {/*
+        Repères des mouvements de capitaux, sur le socle du cadre.
+
+        En bas plutôt que sur le trait : posés sur la courbe, ils entreraient
+        en concurrence avec la pastille du survol, et deux points de même taille
+        au même endroit ne se distinguent plus. En pied, ils marquent la
+        colonne du jour sans rien recouvrir.
+
+        `aria-hidden` : ce ne sont pas des commandes. L'information qu'ils
+        signalent est dite par l'info-bulle du jour, atteignable au clavier
+        comme au pointeur.
+      */}
+      {eventDots.map((e) => (
+        <span
+          key={e.index}
+          aria-hidden
+          data-testid="hero-chart-event"
+          data-index={e.index}
+          data-direction={e.amount >= 0 ? "in" : "out"}
+          className={cn(
+            "pointer-events-none absolute bottom-0 h-1.5 w-1.5 -translate-x-1/2",
+            "rounded-full bg-[var(--primary-text)]",
+            activeIndex === e.index ? "opacity-100" : "opacity-60"
+          )}
+          style={{ left: e.left }}
+        />
+      ))}
 
       {marker && (
         <>
