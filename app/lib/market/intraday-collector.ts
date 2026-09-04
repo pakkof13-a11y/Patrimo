@@ -174,13 +174,26 @@ const emptyReport = (interval: PriceBarInterval): IntradayCollectionReport => ({
  * `refreshEligiblePrices` — les deux chemins doivent viser le même périmètre,
  * sans quoi un actif serait rafraîchi sans être historisé.
  */
+/**
+ * Classes cotées dont l'historique quotidien alimente Financier.
+ *
+ * Aligné sur `LISTED_ASSET_CLASS_KEYS` (ACTIONS, OBLIGATIONS, CRYPTO).
+ * Omettre `OBLIGATIONS` laissait les OAT/ETF obligataires sans clôture —
+ * valorisés au coût, donc plats, jusqu'au cours live du jour.
+ */
+export const COLLECTABLE_LISTED_CLASSES = [
+  "ACTIONS",
+  "OBLIGATIONS",
+  "CRYPTO",
+] as const;
+
 export async function listCollectableAssets(userId?: string) {
   return prisma.asset.findMany({
     where: {
       ...(userId ? { userId } : {}),
       OR: [
         { priceProvider: { in: ["FINNHUB", "YAHOO", "COINGECKO"] } },
-        { assetClass: { in: ["ACTIONS", "CRYPTO"] } },
+        { assetClass: { in: [...COLLECTABLE_LISTED_CLASSES] } },
       ],
     },
     select: { id: true, userId: true, name: true },

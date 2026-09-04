@@ -95,6 +95,10 @@ import type {
   PortfolioValuationPoint,
   ValuationComponent,
 } from "./types";
+import {
+  computePatrimonyMetrics,
+  type ClassifiableHolding,
+} from "../patrimony-metrics";
 
 /**
  * Tout ce dont le moteur a besoin, chargé une fois pour toutes.
@@ -142,6 +146,14 @@ export type HistoricalInputs = {
    * fait le moteur du jour — l'argent est sorti et ne revient pas.
    */
   excludedAssetIds: Set<string>;
+  /**
+   * Méta T-01 par actif : `accountType`, fiches immo, fonds euro.
+   *
+   * Sans elle, `classifyHolding` n'a que la classe brute — une ligne AV
+   * déjà remappée en `ASSURANCE_VIE` reste classable, mais le fonds euro
+   * et une fiche `RealEstateDetail` sur une SCPI mal étiquetée disparaîtraient.
+   */
+  holdingMetaById?: Map<string, HistoricalHoldingMeta>;
   closes: DailyCloseIndex;
   cashAccounts: CashAccountRow[];
   cashEvents: CashEventRow[];
@@ -153,6 +165,14 @@ export type HistoricalInputs = {
   liabilities: LiabilityRow[];
 };
 
+/** Champs nécessaires à `classifyHolding` / `isFondsEuroHolding`. */
+export type HistoricalHoldingMeta = {
+  accountType: string;
+  name?: string | null;
+  hasRealEstateDetail?: boolean;
+  hasIndirectRealEstateDetail?: boolean;
+  isFondsEuro?: boolean;
+};
 
 /**
  * Part des positions valorisées autrement qu'au prix de revient.
@@ -368,6 +388,35 @@ function componentOfAssetClass(assetClass: string | undefined): ValuationCompone
   }
 }
 
+/**
+ * Ligne du journal au format T-01, à partir de la méta chargée (ou déduite
+ * du remap AV / immo déjà appliqué à `assetClassById`).
+ */
+function classifiableHoldingOf(
+  assetId: string,
+  marketValueEur: Decimal,
+  rawClass: string | undefined,
+  remappedClass: string | undefined,
+  meta?: HistoricalHoldingMeta
+): ClassifiableHolding {
+  const inferredAccountType =
+    remappedClass === "ASSURANCE_VIE"
+      ? "AV"
+      : remappedClass === "IMMOBILIER" || rawClass === "IMMOBILIER"
+        ? "IMMOBILIER"
+        : "CTO";
+  return {
+    id: assetId,
+    assetClass: rawClass || "AUTRE",
+    accountType: meta?.accountType || inferredAccountType,
+    marketValueEur,
+    name: meta?.name,
+    hasRealEstateDetail: meta?.hasRealEstateDetail,
+    hasIndirectRealEstateDetail: meta?.hasIndirectRealEstateDetail,
+    isFondsEuro: meta?.isFondsEuro,
+  };
+}
+
 type SleeveState = {
   timelines: ValueTimeline[];
   flowsByDay: Map<DayKey, Decimal>;
@@ -404,7 +453,9 @@ export class PortfolioValuationEngine {
   private readonly cash: SleeveState;
   private readonly alternatives: SleeveState;
   private readonly employeeSavings: SleeveState;
+  private readonly esLiquid: SleeveState;
   private readonly liabilities: SleeveState;
+  private readonly holdingMetaById: Map<string, HistoricalHoldingMeta>;
 
   constructor(inputs: HistoricalInputs) {
     this.inputs = inputs;
@@ -429,7 +480,13 @@ export class PortfolioValuationEngine {
     this.employeeSavings = toSleeveState(
       buildEmployeeSavingsSleeve(inputs.employeeSavings)
     );
+    this.esLiquid = toSleeveState(
+      buildEmployeeSavingsSleeve(
+        inputs.employeeSavings.filter((r) => r.isLiquid === true)
+      )
+    );
     this.liabilities = toSleeveState(buildLiabilitiesSleeve(inputs.liabilities));
+    this.holdingMetaById = inputs.holdingMetaById ?? new Map();
   }
 
   /**
@@ -785,6 +842,40 @@ export class PortfolioValuationEngine {
     const lifeInsurance = byComponent.get("lifeInsurance") ?? zero();
     const otherAssets = byComponent.get("otherAssets") ?? zero();
 
+    const esLiquid = sumTimelinesAt(this.esLiquid.timelines, day);
+
+    const holdings: ClassifiableHolding[] = [];
+    for (const pos of state.positions.values()) {
+      if (pos.quantity.isZero()) continue;
+      if (this.inputs.excludedAssetIds.has(pos.assetId)) continue;
+      const price = resolve(pos.assetId);
+      const marketValueEur =
+        price == null
+          ? pos.costBasisEur
+          : pos.quantity.times(d(price.priceEur));
+      holdings.push(
+        classifiableHoldingOf(
+          pos.assetId,
+          marketValueEur,
+          this.inputs.rawAssetClassById.get(pos.assetId),
+          this.inputs.assetClassById.get(pos.assetId),
+          this.holdingMetaById.get(pos.assetId)
+        )
+      );
+    }
+
+    const metrics = computePatrimonyMetrics({
+      holdings,
+      cash: cash.totalEur,
+      alternatives: alternatives.totalEur,
+      employeeSavings: {
+        total: employeeSavings.totalEur,
+        esLiquid: esLiquid.totalEur,
+      },
+      liabilities: liabilities.totalEur,
+      asOf: day,
+    });
+
     /*
       Les poches sans position au journal rejoignent la classe qui les décrit.
 
@@ -889,6 +980,12 @@ export class PortfolioValuationEngine {
       alternatives: alternatives.totalEur.toNumber(),
       employeeSavings: employeeSavings.totalEur.toNumber(),
       otherAssets: otherAssets.toNumber(),
+
+      listed: metrics.pockets.listed.toNumber(),
+      financier: metrics.financier.toNumber(),
+      fondsEuro: metrics.fondsEuro.toNumber(),
+      esLiquid: metrics.esLiquid.toNumber(),
+
       byAssetClass: Object.fromEntries(
         VALUATION_ASSET_CLASSES.map((c) => [c, byClass[c].toNumber()])
       ) as Record<ValuationAssetClass, number>,

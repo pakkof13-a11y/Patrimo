@@ -161,6 +161,19 @@ export type PortfolioValuationPoint = {
   otherAssets: number;
 
   /**
+   * Agrégats T-01 (`computePatrimonyMetrics`) au même instant.
+   *
+   * `listed` / `financier` / `fondsEuro` / `esLiquid` ne sont pas une seconde
+   * formule : ce sont les champs du contrat PatrimonyMetrics, calculés sur les
+   * mêmes positions et les mêmes poches que le point. `getDailyNav` les lit
+   * tels quels — il ne recomposée rien.
+   */
+  listed: number;
+  financier: number;
+  fondsEuro: number;
+  esLiquid: number;
+
+  /**
    * Le même brut, ventilé par classe d'actif.
    *
    * Seconde partition, pas un supplément : `sum(byAssetClass) === grossAssets`,

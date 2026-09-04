@@ -152,6 +152,7 @@ describe("3 et 5 — périmètre des actifs", () => {
     await collectDailyClosesForAssets({ now: MAINTENANT });
     const where = (assetFindMany.mock.calls[0][0] as { where: { OR: unknown[] } }).where;
     expect(JSON.stringify(where.OR)).toContain("ACTIONS");
+    expect(JSON.stringify(where.OR)).toContain("OBLIGATIONS");
     expect(JSON.stringify(where.OR)).toContain("CRYPTO");
   });
 

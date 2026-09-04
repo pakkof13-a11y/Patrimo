@@ -7,6 +7,7 @@ import {
   DEFAULT_INTRADAY_INTERVAL,
   isIntradayInterval,
 } from "@/app/lib/market/intraday-collector";
+import { backfillDailyClosesFromFirstTx } from "@/app/lib/market/backfill-closes";
 import { parseBarInterval } from "@/app/lib/market/price-history-types";
 import { readCronCredential } from "@/app/lib/auth/cron-credential";
 
@@ -100,18 +101,32 @@ async function collectAll(opts: {
 
   let daily;
   try {
-    daily = await collectDailyClosesForAssets(
+    // T-04 : depuis le premier achat par ticker, pas seulement 365 jours.
+    // `collectDailyClosesForAssets` reste l'entretien court ; le backfill
+    // couvre la profondeur. Un cache déjà complet est un no-op (fraîcheur).
+    daily = await backfillDailyClosesFromFirstTx(
       opts.userId ? { userId: opts.userId } : undefined
     );
   } catch (e) {
-    daily = {
-      assetsConsidered: 0,
-      assetsStale: 0,
-      assetsFilled: 0,
-      closesWritten: 0,
-      errors: [{ assetId: "-", message: e instanceof Error ? e.message : "échec" }],
-      day: "",
-    };
+    try {
+      daily = await collectDailyClosesForAssets(
+        opts.userId ? { userId: opts.userId } : undefined
+      );
+    } catch (e2) {
+      daily = {
+        assetsConsidered: 0,
+        assetsStale: 0,
+        assetsFilled: 0,
+        closesWritten: 0,
+        errors: [
+          {
+            assetId: "-",
+            message: e2 instanceof Error ? e2.message : e instanceof Error ? e.message : "échec",
+          },
+        ],
+        day: "",
+      };
+    }
   }
 
 

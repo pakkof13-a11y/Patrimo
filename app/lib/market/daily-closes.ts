@@ -18,6 +18,7 @@ import { parisDayKey } from "../dates/paris";
 import { toFixed } from "../money/decimal";
 import type { DailyCloseIndex, DayKey } from "../portfolio/class-history";
 import { getAssetPriceHistory } from "./price-history";
+import type { PriceHistoryRange } from "./price-history-types";
 
 /**
  * Fraîcheur exigée du cache pour le jour courant. En deçà, on ne redemande
@@ -117,9 +118,20 @@ export async function fillDailyCloses(
   from: Date,
   now = new Date()
 ): Promise<number> {
-  const result = await getAssetPriceHistory(userId, assetId, "1y", {
+  const spanDays = Math.max(
+    0,
+    (now.getTime() - from.getTime()) / 86_400_000
+  );
+  // `options.from` borne déjà le fetch ; le range n'est qu'un libellé, mais
+  // « all » documente une fenêtre plus longue qu'un an (premier achat).
+  const range: PriceHistoryRange = spanDays > 400 ? "all" : "1y";
+  const floor = new Date(now.getTime());
+  floor.setUTCFullYear(floor.getUTCFullYear() - 30);
+  const fromClamped = from < floor ? floor : from;
+
+  const result = await getAssetPriceHistory(userId, assetId, range, {
     interval: "1d",
-    from,
+    from: fromClamped,
   });
   if (!result || result.source === "mock" || result.points.length === 0) {
     return 0;

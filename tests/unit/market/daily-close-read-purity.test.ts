@@ -55,7 +55,7 @@ describe("le moteur historique lit sans collecter", () => {
 describe("la collecte a un seul endroit", () => {
   it("le cron appelle la collecte quotidienne", () => {
     const code = codeSeul(lire("app/api/cron/collect-intraday/route.ts"));
-    expect(code).toContain("collectDailyClosesForAssets");
+    expect(code).toContain("backfillDailyClosesFromFirstTx");
     expect(code).toContain("collectIntradayBars");
   });
 
