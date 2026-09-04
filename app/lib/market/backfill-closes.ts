@@ -45,6 +45,35 @@ export type BackfillDailyClosesReport = DailyCloseCollectionReport & {
   day: string;
   /** Actifs dont le premier achat est antérieur à la fenêtre d'un an. */
   assetsFromFirstTx: number;
+  /**
+   * Actifs reconnus incomplets mais jamais démarrés, faute de budget.
+   *
+   * Zéro et `stoppedForBudget: false` ⇒ le passage est allé au bout : il n'y a
+   * rien à relancer. Un décompte non nul dit combien il en reste, sans qu'aucun
+   * curseur n'ait à circuler entre deux appels : `needsHistoryBackfill` les
+   * retrouvera seuls au passage suivant.
+   */
+  assetsRemaining: number;
+  /**
+   * Vrai quand l'arrêt vient du budget d'exécution, pas de la fin du travail.
+   *
+   * Ce n'est **pas** une erreur : `errors[]` reste réservé aux fournisseurs qui
+   * ont refusé un appel. Une interruption planifiée se dit ici, et nulle part
+   * ailleurs — sinon relancer un passage tronqué ressemblerait à une panne.
+   */
+  stoppedForBudget: boolean;
+};
+
+/**
+ * Budget d'exécution du backfill.
+ *
+ * `deadlineAt` est une échéance absolue sur la même horloge que `clock`, ce qui
+ * permet à l'appelant de partager un budget entre plusieurs traitements (ici :
+ * backfill puis intraday) et aux tests d'injecter une horloge sans dormir.
+ */
+export type BackfillBudget = {
+  deadlineAt: number;
+  clock?: () => number;
 };
 
 function addCalendarDays(day: string, n: number): string {
@@ -56,19 +85,36 @@ function addCalendarDays(day: string, n: number): string {
   ).padStart(2, "0")}`;
 }
 
+/**
+ * Exécute `worker` sur `items` avec une concurrence bornée, et rend le nombre
+ * d'éléments réellement démarrés.
+ *
+ * `shouldStop` est consulté **avant** de prendre un élément de plus : c'est le
+ * seul point d'arrêt sûr. Interrompre au milieu d'un actif laisserait une
+ * couverture tronquée que le passage suivant devrait détecter ; s'arrêter entre
+ * deux actifs laisse au contraire une frontière nette — l'actif en cours va au
+ * bout de son écriture, les suivants n'ont simplement pas commencé.
+ *
+ * Le compteur `cursor` n'avance qu'à la prise d'un élément et tous les éléments
+ * pris sont attendus avant le retour : à la sortie, `cursor` est exactement le
+ * nombre d'éléments traités.
+ */
 async function mapWithConcurrency<T>(
   items: T[],
   limit: number,
-  worker: (item: T) => Promise<void>
-): Promise<void> {
+  worker: (item: T) => Promise<void>,
+  shouldStop?: () => boolean
+): Promise<number> {
   let cursor = 0;
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (cursor < items.length) {
+      if (shouldStop?.()) return;
       const item = items[cursor++]!;
       await worker(item);
     }
   });
   await Promise.all(runners);
+  return cursor;
 }
 
 /** Premier jour de transaction, par actif. */
@@ -181,8 +227,12 @@ function fromDateForAsset(
 export async function backfillDailyClosesFromFirstTx(opts?: {
   userId?: string;
   now?: Date;
+  budget?: BackfillBudget;
 }): Promise<BackfillDailyClosesReport> {
   const now = opts?.now ?? new Date();
+  const clock = opts?.budget?.clock ?? Date.now;
+  const deadlineAt = opts?.budget?.deadlineAt;
+  const outOfBudget = () => deadlineAt !== undefined && clock() >= deadlineAt;
   const toDay = parisDayKey(now);
   const fallbackFromDay = parisDayKey(
     new Date(now.getTime() - FALLBACK_LOOKBACK_DAYS * 86_400_000)
@@ -197,6 +247,8 @@ export async function backfillDailyClosesFromFirstTx(opts?: {
     errors: [],
     day: toDay,
     assetsFromFirstTx: 0,
+    assetsRemaining: 0,
+    stoppedForBudget: false,
   };
 
   const byUser = new Map<string, string[]>();
@@ -224,7 +276,19 @@ export async function backfillDailyClosesFromFirstTx(opts?: {
     report.assetsStale += stale.length;
     if (stale.length === 0) continue;
 
-    await mapWithConcurrency(stale, FETCH_CONCURRENCY, async (assetId) => {
+    /*
+      Budget déjà consommé par un compte précédent : on ne lance plus aucun
+      appel fournisseur, mais on garde le décompte exact. `assetsNeedingHistory
+      Backfill` ci-dessus n'interroge que la base — c'est borné, et c'est le
+      prix d'un rapport qui dit vraiment combien il reste à faire.
+    */
+    if (outOfBudget()) {
+      report.stoppedForBudget = true;
+      report.assetsRemaining += stale.length;
+      continue;
+    }
+
+    const processed = await mapWithConcurrency(stale, FETCH_CONCURRENCY, async (assetId) => {
       try {
         const from = fromDateForAsset(firstTx.get(assetId), fallbackFromDay, now);
         const { result: written, incidents } = await collectProviderIncidents(
@@ -256,7 +320,12 @@ export async function backfillDailyClosesFromFirstTx(opts?: {
         report.errors.push({ assetId, message });
         console.error(`[backfill-closes] remplissage impossible pour ${assetId}:`, err);
       }
-    });
+    }, outOfBudget);
+
+    if (processed < stale.length) {
+      report.stoppedForBudget = true;
+      report.assetsRemaining += stale.length - processed;
+    }
   }
 
   return report;

@@ -265,10 +265,122 @@ describe("backfillDailyClosesFromFirstTx — fumée", () => {
     expect(r.errors[0]!.message).toContain("timed out");
   });
 
+  it("sans budget déclaré, rien ne s'arrête et le rapport le dit", async () => {
+    const r = await backfillDailyClosesFromFirstTx({ now: MAINTENANT });
+    expect(r.stoppedForBudget).toBe(false);
+    expect(r.assetsRemaining).toBe(0);
+  });
+
   it("inclut les obligations dans le périmètre collectable", async () => {
     await backfillDailyClosesFromFirstTx({ now: MAINTENANT });
     const where = (assetFindMany.mock.calls[0][0] as { where: { OR: unknown[] } }).where;
     expect(JSON.stringify(where.OR)).toContain("OBLIGATIONS");
+  });
+});
+
+/**
+ * T-2b — le budget d'exécution.
+ *
+ * Mesure de la preview : 504 FUNCTION_INVOCATION_TIMEOUT à 60,1 s. Le compte
+ * est en offre Hobby, le plafond de 60 s n'est pas négociable — la seule issue
+ * est de traiter ce qu'on peut, de s'arrêter proprement, et de dire ce qu'il
+ * reste. L'horloge est injectée : aucun test ne dort.
+ */
+describe("backfillDailyClosesFromFirstTx — arrêt par budget", () => {
+  /** Horloge qui avance d'un pas fixe à chaque lecture. */
+  function horlogeQuiAvance(depart: number, pasMs: number) {
+    let t = depart;
+    return () => {
+      const now = t;
+      t += pasMs;
+      return now;
+    };
+  }
+
+  const cinqActifs = [
+    { id: "a1", userId: "u1", name: "LVMH" },
+    { id: "a2", userId: "u1", name: "Air Liquide" },
+    { id: "a3", userId: "u1", name: "Total" },
+    { id: "a4", userId: "u1", name: "Sanofi" },
+    { id: "a5", userId: "u1", name: "Orange" },
+  ];
+
+  beforeEach(() => {
+    assetFindMany.mockResolvedValue(cinqActifs);
+    groupByTx.mockResolvedValue(
+      cinqActifs.map((a) => ({
+        assetId: a.id,
+        _min: { occurredAt: new Date("2023-03-12T10:00:00Z") },
+      }))
+    );
+  });
+
+  it("s'arrête entre deux actifs et compte ce qu'il reste", async () => {
+    // Échéance à 100 ; l'horloge part à 0 et avance de 30 par lecture.
+    // La concurrence vaut 4 : quatre actifs sont pris (lectures 0/30/60/90),
+    // la lecture suivante donne 120 ≥ 100 et arrête la prise.
+    const r = await backfillDailyClosesFromFirstTx({
+      now: MAINTENANT,
+      budget: { deadlineAt: 100, clock: horlogeQuiAvance(0, 30) },
+    });
+
+    expect(r.assetsStale).toBe(5);
+    expect(r.stoppedForBudget).toBe(true);
+    expect(r.assetsRemaining).toBeGreaterThan(0);
+    expect(r.assetsRemaining).toBeLessThan(5);
+    // Un actif démarré va au bout de son écriture : jamais de moitié d'actif.
+    expect(getHistory.mock.calls.length).toBe(5 - r.assetsRemaining);
+  });
+
+  it("un budget déjà épuisé ne lance aucun appel fournisseur", async () => {
+    const r = await backfillDailyClosesFromFirstTx({
+      now: MAINTENANT,
+      budget: { deadlineAt: 0, clock: () => 1_000 },
+    });
+
+    expect(getHistory).not.toHaveBeenCalled();
+    expect(r.stoppedForBudget).toBe(true);
+    expect(r.assetsRemaining).toBe(5);
+  });
+
+  it("un arrêt par budget ne peuple pas errors[]", async () => {
+    const r = await backfillDailyClosesFromFirstTx({
+      now: MAINTENANT,
+      budget: { deadlineAt: 0, clock: () => 1_000 },
+    });
+
+    // Une interruption planifiée n'est pas une panne : elle se dit dans
+    // `stoppedForBudget`, jamais dans le canal réservé aux fournisseurs.
+    expect(r.errors).toEqual([]);
+  });
+
+  it("un budget large laisse le passage aller au bout", async () => {
+    const r = await backfillDailyClosesFromFirstTx({
+      now: MAINTENANT,
+      budget: { deadlineAt: 1_000_000, clock: () => 0 },
+    });
+
+    expect(r.stoppedForBudget).toBe(false);
+    expect(r.assetsRemaining).toBe(0);
+    expect(getHistory).toHaveBeenCalledTimes(5);
+  });
+
+  it("un refus fournisseur reste dans errors[] même sous budget", async () => {
+    getHistory.mockImplementation(async () => {
+      reportProviderError(
+        "coingecko/ohlc",
+        new CoingeckoHttpError("Quota CoinGecko dépassé (Demo ~30 appels/min)", 429)
+      );
+      return null;
+    });
+
+    const r = await backfillDailyClosesFromFirstTx({
+      now: MAINTENANT,
+      budget: { deadlineAt: 1_000_000, clock: () => 0 },
+    });
+
+    expect(r.stoppedForBudget).toBe(false);
+    expect(r.errors).toHaveLength(5);
   });
 });
 
