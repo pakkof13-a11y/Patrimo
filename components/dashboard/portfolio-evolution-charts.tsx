@@ -148,6 +148,76 @@ export function symmetricZeroDomain(
   return [-bound, bound];
 }
 
+type DailyNavTooltipEntry = {
+  value?: unknown;
+  payload?: DailyNavChartPoint;
+};
+
+function signedMoney(value: number, currency: string): string {
+  const abs = formatCurrency(Math.abs(value), currency);
+  if (value > 0) return `+${abs}`;
+  if (value < 0) return `−${abs}`;
+  return abs;
+}
+
+function DailyNavTooltip({
+  active,
+  payload,
+  baseCurrency,
+  stroke,
+}: {
+  active?: boolean;
+  payload?: readonly DailyNavTooltipEntry[];
+  baseCurrency: string;
+  stroke: string;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  const point = payload.find((e) => e.payload)?.payload;
+  if (!point) return null;
+  const showBreakdown = point.delta !== 0 || point.flux !== 0;
+  return (
+    <div style={tooltipBoxStyle} data-testid="evolution-daily-tooltip">
+      {point.periodLabel ? (
+        <div
+          style={{ color: "var(--foreground)", fontWeight: 600, marginBottom: 2 }}
+        >
+          {point.periodLabel}
+        </div>
+      ) : null}
+      <div style={{ color: stroke, fontWeight: 600, whiteSpace: "nowrap" }}>
+        {formatCurrency(point.total, baseCurrency)}
+      </div>
+      {showBreakdown ? (
+        <>
+          <div
+            data-testid="evolution-tooltip-market"
+            style={{
+              color:
+                point.delta >= 0 ? "var(--success)" : "var(--danger)",
+              fontWeight: 500,
+              whiteSpace: "nowrap",
+              marginTop: 4,
+            }}
+          >
+            Marché {signedMoney(point.delta, baseCurrency)}
+          </div>
+          <div
+            data-testid="evolution-tooltip-flux"
+            style={{
+              color: "var(--muted-foreground)",
+              fontWeight: 500,
+              whiteSpace: "nowrap",
+              marginTop: 2,
+            }}
+          >
+            Flux {signedMoney(point.flux, baseCurrency)}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 type ValueTooltipEntry = {
   value?: unknown;
   payload?: EvolutionSeriesPoint & { delta?: number; day?: string };
@@ -411,10 +481,11 @@ export function PortfolioPercentChart({
 }
 
 /**
- * Courbe NAV dense (getDailyNav) + barres de Δ journalier.
+ * Courbe NAV dense (getDailyNav) + barres de Δ **marché**.
  *
  * Trait linéaire, closes réels seulement. Les barres somment (hors ancre) au
- * Δ d'en-tête. Un changement de période ne fait que recouper la fenêtre.
+ * Δ marché d'en-tête, pas au Δ NAV brut : `sum(marché) ≈ (last−first) − Σ flux`.
+ * Un APPORT crée du Flux au survol, pas une barre de performance.
  */
 export function DailyNavChart({
   data,
@@ -462,8 +533,11 @@ export function DailyNavChart({
         />
         <Tooltip
           content={(props: object) => (
-            <ValueTooltip
-              {...(props as { active?: boolean; payload?: readonly ValueTooltipEntry[] })}
+            <DailyNavTooltip
+              {...(props as {
+                active?: boolean;
+                payload?: readonly DailyNavTooltipEntry[];
+              })}
               baseCurrency={baseCurrency}
               stroke={stroke}
             />
@@ -472,7 +546,7 @@ export function DailyNavChart({
         <Bar
           yAxisId="delta"
           dataKey="delta"
-          name="Δ jour"
+          name="Δ marché"
           fill="var(--chart-neutral)"
           fillOpacity={0.45}
           isAnimationActive={false}

@@ -4,7 +4,10 @@ import {
   dailyNavKpiSeries,
   dailyNavQueryWindow,
   dailyNavToHistoryPoints,
+  fluxOfDay,
   headerDelta,
+  headerFlux,
+  headerMarketDelta,
   navOfPoint,
   sumDailyDeltas,
   toDailyNavChartPoints,
@@ -125,13 +128,15 @@ describe("cartes Brut / Net / Financier — même série, champ distinct", () =>
   });
 });
 
-describe("Δ journaliers — somme ≈ Δ d'en-tête", () => {
-  it("identité telescopique sur une série qui monte et descend", () => {
+describe("Δ marché journaliers — somme ≈ (last − first) − Σ flux", () => {
+  it("identité marché sur une série sans flux", () => {
     const series = denseFinancier("2026-01-01", "2026-03-31");
     const windowed = windowDailyNav(series, "3m", "2026-03-31");
     const deltas = dailyNavDeltas(windowed, "financier");
-    const header = headerDelta(windowed, "financier")!;
-    expect(sumDailyDeltas(deltas)).toBeCloseTo(header, 8);
+    const nav = headerDelta(windowed, "financier")!;
+    const flow = headerFlux(windowed, "financier")!;
+    expect(sumDailyDeltas(deltas)).toBeCloseTo(nav - flow, 8);
+    expect(headerMarketDelta(windowed, "financier")).toBeCloseTo(nav - flow, 8);
   });
 
   it("l'ancre n'entre pas dans la somme", () => {
@@ -144,6 +149,112 @@ describe("Δ journaliers — somme ≈ Δ d'en-tête", () => {
     expect(deltas[0]).toBe(0);
     expect(sumDailyDeltas(deltas)).toBe(5);
     expect(headerDelta(points, "financier")).toBe(5);
+    expect(headerMarketDelta(points, "financier")).toBe(5);
+  });
+
+  it("un APPORT n'est pas une barre de performance", () => {
+    const points = [
+      pt("2026-01-01", { financier: 100_000, brut: 100_000 }),
+      pt("2026-01-02", {
+        financier: 150_000,
+        brut: 150_000,
+        cash: 50_000,
+        externalFlows: 50_000,
+        financierFlows: 50_000,
+        transactionFlow: 0,
+      }),
+    ];
+    const deltas = dailyNavDeltas(points, "financier");
+    expect(deltas[1]).toBe(0);
+    expect(fluxOfDay(points[1]!, points[0], "financier")).toBe(50_000);
+    expect(headerDelta(points, "financier")).toBe(50_000);
+    expect(headerMarketDelta(points, "financier")).toBe(0);
+    expect(headerFlux(points, "financier")).toBe(50_000);
+    expect(sumDailyDeltas(deltas)).toBe(0);
+
+    const chart = toDailyNavChartPoints(points, "financier");
+    expect(chart[1]!.delta).toBe(0);
+    expect(chart[1]!.flux).toBe(50_000);
+    expect(chart[1]!.total).toBe(150_000);
+  });
+
+  it("achat immo : ΔFinancier marché ≈ 0, flux sur brut/net", () => {
+    const points = [
+      pt("2026-01-01", { financier: 100_000, brut: 100_000, net: 100_000 }),
+      pt("2026-01-02", {
+        financier: 100_000,
+        brut: 1_080_000,
+        net: 1_080_000,
+        immobilier: 980_000,
+        externalFlows: 980_000,
+        transactionFlow: 0,
+        financierFlows: 0,
+      }),
+    ];
+    expect(dailyNavDeltas(points, "financier")[1]).toBe(0);
+    expect(dailyNavDeltas(points, "brut")[1]).toBe(0);
+    expect(dailyNavDeltas(points, "net")[1]).toBe(0);
+    expect(headerMarketDelta(points, "financier")).toBe(0);
+    expect(headerFlux(points, "financier")).toBe(0);
+    expect(headerFlux(points, "brut")).toBe(980_000);
+    expect(headerFlux(points, "net")).toBe(980_000);
+    expect(headerDelta(points, "brut")).toBe(980_000);
+    expect(headerMarketDelta(points, "brut")).toBe(0);
+
+    const fin = toDailyNavChartPoints(points, "financier");
+    const brut = toDailyNavChartPoints(points, "brut");
+    expect(fin[1]!.delta).toBe(0);
+    expect(fin[1]!.flux).toBe(0);
+    expect(brut[1]!.delta).toBe(0);
+    expect(brut[1]!.flux).toBe(980_000);
+  });
+
+  it("en net, un emprunt rejoint les flux, pas le marché", () => {
+    const points = [
+      pt("2026-03-01", {
+        financier: 100_000,
+        brut: 100_000,
+        net: 100_000,
+        passifs: 0,
+      }),
+      pt("2026-03-02", {
+        financier: 300_000,
+        brut: 300_000,
+        net: 100_000,
+        cash: 200_000,
+        passifs: 200_000,
+        externalFlows: 200_000,
+        financierFlows: 200_000,
+      }),
+    ];
+    expect(dailyNavDeltas(points, "net")[1]).toBe(0);
+    expect(headerMarketDelta(points, "net")).toBe(0);
+    expect(headerFlux(points, "net")).toBe(0);
+    expect(headerDelta(points, "net")).toBe(0);
+    expect(headerMarketDelta(points, "brut")).toBe(0);
+    expect(headerFlux(points, "brut")).toBe(200_000);
+  });
+
+  it("même jour : APPORT + hausse cotés → barre = marché seulement", () => {
+    const points = [
+      pt("2026-01-01", { financier: 100_000, brut: 100_000 }),
+      pt("2026-01-02", {
+        financier: 152_000,
+        brut: 152_000,
+        externalFlows: 50_000,
+        financierFlows: 50_000,
+      }),
+    ];
+    const deltas = dailyNavDeltas(points, "financier");
+    expect(headerDelta(points, "financier")).toBe(52_000);
+    expect(headerFlux(points, "financier")).toBe(50_000);
+    expect(deltas[1]).toBe(2_000);
+    expect(sumDailyDeltas(deltas)).toBe(2_000);
+    expect(headerMarketDelta(points, "financier")).toBe(2_000);
+    expect(sumDailyDeltas(deltas)).toBeCloseTo(
+      headerDelta(points, "financier")! - headerFlux(points, "financier")!,
+      8
+    );
   });
 });
 
@@ -169,7 +280,11 @@ describe("pastilles vs Marché/Flux", () => {
     const chart = toDailyNavChartPoints(points, "financier");
     expect(chart[1]!.transactionFlow).toBe(0);
     expect(chart[1]!.flows).toBe(980_000);
+    expect(chart[1]!.flux).toBe(0);
+    expect(chart[1]!.delta).toBe(0);
     expect(chart[2]!.transactionFlow).toBe(4_000);
+    expect(chart[2]!.flux).toBe(4_000);
+    expect(chart[2]!.delta).toBe(1_000);
   });
 
   it("LOCF MARKET_CARRIED → carried (pastille creuse)", () => {

@@ -45,7 +45,8 @@ import {
 import { IntradaySection } from "@/components/dashboard/intraday-section";
 import type { DailyNavPoint } from "@/app/lib/portfolio/historical/get-daily-nav";
 import {
-  headerDelta,
+  headerFlux,
+  headerMarketDelta,
   HERO_NAV_SCOPE_LABEL,
   toDailyNavChartPoints,
   windowDailyNav,
@@ -334,8 +335,13 @@ export function PortfolioEvolutionPanel({
     [navWindowed, activeNavScope]
   );
 
-  const navDelta = useMemo(
-    () => headerDelta(navWindowed, activeNavScope),
+  const navMarket = useMemo(
+    () => headerMarketDelta(navWindowed, activeNavScope),
+    [navWindowed, activeNavScope]
+  );
+
+  const navFlux = useMemo(
+    () => headerFlux(navWindowed, activeNavScope),
     [navWindowed, activeNavScope]
   );
 
@@ -530,21 +536,29 @@ export function PortfolioEvolutionPanel({
           </>
         }
         actions={
-          useDailyNavCurve && navDelta != null && navChart.length > 1 ? (
+          useDailyNavCurve && navMarket != null && navChart.length > 1 ? (
             <div className="shrink-0 text-right" data-testid="evolution-headline">
               <div
                 className={cn(
                   "text-lg font-bold tabular-nums sm:text-xl",
-                  navDelta >= 0
+                  navMarket >= 0
                     ? "text-[var(--success)]"
                     : "text-[var(--danger)]"
                 )}
+                data-testid="evolution-headline-market"
               >
-                {navDelta >= 0 ? "+" : ""}
-                {formatCurrency(navDelta, baseCurrency)}
+                {navMarket >= 0 ? "+" : ""}
+                {formatCurrency(navMarket, baseCurrency)}
               </div>
               <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
-                Δ NAV {HERO_NAV_SCOPE_LABEL[activeNavScope].toLowerCase()}
+                Δ marché {HERO_NAV_SCOPE_LABEL[activeNavScope].toLowerCase()}
+                {navFlux != null && navFlux !== 0 ? (
+                  <span data-testid="evolution-headline-flux">
+                    {" · Flux "}
+                    {navFlux >= 0 ? "+" : ""}
+                    {formatCurrency(navFlux, baseCurrency)}
+                  </span>
+                ) : null}
               </div>
             </div>
           ) : summary && points.length > 0 ? (
