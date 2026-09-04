@@ -37,7 +37,6 @@ import {
   loadEvolutionPrefs,
   saveEvolutionRange,
 } from "@/app/lib/portfolio/evolution-prefs";
-import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
 import {
   kpiSeries,
   latentPnlAt,
@@ -46,6 +45,14 @@ import {
   seriesChangeAbs,
   seriesChangePct,
 } from "@/app/lib/portfolio/kpi-series";
+import { useDailyNavQuery } from "@/app/hooks/use-portfolio-queries";
+import { parisDayKey } from "@/app/lib/dates/paris";
+import {
+  dailyNavQueryWindow,
+  dailyNavToHistoryPoints,
+  type HeroNavScope,
+} from "@/app/lib/portfolio/daily-nav-view";
+import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
 
 const emptySubscribe = () => () => undefined;
 
@@ -205,6 +212,8 @@ export function DashboardTab({
     saveEvolutionRange(next);
   }
 
+  const [navScope, setNavScope] = useState<HeroNavScope>("financier");
+
   /*
     Repli 7J quand l'historique ne couvre pas la période enregistrée.
 
@@ -223,6 +232,35 @@ export function DashboardTab({
     setRange("7d");
   }
 
+  const referenceDay = parisDayKey(heroWindowReference(stableHistory));
+  const earliestDay = stableHistory[0]?.date
+    ? parisDayKey(new Date(stableHistory[0]!.date))
+    : null;
+  /*
+    Fenêtre API : 1A couvre 7J…1A (texture quotidienne identique, recoupe
+    côté client). 5A / Tout élargissent la requête.
+  */
+  const fetchRange: EvolutionRange =
+    range === "5y" || range === "all" ? range : "1y";
+  const navWindow = dailyNavQueryWindow(
+    fetchRange,
+    referenceDay,
+    earliestDay
+  );
+  const dailyNavQ = useDailyNavQuery(navWindow.from, navWindow.to);
+  const dailyNavPoints = dailyNavQ.data?.points;
+  const navHistory = useMemo(
+    () =>
+      dailyNavPoints && dailyNavPoints.length >= 2
+        ? dailyNavToHistoryPoints(dailyNavPoints)
+        : [],
+    [dailyNavPoints]
+  );
+  const curveHistory = navHistory.length >= 2 ? navHistory : stableHistory;
+  const showNavLoading =
+    showHistoryLoading ||
+    (dailyNavQ.isPending && navHistory.length === 0);
+
   /**
    * Indicateurs — l'ordre du mockup, qui est aussi l'ordre de pilotage :
    * d'abord l'exposition cotée et le résultat, puis les poches annexes.
@@ -239,37 +277,14 @@ export function DashboardTab({
    * soient calculés.
    */
   const kpis = useMemo<TerminalKpi[]>(() => {
-    /*
-      La période choisie, et rien d'autre.
-
-      `windowForRange` est la fonction qu'emploie la courbe d'évolution : même
-      découpe, même point d'ancrage en tête pour la valeur de départ. La
-      variation de chaque tuile porte donc exactement sur la tranche de temps
-      que le graphique dessine juste en dessous.
-
-      La fenêtre glissante de trente points qui régnait ici évitait la variation
-      « depuis l'origine », illisible sur un portefeuille parti de zéro. Ce
-      compromis n'a plus à être arbitré dans le code : l'utilisateur choisit sa
-      période, « Tout » compris, et `seriesChangePct` prend de toute façon pour
-      base la première valeur non nulle.
-    */
+    const source = curveHistory.length >= 2 ? curveHistory : stableHistory;
     const h = windowForRange(
-      stableHistory,
+      source,
       range,
-      heroWindowReference(stableHistory)
+      heroWindowReference(source)
     );
     const sparkDates = h.map((p) => p.date);
 
-    /*
-      Une grandeur absente ne devient pas zéro.
-
-      `kpiSeries` rend `undefined` dès qu'un point ne porte pas le champ
-      demandé, au lieu de le remplacer par zéro pour faire tenir la courbe.
-      Une ligne parfaitement plate à zéro est indiscernable d'un patrimoine
-      réellement stable : c'est précisément la confusion que la doctrine du
-      projet interdit. Un zéro véritable, lui, passe — une poche vide vaut
-      zéro, et la courbe doit le dire.
-    */
     const listed = kpiSeries(h, listedValueAt);
     const cash = kpiSeries(h, (p) => p.cashTotalBase);
     const alternatives = kpiSeries(h, (p) => p.alternativesBase);
@@ -281,10 +296,10 @@ export function DashboardTab({
     return [
       {
         key: "listed",
-        label: "Cotés",
+        label: "Titres & crypto",
         /*
-          Montant du contrat : `pockets.listed` (ACTIONS + OBLIGATIONS +
-          CRYPTO, hors IMMO/AV). Plus de résidu `marketValue − immo − AV`.
+          Poche T-01 `listed` : ACTIONS + OBLIGATIONS + CRYPTO, hors IMMO/AV.
+          Même série / fenêtre que le hero (getDailyNav).
         */
         value: num(
           summary?.totalListedBase ??
@@ -365,7 +380,7 @@ export function DashboardTab({
         changePct: seriesChangePct(realized),
       },
     ];
-  }, [summary, stableHistory, range]);
+  }, [summary, stableHistory, curveHistory, range]);
 
   const netWorth = summary
     ? num(summary.netWorthBase ?? summary.netWorthEur)
@@ -373,6 +388,9 @@ export function DashboardTab({
   /** Somme des actifs, sans déduction des passifs — même source que `netWorth`. */
   const grossAssets = summary
     ? num(summary.totalGrossAssetsBase ?? summary.totalGrossAssetsEur)
+    : null;
+  const financier = summary
+    ? num(summary.totalFinancierBase ?? summary.totalFinancierEur)
     : null;
 
   /*
@@ -400,9 +418,13 @@ export function DashboardTab({
         <TerminalHero
           netWorth={netWorth}
           grossAssets={grossAssets}
-          history={stableHistory}
+          financier={financier}
+          history={curveHistory}
           baseCurrency={baseCurrency}
-          loading={showHistoryLoading}
+          loading={showNavLoading}
+          scope={navScope}
+          onScopeChange={setNavScope}
+          range={range}
         />
       )}
 
@@ -428,9 +450,11 @@ export function DashboardTab({
         >
           {blocks.showEvolutionChart && (
             <PortfolioEvolutionPanel
-              history={stableHistory}
+              history={curveHistory}
+              dailyNav={dailyNavPoints ?? []}
+              navScope={navScope}
               baseCurrency={baseCurrency}
-              loading={showHistoryLoading}
+              loading={showNavLoading}
               className="min-h-[22rem]"
               range={range}
               onRangeChange={changeRange}

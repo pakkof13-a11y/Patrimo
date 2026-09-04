@@ -40,8 +40,17 @@ import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
 import {
   PortfolioPercentChart,
   PortfolioValueChart,
+  DailyNavChart,
 } from "@/components/dashboard/portfolio-evolution-charts";
 import { IntradaySection } from "@/components/dashboard/intraday-section";
+import type { DailyNavPoint } from "@/app/lib/portfolio/historical/get-daily-nav";
+import {
+  headerDelta,
+  HERO_NAV_SCOPE_LABEL,
+  toDailyNavChartPoints,
+  windowDailyNav,
+  type HeroNavScope,
+} from "@/app/lib/portfolio/daily-nav-view";
 
 const emptySubscribe = () => () => undefined;
 
@@ -232,6 +241,8 @@ function Segmented<T extends string>({
  */
 export function PortfolioEvolutionPanel({
   history,
+  dailyNav,
+  navScope,
   baseCurrency,
   loading,
   className,
@@ -239,6 +250,9 @@ export function PortfolioEvolutionPanel({
   onRangeChange,
 }: {
   history: HistoryPoint[];
+  /** Série dense T-05 — courbe par défaut (Financier / Brut / Net). */
+  dailyNav?: DailyNavPoint[];
+  navScope?: HeroNavScope;
   baseCurrency: string;
   loading?: boolean;
   className?: string;
@@ -295,6 +309,36 @@ export function PortfolioEvolutionPanel({
   const scaleAvailable = range === "7d";
   const showIntraday = scaleAvailable && scale === "intraday";
 
+  const activeNavScope: HeroNavScope = navScope ?? "financier";
+  /*
+    Courbe Finary : série dense getDailyNav, sauf filtre de classe / vs indice
+    / intraday, qui gardent l'historique existant.
+  */
+  const useDailyNavCurve =
+    Boolean(dailyNav && dailyNav.length > 1) &&
+    !assetClass &&
+    versus === "none" &&
+    !showIntraday;
+
+  const navWindowed = useMemo(() => {
+    if (!dailyNav?.length) return [];
+    return windowDailyNav(
+      dailyNav,
+      range,
+      dailyNav[dailyNav.length - 1]!.day
+    );
+  }, [dailyNav, range]);
+
+  const navChart = useMemo(
+    () => toDailyNavChartPoints(navWindowed, activeNavScope),
+    [navWindowed, activeNavScope]
+  );
+
+  const navDelta = useMemo(
+    () => headerDelta(navWindowed, activeNavScope),
+    [navWindowed, activeNavScope]
+  );
+
   const update = (patch: Partial<EvolutionPrefsV5>) => {
     setPrefs((p) => {
       const fusion = { ...p, ...patch, v: 5 as const };
@@ -323,7 +367,7 @@ export function PortfolioEvolutionPanel({
     });
   };
 
-  const firstDate = history[0]?.date ?? null;
+  const firstDate = dailyNav?.[0]?.day ?? history[0]?.date ?? null;
 
   /*
     Périodes proposées, selon la profondeur de l'historique.
@@ -461,6 +505,7 @@ export function PortfolioEvolutionPanel({
         className
       )}
       data-testid="portfolio-evolution-panel"
+      data-nav-scope={activeNavScope}
     >
       <PanelHeader
         title="Évolution du portefeuille"
@@ -470,6 +515,8 @@ export function PortfolioEvolutionPanel({
               ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass} en ${envelope} — valeur`
               : assetClass
               ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass}${assetClass === "OBLIGATIONS" ? " (CTO)" : ""} — ${classMetric === "performance" ? "performance" : "valeur"}`
+              : useDailyNavCurve
+              ? `${HERO_NAV_SCOPE_LABEL[activeNavScope]} — NAV quotidienne`
               : "Actifs bruts"}
             <span className="mx-1 opacity-40">·</span>
             {evolutionIntervalLabel(interval)}
@@ -483,7 +530,24 @@ export function PortfolioEvolutionPanel({
           </>
         }
         actions={
-          summary && points.length > 0 ? (
+          useDailyNavCurve && navDelta != null && navChart.length > 1 ? (
+            <div className="shrink-0 text-right" data-testid="evolution-headline">
+              <div
+                className={cn(
+                  "text-lg font-bold tabular-nums sm:text-xl",
+                  navDelta >= 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--danger)]"
+                )}
+              >
+                {navDelta >= 0 ? "+" : ""}
+                {formatCurrency(navDelta, baseCurrency)}
+              </div>
+              <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
+                Δ NAV {HERO_NAV_SCOPE_LABEL[activeNavScope].toLowerCase()}
+              </div>
+            </div>
+          ) : summary && points.length > 0 ? (
             <div className="shrink-0 text-right" data-testid="evolution-headline">
               <div
                 className={cn(
@@ -731,6 +795,11 @@ export function PortfolioEvolutionPanel({
                 description="Choisissez une plage plus large ou attendez davantage d'historique."
               />
             )
+          ) : versus === "none" && useDailyNavCurve ? (
+            <DailyNavChart
+              data={navChart}
+              baseCurrency={baseCurrency}
+            />
           ) : versus === "none" ? (
             <PortfolioValueChart data={points} baseCurrency={baseCurrency} />
           ) : (

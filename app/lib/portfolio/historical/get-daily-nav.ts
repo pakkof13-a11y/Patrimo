@@ -19,10 +19,12 @@ import {
 } from "../patrimony-metrics";
 import { loadHistoricalInputs } from "./load";
 import { PortfolioValuationEngine } from "./engine";
+import type { PriceOrigin } from "./price-resolver";
 import type {
   DayKey,
   HistoricalDataStatus,
   PortfolioValuationPoint,
+  ValuationAssetClass,
 } from "./types";
 
 export const DAILY_NAV_SCOPES = [
@@ -46,11 +48,63 @@ export type DailyNavPoint = {
   status: HistoricalDataStatus;
   /** Capital externe du jour (apports / retraits / achats hors cash explicite). */
   externalFlows: number;
+  /**
+   * Flux du journal sur les cotés (ACTIONS + OBLIGATIONS + CRYPTO).
+   *
+   * Les pastilles de la courbe lisent **ce** champ, pas `externalFlows` :
+   * un achat immobilier est un flux externe (Marché/Flux) sans pastille
+   * sur la courbe Financier.
+   */
+  transactionFlow: number;
+  /**
+   * Flux qui touchent l'agrégat Financier (listed + cash).
+   *
+   * Marché/Flux du hero Financier les somme ; un achat immo n'y figure pas.
+   */
+  financierFlows: number;
   listed: number;
   financier: number;
   brut: number;
   net: number;
+  cash: number;
+  immobilier: number;
+  av: number;
+  alternatifs: number;
+  employeeSavings: number;
+  passifs: number;
+  /** Origines de prix du jour — `MARKET_CARRIED` → pastille creuse. */
+  priceOrigins: PriceOrigin[];
+  realizedPnl: number;
+  ledgerCashIncome: number;
+  /** `marketValue − costBasis` des positions journal, même formule que l'historique. */
+  unrealizedPnl: number;
 };
+
+/** Journal coté du jour — pastilles, pas l'attribution Marché/Flux. */
+export function listedTransactionFlow(
+  flows: Record<ValuationAssetClass, number>
+): number {
+  return flows.ACTIONS + flows.OBLIGATIONS + flows.CRYPTO;
+}
+
+/** Flux qui expliquent ΔFinancier (hors immo / alt / ES). */
+export function financierFlowOf(
+  flows: Record<ValuationAssetClass, number>
+): number {
+  return listedTransactionFlow(flows) + flows.CASH;
+}
+
+/** P&L latent du journal — lecture des champs moteur, pas une seconde formule. */
+export function unrealizedPnlOf(p: PortfolioValuationPoint): number {
+  return (
+    p.securities +
+    p.crypto +
+    p.realEstate +
+    p.lifeInsurance +
+    p.otherAssets -
+    p.positionsCostBasis
+  );
+}
 
 export type DailyNavResult = {
   scope: DailyNavScope;
@@ -93,10 +147,22 @@ export function dailyNavFromSeries(
     nav: navAtScope(p, scope),
     status: p.status,
     externalFlows: p.externalFlows,
+    transactionFlow: listedTransactionFlow(p.flowsByAssetClass),
+    financierFlows: financierFlowOf(p.flowsByAssetClass),
     listed: p.listed,
     financier: p.financier,
     brut: p.brut,
     net: p.net,
+    cash: p.pockets.cash,
+    immobilier: p.pockets.immobilier,
+    av: p.pockets.av,
+    alternatifs: p.pockets.alternatifs,
+    employeeSavings: p.pockets.employeeSavings,
+    passifs: p.pockets.passifs,
+    priceOrigins: p.priceOrigins,
+    realizedPnl: p.realizedPnl,
+    ledgerCashIncome: p.ledgerCashIncome,
+    unrealizedPnl: unrealizedPnlOf(p),
   }));
 }
 

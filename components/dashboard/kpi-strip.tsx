@@ -274,7 +274,7 @@ export function KpiStrip({
         <div className={KPI_GRID_CLASS} data-testid="kpi-strip-grid">
           <Kpi
             icon={<Wallet className="h-4 w-4" />}
-            label="Cotés"
+            label="Titres & crypto"
             value={money(
               summary?.totalListedBase ??
                 summary?.totalListedEur ??

@@ -270,8 +270,23 @@ export type HistoryPoint = {
   /** `grossAssets - liabilities`. */
   netWorthBase?: number;
   liabilitiesBase?: number;
-  /** Capital externe entré (net) ce jour-là — jamais compté en performance. */
+  /**
+   * Capital externe entré (net) ce jour-là — jamais compté en performance.
+   * Sert l'attribution Marché / Flux, **pas** les pastilles de la courbe.
+   */
   externalFlowsBase?: number;
+  /**
+   * Flux du journal coté (ACTIONS + OBLIGATIONS + CRYPTO) ce jour-là.
+   *
+   * Les pastilles de la courbe Financier lisent ce champ. Un achat immobilier
+   * gonfle `externalFlowsBase` sans y figurer.
+   */
+  transactionFlowBase?: number;
+  /**
+   * Flux qui touchent l'agrégat Financier (listed + cash) — Marché/Flux
+   * du hero Financier.
+   */
+  financierFlowsBase?: number;
   /** Résultat du jour, flux neutralisés. */
   investmentPerformanceBase?: number;
 

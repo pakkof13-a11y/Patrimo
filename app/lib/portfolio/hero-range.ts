@@ -11,24 +11,14 @@
  * feraient déborder — mais rien n'interdit de les rouvrir : ce sont les mêmes
  * valeurs côté calcul.
  *
- * ## Deux sélecteurs, volontairement
+ * ## Un sélecteur (S2)
  *
- * La carte de tête et le bloc « Évolution + indicateurs » ne partagent **pas**
- * leur période. Unifier les deux dans `DashboardTab` casserait la lecture :
- *
- * - le hero répond à « d'où vient le patrimoine » (1M · 3M · YTD · 1A · 5A ·
- *   Max, six chips dans la carte, retenus sous `HERO_RANGE_KEY`) ;
- * - l'évolution et les KPI répondent à « comment il s'est comporté sur la
- *   période étudiée » (7J…Tout, `evolutionPrefs.v5`, un seul état soulevé
- *   dans `DashboardTab`).
- *
- * Les fenêtres, elles, s'appuient sur le même `windowForRange` et le même
- * `heroWindowReference` : deux questions, une horloge. Si un jour les
- * sélecteurs devaient se suivre, c'est ici et dans `dashboard-tab.tsx` que
- * la période remonterait, pas dans deux états séparés.
+ * Hero, KPI et évolution partagent la période du tableau de bord
+ * (`evolutionPrefs.v5`). `windowForRange` / `windowDailyNav` s'appuient sur
+ * `heroWindowReference` — la dernière valorisation, pas l'horloge.
  */
 
-import type { EvolutionRange } from "@/app/lib/portfolio/evolution-aggregate";
+import type { EvolutionRange } from "./evolution-aggregate";
 import type { HistoryPoint } from "@/app/lib/types/ui";
 
 /** Les six périodes proposées, dans l'ordre d'affichage. */
@@ -138,14 +128,18 @@ export function heroWindowChange(values: number[]): HeroWindowChange | null {
  * mieux que « depuis le début », qui ne dit rien de sa profondeur.
  */
 export function heroRangeSubtitle(
-  range: HeroRange,
+  range: EvolutionRange,
   windowStartDate: string | undefined
 ): string {
   switch (range) {
+    case "7d":
+      return "sur 7 jours";
     case "1m":
       return "sur 1 mois";
     case "3m":
       return "sur 3 mois";
+    case "6m":
+      return "sur 6 mois";
     case "1y":
       return "sur 1 an";
     case "5y":

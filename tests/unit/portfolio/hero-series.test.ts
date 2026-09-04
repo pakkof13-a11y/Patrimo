@@ -85,7 +85,7 @@ describe("buildHeroSeries — décomposition selon le mode", () => {
   });
 
   it("en brut, aucune décomposition : la question ne se pose pas", () => {
-    const series = buildHeroSeries(history, [150, 165], "gross");
+    const series = buildHeroSeries(history, [150, 165], "brut");
     expect(series[1]!.grossAssets).toBeUndefined();
     expect(series[1]!.liabilities).toBeUndefined();
   });
@@ -131,14 +131,23 @@ describe("buildHeroSeries — valeurs reportées", () => {
 });
 
 describe("buildHeroSeries — événement du jour", () => {
-  it("un flux externe non nul est retenu, un flux nul ne l'est pas", () => {
+  it("un flux de transaction non nul est retenu, un flux nul ne l'est pas", () => {
     const history = [
-      point({ netWorthBase: 100, externalFlowsBase: 0 }),
-      point({ netWorthBase: 5100, externalFlowsBase: 5000 }),
+      point({ netWorthBase: 100, transactionFlowBase: 0, externalFlowsBase: 50_000 }),
+      point({ netWorthBase: 5100, transactionFlowBase: 5000, externalFlowsBase: 50_000 }),
     ];
     const series = buildHeroSeries(history, [100, 5100], "net");
     expect(series[0]!.externalFlow).toBeUndefined();
     expect(series[1]!.externalFlow).toBe(5000);
+  });
+
+  it("un flux externe sans transaction ne pose pas de pastille", () => {
+    const history = [
+      point({ netWorthBase: 100, externalFlowsBase: 0 }),
+      point({ netWorthBase: 980_100, externalFlowsBase: 980_000 }),
+    ];
+    const series = buildHeroSeries(history, [100, 980_100], "financier");
+    expect(series[1]!.externalFlow).toBeUndefined();
   });
 });
 
