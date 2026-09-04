@@ -191,9 +191,12 @@ export function DashboardTab({
    * La préférence enregistrée reste celle du panneau (`evolutionPrefs.v5`) :
    * partager l'état ne devait pas créer une seconde période mémorisée.
    *
-   * Le hero, lui, garde ses propres chips (`HERO_RANGE_KEY`) : unifier les
-   * trois blocs dans un seul sélecteur mélangerait deux questions (voir
-   * `hero-range.ts`). Les fenêtres, en revanche, s'ouvrent toutes depuis
+   * Le hero porte lui aussi les huit chips (`RANGES`, définies dans
+   * `portfolio-evolution-panel.tsx` et réutilisées ici pour éviter deux
+   * listes divergentes) : un clic dans la carte de tête appelle le même
+   * `changeRange` que le panneau du bas, donc écrit le même état et la même
+   * préférence — deux endroits pour changer une seule période, jamais deux
+   * périodes. Les fenêtres, elles, s'ouvrent toutes depuis
    * `heroWindowReference` — la dernière valorisation, pas l'horloge.
    */
   const isClient = useIsClient();
@@ -425,6 +428,8 @@ export function DashboardTab({
           scope={navScope}
           onScopeChange={setNavScope}
           range={range}
+          onRangeChange={changeRange}
+          firstHistoryDate={firstHistoryDate}
         />
       )}
 

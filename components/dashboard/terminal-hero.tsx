@@ -14,6 +14,7 @@ import {
 } from "@/app/lib/portfolio/kpi-series";
 import { buildHeroSeries, type HeroMode } from "@/app/lib/portfolio/hero-series";
 import {
+  isEvolutionRangeEnabled,
   windowForRange,
   type EvolutionRange,
 } from "@/app/lib/portfolio/evolution-aggregate";
@@ -22,6 +23,7 @@ import {
   heroWindowChange,
   heroWindowReference,
 } from "@/app/lib/portfolio/hero-range";
+import { EVOLUTION_RANGE_CHIPS as RANGES } from "@/app/lib/ui/evolution-ranges";
 import {
   heroAttribution,
   heroEventMarkers,
@@ -104,6 +106,8 @@ export function TerminalHero({
   scope,
   onScopeChange,
   range,
+  onRangeChange,
+  firstHistoryDate,
 }: {
   netWorth: number | null;
   /** Somme des actifs, sans déduction des passifs. */
@@ -122,6 +126,18 @@ export function TerminalHero({
    * même série `getDailyNav`.
    */
   range: EvolutionRange;
+  /**
+   * Change la période partagée. Même setter que le panneau Évolution
+   * (`changeRange` dans `dashboard-tab.tsx`) — un clic ici déplace aussi le
+   * sélecteur du bas, et persiste sous `evolutionPrefs.v5`.
+   */
+  onRangeChange: (range: EvolutionRange) => void;
+  /**
+   * Première date de l'historique complet (non fenêtré), pour désactiver
+   * les chips que la profondeur disponible ne couvre pas encore. Même
+   * source et même règle que le panneau (`isEvolutionRangeEnabled`).
+   */
+  firstHistoryDate: string | null;
 }) {
   const mode = scope;
   const [amountsHidden] = useAmountsHidden();
@@ -154,6 +170,19 @@ export function TerminalHero({
     () => kpiSeries(windowed, pickerFor(mode)),
     [windowed, mode]
   );
+
+  /*
+    Chips de période — même règle d'activation que le panneau Évolution
+    (`isEvolutionRangeEnabled`), sur la profondeur réelle de l'historique et
+    non sur la fenêtre déjà découpée.
+  */
+  const rangeEnabled = useMemo(() => {
+    const map = {} as Record<EvolutionRange, boolean>;
+    for (const r of RANGES) {
+      map[r.id] = isEvolutionRangeEnabled(r.id, firstHistoryDate);
+    }
+    return map;
+  }, [firstHistoryDate]);
 
   const stroke =
     mode === "financier"
@@ -508,7 +537,25 @@ export function TerminalHero({
             carte se contracterait au premier survol et se rouvrirait à la
             sortie, sous le curseur.
           */}
-          <div className="mt-[var(--space-2)]">
+          {/*
+            Hauteur réservée pour deux lignes, et non pour une.
+
+            Le survol n'est pas le seul à faire varier cette ligne : les
+            pastilles Marché/Flux ne sont montées que lorsque `heroAttribution`
+            aboutit, et leur arrivée la replie en deux lignes. Mesuré à la
+            largeur des tests : la ligne passe de 12 à 32 pixels entre 3M — où
+            l'attribution est indisponible — et YTD, où elle l'est, et la carte
+            entière suivait de 248 à 268. Un chip changeait donc la taille du
+            bloc, ce que le test « changer de période ne fait pas sauter la
+            carte » interdit à juste titre : tout ce qui est en dessous
+            sursautait à chaque clic.
+
+            Réserver le cas le plus haut plutôt que masquer les pastilles : les
+            cacher aurait stabilisé la carte en taisant une information vraie,
+            et afficher « 0 € » à leur place aurait été un mensonge. Ici on ne
+            montre rien de plus, on garde seulement la place.
+          */}
+          <div className="mt-[var(--space-2)] min-h-[2rem]">
             {windowChange && (
               <p
                 className={cn(
@@ -673,10 +720,53 @@ export function TerminalHero({
           reprend toute la largeur, comme avant, le bloc passant à la ligne.
         */}
         <div className="flex w-full min-w-0 flex-col items-end gap-[var(--space-2)] sm:w-[55%] sm:flex-none">
-          <p
-            className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
+          <div
+            className="flex min-w-0 flex-wrap items-center justify-end gap-0.5"
+            role="tablist"
+            aria-label="Période"
             data-testid="hero-range-toggle"
             data-range={range}
+          >
+            {RANGES.map((r) => {
+              const enabled = rangeEnabled[r.id] !== false;
+              const selected = range === r.id;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  aria-disabled={!enabled}
+                  disabled={!enabled}
+                  title={
+                    enabled
+                      ? undefined
+                      : "Historique trop court pour cette période"
+                  }
+                  data-testid={`hero-range-${r.id}`}
+                  data-active={selected ? "true" : "false"}
+                  onClick={() => enabled && onRangeChange(r.id)}
+                  className={cn(
+                    "rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px] font-medium leading-none transition",
+                    "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+                    !enabled &&
+                      "cursor-not-allowed bg-[var(--muted)]/40 text-[var(--muted-foreground)] opacity-40",
+                    enabled &&
+                      selected &&
+                      "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]",
+                    enabled &&
+                      !selected &&
+                      "bg-[var(--muted)]/70 text-[var(--foreground)] hover:bg-[var(--muted)]"
+                  )}
+                >
+                  {r.label}
+                </button>
+              );
+            })}
+          </div>
+          <p
+            className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
+            data-testid="hero-range-subtitle"
           >
             {heroRangeSubtitle(range, windowed[0]?.date)}
           </p>
