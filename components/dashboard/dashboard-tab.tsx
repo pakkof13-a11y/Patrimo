@@ -283,16 +283,14 @@ export function DashboardTab({
         key: "listed",
         label: "Cotés",
         /*
-          Montant aligné sur la série : titres + crypto, immo et AV retirés.
-          `totalMarketValue` les compte encore — c'est le résidu historique.
+          Montant du contrat : `pockets.listed` (ACTIONS + OBLIGATIONS +
+          CRYPTO, hors IMMO/AV). Plus de résidu `marketValue − immo − AV`.
         */
-        value:
-          listed?.[listed.length - 1] ??
-          num(summary?.totalMarketValueBase ?? summary?.totalMarketValueEur) -
-            num(summary?.totalRealEstateBase ?? summary?.totalRealEstateEur) -
-            num(
-              summary?.totalLifeInsuranceBase ?? summary?.totalLifeInsuranceEur
-            ),
+        value: num(
+          summary?.totalListedBase ??
+            summary?.totalListedEur ??
+            listed?.[listed.length - 1]
+        ),
         spark: listed,
         sparkDates,
         changeAbs: seriesChangeAbs(listed),

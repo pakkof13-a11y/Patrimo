@@ -276,7 +276,10 @@ export function KpiStrip({
             icon={<Wallet className="h-4 w-4" />}
             label="Cotés"
             value={money(
-              summary?.totalMarketValueBase ?? summary?.totalMarketValueEur
+              summary?.totalListedBase ??
+                summary?.totalListedEur ??
+                summary?.totalMarketValueBase ??
+                summary?.totalMarketValueEur
             )}
             loading={loading}
           />

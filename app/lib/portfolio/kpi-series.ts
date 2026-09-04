@@ -18,19 +18,13 @@
 import type { HistoryPoint } from "@/app/lib/types/ui";
 
 /**
- * Valeur des positions **cotées** à une date : titres + crypto.
+ * Valeur des positions **cotées** à une date.
  *
- * « Cotés » désigne ce qui a un cours, pas le résidu du brut. Le moteur publie
- * `securitiesBase` et `cryptoBase` ; les additionner est le périmètre exact.
- * Immobilier et assurance-vie restent hors de cette tuile — ils ont leur
- * propre lecture, et les compter ici faisait bouger « Cotés » à chaque
- * revalorisation d'un appartement.
+ * Le moteur publie `securitiesBase` (ACTIONS + OBLIGATIONS) et `cryptoBase`.
+ * Les additionner est le périmètre listed du jour — hors immobilier et AV.
  *
- * Repli, uniquement si le moteur ne publie pas encore ces champs (réponse
- * ancienne, cache) : `gross − cash − alternatives − employeeSavings`. Ce
- * résidu réintroduit immo et AV ; on ne l'emploie que faute de mieux, et on
- * le déclare `undefined` dès qu'un terme manque plutôt que de tracer une
- * courbe dont on ne sait pas ce qu'elle couvre.
+ * Plus de repli `gross − cash − alt − ES` : ce résidu réintroduisait immo et
+ * AV dans « Cotés ». Si les champs moteur manquent, la série est inconnue.
  */
 export function listedValueAt(p: HistoryPoint): number | undefined {
   const securities = p.securitiesBase;
@@ -43,21 +37,7 @@ export function listedValueAt(p: HistoryPoint): number | undefined {
   ) {
     return securities + crypto;
   }
-
-  const gross = p.grossAssetsBase;
-  const cash = p.cashTotalBase;
-  const alternatives = p.alternativesBase;
-  const employeeSavings = p.employeeSavingsBase;
-  if (
-    gross == null ||
-    cash == null ||
-    alternatives == null ||
-    employeeSavings == null
-  ) {
-    return undefined;
-  }
-  const listed = gross - cash - alternatives - employeeSavings;
-  return Number.isFinite(listed) ? listed : undefined;
+  return undefined;
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { AccountType } from "@/app/lib/constants";
+import type { PatrimonyMetricsJson } from "@/app/lib/portfolio/patrimony-metrics";
 import type {
   BaseAmount,
   EurAmount,
@@ -328,6 +329,8 @@ export type HoldingsResponse = {
   holdings: Holding[];
   platforms: PlatformRow[];
   summary: Record<string, string | number>;
+  /** Contrat T-01 — Hero / KPI / allocation lisent cet objet, pas un résidu. */
+  metrics?: PatrimonyMetricsJson;
   allocation: PortfolioAllocation;
   baseCurrency: string;
 };

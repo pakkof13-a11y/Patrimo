@@ -65,8 +65,8 @@ function pt(partial: {
 
 describe("listedValueAt — périmètre du KPI « Cotés »", () => {
   /*
-    Titres + crypto, dès que le moteur les publie. Le résidu
-    `gross − cash − alt − ES` ne sert que de repli : il réintroduit immo et AV.
+    Titres (ACTIONS + OBLIGATIONS) + crypto, dès que le moteur les publie.
+    Plus de résidu `gross − cash − alt − ES` : il réintroduisait immo et AV.
   */
   it("additionne securitiesBase + cryptoBase quand le moteur les publie", () => {
     const point = pt({
@@ -104,7 +104,7 @@ describe("listedValueAt — périmètre du KPI « Cotés »", () => {
     expect(listedValueAt(avant)).toBe(listedValueAt(apres));
   });
 
-  it("repli : reproduisait `summary.totalMarketValue` sans champs moteur", () => {
+  it("sans champs moteur : inconnue, pas le résidu qui réintroduit immo/AV", () => {
     const marketValue = 120_000;
     const cash = 30_000;
     const alternatives = 15_000;
@@ -119,7 +119,7 @@ describe("listedValueAt — périmètre du KPI « Cotés »", () => {
       employeeSavings,
     });
 
-    expect(listedValueAt(point)).toBe(marketValue);
+    expect(listedValueAt(point)).toBeUndefined();
   });
 
   it("n'est pas `positionsBase`, qui comptait deux poches en trop", () => {
@@ -129,10 +129,10 @@ describe("listedValueAt — périmètre du KPI « Cotés »", () => {
       cash: 30_000,
       alternatives: 15_000,
       employeeSavings: 5_000,
+      securities: 100_000,
+      crypto: 20_000,
     });
 
-    // L'ancienne série : brut − cash, alternatifs et épargne salariale inclus —
-    // deux poches qui ont pourtant leur propre tuile dans le même bandeau.
     expect(point.positionsBase).toBe(140_000);
     expect(listedValueAt(point)).toBe(120_000);
   });
@@ -144,14 +144,17 @@ describe("listedValueAt — périmètre du KPI « Cotés »", () => {
       cash: 30_000,
       alternatives: 15_000,
       employeeSavings: 5_000,
+      securities: 100_000,
+      crypto: 20_000,
     });
-    // Un métal revalorisé de 2 000 € : le brut monte, les cotés non.
     const apres = pt({
       date: "2026-09-02T21:59:59.000Z",
       gross: 172_000,
       cash: 30_000,
       alternatives: 17_000,
       employeeSavings: 5_000,
+      securities: 100_000,
+      crypto: 20_000,
     });
 
     expect(listedValueAt(avant)).toBe(listedValueAt(apres));
@@ -166,7 +169,6 @@ describe("listedValueAt — périmètre du KPI « Cotés »", () => {
       cashTotalEur: 0,
       totalValueBase: 100,
       cashTotalBase: 0,
-      // ni grossAssetsBase, ni alternativesBase, ni employeeSavingsBase
     };
     expect(listedValueAt(incomplet)).toBeUndefined();
   });
@@ -411,8 +413,26 @@ describe("realizedPlusIncomeAt — réalisé + revenus historiques", () => {
  */
 describe("les KPI des chantiers 29/30 restent inchangés", () => {
   const sansNouveauxChamps = [
-    pt({ date: "2026-09-01T21:59:59.000Z", gross: 170_000, cash: 30_000, alternatives: 15_000, employeeSavings: 5_000, liabilities: 80_000 }),
-    pt({ date: "2026-09-02T21:59:59.000Z", gross: 175_000, cash: 31_000, alternatives: 15_000, employeeSavings: 5_000, liabilities: 79_000 }),
+    pt({
+      date: "2026-09-01T21:59:59.000Z",
+      gross: 170_000,
+      cash: 30_000,
+      alternatives: 15_000,
+      employeeSavings: 5_000,
+      liabilities: 80_000,
+      securities: 100_000,
+      crypto: 20_000,
+    }),
+    pt({
+      date: "2026-09-02T21:59:59.000Z",
+      gross: 175_000,
+      cash: 31_000,
+      alternatives: 15_000,
+      employeeSavings: 5_000,
+      liabilities: 79_000,
+      securities: 104_000,
+      crypto: 20_000,
+    }),
   ];
   const avecNouveauxChamps = sansNouveauxChamps.map((p) => ({
     ...p,
@@ -438,7 +458,6 @@ describe("les KPI des chantiers 29/30 restent inchangés", () => {
   });
 
   it("le périmètre « Cotés » ignore toujours le latent et le réalisé", () => {
-    // 170 000 − 30 000 − 15 000 − 5 000 : les nouveaux champs n'y entrent pas.
     expect(listedValueAt(avecNouveauxChamps[0]!)).toBe(120_000);
   });
 });
@@ -546,6 +565,8 @@ describe("période partagée — la fenêtre commande la série et la variation"
       cash: 10_000 + i * 10,
       alternatives: 5_000,
       employeeSavings: 2_000,
+      securities: 70_000,
+      crypto: 13_000,
     })
   );
 
