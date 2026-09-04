@@ -7,6 +7,7 @@ import {
   classifyHoldings,
   computePatrimonyMetrics,
   formatPatrimonyPocketTable,
+  LISTED_ASSET_CLASS_KEYS,
   LISTED_ASSET_CLASSES,
   LISTED_EXCLUDED_ACCOUNT_TYPES,
   serializePatrimonyMetrics,
@@ -133,6 +134,11 @@ function metricsOf(
 
 describe("classifyHolding — une ligne, une poche", () => {
   it("listed = ACTIONS + OBLIGATIONS + CRYPTO, hors IMMOBILIER / AV", () => {
+    expect([...LISTED_ASSET_CLASS_KEYS]).toEqual([
+      "ACTIONS",
+      "OBLIGATIONS",
+      "CRYPTO",
+    ]);
     expect([...LISTED_ASSET_CLASSES].sort()).toEqual([
       "ACTIONS",
       "CRYPTO",
@@ -142,6 +148,18 @@ describe("classifyHolding — une ligne, une poche", () => {
       "AV",
       "IMMOBILIER",
     ]);
+  });
+
+  it("la clé obligations est OBLIGATIONS, pas OBL", () => {
+    expect(
+      classifyHolding(
+        h({ id: "oat", assetClass: "OBLIGATIONS", accountType: "CTO" })
+      )
+    ).toBe("listed");
+    // `OBL` n'existe pas dans ASSET_CLASSES : ce n'est pas listed, c'est autre.
+    expect(
+      classifyHolding(h({ id: "obl", assetClass: "OBL", accountType: "CTO" }))
+    ).toBe("autre");
   });
 
   it("ACTIONS / OBLIGATIONS / CRYPTO hors IMMO et AV → listed", () => {
@@ -363,7 +381,7 @@ describe("PatrimonyMetrics — identités à 0,01 €", () => {
     expect(withinCentime(m.net, net)).toBe(true);
   });
 
-  it("preuve T-02 : listed 176 706,40 € dont OBL ; écart KPI 565 241,28 €", () => {
+  it("preuve T-02 : listed 176 706,40 € dont OBLIGATIONS ; écart KPI 565 241,28 €", () => {
     /*
       Preview démo, 2026-09-04. Sans OBLIGATIONS dans listed, le résidu
       `autre` absorbe l'OAT et les goldens divergent.

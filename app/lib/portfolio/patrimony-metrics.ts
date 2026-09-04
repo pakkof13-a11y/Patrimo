@@ -11,7 +11,8 @@
  * Chaque euro d'actif tombe dans **exactement une** poche. Les sept poches
  * d'actif partitionnent le brut ; les passifs sont à part.
  *
- * 1. **listed** — journal, `assetClass ∈ {ACTIONS, OBLIGATIONS, CRYPTO}` et
+ * 1. **listed** — journal, `assetClass ∈ {ACTIONS, OBLIGATIONS, CRYPTO}`
+ *    (clés exactes de `ASSET_CLASSES` — **pas** `OBL`) et
  *    `accountType ∉ {IMMOBILIER, AV}`. Les obligations CTO/PEA (OAT…) y
  *    restent ; un fonds euro d'AV n'y entre pas.
  * 2. **immobilier** — `accountType = IMMOBILIER` ou `assetClass = IMMOBILIER`
@@ -45,6 +46,7 @@
 
 import { d, toFixed, zero, type Decimal, type DecimalInput } from "../money/decimal";
 import { isEuroFundName } from "../life-insurance/reconcile";
+import type { AssetClass } from "../constants";
 
 /** Un centime d'euro : seuil d'identité, pas une marge de calcul. */
 export const CENTIME_EUR = d("0.01");
@@ -70,7 +72,23 @@ export type PatrimonyPocket = (typeof PATRIMONY_POCKETS)[number];
 /** Poches du journal : une ligne y tombe, jamais dans cash/alt/ES/passifs. */
 export type HoldingPocket = "listed" | "immobilier" | "av" | "autre";
 
-export const LISTED_ASSET_CLASSES = new Set(["ACTIONS", "OBLIGATIONS", "CRYPTO"]);
+/**
+ * Clés `assetClass` du journal qui forment **listed**.
+ *
+ * Exactement `ACTIONS`, `OBLIGATIONS`, `CRYPTO` — les clés de `ASSET_CLASSES`.
+ * **Pas** `OBL` : ce n'est pas une valeur du modèle. Une obligation CTO/PEA
+ * porte `OBLIGATIONS` ; `OBL` tomberait dans `autre` et casserait le golden
+ * T-02 (listed démo = 176 706,40 €).
+ */
+export const LISTED_ASSET_CLASS_KEYS = [
+  "ACTIONS",
+  "OBLIGATIONS",
+  "CRYPTO",
+] as const satisfies readonly AssetClass[];
+
+export type ListedAssetClass = (typeof LISTED_ASSET_CLASS_KEYS)[number];
+
+export const LISTED_ASSET_CLASSES = new Set<string>(LISTED_ASSET_CLASS_KEYS);
 export const LISTED_EXCLUDED_ACCOUNT_TYPES = new Set(["IMMOBILIER", "AV"]);
 
 export type ClassifiableHolding = {
