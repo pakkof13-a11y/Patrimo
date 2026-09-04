@@ -233,6 +233,43 @@ describe("scopes T-01 — Financier ≠ Brut, immo hors Financier", () => {
     expect(apres.listed).toBe(avant.listed);
   });
 
+  it("pastilles = flux cotés, pas l'achat immo (externalFlows)", () => {
+    const from = "2026-01-01";
+    const to = "2026-01-31";
+    const immoDay = "2026-01-15";
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t1", "aapl", from, 10, 100),
+          buy("t2", "maison", immoDay, 1, 250_000),
+        ],
+        assetClassById: new Map([
+          ["aapl", "ACTIONS"],
+          ["maison", "IMMOBILIER"],
+        ]),
+        rawAssetClassById: new Map([
+          ["aapl", "ACTIONS"],
+          ["maison", "IMMOBILIER"],
+        ]),
+        holdingMetaById: new Map([
+          ["aapl", { accountType: "CTO" }],
+          [
+            "maison",
+            { accountType: "IMMOBILIER", hasRealEstateDetail: true },
+          ],
+        ]),
+        closes: closesFor("aapl", from, to, () => 100),
+      })
+    );
+    const nav = dailyNavFromSeries(e.buildSeries(from, to), "financier");
+    const jourAchat = nav.find((p) => p.day === immoDay)!;
+    const veille = nav.find((p) => p.day === "2026-01-14")!;
+    expect(jourAchat.externalFlows).toBe(250_000);
+    expect(jourAchat.transactionFlow).toBe(0);
+    expect(jourAchat.financierFlows).toBe(0);
+    expect(jourAchat.financier).toBe(veille.financier);
+  });
+
   it("financier = listed + cash + fondsEuro + esLiquid (formule T-01)", () => {
     const day = "2026-06-01";
     const e = new PortfolioValuationEngine(

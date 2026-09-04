@@ -18,12 +18,14 @@ import {
   CartesianGrid,
   Legend,
   ReferenceLine,
+  Bar,
 } from "recharts";
 import { formatCurrency } from "@/app/lib/utils";
 import type {
   EvolutionPercentPoint,
   EvolutionSeriesPoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
+import type { DailyNavChartPoint } from "@/app/lib/portfolio/daily-nav-view";
 
 export function yTick(v: number) {
   return new Intl.NumberFormat("fr-FR", {
@@ -146,7 +148,10 @@ export function symmetricZeroDomain(
   return [-bound, bound];
 }
 
-type ValueTooltipEntry = { value?: unknown; payload?: EvolutionSeriesPoint };
+type ValueTooltipEntry = {
+  value?: unknown;
+  payload?: EvolutionSeriesPoint & { delta?: number; day?: string };
+};
 
 function ValueTooltip({
   active,
@@ -174,6 +179,19 @@ function ValueTooltip({
       <div style={{ color: stroke, fontWeight: 600, whiteSpace: "nowrap" }}>
         {formatCurrency(value, baseCurrency)}
       </div>
+      {typeof point?.delta === "number" && point.delta !== 0 ? (
+        <div
+          style={{
+            color:
+              point.delta >= 0 ? "var(--success)" : "var(--danger)",
+            fontWeight: 500,
+            whiteSpace: "nowrap",
+            marginTop: 2,
+          }}
+        >
+          Δ jour {formatCurrency(point.delta, baseCurrency)}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -389,5 +407,91 @@ export function PortfolioPercentChart({
         )}
       </ComposedChart>
     </ResponsiveContainer>
+  );
+}
+
+/**
+ * Courbe NAV dense (getDailyNav) + barres de Δ journalier.
+ *
+ * Trait linéaire, closes réels seulement. Les barres somment (hors ancre) au
+ * Δ d'en-tête. Un changement de période ne fait que recouper la fenêtre.
+ */
+export function DailyNavChart({
+  data,
+  baseCurrency,
+}: {
+  data: DailyNavChartPoint[];
+  baseCurrency: string;
+}) {
+  const first = data[0]?.total ?? 0;
+  const last = data[data.length - 1]?.total ?? 0;
+  const stroke = last >= first ? "var(--success)" : "var(--danger)";
+  const deltaDomain = symmetricZeroDomain(data.map((p) => p.delta));
+
+  return (
+    <div className="h-full w-full" data-testid="daily-nav-chart">
+      <ResponsiveContainer width="100%" height="100%">
+      <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+        <defs>
+          <linearGradient id="daily-nav-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={stroke} stopOpacity={0.22} />
+            <stop offset="100%" stopColor={stroke} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
+        <TimeXAxis data={data} />
+        <YAxis
+          yAxisId="nav"
+          tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+          tickFormatter={yTick}
+          width={54}
+          axisLine={false}
+          tickLine={false}
+          domain={["auto", "auto"]}
+        />
+        <YAxis
+          yAxisId="delta"
+          orientation="right"
+          tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+          tickFormatter={yTick}
+          width={44}
+          axisLine={false}
+          tickLine={false}
+          domain={deltaDomain}
+          allowDataOverflow
+        />
+        <Tooltip
+          content={(props: object) => (
+            <ValueTooltip
+              {...(props as { active?: boolean; payload?: readonly ValueTooltipEntry[] })}
+              baseCurrency={baseCurrency}
+              stroke={stroke}
+            />
+          )}
+        />
+        <Bar
+          yAxisId="delta"
+          dataKey="delta"
+          name="Δ jour"
+          fill="var(--chart-neutral)"
+          fillOpacity={0.45}
+          isAnimationActive={false}
+          maxBarSize={6}
+        />
+        <Area
+          yAxisId="nav"
+          type="linear"
+          dataKey="total"
+          name="NAV"
+          stroke={stroke}
+          strokeWidth={1.75}
+          fill="url(#daily-nav-fill)"
+          dot={false}
+          activeDot={{ r: 4, strokeWidth: 0 }}
+          isAnimationActive={false}
+        />
+      </ComposedChart>
+    </ResponsiveContainer>
+    </div>
   );
 }
