@@ -17,7 +17,7 @@ const assetFindMany = vi.fn();
 const groupBy = vi.fn();
 const getHistory = vi.fn();
 const upsert = vi.fn();
-const transaction = vi.fn();
+const createMany = vi.fn();
 
 vi.mock("@/app/lib/prisma", () => ({
   prisma: {
@@ -25,9 +25,9 @@ vi.mock("@/app/lib/prisma", () => ({
     assetDailyClose: {
       groupBy: (...a: unknown[]) => groupBy(...a),
       upsert: (...a: unknown[]) => upsert(...a),
+      createMany: (...a: unknown[]) => createMany(...a),
       findMany: async () => [],
     },
-    $transaction: (...a: unknown[]) => transaction(...a),
   },
 }));
 
@@ -66,11 +66,7 @@ beforeEach(() => {
   groupBy.mockReset().mockResolvedValue([]);
   getHistory.mockReset().mockResolvedValue(serieReelle());
   upsert.mockReset().mockResolvedValue({});
-  transaction.mockReset().mockImplementation(async (ops: unknown) => {
-    // `fillDailyCloses` passe un tableau de promesses d'upsert.
-    if (Array.isArray(ops)) return ops;
-    return [];
-  });
+  createMany.mockReset().mockResolvedValue({ count: 0 });
 });
 
 describe("1 — première collecte d'une journée", () => {
@@ -129,9 +125,9 @@ describe("2 et 9 — second passage le même jour", () => {
     ]);
     await collectDailyClosesForAssets({ now: MAINTENANT });
     expect(getHistory).toHaveBeenCalledTimes(1);
-    // L'unicité (assetId, day) est portée par la base ; l'écriture est un upsert.
-    const ops = transaction.mock.calls[0]?.[0];
-    expect(Array.isArray(ops)).toBe(true);
+    // L'unicité (assetId, day) est portée par la base : les jours anciens
+    // s'écrivent en `createMany` (`skipDuplicates`), les plus récents en upsert.
+    expect(upsert).toHaveBeenCalled();
   });
 });
 
@@ -180,7 +176,8 @@ describe("4, 5 et 6 — ce qui n'entre pas en base", () => {
     getHistory.mockResolvedValue(serieReelle("mock"));
     const r = await collectDailyClosesForAssets({ now: MAINTENANT });
     expect(r.closesWritten).toBe(0);
-    expect(transaction).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+    expect(createMany).not.toHaveBeenCalled();
   });
 
   it("un fournisseur muet laisse un trou, jamais une valeur inventée", async () => {
@@ -204,6 +201,61 @@ describe("4, 5 et 6 — ce qui n'entre pas en base", () => {
     expect(r.errors).toHaveLength(1);
     expect(r.errors[0]!.message).toContain("429");
     expect(r.assetsFilled).toBe(1);
+  });
+});
+
+describe("T-2c — écriture en lots, sans transaction interactive", () => {
+  /**
+   * Un actif détenu depuis des années (~1800 upserts) faisait expirer la
+   * transaction interactive Prisma (5 s) en preview : rollback intégral, zéro
+   * écriture. `fillDailyCloses` doit écrire par `createMany` (skipDuplicates)
+   * plutôt que dans un `$transaction([...upserts])`.
+   */
+  it("écrit une longue série via createMany, pas via une transaction interactive", async () => {
+    const points = Array.from({ length: 600 }, (_, i) => ({
+      date: `2024-01-${String((i % 28) + 1).padStart(2, "0")}T21:00:00.000Z`,
+      label: "",
+      price: 100,
+      open: 100,
+      high: 100,
+      low: 100,
+      close: 100 + i,
+    }));
+    getHistory.mockResolvedValue({ ...serieReelle(), points });
+
+    await collectDailyClosesForAssets({ now: MAINTENANT });
+
+    expect(createMany).toHaveBeenCalled();
+  });
+
+  it("rafraîchit le jour le plus récent par upsert même si le cache existe déjà", async () => {
+    await collectDailyClosesForAssets({ now: MAINTENANT });
+    // `serieReelle()` ne rend que deux jours : tous deux sont « récents » et
+    // passent donc en upsert, jamais en createMany silencieux qui ignorerait
+    // un rafraîchissement du jour courant.
+    expect(upsert).toHaveBeenCalled();
+  });
+
+  it("écrit du plus récent au plus ancien : un lot interrompu laisse minDay récent", async () => {
+    const points = Array.from({ length: 5 }, (_, i) => ({
+      date: `2026-08-${String(20 + i).padStart(2, "0")}T21:00:00.000Z`,
+      label: "",
+      price: 100,
+      open: 100,
+      high: 100,
+      low: 100,
+      close: 100 + i,
+    }));
+    getHistory.mockResolvedValue({ ...serieReelle(), points });
+
+    await collectDailyClosesForAssets({ now: MAINTENANT });
+
+    // Les deux upserts (jours récents) précèdent le createMany du reste, qui
+    // couvre les jours plus anciens : c'est cet ordre qui garantit qu'une
+    // écriture coupée en route laisse `minDay` proche du jour courant.
+    expect(upsert.mock.invocationCallOrder[0]).toBeLessThan(
+      createMany.mock.invocationCallOrder[0]
+    );
   });
 });
 

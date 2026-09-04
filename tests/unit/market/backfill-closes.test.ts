@@ -108,7 +108,7 @@ const groupByCloses = vi.fn();
 const groupByTx = vi.fn();
 const getHistory = vi.fn();
 const upsert = vi.fn();
-const transaction = vi.fn();
+const createMany = vi.fn();
 
 vi.mock("@/app/lib/prisma", () => ({
   prisma: {
@@ -116,12 +116,12 @@ vi.mock("@/app/lib/prisma", () => ({
     assetDailyClose: {
       groupBy: (...a: unknown[]) => groupByCloses(...a),
       upsert: (...a: unknown[]) => upsert(...a),
+      createMany: (...a: unknown[]) => createMany(...a),
       findMany: async () => [],
     },
     transaction: {
       groupBy: (...a: unknown[]) => groupByTx(...a),
     },
-    $transaction: (...a: unknown[]) => transaction(...a),
   },
 }));
 
@@ -172,10 +172,7 @@ beforeEach(() => {
     serieDepuis("2023-03-12T18:00:00.000Z")
   );
   upsert.mockReset().mockResolvedValue({});
-  transaction.mockReset().mockImplementation(async (ops: unknown) => {
-    if (Array.isArray(ops)) return ops;
-    return [];
-  });
+  createMany.mockReset().mockResolvedValue({ count: 0 });
 });
 
 describe("backfillDailyClosesFromFirstTx — fumée", () => {
@@ -214,7 +211,8 @@ describe("backfillDailyClosesFromFirstTx — fumée", () => {
     getHistory.mockResolvedValue(serieDepuis("2023-03-12T18:00:00.000Z", "mock"));
     const r = await backfillDailyClosesFromFirstTx({ now: MAINTENANT });
     expect(r.closesWritten).toBe(0);
-    expect(transaction).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+    expect(createMany).not.toHaveBeenCalled();
   });
 
   /*
