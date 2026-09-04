@@ -59,6 +59,15 @@ import { readCronCredential } from "@/app/lib/auth/cron-credential";
  */
 
 /**
+ * maxDuration : deux traitements séquentiels sur tous les actifs d'un compte,
+ * avec jusqu'à 12 s de timeout par appel fournisseur. Les dix secondes par
+ * défaut coupaient le passage avant sa fin — sans erreur, la réponse n'étant
+ * jamais rendue. Même plafond que les autres routes de collecte longue
+ * (`wallets/zerion/sync`, `import/commit`).
+ */
+export const maxDuration = 60;
+
+/**
  * Le proxy laisse passer une requête qui *présente* une créance de cron ; c'est
  * ici qu'elle est réellement vérifiée, en temps constant.
  */
@@ -82,9 +91,16 @@ function intervalOf(req: Request) {
 /**
  * Les deux entretiens d'un passage.
  *
- * L'intraday d'abord — c'est lui qui a une fenêtre fournisseur courte, donc le
- * plus à perdre en cas d'interruption. Les clôtures suivent : leur fenêtre est
- * large et un passage manqué se rattrape.
+ * ## Le backfill d'abord
+ *
+ * L'intraday passait en premier : séquentiel sur tous les actifs, jusqu'à 12 s
+ * de timeout unitaire, il pouvait consommer le budget d'exécution entier et le
+ * backfill n'était alors jamais atteint — silencieusement, puisque rien
+ * n'échouait. C'est ce qui laissait la preview à une couverture partielle.
+ *
+ * L'ordre est donc inversé : les clôtures quotidiennes, qui rendent le passé
+ * reconstructible, sont servies avant les barres intra-séance, dont un passage
+ * manqué ne coûte qu'une journée de finesse.
  *
  * L'échec de l'un ne doit pas emporter l'autre : ils entretiennent deux caches
  * distincts, et perdre les deux parce qu'un fournisseur est muet serait
@@ -94,11 +110,6 @@ async function collectAll(opts: {
   interval: ReturnType<typeof intervalOf>;
   userId?: string;
 }) {
-  const intraday = await collectIntradayBars({
-    interval: opts.interval,
-    ...(opts.userId ? { userId: opts.userId } : {}),
-  });
-
   let daily;
   try {
     // T-04 : depuis le premier achat par ticker, pas seulement 365 jours.
@@ -129,6 +140,10 @@ async function collectAll(opts: {
     }
   }
 
+  const intraday = await collectIntradayBars({
+    interval: opts.interval,
+    ...(opts.userId ? { userId: opts.userId } : {}),
+  });
 
   return { intraday, daily };
 }

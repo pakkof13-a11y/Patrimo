@@ -8,6 +8,7 @@ import {
   coingeckoGet,
   resolveCoingeckoId,
 } from "./providers/coingecko";
+import { reportProviderError } from "./provider-incidents";
 import type {
   PriceBarInterval,
   PriceHistoryPoint,
@@ -429,7 +430,10 @@ async function fetchCoingeckoOhlcBars(
       );
     }
     return points.length >= 2 ? points : null;
-  } catch {
+  } catch (err) {
+    // Le repli reste silencieux pour l'appelant (un graphique se contente de
+    // la source suivante), mais la cause remonte au rapport de collecte.
+    reportProviderError("coingecko/ohlc", err);
     return null;
   }
 }
@@ -524,7 +528,8 @@ async function fetchCoingeckoBars(
     }
 
     return points.length >= 2 ? points : null;
-  } catch {
+  } catch (err) {
+    reportProviderError("coingecko/market_chart", err);
     return null;
   }
 }
@@ -645,7 +650,8 @@ async function fetchYahooBars(
     }
 
     return points.length >= 2 ? points : null;
-  } catch {
+  } catch (err) {
+    reportProviderError("yahoo", err);
     return null;
   }
 }

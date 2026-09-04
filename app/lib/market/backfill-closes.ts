@@ -23,6 +23,10 @@ import {
   DAILY_LOOKBACK_DAYS,
   listCollectableAssets,
 } from "./intraday-collector";
+import {
+  collectProviderIncidents,
+  summarizeIncidents,
+} from "./provider-incidents";
 
 /** Un actif sans transaction retombe sur la fenêtre d'entretien (un an). */
 const FALLBACK_LOOKBACK_DAYS = DAILY_LOOKBACK_DAYS;
@@ -223,10 +227,29 @@ export async function backfillDailyClosesFromFirstTx(opts?: {
     await mapWithConcurrency(stale, FETCH_CONCURRENCY, async (assetId) => {
       try {
         const from = fromDateForAsset(firstTx.get(assetId), fallbackFromDay, now);
-        const written = await fillDailyCloses(userId, assetId, from, now);
+        const { result: written, incidents } = await collectProviderIncidents(
+          () => fillDailyCloses(userId, assetId, from, now)
+        );
         if (written > 0) {
           report.assetsFilled++;
           report.closesWritten += written;
+          return;
+        }
+        /*
+          Zéro clôture écrite a deux causes qu'un rapport doit séparer.
+
+          - Le fournisseur ne couvre pas l'instrument (US100 en CFD, une OAT
+            connue par son seul ISIN) : c'est un fait stable, attendu, et
+            l'inscrire dans `errors[]` à chaque passage noierait le signal.
+          - Le fournisseur a refusé l'appel (429, timeout, clé invalide) : le
+            trou est réparable et le prochain passage doit savoir pourquoi il
+            existe. C'était le silence de T-2 — `errors: []` avec zéro écriture.
+        */
+        if (incidents.length > 0) {
+          report.errors.push({
+            assetId,
+            message: `aucune clôture écrite — ${summarizeIncidents(incidents)}`,
+          });
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : "échec fournisseur";
