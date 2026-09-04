@@ -116,7 +116,31 @@ function previousDayKey(day: string): string {
 }
 
 /**
- * Δ quotidien de la NAV du scope — le premier point (ancre) n'a pas de Δ.
+ * Flux_t du scope — même convention que `heroAttribution`.
+ *
+ * - **financier** : `financierFlows` (journal coté + cash). Un achat immo
+ *   n'y figure pas : ΔFinancier marché reste ≈ 0, le cliff va au brut/net.
+ * - **brut** : `externalFlows`.
+ * - **net** : `externalFlows − Δpassifs` — un emprunt n'est pas du marché.
+ *
+ * L'ancre (`previous` absent) n'a pas de flux de fenêtre : 0.
+ */
+export function fluxOfDay(
+  point: DailyNavPoint,
+  previous: DailyNavPoint | undefined,
+  scope: HeroNavScope
+): number {
+  if (!previous) return 0;
+  if (scope === "financier") return point.financierFlows;
+  if (scope === "brut") return point.externalFlows;
+  return point.externalFlows - (point.passifs - previous.passifs);
+}
+
+/**
+ * Δ marché journalier = `NAV_t − NAV_{t−1} − flux_t`.
+ *
+ * Ce sont les barres du graphique d'évolution : un APPORT gonfle la NAV
+ * sans produire de barre verte. Le premier point (ancre) vaut 0.
  */
 export function dailyNavDeltas(
   points: DailyNavPoint[],
@@ -128,16 +152,18 @@ export function dailyNavDeltas(
       out.push(0);
       continue;
     }
-    out.push(navOfPoint(points[i]!, scope) - navOfPoint(points[i - 1]!, scope));
+    const navDelta =
+      navOfPoint(points[i]!, scope) - navOfPoint(points[i - 1]!, scope);
+    out.push(navDelta - fluxOfDay(points[i]!, points[i - 1], scope));
   }
   return out;
 }
 
 /**
- * Somme des Δ journaliers **hors ancre** = dernier − premier.
+ * Somme des Δ journaliers **hors ancre**.
  *
- * C'est l'identité que l'écran affiche : les barres du graphique d'évolution
- * totalisent le Δ d'en-tête, aux arrondis flottants près.
+ * Depuis S2bis ce n'est plus `last − first` (Δ NAV) : les barres sont du
+ * marché, donc `sum ≈ (last − first) − sum(flux)`.
  */
 export function sumDailyDeltas(deltas: number[]): number {
   if (deltas.length < 2) return 0;
@@ -156,13 +182,40 @@ export function headerDelta(
   );
 }
 
+/** Σ flux_t hors ancre — le Flux d'en-tête, aligné sur `heroAttribution`. */
+export function headerFlux(
+  points: DailyNavPoint[],
+  scope: HeroNavScope
+): number | null {
+  if (points.length < 2) return null;
+  let flow = 0;
+  for (let i = 1; i < points.length; i++) {
+    flow += fluxOfDay(points[i]!, points[i - 1], scope);
+  }
+  return flow;
+}
+
+/** Δ marché d'en-tête = (last − first) − Σ flux. */
+export function headerMarketDelta(
+  points: DailyNavPoint[],
+  scope: HeroNavScope
+): number | null {
+  const nav = headerDelta(points, scope);
+  const flow = headerFlux(points, scope);
+  if (nav == null || flow == null) return null;
+  return nav - flow;
+}
+
 export type DailyNavChartPoint = {
   date: string;
   t: number;
   day: string;
   periodLabel: string;
   total: number;
+  /** Δ marché du jour — hauteur de barre. 0 sur l'ancre. */
   delta: number;
+  /** Flux_t du scope (financierFlows / externalFlows / net). 0 sur l'ancre. */
+  flux: number;
   flows: number;
   transactionFlow: number;
   status: DailyNavPoint["status"];
@@ -170,10 +223,10 @@ export type DailyNavChartPoint = {
 };
 
 /**
- * Série tracée (NAV + Δ jour) — linéaire, aucun seau, aucun spline.
+ * Série tracée (NAV + barres Δ marché) — linéaire, aucun seau, aucun spline.
  *
- * `delta` du premier point vaut 0 : l'ancre borne le Δ d'en-tête, elle n'est
- * pas une barre de la période.
+ * `delta` du premier point vaut 0 : l'ancre borne la fenêtre, elle n'est
+ * pas une barre de la période. Hover : Marché = `delta`, Flux = `flux`.
  */
 export function toDailyNavChartPoints(
   points: DailyNavPoint[],
@@ -182,6 +235,7 @@ export function toDailyNavChartPoints(
   const deltas = dailyNavDeltas(points, scope);
   return points.map((p, i) => {
     const at = endOfParisDay(p.day);
+    const prev = i > 0 ? points[i - 1] : undefined;
     return {
       date: at.toISOString(),
       t: at.getTime(),
@@ -189,6 +243,7 @@ export function toDailyNavChartPoints(
       periodLabel: p.day,
       total: navOfPoint(p, scope),
       delta: deltas[i] ?? 0,
+      flux: fluxOfDay(p, prev, scope),
       flows: p.externalFlows,
       transactionFlow: p.transactionFlow,
       status: p.status,
