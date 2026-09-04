@@ -19,6 +19,7 @@ import {
   Legend,
   ReferenceLine,
   Bar,
+  Cell,
 } from "recharts";
 import { formatCurrency } from "@/app/lib/utils";
 import type {
@@ -146,6 +147,84 @@ export function symmetricZeroDomain(
   const nice = niceCeil(maxAbs);
   const bound = nice > maxAbs ? nice : niceCeil(maxAbs * (1 + padRatio));
   return [-bound, bound];
+}
+
+/**
+ * Fraction de la hauteur du cadre réservée au bandeau des barres Δ marché.
+ * La NAV occupe les `1 − f` du haut, l'histogramme les `f` du bas ; les deux
+ * axes ne partagent plus le même domaine vertical, donc plus une seule barre
+ * ne traverse l'aire.
+ */
+export const DELTA_BAND_FRACTION = 0.28;
+
+export type NavDeltaBandDomains = {
+  /** Domaine de l'axe NAV — `[nMin − span·f/(1−f), nMax]`. Jamais calé à 0. */
+  navDomain: [number, number];
+  /** Domaine de l'axe Δ — `[−M, M·(2/f − 1)]`. Zéro à `f/2`, `+M` à `f`. */
+  deltaDomain: [number, number];
+  /** `max(|Δ|)` réellement observé — 0 quand la fenêtre ne bouge pas. */
+  deltaMax: number;
+};
+
+/**
+ * Deux domaines Y disjoints pour la vue NAV + Δ marché.
+ *
+ * Barres : valeurs dans `[−M, +M]`, `M = max(|Δ|)`. Poser
+ * `deltaDomain = [−M, M(2/f − 1)]` amène `−M` en bas du cadre, `+M` à la
+ * fraction `f` et le zéro à `f/2` : un bandeau bas centré sur zéro.
+ * Aucune barre ne dépasse `M`, donc aucun écrêtage — pas de
+ * `allowDataOverflow`, une barre tronquée serait un mensonge.
+ *
+ * NAV : `navDomain = [nMin − (nMax − nMin)·f/(1−f), nMax]` place `nMin` pile
+ * à la fraction `f`. La courbe effleure le haut du bandeau sans y entrer.
+ *
+ * Échelle linéaire calée sur le max, jamais log ni percentile : sur les vraies
+ * données `max|Δ| / médiane|Δ| ≈ ×6`, la barre médiane reste donc lisible.
+ */
+export function navDeltaBandDomains(
+  points: readonly { total: number; delta: number }[],
+  fraction: number = DELTA_BAND_FRACTION
+): NavDeltaBandDomains {
+  const f =
+    Number.isFinite(fraction) && fraction > 0 && fraction < 1
+      ? fraction
+      : DELTA_BAND_FRACTION;
+
+  let deltaMax = 0;
+  let navMin = Number.POSITIVE_INFINITY;
+  let navMax = Number.NEGATIVE_INFINITY;
+  for (const p of points) {
+    if (Number.isFinite(p.delta)) {
+      deltaMax = Math.max(deltaMax, Math.abs(p.delta));
+    }
+    if (Number.isFinite(p.total)) {
+      navMin = Math.min(navMin, p.total);
+      navMax = Math.max(navMax, p.total);
+    }
+  }
+
+  // Fenêtre vide (ou sans NAV finie) : cadre unitaire, jamais NaN.
+  if (navMin > navMax) {
+    navMin = 0;
+    navMax = 1;
+  }
+  // Série plate : un span nul écraserait l'axe. On en fabrique un, centré,
+  // pour que le trait se pose au-dessus du bandeau au lieu de coller au bord.
+  if (navMax === navMin) {
+    const pad = Math.max(Math.abs(navMax), 1) * 0.02;
+    navMin -= pad;
+    navMax += pad;
+  }
+
+  // Aucun mouvement de marché : le bandeau existe quand même, barres à zéro.
+  const bound = deltaMax > 0 ? deltaMax : 1;
+  const navSpan = navMax - navMin;
+
+  return {
+    navDomain: [navMin - navSpan * (f / (1 - f)), navMax],
+    deltaDomain: [-bound, bound * (2 / f - 1)],
+    deltaMax,
+  };
 }
 
 type DailyNavTooltipEntry = {
@@ -497,7 +576,7 @@ export function DailyNavChart({
   const first = data[0]?.total ?? 0;
   const last = data[data.length - 1]?.total ?? 0;
   const stroke = last >= first ? "var(--success)" : "var(--danger)";
-  const deltaDomain = symmetricZeroDomain(data.map((p) => p.delta));
+  const { navDomain, deltaDomain, deltaMax } = navDeltaBandDomains(data);
 
   return (
     <div className="h-full w-full" data-testid="daily-nav-chart">
@@ -518,7 +597,7 @@ export function DailyNavChart({
           width={54}
           axisLine={false}
           tickLine={false}
-          domain={["auto", "auto"]}
+          domain={navDomain}
         />
         <YAxis
           yAxisId="delta"
@@ -529,7 +608,13 @@ export function DailyNavChart({
           axisLine={false}
           tickLine={false}
           domain={deltaDomain}
-          allowDataOverflow
+          /*
+            Trois graduations, et seulement trois : le haut du bandeau, son
+            zéro, son bas. Les laisser en automatique aurait étalé des repères
+            dans la moitié haute du domaine, là où aucune barre ne peut aller —
+            l'axe aurait annoncé une échelle que l'histogramme n'occupe pas.
+          */
+          ticks={deltaMax > 0 ? [-deltaMax, 0, deltaMax] : [0]}
         />
         <Tooltip
           content={(props: object) => (
@@ -543,15 +628,42 @@ export function DailyNavChart({
             />
           )}
         />
+        {/*
+          Le zéro des barres, tracé avant elles pour passer dessous.
+          Sans ce repère, une barre courte vers le bas et une barre courte vers
+          le haut se ressemblent : c'est lui qui donne son sens au signe.
+        */}
+        <ReferenceLine
+          yAxisId="delta"
+          y={0}
+          stroke="var(--border)"
+          strokeWidth={1}
+        />
         <Bar
           yAxisId="delta"
           dataKey="delta"
           name="Δ marché"
-          fill="var(--chart-neutral)"
-          fillOpacity={0.45}
           isAnimationActive={false}
           maxBarSize={6}
-        />
+        >
+          {/*
+            Une couleur par signe, et non un gris unique : une journée à
+            −800 € et une à +800 € dessinaient la même barre, si bien que
+            l'histogramme montrait l'amplitude du marché sans jamais dire
+            dans quel sens il était allé.
+          */}
+          {data.map((p) => (
+            <Cell
+              key={p.periodLabel}
+              fill={
+                p.delta >= 0
+                  ? "var(--chart-positive)"
+                  : "var(--chart-negative)"
+              }
+              fillOpacity={0.75}
+            />
+          ))}
+        </Bar>
         <Area
           yAxisId="nav"
           type="linear"
