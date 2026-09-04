@@ -20,13 +20,17 @@ import type { HistoryPoint } from "@/app/lib/types/ui";
 /**
  * Valeur des positions **cotées** à une date.
  *
- * Le moteur publie `securitiesBase` (ACTIONS + OBLIGATIONS) et `cryptoBase`.
- * Les additionner est le périmètre listed du jour — hors immobilier et AV.
+ * Préfère `listedBase` (poche T-01 : ACTIONS + OBLIGATIONS + CRYPTO hors
+ * IMMO/AV) dès que le moteur la publie. Repli : `securitiesBase + cryptoBase`,
+ * qui mélangeait les UC d'AV dans « Cotés » dès que `securities` incluait
+ * l'assurance-vie.
  *
  * Plus de repli `gross − cash − alt − ES` : ce résidu réintroduisait immo et
- * AV dans « Cotés ». Si les champs moteur manquent, la série est inconnue.
+ * AV dans « Cotés ». Si les champs manquent, la série est inconnue.
  */
 export function listedValueAt(p: HistoryPoint): number | undefined {
+  const listed = p.listedBase;
+  if (listed != null && Number.isFinite(listed)) return listed;
   const securities = p.securitiesBase;
   const crypto = p.cryptoBase;
   if (
@@ -38,6 +42,16 @@ export function listedValueAt(p: HistoryPoint): number | undefined {
     return securities + crypto;
   }
   return undefined;
+}
+
+/**
+ * Patrimoine financier à une date — même agrégat que le hero Financier
+ * (`computePatrimonyMetrics.financier` : listed + cashInvest + fondsEuro +
+ * esLiquid). Tolérance d'identité 0,01 € avec le point live du jour.
+ */
+export function financierAt(p: HistoryPoint): number | undefined {
+  const v = p.financierBase;
+  return v != null && Number.isFinite(v) ? v : undefined;
 }
 
 /**

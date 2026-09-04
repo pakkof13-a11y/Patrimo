@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  financierAt,
   grossAssetsAt,
   kpiSeries,
   latentPnlAt,
@@ -171,6 +172,33 @@ describe("listedValueAt — périmètre du KPI « Cotés »", () => {
       cashTotalBase: 0,
     };
     expect(listedValueAt(incomplet)).toBeUndefined();
+  });
+
+  it("préfère listedBase (T-01) à securities+crypto quand les deux existent", () => {
+    const point = pt({
+      date: "2026-09-02T21:59:59.000Z",
+      gross: 200_000,
+      cash: 30_000,
+      securities: 80_000,
+      crypto: 20_000,
+    });
+    const avecPoche: HistoryPoint = { ...point, listedBase: 70_000 };
+    expect(listedValueAt(avecPoche)).toBe(70_000);
+    expect(listedValueAt(point)).toBe(100_000);
+  });
+});
+
+describe("financierAt — même agrégat que le hero Financier", () => {
+  it("lit financierBase tel quel", () => {
+    const point = pt({
+      date: "2026-09-02T21:59:59.000Z",
+      gross: 200_000,
+      cash: 30_000,
+      securities: 80_000,
+      crypto: 20_000,
+    });
+    expect(financierAt(point)).toBeUndefined();
+    expect(financierAt({ ...point, financierBase: 123_456.78 })).toBe(123_456.78);
   });
 });
 

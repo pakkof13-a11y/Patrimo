@@ -311,6 +311,10 @@ export type HistoryPoint = {
   performanceByAssetClassBase?: Record<string, number>;
   securitiesBase?: number;
   cryptoBase?: number;
+  /** Poche T-01 `listed` — ACTIONS+OBLIGATIONS+CRYPTO hors IMMO/AV. */
+  listedBase?: number;
+  /** Agrégat T-01 `financier`. */
+  financierBase?: number;
   realEstateBase?: number;
   lifeInsuranceBase?: number;
   alternativesBase?: number;

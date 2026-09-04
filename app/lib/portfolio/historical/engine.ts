@@ -46,7 +46,11 @@ import {
 } from "../../accounting/ledger";
 import type { LedgerState, LedgerTx } from "../../accounting/types";
 import { d, zero, type Decimal } from "../../money/decimal";
-import { closeAtOrBefore, type DailyCloseIndex } from "../class-history";
+import {
+  closeAtOrBefore,
+  closeOnDay,
+  type DailyCloseIndex,
+} from "../class-history";
 import {
   ENVELOPE_CAPABLE_CLASSES,
   VALUATION_ASSET_CLASSES,
@@ -96,8 +100,10 @@ import type {
   ValuationComponent,
 } from "./types";
 import {
+  PATRIMONY_POCKETS,
   computePatrimonyMetrics,
   type ClassifiableHolding,
+  type PatrimonyPocket,
 } from "../patrimony-metrics";
 
 /**
@@ -565,23 +571,6 @@ export class PortfolioValuationEngine {
   }
 
   /**
-   * Valorisation d'une journée à partir d'un état de journal déjà positionné.
-   *
-   * Séparée de la boucle pour que `calculatePortfolioValueAt` puisse la
-   * réutiliser sans dupliquer une seule ligne d'arithmétique — c'est la
-   * garantie mécanique que le point du jour et un point d'historique sont
-   * calculés par le même code.
-   */
-  /**
-   * Résolveur du jour — le comportement historique, inchangé.
-   *
-   * `closeAtOrBefore` reporte déjà la dernière clôture connue et la courbe
-   * quotidienne l'annonce `EXACT`. C'est discutable pour un jour de marché
-   * fermé, mais c'est la sémantique en place : la modifier ferait bouger la
-   * courbe existante, ce qui n'est pas l'objet de ce chantier. Le résolveur
-   * quotidien déclare donc `observed: true`, comme avant.
-   */
-  /**
    * Ajoute le flux d'une transaction à sa classe — ou l'écarte.
    *
    * Deux règles, dans cet ordre :
@@ -605,12 +594,26 @@ export class PortfolioValuationEngine {
     addFlow(flows, assetClassOf(this.inputs.rawAssetClassById.get(tx.assetId ?? "")), amount);
   }
 
+  /**
+   * Résolveur du jour — cotés / crypto : `qty(t) × close(t)`.
+   *
+   * Une barre **du jour** est `DAILY_EXACT` (point `EXACT`). Week-end, férié
+   * ou trou : LOCF de la dernière clôture, tagué `MARKET_CARRIED` donc
+   * `ESTIMATED`. Pas de calendrier férié : l'absence de barre du jour suffit.
+   * Pas de padding à 0 : sans aucune clôture antérieure, `null` et la
+   * position reste au coût (`UNAVAILABLE`).
+   */
   private dailyPriceResolver(day: DayKey): PriceResolver {
     return (assetId) => {
-      const close = closeAtOrBefore(this.inputs.closes.get(assetId), day);
-      return close == null
+      const series = this.inputs.closes.get(assetId);
+      const exact = closeOnDay(series, day);
+      if (exact != null) {
+        return { priceEur: exact, origin: "DAILY_EXACT" as const };
+      }
+      const carried = closeAtOrBefore(series, day);
+      return carried == null
         ? null
-        : { priceEur: close, origin: "DAILY_EXACT" as const };
+        : { priceEur: carried, origin: "MARKET_CARRIED" as const };
     };
   }
 
@@ -985,6 +988,11 @@ export class PortfolioValuationEngine {
       financier: metrics.financier.toNumber(),
       fondsEuro: metrics.fondsEuro.toNumber(),
       esLiquid: metrics.esLiquid.toNumber(),
+      brut: metrics.brut.toNumber(),
+      net: metrics.net.toNumber(),
+      pockets: Object.fromEntries(
+        PATRIMONY_POCKETS.map((k) => [k, metrics.pockets[k].toNumber()])
+      ) as Record<PatrimonyPocket, number>,
 
       byAssetClass: Object.fromEntries(
         VALUATION_ASSET_CLASSES.map((c) => [c, byClass[c].toNumber()])
