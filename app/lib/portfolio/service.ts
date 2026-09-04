@@ -1166,6 +1166,10 @@ export type PortfolioHistoryPoint = {
 
   securitiesBase?: number;
   cryptoBase?: number;
+  /** Poche T-01 `listed` — ACTIONS+OBLIGATIONS+CRYPTO hors IMMO/AV. */
+  listedBase?: number;
+  /** Agrégat T-01 `financier`. */
+  financierBase?: number;
   realEstateBase?: number;
   lifeInsuranceBase?: number;
   alternativesBase?: number;
@@ -1234,6 +1238,15 @@ function attachIncomeSplit(
 const HISTORY_DISPLAY_POINTS = 900;
 
 /**
+ * Jours récents conservés au jour le jour par `downsampleSeries`.
+ *
+ * 400 > 366 : une fenêtre ≤1A (365, bissextile 366) extraite de la queue
+ * d'un historique long reste quotidienne. En dessous, « 1A » perdrait des
+ * jours civils et la densification T-05 serait une promesse d'écran.
+ */
+export const DAILY_TAIL_DAYS = 400;
+
+/**
  * Réduit une série quotidienne pour l'affichage **sans jamais altérer une
  * valeur**.
  *
@@ -1259,7 +1272,6 @@ export function downsampleSeries<
     lointain, que l'écran ne montre qu'écrasé sur quelques pixels, est
     échantillonné.
   */
-  const DAILY_TAIL_DAYS = 400;
   for (let i = Math.max(0, series.length - DAILY_TAIL_DAYS); i < series.length; i++) {
     keep.add(i);
   }
@@ -1499,6 +1511,8 @@ export async function getPortfolioHistory(
 
       securitiesBase: toBase(d(p.securities)),
       cryptoBase: toBase(d(p.crypto)),
+      listedBase: toBase(d(p.listed)),
+      financierBase: toBase(d(p.financier)),
       realEstateBase: toBase(d(p.realEstate)),
       lifeInsuranceBase: toBase(d(p.lifeInsurance)),
       alternativesBase: toBase(d(p.alternatives)),

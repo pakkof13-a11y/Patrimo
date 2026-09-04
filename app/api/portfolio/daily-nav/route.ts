@@ -33,7 +33,7 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         error:
-          "scope invalide — financier | brut | net | listed | immobilier | av | cash | alternatifs | employeeSavings | autre | passifs",
+          "scope invalide — financier | brut | net | listed | immobilier | av | cash | alternatifs | employeeSavings | autre",
       },
       { status: 400 }
     );

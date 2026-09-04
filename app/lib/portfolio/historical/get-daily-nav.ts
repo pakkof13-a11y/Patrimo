@@ -2,20 +2,20 @@
  * T-05 — `getDailyNav({ scope, from, to })`.
  *
  * Une série **dense** : exactement un point par jour civil Paris, bornes
- * incluses. Pas d'échantillonnage (`downsampleSeries` est une décision
- * d'écran, pas de contrat). Les scopes `financier | brut | net` lisent le
- * contrat T-01 (`computePatrimonyMetrics`) via les champs que le moteur
- * publie déjà à chaque date — aucune seconde formule.
+ * incluses. Pas d'échantillonnage (l'écran peut réduire une copie ; ce
+ * contrat, lui, ne retire aucun jour). Les scopes lisent le contrat T-01
+ * (`computePatrimonyMetrics`) via les champs que le moteur publie déjà à
+ * chaque date — aucune seconde formule.
  *
  * Lecture pure : le cache `AssetDailyClose` n'est pas complété ici. T-04
  * (cron / POST utilisateur) alimente les clôtures ; sans elles, une position
- * reste au coût et le point se déclare estimé.
+ * cotée reste au coût et le point se déclare estimé. Jamais de padding à 0.
  */
 
 import { parisDayKey } from "../../dates/paris";
 import {
-  PATRIMONY_POCKETS,
-  type PatrimonyPocket,
+  PATRIMONY_ASSET_POCKETS,
+  type PatrimonyAssetPocket,
 } from "../patrimony-metrics";
 import { loadHistoricalInputs } from "./load";
 import { PortfolioValuationEngine } from "./engine";
@@ -29,7 +29,7 @@ export const DAILY_NAV_SCOPES = [
   "financier",
   "brut",
   "net",
-  ...PATRIMONY_POCKETS,
+  ...PATRIMONY_ASSET_POCKETS,
 ] as const;
 
 export type DailyNavScope = (typeof DAILY_NAV_SCOPES)[number];
@@ -63,9 +63,8 @@ export type DailyNavResult = {
 /**
  * Valeur du scope à une date — lecture du contrat T-01, pas un recalcul.
  *
- * `brut` / `net` sont `grossAssets` / `netWorth` du moteur, désormais alignés
- * sur les poches PatrimonyMetrics (immo y compris par `accountType` / fiche).
- * `financier` et `listed` viennent de `computePatrimonyMetrics` au même instant.
+ * `financier` / `listed` / `brut` / `net` / poches viennent de
+ * `computePatrimonyMetrics` au même instant.
  */
 export function navAtScope(
   p: PortfolioValuationPoint,
@@ -75,28 +74,12 @@ export function navAtScope(
     case "financier":
       return p.financier;
     case "brut":
-      return p.grossAssets;
+      return p.brut;
     case "net":
-      return p.netWorth;
-    case "listed":
-      return p.listed;
-    case "immobilier":
-      return p.realEstate;
-    case "av":
-      return p.lifeInsurance;
-    case "cash":
-      return p.cash;
-    case "alternatifs":
-      return p.alternatives;
-    case "employeeSavings":
-      return p.employeeSavings;
-    case "autre":
-      return p.otherAssets;
-    case "passifs":
-      return p.liabilities;
+      return p.net;
     default: {
-      const _exhaustive: never = scope;
-      return _exhaustive;
+      const pocket: PatrimonyAssetPocket = scope;
+      return p.pockets[pocket];
     }
   }
 }
@@ -112,8 +95,8 @@ export function dailyNavFromSeries(
     externalFlows: p.externalFlows,
     listed: p.listed,
     financier: p.financier,
-    brut: p.grossAssets,
-    net: p.netWorth,
+    brut: p.brut,
+    net: p.net,
   }));
 }
 
@@ -133,8 +116,8 @@ export function defaultDailyNavWindow(now = new Date()): {
   return { from, to };
 }
 
-/** Pocket scopes already sketched by the historical API / PatrimonyMetrics. */
-export type DailyNavPocketScope = PatrimonyPocket;
+/** Pocket scopes already sketched by PatrimonyMetrics (hors passifs). */
+export type DailyNavPocketScope = PatrimonyAssetPocket;
 
 export async function getDailyNav(opts: {
   userId: string;

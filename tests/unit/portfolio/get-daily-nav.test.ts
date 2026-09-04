@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   PortfolioValuationEngine,
@@ -12,7 +14,10 @@ import {
 import { d } from "@/app/lib/money/decimal";
 import { enumerateDays } from "@/app/lib/portfolio/historical/timeline";
 import type { LedgerTx } from "@/app/lib/accounting/types";
-import { computePatrimonyMetrics } from "@/app/lib/portfolio/patrimony-metrics";
+import {
+  CENTIME_EUR,
+  computePatrimonyMetrics,
+} from "@/app/lib/portfolio/patrimony-metrics";
 
 /**
  * T-05 — getDailyNav.
@@ -80,6 +85,28 @@ function closesFor(
   return new Map([[assetId, series]]);
 }
 
+/** Week-end civil (samedi/dimanche) du calendrier grégorien. */
+function isWeekend(day: string): boolean {
+  const [y, m, d] = day.split("-").map(Number);
+  const wd = new Date(Date.UTC(y!, m! - 1, d!)).getUTCDay();
+  return wd === 0 || wd === 6;
+}
+
+/** Clôtures des seuls jours de semaine — comme Yahoo, sans barres WE inventées. */
+function weekdayCloses(
+  assetId: string,
+  from: string,
+  to: string,
+  priceAt: (day: string, i: number) => number
+): Map<string, Map<string, number>> {
+  const series = new Map<string, number>();
+  enumerateDays(from, to).forEach((day, i) => {
+    if (isWeekend(day)) return;
+    series.set(day, priceAt(day, i));
+  });
+  return new Map([[assetId, series]]);
+}
+
 describe("parse / scopes", () => {
   it("n'accepte qu'un jour civil YYYY-MM-DD", () => {
     expect(parseDayKey("2026-01-15")).toBe("2026-01-15");
@@ -88,12 +115,18 @@ describe("parse / scopes", () => {
     expect(parseDayKey(null)).toBeNull();
   });
 
-  it("les scopes T-01 + poches sont reconnus", () => {
+  it("les scopes T-01 + poches d'actif sont reconnus — pas les passifs", () => {
     expect(isDailyNavScope("financier")).toBe(true);
     expect(isDailyNavScope("brut")).toBe(true);
     expect(isDailyNavScope("net")).toBe(true);
     expect(isDailyNavScope("listed")).toBe(true);
     expect(isDailyNavScope("immobilier")).toBe(true);
+    expect(isDailyNavScope("av")).toBe(true);
+    expect(isDailyNavScope("cash")).toBe(true);
+    expect(isDailyNavScope("alternatifs")).toBe(true);
+    expect(isDailyNavScope("employeeSavings")).toBe(true);
+    expect(isDailyNavScope("autre")).toBe(true);
+    expect(isDailyNavScope("passifs")).toBe(false);
     expect(isDailyNavScope("totaux")).toBe(false);
   });
 });
@@ -318,11 +351,285 @@ describe("scopes T-01 — Financier ≠ Brut, immo hors Financier", () => {
     );
     const series = e.buildSeries(from, to);
     for (const p of series) {
-      expect(navAtScope(p, "brut")).toBe(p.grossAssets);
-      expect(navAtScope(p, "net")).toBe(p.netWorth);
+      expect(navAtScope(p, "brut")).toBe(p.brut);
+      expect(navAtScope(p, "net")).toBe(p.net);
       expect(navAtScope(p, "financier")).toBe(p.financier);
-      expect(p.financier).toBeLessThanOrEqual(p.grossAssets + 0.01);
-      expect(p.netWorth).toBeCloseTo(p.grossAssets - p.liabilities, 8);
+      expect(navAtScope(p, "listed")).toBe(p.pockets.listed);
+      expect(p.financier).toBeLessThanOrEqual(p.brut + 0.01);
+      expect(p.net).toBeCloseTo(p.brut - p.pockets.passifs, 8);
     }
+  });
+});
+
+describe("T-05 golden 1 — 1 point / jour civil, longueur = nb jours calendaires", () => {
+  it("1A inclusive : autant de points que de jours dans [from, to]", () => {
+    const from = "2025-09-04";
+    const to = "2026-09-04";
+    const days = enumerateDays(from, to);
+    expect(days.length).toBeGreaterThanOrEqual(365);
+
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [buy("t1", "aapl", from, 10, 100)],
+        assetClassById: new Map([["aapl", "ACTIONS"]]),
+        rawAssetClassById: new Map([["aapl", "ACTIONS"]]),
+        holdingMetaById: new Map([["aapl", { accountType: "CTO" }]]),
+        closes: weekdayCloses("aapl", from, to, (_d, i) => 100 + Math.sin(i / 5) * 6),
+      })
+    );
+    const nav = dailyNavFromSeries(e.buildSeries(from, to), "financier");
+    expect(nav).toHaveLength(days.length);
+    expect(nav.map((p) => p.day)).toEqual(days);
+  });
+});
+
+describe("T-05 golden 2 — cotés : qty×close, WE/férié = LOCF ESTIMATED", () => {
+  it("samedi/dimanche portent le close du vendredi, tag ESTIMATED", () => {
+    // 2026-01-02 = vendredi, 3 = samedi, 4 = dimanche, 5 = lundi
+    const friday = "2026-01-02";
+    const saturday = "2026-01-03";
+    const sunday = "2026-01-04";
+    const monday = "2026-01-05";
+    expect(isWeekend(friday)).toBe(false);
+    expect(isWeekend(saturday)).toBe(true);
+    expect(isWeekend(sunday)).toBe(true);
+
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [buy("t1", "aapl", friday, 10, 100)],
+        assetClassById: new Map([["aapl", "ACTIONS"]]),
+        rawAssetClassById: new Map([["aapl", "ACTIONS"]]),
+        holdingMetaById: new Map([["aapl", { accountType: "CTO" }]]),
+        closes: new Map([
+          [
+            "aapl",
+            new Map([
+              [friday, 110],
+              [monday, 120],
+            ]),
+          ],
+        ]),
+      })
+    );
+    const nav = dailyNavFromSeries(e.buildSeries(friday, monday), "listed");
+    const ven = nav.find((p) => p.day === friday)!;
+    const sam = nav.find((p) => p.day === saturday)!;
+    const dim = nav.find((p) => p.day === sunday)!;
+    const lun = nav.find((p) => p.day === monday)!;
+
+    expect(ven.nav).toBe(10 * 110);
+    expect(sam.nav).toBe(10 * 110);
+    expect(dim.nav).toBe(10 * 110);
+    expect(lun.nav).toBe(10 * 120);
+
+    const series = new PortfolioValuationEngine(
+      inputs({
+        transactions: [buy("t1", "aapl", friday, 10, 100)],
+        assetClassById: new Map([["aapl", "ACTIONS"]]),
+        rawAssetClassById: new Map([["aapl", "ACTIONS"]]),
+        holdingMetaById: new Map([["aapl", { accountType: "CTO" }]]),
+        closes: new Map([
+          [
+            "aapl",
+            new Map([
+              [friday, 110],
+              [monday, 120],
+            ]),
+          ],
+        ]),
+      })
+    ).buildSeries(friday, monday);
+
+    expect(series.find((p) => p.day === friday)!.status).toBe("EXACT");
+    expect(series.find((p) => p.day === saturday)!.status).toBe("ESTIMATED");
+    expect(series.find((p) => p.day === sunday)!.status).toBe("ESTIMATED");
+    expect(series.find((p) => p.day === saturday)!.priceOrigins).toContain(
+      "MARKET_CARRIED"
+    );
+    expect(series.find((p) => p.day === friday)!.priceOrigins).toContain(
+      "DAILY_EXACT"
+    );
+  });
+});
+
+describe("T-05 golden 3 — pas d'interpolation immo/AV, pas de padding à 0", () => {
+  it("immo : entre deux expertises, palier au dernier constat — jamais de pente", () => {
+    const from = "2026-01-01";
+    const to = "2026-03-01";
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [buy("t1", "maison", from, 1, 200_000)],
+        assetClassById: new Map([["maison", "IMMOBILIER"]]),
+        rawAssetClassById: new Map([["maison", "IMMOBILIER"]]),
+        holdingMetaById: new Map([
+          ["maison", { accountType: "IMMOBILIER", hasRealEstateDetail: true }],
+        ]),
+        closes: new Map([
+          [
+            "maison",
+            new Map([
+              [from, 200_000],
+              ["2026-03-01", 240_000],
+            ]),
+          ],
+        ]),
+      })
+    );
+    const nav = dailyNavFromSeries(e.buildSeries(from, to), "immobilier");
+    const mid = nav.find((p) => p.day === "2026-02-01")!;
+    expect(mid.nav).toBe(200_000);
+    expect(mid.nav).not.toBe(220_000);
+    for (const p of nav) {
+      expect(p.nav).toBeGreaterThan(0);
+    }
+  });
+
+  it("immo sans close avant l'expertise : coût, jamais 0", () => {
+    const from = "2026-01-01";
+    const expertise = "2026-03-01";
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [buy("t1", "maison", from, 1, 250_000)],
+        assetClassById: new Map([["maison", "IMMOBILIER"]]),
+        rawAssetClassById: new Map([["maison", "IMMOBILIER"]]),
+        holdingMetaById: new Map([
+          ["maison", { accountType: "IMMOBILIER", hasRealEstateDetail: true }],
+        ]),
+        closes: new Map([["maison", new Map([[expertise, 280_000]])]]),
+      })
+    );
+    const nav = dailyNavFromSeries(e.buildSeries(from, expertise), "immobilier");
+    const avant = nav.find((p) => p.day === "2026-02-01")!;
+    const jour = nav.find((p) => p.day === expertise)!;
+    expect(avant.nav).toBe(250_000);
+    expect(jour.nav).toBe(280_000);
+    expect(nav.every((p) => p.nav > 0)).toBe(true);
+  });
+
+  it("cotés sans close : coût, jamais padding à 0", () => {
+    const day = "2026-06-01";
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [buy("t1", "aapl", day, 10, 50)],
+        assetClassById: new Map([["aapl", "ACTIONS"]]),
+        rawAssetClassById: new Map([["aapl", "ACTIONS"]]),
+        holdingMetaById: new Map([["aapl", { accountType: "CTO" }]]),
+        closes: new Map(),
+      })
+    );
+    const p = e.buildSeries(day, day)[0]!;
+    expect(navAtScope(p, "listed")).toBe(500);
+    expect(p.status).toBe("ESTIMATED");
+    expect(p.priceOrigins).toContain("UNAVAILABLE");
+  });
+});
+
+describe("T-05 golden 5 — démo 1A : variance intra-mois sur listed", () => {
+  it("un mois au milieu d'une fenêtre 1A n'est pas trois marches d'events", () => {
+    const from = "2025-09-04";
+    const to = "2026-09-04";
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [buy("t1", "aapl", from, 10, 100)],
+        assetClassById: new Map([["aapl", "ACTIONS"]]),
+        rawAssetClassById: new Map([["aapl", "ACTIONS"]]),
+        holdingMetaById: new Map([["aapl", { accountType: "CTO" }]]),
+        closes: weekdayCloses("aapl", from, to, (_d, i) => 100 + Math.sin(i / 4) * 12),
+      })
+    );
+    const nav = dailyNavFromSeries(e.buildSeries(from, to), "listed");
+    const fev = nav.filter((p) => p.day.startsWith("2026-02-"));
+    expect(fev.length).toBe(28);
+    const uniq = new Set(fev.map((p) => p.nav.toFixed(2)));
+    expect(uniq.size).toBeGreaterThan(5);
+
+    const values = nav.map((p) => p.nav);
+    const ups = values.filter((v, i) => i > 0 && v > values[i - 1]!).length;
+    const downs = values.filter((v, i) => i > 0 && v < values[i - 1]!).length;
+    expect(ups).toBeGreaterThan(20);
+    expect(downs).toBeGreaterThan(20);
+  });
+});
+
+describe("T-05 golden 6 — point live = hero Financier (±0,01 €)", () => {
+  it("dernier point getDailyNav.financier = computePatrimonyMetrics.financier", () => {
+    const from = "2026-08-01";
+    const to = "2026-09-04";
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t1", "aapl", from, 10, 100),
+          buy("t2", "fe", from, 1, 10_000),
+        ],
+        assetClassById: new Map([
+          ["aapl", "ACTIONS"],
+          ["fe", "ASSURANCE_VIE"],
+        ]),
+        rawAssetClassById: new Map([
+          ["aapl", "ACTIONS"],
+          ["fe", "OBLIGATIONS"],
+        ]),
+        holdingMetaById: new Map([
+          ["aapl", { accountType: "CTO" }],
+          ["fe", { accountType: "AV", isFondsEuro: true, name: "Fonds euro" }],
+        ]),
+        closes: weekdayCloses("aapl", from, to, () => 103.5),
+        cashAccounts: [{ id: "b1", balanceEur: d(4_000), createdAt: DAY(from) }],
+        employeeSavings: [
+          {
+            id: "es1",
+            contributionDate: DAY(from),
+            createdAt: DAY(from),
+            updatedAt: DAY(from),
+            contributedEur: d(2_000),
+            currentEur: d(2_000),
+            isLiquid: true,
+          },
+        ],
+      })
+    );
+    const series = e.buildSeries(from, to);
+    const live = series[series.length - 1]!;
+    const liveAt = e.calculateAt(to);
+    expect(Math.abs(live.financier - liveAt.financier)).toBeLessThanOrEqual(
+      CENTIME_EUR.toNumber()
+    );
+
+    const listed = 10 * 103.5;
+    const recomposed = computePatrimonyMetrics({
+      holdings: [
+        {
+          id: "aapl",
+          assetClass: "ACTIONS",
+          accountType: "CTO",
+          marketValueEur: listed,
+        },
+        {
+          id: "fe",
+          assetClass: "OBLIGATIONS",
+          accountType: "AV",
+          marketValueEur: 10_000,
+          isFondsEuro: true,
+        },
+      ],
+      cash: 4_000,
+      alternatives: 0,
+      employeeSavings: { total: 2_000, esLiquid: 2_000 },
+      liabilities: 0,
+    });
+    expect(
+      Math.abs(live.financier - recomposed.financier.toNumber())
+    ).toBeLessThanOrEqual(CENTIME_EUR.toNumber());
+    expect(navAtScope(live, "financier")).toBe(live.financier);
+  });
+});
+
+describe("T-05 golden 7 — getDailyNav ne downsample jamais", () => {
+  it("le source de get-daily-nav n'appelle pas downsampleSeries", () => {
+    const src = readFileSync(
+      join(__dirname, "../../../app/lib/portfolio/historical/get-daily-nav.ts"),
+      "utf8"
+    );
+    expect(src).not.toMatch(/downsampleSeries/);
   });
 });
