@@ -7,7 +7,10 @@ import {
   DEFAULT_INTRADAY_INTERVAL,
   isIntradayInterval,
 } from "@/app/lib/market/intraday-collector";
-import { backfillDailyClosesFromFirstTx } from "@/app/lib/market/backfill-closes";
+import {
+  backfillDailyClosesFromFirstTx,
+  type BackfillDailyClosesReport,
+} from "@/app/lib/market/backfill-closes";
 import { parseBarInterval } from "@/app/lib/market/price-history-types";
 import { readCronCredential } from "@/app/lib/auth/cron-credential";
 
@@ -59,6 +62,30 @@ import { readCronCredential } from "@/app/lib/auth/cron-credential";
  */
 
 /**
+ * maxDuration : deux traitements séquentiels sur tous les actifs d'un compte,
+ * avec jusqu'à 12 s de timeout par appel fournisseur. Les dix secondes par
+ * défaut coupaient le passage avant sa fin — sans erreur, la réponse n'étant
+ * jamais rendue. Même plafond que les autres routes de collecte longue
+ * (`wallets/zerion/sync`, `import/commit`).
+ */
+export const maxDuration = 60;
+
+/**
+ * Budget de travail, nettement sous le plafond de la plateforme.
+ *
+ * Le compte est en offre Hobby : une fonction y est coupée à 60 s, et
+ * `maxDuration = 300` n'existe tout simplement pas. Un passage complet du
+ * backfill dépasse ce plafond — mesuré en preview : 504 à 60,1 s, rapport
+ * perdu, alors même que le travail effectué avait bien progressé en base.
+ *
+ * On garde donc quinze secondes de marge : le temps d'un dernier appel
+ * fournisseur déjà engagé, puis de sérialiser la réponse. Une réponse rendue,
+ * même partielle, vaut infiniment mieux qu'un 504 — c'est elle qui porte le
+ * rapport et dit s'il faut relancer. Le découpage remplace l'allongement.
+ */
+const WORK_BUDGET_MS = 45_000;
+
+/**
  * Le proxy laisse passer une requête qui *présente* une créance de cron ; c'est
  * ici qu'elle est réellement vérifiée, en temps constant.
  */
@@ -82,36 +109,63 @@ function intervalOf(req: Request) {
 /**
  * Les deux entretiens d'un passage.
  *
- * L'intraday d'abord — c'est lui qui a une fenêtre fournisseur courte, donc le
- * plus à perdre en cas d'interruption. Les clôtures suivent : leur fenêtre est
- * large et un passage manqué se rattrape.
+ * ## Le backfill d'abord
+ *
+ * L'intraday passait en premier : séquentiel sur tous les actifs, jusqu'à 12 s
+ * de timeout unitaire, il pouvait consommer le budget d'exécution entier et le
+ * backfill n'était alors jamais atteint — silencieusement, puisque rien
+ * n'échouait. C'est ce qui laissait la preview à une couverture partielle.
+ *
+ * L'ordre est donc inversé : les clôtures quotidiennes, qui rendent le passé
+ * reconstructible, sont servies avant les barres intra-séance, dont un passage
+ * manqué ne coûte qu'une journée de finesse.
  *
  * L'échec de l'un ne doit pas emporter l'autre : ils entretiennent deux caches
  * distincts, et perdre les deux parce qu'un fournisseur est muet serait
  * doublement coûteux.
+ *
+ * ## Un budget partagé, et un intraday qu'on ose sauter
+ *
+ * Les deux traitements se partagent `WORK_BUDGET_MS`. Le backfill s'arrête
+ * entre deux actifs dès qu'il l'a consommé et dit combien il en reste ; on
+ * relance alors le POST jusqu'à `remainingAssets: 0`.
+ *
+ * S'il a tout pris, l'intraday n'est **pas** lancé « au cas où » : le démarrer
+ * sans budget, c'est reprendre le 504 qu'on vient de fuir, et perdre du même
+ * coup le rapport de progression du backfill. Un passage d'intraday manqué ne
+ * coûte qu'une journée de finesse ; un rapport perdu coûte la convergence.
  */
 async function collectAll(opts: {
   interval: ReturnType<typeof intervalOf>;
   userId?: string;
+  /** Horloge injectable — les tests n'ont pas à dormir 45 secondes. */
+  clock?: () => number;
 }) {
-  const intraday = await collectIntradayBars({
-    interval: opts.interval,
-    ...(opts.userId ? { userId: opts.userId } : {}),
-  });
+  const clock = opts.clock ?? Date.now;
+  const budget = { deadlineAt: clock() + WORK_BUDGET_MS, clock };
 
-  let daily;
+  // Le repli d'entretien court ne connaît pas le budget : il porte donc les
+  // champs de progression à leur valeur neutre — rien de tronqué, rien à
+  // relancer. Le type commun évite qu'une branche muette passe pour complète.
+  let daily: BackfillDailyClosesReport;
   try {
     // T-04 : depuis le premier achat par ticker, pas seulement 365 jours.
     // `collectDailyClosesForAssets` reste l'entretien court ; le backfill
     // couvre la profondeur. Un cache déjà complet est un no-op (fraîcheur).
-    daily = await backfillDailyClosesFromFirstTx(
-      opts.userId ? { userId: opts.userId } : undefined
-    );
+    daily = await backfillDailyClosesFromFirstTx({
+      ...(opts.userId ? { userId: opts.userId } : {}),
+      budget,
+    });
   } catch (e) {
     try {
-      daily = await collectDailyClosesForAssets(
-        opts.userId ? { userId: opts.userId } : undefined
-      );
+      daily = {
+        ...(await collectDailyClosesForAssets(
+          opts.userId ? { userId: opts.userId } : undefined
+        )),
+        assetsFromFirstTx: 0,
+        assetsRemaining: 0,
+        stoppedForBudget: false,
+      };
     } catch (e2) {
       daily = {
         assetsConsidered: 0,
@@ -125,12 +179,40 @@ async function collectAll(opts: {
           },
         ],
         day: "",
+        assetsFromFirstTx: 0,
+        assetsRemaining: 0,
+        stoppedForBudget: false,
       };
     }
   }
 
+  /*
+    Progression, rendue lisible sans avoir à interpréter le rapport détaillé :
+    `needsMoreRuns` dit s'il faut relancer, `remainingAssets` combien il reste.
+    Rien à faire circuler d'un appel à l'autre — la reprise est portée par
+    l'état de la base, que `needsHistoryBackfill` relit à chaque passage.
+  */
+  const progress = {
+    needsMoreRuns: daily.stoppedForBudget,
+    remainingAssets: daily.assetsRemaining,
+    stoppedBy: daily.stoppedForBudget ? ("budget" as const) : ("completion" as const),
+  };
 
-  return { intraday, daily };
+  if (daily.stoppedForBudget) {
+    return {
+      progress,
+      daily,
+      intraday: null,
+      intradaySkipped: "budget" as const,
+    };
+  }
+
+  const intraday = await collectIntradayBars({
+    interval: opts.interval,
+    ...(opts.userId ? { userId: opts.userId } : {}),
+  });
+
+  return { progress, intraday, intradaySkipped: null, daily };
 }
 
 export async function GET(req: Request) {

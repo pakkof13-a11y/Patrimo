@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   FIRST_CLOSE_GRACE_DAYS,
@@ -106,7 +108,7 @@ const groupByCloses = vi.fn();
 const groupByTx = vi.fn();
 const getHistory = vi.fn();
 const upsert = vi.fn();
-const transaction = vi.fn();
+const createMany = vi.fn();
 
 vi.mock("@/app/lib/prisma", () => ({
   prisma: {
@@ -114,12 +116,12 @@ vi.mock("@/app/lib/prisma", () => ({
     assetDailyClose: {
       groupBy: (...a: unknown[]) => groupByCloses(...a),
       upsert: (...a: unknown[]) => upsert(...a),
+      createMany: (...a: unknown[]) => createMany(...a),
       findMany: async () => [],
     },
     transaction: {
       groupBy: (...a: unknown[]) => groupByTx(...a),
     },
-    $transaction: (...a: unknown[]) => transaction(...a),
   },
 }));
 
@@ -128,6 +130,8 @@ vi.mock("@/app/lib/market/price-history", () => ({
 }));
 
 import { backfillDailyClosesFromFirstTx } from "@/app/lib/market/backfill-closes";
+import { reportProviderError } from "@/app/lib/market/provider-incidents";
+import { CoingeckoHttpError } from "@/app/lib/market/providers/coingecko";
 
 const MAINTENANT = new Date("2026-09-04T09:00:00.000Z");
 
@@ -168,10 +172,7 @@ beforeEach(() => {
     serieDepuis("2023-03-12T18:00:00.000Z")
   );
   upsert.mockReset().mockResolvedValue({});
-  transaction.mockReset().mockImplementation(async (ops: unknown) => {
-    if (Array.isArray(ops)) return ops;
-    return [];
-  });
+  createMany.mockReset().mockResolvedValue({ count: 0 });
 });
 
 describe("backfillDailyClosesFromFirstTx — fumée", () => {
@@ -210,12 +211,203 @@ describe("backfillDailyClosesFromFirstTx — fumée", () => {
     getHistory.mockResolvedValue(serieDepuis("2023-03-12T18:00:00.000Z", "mock"));
     const r = await backfillDailyClosesFromFirstTx({ now: MAINTENANT });
     expect(r.closesWritten).toBe(0);
-    expect(transaction).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  /*
+    T-2 — un zéro doit dire pourquoi.
+
+    Le rapport affichait `assetsFilled: 0, closesWritten: 0, errors: []` aussi
+    bien quand CoinGecko renvoyait 429 que quand l'actif n'a simplement pas de
+    cours. Les deux cas doivent désormais se distinguer dans `errors[]`.
+  */
+  it("un refus fournisseur (429) apparaît dans errors[]", async () => {
+    getHistory.mockImplementation(async () => {
+      // Ce que fait le `catch` de `fetchCoingeckoBars` : replier en silence
+      // pour l'appelant, mais signaler la cause.
+      reportProviderError(
+        "coingecko/ohlc",
+        new CoingeckoHttpError("Quota CoinGecko dépassé (Demo ~30 appels/min)", 429)
+      );
+      return null;
+    });
+
+    const r = await backfillDailyClosesFromFirstTx({ now: MAINTENANT });
+    expect(r.closesWritten).toBe(0);
+    expect(r.errors).toHaveLength(1);
+    expect(r.errors[0]!.assetId).toBe("a1");
+    expect(r.errors[0]!.message).toContain("Quota CoinGecko");
+  });
+
+  it("un actif sans cours chez le fournisseur ne pollue pas errors[]", async () => {
+    // US100 (CFD), OAT connue par son seul ISIN : absence stable, pas panne.
+    getHistory.mockResolvedValue(null);
+
+    const r = await backfillDailyClosesFromFirstTx({ now: MAINTENANT });
+    expect(r.closesWritten).toBe(0);
+    expect(r.errors).toEqual([]);
+  });
+
+  it("un timeout fournisseur remonte lui aussi", async () => {
+    getHistory.mockImplementation(async () => {
+      reportProviderError(
+        "yahoo",
+        new Error("yahooFinance.chart timed out after 12000ms")
+      );
+      return null;
+    });
+
+    const r = await backfillDailyClosesFromFirstTx({ now: MAINTENANT });
+    expect(r.errors).toHaveLength(1);
+    expect(r.errors[0]!.message).toContain("timed out");
+  });
+
+  it("sans budget déclaré, rien ne s'arrête et le rapport le dit", async () => {
+    const r = await backfillDailyClosesFromFirstTx({ now: MAINTENANT });
+    expect(r.stoppedForBudget).toBe(false);
+    expect(r.assetsRemaining).toBe(0);
   });
 
   it("inclut les obligations dans le périmètre collectable", async () => {
     await backfillDailyClosesFromFirstTx({ now: MAINTENANT });
     const where = (assetFindMany.mock.calls[0][0] as { where: { OR: unknown[] } }).where;
     expect(JSON.stringify(where.OR)).toContain("OBLIGATIONS");
+  });
+});
+
+/**
+ * T-2b — le budget d'exécution.
+ *
+ * Mesure de la preview : 504 FUNCTION_INVOCATION_TIMEOUT à 60,1 s. Le compte
+ * est en offre Hobby, le plafond de 60 s n'est pas négociable — la seule issue
+ * est de traiter ce qu'on peut, de s'arrêter proprement, et de dire ce qu'il
+ * reste. L'horloge est injectée : aucun test ne dort.
+ */
+describe("backfillDailyClosesFromFirstTx — arrêt par budget", () => {
+  /** Horloge qui avance d'un pas fixe à chaque lecture. */
+  function horlogeQuiAvance(depart: number, pasMs: number) {
+    let t = depart;
+    return () => {
+      const now = t;
+      t += pasMs;
+      return now;
+    };
+  }
+
+  const cinqActifs = [
+    { id: "a1", userId: "u1", name: "LVMH" },
+    { id: "a2", userId: "u1", name: "Air Liquide" },
+    { id: "a3", userId: "u1", name: "Total" },
+    { id: "a4", userId: "u1", name: "Sanofi" },
+    { id: "a5", userId: "u1", name: "Orange" },
+  ];
+
+  beforeEach(() => {
+    assetFindMany.mockResolvedValue(cinqActifs);
+    groupByTx.mockResolvedValue(
+      cinqActifs.map((a) => ({
+        assetId: a.id,
+        _min: { occurredAt: new Date("2023-03-12T10:00:00Z") },
+      }))
+    );
+  });
+
+  it("s'arrête entre deux actifs et compte ce qu'il reste", async () => {
+    // Échéance à 100 ; l'horloge part à 0 et avance de 30 par lecture.
+    // La concurrence vaut 4 : quatre actifs sont pris (lectures 0/30/60/90),
+    // la lecture suivante donne 120 ≥ 100 et arrête la prise.
+    const r = await backfillDailyClosesFromFirstTx({
+      now: MAINTENANT,
+      budget: { deadlineAt: 100, clock: horlogeQuiAvance(0, 30) },
+    });
+
+    expect(r.assetsStale).toBe(5);
+    expect(r.stoppedForBudget).toBe(true);
+    expect(r.assetsRemaining).toBeGreaterThan(0);
+    expect(r.assetsRemaining).toBeLessThan(5);
+    // Un actif démarré va au bout de son écriture : jamais de moitié d'actif.
+    expect(getHistory.mock.calls.length).toBe(5 - r.assetsRemaining);
+  });
+
+  it("un budget déjà épuisé ne lance aucun appel fournisseur", async () => {
+    const r = await backfillDailyClosesFromFirstTx({
+      now: MAINTENANT,
+      budget: { deadlineAt: 0, clock: () => 1_000 },
+    });
+
+    expect(getHistory).not.toHaveBeenCalled();
+    expect(r.stoppedForBudget).toBe(true);
+    expect(r.assetsRemaining).toBe(5);
+  });
+
+  it("un arrêt par budget ne peuple pas errors[]", async () => {
+    const r = await backfillDailyClosesFromFirstTx({
+      now: MAINTENANT,
+      budget: { deadlineAt: 0, clock: () => 1_000 },
+    });
+
+    // Une interruption planifiée n'est pas une panne : elle se dit dans
+    // `stoppedForBudget`, jamais dans le canal réservé aux fournisseurs.
+    expect(r.errors).toEqual([]);
+  });
+
+  it("un budget large laisse le passage aller au bout", async () => {
+    const r = await backfillDailyClosesFromFirstTx({
+      now: MAINTENANT,
+      budget: { deadlineAt: 1_000_000, clock: () => 0 },
+    });
+
+    expect(r.stoppedForBudget).toBe(false);
+    expect(r.assetsRemaining).toBe(0);
+    expect(getHistory).toHaveBeenCalledTimes(5);
+  });
+
+  it("un refus fournisseur reste dans errors[] même sous budget", async () => {
+    getHistory.mockImplementation(async () => {
+      reportProviderError(
+        "coingecko/ohlc",
+        new CoingeckoHttpError("Quota CoinGecko dépassé (Demo ~30 appels/min)", 429)
+      );
+      return null;
+    });
+
+    const r = await backfillDailyClosesFromFirstTx({
+      now: MAINTENANT,
+      budget: { deadlineAt: 1_000_000, clock: () => 0 },
+    });
+
+    expect(r.stoppedForBudget).toBe(false);
+    expect(r.errors).toHaveLength(5);
+  });
+});
+
+/**
+ * T-2 — l'ordre du passage planifié.
+ *
+ * L'intraday est séquentiel sur tous les actifs, avec 12 s de timeout unitaire :
+ * placé en premier, il pouvait épuiser le budget d'exécution et le backfill
+ * n'était jamais atteint, sans qu'aucune erreur ne le signale. Le contrôle est
+ * structurel (lecture du source) parce que c'est l'ordre écrit qu'on protège.
+ */
+describe("cron collect-intraday — le backfill passe avant l'intraday", () => {
+  const source = readFileSync(
+    join(__dirname, "..", "..", "..", "app/api/cron/collect-intraday/route.ts"),
+    "utf8"
+  );
+  const corps = source.slice(source.indexOf("async function collectAll"));
+
+  it("appelle backfillDailyClosesFromFirstTx avant collectIntradayBars", () => {
+    const backfill = corps.indexOf("backfillDailyClosesFromFirstTx(");
+    const intraday = corps.indexOf("collectIntradayBars(");
+    expect(backfill).toBeGreaterThan(-1);
+    expect(intraday).toBeGreaterThan(-1);
+    expect(backfill).toBeLessThan(intraday);
+  });
+
+  it("déclare un maxDuration compatible avec deux collectes séquentielles", () => {
+    const m = source.match(/export const maxDuration = (\d+)/);
+    expect(m).not.toBeNull();
+    expect(Number(m![1])).toBeGreaterThanOrEqual(60);
   });
 });
