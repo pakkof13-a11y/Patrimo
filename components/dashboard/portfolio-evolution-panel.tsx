@@ -541,10 +541,10 @@ export function PortfolioEvolutionPanel({
                 {formatCurrency(navMarket, baseCurrency)}
               </div>
               <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
-                Δ marché {HERO_NAV_SCOPE_LABEL[activeNavScope].toLowerCase()}
+                Performance {HERO_NAV_SCOPE_LABEL[activeNavScope].toLowerCase()}
                 {navFlux != null && navFlux !== 0 ? (
                   <span data-testid="evolution-headline-flux">
-                    {" · Flux "}
+                    {" · Capital investi "}
                     {navFlux >= 0 ? "+" : ""}
                     {formatCurrency(navFlux, baseCurrency)}
                   </span>

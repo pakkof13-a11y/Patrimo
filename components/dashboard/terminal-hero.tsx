@@ -643,9 +643,9 @@ export function TerminalHero({
                           : "val-negative"
                       )}
                       data-testid="hero-pill-market"
-                      title="Ce que la valeur des actifs a produit, mouvements de capitaux retirés"
+                      title="Ce que la valeur des actifs a produit, capital investi retiré"
                     >
-                      Marché{" "}
+                      Performance{" "}
                       {formatSignedAmount(attribution.market, (v) => money(v))}
                     </span>
                     <span
@@ -654,9 +654,9 @@ export function TerminalHero({
                         "bg-[var(--surface-sunken)] text-[var(--primary-text)]"
                       )}
                       data-testid="hero-pill-flow"
-                      title="Capitaux entrés ou sortis sur la période — apports, retraits, acquisitions, emprunts"
+                      title="Capital entré ou sorti du périmètre sur la période — achats, ventes, versements sur les poches, emprunts"
                     >
-                      Flux{" "}
+                      Capital investi{" "}
                       {formatSignedAmount(attribution.flow, (v) => money(v))}
                     </span>
                   </>

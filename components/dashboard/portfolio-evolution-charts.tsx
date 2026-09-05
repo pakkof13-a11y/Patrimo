@@ -278,7 +278,7 @@ function DailyNavTooltip({
               marginTop: 4,
             }}
           >
-            Marché {signedMoney(point.delta, baseCurrency)}
+            Performance {signedMoney(point.delta, baseCurrency)}
           </div>
           <div
             data-testid="evolution-tooltip-flux"
@@ -289,7 +289,7 @@ function DailyNavTooltip({
               marginTop: 2,
             }}
           >
-            Flux {signedMoney(point.flux, baseCurrency)}
+            Capital investi {signedMoney(point.flux, baseCurrency)}
           </div>
         </>
       ) : null}
@@ -642,7 +642,7 @@ export function DailyNavChart({
         <Bar
           yAxisId="delta"
           dataKey="delta"
-          name="Δ marché"
+          name="Performance"
           isAnimationActive={false}
           maxBarSize={6}
         >

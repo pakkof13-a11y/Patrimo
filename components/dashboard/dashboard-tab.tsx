@@ -317,7 +317,15 @@ export function DashboardTab({
       },
       {
         key: "latent",
-        label: "P&L latent",
+        /*
+          Le suffixe n'est pas décoratif. Toutes les autres tuiles présentent un
+          encours du jour surmontant une variation sur la période choisie ; le
+          P&L latent, lui, est déjà un cumul depuis l'origine. Posé sans horizon
+          à côté d'une variation à sept jours, il se lisait comme s'il portait
+          la même fenêtre — d'où « Titres −872 € » et « P&L latent +14 606 € »
+          sur le même écran, deux grandeurs justes que rien ne distinguait.
+        */
+        label: "P&L latent depuis l'origine",
         value: num(summary?.unrealizedPnlBase ?? summary?.unrealizedPnlEur),
         spark: latent,
         sparkDates,
@@ -431,6 +439,25 @@ export function DashboardTab({
           onRangeChange={changeRange}
           firstHistoryDate={firstHistoryDate}
         />
+      )}
+
+      {/*
+        Ce que la courbe raconte, dit une fois pour toutes.
+
+        La ligne trace la NAV, capital investi compris : un achat la fait monter
+        sans qu'aucune valeur ait progressé. La performance, elle, retire ce
+        capital — elle peut donc être négative le mois où le patrimoine atteint
+        son plus haut. Les deux affirmations sont vraies en même temps, et
+        c'est précisément ce qui déroute sans cette phrase.
+      */}
+      {blocks.showEvolutionChart && (
+        <p
+          className="-mt-[var(--space-2)] px-[var(--space-1)] text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
+          data-testid="hero-legend"
+        >
+          La courbe inclut le capital investi. La performance peut être négative
+          même si le patrimoine monte.
+        </p>
       )}
 
       {/* —— 2. Indicateurs —— */}
