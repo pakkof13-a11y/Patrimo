@@ -661,6 +661,68 @@ describe("T-05 golden 6 — point live = hero Financier (±0,01 €)", () => {
   });
 });
 
+describe("T-04 lot D — borne « Tout » par scope", () => {
+  it("Brut/Net remontent au tx le plus ancien, Financier commence plus tard", () => {
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [
+          buy("t0", "maison", "1998-06-20", 1, 100_000),
+          buy("t1", "aapl", "2022-10-06", 10, 100),
+        ],
+        assetClassById: new Map([
+          ["maison", "IMMOBILIER"],
+          ["aapl", "ACTIONS"],
+        ]),
+        rawAssetClassById: new Map([
+          ["maison", "IMMOBILIER"],
+          ["aapl", "ACTIONS"],
+        ]),
+        holdingMetaById: new Map([
+          ["maison", { accountType: "IMMOBILIER", hasRealEstateDetail: true }],
+          ["aapl", { accountType: "CTO" }],
+        ]),
+      })
+    );
+
+    expect(e.earliestDayForScope("brut")).toBe("1998-06-20");
+    expect(e.earliestDayForScope("net")).toBe("1998-06-20");
+    expect(e.earliestDayForScope("financier")).toBe("2022-10-06");
+    expect(e.earliestDayForScope("immobilier")).toBe("1998-06-20");
+    expect(e.earliestDayForScope("listed")).toBe("2022-10-06");
+  });
+
+  it("un scope entièrement vide n'a pas de borne (null)", () => {
+    const e = new PortfolioValuationEngine(inputs());
+    expect(e.earliestDayForScope("financier")).toBeNull();
+    expect(e.earliestDayForScope("cash")).toBeNull();
+    expect(e.earliestDayForScope("brut")).toBeNull();
+  });
+
+  it("financier compte aussi le cash et l'épargne salariale liquide, pas seulement listed", () => {
+    // Un solde sans événement n'est qu'un report (observed: false, cf.
+    // `buildCashSleeve`) : il ne borne rien. Un événement daté, lui, est un
+    // constat réel et fixe la borne.
+    const e = new PortfolioValuationEngine(
+      inputs({
+        cashAccounts: [
+          { id: "b1", balanceEur: d(1_000), createdAt: DAY("2010-01-01") },
+        ],
+        cashEvents: [
+          {
+            accountId: "b1",
+            occurredAt: DAY("2010-01-01"),
+            amountEur: d(1_000),
+            balanceAfterEur: d(1_000),
+            type: "OPENING",
+          },
+        ],
+      })
+    );
+    expect(e.earliestDayForScope("financier")).toBe("2010-01-01");
+    expect(e.earliestDayForScope("listed")).toBeNull();
+  });
+});
+
 describe("T-05 golden 7 — getDailyNav ne downsample jamais", () => {
   it("le source de get-daily-nav n'appelle pas downsampleSeries", () => {
     const src = readFileSync(

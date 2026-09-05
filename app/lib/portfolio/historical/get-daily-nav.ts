@@ -191,11 +191,29 @@ export async function getDailyNav(opts: {
   from: DayKey;
   to: DayKey;
 }): Promise<DailyNavResult> {
-  const from = opts.from <= opts.to ? opts.from : opts.to;
+  const requestedFrom = opts.from <= opts.to ? opts.from : opts.to;
   const to = opts.from <= opts.to ? opts.to : opts.from;
 
   const inputs = await loadHistoricalInputs(opts.userId);
   const engine = new PortfolioValuationEngine(inputs);
+
+  /*
+    La borne « Tout » est celle du **scope demandé**, pas du patrimoine
+    entier : Financier ne remonte pas à 1998 sous prétexte que Brut le fait.
+    Une demande antérieure à cette borne est ramenée à elle — jamais servie
+    telle quelle, et jamais fabriquée en une série plate qui n'existerait que
+    par la compression aval (cf. `daily-nav-compress.ts`).
+
+    Un scope sans aucune donnée observée (`null`), ou dont la borne tombe
+    après `to`, ne produit aucun point : une série fantôme serait pire qu'une
+    réponse vide.
+  */
+  const scopeEarliest = engine.earliestDayForScope(opts.scope);
+  if (scopeEarliest == null || scopeEarliest > to) {
+    return { scope: opts.scope, from: requestedFrom, to, points: [] };
+  }
+  const from = requestedFrom < scopeEarliest ? scopeEarliest : requestedFrom;
+
   const series = engine.buildSeries(from, to);
 
   return {
