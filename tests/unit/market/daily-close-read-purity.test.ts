@@ -28,6 +28,7 @@ const LECTEURS = [
   "app/lib/portfolio/intraday/series.ts",
   "app/lib/portfolio/intraday/bar-index.ts",
   "app/lib/market/market-data-repository.ts",
+  "app/lib/market/last-close-as-of.ts",
 ];
 
 const lire = (p: string) => readFileSync(resolve(process.cwd(), p), "utf8");

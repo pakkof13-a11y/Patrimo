@@ -14,6 +14,11 @@ import { prisma } from "../../prisma";
 import { d, zero, type Decimal } from "../../money/decimal";
 import { convertToEurSync, getEurRates } from "../../market/fx";
 import { readDailyCloses } from "../../market/daily-closes";
+import {
+  resolveLastCloseAsOf,
+  readLastClosesAsOf,
+  type LastCloseAsOf,
+} from "../../market/last-close-as-of";
 import { parisDayKey } from "../../dates/paris";
 import { remainingAmountAt } from "../../liabilities/amortization";
 import { isNonOwnedStatus } from "../../crypto/nft-taxonomy";
@@ -80,7 +85,7 @@ export async function loadHistoricalInputs(
         accountType: true,
         currency: true,
         manualPrice: true,
-        priceQuote: { select: { priceEur: true } },
+        priceQuote: { select: { priceEur: true, lastUpdatedAt: true } },
         // Mêmes relations que `getPortfolioBundle` : sans elles, la courbe
         // valoriserait des positions que le patrimoine du jour écarte.
         defiPosition: { select: { isIgnoredInPortfolio: true } },
@@ -254,7 +259,11 @@ export async function loadHistoricalInputs(
     else envelopeEventsByAsset.set(e.assetId, [e]);
   }
 
-  const closes = await loadCloses(transactions, assets.map((a) => a.id));
+  const assetIds = assets.map((a) => a.id);
+  const [closes, lastDailyByAsset] = await Promise.all([
+    loadCloses(transactions, assetIds),
+    readLastClosesAsOf(assetIds),
+  ]);
 
   /*
     Le cours du jour complète le cache de clôtures.
@@ -268,14 +277,31 @@ export async function loadHistoricalInputs(
 
     Le cours n'est inscrit **que** sur le jour courant : il ne descend jamais
     dans le passé, où seules les clôtures réellement observées font foi.
+
+    Vague2 D4 : la même résolution (`resolveLastCloseAsOf`) alimente
+    `lastCloseAsOf`, que la watchlist et l'enveloppe daily-nav publient.
   */
   const today = parisDayKey(new Date());
+  const lastCloseAsOf = new Map<string, LastCloseAsOf>();
   for (const a of assets) {
     const priceEur = a.priceQuote
       ? d(a.priceQuote.priceEur.toString())
       : a.manualPrice
         ? d(convertToEurSync(a.manualPrice.toString(), a.currency || "EUR", rates))
         : null;
+    const quote =
+      priceEur && priceEur.gt(0)
+        ? {
+            priceEur: priceEur.toNumber(),
+            lastUpdatedAt: a.priceQuote?.lastUpdatedAt ?? null,
+          }
+        : null;
+    const asOf = resolveLastCloseAsOf({
+      today,
+      lastDaily: lastDailyByAsset.get(a.id) ?? null,
+      quote,
+    });
+    if (asOf) lastCloseAsOf.set(a.id, asOf);
     if (!priceEur || priceEur.lte(0)) continue;
     const byDay = closes.get(a.id) ?? new Map<string, number>();
     byDay.set(today, priceEur.toNumber());
@@ -399,6 +425,7 @@ export async function loadHistoricalInputs(
     envelopeEventsByAsset,
     excludedAssetIds,
     holdingMetaById,
+    lastCloseAsOf,
     closes,
     cashAccounts,
     cashEvents,
