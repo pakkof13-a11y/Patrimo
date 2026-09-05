@@ -45,6 +45,10 @@ function pt(
     realizedPnl: over.realizedPnl ?? 0,
     ledgerCashIncome: over.ledgerCashIncome ?? 0,
     unrealizedPnl: over.unrealizedPnl ?? 0,
+    byAssetClassAndEnvelope: over.byAssetClassAndEnvelope ?? {
+      ACTIONS: { PEA: null, CTO: null, UNKNOWN: 0 },
+      OBLIGATIONS: { PEA: 0, CTO: 0, UNKNOWN: 0 },
+    },
   };
 }
 
@@ -352,6 +356,23 @@ describe("dailyNavToHistoryPoints — réutilise hero/KPI sans recalcul", () => 
     expect(history[0]!.transactionFlowBase).toBe(12);
     expect(history[0]!.grossAssetsBase).toBe(100);
     expect(history[0]!.date.endsWith("Z")).toBe(true);
+  });
+
+  it("recopie le croisement classe × enveloppe, y compris UNKNOWN", () => {
+    const points = [
+      pt("2026-01-01", {
+        financier: 40,
+        brut: 40,
+        listed: 40,
+        byAssetClassAndEnvelope: {
+          ACTIONS: { PEA: null, CTO: null, UNKNOWN: 40 },
+          OBLIGATIONS: { PEA: 0, CTO: 0, UNKNOWN: 0 },
+        },
+      }),
+    ];
+    const history = dailyNavToHistoryPoints(points);
+    expect(history[0]!.byAssetClassAndEnvelopeBase?.ACTIONS.UNKNOWN).toBe(40);
+    expect(history[0]!.byAssetClassAndEnvelopeBase?.ACTIONS.PEA).toBeNull();
   });
 });
 

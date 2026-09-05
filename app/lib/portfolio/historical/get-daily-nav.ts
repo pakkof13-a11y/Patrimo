@@ -22,9 +22,11 @@ import { PortfolioValuationEngine } from "./engine";
 import type { PriceOrigin } from "./price-resolver";
 import type {
   DayKey,
+  EnvelopeCapableClass,
   HistoricalDataStatus,
   PortfolioValuationPoint,
   ValuationAssetClass,
+  ValuationEnvelope,
 } from "./types";
 
 export const DAILY_NAV_SCOPES = [
@@ -78,6 +80,18 @@ export type DailyNavPoint = {
   ledgerCashIncome: number;
   /** `marketValue − costBasis` des positions journal, même formule que l'historique. */
   unrealizedPnl: number;
+  /**
+   * Croisement classe × enveloppe — même objet que le moteur.
+   *
+   * Sans ce champ, le hero / l'évolution branchés sur `getDailyNav` ne
+   * peuvent pas dire qu'une part des titres est `UNKNOWN` avant le premier
+   * constat. L'avertissement PEA/CTO disparaissait alors que l'API
+   * `/api/portfolio` le publiait encore.
+   */
+  byAssetClassAndEnvelope: Record<
+    EnvelopeCapableClass,
+    Record<ValuationEnvelope, number | null>
+  >;
 };
 
 /** Journal coté du jour — pastilles, pas l'attribution Marché/Flux. */
@@ -163,6 +177,7 @@ export function dailyNavFromSeries(
     realizedPnl: p.realizedPnl,
     ledgerCashIncome: p.ledgerCashIncome,
     unrealizedPnl: unrealizedPnlOf(p),
+    byAssetClassAndEnvelope: p.byAssetClassAndEnvelope,
   }));
 }
 

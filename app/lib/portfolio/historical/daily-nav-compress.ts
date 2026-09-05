@@ -16,8 +16,10 @@
  *
  * « Toutes les grandeurs publiées » = tout le contenu de `DailyNavPoint`, pas
  * la seule valeur du scope demandé : brut, net, financier, listed, chaque
- * poche, le statut, les origines de prix, le P&L. Un jour où une poche hors
- * scope bouge n'est jamais compressible, même si `nav` n'a pas changé.
+ * poche, le statut, les origines de prix, le P&L, le croisement
+ * classe × enveloppe. Un jour où une poche hors scope bouge — ou où
+ * `UNKNOWN` devient PEA — n'est jamais compressible, même si `nav` n'a
+ * pas changé.
  *
  * Un jour porteur d'un flux externe non nul (`externalFlows`,
  * `transactionFlow`, `financierFlows`) n'est jamais comprimé : il reste seul,
@@ -56,8 +58,27 @@ function sameSnapshot(a: DailyNavPoint, b: DailyNavPoint): boolean {
     a.unrealizedPnl === b.unrealizedPnl &&
     a.realizedPnl === b.realizedPnl &&
     a.ledgerCashIncome === b.ledgerCashIncome &&
-    sameOrigins(a.priceOrigins, b.priceOrigins)
+    sameOrigins(a.priceOrigins, b.priceOrigins) &&
+    sameEnvelope(a.byAssetClassAndEnvelope, b.byAssetClassAndEnvelope)
   );
+}
+
+function sameEnvelope(
+  a: DailyNavPoint["byAssetClassAndEnvelope"] | undefined,
+  b: DailyNavPoint["byAssetClassAndEnvelope"] | undefined
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  for (const cls of ["ACTIONS", "OBLIGATIONS"] as const) {
+    const ac = a[cls];
+    const bc = b[cls];
+    if (ac === bc) continue;
+    if (!ac || !bc) return false;
+    if (ac.PEA !== bc.PEA || ac.CTO !== bc.CTO || ac.UNKNOWN !== bc.UNKNOWN) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** `true` si un flux non nul, de quelque nature, est publié ce jour-là. */

@@ -30,6 +30,10 @@ function base(day: string, over: Partial<DailyNavPoint> = {}): DailyNavPoint {
     realizedPnl: 0,
     ledgerCashIncome: 0,
     unrealizedPnl: 0,
+    byAssetClassAndEnvelope: {
+      ACTIONS: { PEA: null, CTO: null, UNKNOWN: 0 },
+      OBLIGATIONS: { PEA: 0, CTO: 0, UNKNOWN: 0 },
+    },
     ...over,
   };
 }
@@ -116,6 +120,36 @@ describe("compressDailyNavPoints", () => {
     const out = compressDailyNavPoints(span);
     expect(out.some((p) => p.day === span[5]!.day)).toBe(true);
     expect(out.some((p) => p.day === span[4]!.day)).toBe(true);
+  });
+
+  it("un passage UNKNOWN → PEA n'est pas un plateau, même si la NAV est plate", () => {
+    const span = days("2024-01-01", 8).map((day) =>
+      base(day, {
+        nav: 100,
+        brut: 100,
+        listed: 100,
+        byAssetClassAndEnvelope: {
+          ACTIONS: { PEA: null, CTO: null, UNKNOWN: 100 },
+          OBLIGATIONS: { PEA: 0, CTO: 0, UNKNOWN: 0 },
+        },
+      })
+    );
+    span[5] = base(span[5]!.day, {
+      nav: 100,
+      brut: 100,
+      listed: 100,
+      byAssetClassAndEnvelope: {
+        ACTIONS: { PEA: 100, CTO: 0, UNKNOWN: 0 },
+        OBLIGATIONS: { PEA: 0, CTO: 0, UNKNOWN: 0 },
+      },
+    });
+    const out = compressDailyNavPoints(span);
+    expect(out.some((p) => p.day === span[5]!.day)).toBe(true);
+    expect(out.some((p) => p.day === span[4]!.day)).toBe(true);
+    expect(
+      out.find((p) => p.day === span[4]!.day)?.byAssetClassAndEnvelope.ACTIONS
+        .UNKNOWN
+    ).toBe(100);
   });
 
   it("ne modifie aucune valeur des points conservés", () => {

@@ -284,6 +284,7 @@ export function dailyNavToHistoryPoints(
       externalFlowsBase: p.externalFlows,
       transactionFlowBase: p.transactionFlow,
       financierFlowsBase: p.financierFlows,
+      byAssetClassAndEnvelopeBase: p.byAssetClassAndEnvelope,
       unrealizedPnlBase: p.unrealizedPnl,
       realizedPnlBase: p.realizedPnl,
       ledgerCashIncomeBase: p.ledgerCashIncome,
