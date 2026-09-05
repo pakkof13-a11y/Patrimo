@@ -111,6 +111,23 @@ export function formatSignedAmount(
   return `${value >= 0 ? "+" : "−"}${formatAbsolute(Math.abs(value))}`;
 }
 
+/**
+ * Relit un montant signé tel que `formatSignedAmount` le pose à l'écran.
+ *
+ * Le signe moins est U+2212, pas le trait d'union ASCII. Un parseur qui ne
+ * garde que `[0-9,.-]` le jette : une perte se lit alors comme un gain, et
+ * l'identité |marché + flux − variation| casse d'exactement `2 · |marché|`.
+ * C'est le 359 144,65 € mesuré sur « Tout » dans `hero-hover.spec.ts`.
+ */
+export function parseSignedScreenAmount(texte: string): number {
+  const brut = texte
+    .replace(/\u2212/g, "-")
+    .replace(/[^\d,.-]/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+  return Number(brut);
+}
+
 /** « +1,2 % » / « −0,4 % ». */
 export function formatSignedPct(value: number): string {
   if (!Number.isFinite(value)) return "—";

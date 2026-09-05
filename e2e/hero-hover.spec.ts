@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
+import { parseSignedScreenAmount } from "../app/lib/ui/hero-format";
 import { gotoDashboard } from "./helpers";
 
 /**
@@ -17,13 +18,13 @@ import { gotoDashboard } from "./helpers";
  * Les séparateurs de milliers sont des espaces insécables — parfois fines —
  * que le format monétaire pose lui-même : un `parseFloat` direct s'arrêterait
  * au premier d'entre eux et lirait 880 là où il y a 880 769,64.
+ *
+ * Le signe moins de `formatSignedAmount` est U+2212. Le jeter ferait lire une
+ * perte comme un gain, et casserait |marché + flux − variation| de
+ * `2 · |marché|` — 359 144,65 € sur « Tout » en CI, trois fois de suite.
  */
 function nombre(texte: string): number {
-  const brut = texte
-    .replace(/[^\d,.-]/g, "")
-    .replace(/\./g, "")
-    .replace(",", ".");
-  const n = Number(brut);
+  const n = parseSignedScreenAmount(texte);
   expect(Number.isFinite(n)).toBe(true);
   return n;
 }
