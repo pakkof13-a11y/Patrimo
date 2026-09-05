@@ -22,9 +22,11 @@ import {
 } from "@/app/lib/portfolio/evolution-aggregate";
 import { parisDayKey } from "@/app/lib/dates/paris";
 import {
+  dailyNavToVsIndexLevels,
   rebaseToCommonBase100,
   toVsIndexPercentPoints,
   vsIndexGapPct,
+  windowVsIndexNav,
 } from "@/app/lib/portfolio/vs-index-series";
 import { EVOLUTION_RANGE_CHIPS as RANGES } from "@/app/lib/ui/evolution-ranges";
 import {
@@ -53,7 +55,6 @@ import {
   headerFlux,
   headerMarketDelta,
   HERO_NAV_SCOPE_LABEL,
-  navOfPoint,
   servedDailyNavFrom,
   toDailyNavChartPoints,
   windowDailyNav,
@@ -216,8 +217,8 @@ function Segmented<T extends string>({
 /**
  * Module Évolution du portefeuille — refonte « premium » orientée
  * investissement, à deux réglages seulement : la période et la comparaison
- * (« Versus »). Le vs-indice (T-4.E) rebase NAV et clôtures à 100 au
- * premier jour commun (`vs-index-series.ts`) — jamais une NAV en euros
+ * (« Versus »). Le vs-indice (T-4.E) rebase NAV et clôtures à 100 à
+ * l'ancre `servedFrom` (`vs-index-series.ts`) — jamais une NAV en euros
  * à côté d'un indice déjà en %.
  */
 export function PortfolioEvolutionPanel({
@@ -226,6 +227,7 @@ export function PortfolioEvolutionPanel({
   navScope,
   navQueryFrom,
   navQueryTo,
+  servedNavFrom,
   baseCurrency,
   loading,
   className,
@@ -242,6 +244,11 @@ export function PortfolioEvolutionPanel({
    */
   navQueryFrom?: string;
   navQueryTo?: string;
+  /**
+   * Borne `from` **servie** par daily-nav — jamais la demandée si clamp.
+   * C'est l'ancre Versus (NAV et indice à 100 le même jour).
+   */
+  servedNavFrom?: string;
   baseCurrency: string;
   loading?: boolean;
   className?: string;
@@ -306,8 +313,8 @@ export function PortfolioEvolutionPanel({
   const activeNavScope: HeroNavScope = navScope ?? "financier";
   /*
     Filtre de poche en valeur : même fenêtre que le hero, scope clampé par
-    `earliestDayForScope`. Le vs-indice (T-4.E) lit cette même fenêtre
-    daily-nav, les deux séries en base 100 au premier jour commun.
+    `earliestDayForScope`. Le vs-indice (T-4.E) lit `servedFrom…to`,
+    les deux séries en base 100 à cette ancre.
   */
   const wantPocketDailyNav =
     Boolean(assetClass) &&
@@ -489,18 +496,40 @@ export function PortfolioEvolutionPanel({
     [scopedHistory, range, history]
   );
 
-  // Mode "index" : clôtures Yahoo sur la même fenêtre que daily-nav / hero
-  // (marge amont pour une clôture de base avant le premier jour commun).
+  /*
+    Vs indice : fenêtre servie (clamp getDailyNav), pas la borne demandée.
+    Marge amont de 7 j pour une close ≤ ancre (LOCF vendredi).
+  */
+  const vsNavWindowed = useMemo(() => {
+    if (!dailyNav?.length) return [];
+    return windowVsIndexNav(
+      dailyNav,
+      range,
+      dailyNav[dailyNav.length - 1]!.day,
+      servedNavFrom
+    );
+  }, [dailyNav, range, servedNavFrom]);
+
   const wantIndex = versus === "index";
-  const idxFromKey = navQueryFrom ?? rawPoints[0]?.date.slice(0, 10) ?? "";
-  const idxToKey = navQueryTo ?? rawPoints[rawPoints.length - 1]?.date.slice(0, 10) ?? "";
+  const idxFromKey =
+    servedNavFrom ??
+    vsNavWindowed[0]?.day ??
+    navQueryFrom ??
+    rawPoints[0]?.date.slice(0, 10) ??
+    "";
+  const idxToKey =
+    navQueryTo ??
+    vsNavWindowed[vsNavWindowed.length - 1]?.day ??
+    rawPoints[rawPoints.length - 1]?.date.slice(0, 10) ??
+    "";
   const indexQ = useQuery({
     queryKey: ["evolution-index", indexKey, idxFromKey, idxToKey],
     enabled:
       wantIndex &&
       Boolean(idxFromKey && idxToKey) &&
-      (navWindowed.length > 1 || rawPoints.length > 1),
+      (vsNavWindowed.length > 1 || rawPoints.length > 1),
     staleTime: 30 * 60_000,
+    retry: false,
     queryFn: () => {
       const fromMs = Date.parse(idxFromKey) - 7 * 24 * 60 * 60 * 1000;
       const from = new Date(fromMs).toISOString();
@@ -512,17 +541,16 @@ export function PortfolioEvolutionPanel({
     },
   });
   const indexCloses = useMemo<IndexClosePoint[]>(
-    () => indexQ.data?.points ?? [],
-    [indexQ.data]
+    () => (indexQ.isError ? [] : indexQ.data?.points ?? []),
+    [indexQ.data, indexQ.isError]
   );
 
   const points = rawPoints;
 
   /*
-    Vs indice : deux niveaux (NAV du hero, clôture), base 100 au premier
-    jour commun. Pas `toPercentSeries` : la daily-nav n'a pas de `growth`,
-    et y passer une NAV en euros à côté d'un CAC déjà en % aplatissait
-    le portefeuille à +0 %.
+    Deux niveaux (NAV hero, clôture Yahoo), base 100 à l'ancre servie.
+    Overlay absent si 429 / vide / aucune close ≤ ancre — NAV intacte.
+    Pas `toPercentSeries` : sans `growth`, le portefeuille restait à +0 %.
   */
   const vsIndexSeries = useMemo(() => {
     if (versus !== "index") return [];
@@ -530,12 +558,9 @@ export function PortfolioEvolutionPanel({
       day: c.date,
       value: c.close,
     }));
-    const useHeroNav = !assetClass && navWindowed.length > 1;
+    const useHeroNav = !assetClass && vsNavWindowed.length > 1;
     const portfolioLevels = useHeroNav
-      ? navWindowed.map((p) => ({
-          day: p.day,
-          value: navOfPoint(p, activeNavScope),
-        }))
+      ? dailyNavToVsIndexLevels(vsNavWindowed, activeNavScope)
       : rawPoints.map((p) => ({
           day: parisDayKey(p.date),
           value: p.total,
@@ -545,7 +570,7 @@ export function PortfolioEvolutionPanel({
     versus,
     indexCloses,
     assetClass,
-    navWindowed,
+    vsNavWindowed,
     activeNavScope,
     rawPoints,
   ]);
@@ -588,7 +613,7 @@ export function PortfolioEvolutionPanel({
     (wantPocketDailyNav
       ? pocketTooShort
       : versus === "index"
-        ? percentPoints.length < 2 && rawPoints.length === 0 && navWindowed.length < 2
+        ? percentPoints.length < 2 && rawPoints.length === 0 && vsNavWindowed.length < 2
         : rawPoints.length === 0);
 
   return (

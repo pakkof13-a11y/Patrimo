@@ -1,22 +1,29 @@
 /**
- * T-4.E — Vs indice : base 100 commune.
+ * T-4.E — Vs indice : base 100 à l'ancre servie.
  *
- * Les deux séries (NAV du périmètre hero / daily-nav, clôtures d'indice)
- * sont ramenées à 100 au **premier jour COMMUN** de la fenêtre — le même
- * `from`/`to` que `getDailyNav` et la carte de tête.
+ * Fenêtre = `servedFrom…to` de `getDailyNav` (jamais la borne demandée si
+ * le moteur a clampé). NAV et indice partagent **la même ancre** : le
+ * premier jour de cette fenêtre.
  *
- * On ne compare jamais une NAV en euros à un indice déjà exprimé en % :
- * chaque série est un niveau (NAV €, clôture d'indice), et la seule
- * transformation partagée est `100 × niveau(t) / niveau(jour commun)`.
- * La courbe affiche `base100 − 100` (0 % au jour commun) : même écart
- * relatif, même unité.
+ *   base100(t) = 100 × niveau(t) / niveau(ancre)
  *
- * Un portefeuille plat à +0 % pendant que le CAC bouge est un échec :
- * soit la NAV n'a pas été rebasée, soit on a mélangé les unités.
+ * Les deux valent 100 à l'ancre. On ne compare jamais une NAV en euros à
+ * un indice déjà en %. Pas de seconde formule Δ — `dailyNavDeltas` /
+ * flux restent hors de ce module.
+ *
+ * Indice : pas d'interpolation. Week-end = LOCF last-close. Aucune close
+ * ≤ ancre → overlay absent (`undefined`), jamais 0 ni 100 inventé.
+ * Réseau down / 429 / vide → même règle : overlay off, NAV intacte.
  */
 
 import { endOfParisDay, parisDayKey } from "../dates/paris";
-import type { EvolutionPercentPoint } from "./evolution-aggregate";
+import type { EvolutionPercentPoint, EvolutionRange } from "./evolution-aggregate";
+import {
+  navOfPoint,
+  windowDailyNav,
+  type HeroNavScope,
+} from "./daily-nav-view";
+import type { DailyNavPoint } from "./historical/get-daily-nav";
 
 /** Niveau brut — NAV € ou clôture d'indice, jamais un pourcentage. */
 export type VsIndexLevel = {
@@ -29,13 +36,13 @@ export type VsIndexBase100Point = {
   day: string;
   date: string;
   t: number;
-  /** 100 × NAV(t) / NAV(jour commun). */
+  /** 100 × NAV(t) / NAV(ancre). */
   portfolioBase100: number;
-  /** 100 × close(t) / close(jour commun) — absent si l'indice manque. */
+  /** 100 × close(t) / close(ancre) — absent si overlay off. */
   indexBase100?: number;
-  /** `portfolioBase100 − 100` — 0 % au jour commun. */
+  /** `portfolioBase100 − 100` — 0 % à l'ancre. */
   portfolioPct: number;
-  /** `indexBase100 − 100` — même origine que le portefeuille. */
+  /** `indexBase100 − 100` — même origine, ou absent. */
   benchmarkPct?: number;
 };
 
@@ -61,7 +68,8 @@ function usableLevels(levels: readonly VsIndexLevel[]): VsIndexLevel[] {
  * Dernier niveau d'indice ≤ `day` (LOCF).
  *
  * Le CAC n'a pas de clôture le week-end : un samedi de NAV reprend le
- * vendredi, sans inventer de cours.
+ * vendredi, sans inventer de cours. `null` s'il n'existe aucune close
+ * à cette date ou avant — l'overlay doit alors rester absent.
  */
 export function makeIndexLevelAt(
   index: readonly VsIndexLevel[]
@@ -80,31 +88,59 @@ export function makeIndexLevelAt(
 }
 
 /**
- * Premier jour de la fenêtre où les deux niveaux sont connus et > 0.
- *
- * L'indice peut précéder le jour (LOCF) : un lundi de NAV est commun avec
- * le vendredi si le lundi n'est pas encore coté, et un portefeuille qui
- * commence avant la première clôture attend cette clôture.
+ * Fenêtre Versus : même `windowDailyNav` que le hero, puis plancher
+ * `servedFrom` — jamais la borne demandée si `getDailyNav` a clampé.
  */
-export function firstCommonDay(
-  portfolio: readonly VsIndexLevel[],
-  index: readonly VsIndexLevel[]
-): string | null {
-  const indexAt = makeIndexLevelAt(index);
-  for (const p of usableLevels(portfolio)) {
-    const idx = indexAt(p.day);
-    if (idx != null && idx > 0) return p.day;
-  }
-  return null;
+export function windowVsIndexNav(
+  points: DailyNavPoint[],
+  range: EvolutionRange,
+  referenceDay: string,
+  servedFrom?: string | null
+): DailyNavPoint[] {
+  const windowed = windowDailyNav(points, range, referenceDay);
+  if (!servedFrom) return windowed;
+  return windowed.filter((p) => p.day >= servedFrom);
+}
+
+export function dailyNavToVsIndexLevels(
+  points: readonly DailyNavPoint[],
+  scope: HeroNavScope
+): VsIndexLevel[] {
+  return points.map((p) => ({
+    day: p.day,
+    value: navOfPoint(p, scope),
+  }));
 }
 
 /**
- * Rebase les deux séries à 100 au premier jour commun.
+ * Ancre = premier jour NAV de la fenêtre servie.
  *
- * Sans indice, le portefeuille part tout de même à 100 à son premier jour
- * (pas de courbe plate à 0 % faute de CAC). Dès que l'indice est là, les
- * jours antérieurs au commun sont retirés : les deux courbes naissent
- * ensemble.
+ * Ce n'est pas « le premier jour où les deux existent » : décaler l'ancre
+ * pour attendre le CAC inventerait une origine que le hero n'a pas.
+ */
+export function vsIndexAnchorDay(
+  portfolio: readonly VsIndexLevel[]
+): string | null {
+  return usableLevels(portfolio)[0]?.day ?? null;
+}
+
+/**
+ * Close d'indice à l'ancre (LOCF). `null` → overlay off.
+ */
+export function indexCloseAtAnchor(
+  anchorDay: string,
+  index: readonly VsIndexLevel[]
+): number | null {
+  const close = makeIndexLevelAt(index)(anchorDay);
+  return close != null && close > 0 ? close : null;
+}
+
+/**
+ * Rebase à 100 à l'ancre NAV (premier jour de la fenêtre).
+ *
+ * Overlay seulement si une close existe ≤ ancre. Sinon les points NAV
+ * restent, `indexBase100` / `benchmarkPct` restent `undefined` — jamais
+ * 0 ni 100 inventés pour l'indice.
  */
 export function rebaseToCommonBase100(
   portfolio: readonly VsIndexLevel[],
@@ -117,18 +153,15 @@ export function rebaseToCommonBase100(
   for (const p of navs) navByDay.set(p.day, p.value);
   const days = [...navByDay.keys()].sort();
 
-  const common = firstCommonDay(navs, index);
-  const baseDay = common ?? days[0]!;
+  const baseDay = days[0]!;
   const nav0 = navByDay.get(baseDay);
   if (nav0 == null || !(nav0 > 0)) return [];
 
   const indexAt = makeIndexLevelAt(index);
-  const idx0 = indexAt(baseDay);
-  const haveIndex = idx0 != null && idx0 > 0;
+  const idx0 = indexCloseAtAnchor(baseDay, index);
 
   const out: VsIndexBase100Point[] = [];
   for (const day of days) {
-    if (day < baseDay) continue;
     const nav = navByDay.get(day);
     if (nav == null || !(nav > 0)) continue;
     const at = endOfParisDay(day);
@@ -140,10 +173,10 @@ export function rebaseToCommonBase100(
       portfolioBase100,
       portfolioPct: portfolioBase100 - 100,
     };
-    if (haveIndex) {
+    if (idx0 != null) {
       const idx = indexAt(day);
       if (idx != null && idx > 0) {
-        point.indexBase100 = (100 * idx) / idx0!;
+        point.indexBase100 = (100 * idx) / idx0;
         point.benchmarkPct = point.indexBase100 - 100;
       }
     }

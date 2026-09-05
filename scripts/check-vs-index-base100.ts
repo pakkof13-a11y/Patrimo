@@ -7,8 +7,9 @@
  * Frankfurter n'entre pas dans le rebase (le CAC est déjà en points EUR) :
  * on le ping seulement pour confirmer l'egress déjà utilisé par le FX.
  *
- * Échec : portefeuille plat à +0 % pendant que le CAC bouge sur la fenêtre
- * commune — le symptôme d'une NAV en euros posée à côté d'un indice en %.
+ * Échec : portefeuille plat à +0 % pendant que le CAC bouge — le symptôme
+ * d'une NAV en euros posée à côté d'un indice en %. Ancre = premier jour
+ * NAV ; overlay off s'il n'existe aucune close ≤ ancre.
  */
 import YahooFinance from "yahoo-finance2";
 import { rebaseToCommonBase100 } from "@/app/lib/portfolio/vs-index-series";

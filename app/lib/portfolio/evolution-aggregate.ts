@@ -902,7 +902,7 @@ export type EvolutionPercentPoint = {
  * Le comparatif Versus du tableau de bord (T-4.E) ne passe plus par ici :
  * la daily-nav n'a pas de `growth`, et y envoyer une NAV en euros à côté
  * d'un indice déjà en % aplatissait le portefeuille à +0 %. Voir
- * `vs-index-series.ts` — base 100 au premier jour commun.
+ * `vs-index-series.ts` — base 100 à l'ancre `servedFrom`.
  */
 export function toPercentSeries(
   points: EvolutionSeriesPoint[]
