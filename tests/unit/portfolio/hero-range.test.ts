@@ -185,6 +185,10 @@ describe("libellés de période", () => {
     );
     expect(src).toMatch(/heroPeriodLabel/);
     expect(src).toMatch(/heroModeHelpLine/);
+    expect(src).toMatch(/heroModeHelpAll/);
+    expect(src).toMatch(/hero-tooltip-market/);
+    expect(src).not.toMatch(/Événement ·/);
+    expect(src).not.toMatch(/hero-tooltip-delta/);
     expect(src).not.toMatch(/dailyNavQueryWindow/);
     expect(src).not.toMatch(/keepPreviousData/);
   });

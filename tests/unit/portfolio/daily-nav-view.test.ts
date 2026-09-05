@@ -10,7 +10,10 @@ import {
   headerMarketDelta,
   navOfPoint,
   servedDailyNavFrom,
+  heroModeHelpAll,
   heroModeHelpLine,
+  HERO_FINANCIER_PHRASE,
+  HERO_MODE_HELP,
   sumDailyDeltas,
   toDailyNavChartPoints,
   windowDailyNav,
@@ -492,16 +495,29 @@ describe("servedDailyNavFrom — borne servie, pas demandée", () => {
   });
 });
 
-describe("heroModeHelpLine — une ligne, carte active", () => {
-  it("nomme le périmètre de la carte et ce que la courbe contient", () => {
+describe("heroModeHelpLine — D3 copie Métier + D8", () => {
+  it("Financier porte la phrase validée, hors immo et alternatifs", () => {
+    expect(HERO_FINANCIER_PHRASE).toBe(
+      "Titres & crypto, cash, fonds euro et ES dispo — hors immo et alternatifs."
+    );
     expect(heroModeHelpLine("financier")).toBe(
-      "Titres, cash, fonds euro et épargne salariale disponible. La courbe inclut le capital investi."
+      `${HERO_FINANCIER_PHRASE} La courbe inclut le capital investi.`
     );
     expect(heroModeHelpLine("brut")).toBe(
-      "Total des actifs, passifs non déduits. La courbe inclut le capital investi."
+      "Tous les actifs. La courbe inclut le capital investi."
     );
     expect(heroModeHelpLine("net")).toBe(
-      "Actifs moins passifs. La courbe inclut le capital investi."
+      "Brut − dettes. La courbe inclut le capital investi."
     );
+  });
+
+  it("l'aide des trois cartes tient en une ligne", () => {
+    expect(HERO_MODE_HELP).toBe(
+      "Financier = titres & crypto + cash + fonds euro + ES dispo. Brut = tous les actifs. Net = brut − dettes."
+    );
+    expect(heroModeHelpAll()).toBe(
+      `${HERO_MODE_HELP} La courbe inclut le capital investi.`
+    );
+    expect(heroModeHelpAll()).not.toMatch(/\n/);
   });
 });

@@ -48,6 +48,7 @@ import {
   HERO_NAV_SCOPE_LABEL,
   HERO_NAV_SCOPE_TITLE,
   HERO_NAV_SCOPES,
+  heroModeHelpAll,
   heroModeHelpLine,
 } from "@/app/lib/portfolio/daily-nav-view";
 
@@ -335,24 +336,27 @@ export function TerminalHero({
         {money(active.value)}
       </p>
 
-      {/* 3. Écart avec le point précédent disponible */}
-      {active.deltaAbs !== undefined && (
+      {/* 3. Marché / Flux — pas le Δ NAV brut. Flux masqué si inconnu ou 0. */}
+      {active.market !== undefined && (
         <p
           className={cn(
             "num flex flex-wrap items-baseline gap-[var(--space-1)]",
-            active.deltaAbs >= 0 ? "val-positive" : "val-negative"
+            active.market >= 0 ? "val-positive" : "val-negative"
           )}
-          data-testid="hero-tooltip-delta"
+          data-testid="hero-tooltip-market"
         >
-          <span>
-            {formatSignedAmount(active.deltaAbs, (v) => money(v))}
-          </span>
-          {active.deltaPct !== undefined && (
-            <>
-              <span className="text-[var(--foreground-faint)]">·</span>
-              <span>{formatSignedPct(active.deltaPct)}</span>
-            </>
+          Marché {formatSignedAmount(active.market, (v) => money(v))}
+        </p>
+      )}
+      {active.flow !== undefined && active.flow !== 0 && (
+        <p
+          className={cn(
+            "num flex flex-wrap items-baseline gap-[var(--space-1)]",
+            "text-[var(--primary-text)]"
           )}
+          data-testid="hero-tooltip-flow"
+        >
+          Flux {formatSignedAmount(active.flow, (v) => money(v))}
         </p>
       )}
 
@@ -372,14 +376,14 @@ export function TerminalHero({
           </p>
         )}
 
-      {/* 5. Événement du jour — aujourd'hui, un mouvement de capital externe */}
+      {/* 5. Pastille tx — journal coté, distincte de Marché/Flux */}
       {active.externalFlow !== undefined && (
         <p
           className={cn(
             "flex items-center gap-[var(--space-1)]",
             active.externalFlow >= 0 ? "val-positive" : "val-negative"
           )}
-          data-testid="hero-tooltip-event"
+          data-testid="hero-tooltip-tx"
         >
           <span
             aria-hidden
@@ -390,19 +394,22 @@ export function TerminalHero({
                 : "bg-[var(--chart-negative)]"
             )}
           />
-          Événement ·{" "}
-          {active.externalFlow >= 0 ? "apport" : "retrait"} de{" "}
-          <span className="num">{money(Math.abs(active.externalFlow))}</span>
+          <span className="num">
+            {formatSignedAmount(active.externalFlow, (v) => money(v))}
+          </span>
         </p>
       )}
 
-      {/* 6. Journée non observée : dire d'où vient la valeur */}
-      {active.carried && active.lastObservedDate && (
+      {/* 6. LOCF : dire que la valeur est reportée, pas mesurée ce jour-là */}
+      {active.carried && (
         <p
           className="text-[var(--foreground-faint)]"
           data-testid="hero-tooltip-carried"
         >
-          dernière valo : {formatDayMonthParis(active.lastObservedDate)}
+          Reporté
+          {active.lastObservedDate
+            ? ` · ${formatDayMonthParis(active.lastObservedDate)}`
+            : ""}
         </p>
       )}
     </div>
@@ -441,7 +448,7 @@ export function TerminalHero({
               tabIndex={0}
               role="note"
               data-testid="hero-mode-help"
-              title={heroModeHelpLine(mode)}
+              title={heroModeHelpAll()}
               aria-label={heroModeHelpLine(mode)}
             >
               ?

@@ -52,10 +52,21 @@ export const HERO_NAV_SCOPE_HEADING: Record<HeroNavScope, string> = {
   net: "Patrimoine net",
 };
 
+/** Phrase Financier (D3) — carte + « ? » quand cette carte est active. */
+export const HERO_FINANCIER_PHRASE =
+  "Titres & crypto, cash, fonds euro et ES dispo — hors immo et alternatifs.";
+
+/**
+ * Aide des trois cartes (D3). Une ligne, pas un panneau.
+ * Financier = listed + cashInvest + fondsEuro + esLiquid.
+ */
+export const HERO_MODE_HELP =
+  "Financier = titres & crypto + cash + fonds euro + ES dispo. Brut = tous les actifs. Net = brut − dettes.";
+
 export const HERO_NAV_SCOPE_TITLE: Record<HeroNavScope, string> = {
-  financier: "Titres, cash, fonds euro et épargne salariale disponible",
-  brut: "Total des actifs, passifs non déduits",
-  net: "Actifs moins passifs",
+  financier: HERO_FINANCIER_PHRASE,
+  brut: "Tous les actifs",
+  net: "Brut − dettes",
 };
 
 export function navOfPoint(p: DailyNavPoint, scope: HeroNavScope): number {
@@ -166,11 +177,19 @@ export function servedDailyNavFrom(
 }
 
 /**
- * Une ligne pour le « ? » de la carte de tête : périmètre de la carte
- * active + ce que la courbe contient. Pas un second panneau.
+ * Une ligne pour le « ? » : périmètre de la carte active + ce que la
+ * courbe contient (D8). Financier porte la phrase D3, pas l'ancien
+ * « titres, cash, fonds euro… ».
  */
 export function heroModeHelpLine(scope: HeroNavScope): string {
-  return `${HERO_NAV_SCOPE_TITLE[scope]}. La courbe inclut le capital investi.`;
+  const perimeter = HERO_NAV_SCOPE_TITLE[scope];
+  const base = perimeter.endsWith(".") ? perimeter : `${perimeter}.`;
+  return `${base} La courbe inclut le capital investi.`;
+}
+
+/** Aide complète des trois cartes — attribut `title` du « ? ». */
+export function heroModeHelpAll(): string {
+  return `${HERO_MODE_HELP} La courbe inclut le capital investi.`;
 }
 
 /**
