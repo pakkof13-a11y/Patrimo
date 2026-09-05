@@ -1,9 +1,9 @@
 /**
  * D11 — fraîcheur des cours (front).
  *
- * Le badge sous le hero lit un `fetchedAt` d'API. Tant que daily-nav ne
- * le publie pas, le composant reste monté et se tait : pas de date
- * inventée, pas de second fetch.
+ * Lit `daily-nav.fetchedAt` (Vague2 D4/D11, tip 34766b0). Absent ou
+ * illisible → pas de badge, pas de date inventée. Même seuil 24 h que
+ * `isCloseFetchStale` — ce module reste côté client (pas de Prisma).
  */
 
 export const QUOTE_STALE_AFTER_MS = 24 * 60 * 60 * 1000;

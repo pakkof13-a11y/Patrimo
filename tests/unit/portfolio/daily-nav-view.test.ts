@@ -503,6 +503,9 @@ describe("heroModeHelpLine — D3 copie Métier + D8", () => {
     expect(heroModeHelpLine("financier")).toBe(
       `${HERO_FINANCIER_PHRASE} La courbe inclut le capital investi.`
     );
+    expect(heroModeHelpLine("financier").startsWith(HERO_FINANCIER_PHRASE)).toBe(
+      true
+    );
     expect(heroModeHelpLine("brut")).toBe(
       "Tous les actifs. La courbe inclut le capital investi."
     );

@@ -9,7 +9,7 @@ import {
 describe("quoteStaleness — D11 badge sous le hero", () => {
   const now = new Date("2026-09-05T21:00:00.000Z");
 
-  it("sans fetchedAt (backend pas prêt) : pas de badge inventé", () => {
+  it("sans fetchedAt : pas de badge inventé", () => {
     expect(quoteStaleBadgeLabel(undefined, now)).toBeNull();
     expect(quoteStaleBadgeLabel(null, now)).toBeNull();
     expect(quoteStaleBadgeLabel("", now)).toBeNull();

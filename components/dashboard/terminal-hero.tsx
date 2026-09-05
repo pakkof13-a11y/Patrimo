@@ -48,7 +48,6 @@ import {
   HERO_NAV_SCOPE_LABEL,
   HERO_NAV_SCOPE_TITLE,
   HERO_NAV_SCOPES,
-  heroModeHelpAll,
   heroModeHelpLine,
 } from "@/app/lib/portfolio/daily-nav-view";
 
@@ -448,7 +447,7 @@ export function TerminalHero({
               tabIndex={0}
               role="note"
               data-testid="hero-mode-help"
-              title={heroModeHelpAll()}
+              title={heroModeHelpLine(mode)}
               aria-label={heroModeHelpLine(mode)}
             >
               ?

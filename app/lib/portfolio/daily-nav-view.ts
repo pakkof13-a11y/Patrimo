@@ -187,7 +187,7 @@ export function heroModeHelpLine(scope: HeroNavScope): string {
   return `${base} La courbe inclut le capital investi.`;
 }
 
-/** Aide complète des trois cartes — attribut `title` du « ? ». */
+/** Aide des trois cartes (tests / copie de référence). Le « ? » affiche `heroModeHelpLine`. */
 export function heroModeHelpAll(): string {
   return `${HERO_MODE_HELP} La courbe inclut le capital investi.`;
 }
