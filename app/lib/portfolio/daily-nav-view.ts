@@ -33,6 +33,21 @@ export const HERO_NAV_SCOPE_LABEL: Record<HeroNavScope, string> = {
   net: "Net",
 };
 
+/**
+ * Le titre de la carte de tête, qui doit nommer ce que le chiffre mesure.
+ *
+ * « Patrimoine total » surmontait indifféremment les trois cartes, y compris
+ * le Financier — qui n'est pas un total mais un sous-ensemble : ni immobilier,
+ * ni alternatifs. Le titre affirmait donc l'exhaustivité au-dessus d'un chiffre
+ * partiel, et le camembert d'allocation, lui, répartissait bien le patrimoine
+ * entier — deux périmètres sur le même écran, sans que rien ne les distingue.
+ */
+export const HERO_NAV_SCOPE_HEADING: Record<HeroNavScope, string> = {
+  financier: "Patrimoine financier",
+  brut: "Patrimoine brut",
+  net: "Patrimoine net",
+};
+
 export const HERO_NAV_SCOPE_TITLE: Record<HeroNavScope, string> = {
   financier: "Titres, cash, fonds euro et épargne salariale disponible",
   brut: "Total des actifs, passifs non déduits",

@@ -134,29 +134,6 @@ const METRIC_CHOICES: {
 ];
 
 
-/**
- * Échelle de lecture — quotidienne ou horaire.
- *
- * Proposée sur la seule fenêtre de sept jours : c'est là que l'heure a un sens,
- * et la collecte horaire ne remonte de toute façon pas plus loin. Le choix est
- * volontairement local et non mémorisé — c'est une façon de regarder, pas un
- * réglage de compte, et le mémoriser ferait rouvrir l'écran sur une courbe que
- * l'utilisateur n'a pas demandée.
- *
- * La courbe quotidienne reste le défaut : l'intraday s'ajoute au parcours, il
- * ne le remplace pas.
- */
-type EvolutionScale = "daily" | "intraday";
-
-const SCALE_CHOICES: { id: EvolutionScale; label: string; title: string }[] = [
-  { id: "daily", label: "Jour", title: "Un point par jour — historique complet" },
-  {
-    id: "intraday",
-    label: "Heure",
-    title: "Un point par heure, sur les observations réellement collectées",
-  },
-];
-
 const VERSUS_CHOICES: {
   id: EvolutionBenchmark;
   label: string;
@@ -290,15 +267,20 @@ export function PortfolioEvolutionPanel({
   const envelope = prefs.envelope ?? null;
 
   /*
-    L'échelle n'est pas mémorisée avec les autres préférences : c'est une façon
-    de regarder sur l'instant, pas un réglage de compte. Elle retombe donc sur
-    « Jour » — la courbe de référence — à chaque ouverture.
+    Plus d'échelle horaire sur ce tableau de bord.
+
+    Le sélecteur Jour/Heure basculait sur un second moteur : la vue horaire ne
+    sait produire que les actifs bruts, si bien qu'un clic remplaçait une
+    courbe Financier à −373 € par une courbe brute à +15 000 € — deux
+    périmètres, deux moteurs, aucun avertissement. `getDailyNav` n'a pas de
+    grain horaire, et lui en inventer un pour tenir la comparaison aurait
+    fabriqué de la donnée.
+
+    L'intraday n'est pas démonté pour autant : il garde son sens là où une
+    seule ligne est cotée — sur la fiche d'un actif — et ce chemin-là n'est pas
+    touché. C'est l'agrégat patrimonial qui ne se lit pas à l'heure.
   */
-  const [scale, setScale] = useState<EvolutionScale>("daily");
-  // L'heure n'a de sens que sur la fenêtre courte, la seule que la collecte
-  // horaire couvre. Ailleurs, le choix disparaît et la lecture reste quotidienne.
-  const scaleAvailable = range === "7d";
-  const showIntraday = scaleAvailable && scale === "intraday";
+  const showIntraday = false;
 
   const activeNavScope: HeroNavScope = navScope ?? "financier";
   /*
@@ -638,15 +620,6 @@ export function PortfolioEvolutionPanel({
         </div>
 
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
-          {scaleAvailable && (
-            <Segmented
-              items={SCALE_CHOICES}
-              value={scale}
-              onChange={setScale}
-              ariaLabel="Échelle de lecture"
-              testIdPrefix="evolution-scale"
-            />
-          )}
           {/*
             La classe commande, l'enveloppe précise.
 

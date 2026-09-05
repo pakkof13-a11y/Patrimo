@@ -23,7 +23,10 @@ import {
   heroWindowChange,
   heroWindowReference,
 } from "@/app/lib/portfolio/hero-range";
-import { EVOLUTION_RANGE_CHIPS as RANGES } from "@/app/lib/ui/evolution-ranges";
+import {
+  EVOLUTION_RANGE_CHIPS as RANGES,
+  evolutionRangePeriodLabel,
+} from "@/app/lib/ui/evolution-ranges";
 import {
   heroAttribution,
   heroEventMarkers,
@@ -40,6 +43,7 @@ import {
   formatValuationTimeParis,
 } from "@/app/lib/ui/hero-format";
 import {
+  HERO_NAV_SCOPE_HEADING,
   HERO_NAV_SCOPE_LABEL,
   HERO_NAV_SCOPE_TITLE,
   HERO_NAV_SCOPES,
@@ -407,7 +411,7 @@ export function TerminalHero({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-[var(--space-2)]">
             <h2 id="hero-heading" className="text-label">
-              Patrimoine total
+              {HERO_NAV_SCOPE_HEADING[mode]}
             </h2>
             <span
               className={cn(
@@ -996,6 +1000,15 @@ export function TerminalKpiRow({
                       {formatPct(pct)}
                     </span>
                   )}
+                  {/*
+                    Sur quoi porte cette variation. La période ne vivait que
+                    dans `data-range`, invisible à l'écran : deux tuiles
+                    voisines pouvaient annoncer des horizons différents sans
+                    que rien ne le montre.
+                  */}
+                  <span className="shrink-0 truncate text-[var(--foreground-faint)]">
+                    {evolutionRangePeriodLabel(range)}
+                  </span>
                 </>
               ) : (
                 /*
