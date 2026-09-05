@@ -13,10 +13,10 @@ import {
   startOfRange,
   type EvolutionRange,
 } from "./evolution-aggregate";
-import {
-  parseDayKey,
-  type DailyNavPoint,
-  type DailyNavScope,
+import { parseDayKey } from "./historical/day-key";
+import type {
+  DailyNavPoint,
+  DailyNavScope,
 } from "./historical/get-daily-nav";
 import type { HistoryPoint } from "../types/ui";
 

@@ -13,6 +13,9 @@
  */
 
 import { parisDayKey } from "../../dates/paris";
+import { parseDayKey } from "./day-key";
+
+export { parseDayKey } from "./day-key";
 import {
   PATRIMONY_ASSET_POCKETS,
   type PatrimonyAssetPocket,
@@ -191,13 +194,6 @@ export function dailyNavFromSeries(
     byAssetClass: p.byAssetClass,
     flowsByAssetClass: p.flowsByAssetClass,
   }));
-}
-
-const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-export function parseDayKey(raw: string | null | undefined): DayKey | null {
-  if (!raw || !DAY_KEY_RE.test(raw)) return null;
-  return raw;
 }
 
 export function defaultDailyNavWindow(now = new Date()): {
