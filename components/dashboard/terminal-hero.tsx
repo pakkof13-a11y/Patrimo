@@ -20,7 +20,7 @@ import {
   type EvolutionRange,
 } from "@/app/lib/portfolio/evolution-aggregate";
 import {
-  heroRangeSubtitle,
+  heroPeriodLabel,
   heroWindowChange,
   heroWindowReference,
 } from "@/app/lib/portfolio/hero-range";
@@ -48,6 +48,7 @@ import {
   HERO_NAV_SCOPE_LABEL,
   HERO_NAV_SCOPE_TITLE,
   HERO_NAV_SCOPES,
+  heroModeHelpLine,
 } from "@/app/lib/portfolio/daily-nav-view";
 
 function formatPct(v: number): string {
@@ -250,6 +251,11 @@ export function TerminalHero({
   const periodOriginIso = servedNavFrom
     ? endOfParisDay(servedNavFrom).toISOString()
     : undefined;
+  /*
+    Une seule chaîne : `daily-nav.from` servi / `points[0].day`. Vide tant
+    que « Tout » n'a pas sa réponse — pas le from 1A encore en vol.
+  */
+  const periodLabel = heroPeriodLabel(range, periodOriginIso);
 
   /*
     D'où vient la variation : du marché, ou des capitaux apportés.
@@ -435,8 +441,8 @@ export function TerminalHero({
               tabIndex={0}
               role="note"
               data-testid="hero-mode-help"
-              title="Financier = titres, cash, fonds euro, ES disponible. Brut = tous les actifs. Net = brut − dettes."
-              aria-label="Financier égale titres, cash, fonds euro et épargne salariale disponible. Brut égale tous les actifs. Net égale brut moins dettes."
+              title={heroModeHelpLine(mode)}
+              aria-label={heroModeHelpLine(mode)}
             >
               ?
             </span>
@@ -632,7 +638,7 @@ export function TerminalHero({
                   className="text-[var(--foreground-secondary)]"
                   data-testid="hero-window-label"
                 >
-                  {heroRangeSubtitle(range, periodOriginIso)}
+                  {periodLabel}
                 </span>
 
                 {/*
@@ -786,7 +792,7 @@ export function TerminalHero({
             className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
             data-testid="hero-range-subtitle"
           >
-            {heroRangeSubtitle(range, periodOriginIso)}
+            {periodLabel}
           </p>
 
           <div className="h-[5.5rem] w-full min-w-0 sm:h-[6.5rem]">

@@ -26,9 +26,12 @@ import {
   rebaseToCommonBase100,
   toVsIndexPercentPoints,
   vsIndexAnchorDay,
+  vsIndexChartKind,
   vsIndexDayKey,
   vsIndexGapPct,
+  vsIndexHasOverlay,
   windowVsIndexNav,
+  INDEX_UNAVAILABLE_TITLE,
   type VsIndexLevel,
 } from "@/app/lib/portfolio/vs-index-series";
 
@@ -308,6 +311,48 @@ describe("fenêtre = servedFrom…to, pas la borne demandée", () => {
   });
 });
 
+describe("vsIndexChartKind — pas de +0 % fantôme", () => {
+  it("Versus éteint → NAV seulement, jamais un graphe %", () => {
+    expect(
+      vsIndexChartKind({ versus: "none", indexError: false, hasOverlay: true })
+    ).toBe("nav");
+    expect(
+      vsIndexChartKind({ versus: "none", indexError: true, hasOverlay: false })
+    ).toBe("nav");
+  });
+
+  it("403 / erreur fournisseur → empty state, pas une ligne plate à +0 %", () => {
+    expect(
+      vsIndexChartKind({ versus: "index", indexError: true, hasOverlay: false })
+    ).toBe("index-unavailable");
+    expect(
+      vsIndexChartKind({ versus: "index", indexError: true, hasOverlay: true })
+    ).toBe("index-unavailable");
+    expect(INDEX_UNAVAILABLE_TITLE).toBe("Indice indisponible");
+  });
+
+  it("overlay off (vide / 429 sans erreur HTTP) → NAV seule", () => {
+    expect(
+      vsIndexChartKind({ versus: "index", indexError: false, hasOverlay: false })
+    ).toBe("nav");
+    expect(vsIndexHasOverlay([{ portfolioPct: 0 }, { portfolioPct: 10 }])).toBe(
+      false
+    );
+  });
+
+  it("overlay présent → graphe %", () => {
+    expect(
+      vsIndexChartKind({ versus: "index", indexError: false, hasOverlay: true })
+    ).toBe("percent");
+    expect(
+      vsIndexHasOverlay([
+        { portfolioPct: 0, benchmarkPct: 0 },
+        { portfolioPct: 10, benchmarkPct: 4 },
+      ])
+    ).toBe(true);
+  });
+});
+
 describe("toVsIndexPercentPoints", () => {
   it("expose les % (base 100 − 100) que le graphe Versus lit", () => {
     const pct = toVsIndexPercentPoints(
@@ -346,6 +391,9 @@ describe("contrat Finance — gardes structurelles", () => {
     expect(src).not.toMatch(/buildBenchmarkSeries/);
     expect(src).toMatch(/servedNavFrom/);
     expect(src).toMatch(/jamais `navQueryFrom`/);
+    expect(src).toMatch(/vsIndexChartKind/);
+    expect(src).toMatch(/INDEX_UNAVAILABLE_TITLE/);
+    expect(src).not.toMatch(/toPercentSeries\s*\(/);
   });
 
   it("un samedi n'est pas la moyenne vendredi–lundi", () => {

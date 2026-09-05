@@ -23,9 +23,12 @@ import {
 import { parisDayKey } from "@/app/lib/dates/paris";
 import {
   dailyNavToVsIndexLevels,
+  INDEX_UNAVAILABLE_TITLE,
   rebaseToCommonBase100,
   toVsIndexPercentPoints,
+  vsIndexChartKind,
   vsIndexGapPct,
+  vsIndexHasOverlay,
   windowVsIndexNav,
 } from "@/app/lib/portfolio/vs-index-series";
 import { EVOLUTION_RANGE_CHIPS as RANGES } from "@/app/lib/ui/evolution-ranges";
@@ -63,6 +66,7 @@ import {
 import {
   dailyNavScopeForClass,
   pocketChartLineType,
+  pocketEmptyState,
   pocketSeriesTooShort,
   toPocketEvolutionPoints,
   windowPocketDailyNav,
@@ -359,14 +363,9 @@ export function PortfolioEvolutionPanel({
   const pocketTooShort =
     pocketReady && pocketSeriesTooShort(pocketPoints);
 
-  /*
-    Courbe Finary : série dense getDailyNav, sauf filtre de classe / vs indice
-    / intraday, qui gardent l'historique existant.
-  */
-  const useDailyNavCurve =
+  const canUseDailyNavSeries =
     Boolean(dailyNav && dailyNav.length > 1) &&
     !assetClass &&
-    versus === "none" &&
     !showIntraday;
 
   const navWindowed = useMemo(() => {
@@ -576,6 +575,18 @@ export function PortfolioEvolutionPanel({
     () => (versus === "none" ? [] : toVsIndexPercentPoints(vsIndexSeries)),
     [vsIndexSeries, versus]
   );
+  const hasIndexOverlay = vsIndexHasOverlay(percentPoints);
+  const chartKind = vsIndexChartKind({
+    versus,
+    indexError: Boolean(wantIndex && indexQ.isError),
+    hasOverlay: hasIndexOverlay,
+  });
+  /*
+    NAV quotidienne dès que Versus n'a pas d'overlay à tracer : éteint,
+    indice en erreur, ou overlay absent. Interdit dès que le graphe %
+    est légitime — sinon on superposerait deux lectures.
+  */
+  const useDailyNavCurve = canUseDailyNavSeries && chartKind !== "percent";
 
   const gap = useMemo(
     () => (versus === "none" ? null : vsIndexGapPct(vsIndexSeries)),
@@ -591,18 +602,20 @@ export function PortfolioEvolutionPanel({
     [usePocketCurve, pocketPoints]
   );
   const headlinePct =
-    percentPoints.length > 0
+    chartKind === "percent" && percentPoints.length > 0
       ? percentPoints[percentPoints.length - 1]!.portfolioPct
-      : 0;
+      : null;
 
   const showPanelLoading = Boolean(
     loading ||
       (wantPocketDailyNav && !pocketReady && !pocketNavQ.isError)
   );
   const empty = !showPanelLoading && history.length === 0;
+  const pocketEmpty = pocketReady ? pocketEmptyState(pocketPoints.length) : null;
   /*
     « Période trop courte » seulement après clamp : moins de deux points
     sur la fenêtre servie. Un `from` trop ancien n'est plus une absence.
+    0 point de poche → copie dédiée, pas le générique.
   */
   const noPoints =
     !showPanelLoading &&
@@ -610,7 +623,9 @@ export function PortfolioEvolutionPanel({
     (wantPocketDailyNav
       ? pocketTooShort
       : versus === "index"
-        ? percentPoints.length < 2 && rawPoints.length === 0 && vsNavWindowed.length < 2
+        ? chartKind === "percent"
+          ? percentPoints.length < 2
+          : rawPoints.length === 0 && vsNavWindowed.length < 2 && navChart.length < 2
         : rawPoints.length === 0);
 
   return (
@@ -622,6 +637,7 @@ export function PortfolioEvolutionPanel({
       data-testid="portfolio-evolution-panel"
       data-nav-scope={activeNavScope}
       data-pocket-class={assetClass ?? "all"}
+      data-chart-kind={chartKind}
       data-vs-base-day={versus === "index" ? vsIndexSeries[0]?.day : undefined}
       data-line-type={
         usePocketCurve ? pocketLineType : useDailyNavCurve ? "linear" : undefined
@@ -692,27 +708,18 @@ export function PortfolioEvolutionPanel({
                 {`${pocketSummary.pct >= 0 ? "+" : ""}${pocketSummary.pct.toFixed(1)} % de rendement`}
               </div>
             </div>
-          ) : summary && points.length > 0 ? (
+          ) : summary && points.length > 0 && chartKind !== "percent" ? (
             <div className="shrink-0 text-right" data-testid="evolution-headline">
               <div
                 className={cn(
                   "text-lg font-bold tabular-nums sm:text-xl",
-                  (versus === "none" ? summary.delta : headlinePct) >= 0
+                  summary.delta >= 0
                     ? "text-[var(--success)]"
                     : "text-[var(--danger)]"
                 )}
               >
-                {versus === "none" ? (
-                  <>
-                    {summary.delta >= 0 ? "+" : ""}
-                    {formatCurrency(summary.delta, baseCurrency)}
-                  </>
-                ) : (
-                  <>
-                    {headlinePct >= 0 ? "+" : ""}
-                    {headlinePct.toFixed(1)}&nbsp;%
-                  </>
-                )}
+                {summary.delta >= 0 ? "+" : ""}
+                {formatCurrency(summary.delta, baseCurrency)}
               </div>
               <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
                 {versus === "none"
@@ -727,7 +734,26 @@ export function PortfolioEvolutionPanel({
                        l'autre.
                     */
                     `${summary.pct >= 0 ? "+" : ""}${summary.pct.toFixed(1)} % de rendement`
-                  : `Vs ${benchmarkDisplayName}`}
+                  : chartKind === "index-unavailable"
+                    ? INDEX_UNAVAILABLE_TITLE
+                    : `Vs ${benchmarkDisplayName}`}
+              </div>
+            </div>
+          ) : summary && points.length > 0 && headlinePct != null ? (
+            <div className="shrink-0 text-right" data-testid="evolution-headline">
+              <div
+                className={cn(
+                  "text-lg font-bold tabular-nums sm:text-xl",
+                  headlinePct >= 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--danger)]"
+                )}
+              >
+                {headlinePct >= 0 ? "+" : ""}
+                {headlinePct.toFixed(1)}&nbsp;%
+              </div>
+              <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
+                {`Vs ${benchmarkDisplayName}`}
               </div>
             </div>
           ) : null
@@ -909,6 +935,14 @@ export function PortfolioEvolutionPanel({
               title="Historique encore vide"
               description="Actualisez les cours pour enregistrer un premier point de courbe."
             />
+          ) : wantPocketDailyNav && pocketEmpty?.kind === "empty" ? (
+            <EmptyPlaceholder
+              compact
+              testId="evolution-pocket-empty"
+              emptyKind="pocket"
+              title={pocketEmpty.title}
+              description={pocketEmpty.description}
+            />
           ) : noPoints ? (
             /*
               Deux raisons très différentes de n'avoir aucun point, et une seule
@@ -932,18 +966,28 @@ export function PortfolioEvolutionPanel({
                 description="Choisissez une plage plus large ou attendez davantage d'historique."
               />
             )
+          ) : chartKind === "index-unavailable" &&
+            navChart.length < 2 &&
+            points.length < 2 ? (
+            <EmptyPlaceholder
+              compact
+              testId="evolution-index-unavailable"
+              emptyKind="index"
+              title={INDEX_UNAVAILABLE_TITLE}
+              description="Le fournisseur d’indice n’a pas répondu. La comparaison est masquée — aucun +0 % inventé."
+            />
           ) : versus === "none" && usePocketCurve ? (
             <PortfolioValueChart
               data={pocketPoints}
               baseCurrency={baseCurrency}
               lineType={pocketLineType}
             />
-          ) : versus === "none" && useDailyNavCurve ? (
+          ) : chartKind !== "percent" && useDailyNavCurve ? (
             <DailyNavChart
               data={navChart}
               baseCurrency={baseCurrency}
             />
-          ) : versus === "none" ? (
+          ) : chartKind !== "percent" ? (
             <PortfolioValueChart
               data={points}
               baseCurrency={baseCurrency}
@@ -980,7 +1024,24 @@ export function PortfolioEvolutionPanel({
         </p>
       )}
 
-      {versus !== "none" && !empty && !noPoints && (percentPoints.length > 0 || points.length > 0) && (
+      {chartKind === "index-unavailable" &&
+        !empty &&
+        (navChart.length >= 2 || points.length >= 2) && (
+        <p
+          className="text-meta mt-1.5 shrink-0"
+          data-testid="evolution-index-unavailable"
+          data-empty-kind="index"
+        >
+          {INDEX_UNAVAILABLE_TITLE}
+          {" — comparaison masquée, courbe NAV seule."}
+        </p>
+      )}
+
+      {versus !== "none" &&
+        chartKind === "percent" &&
+        !empty &&
+        !noPoints &&
+        (percentPoints.length > 0 || points.length > 0) && (
         <p className="text-meta mt-1.5 shrink-0" data-testid="evolution-vs-note">
           Vs {benchmarkDisplayName}
           {gap ? (
@@ -1008,8 +1069,6 @@ export function PortfolioEvolutionPanel({
             </>
           ) : wantIndex && indexQ.isLoading ? (
             " · chargement de l'indice…"
-          ) : wantIndex && indexQ.isError ? (
-            " · indice indisponible"
           ) : (
             ""
           )}

@@ -134,15 +134,24 @@ function previousDayKey(day: string): string {
   return parisDayKey(new Date(start));
 }
 
+function firstPointDay(
+  points: readonly unknown[] | undefined
+): string | undefined {
+  const first = points?.[0];
+  if (!first || typeof first !== "object") return undefined;
+  const day = "day" in first ? (first as { day?: unknown }).day : undefined;
+  return typeof day === "string" ? (parseDayKey(day) ?? undefined) : undefined;
+}
+
 /**
  * Borne `from` **servie** par `GET /api/portfolio/daily-nav`.
  *
- * Jamais la borne demandée (`dailyNavQueryWindow`) : `getDailyNav` ramène
- * une demande trop ancienne à la première observation du scope. Jamais une
- * réponse encore en vol — `keepPreviousData` d'une fenêtre 1A ferait lire
- * « sept. 2025 » pendant que « Tout » charge, puis « oct. 2022 » à
- * l'arrivée. On n'affiche la date que lorsque la réponse courante est
- * posée, avec des points.
+ * Uniquement `result.from` ou, à défaut, `points[0].day`. Jamais la borne
+ * demandée (`dailyNavQueryWindow`) : `getDailyNav` ramène une demande trop
+ * ancienne à la première observation du scope. Jamais une réponse encore
+ * en vol — `keepPreviousData` d'une fenêtre 1A ferait lire « sept. 2025 »
+ * pendant que « Tout » charge, puis « oct. 2022 » à l'arrivée. On n'affiche
+ * la date que lorsque la réponse courante est posée, avec des points.
  */
 export function servedDailyNavFrom(
   result:
@@ -153,7 +162,15 @@ export function servedDailyNavFrom(
 ): string | undefined {
   if (opts?.isPlaceholderData) return undefined;
   if (!result?.points?.length) return undefined;
-  return parseDayKey(result.from) ?? undefined;
+  return parseDayKey(result.from) ?? firstPointDay(result.points);
+}
+
+/**
+ * Une ligne pour le « ? » de la carte de tête : périmètre de la carte
+ * active + ce que la courbe contient. Pas un second panneau.
+ */
+export function heroModeHelpLine(scope: HeroNavScope): string {
+  return `${HERO_NAV_SCOPE_TITLE[scope]}. La courbe inclut le capital investi.`;
 }
 
 /**

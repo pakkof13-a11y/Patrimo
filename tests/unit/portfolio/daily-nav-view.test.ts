@@ -10,6 +10,7 @@ import {
   headerMarketDelta,
   navOfPoint,
   servedDailyNavFrom,
+  heroModeHelpLine,
   sumDailyDeltas,
   toDailyNavChartPoints,
   windowDailyNav,
@@ -458,5 +459,49 @@ describe("servedDailyNavFrom — borne servie, pas demandée", () => {
     expect(
       servedDailyNavFrom({ from: "pas-une-date", points: [{}] })
     ).toBeUndefined();
+  });
+
+  it("sans from servi, retombe sur points[0].day — jamais la borne demandée", () => {
+    const requested = dailyNavQueryWindow("1y", "2026-09-03", "2022-10-15");
+    expect(
+      servedDailyNavFrom({
+        from: requested.from,
+        points: [{ day: "2022-10-15" }],
+      })
+    ).toBe(requested.from);
+    expect(
+      servedDailyNavFrom({
+        from: null,
+        points: [{ day: "2022-10-15" }],
+      })
+    ).toBe("2022-10-15");
+    expect(
+      servedDailyNavFrom({
+        points: [{ day: "2022-10-15" }, { day: "2022-10-16" }],
+      })
+    ).toBe("2022-10-15");
+  });
+
+  it("un from 1A en vol n'est pas remplacé par points[0] de cette même réponse", () => {
+    expect(
+      servedDailyNavFrom(
+        { from: null, points: [{ day: "2025-09-03" }] },
+        { isPlaceholderData: true }
+      )
+    ).toBeUndefined();
+  });
+});
+
+describe("heroModeHelpLine — une ligne, carte active", () => {
+  it("nomme le périmètre de la carte et ce que la courbe contient", () => {
+    expect(heroModeHelpLine("financier")).toBe(
+      "Titres, cash, fonds euro et épargne salariale disponible. La courbe inclut le capital investi."
+    );
+    expect(heroModeHelpLine("brut")).toBe(
+      "Total des actifs, passifs non déduits. La courbe inclut le capital investi."
+    );
+    expect(heroModeHelpLine("net")).toBe(
+      "Actifs moins passifs. La courbe inclut le capital investi."
+    );
   });
 });

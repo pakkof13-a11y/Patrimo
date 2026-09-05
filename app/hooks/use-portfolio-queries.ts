@@ -46,7 +46,14 @@ export function usePortfolioHistoryQuery(baseCurrency: string) {
 
 const DAILY_NAV_STALE_MS = 60_000;
 
-export type DailyNavQueryResult = import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavResult;
+export type DailyNavQueryResult =
+  import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavResult & {
+    /**
+     * Horodatage des clôtures (D11). Optionnel tant que le backend ne le
+     * publie pas — le badge hero se tait plutôt que d'inventer une date.
+     */
+    fetchedAt?: string | null;
+  };
 export type DailyNavQueryScope = import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavScope;
 
 /**

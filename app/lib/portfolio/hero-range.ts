@@ -164,3 +164,19 @@ export function heroRangeSubtitle(
     }
   }
 }
+
+/**
+ * Libellé de période affiché — **une** chaîne, jamais la borne demandée
+ * ni un `from` 1A encore en vol (`keepPreviousData`).
+ *
+ * « Tout » n'annonce le mois que lorsque `servedFrom` (`daily-nav.from` /
+ * `points[0].day`) est posé. Tant que la réponse n'est pas là, rien : pas
+ * « depuis l'origine » qui céderait ensuite à « depuis octobre 2022 ».
+ */
+export function heroPeriodLabel(
+  range: EvolutionRange,
+  servedFrom: string | undefined
+): string {
+  if (range === "all" && !servedFrom) return "";
+  return heroRangeSubtitle(range, servedFrom);
+}

@@ -116,6 +116,35 @@ export function pocketSeriesTooShort(
   return points.length < MIN_POCKET_SERIES_POINTS;
 }
 
+export const POCKET_EMPTY_TITLE = "Pas encore d’historique sur cette poche";
+export const PERIOD_TOO_SHORT_TITLE = "Période trop courte";
+
+/**
+ * Copie d'écran après clamp : 0 point n'est pas « période trop courte ».
+ * Une poche née hier n'a simplement pas d'historique à tracer.
+ */
+export function pocketEmptyState(pointCount: number): {
+  kind: "empty" | "too-short";
+  title: string;
+  description: string;
+} | null {
+  if (pointCount >= MIN_POCKET_SERIES_POINTS) return null;
+  if (pointCount === 0) {
+    return {
+      kind: "empty",
+      title: POCKET_EMPTY_TITLE,
+      description:
+        "Cette poche n’a pas encore de valorisation sur la fenêtre affichée.",
+    };
+  }
+  return {
+    kind: "too-short",
+    title: PERIOD_TOO_SHORT_TITLE,
+    description:
+      "Choisissez une plage plus large ou attendez davantage d'historique.",
+  };
+}
+
 /**
  * Fenêtre UI (6M, Tout, …) sur une série déjà clampée par `getDailyNav`.
  *
