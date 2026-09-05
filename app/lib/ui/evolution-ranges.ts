@@ -15,6 +15,38 @@ import type { EvolutionRange } from "@/app/lib/portfolio/evolution-aggregate";
  * carte de tête à importer tout le graphe du panneau — Recharts inclus — pour
  * huit libellés.
  */
+/**
+ * La période écrite en toutes lettres, pour accompagner une variation.
+ *
+ * Un « −872 € » ne dit pas sur quoi il porte. Tant que la fenêtre n'était
+ * lisible que dans un attribut `data-range`, deux tuiles voisines pouvaient
+ * afficher une variation à sept jours et un cumul depuis l'origine sans que
+ * rien ne les sépare — le P&L latent à +14 606 € contre des titres à −872 €,
+ * deux chiffres justes qui se contredisaient en apparence.
+ *
+ * Le libellé décrit la **variation**, pas le montant qui la surmonte.
+ */
+export function evolutionRangePeriodLabel(range: EvolutionRange): string {
+  switch (range) {
+    case "7d":
+      return "sur 7 jours";
+    case "1m":
+      return "sur 1 mois";
+    case "3m":
+      return "sur 3 mois";
+    case "6m":
+      return "sur 6 mois";
+    case "ytd":
+      return "depuis le 1er janvier";
+    case "1y":
+      return "sur 1 an";
+    case "5y":
+      return "sur 5 ans";
+    case "all":
+      return "depuis l'origine";
+  }
+}
+
 export const EVOLUTION_RANGE_CHIPS: { id: EvolutionRange; label: string }[] = [
   { id: "7d", label: "7J" },
   { id: "1m", label: "1M" },
