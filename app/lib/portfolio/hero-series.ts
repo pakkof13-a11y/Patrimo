@@ -16,8 +16,8 @@
 
 import type { HistoryPoint } from "@/app/lib/types/ui";
 
-/** Lecture demandée par le sélecteur de la carte. */
-export type HeroMode = "net" | "gross";
+/** Lecture demandée par les cartes de tête — défaut produit : Financier. */
+export type HeroMode = "financier" | "net" | "brut";
 
 export type HeroSeriesPoint = {
   /** Rang dans la série tracée, et dans l'historique dont elle vient. */
@@ -102,7 +102,12 @@ export function buildHeroSeries(
         ? undefined
         : ((value - previous) / Math.abs(previous)) * 100;
 
-    const flow = finite(p.externalFlowsBase);
+    /*
+      Pastilles = série de transactions cotées, pas les flux externes.
+      Un achat immo reste visible dans Marché/Flux (`externalFlows`) sans
+      poser de pastille sur la courbe Financier.
+    */
+    const flow = finite(p.transactionFlowBase);
 
     const point: HeroSeriesPoint = {
       index,

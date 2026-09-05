@@ -22,6 +22,7 @@ import {
   type EvolutionRange,
   type IndexClosePoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
+import { EVOLUTION_RANGE_CHIPS as RANGES } from "@/app/lib/ui/evolution-ranges";
 import {
   DEFAULT_EVOLUTION_PREFS,
   loadEvolutionPrefs,
@@ -30,35 +31,34 @@ import {
   type EvolutionBenchmark,
   type EvolutionPrefsV5,
   type EvolutionAssetClass,
-  type EvolutionScope,
 } from "@/app/lib/portfolio/evolution-prefs";
 import {
   MARKET_INDICES,
   marketIndexLabel,
   type MarketIndexKey,
 } from "@/app/lib/portfolio/market-indices";
+import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
 import {
   PortfolioPercentChart,
   PortfolioValueChart,
+  DailyNavChart,
 } from "@/components/dashboard/portfolio-evolution-charts";
 import { IntradaySection } from "@/components/dashboard/intraday-section";
+import type { DailyNavPoint } from "@/app/lib/portfolio/historical/get-daily-nav";
+import {
+  headerFlux,
+  headerMarketDelta,
+  HERO_NAV_SCOPE_LABEL,
+  toDailyNavChartPoints,
+  windowDailyNav,
+  type HeroNavScope,
+} from "@/app/lib/portfolio/daily-nav-view";
 
 const emptySubscribe = () => () => undefined;
 
 function useIsClient() {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
 }
-
-const RANGES: { id: EvolutionRange; label: string }[] = [
-  { id: "7d", label: "7J" },
-  { id: "1m", label: "1M" },
-  { id: "3m", label: "3M" },
-  { id: "6m", label: "6M" },
-  { id: "ytd", label: "YTD" },
-  { id: "1y", label: "1A" },
-  { id: "5y", label: "5A" },
-  { id: "all", label: "Tout" },
-];
 
 /**
  * Classes proposées au sélecteur.
@@ -133,22 +133,6 @@ const METRIC_CHOICES: {
   },
 ];
 
-const SCOPE_CHOICES: {
-  id: EvolutionScope;
-  label: string;
-  title: string;
-}[] = [
-  {
-    id: "gross",
-    label: "Portefeuille",
-    title: "Valeur brute des actifs — titres, cash, alternatifs, épargne salariale",
-  },
-  {
-    id: "net",
-    label: "Patrimoine net",
-    title: "Valeur brute des actifs moins le capital restant dû",
-  },
-];
 
 /**
  * Échelle de lecture — quotidienne ou horaire.
@@ -248,6 +232,8 @@ function Segmented<T extends string>({
  */
 export function PortfolioEvolutionPanel({
   history,
+  dailyNav,
+  navScope,
   baseCurrency,
   loading,
   className,
@@ -255,6 +241,9 @@ export function PortfolioEvolutionPanel({
   onRangeChange,
 }: {
   history: HistoryPoint[];
+  /** Série dense T-05 — courbe par défaut (Financier / Brut / Net). */
+  dailyNav?: DailyNavPoint[];
+  navScope?: HeroNavScope;
   baseCurrency: string;
   loading?: boolean;
   className?: string;
@@ -285,7 +274,17 @@ export function PortfolioEvolutionPanel({
     la valeur qui fait foi à l'écran est celle du tableau de bord, et toute
     écriture la réinjecte (voir `update`).
   */
-  const { versus, indexKey, scope } = prefs;
+  const { versus, indexKey } = prefs;
+  /*
+    Brut seulement.
+
+    Net/Brut vit sur la carte de tête : le reproposer ici faisait deux
+    sélecteurs pour la même question, et le second n'avait rien à dire que
+    le premier n'ait déjà tranché. La courbe d'évolution trace les actifs
+    bruts — c'est ce que « portefeuille » désigne, et ce qui se compare à
+    un indice.
+  */
+  const scope = "gross" as const;
   const assetClass = prefs.assetClass ?? null;
   const classMetric = prefs.classMetric ?? "value";
   const envelope = prefs.envelope ?? null;
@@ -300,6 +299,41 @@ export function PortfolioEvolutionPanel({
   // horaire couvre. Ailleurs, le choix disparaît et la lecture reste quotidienne.
   const scaleAvailable = range === "7d";
   const showIntraday = scaleAvailable && scale === "intraday";
+
+  const activeNavScope: HeroNavScope = navScope ?? "financier";
+  /*
+    Courbe Finary : série dense getDailyNav, sauf filtre de classe / vs indice
+    / intraday, qui gardent l'historique existant.
+  */
+  const useDailyNavCurve =
+    Boolean(dailyNav && dailyNav.length > 1) &&
+    !assetClass &&
+    versus === "none" &&
+    !showIntraday;
+
+  const navWindowed = useMemo(() => {
+    if (!dailyNav?.length) return [];
+    return windowDailyNav(
+      dailyNav,
+      range,
+      dailyNav[dailyNav.length - 1]!.day
+    );
+  }, [dailyNav, range]);
+
+  const navChart = useMemo(
+    () => toDailyNavChartPoints(navWindowed, activeNavScope),
+    [navWindowed, activeNavScope]
+  );
+
+  const navMarket = useMemo(
+    () => headerMarketDelta(navWindowed, activeNavScope),
+    [navWindowed, activeNavScope]
+  );
+
+  const navFlux = useMemo(
+    () => headerFlux(navWindowed, activeNavScope),
+    [navWindowed, activeNavScope]
+  );
 
   const update = (patch: Partial<EvolutionPrefsV5>) => {
     setPrefs((p) => {
@@ -329,7 +363,7 @@ export function PortfolioEvolutionPanel({
     });
   };
 
-  const firstDate = history[0]?.date ?? null;
+  const firstDate = dailyNav?.[0]?.day ?? history[0]?.date ?? null;
 
   /*
     Périodes proposées, selon la profondeur de l'historique.
@@ -380,7 +414,7 @@ export function PortfolioEvolutionPanel({
    */
   const unknownEnvelopeEur = useMemo(() => {
     if (!assetClass || !envelope) return 0;
-    const from = startOfRange(range);
+    const from = startOfRange(range, heroWindowReference(history));
     const fromT = from ? from.getTime() : -Infinity;
     let max = 0;
     for (const p of history) {
@@ -394,8 +428,14 @@ export function PortfolioEvolutionPanel({
   }, [history, assetClass, envelope, range]);
 
   const { points: rawPoints, interval } = useMemo(
-    () => buildEvolutionSeries(scopedHistory, range, "cumul"),
-    [scopedHistory, range]
+    () =>
+      buildEvolutionSeries(
+        scopedHistory,
+        range,
+        "cumul",
+        heroWindowReference(history)
+      ),
+    [scopedHistory, range, history]
   );
 
   // Mode "index" : récupère les clôtures réelles de l'indice choisi sur la
@@ -461,6 +501,7 @@ export function PortfolioEvolutionPanel({
         className
       )}
       data-testid="portfolio-evolution-panel"
+      data-nav-scope={activeNavScope}
     >
       <PanelHeader
         title="Évolution du portefeuille"
@@ -470,9 +511,9 @@ export function PortfolioEvolutionPanel({
               ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass} en ${envelope} — valeur`
               : assetClass
               ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass}${assetClass === "OBLIGATIONS" ? " (CTO)" : ""} — ${classMetric === "performance" ? "performance" : "valeur"}`
-              : scope === "net"
-                ? "Patrimoine net"
-                : "Actifs bruts"}
+              : useDailyNavCurve
+              ? `${HERO_NAV_SCOPE_LABEL[activeNavScope]} — NAV quotidienne`
+              : "Actifs bruts"}
             <span className="mx-1 opacity-40">·</span>
             {evolutionIntervalLabel(interval)}
             <span className="sr-only"> ({evolutionIntervalHint(interval)})</span>
@@ -485,7 +526,32 @@ export function PortfolioEvolutionPanel({
           </>
         }
         actions={
-          summary && points.length > 0 ? (
+          useDailyNavCurve && navMarket != null && navChart.length > 1 ? (
+            <div className="shrink-0 text-right" data-testid="evolution-headline">
+              <div
+                className={cn(
+                  "text-lg font-bold tabular-nums sm:text-xl",
+                  navMarket >= 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--danger)]"
+                )}
+                data-testid="evolution-headline-market"
+              >
+                {navMarket >= 0 ? "+" : ""}
+                {formatCurrency(navMarket, baseCurrency)}
+              </div>
+              <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
+                Δ marché {HERO_NAV_SCOPE_LABEL[activeNavScope].toLowerCase()}
+                {navFlux != null && navFlux !== 0 ? (
+                  <span data-testid="evolution-headline-flux">
+                    {" · Flux "}
+                    {navFlux >= 0 ? "+" : ""}
+                    {formatCurrency(navFlux, baseCurrency)}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : summary && points.length > 0 ? (
             <div className="shrink-0 text-right" data-testid="evolution-headline">
               <div
                 className={cn(
@@ -644,20 +710,6 @@ export function PortfolioEvolutionPanel({
               testIdPrefix="evolution-metric"
             />
           )}
-          {/*
-            Brut ou net ne se pose que sur le patrimoine entier : les dettes
-            n'appartiennent à aucune classe, et proposer « Crypto nette »
-            n'aurait pas de sens.
-          */}
-          {!assetClass && !envelope && (
-            <Segmented
-              items={SCOPE_CHOICES}
-              value={scope}
-              onChange={(v) => update({ scope: v })}
-              ariaLabel="Périmètre"
-              testIdPrefix="evolution-scope"
-            />
-          )}
           <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
             Vs
           </span>
@@ -747,6 +799,11 @@ export function PortfolioEvolutionPanel({
                 description="Choisissez une plage plus large ou attendez davantage d'historique."
               />
             )
+          ) : versus === "none" && useDailyNavCurve ? (
+            <DailyNavChart
+              data={navChart}
+              baseCurrency={baseCurrency}
+            />
           ) : versus === "none" ? (
             <PortfolioValueChart data={points} baseCurrency={baseCurrency} />
           ) : (

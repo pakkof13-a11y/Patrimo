@@ -17,6 +17,7 @@ import { sparklineGeometry } from "@/app/lib/ui/sparkline-geometry";
  */
 export function Sparkline({
   values,
+  dates,
   stroke,
   fill = false,
   width = 64,
@@ -25,6 +26,12 @@ export function Sparkline({
   className,
 }: {
   values: number[];
+  /**
+   * Horodatages alignés sur `values`. Présents, ils placent les points sur
+   * l'axe du temps plutôt qu'à pas d'indice égal — un palier occupe alors
+   * la durée qu'il a vraiment duré.
+   */
+  dates?: Array<string | number | Date | null | undefined>;
   /** Couleur du trait — toujours un token (`var(--chart-…)`). */
   stroke: string;
   /** Aire dégradée sous la courbe (tuiles KPI, carte patrimoine). */
@@ -37,9 +44,9 @@ export function Sparkline({
   const gradientId = useId();
 
   const { line, area } = useMemo(() => {
-    const geom = sparklineGeometry(values, width, height, strokeWidth);
+    const geom = sparklineGeometry(values, width, height, strokeWidth, dates);
     return geom ?? { line: "", area: "" };
-  }, [values, width, height, strokeWidth]);
+  }, [values, dates, width, height, strokeWidth]);
 
   if (!line) return null;
 

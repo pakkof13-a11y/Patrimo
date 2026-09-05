@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import {
@@ -8,6 +8,8 @@ import {
   ArrowLeftRight,
   ArrowUpRight,
   Coins,
+  LayoutGrid,
+  PieChart as PieIcon,
   Receipt,
   Star,
   type LucideIcon,
@@ -16,6 +18,13 @@ import { fetchJson } from "@/app/lib/api-client";
 import { AssetLogo } from "@/components/ui/platform-logo";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import type { Holding } from "@/app/lib/types/ui";
+import {
+  allocatePercents,
+  capTinyHoldings,
+} from "@/app/lib/ui/allocate-percents";
+import { squarify } from "@/app/lib/ui/squarify";
+import { SegmentedControl, SegmentedItem } from "@/components/ui/panel";
+import type { EvolutionRange } from "@/app/lib/portfolio/evolution-aggregate";
 
 /**
  * Logos du tableau de bord.
@@ -85,8 +94,35 @@ function formatPct1(v: number): string {
   })} %`;
 }
 
+/**
+ * Teinte Coin360 : aire = MV, couleur = performance (vert / rouge).
+ *
+ * L'intensité suit l'amplitude, plafonnée : +2 % et +80 % doivent se
+ * distinguer, sans qu'une tuile disparaisse dans un vert saturé.
+ */
+export function perfTone(pct: number | null | undefined): string {
+  if (pct == null || !Number.isFinite(pct) || pct === 0) {
+    return "var(--chart-neutral)";
+  }
+  const token = pct > 0 ? "var(--chart-positive)" : "var(--chart-negative)";
+  const intensity = Math.min(100, Math.max(32, Math.round(Math.abs(pct) * 2.4)));
+  return `color-mix(in srgb, ${token} ${intensity}%, var(--surface-raised))`;
+}
+
+function holdingValue(h: Holding): number {
+  const v = Number(h.marketValueBase ?? h.marketValueEur);
+  return Number.isFinite(v) ? v : 0;
+}
+
+function holdingPerf(h: Holding): number | null {
+  const v = Number(h.unrealizedPnlPct);
+  return Number.isFinite(v) ? v : null;
+}
+
 export function AllocationCard({
   data,
+  holdings,
+  periodRange,
   baseCurrency,
   className,
   title = "Répartition du portefeuille",
@@ -98,6 +134,18 @@ export function AllocationCard({
   compact = false,
 }: {
   data: { name: string; value: number }[];
+  /**
+   * Lignes détenues — mosaïque Coin360 (aire ∝ MV). Absentes, le second
+   * mode n'est pas proposé : le camembert de classes reste seul.
+   */
+  holdings?: Holding[];
+  /**
+   * Période partagée du tableau de bord. La mosaïque colore chaque ligne
+   * par son P&L latent (coût → maintenant) : le moteur ne publie pas de
+   * rendement fenêtré par ligne, et en inventer un serait une autre
+   * grandeur. La période reste celle des KPI / de l'évolution.
+   */
+  periodRange?: EvolutionRange;
   baseCurrency: string;
   className?: string;
   /** Le même camembert sert le tableau de bord et la vue PEA & CTO. */
@@ -116,17 +164,44 @@ export function AllocationCard({
   /** Anneau resserré : la légende porte alors les montants sans se faire rogner. */
   compact?: boolean;
 }) {
+  const [mode, setMode] = useState<"pie" | "treemap">("pie");
+
   const rows = useMemo(() => {
     const positive = data.filter((d) => d.value > 0);
-    const total = positive.reduce((s, d) => s + d.value, 0) || 1;
-    return positive
-      .sort((a, b) => b.value - a.value)
-      .map((d) => ({
-        ...d,
-        pct: (d.value / total) * 100,
-        tone: toneOf(d.name),
-      }));
+    const sorted = [...positive].sort((a, b) => b.value - a.value);
+    const pcts = allocatePercents(sorted.map((d) => d.value), 1);
+    return sorted.map((d, i) => ({
+      ...d,
+      pct: pcts[i] ?? 0,
+      tone: toneOf(d.name),
+    }));
   }, [data, toneOf]);
+
+  const mosaic = useMemo(() => {
+    if (!holdings?.length) return [];
+    const items = capTinyHoldings(
+      holdings
+        .filter((h) => holdingValue(h) > 0)
+        .map((h) => ({
+          name: h.name,
+          value: holdingValue(h),
+          perfPct: holdingPerf(h),
+        })),
+      { minShare: 0.01, otherLabel: "Autres" }
+    );
+    const pcts = allocatePercents(items.map((it) => it.value), 1);
+    const labeled = items.map((it, i) => ({
+      ...it,
+      pct: pcts[i] ?? 0,
+      color:
+        it.name === "Autres"
+          ? "var(--chart-neutral)"
+          : perfTone(it.perfPct),
+    }));
+    return squarify(labeled);
+  }, [holdings]);
+
+  const canTreemap = mosaic.length > 0;
 
   return (
     <section
@@ -141,13 +216,79 @@ export function AllocationCard({
           </h3>
           {subtitle && <p className="text-meta">{subtitle}</p>}
         </div>
+        {canTreemap && (
+          <SegmentedControl
+            aria-label="Mode de répartition"
+            testId="allocation-mode"
+          >
+            <SegmentedItem
+              selected={mode === "pie"}
+              testId="allocation-mode-pie"
+              onClick={() => setMode("pie")}
+            >
+              <PieIcon className="h-3.5 w-3.5" />
+              <span className="sr-only sm:not-sr-only">Camembert</span>
+            </SegmentedItem>
+            <SegmentedItem
+              selected={mode === "treemap"}
+              testId="allocation-mode-treemap"
+              onClick={() => setMode("treemap")}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              <span className="sr-only sm:not-sr-only">Mosaïque</span>
+            </SegmentedItem>
+          </SegmentedControl>
+        )}
       </div>
 
-      <div className="panel-body">
-        {rows.length === 0 ? (
+      <div className="panel-body" data-period={periodRange}>
+        {rows.length === 0 && mosaic.length === 0 ? (
           <p className="text-meta py-[var(--space-6)] text-center">
             {emptyHint}
           </p>
+        ) : mode === "treemap" && mosaic.length > 0 ? (
+          <div
+            className="relative h-44 w-full overflow-hidden rounded-[var(--radius-md)] bg-[var(--surface-sunken)] sm:h-48"
+            data-testid="allocation-treemap"
+            role="img"
+            aria-label={mosaic
+              .map(
+                (t) =>
+                  `${t.name} : ${formatPct1(t.pct)}, ${formatCurrency(t.value, baseCurrency)}`
+              )
+              .join(". ")}
+          >
+            {mosaic.map((t) => {
+              const showName = t.h * 192 >= 16 && t.w * 260 >= 40;
+              const showPct = t.h * 192 >= 22 && t.w * 260 >= 48;
+              return (
+                <div
+                  key={t.name}
+                  title={`${t.name} · ${formatPct1(t.pct)} · ${formatCurrency(t.value, baseCurrency)}`}
+                  className="absolute box-border overflow-hidden px-1.5 py-1 text-[var(--background)]"
+                  style={{
+                    left: `${t.x * 100}%`,
+                    top: `${t.y * 100}%`,
+                    width: `${t.w * 100}%`,
+                    height: `${t.h * 100}%`,
+                    backgroundColor: t.color,
+                    boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.35)",
+                  }}
+                >
+                  {showName && (
+                    <div className="truncate text-[length:var(--text-2xs)] font-semibold leading-tight">
+                      {t.name}
+                    </div>
+                  )}
+                  {showPct && (
+                    <div className="num text-[length:var(--text-xs)] font-semibold leading-none">
+                      {formatPct1(t.pct)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         ) : (
           <div
             className={cn(
@@ -221,7 +362,7 @@ export function AllocationCard({
           </div>
         )}
 
-        {rows.length > 0 && (
+        {rows.length > 0 && mode !== "treemap" && (
           <p className="sr-only">
             {rows
               .map(

@@ -44,6 +44,37 @@ export function usePortfolioHistoryQuery(baseCurrency: string) {
   });
 }
 
+const DAILY_NAV_STALE_MS = 60_000;
+
+export type DailyNavQueryResult = import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavResult;
+
+/**
+ * Série dense T-05 — `GET /api/portfolio/daily-nav?scope=financier`.
+ *
+ * Un seul aller-retour : chaque point porte déjà brut / net / financier /
+ * listed. Cliquer une carte ne refetch pas — ça lit un autre champ.
+ * `from`/`to` ne changent que la fenêtre, jamais la texture (1 pt/jour).
+ */
+export function useDailyNavQuery(from: string, to: string, enabled = true) {
+  return useQuery({
+    queryKey: ["portfolio-daily-nav", from, to],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        scope: "financier",
+        from,
+        to,
+      });
+      return fetchJson<DailyNavQueryResult>(
+        `/api/portfolio/daily-nav?${params.toString()}`
+      );
+    },
+    enabled: enabled && Boolean(from && to),
+    staleTime: DAILY_NAV_STALE_MS,
+    placeholderData: keepPreviousData,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function usePlatformsQuery(baseCurrency: string) {
   return useQuery({
     queryKey: ["platforms", baseCurrency],

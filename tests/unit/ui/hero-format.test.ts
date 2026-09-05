@@ -7,6 +7,7 @@ import {
   formatSignedAmount,
   formatSignedPct,
   formatValuationTimeParis,
+  parseSignedScreenAmount,
 } from "@/app/lib/ui/hero-format";
 
 /**
@@ -104,5 +105,74 @@ describe("variations signées", () => {
   it("zéro est compté comme une non-baisse", () => {
     expect(formatSignedAmount(0, abs)).toBe("+0.00 €");
     expect(formatSignedPct(0)).toBe("+0,0 %");
+  });
+});
+
+describe("relecture d'un montant signé à l'écran", () => {
+  const fr = (v: number) =>
+    v.toLocaleString("fr-FR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }) + " €";
+
+  it("relit une hausse et une baisse telles que formatSignedAmount les pose", () => {
+    expect(parseSignedScreenAmount(formatSignedAmount(359_144.65, fr))).toBeCloseTo(
+      359_144.65,
+      2
+    );
+    expect(parseSignedScreenAmount(formatSignedAmount(-179_572.325, fr))).toBeCloseTo(
+      -179_572.33,
+      2
+    );
+  });
+
+  it("garde le signe derrière le préfixe Marché / Flux", () => {
+    expect(parseSignedScreenAmount(`Marché ${formatSignedAmount(-179_572.33, fr)}`)).toBeCloseTo(
+      -179_572.33,
+      2
+    );
+    expect(parseSignedScreenAmount(`Flux ${formatSignedAmount(538_716.98, fr)}`)).toBeCloseTo(
+      538_716.98,
+      2
+    );
+  });
+
+  it("sans U+2212, |marché + flux − variation| casse de 2·|marché|", () => {
+    /*
+      Repro du 359 144,65 € mesuré trois fois sur « Tout » : le marché de
+      la fenêtre est négatif, formatSignedAmount le préfixe d'un moins
+      typographique, et un parseur `[^\d,.-]` le jette. L'identité à
+      l'écran n'était pas fausse — c'est la mesure qui inversait le marché.
+    */
+    const marche = -179_572.325;
+    const flux = 538_716.98;
+    const variation = marche + flux;
+    const ecran = {
+      variation: formatSignedAmount(variation, fr),
+      marche: `Marché ${formatSignedAmount(marche, fr)}`,
+      flux: `Flux ${formatSignedAmount(flux, fr)}`,
+    };
+
+    expect(
+      Math.abs(
+        parseSignedScreenAmount(ecran.marche) +
+          parseSignedScreenAmount(ecran.flux) -
+          parseSignedScreenAmount(ecran.variation)
+      )
+    ).toBeLessThan(1);
+
+    const ancien = (texte: string) =>
+      Number(
+        texte
+          .replace(/[^\d,.-]/g, "")
+          .replace(/\./g, "")
+          .replace(",", ".")
+      );
+    expect(
+      Math.abs(ancien(ecran.marche) + ancien(ecran.flux) - ancien(ecran.variation))
+    ).toBeCloseTo(2 * Math.abs(marche), 0);
+    expect(
+      Math.abs(ancien(ecran.marche) + ancien(ecran.flux) - ancien(ecran.variation))
+    ).toBeCloseTo(359_144.65, 0);
   });
 });

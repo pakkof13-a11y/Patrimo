@@ -175,3 +175,27 @@ export async function getPatrimonyState(
     families: presentFamilies(presence),
   };
 }
+
+export {
+  allocationAssetClass,
+  checkPatrimonyIdentities,
+  classifyHolding,
+  classifyHoldings,
+  computePatrimonyMetrics,
+  formatPatrimonyPocketTable,
+  serializePatrimonyMetrics,
+  CENTIME_EUR,
+  LISTED_ASSET_CLASSES,
+  LISTED_ASSET_CLASS_KEYS,
+  LISTED_EXCLUDED_ACCOUNT_TYPES,
+  PATRIMONY_ASSET_POCKETS,
+  PATRIMONY_POCKETS,
+} from "./patrimony-metrics";
+export type {
+  ClassifiableHolding,
+  HoldingPocket,
+  PatrimonyMetrics,
+  PatrimonyMetricsJson,
+  PatrimonyPocket,
+  PatrimonyPockets,
+} from "./patrimony-metrics";

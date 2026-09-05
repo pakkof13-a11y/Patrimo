@@ -26,6 +26,7 @@ const lire = (p: string) => readFileSync(join(racine, p), "utf8");
  */
 const CHEMINS_DE_LECTURE = [
   "app/api/portfolio/sparklines/route.ts",
+  "app/api/portfolio/daily-nav/route.ts",
   "app/lib/portfolio/class-pnl-service.ts",
   "app/lib/life-insurance/performance-service.ts",
   "app/lib/crypto/spot-history-service.ts",
@@ -39,6 +40,7 @@ describe("chemins de lecture — aucune collecte, aucun fournisseur", () => {
     expect(src).not.toMatch(/collectDailyCloses(ForAssets)?\s*\(/);
     expect(src).not.toMatch(/collectIntradayBars\s*\(/);
     expect(src).not.toMatch(/fillDailyCloses\s*\(/);
+    expect(src).not.toMatch(/backfillDailyClosesFromFirstTx\s*\(/);
   });
 
   it.each(CHEMINS_DE_LECTURE)(
@@ -69,7 +71,7 @@ describe("chemins de lecture — aucune collecte, aucun fournisseur", () => {
     // Le pendant positif : si cette route cessait de collecter, les tests
     // ci-dessus passeraient sur une application qui n'accumule plus rien.
     expect(cron).toMatch(/collectIntradayBars\s*\(/);
-    expect(cron).toMatch(/collectDailyClosesForAssets\s*\(/);
+    expect(cron).toMatch(/backfillDailyClosesFromFirstTx\s*\(/);
   });
 });
 
@@ -122,7 +124,7 @@ describe("aucune quatrième porte", () => {
     const fautives = routes.filter(
       (r) =>
         !COLLECTE_AUTORISEE.includes(r) &&
-        /collectDailyCloses(ForAssets)?\s*\(|collectIntradayBars\s*\(|fillDailyCloses\s*\(/.test(
+        /collectDailyCloses(ForAssets)?\s*\(|collectIntradayBars\s*\(|fillDailyCloses\s*\(|backfillDailyClosesFromFirstTx\s*\(/.test(
           lire(r)
         )
     );

@@ -143,8 +143,10 @@ describe("variation de la fenêtre", () => {
 
 describe("libellés de période", () => {
   it("les périodes glissantes annoncent leur durée", () => {
+    expect(heroRangeSubtitle("7d", undefined)).toBe("sur 7 jours");
     expect(heroRangeSubtitle("1m", undefined)).toBe("sur 1 mois");
     expect(heroRangeSubtitle("3m", undefined)).toBe("sur 3 mois");
+    expect(heroRangeSubtitle("6m", undefined)).toBe("sur 6 mois");
     expect(heroRangeSubtitle("1y", undefined)).toBe("sur 1 an");
     expect(heroRangeSubtitle("5y", undefined)).toBe("sur 5 ans");
   });

@@ -179,7 +179,7 @@ test.describe("Tableau de bord", () => {
     await verifierCoherence("7J");
   });
 
-  test("carte Patrimoine total : une seule, Net/Brut, sans période propre", async ({
+  test("carte Patrimoine total : une seule, Net/Brut, périodes propres", async ({
     page,
     request,
   }) => {
@@ -196,17 +196,18 @@ test.describe("Tableau de bord", () => {
     ).toBeVisible();
 
     /*
-      La carte a désormais ses propres périodes — six chips, sur la courbe.
-
-      Ce que la séparation d'avec le panneau « Évolution » interdit n'a pas
-      changé pour autant : le sélecteur global n'a rien à faire ici, et la
-      suite de ce test vérifie qu'il ne touche pas au chiffre de tête.
+      La carte et le panneau « Évolution » partagent désormais une seule et
+      même période : huit chips (7J, 1M, 3M, 6M, YTD, 1A, 5A, Tout), portées
+      par la carte de tête. Le test qui suit vérifie que la carte affiche
+      bien ses propres chips `hero-range-*` sans porter aussi celles du
+      panneau `evolution-range-*` — les deux zones restent deux endroits
+      distincts pour changer une même valeur, pas deux périodes séparées.
     */
     // `role="tab"` pour ne compter que les chips : le conteneur porte lui aussi
     // un testid préfixé `hero-range-`.
     await expect(
       carte.locator("[role='tab'][data-testid^='hero-range-']")
-    ).toHaveCount(6);
+    ).toHaveCount(8);
     await expect(
       carte.locator("[data-testid^='evolution-range-']")
     ).toHaveCount(0);
@@ -228,7 +229,14 @@ test.describe("Tableau de bord", () => {
     // (`formatHeadline`) : ne comparer que les chiffres.
     const parseHeadline = (t: string) => Number(t.replace(/[^\d-]/g, ""));
 
-    // Défaut : Net.
+    /*
+      Le défaut réel de la carte est « Financier » (dashboard-tab.tsx), pas
+      Net : le supposer actif laissait le test dépendre d'un écran qui n'existe
+      plus. Ce que ce test doit prouver survit au changement de défaut — que
+      Net = Brut − Passifs s'affiche bien quand ce mode est sélectionné — donc
+      on active Net explicitement au lieu de le tenir pour acquis.
+    */
+    await page.getByTestId("hero-mode-net").click();
     await expect(page.getByTestId("hero-mode-net")).toHaveAttribute(
       "data-active",
       "true"
@@ -237,8 +245,10 @@ test.describe("Tableau de bord", () => {
     expect(parseHeadline(netText)).toBe(expectedNet);
 
     // Passage en brut : la valeur suit, le titre ne bouge pas.
-    await page.getByTestId("hero-mode-gross").click();
-    await expect(page.getByTestId("hero-mode-gross")).toHaveAttribute(
+    // Le scope se nomme `brut` (`HERO_NAV_SCOPES`), pas `gross` — un testid
+    // `hero-mode-gross` viserait un bouton qui n'a jamais existé.
+    await page.getByTestId("hero-mode-brut").click();
+    await expect(page.getByTestId("hero-mode-brut")).toHaveAttribute(
       "data-active",
       "true"
     );

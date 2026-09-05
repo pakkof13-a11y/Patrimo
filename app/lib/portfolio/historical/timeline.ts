@@ -77,6 +77,21 @@ export class ValueTimeline {
   }
 
   /**
+   * Jour du premier constat **observé** (`observed: true`), ou `null`.
+   *
+   * Distinct de `firstDay` : un repli `createdAt`/`updatedAt` (`observed:
+   * false`) ne borne rien — il dit seulement quand la ligne a été saisie, pas
+   * depuis quand le patrimoine existe. La borne « Tout » ne doit reculer que
+   * jusqu'à un fait réellement constaté (acquisition, flux, relevé daté).
+   */
+  get earliestObservedDay(): DayKey | null {
+    for (const p of this.points) {
+      if (p.observed) return p.day;
+    }
+    return null;
+  }
+
+  /**
    * Valeur connue à `day` : le dernier constat dont la date lui est
    * antérieure ou égale. Zéro avant le premier constat.
    *

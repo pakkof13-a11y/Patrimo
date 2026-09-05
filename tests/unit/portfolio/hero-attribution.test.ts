@@ -49,7 +49,7 @@ describe("identité variation = marché + flux", () => {
       jour("2026-01-01T22:59:59.999Z", 100_000, 0),
       jour("2026-01-02T22:59:59.999Z", 150_000, 50_000),
     ];
-    const a = heroAttribution(fenetre, "gross")!;
+    const a = heroAttribution(fenetre, "brut")!;
 
     expect(a.variation).toBe(50_000);
     expect(a.flow).toBe(50_000);
@@ -62,7 +62,7 @@ describe("identité variation = marché + flux", () => {
       jour("2026-01-01T22:59:59.999Z", 100_000, 0),
       jour("2026-01-02T22:59:59.999Z", 102_000, 0),
     ];
-    const a = heroAttribution(fenetre, "gross")!;
+    const a = heroAttribution(fenetre, "brut")!;
 
     expect(a.variation).toBe(2_000);
     expect(a.flow).toBe(0);
@@ -79,7 +79,7 @@ describe("identité variation = marché + flux", () => {
       jour("2026-01-01T22:59:59.999Z", 100_000, 0),
       jour("2026-01-02T22:59:59.999Z", 1_082_000, 980_000),
     ];
-    const a = heroAttribution(fenetre, "gross")!;
+    const a = heroAttribution(fenetre, "brut")!;
 
     expect(a.variation).toBe(982_000);
     expect(a.flow).toBe(980_000);
@@ -92,7 +92,7 @@ describe("identité variation = marché + flux", () => {
       jour("2026-02-01T22:59:59.999Z", 500_000, 0),
       jour("2026-02-02T22:59:59.999Z", 503_000, 0),
     ];
-    const a = heroAttribution(fenetre, "gross")!;
+    const a = heroAttribution(fenetre, "brut")!;
 
     expect(a.flow).toBe(0);
     expect(a.market).toBe(3_000);
@@ -110,7 +110,7 @@ describe("identité variation = marché + flux", () => {
       jour("2026-01-03T22:59:59.999Z", 1_132_000, 980_000), // entrée du bien
       jour("2026-01-04T22:59:59.999Z", 1_135_000, 0), // revalo SCPI
     ];
-    const a = heroAttribution(fenetre, "gross")!;
+    const a = heroAttribution(fenetre, "brut")!;
 
     expect(a.variation).toBe(1_035_000);
     expect(a.flow).toBe(1_030_000);
@@ -160,7 +160,7 @@ describe("mode net — les passifs rejoignent les flux", () => {
       jour("2026-04-01T22:59:59.999Z", 500_000, 0, 100_000),
       jour("2026-04-02T22:59:59.999Z", 560_000, 50_000, 90_000),
     ];
-    const brut = heroAttribution(fenetre, "gross")!;
+    const brut = heroAttribution(fenetre, "brut")!;
     const net = heroAttribution(fenetre, "net")!;
 
     expect(brut.market).toBe(10_000);
@@ -182,7 +182,7 @@ describe("l'ancre borne la fenêtre sans y entrer", () => {
       jour("2026-01-01T22:59:59.999Z", 100_000, 90_000), // ancre : flux d'avant
       jour("2026-01-02T22:59:59.999Z", 110_000, 0),
     ];
-    const a = heroAttribution(fenetre, "gross")!;
+    const a = heroAttribution(fenetre, "brut")!;
 
     expect(a.flow).toBe(0);
     expect(a.market).toBe(10_000);
@@ -199,7 +199,7 @@ describe("dégradation propre", () => {
       pt({ date: "2026-01-01T22:59:59.999Z", grossAssetsBase: 100_000 }),
       pt({ date: "2026-01-02T22:59:59.999Z", grossAssetsBase: 110_000 }),
     ];
-    expect(heroAttribution(fenetre, "gross")).toBeNull();
+    expect(heroAttribution(fenetre, "brut")).toBeNull();
   });
 
   it("un seul jour sans flux suffit à tout retenir", () => {
@@ -208,7 +208,7 @@ describe("dégradation propre", () => {
       pt({ date: "2026-01-02T22:59:59.999Z", grossAssetsBase: 105_000 }),
       jour("2026-01-03T22:59:59.999Z", 110_000, 0),
     ];
-    expect(heroAttribution(fenetre, "gross")).toBeNull();
+    expect(heroAttribution(fenetre, "brut")).toBeNull();
   });
 
   it("en net, des passifs manquants empêchent l'attribution", () => {
@@ -228,13 +228,13 @@ describe("dégradation propre", () => {
     ];
     expect(heroAttribution(fenetre, "net")).toBeNull();
     // En brut, la même fenêtre reste exploitable.
-    expect(heroAttribution(fenetre, "gross")).not.toBeNull();
+    expect(heroAttribution(fenetre, "brut")).not.toBeNull();
   });
 
   it("moins de deux points : aucune attribution", () => {
-    expect(heroAttribution([], "gross")).toBeNull();
+    expect(heroAttribution([], "brut")).toBeNull();
     expect(
-      heroAttribution([jour("2026-01-01T22:59:59.999Z", 1, 0)], "gross")
+      heroAttribution([jour("2026-01-01T22:59:59.999Z", 1, 0)], "brut")
     ).toBeNull();
   });
 });
@@ -287,5 +287,64 @@ describe("repères d'événements sur la courbe", () => {
       amount: 10_000 + i,
     }));
     expect(heroEventMarkers(beaucoup)).toHaveLength(5);
+  });
+});
+
+describe("mode financier — un achat immo n'est pas un flux Financier", () => {
+  it("ΔFinancier = 0, Marché = 0, Flux = 0 alors que le brut encaisse l'achat", () => {
+    const fenetre = [
+      pt({
+        date: "2026-01-01T22:59:59.999Z",
+        grossAssetsBase: 100_000,
+        financierBase: 100_000,
+        netWorthBase: 100_000,
+        liabilitiesBase: 0,
+        externalFlowsBase: 0,
+        financierFlowsBase: 0,
+        transactionFlowBase: 0,
+      }),
+      pt({
+        date: "2026-01-02T22:59:59.999Z",
+        grossAssetsBase: 1_080_000,
+        financierBase: 100_000,
+        netWorthBase: 1_080_000,
+        liabilitiesBase: 0,
+        externalFlowsBase: 980_000,
+        financierFlowsBase: 0,
+        transactionFlowBase: 0,
+      }),
+    ];
+    const fin = heroAttribution(fenetre, "financier")!;
+    const brut = heroAttribution(fenetre, "brut")!;
+
+    expect(fin.variation).toBe(0);
+    expect(fin.flow).toBe(0);
+    expect(fin.market).toBe(0);
+    expect(brut.variation).toBe(980_000);
+    expect(brut.flow).toBe(980_000);
+    expect(brut.market).toBe(0);
+  });
+
+  it("une hausse des cotés est du marché Financier", () => {
+    const fenetre = [
+      pt({
+        date: "2026-01-01T22:59:59.999Z",
+        grossAssetsBase: 100_000,
+        financierBase: 100_000,
+        externalFlowsBase: 0,
+        financierFlowsBase: 0,
+      }),
+      pt({
+        date: "2026-01-02T22:59:59.999Z",
+        grossAssetsBase: 102_000,
+        financierBase: 102_000,
+        externalFlowsBase: 0,
+        financierFlowsBase: 0,
+      }),
+    ];
+    const a = heroAttribution(fenetre, "financier")!;
+    expect(a.variation).toBe(2_000);
+    expect(a.flow).toBe(0);
+    expect(a.market).toBe(2_000);
   });
 });

@@ -26,6 +26,11 @@ export type EvolutionViewMode = "global" | "decomposed";
 
 export type EvolutionSeriesPoint = {
   date: string;
+  /**
+   * Instant de la barre, en ms. L'axe X du graphique est une échelle de
+   * temps, pas une catégorie : ce champ est ce qu'elle lit.
+   */
+  t?: number;
   label: string;
   periodLabel: string;
   /** Valeur totale (stock) en fin de bucket */
@@ -648,33 +653,18 @@ export function buildEvolutionSeries(
     }
   }
 
-  const interval = resolveEvolutionInterval(range, filtered.length);
+  /*
+    Un point par jour de la fenêtre, déjà échantillonné en amont par
+    `downsampleSeries`. Les seaux hebdo / mensuels + un axe catégoriel
+    produisaient des marches : deux semaines voisines prenaient la même
+    largeur qu'un jour, et un saut de valorisation se lisait comme un
+    escalier. L'axe du graphique est désormais une échelle de temps ; la
+    granularité affichée reste le jour, et `interval` ne sert plus qu'à
+    formater les ticks.
+  */
+  const interval: EvolutionInterval = "day";
 
-  // Bucket : dernière observation du bucket (stock)
-  const buckets = new Map<string, StockAcc>();
-  const order: string[] = [];
-
-  for (const p of filtered) {
-    const key = bucketKey(p.date, interval);
-    const prev = buckets.get(key);
-    if (!prev) {
-      order.push(key);
-      buckets.set(key, { ...p });
-    } else {
-      // Stocks : dernière observation du bucket. Flux : somme du bucket.
-      buckets.set(key, {
-        ...p,
-        flows: prev.flows + p.flows,
-        // Un seul jour estimé suffit à rendre le bucket estimé.
-        status:
-          prev.status === "ESTIMATED" || p.status === "ESTIMATED"
-            ? "ESTIMATED"
-            : (p.status ?? prev.status),
-      });
-    }
-  }
-
-  let stock: StockAcc[] = order.map((k) => buckets.get(k)!);
+  let stock: StockAcc[] = filtered;
 
   // 7J : densifier tous les jours calendaires (report des valeurs manquantes)
   if (range === "7d" && interval === "day" && from) {
@@ -689,15 +679,11 @@ export function buildEvolutionSeries(
     const prev = i > 0 ? stock[i - 1]! : null;
     const dTotal = prev ? s.total - prev.total : 0;
     const chartValue = metric === "cumul" ? s.total : dTotal;
-    // Libellé semaine : ancré sur le lundi ISO (pas sur le jour de la dernière obs.)
-    const labelIso =
-      interval === "week" || interval === "biweek"
-        ? startOfIsoWeekMonday(new Date(s.date)).toISOString()
-        : s.date;
     return {
       date: s.date,
-      label: formatAxisLabel(labelIso, interval),
-      periodLabel: formatPeriodLabel(labelIso, interval),
+      t: Date.parse(s.date),
+      label: formatAxisLabel(s.date, interval),
+      periodLabel: formatPeriodLabel(s.date, interval),
       total: s.total,
       flows: s.flows,
       cash: s.cash,
@@ -900,6 +886,7 @@ export function withBenchmarkSeries(
 
 export type EvolutionPercentPoint = {
   date: string;
+  t?: number;
   label: string;
   periodLabel: string;
   /** Performance du portefeuille depuis le premier point affiché, en %. */
@@ -932,6 +919,7 @@ export function toPercentSeries(
   const growthBase = g0 != null && g0 > 0 ? g0 : null;
   return points.map((p) => ({
     date: p.date,
+    t: p.t ?? Date.parse(p.date),
     label: p.label,
     periodLabel: p.periodLabel,
     /*

@@ -1,30 +1,29 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import { Eye, EyeOff } from "lucide-react";
 import { maskAmount, useAmountsHidden } from "@/app/lib/ui/privacy-prefs";
 import type { HistoryPoint } from "@/app/lib/types/ui";
 import { Sparkline } from "@/components/ui/sparkline";
-import type { EvolutionRange } from "@/app/lib/portfolio/evolution-aggregate";
 import {
+  financierAt,
   grossAssetsAt,
   kpiSeries,
   netWorthAt,
 } from "@/app/lib/portfolio/kpi-series";
 import { buildHeroSeries, type HeroMode } from "@/app/lib/portfolio/hero-series";
-import { windowForRange } from "@/app/lib/portfolio/evolution-aggregate";
 import {
-  defaultHeroRange,
+  isEvolutionRangeEnabled,
+  windowForRange,
+  type EvolutionRange,
+} from "@/app/lib/portfolio/evolution-aggregate";
+import {
   heroRangeSubtitle,
   heroWindowChange,
   heroWindowReference,
-  HERO_RANGES,
-  HERO_RANGE_LABEL,
-  isHeroRange,
-  type HeroRange,
 } from "@/app/lib/portfolio/hero-range";
-import { HERO_RANGE_KEY, loadUiPref, saveUiPref } from "@/app/lib/ui-preferences";
+import { EVOLUTION_RANGE_CHIPS as RANGES } from "@/app/lib/ui/evolution-ranges";
 import {
   heroAttribution,
   heroEventMarkers,
@@ -40,21 +39,21 @@ import {
   formatSignedPct,
   formatValuationTimeParis,
 } from "@/app/lib/ui/hero-format";
+import {
+  HERO_NAV_SCOPE_LABEL,
+  HERO_NAV_SCOPE_TITLE,
+  HERO_NAV_SCOPES,
+} from "@/app/lib/portfolio/daily-nav-view";
 
 function formatPct(v: number): string {
   return formatSignedPct(v);
 }
 
-/** Ce que chaque mode désigne — libellé du contrôle, pas du titre. */
-const HERO_MODE_LABEL: Record<HeroMode, string> = {
-  net: "Net",
-  gross: "Brut",
-};
-
-const HERO_MODE_TITLE: Record<HeroMode, string> = {
-  net: "Actifs moins passifs",
-  gross: "Total des actifs, passifs non déduits",
-};
+function pickerFor(mode: HeroMode) {
+  if (mode === "financier") return financierAt;
+  if (mode === "net") return netWorthAt;
+  return grossAssetsAt;
+}
 
 /**
  * Carte de tête — le patrimoine total, net ou brut selon le sélecteur.
@@ -72,12 +71,9 @@ const HERO_MODE_TITLE: Record<HeroMode, string> = {
  *
  * ## Période
  *
- * La carte porte **ses propres** périodes — 1M · 3M · YTD · 1A · 5A · Max —
- * retenues sous `HERO_RANGE_KEY`. Elles sont indépendantes du sélecteur du
- * bandeau d'indicateurs et du graphique d'évolution : les deux blocs répondent
- * à des questions différentes, et un test vérifie que le sélecteur global ne
- * déplace pas le chiffre de tête. Le fenêtrage lui-même est celui du tableau de
- * bord (`windowForRange`), pas une seconde découpe.
+ * S2 : un **seul** sélecteur (panneau Évolution), partagé avec le hero et
+ * les KPI. Les trois lisent `getDailyNav` sur la même fenêtre — changer de
+ * période recoupe la série dense, sans changer sa texture quotidienne.
  *
  * ## Ce que la carte affiche, et quand
  *
@@ -103,49 +99,62 @@ const HERO_MODE_TITLE: Record<HeroMode, string> = {
 export function TerminalHero({
   netWorth,
   grossAssets,
+  financier,
   history,
   baseCurrency,
   loading,
+  scope,
+  onScopeChange,
+  range,
+  onRangeChange,
+  firstHistoryDate,
 }: {
   netWorth: number | null;
   /** Somme des actifs, sans déduction des passifs. */
   grossAssets: number | null;
+  /** Agrégat T-01 Financier — défaut de la courbe. */
+  financier: number | null;
   history: HistoryPoint[];
   baseCurrency: string;
   loading?: boolean;
+  /** Carte active — brut / net / financier. */
+  scope: HeroMode;
+  onScopeChange: (scope: HeroMode) => void;
+  /**
+   * Période partagée avec l'évolution et les KPI.
+   * Un seul sélecteur (panneau Évolution) ; la carte de tête fenêtre la
+   * même série `getDailyNav`.
+   */
+  range: EvolutionRange;
+  /**
+   * Change la période partagée. Même setter que le panneau Évolution
+   * (`changeRange` dans `dashboard-tab.tsx`) — un clic ici déplace aussi le
+   * sélecteur du bas, et persiste sous `evolutionPrefs.v5`.
+   */
+  onRangeChange: (range: EvolutionRange) => void;
+  /**
+   * Première date de l'historique complet (non fenêtré), pour désactiver
+   * les chips que la profondeur disponible ne couvre pas encore. Même
+   * source et même règle que le panneau (`isEvolutionRangeEnabled`).
+   */
+  firstHistoryDate: string | null;
 }) {
-  const [mode, setMode] = useState<HeroMode>("net");
+  const mode = scope;
   const [amountsHidden] = useAmountsHidden();
 
-  const currentValue = mode === "net" ? netWorth : grossAssets;
+  const currentValue =
+    mode === "financier"
+      ? financier
+      : mode === "net"
+        ? netWorth
+        : grossAssets;
 
   /*
-    Période de la carte, retenue d'une session à l'autre.
+    L'historique, coupé à la période partagée.
 
-    Lue paresseusement dans l'initialiseur, comme les autres préférences du
-    tableau de bord : la lire dans un effet afficherait un premier rendu à la
-    période par défaut puis un second à la période retenue — un clignotement à
-    chaque ouverture.
-
-    `null` tant qu'aucun choix n'a été fait : le défaut dépend de la profondeur
-    de l'historique, que le composant ne connaît pas au montage.
-  */
-  const [chosenRange, setChosenRange] = useState<HeroRange | null>(() => {
-    if (typeof window === "undefined") return null;
-    const stored = loadUiPref<string | null>(HERO_RANGE_KEY, null);
-    return isHeroRange(stored) ? stored : null;
-  });
-
-  const range: HeroRange = chosenRange ?? defaultHeroRange(history);
-
-  /*
-    L'historique, coupé à la période.
-
-    Le fenêtrage est celui du tableau de bord (`windowForRange`), pas une
-    seconde découpe : le point qui précède la fenêtre y est conservé en tête, et
-    c'est lui qui donne la valeur de départ sans laquelle aucune variation de
-    période n'aurait de référence. L'instant de référence est la dernière
-    valorisation, non l'horloge — voir `heroWindowReference`.
+    Le fenêtrage est celui du tableau de bord (`windowForRange`) : même
+    série `getDailyNav`, même fenêtre que l'évolution et les KPI. Le point
+    qui précède la fenêtre reste en tête pour le Δ.
   */
   const windowed = useMemo(
     () => windowForRange(history, range, heroWindowReference(history)),
@@ -158,12 +167,29 @@ export function TerminalHero({
     zéros. Une carte sans courbe vaut mieux qu'une courbe qui ne décrit rien.
   */
   const values = useMemo(
-    () => kpiSeries(windowed, mode === "net" ? netWorthAt : grossAssetsAt),
+    () => kpiSeries(windowed, pickerFor(mode)),
     [windowed, mode]
   );
 
+  /*
+    Chips de période — même règle d'activation que le panneau Évolution
+    (`isEvolutionRangeEnabled`), sur la profondeur réelle de l'historique et
+    non sur la fenêtre déjà découpée.
+  */
+  const rangeEnabled = useMemo(() => {
+    const map = {} as Record<EvolutionRange, boolean>;
+    for (const r of RANGES) {
+      map[r.id] = isEvolutionRangeEnabled(r.id, firstHistoryDate);
+    }
+    return map;
+  }, [firstHistoryDate]);
+
   const stroke =
-    mode === "net" ? "var(--chart-gold)" : "var(--chart-cyan)";
+    mode === "financier"
+      ? "var(--chart-gold)"
+      : mode === "brut"
+        ? "var(--chart-cyan)"
+        : "var(--chart-gold)";
 
   /*
     Série lisible — la même que celle tracée, augmentée de quoi la décrire.
@@ -189,6 +215,14 @@ export function TerminalHero({
     () => (values ? heroWindowChange(values) : null),
     [values]
   );
+
+  const cardChanges = useMemo(() => {
+    const out = {} as Record<HeroMode, ReturnType<typeof heroWindowChange>>;
+    out.financier = heroWindowChange(kpiSeries(windowed, financierAt) ?? []);
+    out.brut = heroWindowChange(kpiSeries(windowed, grossAssetsAt) ?? []);
+    out.net = heroWindowChange(kpiSeries(windowed, netWorthAt) ?? []);
+    return out;
+  }, [windowed]);
 
   /** Passifs en fin de fenêtre — « dont passifs », en mode net seulement. */
   const liabilitiesNow = useMemo(() => {
@@ -318,12 +352,20 @@ export function TerminalHero({
       {/* 5. Événement du jour — aujourd'hui, un mouvement de capital externe */}
       {active.externalFlow !== undefined && (
         <p
-          className="flex items-center gap-[var(--space-1)] text-[var(--foreground-secondary)]"
+          className={cn(
+            "flex items-center gap-[var(--space-1)]",
+            active.externalFlow >= 0 ? "val-positive" : "val-negative"
+          )}
           data-testid="hero-tooltip-event"
         >
           <span
             aria-hidden
-            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--primary-text)]"
+            className={cn(
+              "inline-block h-1.5 w-1.5 shrink-0 rounded-full",
+              active.externalFlow >= 0
+                ? "bg-[var(--chart-positive)]"
+                : "bg-[var(--chart-negative)]"
+            )}
           />
           Événement ·{" "}
           {active.externalFlow >= 0 ? "apport" : "retrait"} de{" "}
@@ -347,6 +389,7 @@ export function TerminalHero({
     <section
       className="panel px-[var(--pad-card-lg)] py-[var(--pad-card-lg)]"
       data-testid="terminal-hero"
+      data-nav-scope={mode}
       aria-labelledby="hero-heading"
     >
       <div className="flex flex-wrap items-start justify-between gap-[var(--space-5)]">
@@ -363,48 +406,9 @@ export function TerminalHero({
         */}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-[var(--space-2)]">
-            {/*
-              Le titre ne change plus avec le mode : « Patrimoine net » puis
-              « Patrimoine brut » faisaient croire à deux cartes selon le
-              bouton pressé. Ce qu'on regarde est le patrimoine total ; net ou
-              brut n'en est qu'une lecture, et c'est le sélecteur qui la porte.
-            */}
             <h2 id="hero-heading" className="text-label">
               Patrimoine total
             </h2>
-
-            <div
-              className="term-seg"
-              role="tablist"
-              aria-label="Patrimoine net ou brut"
-              data-testid="hero-mode-toggle"
-            >
-              {(["net", "gross"] as HeroMode[]).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  role="tab"
-                  aria-selected={mode === m}
-                  data-active={mode === m}
-                  title={HERO_MODE_TITLE[m]}
-                  className="term-seg-item"
-                  data-testid={`hero-mode-${m}`}
-                  onClick={() => setMode(m)}
-                >
-                  {HERO_MODE_LABEL[m]}
-                </button>
-              ))}
-            </div>
-
-            {/*
-              L'aide en une ligne, sans coûter une ligne.
-
-              La phrase complète tient dans l'infobulle native et dans le nom
-              accessible du repère ; l'écrire en clair à côté du sélecteur
-              poussait le bloc à la ligne suivante et faisait grandir la carte
-              de près de deux cents pixels — pour une phrase que le libellé
-              actif rappelle déjà juste en dessous.
-            */}
             <span
               className={cn(
                 "inline-flex h-4 w-4 cursor-help select-none items-center justify-center",
@@ -414,12 +418,79 @@ export function TerminalHero({
               tabIndex={0}
               role="note"
               data-testid="hero-mode-help"
-              title="Net = actifs − dettes. Brut = actifs seuls."
-              aria-label="Net = actifs moins dettes. Brut = actifs seuls."
+              title="Financier = titres, cash, fonds euro, ES disponible. Brut = tous les actifs. Net = brut − dettes."
+              aria-label="Financier égale titres, cash, fonds euro et épargne salariale disponible. Brut égale tous les actifs. Net égale brut moins dettes."
             >
               ?
             </span>
           </div>
+
+          <div
+            className="mt-[var(--space-3)] grid w-full grid-cols-3 gap-[var(--space-2)]"
+            role="tablist"
+            aria-label="Lecture Brut, Net ou Financier"
+            data-testid="hero-mode-toggle"
+          >
+              {HERO_NAV_SCOPES.map((m) => {
+                const selected = mode === m;
+                const live =
+                  m === "financier"
+                    ? financier
+                    : m === "net"
+                      ? netWorth
+                      : grossAssets;
+                const change = cardChanges[m];
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    data-active={selected}
+                    title={HERO_NAV_SCOPE_TITLE[m]}
+                    className={cn(
+                      "min-w-0 rounded-[var(--radius-md)] border px-[var(--space-2)] py-[var(--space-2)] text-left",
+                      "transition-colors duration-[var(--duration-fast)]",
+                      "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+                      selected
+                        ? "border-[var(--border-strong)] bg-[var(--surface-sunken)]"
+                        : "border-[var(--border)] hover:bg-[var(--surface-hover)]"
+                    )}
+                    data-testid={`hero-mode-${m}`}
+                    onClick={() => {
+                      onScopeChange(m);
+                      hover.reset();
+                    }}
+                  >
+                    <span className="text-label block truncate">
+                      {HERO_NAV_SCOPE_LABEL[m]}
+                    </span>
+                    <span
+                      className={cn(
+                        "num mt-[var(--space-1)] block truncate text-[length:var(--text-sm)] font-semibold leading-none",
+                        selected
+                          ? "text-[var(--foreground)]"
+                          : "text-[var(--foreground-secondary)]"
+                      )}
+                    >
+                      {live === null
+                        ? "—"
+                        : maskAmount(formatHeroAmount(live), amountsHidden)}
+                    </span>
+                    {change && (
+                      <span
+                        className={cn(
+                          "num mt-[var(--space-1)] block truncate text-[length:var(--text-2xs)]",
+                          change.abs >= 0 ? "val-positive" : "val-negative"
+                        )}
+                      >
+                        {formatSignedAmount(change.abs, (v) => money(v))}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
 
           <div className="mt-[var(--space-3)] flex flex-wrap items-baseline gap-[var(--space-3)]">
             {loading && headlineValue === null ? (
@@ -466,7 +537,25 @@ export function TerminalHero({
             carte se contracterait au premier survol et se rouvrirait à la
             sortie, sous le curseur.
           */}
-          <div className="mt-[var(--space-2)]">
+          {/*
+            Hauteur réservée pour deux lignes, et non pour une.
+
+            Le survol n'est pas le seul à faire varier cette ligne : les
+            pastilles Marché/Flux ne sont montées que lorsque `heroAttribution`
+            aboutit, et leur arrivée la replie en deux lignes. Mesuré à la
+            largeur des tests : la ligne passe de 12 à 32 pixels entre 3M — où
+            l'attribution est indisponible — et YTD, où elle l'est, et la carte
+            entière suivait de 248 à 268. Un chip changeait donc la taille du
+            bloc, ce que le test « changer de période ne fait pas sauter la
+            carte » interdit à juste titre : tout ce qui est en dessous
+            sursautait à chaque clic.
+
+            Réserver le cas le plus haut plutôt que masquer les pastilles : les
+            cacher aurait stabilisé la carte en taisant une information vraie,
+            et afficher « 0 € » à leur place aurait été un mensonge. Ici on ne
+            montre rien de plus, on garde seulement la place.
+          */}
+          <div className="mt-[var(--space-2)] min-h-[2rem]">
             {windowChange && (
               <p
                 className={cn(
@@ -631,62 +720,62 @@ export function TerminalHero({
           reprend toute la largeur, comme avant, le bloc passant à la ligne.
         */}
         <div className="flex w-full min-w-0 flex-col items-end gap-[var(--space-2)] sm:w-[55%] sm:flex-none">
-          {/*
-            Périodes, posées sur la courbe qu'elles découpent.
-
-            Même habillage que le sélecteur net/brut : deux réglages de la même
-            carte, deux apparences auraient suggéré deux natures. Elles logent
-            dans la colonne du graphique, plus courte que celle du chiffre — la
-            carte ne grandit donc pas d'un pixel pour les accueillir.
-          */}
           <div
-            className="term-seg"
+            className="flex min-w-0 flex-wrap items-center justify-end gap-0.5"
             role="tablist"
-            aria-label="Période de la courbe"
+            aria-label="Période"
             data-testid="hero-range-toggle"
+            data-range={range}
           >
-            {HERO_RANGES.map((r) => (
-              <button
-                key={r}
-                type="button"
-                role="tab"
-                aria-selected={range === r}
-                data-active={range === r}
-                className="term-seg-item"
-                data-testid={`hero-range-${r}`}
-                onClick={() => {
-                  saveUiPref(HERO_RANGE_KEY, r);
-                  setChosenRange(r);
-                  /*
-                    Le survol ne survit pas au changement de fenêtre.
-
-                    Le rang désigné n'a de sens que dans la série qui l'a
-                    produit : conservé, il pointerait le même rang dans une
-                    série qui couvre dix ans au lieu d'un mois — un autre jour,
-                    un autre montant, sans que rien ne le signale. Le bornage du
-                    hook ne protège que du rang hors tableau, pas du rang valide
-                    mais devenu faux.
-
-                    Aujourd'hui redondant, et assumé comme tel : activer un chip
-                    suppose de sortir le pointeur du graphique ou de lui prendre
-                    le focus, et `pointerleave` comme `blur` relâchent déjà le
-                    survol. Le dire ici rend l'invariant explicite au lieu de le
-                    faire reposer sur deux effets de bord — le jour où les chips
-                    passeraient à l'intérieur du cadre, aucun des deux ne se
-                    produirait plus.
-                  */
-                  hover.reset();
-                }}
-              >
-                {HERO_RANGE_LABEL[r]}
-              </button>
-            ))}
+            {RANGES.map((r) => {
+              const enabled = rangeEnabled[r.id] !== false;
+              const selected = range === r.id;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  aria-disabled={!enabled}
+                  disabled={!enabled}
+                  title={
+                    enabled
+                      ? undefined
+                      : "Historique trop court pour cette période"
+                  }
+                  data-testid={`hero-range-${r.id}`}
+                  data-active={selected ? "true" : "false"}
+                  onClick={() => enabled && onRangeChange(r.id)}
+                  className={cn(
+                    "rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px] font-medium leading-none transition",
+                    "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+                    !enabled &&
+                      "cursor-not-allowed bg-[var(--muted)]/40 text-[var(--muted-foreground)] opacity-40",
+                    enabled &&
+                      selected &&
+                      "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]",
+                    enabled &&
+                      !selected &&
+                      "bg-[var(--muted)]/70 text-[var(--foreground)] hover:bg-[var(--muted)]"
+                  )}
+                >
+                  {r.label}
+                </button>
+              );
+            })}
           </div>
+          <p
+            className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
+            data-testid="hero-range-subtitle"
+          >
+            {heroRangeSubtitle(range, windowed[0]?.date)}
+          </p>
 
           <div className="h-[5.5rem] w-full min-w-0 sm:h-[6.5rem]">
             {values && values.length >= 2 ? (
               <HeroChart
                 values={values}
+                dates={windowed.map((p) => p.date)}
                 stroke={stroke}
                 activeIndex={hover.activeIndex}
                 setContainer={hover.setContainer}
@@ -694,9 +783,7 @@ export function TerminalHero({
                 carriedActive={active?.carried ?? false}
                 eventMarkers={markers}
                 tooltip={tooltip}
-                ariaLabel={`Courbe du patrimoine ${
-                  mode === "net" ? "net" : "brut"
-                } — flèches gauche et droite pour parcourir les points, Échap pour revenir à aujourd'hui`}
+                ariaLabel={`Courbe du patrimoine ${HERO_NAV_SCOPE_LABEL[mode]} — flèches gauche et droite pour parcourir les points, Échap pour revenir à aujourd'hui`}
               />
             ) : (
               <div className="flex h-full items-center justify-end text-[length:var(--text-xs)] text-[var(--foreground-faint)]">
@@ -717,6 +804,11 @@ export type TerminalKpi = {
   value: number;
   /** Série d'historique — omise quand aucune donnée réelle n'existe. */
   spark?: number[];
+  /**
+   * Horodatages alignés sur `spark`. Même axe temporel que la courbe de tête
+   * quand ils sont fournis — un palier occupe la durée qu'il a vraiment duré.
+   */
+  sparkDates?: string[];
   /** Teinte du trait ; par défaut dérivée du signe de la variation. */
   tone?: "gold" | "positive" | "negative" | "cyan" | "neutral";
   /**
@@ -858,7 +950,7 @@ export function TerminalKpiRow({
               className={cn(
                 "num text-[length:var(--text-xl)] font-semibold leading-none",
                 item.tone === "gold"
-                  ? "text-[var(--primary-text)]"
+                  ? "text-[var(--chart-gold)]"
                   : "text-[var(--foreground)]"
               )}
             >
@@ -920,6 +1012,7 @@ export function TerminalKpiRow({
               {item.spark && item.spark.length >= 2 && (
                 <Sparkline
                   values={item.spark}
+                  dates={item.sparkDates}
                   stroke={TONE_STROKE[tone] ?? TONE_STROKE.neutral!}
                   width={180}
                   height={28}

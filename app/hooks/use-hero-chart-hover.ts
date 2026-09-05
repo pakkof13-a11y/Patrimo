@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { nearestPointIndex } from "@/app/lib/ui/sparkline-geometry";
+import {
+  nearestPointByFraction,
+  nearestPointIndex,
+  parseSparklineTimestamp,
+  sparklineXFractions,
+} from "@/app/lib/ui/sparkline-geometry";
 import type { HeroSeriesPoint } from "@/app/lib/portfolio/hero-series";
 
 /**
@@ -13,13 +18,14 @@ import type { HeroSeriesPoint } from "@/app/lib/portfolio/hero-series";
  * mérite de l'être — l'aimantation, les bornes, le clavier — sans monter un
  * arbre React.
  *
- * ## Pourquoi une aimantation par rang
+ * ## Pourquoi une aimantation sur l'abscisse dessinée
  *
- * La courbe espace ses points par rang, pas par date : c'est ce que trace la
- * sparkline depuis toujours, et c'est ce qui préserve les marches d'un actif
- * revalorisé deux fois l'an. Aimanter au rang le plus proche revient donc à
- * désigner exactement le point dessiné sous le curseur — jamais un endroit du
- * trait où aucune valeur n'existe.
+ * Sans dates, la courbe espace ses points par rang — un pas constant — et
+ * l'aimantation par rang désigne exactement le point sous le curseur.
+ *
+ * Avec des dates, le trait est linéaire dans le temps : un palier de six mois
+ * occupe six mois de largeur. Aimanter encore au rang viserait un endroit du
+ * trait où il n'y a rien. On lit alors les mêmes fractions que la géométrie.
  *
  * ## Pourquoi l'état ne change qu'au changement de point
  *
@@ -60,6 +66,10 @@ export function useHeroChartHover(points: HeroSeriesPoint[]): HeroChartHover {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const count = points.length;
+  const fractions = useMemo(() => {
+    const timestamps = points.map((p) => parseSparklineTimestamp(p.date));
+    return sparklineXFractions(points.length, timestamps);
+  }, [points]);
 
   const setContainer = useCallback((el: HTMLDivElement | null) => {
     containerRef.current = el;
@@ -81,11 +91,15 @@ export function useHeroChartHover(points: HeroSeriesPoint[]): HeroChartHover {
       if (!el || count === 0) return;
       const rect = el.getBoundingClientRect();
       if (rect.width <= 0) return;
-      const next = nearestPointIndex(count, (clientX - rect.left) / rect.width);
+      const ratio = (clientX - rect.left) / rect.width;
+      const next =
+        fractions.length === count && fractions.length > 0
+          ? nearestPointByFraction(fractions, ratio)
+          : nearestPointIndex(count, ratio);
       if (next < 0) return;
       setActiveIndex((prev) => (prev === next ? prev : next));
     },
-    [count]
+    [count, fractions]
   );
 
   const onPointerMove = useCallback(

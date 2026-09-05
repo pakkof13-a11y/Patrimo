@@ -184,7 +184,12 @@ test.describe("Évolution — croisement classe × enveloppe", () => {
       par le test précédent, sur la même réponse d'API. Le revérifier ici
       coûtait un appel de plus dont ce test n'a pas besoin, et c'est cet appel,
       non l'assertion, qui tombait. On s'en tient donc à ce que l'écran montre.
+
+      La période par défaut est 3 mois : trop courte pour que le passé
+      inconnu y figure. « Tout » est la fenêtre dont parle l'assertion.
     */
+    await page.getByTestId("hero-range-all").click();
+    await expect(page.getByTestId("hero-window-label")).toContainText("depuis");
     await page.getByTestId("evolution-class-ACTIONS").click();
     await page.getByTestId("evolution-envelope-PEA").click();
     const note = page.getByTestId("evolution-envelope-unknown");
@@ -226,8 +231,7 @@ test.describe("Évolution — croisement classe × enveloppe", () => {
 
     await page.getByTestId("evolution-class-all").click();
     await expect(panel).toContainText("Actifs bruts", { timeout: 15_000 });
-    // Le choix brut/net redevient disponible hors classe.
-    await expect(page.getByTestId("evolution-scope-gross")).toBeVisible();
+    await expect(page.getByTestId("evolution-scope-gross")).toHaveCount(0);
   });
 
   test("la performance disparaît dès qu'une enveloppe est choisie", async ({

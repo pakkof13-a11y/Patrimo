@@ -3,6 +3,7 @@ import {
   aggregateClassPnl,
   buildClassDailyPnl,
   closeAtOrBefore,
+  closeOnDay,
   type ClassDailyInput,
   type ClassDailyPnl,
   type DailyCloseIndex,
@@ -29,6 +30,12 @@ describe("closeAtOrBefore", () => {
 
   it("rend la clôture exacte du jour quand elle existe", () => {
     expect(closeAtOrBefore(series, "2026-01-05")).toBe(110);
+  });
+
+  it("ne confond pas une barre du jour avec un report (closeOnDay)", () => {
+    expect(closeOnDay(series, "2026-01-05")).toBe(110);
+    expect(closeOnDay(series, "2026-01-04")).toBeNull();
+    expect(closeAtOrBefore(series, "2026-01-04")).toBe(100);
   });
 
   it("reporte la dernière clôture connue sur un jour sans cotation", () => {

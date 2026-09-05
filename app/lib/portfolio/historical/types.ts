@@ -7,6 +7,7 @@
 
 import type { PriceOrigin } from "./price-resolver";
 import type { Decimal } from "../../money/decimal";
+import type { PatrimonyPocket } from "../patrimony-metrics";
 
 /** Jour civil Europe/Paris, `YYYY-MM-DD` (tri lexicographique = chronologique). */
 export type DayKey = string;
@@ -159,6 +160,34 @@ export type PortfolioValuationPoint = {
   alternatives: number;
   employeeSavings: number;
   otherAssets: number;
+
+  /**
+   * Agrégats T-01 (`computePatrimonyMetrics`) au même instant.
+   *
+   * `listed` / `financier` / `fondsEuro` / `esLiquid` ne sont pas une seconde
+   * formule : ce sont les champs du contrat PatrimonyMetrics, calculés sur les
+   * mêmes positions et les mêmes poches que le point. `getDailyNav` les lit
+   * tels quels — il ne recomposée rien.
+   */
+  listed: number;
+  financier: number;
+  fondsEuro: number;
+  esLiquid: number;
+  /**
+   * Agrégat T-01 `brut` — lecture de `computePatrimonyMetrics`, pas la somme
+   * des compartiments moteur. `getDailyNav({ scope: "brut" })` lit ce champ.
+   */
+  brut: number;
+  /**
+   * Agrégat T-01 `net` — `metrics.net`. `getDailyNav({ scope: "net" })` le lit.
+   */
+  net: number;
+  /**
+   * Poches T-01 au même instant. `getDailyNav` y lit listed / immobilier /
+   * av / cash / alternatifs / employeeSavings / autre — jamais un recalcul.
+   * `passifs` y figure pour la partition, mais n'est pas un scope de courbe.
+   */
+  pockets: Record<PatrimonyPocket, number>;
 
   /**
    * Le même brut, ventilé par classe d'actif.
