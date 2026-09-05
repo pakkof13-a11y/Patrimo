@@ -16,11 +16,18 @@ import {
   dailyNavFromSeries,
 } from "@/app/lib/portfolio/historical/get-daily-nav";
 import type { DailyNavPoint } from "@/app/lib/portfolio/historical/get-daily-nav";
-import { dailyNavToHistoryPoints, windowDailyNav } from "@/app/lib/portfolio/daily-nav-view";
+import {
+  dailyNavDeltas,
+  dailyNavToHistoryPoints,
+  headerFlux,
+  headerMarketDelta,
+  windowDailyNav,
+} from "@/app/lib/portfolio/daily-nav-view";
 import { scopeHistory } from "@/app/lib/portfolio/scope-history";
 import {
   clampRequestedFrom,
   dailyNavScopeForClass,
+  locfValueAt,
   pocketChartLineType,
   pocketSeriesTooShort,
   pocketValueAt,
@@ -330,5 +337,91 @@ describe("mapping classe → scope de clamp", () => {
       byAssetClass: undefined as unknown as DailyNavPoint["byAssetClass"],
     };
     expect(pocketValueAt(sansClasse, "IMMOBILIER")).toBe(10);
+  });
+});
+
+describe("contrainte métier F — LOCF, flux immo, trop courte", () => {
+  it("entre deux expertises on tient le palier, on n'interpole pas", () => {
+    const expertises = [
+      { day: "2010-01-01", value: 200_000 },
+      { day: "2015-06-01", value: 280_000 },
+    ];
+    expect(locfValueAt(expertises, "2009-12-31")).toBeNull();
+    expect(locfValueAt(expertises, "2010-01-01")).toBe(200_000);
+    expect(locfValueAt(expertises, "2012-06-01")).toBe(200_000);
+    expect(locfValueAt(expertises, "2015-05-31")).toBe(200_000);
+    expect(locfValueAt(expertises, "2015-06-01")).toBe(280_000);
+    // Le lerp aurait donné 240 000 à mi-parcours — ce n'est pas une valo.
+    expect(locfValueAt(expertises, "2012-09-16")).not.toBe(240_000);
+  });
+
+  it("après un achat immo la série tient le prix — palier, pas une pente", () => {
+    const e = maisonEtAction();
+    const from = clampRequestedFrom(
+      "1900-01-01",
+      e.earliestDayForScope("immobilier")
+    );
+    const nav = dailyNavFromSeries(
+      e.buildSeries(from!, "1998-07-20"),
+      "immobilier"
+    );
+    expect(pocketSeriesTooShort(nav)).toBe(false);
+    const immo = nav.map((p) => p.immobilier);
+    expect(new Set(immo)).toEqual(new Set([100_000]));
+    const chart = toPocketChartPoints(nav, "IMMOBILIER");
+    expect(chart.every((p) => p.total === 100_000)).toBe(true);
+    expect(pocketChartLineType("IMMOBILIER")).toBe("stepAfter");
+  });
+
+  it("achat immo = flux brut/net, ΔFinancier marché ≈ 0, marche immo", () => {
+    const avant = pt("2026-01-14", {
+      financier: 100_000,
+      brut: 100_000,
+      listed: 100_000,
+      immobilier: 0,
+      byAssetClass: emptyClass({ ACTIONS: 100_000 }),
+    });
+    const apres = pt("2026-01-15", {
+      financier: 100_000,
+      brut: 1_080_000,
+      listed: 100_000,
+      immobilier: 980_000,
+      externalFlows: 980_000,
+      financierFlows: 0,
+      transactionFlow: 0,
+      byAssetClass: emptyClass({ ACTIONS: 100_000, IMMOBILIER: 980_000 }),
+      flowsByAssetClass: emptyClass({ IMMOBILIER: 980_000 }),
+    });
+    const points = [avant, apres];
+
+    expect(dailyNavDeltas(points, "financier")[1]).toBe(0);
+    expect(headerMarketDelta(points, "financier")).toBe(0);
+    expect(headerFlux(points, "brut")).toBe(980_000);
+    expect(headerFlux(points, "net")).toBe(980_000);
+
+    const marche = toPocketChartPoints(points, "IMMOBILIER");
+    expect(marche.map((p) => p.total)).toEqual([0, 980_000]);
+    expect(marche).toHaveLength(2);
+    expect(locfValueAt(
+      marche.map((p) => ({ day: p.day, value: p.total })),
+      "2026-01-14"
+    )).toBe(0);
+    expect(locfValueAt(
+      marche.map((p) => ({ day: p.day, value: p.total })),
+      "2026-01-15"
+    )).toBe(980_000);
+  });
+
+  it("from plus ancien que earliestDayForScope : clamp, pas « trop courte »", () => {
+    const earliest = "1998-06-20";
+    expect(clampRequestedFrom("1900-01-01", earliest)).toBe(earliest);
+    const clamped = [
+      pt("1998-06-20", { immobilier: 100_000 }),
+      pt("1998-06-21", { immobilier: 100_000 }),
+    ];
+    expect(pocketSeriesTooShort(clamped)).toBe(false);
+    expect(
+      pocketSeriesTooShort([pt("1998-06-20", { immobilier: 100_000 })])
+    ).toBe(true);
   });
 });

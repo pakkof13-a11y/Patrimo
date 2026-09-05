@@ -54,6 +54,24 @@ export function pocketChartLineType(
 }
 
 /**
+ * Dernière expertise connue au jour `day` — LOCF / palier.
+ *
+ * Entre deux valorisations on reconduit la précédente. Une moyenne ou un
+ * lerp `(v0 + (v1−v0)·t)` n'est pas une observation : c'est interdit.
+ */
+export function locfValueAt(
+  appraisals: ReadonlyArray<{ day: string; value: number }>,
+  day: string
+): number | null {
+  let held: number | null = null;
+  for (const a of appraisals) {
+    if (a.day > day) break;
+    held = a.value;
+  }
+  return held;
+}
+
+/**
  * Scope `getDailyNav` dont `earliestDayForScope` borne le filtre.
  *
  * Actions / obligations / crypto partagent la poche `listed`. AUTRE agrège

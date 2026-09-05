@@ -888,7 +888,11 @@ export function PortfolioEvolutionPanel({
               baseCurrency={baseCurrency}
             />
           ) : versus === "none" ? (
-            <PortfolioValueChart data={points} baseCurrency={baseCurrency} />
+            <PortfolioValueChart
+              data={points}
+              baseCurrency={baseCurrency}
+              lineType={pocketChartLineType(assetClass)}
+            />
           ) : (
             <PortfolioPercentChart
               data={percentPoints}
