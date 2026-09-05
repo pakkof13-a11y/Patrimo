@@ -151,6 +151,81 @@ describe("buildHeroSeries — événement du jour", () => {
   });
 });
 
+describe("buildHeroSeries — Marché / Flux (D3), pas le Δ NAV brut", () => {
+  it("Financier : achat immo n'est pas du flux, Marché = ΔNAV − financierFlows", () => {
+    const history = [
+      point({
+        financierBase: 100_000,
+        financierFlowsBase: 0,
+        externalFlowsBase: 0,
+        transactionFlowBase: 0,
+      }),
+      point({
+        financierBase: 100_000,
+        financierFlowsBase: 0,
+        externalFlowsBase: 980_000,
+        transactionFlowBase: 0,
+      }),
+    ];
+    const series = buildHeroSeries(history, [100_000, 100_000], "financier");
+    expect(series[1]!.deltaAbs).toBe(0);
+    expect(series[1]!.flow).toBe(0);
+    expect(series[1]!.market).toBe(0);
+    expect(series[1]!.externalFlow).toBeUndefined();
+  });
+
+  it("Brut : le même achat est du Flux, Marché reste 0", () => {
+    const history = [
+      point({
+        grossAssetsBase: 100_000,
+        externalFlowsBase: 0,
+        financierFlowsBase: 0,
+      }),
+      point({
+        grossAssetsBase: 1_080_000,
+        externalFlowsBase: 980_000,
+        financierFlowsBase: 0,
+      }),
+    ];
+    const series = buildHeroSeries(history, [100_000, 1_080_000], "brut");
+    expect(series[1]!.deltaAbs).toBe(980_000);
+    expect(series[1]!.flow).toBe(980_000);
+    expect(series[1]!.market).toBe(0);
+  });
+
+  it("flux inconnu : pas de Marché inventé (on ne suppose pas flux = 0)", () => {
+    const history = [
+      point({ financierBase: 100, financierFlowsBase: 0 }),
+      point({ financierBase: 110 }),
+    ];
+    const series = buildHeroSeries(history, [100, 110], "financier");
+    expect(series[1]!.deltaAbs).toBe(10);
+    expect(series[1]!.flow).toBeUndefined();
+    expect(series[1]!.market).toBeUndefined();
+  });
+
+  it("Net : flux = externalFlows − Δpassifs", () => {
+    const history = [
+      point({
+        netWorthBase: 80,
+        grossAssetsBase: 100,
+        liabilitiesBase: 20,
+        externalFlowsBase: 0,
+      }),
+      point({
+        netWorthBase: 90,
+        grossAssetsBase: 130,
+        liabilitiesBase: 40,
+        externalFlowsBase: 30,
+      }),
+    ];
+    const series = buildHeroSeries(history, [80, 90], "net");
+    // ΔNAV = 10 ; flux = 30 − (40−20) = 10 ; Marché = 0
+    expect(series[1]!.flow).toBe(10);
+    expect(series[1]!.market).toBe(0);
+  });
+});
+
 describe("géométrie et aimantation", () => {
   it("le rang d'origine survit au filtrage des valeurs non finies", () => {
     /*

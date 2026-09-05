@@ -59,6 +59,7 @@ import {
   type HeroNavScope,
 } from "@/app/lib/portfolio/daily-nav-view";
 import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
+import { quoteStaleBadgeLabel } from "@/app/lib/ui/quote-staleness";
 
 const emptySubscribe = () => () => undefined;
 
@@ -277,6 +278,9 @@ export function DashboardTab({
   const servedNavFrom = servedDailyNavFrom(dailyNavQ.data, {
     isPlaceholderData: dailyNavQ.isPlaceholderData,
   });
+  const staleQuotesLabel = quoteStaleBadgeLabel(
+    dailyNavQ.isPlaceholderData ? undefined : dailyNavQ.data?.fetchedAt
+  );
   const navHistory = useMemo(
     () =>
       dailyNavPoints && dailyNavPoints.length >= 2
@@ -466,6 +470,16 @@ export function DashboardTab({
           servedNavFrom={servedNavFrom}
         />
       )}
+
+      {blocks.showEvolutionChart && staleQuotesLabel && (
+          <p
+            className="-mt-[var(--space-2)] px-[var(--space-1)] text-[length:var(--text-2xs)] text-[var(--foreground-secondary)]"
+            data-testid="hero-stale-quotes"
+            role="status"
+          >
+            {staleQuotesLabel}
+          </p>
+        )}
 
       {/*
         Ce que la courbe raconte, dit une fois pour toutes.

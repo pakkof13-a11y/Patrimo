@@ -29,8 +29,11 @@ import {
   dailyNavScopeForClass,
   locfValueAt,
   pocketChartLineType,
+  pocketEmptyState,
   pocketSeriesTooShort,
   pocketValueAt,
+  POCKET_EMPTY_TITLE,
+  PERIOD_TOO_SHORT_TITLE,
   toPocketChartPoints,
   windowPocketDailyNav,
 } from "@/app/lib/portfolio/pocket-series";
@@ -423,5 +426,15 @@ describe("contrainte métier F — LOCF, flux immo, trop courte", () => {
     expect(
       pocketSeriesTooShort([pt("1998-06-20", { immobilier: 100_000 })])
     ).toBe(true);
+  });
+
+  it("0 point après clamp : poche vide, pas « période trop courte »", () => {
+    const empty = pocketEmptyState(0);
+    expect(empty).not.toBeNull();
+    expect(empty!.kind).toBe("empty");
+    expect(empty!.title).toBe(POCKET_EMPTY_TITLE);
+    expect(empty!.title).not.toBe(PERIOD_TOO_SHORT_TITLE);
+    expect(pocketEmptyState(1)?.kind).toBe("too-short");
+    expect(pocketEmptyState(2)).toBeNull();
   });
 });

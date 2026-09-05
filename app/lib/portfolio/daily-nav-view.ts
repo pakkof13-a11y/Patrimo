@@ -52,10 +52,21 @@ export const HERO_NAV_SCOPE_HEADING: Record<HeroNavScope, string> = {
   net: "Patrimoine net",
 };
 
+/** Phrase Financier (D3) — carte + « ? » quand cette carte est active. */
+export const HERO_FINANCIER_PHRASE =
+  "Titres & crypto, cash, fonds euro et ES dispo — hors immo et alternatifs.";
+
+/**
+ * Aide des trois cartes (D3). Une ligne, pas un panneau.
+ * Financier = listed + cashInvest + fondsEuro + esLiquid.
+ */
+export const HERO_MODE_HELP =
+  "Financier = titres & crypto + cash + fonds euro + ES dispo. Brut = tous les actifs. Net = brut − dettes.";
+
 export const HERO_NAV_SCOPE_TITLE: Record<HeroNavScope, string> = {
-  financier: "Titres, cash, fonds euro et épargne salariale disponible",
-  brut: "Total des actifs, passifs non déduits",
-  net: "Actifs moins passifs",
+  financier: HERO_FINANCIER_PHRASE,
+  brut: "Tous les actifs",
+  net: "Brut − dettes",
 };
 
 export function navOfPoint(p: DailyNavPoint, scope: HeroNavScope): number {
@@ -134,15 +145,24 @@ function previousDayKey(day: string): string {
   return parisDayKey(new Date(start));
 }
 
+function firstPointDay(
+  points: readonly unknown[] | undefined
+): string | undefined {
+  const first = points?.[0];
+  if (!first || typeof first !== "object") return undefined;
+  const day = "day" in first ? (first as { day?: unknown }).day : undefined;
+  return typeof day === "string" ? (parseDayKey(day) ?? undefined) : undefined;
+}
+
 /**
  * Borne `from` **servie** par `GET /api/portfolio/daily-nav`.
  *
- * Jamais la borne demandée (`dailyNavQueryWindow`) : `getDailyNav` ramène
- * une demande trop ancienne à la première observation du scope. Jamais une
- * réponse encore en vol — `keepPreviousData` d'une fenêtre 1A ferait lire
- * « sept. 2025 » pendant que « Tout » charge, puis « oct. 2022 » à
- * l'arrivée. On n'affiche la date que lorsque la réponse courante est
- * posée, avec des points.
+ * Uniquement `result.from` ou, à défaut, `points[0].day`. Jamais la borne
+ * demandée (`dailyNavQueryWindow`) : `getDailyNav` ramène une demande trop
+ * ancienne à la première observation du scope. Jamais une réponse encore
+ * en vol — `keepPreviousData` d'une fenêtre 1A ferait lire « sept. 2025 »
+ * pendant que « Tout » charge, puis « oct. 2022 » à l'arrivée. On n'affiche
+ * la date que lorsque la réponse courante est posée, avec des points.
  */
 export function servedDailyNavFrom(
   result:
@@ -153,7 +173,23 @@ export function servedDailyNavFrom(
 ): string | undefined {
   if (opts?.isPlaceholderData) return undefined;
   if (!result?.points?.length) return undefined;
-  return parseDayKey(result.from) ?? undefined;
+  return parseDayKey(result.from) ?? firstPointDay(result.points);
+}
+
+/**
+ * Une ligne pour le « ? » : périmètre de la carte active + ce que la
+ * courbe contient (D8). Financier porte la phrase D3, pas l'ancien
+ * « titres, cash, fonds euro… ».
+ */
+export function heroModeHelpLine(scope: HeroNavScope): string {
+  const perimeter = HERO_NAV_SCOPE_TITLE[scope];
+  const base = perimeter.endsWith(".") ? perimeter : `${perimeter}.`;
+  return `${base} La courbe inclut le capital investi.`;
+}
+
+/** Aide des trois cartes (tests / copie de référence). Le « ? » affiche `heroModeHelpLine`. */
+export function heroModeHelpAll(): string {
+  return `${HERO_MODE_HELP} La courbe inclut le capital investi.`;
 }
 
 /**

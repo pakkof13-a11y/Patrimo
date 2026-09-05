@@ -46,7 +46,8 @@ export function usePortfolioHistoryQuery(baseCurrency: string) {
 
 const DAILY_NAV_STALE_MS = 60_000;
 
-export type DailyNavQueryResult = import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavResult;
+export type DailyNavQueryResult =
+  import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavResult;
 export type DailyNavQueryScope = import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavScope;
 
 /**

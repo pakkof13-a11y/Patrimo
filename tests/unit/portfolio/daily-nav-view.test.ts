@@ -10,6 +10,10 @@ import {
   headerMarketDelta,
   navOfPoint,
   servedDailyNavFrom,
+  heroModeHelpAll,
+  heroModeHelpLine,
+  HERO_FINANCIER_PHRASE,
+  HERO_MODE_HELP,
   sumDailyDeltas,
   toDailyNavChartPoints,
   windowDailyNav,
@@ -458,5 +462,65 @@ describe("servedDailyNavFrom — borne servie, pas demandée", () => {
     expect(
       servedDailyNavFrom({ from: "pas-une-date", points: [{}] })
     ).toBeUndefined();
+  });
+
+  it("sans from servi, retombe sur points[0].day — jamais la borne demandée", () => {
+    const requested = dailyNavQueryWindow("1y", "2026-09-03", "2022-10-15");
+    expect(
+      servedDailyNavFrom({
+        from: requested.from,
+        points: [{ day: "2022-10-15" }],
+      })
+    ).toBe(requested.from);
+    expect(
+      servedDailyNavFrom({
+        from: null,
+        points: [{ day: "2022-10-15" }],
+      })
+    ).toBe("2022-10-15");
+    expect(
+      servedDailyNavFrom({
+        points: [{ day: "2022-10-15" }, { day: "2022-10-16" }],
+      })
+    ).toBe("2022-10-15");
+  });
+
+  it("un from 1A en vol n'est pas remplacé par points[0] de cette même réponse", () => {
+    expect(
+      servedDailyNavFrom(
+        { from: null, points: [{ day: "2025-09-03" }] },
+        { isPlaceholderData: true }
+      )
+    ).toBeUndefined();
+  });
+});
+
+describe("heroModeHelpLine — D3 copie Métier + D8", () => {
+  it("Financier porte la phrase validée, hors immo et alternatifs", () => {
+    expect(HERO_FINANCIER_PHRASE).toBe(
+      "Titres & crypto, cash, fonds euro et ES dispo — hors immo et alternatifs."
+    );
+    expect(heroModeHelpLine("financier")).toBe(
+      `${HERO_FINANCIER_PHRASE} La courbe inclut le capital investi.`
+    );
+    expect(heroModeHelpLine("financier").startsWith(HERO_FINANCIER_PHRASE)).toBe(
+      true
+    );
+    expect(heroModeHelpLine("brut")).toBe(
+      "Tous les actifs. La courbe inclut le capital investi."
+    );
+    expect(heroModeHelpLine("net")).toBe(
+      "Brut − dettes. La courbe inclut le capital investi."
+    );
+  });
+
+  it("l'aide des trois cartes tient en une ligne", () => {
+    expect(HERO_MODE_HELP).toBe(
+      "Financier = titres & crypto + cash + fonds euro + ES dispo. Brut = tous les actifs. Net = brut − dettes."
+    );
+    expect(heroModeHelpAll()).toBe(
+      `${HERO_MODE_HELP} La courbe inclut le capital investi.`
+    );
+    expect(heroModeHelpAll()).not.toMatch(/\n/);
   });
 });

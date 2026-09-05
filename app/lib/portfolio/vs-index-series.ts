@@ -213,3 +213,32 @@ export function toVsIndexPercentPoints(
     benchmarkPct: p.benchmarkPct,
   }));
 }
+
+/**
+ * Ce que l'écran Versus a le droit de dessiner.
+ *
+ * Un 403 / réseau down ne dessine **pas** une courbe portefeuille à +0 %
+ * (l'ancien `toPercentSeries` sans `growth`). Overlay off ; la NAV en
+ * euros reste, seule. Versus éteint → NAV seulement, jamais un graphe %
+ * fantôme.
+ */
+export type VsIndexChartKind = "percent" | "nav" | "index-unavailable";
+
+export const INDEX_UNAVAILABLE_TITLE = "Indice indisponible";
+
+export function vsIndexHasOverlay(
+  points: readonly { benchmarkPct?: number | null }[]
+): boolean {
+  return points.some((p) => p.benchmarkPct != null);
+}
+
+export function vsIndexChartKind(input: {
+  versus: "none" | "index" | string;
+  indexError: boolean;
+  hasOverlay: boolean;
+}): VsIndexChartKind {
+  if (input.versus !== "index") return "nav";
+  if (input.indexError) return "index-unavailable";
+  if (!input.hasOverlay) return "nav";
+  return "percent";
+}

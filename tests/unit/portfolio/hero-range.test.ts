@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultHeroRange,
+  heroPeriodLabel,
   heroRangeSubtitle,
   heroWindowChange,
   heroWindowReference,
@@ -169,6 +170,27 @@ describe("libellés de période", () => {
   it("sans date de départ, le libellé reste lisible", () => {
     expect(heroRangeSubtitle("all", undefined)).toBe("depuis l'origine");
     expect(heroRangeSubtitle("all", "pas-une-date")).toBe("depuis l'origine");
+  });
+
+  it("Tout n'annonce la date que sur le from servi — une chaîne stable", () => {
+    expect(heroPeriodLabel("all", undefined)).toBe("");
+    expect(heroPeriodLabel("all", "2022-10-15")).toBe("depuis octobre 2022");
+    expect(heroPeriodLabel("1y", undefined)).toBe("sur 1 an");
+    expect(heroPeriodLabel("1y", "2025-09-03")).toBe("sur 1 an");
+  });
+
+  it("la carte de tête lit heroPeriodLabel, pas un from demandé", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync("components/dashboard/terminal-hero.tsx", "utf8")
+    );
+    expect(src).toMatch(/heroPeriodLabel/);
+    expect(src).toMatch(/heroModeHelpLine/);
+    expect(src).toMatch(/hero-tooltip-market/);
+    expect(src).not.toMatch(/heroModeHelpAll/);
+    expect(src).not.toMatch(/Événement ·/);
+    expect(src).not.toMatch(/hero-tooltip-delta/);
+    expect(src).not.toMatch(/dailyNavQueryWindow/);
+    expect(src).not.toMatch(/keepPreviousData/);
   });
 });
 
