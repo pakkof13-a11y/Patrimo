@@ -37,6 +37,7 @@
  */
 
 import { endOfParisDay, parisDayKey } from "../../dates/paris";
+import type { LastCloseAsOf } from "../../market/last-close-as-of";
 import { toEur } from "../../accounting/fx";
 import {
   applyTransaction,
@@ -164,6 +165,11 @@ export type HistoricalInputs = {
    * et une fiche `RealEstateDetail` sur une SCPI mal étiquetée disparaîtraient.
    */
   holdingMetaById?: Map<string, HistoricalHoldingMeta>;
+  /**
+   * Dernière clôture par actif — même règle que l'overlay du jour
+   * (`last-close-as-of.ts`). Hero / KPI / watchlist lisent cette date.
+   */
+  lastCloseAsOf?: Map<string, LastCloseAsOf>;
   closes: DailyCloseIndex;
   cashAccounts: CashAccountRow[];
   cashEvents: CashEventRow[];

@@ -10,9 +10,14 @@
  * Lecture pure : le cache `AssetDailyClose` n'est pas complété ici. T-04
  * (cron / POST utilisateur) alimente les clôtures ; sans elles, une position
  * cotée reste au coût et le point se déclare estimé. Jamais de padding à 0.
+ *
+ * Vague2 D4 : `asOfDay` est le jour du dernier point — hero, KPI et
+ * watchlist s'y calent. Vague2 D11 : `fetchedAt` est la plus ancienne
+ * collecte de ces clôtures, pour un badge « cours daté » si > 24 h.
  */
 
 import { parisDayKey } from "../../dates/paris";
+import { oldestFetchedAt } from "../../market/last-close-as-of";
 import { parseDayKey } from "./day-key";
 
 export { parseDayKey } from "./day-key";
@@ -139,6 +144,19 @@ export type DailyNavResult = {
   to: DayKey;
   /** Un point par jour civil, `from` → `to` inclus. */
   points: DailyNavPoint[];
+  /**
+   * Jour du dernier point — ancre hero / KPI / watchlist (Vague2 D4).
+   *
+   * `null` si la série est vide : rien à dater.
+   */
+  asOfDay: DayKey | null;
+  /**
+   * Plus ancienne collecte des dernières clôtures (Vague2 D11).
+   *
+   * Le front affiche un badge « cours daté » si cet instant a plus de 24 h.
+   * `null` si aucune clôture n'a jamais été collectée.
+   */
+  fetchedAt: string | null;
 };
 
 /**
@@ -233,16 +251,27 @@ export async function getDailyNav(opts: {
   */
   const scopeEarliest = engine.earliestDayForScope(opts.scope);
   if (scopeEarliest == null || scopeEarliest > to) {
-    return { scope: opts.scope, from: requestedFrom, to, points: [] };
+    return {
+      scope: opts.scope,
+      from: requestedFrom,
+      to,
+      points: [],
+      asOfDay: null,
+      fetchedAt: null,
+    };
   }
   const from = requestedFrom < scopeEarliest ? scopeEarliest : requestedFrom;
 
   const series = engine.buildSeries(from, to);
+  const points = dailyNavFromSeries(series, opts.scope);
+  const last = points[points.length - 1];
 
   return {
     scope: opts.scope,
     from,
     to,
-    points: dailyNavFromSeries(series, opts.scope),
+    points,
+    asOfDay: last?.day ?? null,
+    fetchedAt: oldestFetchedAt(inputs.lastCloseAsOf?.values()),
   };
 }

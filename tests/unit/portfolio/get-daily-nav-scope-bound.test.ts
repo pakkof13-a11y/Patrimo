@@ -8,6 +8,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { d } from "@/app/lib/money/decimal";
+import { lastCloseAligned } from "@/app/lib/market/last-close-as-of";
 import type { HistoricalInputs } from "@/app/lib/portfolio/historical/engine";
 import type { LedgerTx } from "@/app/lib/accounting/types";
 
@@ -57,6 +58,17 @@ const demoInputs: HistoricalInputs = {
     ["aapl", { accountType: "CTO" }],
   ]),
   closes: new Map([["aapl", new Map([["2022-10-06", 100]])]]),
+  lastCloseAsOf: new Map([
+    [
+      "aapl",
+      {
+        day: "2022-10-06",
+        closeEur: 100,
+        fetchedAt: "2022-10-06T16:00:00.000Z",
+        source: "daily-close" as const,
+      },
+    ],
+  ]),
   cashAccounts: [],
   cashEvents: [],
   metals: [],
@@ -101,6 +113,9 @@ describe("getDailyNav — borne « Tout » par scope", () => {
     expect(r.from).toBe("2022-10-06");
     expect(r.points).toHaveLength(1);
     expect(r.points[0]!.day).toBe("2022-10-06");
+    expect(r.asOfDay).toBe("2022-10-06");
+    expect(r.fetchedAt).toBe("2022-10-06T16:00:00.000Z");
+    expect(lastCloseAligned("2022-10-06", r.asOfDay)).toBe(true);
   });
 
   it("les deux bornes diffèrent bien sur les mêmes données (1998 vs 2022)", async () => {
@@ -129,6 +144,8 @@ describe("getDailyNav — borne « Tout » par scope", () => {
       to: "2022-10-06",
     });
     expect(r.points).toEqual([]);
+    expect(r.asOfDay).toBeNull();
+    expect(r.fetchedAt).toBeNull();
   });
 
   it("from=1900-01-01, scope=immobilier : clamp 1998, au moins 2 points", async () => {

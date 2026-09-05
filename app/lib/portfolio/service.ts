@@ -6,6 +6,11 @@ import {
   totalRealizedPnl,
 } from "../accounting";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
+import {
+  oldestFetchedAt,
+  readLastClosesAsOf,
+  resolveLastCloseAsOf,
+} from "../market/last-close-as-of";
 import { endOfParisDay, parisDayKey, parisDayStart } from "../dates/paris";
 import { PortfolioValuationEngine } from "./historical/engine";
 import { loadHistoricalInputs } from "./historical/load";
@@ -150,6 +155,10 @@ export type HoldingRow = {
   priceSource: string | null;
   priceStatus: string | null;
   lastUpdatedAt: string | null;
+  /** Dernière clôture alignée getDailyNav — Vague2 D4. */
+  closeDay: string | null;
+  /** Collecte de cette clôture — Vague2 D11. */
+  fetchedAt: string | null;
   logoUrl: string | null;
   priceProvider: string;
   /** Fees paid on purchases (EUR, cumulative) */
@@ -182,6 +191,23 @@ export type HoldingRow = {
    */
   hasSecondaryLevels: boolean;
 };
+
+/** Dernière clôture la plus fraîche des deux jambes fusionnées. */
+function preferCloseAsOf(
+  a: Pick<HoldingRow, "closeDay" | "fetchedAt">,
+  b: Pick<HoldingRow, "closeDay" | "fetchedAt">
+): Pick<HoldingRow, "closeDay" | "fetchedAt"> {
+  if (!a.closeDay) return { closeDay: b.closeDay, fetchedAt: b.fetchedAt };
+  if (!b.closeDay) return { closeDay: a.closeDay, fetchedAt: a.fetchedAt };
+  if (a.fetchedAt && b.fetchedAt) {
+    return a.fetchedAt >= b.fetchedAt
+      ? { closeDay: a.closeDay, fetchedAt: a.fetchedAt }
+      : { closeDay: b.closeDay, fetchedAt: b.fetchedAt };
+  }
+  return a.closeDay >= b.closeDay
+    ? { closeDay: a.closeDay, fetchedAt: a.fetchedAt }
+    : { closeDay: b.closeDay, fetchedAt: b.fetchedAt };
+}
 
 /** Helpers locaux — toFixed → montants brandés */
 const qtyS = (v: string) => asQuantityString(v);
@@ -274,6 +300,8 @@ export async function getHoldings(
   }
 
   const assetMap = new Map(assets.map((a) => [a.id, a]));
+  const lastDailyByAsset = await readLastClosesAsOf([...assetMap.keys()]);
+  const closeAsOfToday = parisDayKey(new Date());
   // Also index platforms for positions whose platform differs from asset.home
   const platformIds = new Set<string>();
   for (const pos of ledger.positions.values()) platformIds.add(pos.platformId);
@@ -318,6 +346,18 @@ export async function getHoldings(
       priceEur = pos.costBasisEur.div(pos.quantity);
       priceNative = priceEur;
     }
+
+    const quoteForAsOf = priceEur.gt(0)
+      ? {
+          priceEur: priceEur.toNumber(),
+          lastUpdatedAt: asset.priceQuote?.lastUpdatedAt ?? null,
+        }
+      : null;
+    const closeAsOf = resolveLastCloseAsOf({
+      today: closeAsOfToday,
+      lastDaily: lastDailyByAsset.get(asset.id) ?? null,
+      quote: quoteForAsOf,
+    });
 
     const marketValue = pos.quantity.times(priceEur);
     const unrealized = marketValue.minus(pos.costBasisEur);
@@ -391,6 +431,8 @@ export async function getHoldings(
       priceSource: asset.priceQuote?.source ?? (asset.manualPrice ? "manual" : "coût"),
       priceStatus: asset.priceQuote?.status ?? (asset.manualPrice ? "OK" : "OK"),
       lastUpdatedAt: asset.priceQuote?.lastUpdatedAt?.toISOString() ?? null,
+      closeDay: closeAsOf?.day ?? null,
+      fetchedAt: closeAsOf?.fetchedAt ?? null,
       logoUrl: assetLogo,
       priceProvider: asset.priceProvider,
       acquisitionFeesEur: eurS(toFixed(fees, 8)),
@@ -550,6 +592,7 @@ export async function getHoldings(
       priceProvider: preferLive.priceProvider || prev.priceProvider,
       priceStatus: preferLive.priceStatus || prev.priceStatus,
       lastUpdatedAt: preferLive.lastUpdatedAt || prev.lastUpdatedAt,
+      ...preferCloseAsOf(prev, row),
       acquisitionFeesEur: eurS(toFixed(fees, 8)),
       acquisitionFeesBase: baseS(toBase(fees)),
       passiveIncomeEur: eurS(toFixed(income, 8)),
@@ -990,6 +1033,22 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     cashInvestissementEur: toFixed(metrics.cashInvestissement, 8),
     cashInvestissementBase: toBase(metrics.cashInvestissement),
     metricsAsOf: metrics.asOf,
+    /**
+     * Dernier jour de courbe getDailyNav (to = aujourd'hui Paris).
+     * Watchlist.closeDay doit rester à ≤ 1 séance (Vague2 D4).
+     */
+    navAsOfDay: parisDayKey(new Date()),
+    fetchedAt:
+      oldestFetchedAt(
+        holdings
+          .filter((h) => h.fetchedAt)
+          .map((h) => ({
+            day: h.closeDay ?? parisDayKey(new Date()),
+            closeEur: 0,
+            fetchedAt: h.fetchedAt,
+            source: "daily-close" as const,
+          }))
+      ) ?? "",
     /** Actif brut = Σ poches d'actif (contrat PatrimonyMetrics). */
     portfolioPlusCashEur: toFixed(totalAssets, 8),
     totalGrossAssetsEur: toFixed(totalAssets, 8),
