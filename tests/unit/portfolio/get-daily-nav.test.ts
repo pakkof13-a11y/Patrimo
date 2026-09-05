@@ -7,7 +7,9 @@ import {
 } from "@/app/lib/portfolio/historical/engine";
 import {
   dailyNavFromSeries,
+  financierFlowOf,
   isDailyNavScope,
+  listedTransactionFlow,
   navAtScope,
   parseDayKey,
 } from "@/app/lib/portfolio/historical/get-daily-nav";
@@ -658,6 +660,15 @@ describe("T-05 golden 6 — point live = hero Financier (±0,01 €)", () => {
       Math.abs(live.financier - recomposed.financier.toNumber())
     ).toBeLessThanOrEqual(CENTIME_EUR.toNumber());
     expect(navAtScope(live, "financier")).toBe(live.financier);
+  });
+});
+
+describe("flux Financier — une clé manquante n'est pas NaN", () => {
+  it("listedTransactionFlow et financierFlowOf restent des nombres", () => {
+    const partiel = { ACTIONS: 10 } as Parameters<typeof listedTransactionFlow>[0];
+    expect(listedTransactionFlow(partiel)).toBe(10);
+    expect(Number.isNaN(financierFlowOf(partiel))).toBe(false);
+    expect(financierFlowOf(partiel)).toBe(10);
   });
 });
 

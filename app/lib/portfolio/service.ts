@@ -9,6 +9,10 @@ import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx"
 import { endOfParisDay, parisDayKey, parisDayStart } from "../dates/paris";
 import { PortfolioValuationEngine } from "./historical/engine";
 import { loadHistoricalInputs } from "./historical/load";
+import {
+  financierFlowOf,
+  listedTransactionFlow,
+} from "./historical/get-daily-nav";
 import type {
   HistoricalDataStatus,
   PortfolioValuationPoint,
@@ -1161,6 +1165,16 @@ export type PortfolioHistoryPoint = {
   liabilitiesBase?: number;
   /** Capital externe entré (net) ce jour-là — jamais compté en performance. */
   externalFlowsBase?: number;
+  /**
+   * Flux du journal coté (ACTIONS + OBLIGATIONS + CRYPTO).
+   * Pastilles de la courbe Financier — un achat immo n'y figure pas.
+   */
+  transactionFlowBase?: number;
+  /**
+   * Flux qui touchent l'agrégat Financier. Sans ce champ, `heroAttribution`
+   * en mode financier rend `null` et les pastilles Marché/Flux disparaissent.
+   */
+  financierFlowsBase?: number;
   /** Résultat du jour, flux neutralisés. */
   investmentPerformanceBase?: number;
 
@@ -1427,6 +1441,8 @@ export async function getPortfolioHistory(
       netWorthBase: toBase(d(p.netWorth)),
       liabilitiesBase: toBase(d(p.liabilities)),
       externalFlowsBase: toBase(d(p.externalFlows)),
+      transactionFlowBase: toBase(d(listedTransactionFlow(p.flowsByAssetClass))),
+      financierFlowsBase: toBase(d(financierFlowOf(p.flowsByAssetClass))),
       investmentPerformanceBase: toBase(d(p.investmentPerformance)),
 
       /*

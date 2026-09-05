@@ -98,14 +98,14 @@ export type DailyNavPoint = {
 export function listedTransactionFlow(
   flows: Record<ValuationAssetClass, number>
 ): number {
-  return flows.ACTIONS + flows.OBLIGATIONS + flows.CRYPTO;
+  return (flows.ACTIONS ?? 0) + (flows.OBLIGATIONS ?? 0) + (flows.CRYPTO ?? 0);
 }
 
 /** Flux qui expliquent ΔFinancier (hors immo / alt / ES). */
 export function financierFlowOf(
   flows: Record<ValuationAssetClass, number>
 ): number {
-  return listedTransactionFlow(flows) + flows.CASH;
+  return listedTransactionFlow(flows) + (flows.CASH ?? 0);
 }
 
 /** P&L latent du journal — lecture des champs moteur, pas une seconde formule. */

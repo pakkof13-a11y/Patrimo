@@ -293,6 +293,16 @@ test.describe("Carte de tête — survol de la courbe", () => {
     */
     await page.getByTestId("hero-range-all").click();
     await expect(page.getByTestId("hero-window-label")).toContainText("depuis");
+    /*
+      Les pastilles ne sont montées que lorsque `heroAttribution` aboutit.
+      Sur « Tout », la série peut encore être le repli `/api/portfolio` le
+      temps que `getDailyNav` arrive : sans attendre, on lirait deux
+      chaînes vides (0 + 0) contre la variation, soit exactement
+      |Δ Financier| — 359 144,65 € sur le décor de démo.
+    */
+    await expect(page.getByTestId("hero-pill-market")).toBeVisible({
+      timeout: 20_000,
+    });
     const longue = await trio();
 
     /*
@@ -326,6 +336,9 @@ test.describe("Carte de tête — survol de la courbe", () => {
 
     await page.getByTestId("hero-range-all").click();
     await expect(page.getByTestId("hero-window-label")).toContainText("depuis");
+    await expect(page.getByTestId("hero-chart-event").first()).toBeVisible({
+      timeout: 20_000,
+    });
     const reperes = page.getByTestId("hero-chart-event");
     const nb = await reperes.count();
 
