@@ -22,6 +22,7 @@ import {
   type EvolutionRange,
   type IndexClosePoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
+import { EVOLUTION_RANGE_CHIPS as RANGES } from "@/app/lib/ui/evolution-ranges";
 import {
   DEFAULT_EVOLUTION_PREFS,
   loadEvolutionPrefs,
@@ -58,17 +59,6 @@ const emptySubscribe = () => () => undefined;
 function useIsClient() {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
 }
-
-const RANGES: { id: EvolutionRange; label: string }[] = [
-  { id: "7d", label: "7J" },
-  { id: "1m", label: "1M" },
-  { id: "3m", label: "3M" },
-  { id: "6m", label: "6M" },
-  { id: "ytd", label: "YTD" },
-  { id: "1y", label: "1A" },
-  { id: "5y", label: "5A" },
-  { id: "all", label: "Tout" },
-];
 
 /**
  * Classes proposées au sélecteur.

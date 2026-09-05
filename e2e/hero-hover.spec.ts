@@ -148,8 +148,14 @@ test.describe("Carte de tête — survol de la courbe", () => {
 
     expect(passifs).toBeGreaterThan(0);
 
+    /*
+      `hero-mode-gross` n'a jamais existé côté composant : le scope se nomme
+      `brut` (`HERO_NAV_SCOPES`), pas `gross`. Le testid visait un bouton
+      fantôme et le clic restait bloqué jusqu'au timeout — sans rapport avec
+      le rendu réel de la carte.
+    */
     await page.mouse.move(0, 0);
-    await page.getByTestId("hero-mode-gross").click();
+    await page.getByTestId("hero-mode-brut").click();
     await survolerA(page, chart, 0.9);
     const rangBrut = await chart.getAttribute("data-active-index");
     const valeurBrut = nombre(await montant.innerText());
@@ -251,19 +257,41 @@ test.describe("Carte de tête — survol de la courbe", () => {
   }) => {
     await heroChart(page);
 
-    /** Les trois chiffres de la période courante. */
+    /*
+      Les trois chiffres de la période courante, lus en un seul aller-retour.
+
+      Trois `.innerText()` successifs liraient trois instantanés distincts :
+      un rafraîchissement de cotation en tâche de fond (le serveur retente
+      Yahoo pendant toute la suite) peut retoucher la carte entre deux lectures
+      et casser l'identité pour une raison qui n'a rien à voir avec le calcul.
+      `evaluate` prend les trois pastilles dans le même tick JS, donc dans le
+      même rendu React.
+    */
     async function trio() {
-      const variation = nombre(
-        await page.getByTestId("hero-window-change-abs").innerText()
-      );
-      const marche = nombre(
-        await page.getByTestId("hero-pill-market").innerText()
-      );
-      const flux = nombre(await page.getByTestId("hero-pill-flow").innerText());
-      return { variation, marche, flux };
+      const [variationTxt, marcheTxt, fluxTxt] = await page.evaluate(() => {
+        const txt = (id: string) =>
+          document.querySelector(`[data-testid="${id}"]`)?.textContent ?? "";
+        return [
+          txt("hero-window-change-abs"),
+          txt("hero-pill-market"),
+          txt("hero-pill-flow"),
+        ];
+      });
+      return {
+        variation: nombre(variationTxt),
+        marche: nombre(marcheTxt),
+        flux: nombre(fluxTxt),
+      };
     }
 
+    /*
+      Attendre le libellé de fenêtre est indispensable : le clic déclenche un
+      recalcul asynchrone des trois pastilles, et les lire trop tôt renvoie
+      les valeurs de la période précédente — l'identité paraît alors fausse
+      alors que c'est la mesure qui a été prise en retard.
+    */
     await page.getByTestId("hero-range-all").click();
+    await expect(page.getByTestId("hero-window-label")).toContainText("depuis");
     const longue = await trio();
 
     /*
@@ -296,6 +324,7 @@ test.describe("Carte de tête — survol de la courbe", () => {
     await heroChart(page);
 
     await page.getByTestId("hero-range-all").click();
+    await expect(page.getByTestId("hero-window-label")).toContainText("depuis");
     const reperes = page.getByTestId("hero-chart-event");
     const nb = await reperes.count();
 
