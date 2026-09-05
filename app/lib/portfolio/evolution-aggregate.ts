@@ -897,10 +897,12 @@ export type EvolutionPercentPoint = {
 
 /**
  * Reprojette une série déjà rebasée par `withBenchmarkSeries` en performance
- * relative : les deux courbes partent à 0 % au premier point affiché. C'est
- * la seule transformation qui rend portefeuille et benchmark comparables sans
- * mélanger unité monétaire et pourcentage sur le même axe — l'un des deux
- * axes doit céder, jamais un affichage mixte.
+ * relative : les deux courbes partent à 0 % au premier point affiché.
+ *
+ * Le comparatif Versus du tableau de bord (T-4.E) ne passe plus par ici :
+ * la daily-nav n'a pas de `growth`, et y envoyer une NAV en euros à côté
+ * d'un indice déjà en % aplatissait le portefeuille à +0 %. Voir
+ * `vs-index-series.ts` — base 100 au premier jour commun.
  */
 export function toPercentSeries(
   points: EvolutionSeriesPoint[]

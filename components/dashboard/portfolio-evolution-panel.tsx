@@ -11,18 +11,21 @@ import { fetchJson } from "@/app/lib/api-client";
 import { useDailyNavQuery } from "@/app/hooks/use-portfolio-queries";
 import {
   buildEvolutionSeries,
-  benchmarkGapPct,
   benchmarkLabel,
   evolutionDeltaSummary,
   evolutionIntervalHint,
   evolutionIntervalLabel,
   isEvolutionRangeEnabled,
   startOfRange,
-  toPercentSeries,
-  withBenchmarkSeries,
   type EvolutionRange,
   type IndexClosePoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
+import { parisDayKey } from "@/app/lib/dates/paris";
+import {
+  rebaseToCommonBase100,
+  toVsIndexPercentPoints,
+  vsIndexGapPct,
+} from "@/app/lib/portfolio/vs-index-series";
 import { EVOLUTION_RANGE_CHIPS as RANGES } from "@/app/lib/ui/evolution-ranges";
 import {
   DEFAULT_EVOLUTION_PREFS,
@@ -50,6 +53,7 @@ import {
   headerFlux,
   headerMarketDelta,
   HERO_NAV_SCOPE_LABEL,
+  navOfPoint,
   servedDailyNavFrom,
   toDailyNavChartPoints,
   windowDailyNav,
@@ -212,9 +216,9 @@ function Segmented<T extends string>({
 /**
  * Module Évolution du portefeuille — refonte « premium » orientée
  * investissement, à deux réglages seulement : la période et la comparaison
- * (« Versus »). Toute la logique d'affichage (numéraire vs pourcentage,
- * rebasage du benchmark) est centralisée ici et dans `evolution-aggregate.ts`
- * — aucun calcul de performance dupliqué ailleurs dans l'app.
+ * (« Versus »). Le vs-indice (T-4.E) rebase NAV et clôtures à 100 au
+ * premier jour commun (`vs-index-series.ts`) — jamais une NAV en euros
+ * à côté d'un indice déjà en %.
  */
 export function PortfolioEvolutionPanel({
   history,
@@ -302,8 +306,8 @@ export function PortfolioEvolutionPanel({
   const activeNavScope: HeroNavScope = navScope ?? "financier";
   /*
     Filtre de poche en valeur : même fenêtre que le hero, scope clampé par
-    `earliestDayForScope`. La performance et le vs-indice restent sur
-    l'historique existant (T-4.E).
+    `earliestDayForScope`. Le vs-indice (T-4.E) lit cette même fenêtre
+    daily-nav, les deux séries en base 100 au premier jour commun.
   */
   const wantPocketDailyNav =
     Boolean(assetClass) &&
@@ -485,19 +489,22 @@ export function PortfolioEvolutionPanel({
     [scopedHistory, range, history]
   );
 
-  // Mode "index" : récupère les clôtures réelles de l'indice choisi sur la
-  // fenêtre affichée (marge amont pour disposer d'une clôture de base).
+  // Mode "index" : clôtures Yahoo sur la même fenêtre que daily-nav / hero
+  // (marge amont pour une clôture de base avant le premier jour commun).
   const wantIndex = versus === "index";
-  const idxFromKey = rawPoints[0]?.date.slice(0, 10) ?? "";
-  const idxToKey = rawPoints[rawPoints.length - 1]?.date.slice(0, 10) ?? "";
+  const idxFromKey = navQueryFrom ?? rawPoints[0]?.date.slice(0, 10) ?? "";
+  const idxToKey = navQueryTo ?? rawPoints[rawPoints.length - 1]?.date.slice(0, 10) ?? "";
   const indexQ = useQuery({
     queryKey: ["evolution-index", indexKey, idxFromKey, idxToKey],
-    enabled: wantIndex && rawPoints.length > 1,
+    enabled:
+      wantIndex &&
+      Boolean(idxFromKey && idxToKey) &&
+      (navWindowed.length > 1 || rawPoints.length > 1),
     staleTime: 30 * 60_000,
     queryFn: () => {
-      const fromMs = Date.parse(rawPoints[0]!.date) - 7 * 24 * 60 * 60 * 1000;
+      const fromMs = Date.parse(idxFromKey) - 7 * 24 * 60 * 60 * 1000;
       const from = new Date(fromMs).toISOString();
-      const to = rawPoints[rawPoints.length - 1]!.date;
+      const to = idxToKey;
       const params = new URLSearchParams({ symbol: indexKey, from, to });
       return fetchJson<{ points: IndexClosePoint[] }>(
         `/api/benchmark?${params.toString()}`
@@ -509,24 +516,48 @@ export function PortfolioEvolutionPanel({
     [indexQ.data]
   );
 
-  const points = useMemo(
-    () => withBenchmarkSeries(rawPoints, versus, { indexCloses }),
-    [rawPoints, versus, indexCloses]
-  );
+  const points = rawPoints;
 
   /*
-    Trois situations distinctes, et elles ne se disent pas pareil :
-    la période est trop courte, la donnée manque, ou tout va bien.
+    Vs indice : deux niveaux (NAV du hero, clôture), base 100 au premier
+    jour commun. Pas `toPercentSeries` : la daily-nav n'a pas de `growth`,
+    et y passer une NAV en euros à côté d'un CAC déjà en % aplatissait
+    le portefeuille à +0 %.
   */
+  const vsIndexSeries = useMemo(() => {
+    if (versus !== "index") return [];
+    const indexLevels = indexCloses.map((c) => ({
+      day: c.date,
+      value: c.close,
+    }));
+    const useHeroNav = !assetClass && navWindowed.length > 1;
+    const portfolioLevels = useHeroNav
+      ? navWindowed.map((p) => ({
+          day: p.day,
+          value: navOfPoint(p, activeNavScope),
+        }))
+      : rawPoints.map((p) => ({
+          day: parisDayKey(p.date),
+          value: p.total,
+        }));
+    return rebaseToCommonBase100(portfolioLevels, indexLevels);
+  }, [
+    versus,
+    indexCloses,
+    assetClass,
+    navWindowed,
+    activeNavScope,
+    rawPoints,
+  ]);
 
   const percentPoints = useMemo(
-    () => (versus === "none" ? [] : toPercentSeries(points)),
-    [points, versus]
+    () => (versus === "none" ? [] : toVsIndexPercentPoints(vsIndexSeries)),
+    [vsIndexSeries, versus]
   );
 
   const gap = useMemo(
-    () => (versus === "none" ? null : benchmarkGapPct(points)),
-    [points, versus]
+    () => (versus === "none" ? null : vsIndexGapPct(vsIndexSeries)),
+    [vsIndexSeries, versus]
   );
 
   const benchmarkDisplayName =
@@ -556,7 +587,9 @@ export function PortfolioEvolutionPanel({
     !empty &&
     (wantPocketDailyNav
       ? pocketTooShort
-      : rawPoints.length === 0);
+      : versus === "index"
+        ? percentPoints.length < 2 && rawPoints.length === 0 && navWindowed.length < 2
+        : rawPoints.length === 0);
 
   return (
     <div
@@ -567,6 +600,7 @@ export function PortfolioEvolutionPanel({
       data-testid="portfolio-evolution-panel"
       data-nav-scope={activeNavScope}
       data-pocket-class={assetClass ?? "all"}
+      data-vs-base-day={versus === "index" ? vsIndexSeries[0]?.day : undefined}
       data-line-type={
         usePocketCurve ? pocketLineType : useDailyNavCurve ? "linear" : undefined
       }
@@ -924,7 +958,7 @@ export function PortfolioEvolutionPanel({
         </p>
       )}
 
-      {versus !== "none" && !empty && !noPoints && points.length > 0 && (
+      {versus !== "none" && !empty && !noPoints && (percentPoints.length > 0 || points.length > 0) && (
         <p className="text-meta mt-1.5 shrink-0" data-testid="evolution-vs-note">
           Vs {benchmarkDisplayName}
           {gap ? (
