@@ -496,8 +496,16 @@ export class PortfolioValuationEngine {
   }
 
   /**
-   * Premier jour où le patrimoine existe : la plus ancienne date connue, toutes
-   * sources confondues. Commencer avant afficherait une ligne plate à zéro.
+   * Premier jour où le patrimoine existe : la plus ancienne date **observée**,
+   * toutes sources confondues. Commencer avant afficherait une ligne plate à
+   * zéro.
+   *
+   * Un repli `createdAt`/`updatedAt` (`observed: false`, posé par
+   * `components.ts` quand aucune date réelle n'est connue) n'entre pas dans ce
+   * calcul : ce n'est pas un fait constaté, seulement une date de saisie. Une
+   * acquisition de 1998 sans écriture au journal reste la borne, même si le
+   * compte de cash le plus ancien n'a de solde connu que depuis sa dernière
+   * mise à jour.
    */
   earliestDay(): DayKey | null {
     const candidates: DayKey[] = [];
@@ -511,7 +519,7 @@ export class PortfolioValuationEngine {
       this.liabilities,
     ]) {
       for (const t of sleeve.timelines) {
-        const first = t.firstDay;
+        const first = t.earliestObservedDay;
         if (first) candidates.push(first);
       }
     }
