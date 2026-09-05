@@ -101,8 +101,12 @@ import type {
 } from "./types";
 import {
   PATRIMONY_POCKETS,
+  classifyHolding,
   computePatrimonyMetrics,
+  isFondsEuroHolding,
   type ClassifiableHolding,
+  type HoldingPocket,
+  type PatrimonyAssetPocket,
   type PatrimonyPocket,
 } from "../patrimony-metrics";
 
@@ -525,6 +529,108 @@ export class PortfolioValuationEngine {
     }
     if (candidates.length === 0) return null;
     return candidates.reduce((min, c) => (c < min ? c : min));
+  }
+
+  /**
+   * Ligne du journal, sous la forme minimale que `classifyHolding` /
+   * `isFondsEuroHolding` réclament — sans valeur de marché, puisque la
+   * classification n'en dépend jamais.
+   */
+  private classifiableOf(assetId: string): ClassifiableHolding {
+    return classifiableHoldingOf(
+      assetId,
+      zero(),
+      this.inputs.rawAssetClassById.get(assetId),
+      this.inputs.assetClassById.get(assetId),
+      this.holdingMetaById.get(assetId)
+    );
+  }
+
+  /**
+   * Premier jour où une ligne du journal tombe dans la poche demandée, ou dans
+   * le sous-ensemble fonds euro de l'AV.
+   *
+   * Le journal est déjà trié par date : le premier tirage suffit, aucun besoin
+   * de balayer l'ensemble. La classification (`assetClassById` / méta T-01) ne
+   * varie pas dans le temps ici — seule l'enveloppe fiscale le ferait, et elle
+   * n'intervient pas dans le partage des sept poches.
+   */
+  private earliestHoldingDay(
+    predicate: (h: ClassifiableHolding) => boolean
+  ): DayKey | null {
+    for (let i = 0; i < this.sortedTxs.length; i++) {
+      const tx = this.sortedTxs[i]!;
+      if (!tx.assetId || this.inputs.excludedAssetIds.has(tx.assetId)) continue;
+      if (predicate(this.classifiableOf(tx.assetId))) return this.txDays[i]!;
+    }
+    return null;
+  }
+
+  private earliestSleeveDay(sleeve: SleeveState): DayKey | null {
+    let min: DayKey | null = null;
+    for (const t of sleeve.timelines) {
+      const first = t.earliestObservedDay;
+      if (first && (min == null || first < min)) min = first;
+    }
+    return min;
+  }
+
+  private static minDay(days: Array<DayKey | null>): DayKey | null {
+    let min: DayKey | null = null;
+    for (const d of days) {
+      if (d != null && (min == null || d < min)) min = d;
+    }
+    return min;
+  }
+
+  /**
+   * Borne « Tout » **par scope**, et non plus toutes sources confondues.
+   *
+   * `earliestDay()` répond « depuis quand le patrimoine existe » ; cette
+   * méthode répond « depuis quand *ce* scope existe ». Brut et Net remontent
+   * aussi loin que le patrimoine entier — ils en sont la somme — quand
+   * Financier ou une poche isolée peuvent commencer bien plus tard : le
+   * premier jour observé du scope demandé, jamais avant.
+   *
+   * Chaque poche d'actif se résout par sa propre source : les positions du
+   * journal pour `listed` / `immobilier` / `av` / `autre`, la chronologie de
+   * poche pour `cash` / `alternatifs` / `employeeSavings`. `financier`
+   * recompose la même borne que `computePatrimonyMetrics` — listed, cash
+   * d'investissement (V1 = tout le cash), fonds euro, épargne salariale
+   * liquide — sans reformuler l'agrégat.
+   */
+  earliestDayForScope(
+    scope: "brut" | "net" | "financier" | PatrimonyAssetPocket
+  ): DayKey | null {
+    switch (scope) {
+      case "brut":
+      case "net":
+        return this.earliestDay();
+      case "financier":
+        return PortfolioValuationEngine.minDay([
+          this.earliestHoldingDay((h) => classifyHolding(h) === "listed"),
+          this.earliestSleeveDay(this.cash),
+          this.earliestHoldingDay(
+            (h) => classifyHolding(h) === "av" && isFondsEuroHolding(h)
+          ),
+          this.earliestSleeveDay(this.esLiquid),
+        ]);
+      case "listed":
+      case "immobilier":
+      case "av":
+      case "autre":
+        return this.earliestHoldingDay(
+          (h) => classifyHolding(h) === (scope as HoldingPocket)
+        );
+      case "cash":
+        return this.earliestSleeveDay(this.cash);
+      case "alternatifs":
+        return this.earliestSleeveDay(this.alternatives);
+      case "employeeSavings":
+        return this.earliestSleeveDay(this.employeeSavings);
+      default:
+        return this.earliestDay();
+    }
   }
 
   /**
