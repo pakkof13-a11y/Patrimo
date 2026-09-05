@@ -13,7 +13,11 @@ import {
   startOfRange,
   type EvolutionRange,
 } from "./evolution-aggregate";
-import type { DailyNavPoint, DailyNavScope } from "./historical/get-daily-nav";
+import {
+  parseDayKey,
+  type DailyNavPoint,
+  type DailyNavScope,
+} from "./historical/get-daily-nav";
 import type { HistoryPoint } from "../types/ui";
 
 /** Scopes tracés par les trois cartes Finary — ordre d'affichage. */
@@ -128,6 +132,28 @@ export function dailyNavQueryWindow(
 function previousDayKey(day: string): string {
   const start = endOfParisDay(day).getTime() - 36 * 3600_000;
   return parisDayKey(new Date(start));
+}
+
+/**
+ * Borne `from` **servie** par `GET /api/portfolio/daily-nav`.
+ *
+ * Jamais la borne demandée (`dailyNavQueryWindow`) : `getDailyNav` ramène
+ * une demande trop ancienne à la première observation du scope. Jamais une
+ * réponse encore en vol — `keepPreviousData` d'une fenêtre 1A ferait lire
+ * « sept. 2025 » pendant que « Tout » charge, puis « oct. 2022 » à
+ * l'arrivée. On n'affiche la date que lorsque la réponse courante est
+ * posée, avec des points.
+ */
+export function servedDailyNavFrom(
+  result:
+    | { from?: string | null; points?: readonly unknown[] }
+    | null
+    | undefined,
+  opts?: { isPlaceholderData?: boolean }
+): string | undefined {
+  if (opts?.isPlaceholderData) return undefined;
+  if (!result?.points?.length) return undefined;
+  return parseDayKey(result.from) ?? undefined;
 }
 
 /**

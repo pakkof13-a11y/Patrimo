@@ -15,7 +15,12 @@ import {
   WatchlistCard,
 } from "@/components/dashboard/terminal-panels";
 import type { DashboardNavTarget } from "@/components/dashboard/dashboard-quick-actions";
-import { getAssetClassLabel, cn } from "@/app/lib/utils";
+import { cn } from "@/app/lib/utils";
+import {
+  allocationLegendForScope,
+  allocationSliceLabel,
+  allocationSlicesForScope,
+} from "@/app/lib/portfolio/allocation-scope";
 import type {
   Holding,
   HistoryPoint,
@@ -50,6 +55,7 @@ import { parisDayKey } from "@/app/lib/dates/paris";
 import {
   dailyNavQueryWindow,
   dailyNavToHistoryPoints,
+  servedDailyNavFrom,
   type HeroNavScope,
 } from "@/app/lib/portfolio/daily-nav-view";
 import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
@@ -148,6 +154,8 @@ export function DashboardTab({
   }
   const displayAllocation = stableAllocation ?? allocation;
 
+  const [navScope, setNavScope] = useState<HeroNavScope>("financier");
+
   /*
     Les valeurs brutes, sans `round2`.
 
@@ -155,15 +163,27 @@ export function DashboardTab({
     somner 100,1 % : chaque part était déjà écornée, puis `formatPct` arrondissait
     une seconde fois. `AllocationCard` applique `allocatePercents` sur ces
     montants tels quels.
+
+    Le camembert lit le même périmètre que la carte active : Financier
+    n'inclut pas l'immobilier, Brut/Net le portent, Net le dit « hors passifs ».
   */
   const classChart = useMemo(
     () =>
-      displayAllocation?.byClass.map((x) => ({
-        name: getAssetClassLabel(x.name),
-        value: num(x.value),
-      })) ?? [],
-    [displayAllocation?.byClass]
+      allocationSlicesForScope(navScope, {
+        byClass: displayAllocation?.byClass ?? [],
+        holdings,
+        cashInvestissement: num(
+          summary?.cashInvestissementBase ?? summary?.cashInvestissementEur
+        ),
+        fondsEuro: num(summary?.fondsEuroBase ?? summary?.fondsEuroEur),
+        esLiquid: num(summary?.esLiquidBase ?? summary?.esLiquidEur),
+      }).map((x) => ({
+        name: allocationSliceLabel(x.name),
+        value: x.value,
+      })),
+    [displayAllocation?.byClass, holdings, navScope, summary]
   );
+  const allocationLegend = allocationLegendForScope(navScope);
 
   const [stableHistory, setStableHistory] = useState<HistoryPoint[]>(history);
   const [prevHistory, setPrevHistory] = useState(history);
@@ -215,8 +235,6 @@ export function DashboardTab({
     saveEvolutionRange(next);
   }
 
-  const [navScope, setNavScope] = useState<HeroNavScope>("financier");
-
   /*
     Repli 7J quand l'historique ne couvre pas la période enregistrée.
 
@@ -252,6 +270,13 @@ export function DashboardTab({
   );
   const dailyNavQ = useDailyNavQuery(navWindow.from, navWindow.to);
   const dailyNavPoints = dailyNavQ.data?.points;
+  /*
+    Libellé de période : borne **servie**, jamais celle demandée, jamais
+    le `from` d'une fenêtre 1A encore affichée par `keepPreviousData`.
+  */
+  const servedNavFrom = servedDailyNavFrom(dailyNavQ.data, {
+    isPlaceholderData: dailyNavQ.isPlaceholderData,
+  });
   const navHistory = useMemo(
     () =>
       dailyNavPoints && dailyNavPoints.length >= 2
@@ -438,6 +463,7 @@ export function DashboardTab({
           range={range}
           onRangeChange={changeRange}
           firstHistoryDate={firstHistoryDate}
+          servedNavFrom={servedNavFrom}
         />
       )}
 
@@ -500,6 +526,8 @@ export function DashboardTab({
                 holdings={holdings}
                 periodRange={range}
                 baseCurrency={baseCurrency}
+                scope={navScope}
+                legend={allocationLegend}
               />
               <WatchlistCard
                 holdings={holdings}
