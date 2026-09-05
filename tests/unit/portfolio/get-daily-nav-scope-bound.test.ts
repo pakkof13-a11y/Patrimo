@@ -74,6 +74,9 @@ vi.mock("@/app/lib/portfolio/historical/load", () => ({
 const { getDailyNav } = await import(
   "@/app/lib/portfolio/historical/get-daily-nav"
 );
+const { pocketSeriesTooShort } = await import(
+  "@/app/lib/portfolio/pocket-series"
+);
 
 describe("getDailyNav — borne « Tout » par scope", () => {
   it("from=1900-01-01, scope=brut : ramené à 1998-06-20, r.from l'annonce", async () => {
@@ -126,6 +129,20 @@ describe("getDailyNav — borne « Tout » par scope", () => {
       to: "2022-10-06",
     });
     expect(r.points).toEqual([]);
+  });
+
+  it("from=1900-01-01, scope=immobilier : clamp 1998, au moins 2 points", async () => {
+    const r = await getDailyNav({
+      userId: "u1",
+      scope: "immobilier",
+      from: "1900-01-01",
+      to: "1998-07-20",
+    });
+    expect(r.from).toBe("1998-06-20");
+    expect(r.points.length).toBeGreaterThanOrEqual(2);
+    expect(r.points[0]!.day).toBe("1998-06-20");
+    expect(r.points.every((p) => p.immobilier > 0)).toBe(true);
+    expect(pocketSeriesTooShort(r.points)).toBe(false);
   });
 
   it("from déjà valide (postérieur à la borne) n'est pas modifié", async () => {

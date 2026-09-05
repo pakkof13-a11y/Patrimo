@@ -50,6 +50,22 @@ function pt(
       ACTIONS: { PEA: null, CTO: null, UNKNOWN: 0 },
       OBLIGATIONS: { PEA: 0, CTO: 0, UNKNOWN: 0 },
     },
+    byAssetClass: over.byAssetClass ?? {
+      ACTIONS: 0,
+      OBLIGATIONS: 0,
+      CRYPTO: 0,
+      IMMOBILIER: over.immobilier ?? 0,
+      CASH: over.cash ?? 0,
+      AUTRE: (over.alternatifs ?? 0) + (over.employeeSavings ?? 0),
+    },
+    flowsByAssetClass: over.flowsByAssetClass ?? {
+      ACTIONS: 0,
+      OBLIGATIONS: 0,
+      CRYPTO: 0,
+      IMMOBILIER: 0,
+      CASH: 0,
+      AUTRE: 0,
+    },
   };
 }
 
@@ -374,6 +390,28 @@ describe("dailyNavToHistoryPoints — réutilise hero/KPI sans recalcul", () => 
     const history = dailyNavToHistoryPoints(points);
     expect(history[0]!.byAssetClassAndEnvelopeBase?.ACTIONS.UNKNOWN).toBe(40);
     expect(history[0]!.byAssetClassAndEnvelopeBase?.ACTIONS.PEA).toBeNull();
+  });
+
+  it("recopie byAssetClass / flowsByAssetClass pour les filtres de poche", () => {
+    const points = [
+      pt("2026-01-01", {
+        financier: 40,
+        brut: 240,
+        listed: 40,
+        immobilier: 200,
+        byAssetClass: {
+          ACTIONS: 40,
+          OBLIGATIONS: 0,
+          CRYPTO: 0,
+          IMMOBILIER: 200,
+          CASH: 0,
+          AUTRE: 0,
+        },
+      }),
+    ];
+    const history = dailyNavToHistoryPoints(points);
+    expect(history[0]!.byAssetClassBase?.IMMOBILIER).toBe(200);
+    expect(history[0]!.byAssetClassBase?.ACTIONS).toBe(40);
   });
 });
 

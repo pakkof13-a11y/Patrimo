@@ -350,65 +350,75 @@ function ValueTooltip({
  * dérivée du sens global de la période (hausse/baisse), aire dégradée en
  * dessous.
  *
- * Tracé **linéaire**, jamais incurvé : la courbe porte une valeur quotidienne
- * réelle par point, et une interpolation en spline dessinerait entre deux jours
- * des valeurs que le patrimoine n'a jamais prises. Sur une série dense c'est
- * imperceptible ; sur une série creuse, cela invente exactement ce que le
- * moteur s'interdit de fabriquer.
+ * Jamais incurvé (`monotone`) : un spline inventerait des valeurs entre deux
+ * jours. Les cotés restent `linear`. Les poches illiquides passent en
+ * `stepAfter` : la dernière expertise tient jusqu'à la suivante.
  */
 export function PortfolioValueChart({
   data,
   baseCurrency,
+  lineType = "linear",
 }: {
   data: EvolutionSeriesPoint[];
   baseCurrency: string;
+  /**
+   * `stepAfter` pour les poches illiquides : la dernière expertise tient
+   * jusqu'à la suivante. `linear` reste le défaut des cotés.
+   */
+  lineType?: "linear" | "stepAfter";
 }) {
   const first = data[0]?.total ?? 0;
   const last = data[data.length - 1]?.total ?? 0;
   const stroke = last >= first ? "var(--success)" : "var(--danger)";
 
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-        <defs>
-          <linearGradient id="evolution-value-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={stroke} stopOpacity={0.22} />
-            <stop offset="100%" stopColor={stroke} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
-        <TimeXAxis data={data} />
-        <YAxis
-          tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-          tickFormatter={yTick}
-          width={54}
-          axisLine={false}
-          tickLine={false}
-          domain={["auto", "auto"]}
-        />
-        <Tooltip
-          content={(props: object) => (
-            <ValueTooltip
-              {...(props as { active?: boolean; payload?: readonly ValueTooltipEntry[] })}
-              baseCurrency={baseCurrency}
-              stroke={stroke}
-            />
-          )}
-        />
-        <Area
-          type="linear"
-          dataKey="total"
-          stroke={stroke}
-          // Trait fin : une série quotidienne compte des centaines de points,
-          // un tracé épais les empâte en un ruban.
-          strokeWidth={1.75}
-          fill="url(#evolution-value-fill)"
-          dot={false}
-          activeDot={{ r: 4, strokeWidth: 0 }}
-          isAnimationActive={false}
-        />
-      </ComposedChart>
-    </ResponsiveContainer>
+    <div
+      className="h-full w-full"
+      data-testid="evolution-value-chart"
+      data-line-type={lineType}
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="evolution-value-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={stroke} stopOpacity={0.22} />
+              <stop offset="100%" stopColor={stroke} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
+          <TimeXAxis data={data} />
+          <YAxis
+            tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+            tickFormatter={yTick}
+            width={54}
+            axisLine={false}
+            tickLine={false}
+            domain={["auto", "auto"]}
+          />
+          <Tooltip
+            content={(props: object) => (
+              <ValueTooltip
+                {...(props as { active?: boolean; payload?: readonly ValueTooltipEntry[] })}
+                baseCurrency={baseCurrency}
+                stroke={stroke}
+              />
+            )}
+          />
+          <Area
+            type={lineType}
+            dataKey="total"
+            stroke={stroke}
+            // Trait fin : une série quotidienne compte des centaines de points,
+            // un tracé épais les empâte en un ruban.
+            strokeWidth={1.75}
+            fill="url(#evolution-value-fill)"
+            dot={false}
+            activeDot={{ r: 4, strokeWidth: 0 }}
+            isAnimationActive={false}
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 

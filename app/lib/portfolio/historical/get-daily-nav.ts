@@ -13,6 +13,9 @@
  */
 
 import { parisDayKey } from "../../dates/paris";
+import { parseDayKey } from "./day-key";
+
+export { parseDayKey } from "./day-key";
 import {
   PATRIMONY_ASSET_POCKETS,
   type PatrimonyAssetPocket,
@@ -92,6 +95,16 @@ export type DailyNavPoint = {
     EnvelopeCapableClass,
     Record<ValuationEnvelope, number | null>
   >;
+  /**
+   * Ventilation T-01 par classe — lecture du moteur, pas un recalcul.
+   *
+   * Les filtres Actions / Immo / Cash du panneau Évolution lisent **ce**
+   * champ. Sans lui, la série dense ne portait que les poches, et
+   * `scopeHistory` retirait tous les points faute de `byAssetClassBase`.
+   */
+  byAssetClass: Record<ValuationAssetClass, number>;
+  /** Flux du jour par classe — même objet que le moteur. */
+  flowsByAssetClass: Record<ValuationAssetClass, number>;
 };
 
 /** Journal coté du jour — pastilles, pas l'attribution Marché/Flux. */
@@ -178,14 +191,9 @@ export function dailyNavFromSeries(
     ledgerCashIncome: p.ledgerCashIncome,
     unrealizedPnl: unrealizedPnlOf(p),
     byAssetClassAndEnvelope: p.byAssetClassAndEnvelope,
+    byAssetClass: p.byAssetClass,
+    flowsByAssetClass: p.flowsByAssetClass,
   }));
-}
-
-const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-export function parseDayKey(raw: string | null | undefined): DayKey | null {
-  if (!raw || !DAY_KEY_RE.test(raw)) return null;
-  return raw;
 }
 
 export function defaultDailyNavWindow(now = new Date()): {
