@@ -162,6 +162,8 @@ describe("libellés de période", () => {
     expect(heroRangeSubtitle("all", "2021-03-04T12:00:00.000Z")).toBe(
       "depuis mars 2021"
     );
+    // DayKey servi par daily-nav.from — même lecture, pas la borne demandée.
+    expect(heroRangeSubtitle("all", "2022-10-15")).toBe("depuis octobre 2022");
   });
 
   it("sans date de départ, le libellé reste lisible", () => {

@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { formatCurrency, cn } from "@/app/lib/utils";
+import { endOfParisDay } from "@/app/lib/dates/paris";
 import { Eye, EyeOff } from "lucide-react";
 import { maskAmount, useAmountsHidden } from "@/app/lib/ui/privacy-prefs";
 import type { HistoryPoint } from "@/app/lib/types/ui";
@@ -112,6 +113,7 @@ export function TerminalHero({
   range,
   onRangeChange,
   firstHistoryDate,
+  servedNavFrom,
 }: {
   netWorth: number | null;
   /** Somme des actifs, sans déduction des passifs. */
@@ -142,6 +144,11 @@ export function TerminalHero({
    * source et même règle que le panneau (`isEvolutionRangeEnabled`).
    */
   firstHistoryDate: string | null;
+  /**
+   * Borne `from` **servie** par daily-nav. Le libellé de période la lit,
+   * jamais la borne demandée ni une réponse 1A encore en vol.
+   */
+  servedNavFrom?: string;
 }) {
   const mode = scope;
   const [amountsHidden] = useAmountsHidden();
@@ -235,8 +242,14 @@ export function TerminalHero({
     return typeof v === "number" && Number.isFinite(v) ? v : undefined;
   }, [windowed, mode]);
 
-  /** Origine de **tout** l'historique, indépendante de la période choisie. */
-  const historyStart = history[0]?.date;
+  /*
+    Origine affichée : `from` servi, pas `history[0]` (fenêtre 1A encore
+    à l'écran) ni la borne demandée. Absent tant que la réponse n'est pas
+    posée — mieux qu'un flash « sept. 2025 » puis « oct. 2022 ».
+  */
+  const periodOriginIso = servedNavFrom
+    ? endOfParisDay(servedNavFrom).toISOString()
+    : undefined;
 
   /*
     D'où vient la variation : du marché, ou des capitaux apportés.
@@ -619,7 +632,7 @@ export function TerminalHero({
                   className="text-[var(--foreground-secondary)]"
                   data-testid="hero-window-label"
                 >
-                  {heroRangeSubtitle(range, windowed[0]?.date)}
+                  {heroRangeSubtitle(range, periodOriginIso)}
                 </span>
 
                 {/*
@@ -693,7 +706,7 @@ export function TerminalHero({
                 </span>
               </>
             )}
-            {historyStart && (
+            {servedNavFrom && periodOriginIso && (
               <>
                 <span className="mx-[var(--space-2)] text-[var(--foreground-faint)]">
                   ·
@@ -701,8 +714,9 @@ export function TerminalHero({
                 <span
                   className="text-[var(--foreground-faint)]"
                   data-testid="hero-history-start"
+                  data-from={servedNavFrom}
                 >
-                  depuis {formatShortDateParis(historyStart)}
+                  depuis {formatShortDateParis(periodOriginIso)}
                 </span>
               </>
             )}
@@ -772,7 +786,7 @@ export function TerminalHero({
             className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
             data-testid="hero-range-subtitle"
           >
-            {heroRangeSubtitle(range, windowed[0]?.date)}
+            {heroRangeSubtitle(range, periodOriginIso)}
           </p>
 
           <div className="h-[5.5rem] w-full min-w-0 sm:h-[6.5rem]">

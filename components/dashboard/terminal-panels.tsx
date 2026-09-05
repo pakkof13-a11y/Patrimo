@@ -73,6 +73,8 @@ const TONE_BY_CLASS: Record<string, string> = {
   Obligations: "var(--chart-positive)",
   "Liquidités / Cash": "var(--chart-neutral)",
   Autre: "var(--cyan-ink-light)",
+  "Fonds euro": "var(--chart-positive)",
+  "Épargne salariale": "var(--cyan-ink-light)",
 };
 
 export function allocationTone(label: string): string {
@@ -127,6 +129,8 @@ export function AllocationCard({
   className,
   title = "Répartition du portefeuille",
   subtitle,
+  legend,
+  scope,
   showValues = false,
   emptyHint = "Les classes d'actifs apparaîtront dès le premier achat.",
   testId = "allocation-card",
@@ -151,6 +155,12 @@ export function AllocationCard({
   /** Le même camembert sert le tableau de bord et la vue PEA & CTO. */
   title?: string;
   subtitle?: string;
+  /**
+   * Légende de périmètre — « hors passifs » en Net, rien en Brut/Financier.
+   */
+  legend?: string;
+  /** Carte active dont le camembert reprend le dénominateur. */
+  scope?: string;
   /** Ajoute le montant à côté du pourcentage dans la légende. */
   showValues?: boolean;
   emptyHint?: string;
@@ -207,6 +217,7 @@ export function AllocationCard({
     <section
       className={cn("panel", className)}
       data-testid={testId}
+      data-scope={scope}
       aria-labelledby="allocation-heading"
     >
       <div className="panel-head">
@@ -373,6 +384,15 @@ export function AllocationCard({
                   )}`
               )
               .join(". ")}
+          </p>
+        )}
+
+        {legend && rows.length > 0 && (
+          <p
+            className="mt-[var(--space-2)] text-[length:var(--text-xs)] text-[var(--foreground-faint)]"
+            data-testid="allocation-scope-legend"
+          >
+            {legend}
           </p>
         )}
       </div>

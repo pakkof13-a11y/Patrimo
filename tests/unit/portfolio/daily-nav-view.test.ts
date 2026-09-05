@@ -9,6 +9,7 @@ import {
   headerFlux,
   headerMarketDelta,
   navOfPoint,
+  servedDailyNavFrom,
   sumDailyDeltas,
   toDailyNavChartPoints,
   windowDailyNav,
@@ -387,5 +388,37 @@ describe("dailyNavQueryWindow", () => {
   it("Tout part du premier jour connu", () => {
     const w = dailyNavQueryWindow("all", "2026-09-03", "2020-01-15");
     expect(w).toEqual({ from: "2020-01-15", to: "2026-09-03" });
+  });
+});
+
+describe("servedDailyNavFrom — borne servie, pas demandée", () => {
+  it("lit le from de la réponse, pas celui de la requête", () => {
+    const requested = dailyNavQueryWindow("1y", "2026-09-03", "2022-10-15");
+    expect(requested.from.startsWith("2025-09")).toBe(true);
+    expect(
+      servedDailyNavFrom({
+        from: "2022-10-15",
+        points: [{ day: "2022-10-15" }],
+      })
+    ).toBe("2022-10-15");
+    expect(servedDailyNavFrom({ from: requested.from, points: [] })).toBe(
+      undefined
+    );
+  });
+
+  it("ignore une réponse 1A encore en vol (keepPreviousData)", () => {
+    expect(
+      servedDailyNavFrom(
+        { from: "2025-09-03", points: [{ day: "2025-09-03" }] },
+        { isPlaceholderData: true }
+      )
+    ).toBeUndefined();
+  });
+
+  it("ignore une borne illisible ou absente", () => {
+    expect(servedDailyNavFrom(undefined)).toBeUndefined();
+    expect(
+      servedDailyNavFrom({ from: "pas-une-date", points: [{}] })
+    ).toBeUndefined();
   });
 });
