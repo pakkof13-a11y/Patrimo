@@ -511,16 +511,20 @@ export function PortfolioEvolutionPanel({
   }, [dailyNav, range, servedNavFrom]);
 
   const wantIndex = versus === "index";
+  /*
+    `from` = ancre servie, jamais `navQueryFrom` (borne demandée, ex. 1998
+    alors que getDailyNav a clampé à 2022). `to` = dernier jour de la
+    fenêtre affichée, pas une date demandée plus large.
+  */
   const idxFromKey =
     servedNavFrom ??
     vsNavWindowed[0]?.day ??
-    navQueryFrom ??
-    rawPoints[0]?.date.slice(0, 10) ??
+    dailyNav?.[0]?.day ??
     "";
   const idxToKey =
-    navQueryTo ??
     vsNavWindowed[vsNavWindowed.length - 1]?.day ??
-    rawPoints[rawPoints.length - 1]?.date.slice(0, 10) ??
+    dailyNav?.[dailyNav.length - 1]?.day ??
+    navQueryTo ??
     "";
   const indexQ = useQuery({
     queryKey: ["evolution-index", indexKey, idxFromKey, idxToKey],
@@ -558,22 +562,15 @@ export function PortfolioEvolutionPanel({
       day: c.date,
       value: c.close,
     }));
-    const useHeroNav = !assetClass && vsNavWindowed.length > 1;
-    const portfolioLevels = useHeroNav
-      ? dailyNavToVsIndexLevels(vsNavWindowed, activeNavScope)
-      : rawPoints.map((p) => ({
-          day: parisDayKey(p.date),
-          value: p.total,
-        }));
+    const portfolioLevels =
+      vsNavWindowed.length > 1
+        ? dailyNavToVsIndexLevels(vsNavWindowed, activeNavScope)
+        : rawPoints.map((p) => ({
+            day: parisDayKey(p.date),
+            value: p.total,
+          }));
     return rebaseToCommonBase100(portfolioLevels, indexLevels);
-  }, [
-    versus,
-    indexCloses,
-    assetClass,
-    vsNavWindowed,
-    activeNavScope,
-    rawPoints,
-  ]);
+  }, [versus, indexCloses, vsNavWindowed, activeNavScope, rawPoints]);
 
   const percentPoints = useMemo(
     () => (versus === "none" ? [] : toVsIndexPercentPoints(vsIndexSeries)),

@@ -322,3 +322,43 @@ describe("toVsIndexPercentPoints", () => {
     expect(pct[1]!.benchmarkPct).toBeCloseTo(-5, 6);
   });
 });
+
+describe("contrat Finance — gardes structurelles", () => {
+  it("ne recalcule pas Δmarché / flux et n'emprunte pas le DCA", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync("app/lib/portfolio/vs-index-series.ts", "utf8")
+    );
+    expect(src).not.toMatch(/\bdailyNavDeltas\s*\(/);
+    expect(src).not.toMatch(/\bfluxOfDay\s*\(/);
+    expect(src).not.toMatch(/\bbuildBenchmarkSeries\s*\(/);
+    expect(src).not.toMatch(/\blerp\s*\(/);
+  });
+
+  it("le panneau Versus lit MARKET_INDICES + /api/benchmark, pas le DCA", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(
+        "components/dashboard/portfolio-evolution-panel.tsx",
+        "utf8"
+      )
+    );
+    expect(src).toMatch(/MARKET_INDICES/);
+    expect(src).toMatch(/\/api\/benchmark/);
+    expect(src).not.toMatch(/buildBenchmarkSeries/);
+    expect(src).toMatch(/servedNavFrom/);
+    expect(src).toMatch(/jamais `navQueryFrom`/);
+  });
+
+  it("un samedi n'est pas la moyenne vendredi–lundi", () => {
+    const out = rebaseToCommonBase100(
+      [
+        nav("2026-01-02", 100_000),
+        nav("2026-01-03", 100_000),
+        nav("2026-01-05", 100_000),
+      ],
+      [cac("2026-01-02", 8_000), cac("2026-01-05", 8_800)]
+    );
+    expect(out[1]!.day).toBe("2026-01-03");
+    expect(out[1]!.indexBase100).toBe(100);
+    expect(out[1]!.indexBase100).not.toBeCloseTo(105, 5);
+  });
+});
