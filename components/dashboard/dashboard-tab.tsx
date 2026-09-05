@@ -513,6 +513,7 @@ export function DashboardTab({
               navScope={navScope}
               navQueryFrom={navWindow.from}
               navQueryTo={navWindow.to}
+              servedNavFrom={servedNavFrom}
               baseCurrency={baseCurrency}
               loading={showNavLoading}
               className="min-h-[22rem]"
