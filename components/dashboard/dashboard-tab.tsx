@@ -511,6 +511,8 @@ export function DashboardTab({
               history={curveHistory}
               dailyNav={dailyNavPoints ?? []}
               navScope={navScope}
+              navQueryFrom={navWindow.from}
+              navQueryTo={navWindow.to}
               baseCurrency={baseCurrency}
               loading={showNavLoading}
               className="min-h-[22rem]"
