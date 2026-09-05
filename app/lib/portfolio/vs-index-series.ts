@@ -227,7 +227,7 @@ export type VsIndexChartKind = "percent" | "nav" | "index-unavailable";
 export const INDEX_UNAVAILABLE_TITLE = "Indice indisponible";
 
 export function vsIndexHasOverlay(
-  points: readonly { benchmarkPct?: number }[]
+  points: readonly { benchmarkPct?: number | null }[]
 ): boolean {
   return points.some((p) => p.benchmarkPct != null);
 }

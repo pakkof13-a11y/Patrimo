@@ -335,9 +335,7 @@ describe("vsIndexChartKind — pas de +0 % fantôme", () => {
     expect(
       vsIndexChartKind({ versus: "index", indexError: false, hasOverlay: false })
     ).toBe("nav");
-    expect(vsIndexHasOverlay([{ portfolioPct: 0 }, { portfolioPct: 10 }])).toBe(
-      false
-    );
+    expect(vsIndexHasOverlay([{}, { benchmarkPct: undefined }])).toBe(false);
   });
 
   it("overlay présent → graphe %", () => {
@@ -345,10 +343,7 @@ describe("vsIndexChartKind — pas de +0 % fantôme", () => {
       vsIndexChartKind({ versus: "index", indexError: false, hasOverlay: true })
     ).toBe("percent");
     expect(
-      vsIndexHasOverlay([
-        { portfolioPct: 0, benchmarkPct: 0 },
-        { portfolioPct: 10, benchmarkPct: 4 },
-      ])
+      vsIndexHasOverlay([{ benchmarkPct: 0 }, { benchmarkPct: 4 }])
     ).toBe(true);
   });
 });
