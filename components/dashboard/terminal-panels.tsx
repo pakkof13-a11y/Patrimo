@@ -113,6 +113,44 @@ export function perfTone(pct: number | null | undefined): string {
   return `color-mix(in srgb, ${token} ${intensity}%, var(--surface-raised))`;
 }
 
+/**
+ * Luminance relative WCAG d'une couleur hex `#rrggbb` — sert à choisir un
+ * texte clair ou sombre par-dessus une case de mosaïque, sans jamais
+ * recalculer la couleur elle-même (celle-ci vient de l'API, cf.
+ * `allocation-by-venue-api.ts`, ou d'un jeton de ce fichier).
+ */
+function hexRelativeLuminance(hex: string): number {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex);
+  if (!m) return NaN;
+  const int = parseInt(m[1]!, 16);
+  const channel = (shift: number) => {
+    const c = ((int >> shift) & 0xff) / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const r = channel(16);
+  const g = channel(8);
+  const b = channel(0);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Texte clair ou sombre selon le fond de la case.
+ *
+ * Les couleurs de la mosaïque « par endroit » sont des hex fournis par
+ * l'API — leur luminance se calcule directement. Celles des mosaïques par
+ * classe/valeur (`allocationTone`, `perfTone`) restent des jetons CSS
+ * (`var(--chart-…)`, `color-mix(...)`) qu'on ne peut pas résoudre en dehors
+ * du navigateur ; leur nom dit déjà s'ils sont plutôt clairs ou sombres.
+ */
+function tileTextColor(color: string): string {
+  const luminance = hexRelativeLuminance(color);
+  if (Number.isFinite(luminance)) {
+    return luminance > 0.55 ? "var(--foreground)" : "var(--background)";
+  }
+  if (/gold/i.test(color)) return "var(--foreground)";
+  return "var(--background)";
+}
+
 function holdingValue(h: Holding): number {
   const v = Number(h.marketValueBase ?? h.marketValueEur);
   return Number.isFinite(v) ? v : 0;
@@ -314,119 +352,170 @@ export function AllocationCard({
           <p className="text-meta py-[var(--space-6)] text-center">
             {emptyHint}
           </p>
-        ) : mode === "treemap" && mosaic.length > 0 ? (
-          <div
-            className="relative h-44 w-full overflow-hidden rounded-[var(--radius-md)] bg-[var(--surface-sunken)] sm:h-48"
-            data-testid="allocation-treemap"
-            role="img"
-            aria-label={mosaic
-              .map(
-                (t) =>
-                  `${t.name} : ${formatPct1(t.pct)}, ${formatCurrency(t.value, baseCurrency)}`
-              )
-              .join(". ")}
-          >
-            {mosaic.map((t) => {
-              const showName = t.h * 192 >= 16 && t.w * 260 >= 40;
-              const showPct = t.h * 192 >= 22 && t.w * 260 >= 48;
-              return (
-                <div
-                  key={t.name}
-                  title={`${t.name} · ${formatPct1(t.pct)} · ${formatCurrency(t.value, baseCurrency)}`}
-                  className="absolute box-border overflow-hidden px-1.5 py-1 text-[var(--background)]"
-                  style={{
-                    left: `${t.x * 100}%`,
-                    top: `${t.y * 100}%`,
-                    width: `${t.w * 100}%`,
-                    height: `${t.h * 100}%`,
-                    backgroundColor: t.color,
-                    boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.35)",
-                  }}
-                >
-                  {showName && (
-                    <div className="truncate text-[length:var(--text-2xs)] font-semibold leading-tight">
-                      {t.name}
-                    </div>
-                  )}
-                  {showPct && (
-                    <div className="num text-[length:var(--text-xs)] font-semibold leading-none">
-                      {formatPct1(t.pct)}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
         ) : (
-          <div
-            className={cn(
-              "flex items-center",
-              compact ? "gap-[var(--space-3)]" : "gap-[var(--space-5)]"
-            )}
-          >
-            <div
-              className={cn(
-                "shrink-0",
-                compact ? "h-[5.5rem] w-[5.5rem]" : "h-[7.5rem] w-[7.5rem]"
-              )}
-            >
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={rows}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius="100%"
-                    innerRadius="62%"
-                    paddingAngle={1.5}
-                    stroke="none"
-                    animationDuration={0}
-                  >
-                    {rows.map((r) => (
-                      <Cell key={r.name} fill={r.tone} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/*
-              Légende porteuse des valeurs, et non simple clé de couleurs :
-              c'est elle qui rend le camembert lisible sans survol — donc
-              utilisable au doigt et au lecteur d'écran.
-            */}
-            <ul className="min-w-0 flex-1 space-y-[var(--space-2)]">
-              {rows.map((r) => (
-                <li
-                  key={r.name}
-                  className="flex items-baseline gap-[var(--space-2)] text-[length:var(--text-sm)]"
-                >
-                  <span
-                    className="h-[0.5rem] w-[0.5rem] shrink-0 translate-y-[-1px] rounded-[var(--radius-xs)]"
-                    style={{ backgroundColor: r.tone }}
-                    aria-hidden
-                  />
-                  <span
-                    className="min-w-0 flex-1 truncate text-[var(--foreground-secondary)]"
-                    title={r.name}
-                  >
-                    {r.name}
-                  </span>
-                  {/* `%` et montant ne rétrécissent pas : ce sont les faits.
-                      Seul le libellé s'abrège, et son `title` le rend entier. */}
-                  <span className="num shrink-0 text-[var(--foreground)]">
-                    {formatPct1(r.pct)}
-                  </span>
-                  {legendShowsValues && (
-                    <span className="num shrink-0 text-right text-[length:var(--text-xs)] text-[var(--foreground-faint)]">
-                      {formatCurrency(r.value, baseCurrency)}
-                    </span>
+          /*
+            Même cadre pour les deux vues : hauteur fixe, quel que soit le
+            nombre de lignes de légende du camembert. Sans ça, basculer sur le
+            camembert agrandissait le pavé — et avec lui toute la colonne du
+            tableau de bord — dès que le nombre d'endroits dépassait ce qui
+            tenait en 44/48 unités de hauteur. C'est désormais la légende qui
+            défile à l'intérieur du cadre, pas le cadre qui suit la légende.
+          */
+          <div className="h-44 w-full sm:h-48">
+            {mode === "treemap" && mosaic.length > 0 ? (
+              <div
+                className="relative h-full w-full overflow-hidden rounded-[var(--radius-md)] bg-[var(--surface-sunken)]"
+                data-testid="allocation-treemap"
+                role="img"
+                aria-label={mosaic
+                  .map(
+                    (t) =>
+                      `${t.name} : ${formatPct1(t.pct)}, ${formatCurrency(t.value, baseCurrency)}`
+                  )
+                  .join(". ")}
+              >
+                {mosaic.map((t) => {
+                  // Dimensions approchées du conteneur (192/260 px), pour
+                  // décider ce que la case peut porter sans déborder.
+                  const wPx = t.w * 260;
+                  const hPx = t.h * 192;
+                  const showName = hPx >= 16 && wPx >= 40;
+                  const showPct = hPx >= 22 && wPx >= 48;
+                  // Une case franchement grande porte en plus le montant, et
+                  // son corps grossit avec l'aire — le nom d'une case à 70 %
+                  // doit se lire de loin, celui d'une case à 0,4 % se
+                  // contente d'un seul mot en tout petit.
+                  const roomy = hPx >= 46 && wPx >= 70;
+                  const spacious = hPx >= 70 && wPx >= 110;
+                  const showAmount = spacious;
+                  const textColor = tileTextColor(t.color);
+                  return (
+                    <div
+                      key={t.name}
+                      title={`${t.name} · ${formatPct1(t.pct)} · ${formatCurrency(t.value, baseCurrency)}`}
+                      className="absolute box-border flex flex-col items-center justify-center overflow-hidden px-1 py-0.5 text-center leading-tight"
+                      style={{
+                        left: `${t.x * 100}%`,
+                        top: `${t.y * 100}%`,
+                        width: `${t.w * 100}%`,
+                        height: `${t.h * 100}%`,
+                        backgroundColor: t.color,
+                        color: textColor,
+                        boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.35)",
+                      }}
+                    >
+                      {showName && (
+                        <div
+                          className={cn(
+                            "w-full truncate font-semibold",
+                            spacious
+                              ? "text-[length:var(--text-sm)]"
+                              : roomy
+                                ? "text-[length:var(--text-xs)]"
+                                : "text-[length:var(--text-2xs)]"
+                          )}
+                        >
+                          {t.name}
+                        </div>
+                      )}
+                      {showPct && (
+                        <div
+                          className={cn(
+                            "num w-full truncate font-semibold",
+                            spacious
+                              ? "text-[length:var(--text-base)]"
+                              : roomy
+                                ? "text-[length:var(--text-sm)]"
+                                : "text-[length:var(--text-xs)]"
+                          )}
+                        >
+                          {formatPct1(t.pct)}
+                        </div>
+                      )}
+                      {showAmount && (
+                        <div className="num w-full truncate text-[length:var(--text-xs)] opacity-90">
+                          {formatCurrency(t.value, baseCurrency)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div
+                className={cn(
+                  "flex h-full items-center",
+                  compact ? "gap-[var(--space-3)]" : "gap-[var(--space-5)]"
+                )}
+              >
+                <div
+                  className={cn(
+                    "shrink-0",
+                    compact ? "h-[5.5rem] w-[5.5rem]" : "h-[7.5rem] w-[7.5rem]"
                   )}
-                </li>
-              ))}
-            </ul>
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={rows}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius="100%"
+                        innerRadius="62%"
+                        paddingAngle={1.5}
+                        stroke="none"
+                        animationDuration={0}
+                      >
+                        {rows.map((r) => (
+                          <Cell key={r.name} fill={r.tone} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/*
+                  Légende porteuse des valeurs, et non simple clé de
+                  couleurs : c'est elle qui rend le camembert lisible sans
+                  survol — donc utilisable au doigt et au lecteur d'écran.
+                  Elle défile dans le cadre commun plutôt que de l'étirer :
+                  cf. le commentaire au-dessus du conteneur.
+                */}
+                <ul className="min-h-0 min-w-0 flex-1 space-y-[var(--space-2)] overflow-y-auto pr-[var(--space-1)]">
+                  {rows.map((r) => (
+                    <li
+                      key={r.name}
+                      className="flex items-baseline gap-[var(--space-2)] text-[length:var(--text-sm)]"
+                    >
+                      <span
+                        className="h-[0.5rem] w-[0.5rem] shrink-0 translate-y-[-1px] rounded-[var(--radius-xs)]"
+                        style={{ backgroundColor: r.tone }}
+                        aria-hidden
+                      />
+                      <span
+                        className="min-w-0 flex-1 truncate text-[var(--foreground-secondary)]"
+                        title={r.name}
+                      >
+                        {r.name}
+                      </span>
+                      {/* `%` et montant ne rétrécissent pas : ce sont les
+                          faits. Seul le libellé s'abrège, et son `title` le
+                          rend entier. */}
+                      <span className="num shrink-0 text-[var(--foreground)]">
+                        {formatPct1(r.pct)}
+                      </span>
+                      {legendShowsValues && (
+                        <span className="num shrink-0 text-right text-[length:var(--text-xs)] text-[var(--foreground-faint)]">
+                          {formatCurrency(r.value, baseCurrency)}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
