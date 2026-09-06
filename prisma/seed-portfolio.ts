@@ -1000,11 +1000,28 @@ export async function seedUserPortfolio(
         événement pour une ligne AV, CRYPTO ou IMMOBILIER élargirait ce
         périmètre sans que rien ne le demande.
 
-        La date retenue est celle de **création de la ligne**, jamais sa date
-        d'acquisition. `acquisitionDate` remonte à plusieurs années : s'en
-        servir affirmerait que l'enveloppe était connue à cette date, alors que
-        le seed ne l'établit qu'à l'instant présent. Ce serait exactement la
-        rétro-projection que le journal existe pour interdire.
+        La date retenue est celle de l'**acquisition de la ligne**, et c'est un
+        revirement assumé par rapport à la version précédente de ce bloc.
+
+        Elle datait l'événement de la création de l'enregistrement, au motif
+        qu'affirmer l'enveloppe à la date d'achat serait une rétro-projection.
+        L'argument est juste — pour une ligne **importée**. Le journal existe
+        précisément pour ne pas inventer le passé d'une donnée dont on hérite,
+        et cette règle ne bouge pas d'un pouce hors de ce fichier.
+
+        Mais le seed n'hérite de rien : il est l'auteur du fait. C'est lui qui
+        décide que cette ligne fut achetée en PEA il y a six ans ; le dire à la
+        date d'achat n'est pas une conjecture, c'est l'énoncé de ce qu'il vient
+        d'établir. Dater l'événement d'aujourd'hui revenait à faire dire au jeu
+        de démonstration « l'enveloppe n'est connue que depuis ce matin »,
+        c'est-à-dire à rendre `UNKNOWN` toute la profondeur de l'historique.
+
+        Le coût n'était pas théorique : `resolveEnvelopeAt` rendait `null` sur
+        tout le passé, et la courbe d'un compte-titres — PEA, CTO, ou leur
+        somme — se réduisait à un point unique, celui du jour du réamorçage.
+
+        Ce chemin ne s'exécute que pour les portefeuilles semés. Aucun import
+        réel n'y passe, et aucun n'antidate son enveloppe.
 
         Aucun compte titres n'est rattaché : le seed n'en crée aucun, et les
         supprime tous au nettoyage. `securitiesAccountId` à `null` enregistre
@@ -1015,7 +1032,7 @@ export async function seedUserPortfolio(
           data: {
             assetId: cree.id,
             userId,
-            occurredAt: cree.createdAt,
+            occurredAt: daysAgo(s.openDaysAgo),
             kind: "OBSERVED",
             accountType: cree.accountType,
             securitiesAccountId: null,

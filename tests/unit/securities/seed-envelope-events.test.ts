@@ -52,21 +52,38 @@ describe("le seed journalise ce qu'il crée", () => {
     expect(iCreation).toBeLessThan(iEvenement);
   });
 
-  it("date l'événement sur la création de la ligne, pas sur son acquisition", () => {
+  it("date l'événement sur l'acquisition de la ligne, pas sur sa création", () => {
     /*
-      Le point qui distingue un constat d'une rétro-projection.
+      Revirement assumé par rapport à la version précédente de ce test, qui
+      exigeait l'inverse — et qui avait raison pour une ligne **importée** :
+      on n'invente pas le passé d'une donnée dont on hérite.
 
-      `acquisitionDate` remonte à plusieurs années — 2024 pour des lignes créées
-      en 2026. S'en servir affirmerait que l'enveloppe était connue à cette
-      date, alors que le seed ne l'établit qu'à l'instant présent.
+      Le seed, lui, n'hérite de rien. C'est lui qui décide que cette ligne fut
+      achetée en PEA il y a six ans ; le dire à la date d'achat énonce ce qu'il
+      vient d'établir, ce n'est pas une conjecture. Dater l'événement du jour
+      faisait dire au jeu de démonstration « l'enveloppe n'est connue que depuis
+      ce matin », et rendait `UNKNOWN` toute la profondeur de l'historique : la
+      courbe d'un compte-titres se réduisait à un point unique.
+
+      La doctrine ne bouge pas hors de ce fichier — le dernier bloc de ce
+      fichier le vérifie sur le résolveur lui-même.
     */
     const bloc = seed.slice(
       seed.indexOf("assetEnvelopeEvent.create"),
       seed.indexOf("assetEnvelopeEvent.create") + 500
     );
-    expect(bloc).toMatch(/occurredAt:\s*cree\.createdAt/);
-    expect(bloc).not.toMatch(/acquisitionDate/);
-    expect(bloc).not.toMatch(/daysAgo/);
+    expect(bloc).toMatch(/occurredAt:\s*daysAgo\(s\.openDaysAgo\)/);
+    expect(bloc).not.toMatch(/cree\.createdAt/);
+  });
+
+  it("ancre l'événement sur la même date que l'achat de la ligne", () => {
+    /*
+      `acquisitionDate` et l'ouverture du journal doivent parler de la même
+      date, sans quoi l'enveloppe s'établirait avant ou après l'existence de la
+      position. Les deux lisent `daysAgo(s.openDaysAgo)` — c'est ce que ce
+      contrôle verrouille, plutôt que la valeur qui en sort.
+    */
+    expect(seed).toMatch(/acquisitionDate:\s*daysAgo\(s\.openDaysAgo\)/);
   });
 
   it("ne journalise que les enveloppes titres", () => {
