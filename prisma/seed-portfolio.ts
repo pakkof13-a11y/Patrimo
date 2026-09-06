@@ -1443,17 +1443,56 @@ export async function seedUserPortfolio(
       notes: note("Prêt 25 ans"),
     },
   });
+  /*
+    Douze échéances qui amortissent vraiment.
+
+    La version précédente écrivait `178500 + (12 - m) * 420` : le capital
+    restant dû **montait** de 420 € à chaque mensualité, si bien qu'un débit de
+    980 € alourdissait la dette. Sur la courbe des passifs, cela produisait deux
+    marches ascendantes suivies d'un décrochage au jour du seed — un profil qui
+    ne ressemble à aucun amortissement.
+
+    Les échéances sont donc reconstruites à rebours depuis le capital restant
+    dû courant, avec la règle qui vaut pour un prêt amortissable : la mensualité
+    couvre d'abord les intérêts du mois, et seul le solde réduit le capital.
+
+        capital_avant = (capital_après + mensualité) / (1 + r)
+        intérêts      = capital_avant × r
+        principal     = mensualité − intérêts
+
+    Six premières échéances, à 2,15 % l'an sur 980 € :
+
+        échéance   intérêts   principal   capital après
+        la plus récente  320,99    659,01     178 500,00
+        −1 mois          322,17    657,83     179 159,01
+        −2 mois          323,35    656,65     179 816,83
+        −3 mois          324,52    655,48     180 473,49
+        −4 mois          325,70    654,30     181 128,96
+        −5 mois          326,87    653,13     181 783,27
+
+    L'assurance (28 €/mois) reste hors de ce calcul : c'est une charge, elle ne
+    rembourse rien.
+
+    Rien n'est touché du côté du moteur — `applyMonthlyDebit` impute toujours la
+    mensualité entière au capital, et c'est un défaut distinct. Ici on corrige
+    seulement des données qui décrivaient un prêt impossible.
+  */
+  const MORTGAGE_MONTHLY_RATE = 0.0215 / 12;
+  const MORTGAGE_PAYMENT = 980;
+  let crdAfter = 178500;
   for (let m = 0; m < 12; m++) {
     await prisma.liabilityEvent.create({
       data: {
         liabilityId: mortgage.id,
         type: "MONTHLY_DEBIT",
-        amount: D("980"),
-        remainingAfter: D(String(178500 + (12 - m) * 420)),
+        amount: D(String(MORTGAGE_PAYMENT)),
+        remainingAfter: D(moneyN(crdAfter).toFixed(2)),
         eventDate: daysAgo(30 + m * 30),
         notes: note(`Mensualité #${m + 1}`),
       },
     });
+    // Remontée d'un mois : avant cette échéance, le capital était plus élevé.
+    crdAfter = (crdAfter + MORTGAGE_PAYMENT) / (1 + MORTGAGE_MONTHLY_RATE);
   }
   /*
     Rattachement du prêt au bien qu'il finance.
