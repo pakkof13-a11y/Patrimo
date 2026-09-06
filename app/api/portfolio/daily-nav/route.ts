@@ -26,6 +26,10 @@ import { compressDailyNavPoints } from "@/app/lib/portfolio/historical/daily-nav
  * dense, rien n'est retiré — le contrat T-05 survit intact à l'écran.
  *
  * `scope` défaut : `financier` (courbe Finary). `from`/`to` défaut : 1 an.
+ *
+ * Vague2 D4 / D11 : l'enveloppe porte `asOfDay` (dernier point) et
+ * `fetchedAt` (plus ancienne collecte des dernières clôtures). Hero, KPI
+ * et watchlist lisent cette date — pas une horloge ni `PriceQuote` seul.
  */
 
 export async function GET(req: Request) {

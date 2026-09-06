@@ -8,20 +8,29 @@ import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/app/lib/api-client";
+import { useDailyNavQuery } from "@/app/hooks/use-portfolio-queries";
 import {
   buildEvolutionSeries,
-  benchmarkGapPct,
   benchmarkLabel,
   evolutionDeltaSummary,
   evolutionIntervalHint,
   evolutionIntervalLabel,
   isEvolutionRangeEnabled,
   startOfRange,
-  toPercentSeries,
-  withBenchmarkSeries,
   type EvolutionRange,
   type IndexClosePoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
+import { parisDayKey } from "@/app/lib/dates/paris";
+import {
+  dailyNavToVsIndexLevels,
+  INDEX_UNAVAILABLE_TITLE,
+  rebaseToCommonBase100,
+  toVsIndexPercentPoints,
+  vsIndexChartKind,
+  vsIndexGapPct,
+  vsIndexHasOverlay,
+  windowVsIndexNav,
+} from "@/app/lib/portfolio/vs-index-series";
 import { EVOLUTION_RANGE_CHIPS as RANGES } from "@/app/lib/ui/evolution-ranges";
 import {
   DEFAULT_EVOLUTION_PREFS,
@@ -49,10 +58,19 @@ import {
   headerFlux,
   headerMarketDelta,
   HERO_NAV_SCOPE_LABEL,
+  servedDailyNavFrom,
   toDailyNavChartPoints,
   windowDailyNav,
   type HeroNavScope,
 } from "@/app/lib/portfolio/daily-nav-view";
+import {
+  dailyNavScopeForClass,
+  pocketChartLineType,
+  pocketEmptyState,
+  pocketSeriesTooShort,
+  toPocketEvolutionPoints,
+  windowPocketDailyNav,
+} from "@/app/lib/portfolio/pocket-series";
 
 const emptySubscribe = () => () => undefined;
 
@@ -134,29 +152,6 @@ const METRIC_CHOICES: {
 ];
 
 
-/**
- * Échelle de lecture — quotidienne ou horaire.
- *
- * Proposée sur la seule fenêtre de sept jours : c'est là que l'heure a un sens,
- * et la collecte horaire ne remonte de toute façon pas plus loin. Le choix est
- * volontairement local et non mémorisé — c'est une façon de regarder, pas un
- * réglage de compte, et le mémoriser ferait rouvrir l'écran sur une courbe que
- * l'utilisateur n'a pas demandée.
- *
- * La courbe quotidienne reste le défaut : l'intraday s'ajoute au parcours, il
- * ne le remplace pas.
- */
-type EvolutionScale = "daily" | "intraday";
-
-const SCALE_CHOICES: { id: EvolutionScale; label: string; title: string }[] = [
-  { id: "daily", label: "Jour", title: "Un point par jour — historique complet" },
-  {
-    id: "intraday",
-    label: "Heure",
-    title: "Un point par heure, sur les observations réellement collectées",
-  },
-];
-
 const VERSUS_CHOICES: {
   id: EvolutionBenchmark;
   label: string;
@@ -226,14 +221,17 @@ function Segmented<T extends string>({
 /**
  * Module Évolution du portefeuille — refonte « premium » orientée
  * investissement, à deux réglages seulement : la période et la comparaison
- * (« Versus »). Toute la logique d'affichage (numéraire vs pourcentage,
- * rebasage du benchmark) est centralisée ici et dans `evolution-aggregate.ts`
- * — aucun calcul de performance dupliqué ailleurs dans l'app.
+ * (« Versus »). Le vs-indice (T-4.E) rebase NAV et clôtures à 100 à
+ * l'ancre `servedFrom` (`vs-index-series.ts`) — jamais une NAV en euros
+ * à côté d'un indice déjà en %.
  */
 export function PortfolioEvolutionPanel({
   history,
   dailyNav,
   navScope,
+  navQueryFrom,
+  navQueryTo,
+  servedNavFrom,
   baseCurrency,
   loading,
   className,
@@ -244,6 +242,17 @@ export function PortfolioEvolutionPanel({
   /** Série dense T-05 — courbe par défaut (Financier / Brut / Net). */
   dailyNav?: DailyNavPoint[];
   navScope?: HeroNavScope;
+  /**
+   * Même `from`/`to` que le hero. Un filtre de poche les réutilise : le
+   * clamp `earliestDayForScope` se fait ensuite côté `getDailyNav`.
+   */
+  navQueryFrom?: string;
+  navQueryTo?: string;
+  /**
+   * Borne `from` **servie** par daily-nav — jamais la demandée si clamp.
+   * C'est l'ancre Versus (NAV et indice à 100 le même jour).
+   */
+  servedNavFrom?: string;
   baseCurrency: string;
   loading?: boolean;
   className?: string;
@@ -290,25 +299,73 @@ export function PortfolioEvolutionPanel({
   const envelope = prefs.envelope ?? null;
 
   /*
-    L'échelle n'est pas mémorisée avec les autres préférences : c'est une façon
-    de regarder sur l'instant, pas un réglage de compte. Elle retombe donc sur
-    « Jour » — la courbe de référence — à chaque ouverture.
+    Plus d'échelle horaire sur ce tableau de bord.
+
+    Le sélecteur Jour/Heure basculait sur un second moteur : la vue horaire ne
+    sait produire que les actifs bruts, si bien qu'un clic remplaçait une
+    courbe Financier à −373 € par une courbe brute à +15 000 € — deux
+    périmètres, deux moteurs, aucun avertissement. `getDailyNav` n'a pas de
+    grain horaire, et lui en inventer un pour tenir la comparaison aurait
+    fabriqué de la donnée.
+
+    L'intraday n'est pas démonté pour autant : il garde son sens là où une
+    seule ligne est cotée — sur la fiche d'un actif — et ce chemin-là n'est pas
+    touché. C'est l'agrégat patrimonial qui ne se lit pas à l'heure.
   */
-  const [scale, setScale] = useState<EvolutionScale>("daily");
-  // L'heure n'a de sens que sur la fenêtre courte, la seule que la collecte
-  // horaire couvre. Ailleurs, le choix disparaît et la lecture reste quotidienne.
-  const scaleAvailable = range === "7d";
-  const showIntraday = scaleAvailable && scale === "intraday";
+  const showIntraday = false;
 
   const activeNavScope: HeroNavScope = navScope ?? "financier";
   /*
-    Courbe Finary : série dense getDailyNav, sauf filtre de classe / vs indice
-    / intraday, qui gardent l'historique existant.
+    Filtre de poche en valeur : même fenêtre que le hero, scope clampé par
+    `earliestDayForScope`. Le vs-indice (T-4.E) lit `servedFrom…to`,
+    les deux séries en base 100 à cette ancre.
   */
-  const useDailyNavCurve =
+  const wantPocketDailyNav =
+    Boolean(assetClass) &&
+    versus === "none" &&
+    classMetric === "value" &&
+    !showIntraday &&
+    Boolean(navQueryFrom && navQueryTo);
+  const pocketScope = assetClass
+    ? dailyNavScopeForClass(assetClass)
+    : "listed";
+  const pocketNavQ = useDailyNavQuery(navQueryFrom ?? "", navQueryTo ?? "", {
+    enabled: wantPocketDailyNav,
+    scope: pocketScope,
+  });
+  const pocketServedFrom = servedDailyNavFrom(pocketNavQ.data, {
+    isPlaceholderData: pocketNavQ.isPlaceholderData,
+  });
+  const pocketWindowed = useMemo(() => {
+    const points = pocketNavQ.data?.points;
+    if (!points?.length || !assetClass) return [];
+    const ref =
+      points[points.length - 1]?.day ??
+      dailyNav?.[dailyNav.length - 1]?.day ??
+      "";
+    if (!ref) return [];
+    return windowPocketDailyNav(points, range, ref, pocketServedFrom);
+  }, [pocketNavQ.data?.points, assetClass, range, pocketServedFrom, dailyNav]);
+  const pocketPoints = useMemo(
+    () =>
+      assetClass
+        ? toPocketEvolutionPoints(pocketWindowed, assetClass, envelope)
+        : [],
+    [pocketWindowed, assetClass, envelope]
+  );
+  const pocketLineType = pocketChartLineType(assetClass);
+  const pocketReady =
+    wantPocketDailyNav &&
+    !pocketNavQ.isPending &&
+    !pocketNavQ.isPlaceholderData;
+  const usePocketCurve =
+    pocketReady && !pocketSeriesTooShort(pocketPoints);
+  const pocketTooShort =
+    pocketReady && pocketSeriesTooShort(pocketPoints);
+
+  const canUseDailyNavSeries =
     Boolean(dailyNav && dailyNav.length > 1) &&
     !assetClass &&
-    versus === "none" &&
     !showIntraday;
 
   const navWindowed = useMemo(() => {
@@ -438,19 +495,48 @@ export function PortfolioEvolutionPanel({
     [scopedHistory, range, history]
   );
 
-  // Mode "index" : récupère les clôtures réelles de l'indice choisi sur la
-  // fenêtre affichée (marge amont pour disposer d'une clôture de base).
+  /*
+    Vs indice : fenêtre servie (clamp getDailyNav), pas la borne demandée.
+    Marge amont de 7 j pour une close ≤ ancre (LOCF vendredi).
+  */
+  const vsNavWindowed = useMemo(() => {
+    if (!dailyNav?.length) return [];
+    return windowVsIndexNav(
+      dailyNav,
+      range,
+      dailyNav[dailyNav.length - 1]!.day,
+      servedNavFrom
+    );
+  }, [dailyNav, range, servedNavFrom]);
+
   const wantIndex = versus === "index";
-  const idxFromKey = rawPoints[0]?.date.slice(0, 10) ?? "";
-  const idxToKey = rawPoints[rawPoints.length - 1]?.date.slice(0, 10) ?? "";
+  /*
+    `from` = ancre servie, jamais `navQueryFrom` (borne demandée, ex. 1998
+    alors que getDailyNav a clampé à 2022). `to` = dernier jour de la
+    fenêtre affichée, pas une date demandée plus large.
+  */
+  const idxFromKey =
+    servedNavFrom ??
+    vsNavWindowed[0]?.day ??
+    dailyNav?.[0]?.day ??
+    "";
+  const idxToKey =
+    vsNavWindowed[vsNavWindowed.length - 1]?.day ??
+    dailyNav?.[dailyNav.length - 1]?.day ??
+    navQueryTo ??
+    "";
   const indexQ = useQuery({
     queryKey: ["evolution-index", indexKey, idxFromKey, idxToKey],
-    enabled: wantIndex && rawPoints.length > 1,
+    enabled:
+      wantIndex &&
+      Boolean(idxFromKey && idxToKey) &&
+      (vsNavWindowed.length > 1 || rawPoints.length > 1),
     staleTime: 30 * 60_000,
+    retry: false,
     queryFn: () => {
-      const fromMs = Date.parse(rawPoints[0]!.date) - 7 * 24 * 60 * 60 * 1000;
+      const fromMs = Date.parse(idxFromKey) - 7 * 24 * 60 * 60 * 1000;
       const from = new Date(fromMs).toISOString();
-      const to = rawPoints[rawPoints.length - 1]!.date;
+      const to = idxToKey;
       const params = new URLSearchParams({ symbol: indexKey, from, to });
       return fetchJson<{ points: IndexClosePoint[] }>(
         `/api/benchmark?${params.toString()}`
@@ -458,41 +544,89 @@ export function PortfolioEvolutionPanel({
     },
   });
   const indexCloses = useMemo<IndexClosePoint[]>(
-    () => indexQ.data?.points ?? [],
-    [indexQ.data]
+    () => (indexQ.isError ? [] : indexQ.data?.points ?? []),
+    [indexQ.data, indexQ.isError]
   );
 
-  const points = useMemo(
-    () => withBenchmarkSeries(rawPoints, versus, { indexCloses }),
-    [rawPoints, versus, indexCloses]
-  );
+  const points = rawPoints;
 
   /*
-    Trois situations distinctes, et elles ne se disent pas pareil :
-    la période est trop courte, la donnée manque, ou tout va bien.
+    Deux niveaux (NAV hero, clôture Yahoo), base 100 à l'ancre servie.
+    Overlay absent si 429 / vide / aucune close ≤ ancre — NAV intacte.
+    Pas `toPercentSeries` : sans `growth`, le portefeuille restait à +0 %.
   */
+  const vsIndexSeries = useMemo(() => {
+    if (versus !== "index") return [];
+    const indexLevels = indexCloses.map((c) => ({
+      day: c.date,
+      value: c.close,
+    }));
+    const portfolioLevels =
+      vsNavWindowed.length > 1
+        ? dailyNavToVsIndexLevels(vsNavWindowed, activeNavScope)
+        : rawPoints.map((p) => ({
+            day: parisDayKey(p.date),
+            value: p.total,
+          }));
+    return rebaseToCommonBase100(portfolioLevels, indexLevels);
+  }, [versus, indexCloses, vsNavWindowed, activeNavScope, rawPoints]);
 
   const percentPoints = useMemo(
-    () => (versus === "none" ? [] : toPercentSeries(points)),
-    [points, versus]
+    () => (versus === "none" ? [] : toVsIndexPercentPoints(vsIndexSeries)),
+    [vsIndexSeries, versus]
   );
+  const hasIndexOverlay = vsIndexHasOverlay(percentPoints);
+  const chartKind = vsIndexChartKind({
+    versus,
+    indexError: Boolean(wantIndex && indexQ.isError),
+    hasOverlay: hasIndexOverlay,
+  });
+  /*
+    NAV quotidienne dès que Versus n'a pas d'overlay à tracer : éteint,
+    indice en erreur, ou overlay absent. Interdit dès que le graphe %
+    est légitime — sinon on superposerait deux lectures.
+  */
+  const useDailyNavCurve = canUseDailyNavSeries && chartKind !== "percent";
 
   const gap = useMemo(
-    () => (versus === "none" ? null : benchmarkGapPct(points)),
-    [points, versus]
+    () => (versus === "none" ? null : vsIndexGapPct(vsIndexSeries)),
+    [vsIndexSeries, versus]
   );
 
   const benchmarkDisplayName =
     versus === "index" ? marketIndexLabel(indexKey) : benchmarkLabel(versus);
 
   const summary = useMemo(() => evolutionDeltaSummary(points), [points]);
+  const pocketSummary = useMemo(
+    () => (usePocketCurve ? evolutionDeltaSummary(pocketPoints) : null),
+    [usePocketCurve, pocketPoints]
+  );
   const headlinePct =
-    percentPoints.length > 0
+    chartKind === "percent" && percentPoints.length > 0
       ? percentPoints[percentPoints.length - 1]!.portfolioPct
-      : 0;
+      : null;
 
-  const empty = !loading && history.length === 0;
-  const noPoints = !loading && !empty && rawPoints.length === 0;
+  const showPanelLoading = Boolean(
+    loading ||
+      (wantPocketDailyNav && !pocketReady && !pocketNavQ.isError)
+  );
+  const empty = !showPanelLoading && history.length === 0;
+  const pocketEmpty = pocketReady ? pocketEmptyState(pocketPoints.length) : null;
+  /*
+    « Période trop courte » seulement après clamp : moins de deux points
+    sur la fenêtre servie. Un `from` trop ancien n'est plus une absence.
+    0 point de poche → copie dédiée, pas le générique.
+  */
+  const noPoints =
+    !showPanelLoading &&
+    !empty &&
+    (wantPocketDailyNav
+      ? pocketTooShort
+      : versus === "index"
+        ? chartKind === "percent"
+          ? percentPoints.length < 2
+          : rawPoints.length === 0 && vsNavWindowed.length < 2 && navChart.length < 2
+        : rawPoints.length === 0);
 
   return (
     <div
@@ -502,6 +636,12 @@ export function PortfolioEvolutionPanel({
       )}
       data-testid="portfolio-evolution-panel"
       data-nav-scope={activeNavScope}
+      data-pocket-class={assetClass ?? "all"}
+      data-chart-kind={chartKind}
+      data-vs-base-day={versus === "index" ? vsIndexSeries[0]?.day : undefined}
+      data-line-type={
+        usePocketCurve ? pocketLineType : useDailyNavCurve ? "linear" : undefined
+      }
     >
       <PanelHeader
         title="Évolution du portefeuille"
@@ -541,37 +681,45 @@ export function PortfolioEvolutionPanel({
                 {formatCurrency(navMarket, baseCurrency)}
               </div>
               <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
-                Δ marché {HERO_NAV_SCOPE_LABEL[activeNavScope].toLowerCase()}
+                Performance {HERO_NAV_SCOPE_LABEL[activeNavScope].toLowerCase()}
                 {navFlux != null && navFlux !== 0 ? (
                   <span data-testid="evolution-headline-flux">
-                    {" · Flux "}
+                    {" · Capital investi "}
                     {navFlux >= 0 ? "+" : ""}
                     {formatCurrency(navFlux, baseCurrency)}
                   </span>
                 ) : null}
               </div>
             </div>
-          ) : summary && points.length > 0 ? (
+          ) : usePocketCurve && pocketSummary && pocketPoints.length > 0 ? (
             <div className="shrink-0 text-right" data-testid="evolution-headline">
               <div
                 className={cn(
                   "text-lg font-bold tabular-nums sm:text-xl",
-                  (versus === "none" ? summary.delta : headlinePct) >= 0
+                  pocketSummary.delta >= 0
                     ? "text-[var(--success)]"
                     : "text-[var(--danger)]"
                 )}
               >
-                {versus === "none" ? (
-                  <>
-                    {summary.delta >= 0 ? "+" : ""}
-                    {formatCurrency(summary.delta, baseCurrency)}
-                  </>
-                ) : (
-                  <>
-                    {headlinePct >= 0 ? "+" : ""}
-                    {headlinePct.toFixed(1)}&nbsp;%
-                  </>
+                {pocketSummary.delta >= 0 ? "+" : ""}
+                {formatCurrency(pocketSummary.delta, baseCurrency)}
+              </div>
+              <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
+                {`${pocketSummary.pct >= 0 ? "+" : ""}${pocketSummary.pct.toFixed(1)} % de rendement`}
+              </div>
+            </div>
+          ) : summary && points.length > 0 && chartKind !== "percent" ? (
+            <div className="shrink-0 text-right" data-testid="evolution-headline">
+              <div
+                className={cn(
+                  "text-lg font-bold tabular-nums sm:text-xl",
+                  summary.delta >= 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--danger)]"
                 )}
+              >
+                {summary.delta >= 0 ? "+" : ""}
+                {formatCurrency(summary.delta, baseCurrency)}
               </div>
               <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
                 {versus === "none"
@@ -586,7 +734,26 @@ export function PortfolioEvolutionPanel({
                        l'autre.
                     */
                     `${summary.pct >= 0 ? "+" : ""}${summary.pct.toFixed(1)} % de rendement`
-                  : `Vs ${benchmarkDisplayName}`}
+                  : chartKind === "index-unavailable"
+                    ? INDEX_UNAVAILABLE_TITLE
+                    : `Vs ${benchmarkDisplayName}`}
+              </div>
+            </div>
+          ) : summary && points.length > 0 && headlinePct != null ? (
+            <div className="shrink-0 text-right" data-testid="evolution-headline">
+              <div
+                className={cn(
+                  "text-lg font-bold tabular-nums sm:text-xl",
+                  headlinePct >= 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--danger)]"
+                )}
+              >
+                {headlinePct >= 0 ? "+" : ""}
+                {headlinePct.toFixed(1)}&nbsp;%
+              </div>
+              <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
+                {`Vs ${benchmarkDisplayName}`}
               </div>
             </div>
           ) : null
@@ -638,15 +805,6 @@ export function PortfolioEvolutionPanel({
         </div>
 
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
-          {scaleAvailable && (
-            <Segmented
-              items={SCALE_CHOICES}
-              value={scale}
-              onChange={setScale}
-              ariaLabel="Échelle de lecture"
-              testIdPrefix="evolution-scale"
-            />
-          )}
           {/*
             La classe commande, l'enveloppe précise.
 
@@ -754,7 +912,7 @@ export function PortfolioEvolutionPanel({
           */}
           {showIntraday ? (
             <IntradaySection baseCurrency={baseCurrency} />
-          ) : loading ? (
+          ) : showPanelLoading ? (
             <div
               className="flex h-full flex-col gap-3 px-2 py-2"
               data-testid="evolution-loading-skeleton"
@@ -777,6 +935,14 @@ export function PortfolioEvolutionPanel({
               title="Historique encore vide"
               description="Actualisez les cours pour enregistrer un premier point de courbe."
             />
+          ) : wantPocketDailyNav && pocketEmpty?.kind === "empty" ? (
+            <EmptyPlaceholder
+              compact
+              testId="evolution-pocket-empty"
+              emptyKind="pocket"
+              title={pocketEmpty.title}
+              description={pocketEmpty.description}
+            />
           ) : noPoints ? (
             /*
               Deux raisons très différentes de n'avoir aucun point, et une seule
@@ -795,17 +961,38 @@ export function PortfolioEvolutionPanel({
             ) : (
               <EmptyPlaceholder
                 compact
+                testId="evolution-too-short"
                 title="Période trop courte"
                 description="Choisissez une plage plus large ou attendez davantage d'historique."
               />
             )
-          ) : versus === "none" && useDailyNavCurve ? (
+          ) : chartKind === "index-unavailable" &&
+            navChart.length < 2 &&
+            points.length < 2 ? (
+            <EmptyPlaceholder
+              compact
+              testId="evolution-index-unavailable"
+              emptyKind="index"
+              title={INDEX_UNAVAILABLE_TITLE}
+              description="Le fournisseur d’indice n’a pas répondu. La comparaison est masquée — aucun +0 % inventé."
+            />
+          ) : versus === "none" && usePocketCurve ? (
+            <PortfolioValueChart
+              data={pocketPoints}
+              baseCurrency={baseCurrency}
+              lineType={pocketLineType}
+            />
+          ) : chartKind !== "percent" && useDailyNavCurve ? (
             <DailyNavChart
               data={navChart}
               baseCurrency={baseCurrency}
             />
-          ) : versus === "none" ? (
-            <PortfolioValueChart data={points} baseCurrency={baseCurrency} />
+          ) : chartKind !== "percent" ? (
+            <PortfolioValueChart
+              data={points}
+              baseCurrency={baseCurrency}
+              lineType={pocketChartLineType(assetClass)}
+            />
           ) : (
             <PortfolioPercentChart
               data={percentPoints}
@@ -837,7 +1024,24 @@ export function PortfolioEvolutionPanel({
         </p>
       )}
 
-      {versus !== "none" && !empty && !noPoints && points.length > 0 && (
+      {chartKind === "index-unavailable" &&
+        !empty &&
+        (navChart.length >= 2 || points.length >= 2) && (
+        <p
+          className="text-meta mt-1.5 shrink-0"
+          data-testid="evolution-index-unavailable"
+          data-empty-kind="index"
+        >
+          {INDEX_UNAVAILABLE_TITLE}
+          {" — comparaison masquée, courbe NAV seule."}
+        </p>
+      )}
+
+      {versus !== "none" &&
+        chartKind === "percent" &&
+        !empty &&
+        !noPoints &&
+        (percentPoints.length > 0 || points.length > 0) && (
         <p className="text-meta mt-1.5 shrink-0" data-testid="evolution-vs-note">
           Vs {benchmarkDisplayName}
           {gap ? (
@@ -865,8 +1069,6 @@ export function PortfolioEvolutionPanel({
             </>
           ) : wantIndex && indexQ.isLoading ? (
             " · chargement de l'indice…"
-          ) : wantIndex && indexQ.isError ? (
-            " · indice indisponible"
           ) : (
             ""
           )}

@@ -46,21 +46,30 @@ export function usePortfolioHistoryQuery(baseCurrency: string) {
 
 const DAILY_NAV_STALE_MS = 60_000;
 
-export type DailyNavQueryResult = import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavResult;
+export type DailyNavQueryResult =
+  import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavResult;
+export type DailyNavQueryScope = import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavScope;
 
 /**
- * Série dense T-05 — `GET /api/portfolio/daily-nav?scope=financier`.
+ * Série dense T-05 — `GET /api/portfolio/daily-nav`.
  *
- * Un seul aller-retour : chaque point porte déjà brut / net / financier /
- * listed. Cliquer une carte ne refetch pas — ça lit un autre champ.
- * `from`/`to` ne changent que la fenêtre, jamais la texture (1 pt/jour).
+ * Le hero demande `scope=financier` : chaque point porte déjà brut / net /
+ * financier / listed / poches. Cliquer une carte ne refetch pas.
+ * Un filtre de poche (T-4.F) demande le scope correspondant — même
+ * `from`/`to` que le hero, clamp `earliestDayForScope` côté API.
  */
-export function useDailyNavQuery(from: string, to: string, enabled = true) {
+export function useDailyNavQuery(
+  from: string,
+  to: string,
+  options?: { enabled?: boolean; scope?: DailyNavQueryScope }
+) {
+  const enabled = options?.enabled ?? true;
+  const scope = options?.scope ?? "financier";
   return useQuery({
-    queryKey: ["portfolio-daily-nav", from, to],
+    queryKey: ["portfolio-daily-nav", scope, from, to],
     queryFn: () => {
       const params = new URLSearchParams({
-        scope: "financier",
+        scope,
         from,
         to,
       });

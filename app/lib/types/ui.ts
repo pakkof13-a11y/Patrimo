@@ -70,6 +70,16 @@ export type Holding = {
   priceSource: string | null;
   priceStatus: string | null;
   lastUpdatedAt: string | null;
+  /**
+   * Jour civil Paris de la dernière clôture lue par getDailyNav (Vague2 D4).
+   * Watchlist et dernier point de courbe partagent cette date.
+   */
+  closeDay?: string | null;
+  /**
+   * Collecte de cette clôture (AssetDailyClose.fetchedAt ou PriceQuote).
+   * Badge « cours daté » si > 24 h (Vague2 D11).
+   */
+  fetchedAt?: string | null;
   acquisitionFeesEur?: EurAmount;
   acquisitionFeesBase?: BaseAmount;
   passiveIncomeEur?: EurAmount;

@@ -15,7 +15,12 @@ import {
   WatchlistCard,
 } from "@/components/dashboard/terminal-panels";
 import type { DashboardNavTarget } from "@/components/dashboard/dashboard-quick-actions";
-import { getAssetClassLabel, cn } from "@/app/lib/utils";
+import { cn } from "@/app/lib/utils";
+import {
+  allocationLegendForScope,
+  allocationSliceLabel,
+  allocationSlicesForScope,
+} from "@/app/lib/portfolio/allocation-scope";
 import type {
   Holding,
   HistoryPoint,
@@ -50,9 +55,11 @@ import { parisDayKey } from "@/app/lib/dates/paris";
 import {
   dailyNavQueryWindow,
   dailyNavToHistoryPoints,
+  servedDailyNavFrom,
   type HeroNavScope,
 } from "@/app/lib/portfolio/daily-nav-view";
 import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
+import { quoteStaleBadgeLabel } from "@/app/lib/ui/quote-staleness";
 
 const emptySubscribe = () => () => undefined;
 
@@ -148,6 +155,8 @@ export function DashboardTab({
   }
   const displayAllocation = stableAllocation ?? allocation;
 
+  const [navScope, setNavScope] = useState<HeroNavScope>("financier");
+
   /*
     Les valeurs brutes, sans `round2`.
 
@@ -155,15 +164,27 @@ export function DashboardTab({
     somner 100,1 % : chaque part était déjà écornée, puis `formatPct` arrondissait
     une seconde fois. `AllocationCard` applique `allocatePercents` sur ces
     montants tels quels.
+
+    Le camembert lit le même périmètre que la carte active : Financier
+    n'inclut pas l'immobilier, Brut/Net le portent, Net le dit « hors passifs ».
   */
   const classChart = useMemo(
     () =>
-      displayAllocation?.byClass.map((x) => ({
-        name: getAssetClassLabel(x.name),
-        value: num(x.value),
-      })) ?? [],
-    [displayAllocation?.byClass]
+      allocationSlicesForScope(navScope, {
+        byClass: displayAllocation?.byClass ?? [],
+        holdings,
+        cashInvestissement: num(
+          summary?.cashInvestissementBase ?? summary?.cashInvestissementEur
+        ),
+        fondsEuro: num(summary?.fondsEuroBase ?? summary?.fondsEuroEur),
+        esLiquid: num(summary?.esLiquidBase ?? summary?.esLiquidEur),
+      }).map((x) => ({
+        name: allocationSliceLabel(x.name),
+        value: x.value,
+      })),
+    [displayAllocation?.byClass, holdings, navScope, summary]
   );
+  const allocationLegend = allocationLegendForScope(navScope);
 
   const [stableHistory, setStableHistory] = useState<HistoryPoint[]>(history);
   const [prevHistory, setPrevHistory] = useState(history);
@@ -215,8 +236,6 @@ export function DashboardTab({
     saveEvolutionRange(next);
   }
 
-  const [navScope, setNavScope] = useState<HeroNavScope>("financier");
-
   /*
     Repli 7J quand l'historique ne couvre pas la période enregistrée.
 
@@ -252,6 +271,16 @@ export function DashboardTab({
   );
   const dailyNavQ = useDailyNavQuery(navWindow.from, navWindow.to);
   const dailyNavPoints = dailyNavQ.data?.points;
+  /*
+    Libellé de période : borne **servie**, jamais celle demandée, jamais
+    le `from` d'une fenêtre 1A encore affichée par `keepPreviousData`.
+  */
+  const servedNavFrom = servedDailyNavFrom(dailyNavQ.data, {
+    isPlaceholderData: dailyNavQ.isPlaceholderData,
+  });
+  const staleQuotesLabel = quoteStaleBadgeLabel(
+    dailyNavQ.isPlaceholderData ? undefined : dailyNavQ.data?.fetchedAt
+  );
   const navHistory = useMemo(
     () =>
       dailyNavPoints && dailyNavPoints.length >= 2
@@ -317,7 +346,15 @@ export function DashboardTab({
       },
       {
         key: "latent",
-        label: "P&L latent",
+        /*
+          Le suffixe n'est pas décoratif. Toutes les autres tuiles présentent un
+          encours du jour surmontant une variation sur la période choisie ; le
+          P&L latent, lui, est déjà un cumul depuis l'origine. Posé sans horizon
+          à côté d'une variation à sept jours, il se lisait comme s'il portait
+          la même fenêtre — d'où « Titres −872 € » et « P&L latent +14 606 € »
+          sur le même écran, deux grandeurs justes que rien ne distinguait.
+        */
+        label: "P&L latent depuis l'origine",
         value: num(summary?.unrealizedPnlBase ?? summary?.unrealizedPnlEur),
         spark: latent,
         sparkDates,
@@ -430,7 +467,37 @@ export function DashboardTab({
           range={range}
           onRangeChange={changeRange}
           firstHistoryDate={firstHistoryDate}
+          servedNavFrom={servedNavFrom}
         />
+      )}
+
+      {blocks.showEvolutionChart && staleQuotesLabel && (
+          <p
+            className="-mt-[var(--space-2)] px-[var(--space-1)] text-[length:var(--text-2xs)] text-[var(--foreground-secondary)]"
+            data-testid="hero-stale-quotes"
+            role="status"
+          >
+            {staleQuotesLabel}
+          </p>
+        )}
+
+      {/*
+        Ce que la courbe raconte, dit une fois pour toutes.
+
+        La ligne trace la NAV, capital investi compris : un achat la fait monter
+        sans qu'aucune valeur ait progressé. La performance, elle, retire ce
+        capital — elle peut donc être négative le mois où le patrimoine atteint
+        son plus haut. Les deux affirmations sont vraies en même temps, et
+        c'est précisément ce qui déroute sans cette phrase.
+      */}
+      {blocks.showEvolutionChart && (
+        <p
+          className="-mt-[var(--space-2)] px-[var(--space-1)] text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
+          data-testid="hero-legend"
+        >
+          La courbe inclut le capital investi. La performance peut être négative
+          même si le patrimoine monte.
+        </p>
       )}
 
       {/* —— 2. Indicateurs —— */}
@@ -458,6 +525,9 @@ export function DashboardTab({
               history={curveHistory}
               dailyNav={dailyNavPoints ?? []}
               navScope={navScope}
+              navQueryFrom={navWindow.from}
+              navQueryTo={navWindow.to}
+              servedNavFrom={servedNavFrom}
               baseCurrency={baseCurrency}
               loading={showNavLoading}
               className="min-h-[22rem]"
@@ -473,6 +543,8 @@ export function DashboardTab({
                 holdings={holdings}
                 periodRange={range}
                 baseCurrency={baseCurrency}
+                scope={navScope}
+                legend={allocationLegend}
               />
               <WatchlistCard
                 holdings={holdings}

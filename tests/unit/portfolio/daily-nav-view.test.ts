@@ -9,6 +9,11 @@ import {
   headerFlux,
   headerMarketDelta,
   navOfPoint,
+  servedDailyNavFrom,
+  heroModeHelpAll,
+  heroModeHelpLine,
+  HERO_FINANCIER_PHRASE,
+  HERO_MODE_HELP,
   sumDailyDeltas,
   toDailyNavChartPoints,
   windowDailyNav,
@@ -48,6 +53,22 @@ function pt(
     byAssetClassAndEnvelope: over.byAssetClassAndEnvelope ?? {
       ACTIONS: { PEA: null, CTO: null, UNKNOWN: 0 },
       OBLIGATIONS: { PEA: 0, CTO: 0, UNKNOWN: 0 },
+    },
+    byAssetClass: over.byAssetClass ?? {
+      ACTIONS: 0,
+      OBLIGATIONS: 0,
+      CRYPTO: 0,
+      IMMOBILIER: over.immobilier ?? 0,
+      CASH: over.cash ?? 0,
+      AUTRE: (over.alternatifs ?? 0) + (over.employeeSavings ?? 0),
+    },
+    flowsByAssetClass: over.flowsByAssetClass ?? {
+      ACTIONS: 0,
+      OBLIGATIONS: 0,
+      CRYPTO: 0,
+      IMMOBILIER: 0,
+      CASH: 0,
+      AUTRE: 0,
     },
   };
 }
@@ -374,6 +395,28 @@ describe("dailyNavToHistoryPoints — réutilise hero/KPI sans recalcul", () => 
     expect(history[0]!.byAssetClassAndEnvelopeBase?.ACTIONS.UNKNOWN).toBe(40);
     expect(history[0]!.byAssetClassAndEnvelopeBase?.ACTIONS.PEA).toBeNull();
   });
+
+  it("recopie byAssetClass / flowsByAssetClass pour les filtres de poche", () => {
+    const points = [
+      pt("2026-01-01", {
+        financier: 40,
+        brut: 240,
+        listed: 40,
+        immobilier: 200,
+        byAssetClass: {
+          ACTIONS: 40,
+          OBLIGATIONS: 0,
+          CRYPTO: 0,
+          IMMOBILIER: 200,
+          CASH: 0,
+          AUTRE: 0,
+        },
+      }),
+    ];
+    const history = dailyNavToHistoryPoints(points);
+    expect(history[0]!.byAssetClassBase?.IMMOBILIER).toBe(200);
+    expect(history[0]!.byAssetClassBase?.ACTIONS).toBe(40);
+  });
 });
 
 describe("dailyNavQueryWindow", () => {
@@ -387,5 +430,97 @@ describe("dailyNavQueryWindow", () => {
   it("Tout part du premier jour connu", () => {
     const w = dailyNavQueryWindow("all", "2026-09-03", "2020-01-15");
     expect(w).toEqual({ from: "2020-01-15", to: "2026-09-03" });
+  });
+});
+
+describe("servedDailyNavFrom — borne servie, pas demandée", () => {
+  it("lit le from de la réponse, pas celui de la requête", () => {
+    const requested = dailyNavQueryWindow("1y", "2026-09-03", "2022-10-15");
+    expect(requested.from.startsWith("2025-09")).toBe(true);
+    expect(
+      servedDailyNavFrom({
+        from: "2022-10-15",
+        points: [{ day: "2022-10-15" }],
+      })
+    ).toBe("2022-10-15");
+    expect(servedDailyNavFrom({ from: requested.from, points: [] })).toBe(
+      undefined
+    );
+  });
+
+  it("ignore une réponse 1A encore en vol (keepPreviousData)", () => {
+    expect(
+      servedDailyNavFrom(
+        { from: "2025-09-03", points: [{ day: "2025-09-03" }] },
+        { isPlaceholderData: true }
+      )
+    ).toBeUndefined();
+  });
+
+  it("ignore une borne illisible ou absente", () => {
+    expect(servedDailyNavFrom(undefined)).toBeUndefined();
+    expect(
+      servedDailyNavFrom({ from: "pas-une-date", points: [{}] })
+    ).toBeUndefined();
+  });
+
+  it("sans from servi, retombe sur points[0].day — jamais la borne demandée", () => {
+    const requested = dailyNavQueryWindow("1y", "2026-09-03", "2022-10-15");
+    expect(
+      servedDailyNavFrom({
+        from: requested.from,
+        points: [{ day: "2022-10-15" }],
+      })
+    ).toBe(requested.from);
+    expect(
+      servedDailyNavFrom({
+        from: null,
+        points: [{ day: "2022-10-15" }],
+      })
+    ).toBe("2022-10-15");
+    expect(
+      servedDailyNavFrom({
+        points: [{ day: "2022-10-15" }, { day: "2022-10-16" }],
+      })
+    ).toBe("2022-10-15");
+  });
+
+  it("un from 1A en vol n'est pas remplacé par points[0] de cette même réponse", () => {
+    expect(
+      servedDailyNavFrom(
+        { from: null, points: [{ day: "2025-09-03" }] },
+        { isPlaceholderData: true }
+      )
+    ).toBeUndefined();
+  });
+});
+
+describe("heroModeHelpLine — D3 copie Métier + D8", () => {
+  it("Financier porte la phrase validée, hors immo et alternatifs", () => {
+    expect(HERO_FINANCIER_PHRASE).toBe(
+      "Titres & crypto, cash, fonds euro et ES dispo — hors immo et alternatifs."
+    );
+    expect(heroModeHelpLine("financier")).toBe(
+      `${HERO_FINANCIER_PHRASE} La courbe inclut le capital investi.`
+    );
+    expect(heroModeHelpLine("financier").startsWith(HERO_FINANCIER_PHRASE)).toBe(
+      true
+    );
+    expect(heroModeHelpLine("brut")).toBe(
+      "Tous les actifs. La courbe inclut le capital investi."
+    );
+    expect(heroModeHelpLine("net")).toBe(
+      "Brut − dettes. La courbe inclut le capital investi."
+    );
+  });
+
+  it("l'aide des trois cartes tient en une ligne", () => {
+    expect(HERO_MODE_HELP).toBe(
+      "Financier = titres & crypto + cash + fonds euro + ES dispo. Brut = tous les actifs. Net = brut − dettes."
+    );
+    expect(heroModeHelpAll()).toBe(
+      `${HERO_MODE_HELP} La courbe inclut le capital investi.`
+    );
+    expect(heroModeHelpAll()).not.toMatch(/\n/);
   });
 });

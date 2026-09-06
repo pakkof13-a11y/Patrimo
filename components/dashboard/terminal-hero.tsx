@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { formatCurrency, cn } from "@/app/lib/utils";
+import { endOfParisDay } from "@/app/lib/dates/paris";
 import { Eye, EyeOff } from "lucide-react";
 import { maskAmount, useAmountsHidden } from "@/app/lib/ui/privacy-prefs";
 import type { HistoryPoint } from "@/app/lib/types/ui";
@@ -19,11 +20,14 @@ import {
   type EvolutionRange,
 } from "@/app/lib/portfolio/evolution-aggregate";
 import {
-  heroRangeSubtitle,
+  heroPeriodLabel,
   heroWindowChange,
   heroWindowReference,
 } from "@/app/lib/portfolio/hero-range";
-import { EVOLUTION_RANGE_CHIPS as RANGES } from "@/app/lib/ui/evolution-ranges";
+import {
+  EVOLUTION_RANGE_CHIPS as RANGES,
+  evolutionRangePeriodLabel,
+} from "@/app/lib/ui/evolution-ranges";
 import {
   heroAttribution,
   heroEventMarkers,
@@ -40,9 +44,11 @@ import {
   formatValuationTimeParis,
 } from "@/app/lib/ui/hero-format";
 import {
+  HERO_NAV_SCOPE_HEADING,
   HERO_NAV_SCOPE_LABEL,
   HERO_NAV_SCOPE_TITLE,
   HERO_NAV_SCOPES,
+  heroModeHelpLine,
 } from "@/app/lib/portfolio/daily-nav-view";
 
 function formatPct(v: number): string {
@@ -108,6 +114,7 @@ export function TerminalHero({
   range,
   onRangeChange,
   firstHistoryDate,
+  servedNavFrom,
 }: {
   netWorth: number | null;
   /** Somme des actifs, sans déduction des passifs. */
@@ -138,6 +145,11 @@ export function TerminalHero({
    * source et même règle que le panneau (`isEvolutionRangeEnabled`).
    */
   firstHistoryDate: string | null;
+  /**
+   * Borne `from` **servie** par daily-nav. Le libellé de période la lit,
+   * jamais la borne demandée ni une réponse 1A encore en vol.
+   */
+  servedNavFrom?: string;
 }) {
   const mode = scope;
   const [amountsHidden] = useAmountsHidden();
@@ -231,8 +243,19 @@ export function TerminalHero({
     return typeof v === "number" && Number.isFinite(v) ? v : undefined;
   }, [windowed, mode]);
 
-  /** Origine de **tout** l'historique, indépendante de la période choisie. */
-  const historyStart = history[0]?.date;
+  /*
+    Origine affichée : `from` servi, pas `history[0]` (fenêtre 1A encore
+    à l'écran) ni la borne demandée. Absent tant que la réponse n'est pas
+    posée — mieux qu'un flash « sept. 2025 » puis « oct. 2022 ».
+  */
+  const periodOriginIso = servedNavFrom
+    ? endOfParisDay(servedNavFrom).toISOString()
+    : undefined;
+  /*
+    Une seule chaîne : `daily-nav.from` servi / `points[0].day`. Vide tant
+    que « Tout » n'a pas sa réponse — pas le from 1A encore en vol.
+  */
+  const periodLabel = heroPeriodLabel(range, periodOriginIso);
 
   /*
     D'où vient la variation : du marché, ou des capitaux apportés.
@@ -312,24 +335,27 @@ export function TerminalHero({
         {money(active.value)}
       </p>
 
-      {/* 3. Écart avec le point précédent disponible */}
-      {active.deltaAbs !== undefined && (
+      {/* 3. Marché / Flux — pas le Δ NAV brut. Flux masqué si inconnu ou 0. */}
+      {active.market !== undefined && (
         <p
           className={cn(
             "num flex flex-wrap items-baseline gap-[var(--space-1)]",
-            active.deltaAbs >= 0 ? "val-positive" : "val-negative"
+            active.market >= 0 ? "val-positive" : "val-negative"
           )}
-          data-testid="hero-tooltip-delta"
+          data-testid="hero-tooltip-market"
         >
-          <span>
-            {formatSignedAmount(active.deltaAbs, (v) => money(v))}
-          </span>
-          {active.deltaPct !== undefined && (
-            <>
-              <span className="text-[var(--foreground-faint)]">·</span>
-              <span>{formatSignedPct(active.deltaPct)}</span>
-            </>
+          Marché {formatSignedAmount(active.market, (v) => money(v))}
+        </p>
+      )}
+      {active.flow !== undefined && active.flow !== 0 && (
+        <p
+          className={cn(
+            "num flex flex-wrap items-baseline gap-[var(--space-1)]",
+            "text-[var(--primary-text)]"
           )}
+          data-testid="hero-tooltip-flow"
+        >
+          Flux {formatSignedAmount(active.flow, (v) => money(v))}
         </p>
       )}
 
@@ -349,14 +375,14 @@ export function TerminalHero({
           </p>
         )}
 
-      {/* 5. Événement du jour — aujourd'hui, un mouvement de capital externe */}
+      {/* 5. Pastille tx — journal coté, distincte de Marché/Flux */}
       {active.externalFlow !== undefined && (
         <p
           className={cn(
             "flex items-center gap-[var(--space-1)]",
             active.externalFlow >= 0 ? "val-positive" : "val-negative"
           )}
-          data-testid="hero-tooltip-event"
+          data-testid="hero-tooltip-tx"
         >
           <span
             aria-hidden
@@ -367,19 +393,22 @@ export function TerminalHero({
                 : "bg-[var(--chart-negative)]"
             )}
           />
-          Événement ·{" "}
-          {active.externalFlow >= 0 ? "apport" : "retrait"} de{" "}
-          <span className="num">{money(Math.abs(active.externalFlow))}</span>
+          <span className="num">
+            {formatSignedAmount(active.externalFlow, (v) => money(v))}
+          </span>
         </p>
       )}
 
-      {/* 6. Journée non observée : dire d'où vient la valeur */}
-      {active.carried && active.lastObservedDate && (
+      {/* 6. LOCF : dire que la valeur est reportée, pas mesurée ce jour-là */}
+      {active.carried && (
         <p
           className="text-[var(--foreground-faint)]"
           data-testid="hero-tooltip-carried"
         >
-          dernière valo : {formatDayMonthParis(active.lastObservedDate)}
+          Reporté
+          {active.lastObservedDate
+            ? ` · ${formatDayMonthParis(active.lastObservedDate)}`
+            : ""}
         </p>
       )}
     </div>
@@ -407,7 +436,7 @@ export function TerminalHero({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-[var(--space-2)]">
             <h2 id="hero-heading" className="text-label">
-              Patrimoine total
+              {HERO_NAV_SCOPE_HEADING[mode]}
             </h2>
             <span
               className={cn(
@@ -418,8 +447,8 @@ export function TerminalHero({
               tabIndex={0}
               role="note"
               data-testid="hero-mode-help"
-              title="Financier = titres, cash, fonds euro, ES disponible. Brut = tous les actifs. Net = brut − dettes."
-              aria-label="Financier égale titres, cash, fonds euro et épargne salariale disponible. Brut égale tous les actifs. Net égale brut moins dettes."
+              title={heroModeHelpLine(mode)}
+              aria-label={heroModeHelpLine(mode)}
             >
               ?
             </span>
@@ -615,7 +644,7 @@ export function TerminalHero({
                   className="text-[var(--foreground-secondary)]"
                   data-testid="hero-window-label"
                 >
-                  {heroRangeSubtitle(range, windowed[0]?.date)}
+                  {periodLabel}
                 </span>
 
                 {/*
@@ -643,9 +672,9 @@ export function TerminalHero({
                           : "val-negative"
                       )}
                       data-testid="hero-pill-market"
-                      title="Ce que la valeur des actifs a produit, mouvements de capitaux retirés"
+                      title="Ce que la valeur des actifs a produit, capital investi retiré"
                     >
-                      Marché{" "}
+                      Performance{" "}
                       {formatSignedAmount(attribution.market, (v) => money(v))}
                     </span>
                     <span
@@ -654,9 +683,9 @@ export function TerminalHero({
                         "bg-[var(--surface-sunken)] text-[var(--primary-text)]"
                       )}
                       data-testid="hero-pill-flow"
-                      title="Capitaux entrés ou sortis sur la période — apports, retraits, acquisitions, emprunts"
+                      title="Capital entré ou sorti du périmètre sur la période — achats, ventes, versements sur les poches, emprunts"
                     >
-                      Flux{" "}
+                      Capital investi{" "}
                       {formatSignedAmount(attribution.flow, (v) => money(v))}
                     </span>
                   </>
@@ -689,7 +718,7 @@ export function TerminalHero({
                 </span>
               </>
             )}
-            {historyStart && (
+            {servedNavFrom && periodOriginIso && (
               <>
                 <span className="mx-[var(--space-2)] text-[var(--foreground-faint)]">
                   ·
@@ -697,8 +726,9 @@ export function TerminalHero({
                 <span
                   className="text-[var(--foreground-faint)]"
                   data-testid="hero-history-start"
+                  data-from={servedNavFrom}
                 >
-                  depuis {formatShortDateParis(historyStart)}
+                  depuis {formatShortDateParis(periodOriginIso)}
                 </span>
               </>
             )}
@@ -768,7 +798,7 @@ export function TerminalHero({
             className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
             data-testid="hero-range-subtitle"
           >
-            {heroRangeSubtitle(range, windowed[0]?.date)}
+            {periodLabel}
           </p>
 
           <div className="h-[5.5rem] w-full min-w-0 sm:h-[6.5rem]">
@@ -996,6 +1026,15 @@ export function TerminalKpiRow({
                       {formatPct(pct)}
                     </span>
                   )}
+                  {/*
+                    Sur quoi porte cette variation. La période ne vivait que
+                    dans `data-range`, invisible à l'écran : deux tuiles
+                    voisines pouvaient annoncer des horizons différents sans
+                    que rien ne le montre.
+                  */}
+                  <span className="shrink-0 truncate text-[var(--foreground-faint)]">
+                    {evolutionRangePeriodLabel(range)}
+                  </span>
                 </>
               ) : (
                 /*

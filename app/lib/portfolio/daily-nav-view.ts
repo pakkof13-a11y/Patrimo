@@ -13,7 +13,11 @@ import {
   startOfRange,
   type EvolutionRange,
 } from "./evolution-aggregate";
-import type { DailyNavPoint, DailyNavScope } from "./historical/get-daily-nav";
+import { parseDayKey } from "./historical/day-key";
+import type {
+  DailyNavPoint,
+  DailyNavScope,
+} from "./historical/get-daily-nav";
 import type { HistoryPoint } from "../types/ui";
 
 /** Scopes tracés par les trois cartes Finary — ordre d'affichage. */
@@ -33,10 +37,36 @@ export const HERO_NAV_SCOPE_LABEL: Record<HeroNavScope, string> = {
   net: "Net",
 };
 
+/**
+ * Le titre de la carte de tête, qui doit nommer ce que le chiffre mesure.
+ *
+ * « Patrimoine total » surmontait indifféremment les trois cartes, y compris
+ * le Financier — qui n'est pas un total mais un sous-ensemble : ni immobilier,
+ * ni alternatifs. Le titre affirmait donc l'exhaustivité au-dessus d'un chiffre
+ * partiel, et le camembert d'allocation, lui, répartissait bien le patrimoine
+ * entier — deux périmètres sur le même écran, sans que rien ne les distingue.
+ */
+export const HERO_NAV_SCOPE_HEADING: Record<HeroNavScope, string> = {
+  financier: "Patrimoine financier",
+  brut: "Patrimoine brut",
+  net: "Patrimoine net",
+};
+
+/** Phrase Financier (D3) — carte + « ? » quand cette carte est active. */
+export const HERO_FINANCIER_PHRASE =
+  "Titres & crypto, cash, fonds euro et ES dispo — hors immo et alternatifs.";
+
+/**
+ * Aide des trois cartes (D3). Une ligne, pas un panneau.
+ * Financier = listed + cashInvest + fondsEuro + esLiquid.
+ */
+export const HERO_MODE_HELP =
+  "Financier = titres & crypto + cash + fonds euro + ES dispo. Brut = tous les actifs. Net = brut − dettes.";
+
 export const HERO_NAV_SCOPE_TITLE: Record<HeroNavScope, string> = {
-  financier: "Titres, cash, fonds euro et épargne salariale disponible",
-  brut: "Total des actifs, passifs non déduits",
-  net: "Actifs moins passifs",
+  financier: HERO_FINANCIER_PHRASE,
+  brut: "Tous les actifs",
+  net: "Brut − dettes",
 };
 
 export function navOfPoint(p: DailyNavPoint, scope: HeroNavScope): number {
@@ -113,6 +143,53 @@ export function dailyNavQueryWindow(
 function previousDayKey(day: string): string {
   const start = endOfParisDay(day).getTime() - 36 * 3600_000;
   return parisDayKey(new Date(start));
+}
+
+function firstPointDay(
+  points: readonly unknown[] | undefined
+): string | undefined {
+  const first = points?.[0];
+  if (!first || typeof first !== "object") return undefined;
+  const day = "day" in first ? (first as { day?: unknown }).day : undefined;
+  return typeof day === "string" ? (parseDayKey(day) ?? undefined) : undefined;
+}
+
+/**
+ * Borne `from` **servie** par `GET /api/portfolio/daily-nav`.
+ *
+ * Uniquement `result.from` ou, à défaut, `points[0].day`. Jamais la borne
+ * demandée (`dailyNavQueryWindow`) : `getDailyNav` ramène une demande trop
+ * ancienne à la première observation du scope. Jamais une réponse encore
+ * en vol — `keepPreviousData` d'une fenêtre 1A ferait lire « sept. 2025 »
+ * pendant que « Tout » charge, puis « oct. 2022 » à l'arrivée. On n'affiche
+ * la date que lorsque la réponse courante est posée, avec des points.
+ */
+export function servedDailyNavFrom(
+  result:
+    | { from?: string | null; points?: readonly unknown[] }
+    | null
+    | undefined,
+  opts?: { isPlaceholderData?: boolean }
+): string | undefined {
+  if (opts?.isPlaceholderData) return undefined;
+  if (!result?.points?.length) return undefined;
+  return parseDayKey(result.from) ?? firstPointDay(result.points);
+}
+
+/**
+ * Une ligne pour le « ? » : périmètre de la carte active + ce que la
+ * courbe contient (D8). Financier porte la phrase D3, pas l'ancien
+ * « titres, cash, fonds euro… ».
+ */
+export function heroModeHelpLine(scope: HeroNavScope): string {
+  const perimeter = HERO_NAV_SCOPE_TITLE[scope];
+  const base = perimeter.endsWith(".") ? perimeter : `${perimeter}.`;
+  return `${base} La courbe inclut le capital investi.`;
+}
+
+/** Aide des trois cartes (tests / copie de référence). Le « ? » affiche `heroModeHelpLine`. */
+export function heroModeHelpAll(): string {
+  return `${HERO_MODE_HELP} La courbe inclut le capital investi.`;
 }
 
 /**
@@ -285,6 +362,8 @@ export function dailyNavToHistoryPoints(
       transactionFlowBase: p.transactionFlow,
       financierFlowsBase: p.financierFlows,
       byAssetClassAndEnvelopeBase: p.byAssetClassAndEnvelope,
+      byAssetClassBase: p.byAssetClass,
+      flowsByAssetClassBase: p.flowsByAssetClass,
       unrealizedPnlBase: p.unrealizedPnl,
       realizedPnlBase: p.realizedPnl,
       ledgerCashIncomeBase: p.ledgerCashIncome,

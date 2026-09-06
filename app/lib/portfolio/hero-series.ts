@@ -47,19 +47,28 @@ export type HeroSeriesPoint = {
   /** Date de la dernière valorisation réellement observée, si `carried`. */
   lastObservedDate?: string;
   /**
-   * Capital entré ou sorti ce jour-là, s'il y en a eu.
+   * Pastille tx (journal coté) — distincte de Marché/Flux.
    *
-   * C'est le seul « événement » que le modèle connaisse aujourd'hui, et il est
-   * réel : un apport de 50 000 € explique une marche que la seule variation ne
-   * justifierait pas. Le jour où un modèle d'événements dédié existera, il se
-   * branchera au même endroit de l'info-bulle.
+   * Un achat immo gonfle `externalFlows` sans y figurer. Absent si nul
+   * ou inconnu : on ne pose pas de pastille inventée.
    */
   externalFlow?: number;
   /**
-   * Écart avec le point précédent **disponible**, pas avec le début de série.
-   *
-   * Absent sur le premier point : sans veille, il n'y a rien à comparer, et
-   * afficher « +0 € » y serait faux plutôt qu'imprécis.
+   * Flux du **périmètre** (D3) : Financier = `financierFlows` ; Brut =
+   * `externalFlows` ; Net = `externalFlows − Δpassifs`. Absent si le
+   * champ n'est pas publié — jamais un 0 inventé pour l'afficher.
+   */
+  flow?: number;
+  /**
+   * Marché du jour = ΔNAV − flux, **même identité** que `heroAttribution`
+   * / `dailyNavDeltas`. Absent si le flux est inconnu (on ne fabrique pas
+   * un marché en supposant flux = 0).
+   */
+  market?: number;
+  /**
+   * Écart NAV avec le point précédent **disponible**, pas avec le début
+   * de série. L'info-bulle D3 ne l'affiche plus (Marché/Flux à la place) ;
+   * il reste pour les tests de voisinage.
    */
   deltaAbs?: number;
   /** Même écart en pourcentage — absent aussi quand la veille valait zéro. */
@@ -68,6 +77,30 @@ export type HeroSeriesPoint = {
 
 function finite(v: number | undefined | null): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * Flux du jour selon le périmètre — **lecture** des champs déjà publiés,
+ * même convention que `heroAttribution` / `fluxOfDay`. Pas une 2ᵉ formule.
+ *
+ * L'ancre (pas de veille) n'a pas de flux de fenêtre : `undefined`, pour
+ * que l'info-bulle masque Flux plutôt que d'écrire « Flux 0 € ».
+ */
+function scopeFlowAt(
+  point: HistoryPoint,
+  previous: HistoryPoint | undefined,
+  mode: HeroMode
+): number | undefined {
+  if (!previous) return undefined;
+  if (mode === "financier") return finite(point.financierFlowsBase);
+  if (mode === "brut") return finite(point.externalFlowsBase);
+  const ext = finite(point.externalFlowsBase);
+  const liab = finite(point.liabilitiesBase);
+  const prevLiab = finite(previous.liabilitiesBase);
+  if (ext === undefined || liab === undefined || prevLiab === undefined) {
+    return undefined;
+  }
+  return ext - (liab - prevLiab);
 }
 
 /**
@@ -103,11 +136,13 @@ export function buildHeroSeries(
         : ((value - previous) / Math.abs(previous)) * 100;
 
     /*
-      Pastilles = série de transactions cotées, pas les flux externes.
-      Un achat immo reste visible dans Marché/Flux (`externalFlows`) sans
-      poser de pastille sur la courbe Financier.
+      Pastilles txs = journal coté, pas les flux d'attribution.
+      Un achat immo reste dans Marché/Flux (`externalFlows`) sans pastille
+      sur la courbe Financier.
     */
-    const flow = finite(p.transactionFlowBase);
+    const tx = finite(p.transactionFlowBase);
+    const prevPoint = index > 0 ? history[index - 1] : undefined;
+    const scopeFlow = scopeFlowAt(p, prevPoint, mode);
 
     const point: HeroSeriesPoint = {
       index,
@@ -127,7 +162,13 @@ export function buildHeroSeries(
     if (carried && lastObserved !== undefined) {
       point.lastObservedDate = lastObserved;
     }
-    if (flow !== undefined && flow !== 0) point.externalFlow = flow;
+    if (tx !== undefined && tx !== 0) point.externalFlow = tx;
+    if (scopeFlow !== undefined) {
+      point.flow = scopeFlow;
+      if (deltaAbs !== undefined && Number.isFinite(deltaAbs)) {
+        point.market = deltaAbs - scopeFlow;
+      }
+    }
     if (deltaAbs !== undefined && Number.isFinite(deltaAbs)) {
       point.deltaAbs = deltaAbs;
     }

@@ -34,6 +34,22 @@ function base(day: string, over: Partial<DailyNavPoint> = {}): DailyNavPoint {
       ACTIONS: { PEA: null, CTO: null, UNKNOWN: 0 },
       OBLIGATIONS: { PEA: 0, CTO: 0, UNKNOWN: 0 },
     },
+    byAssetClass: {
+      ACTIONS: 0,
+      OBLIGATIONS: 0,
+      CRYPTO: 0,
+      IMMOBILIER: 0,
+      CASH: 0,
+      AUTRE: 0,
+    },
+    flowsByAssetClass: {
+      ACTIONS: 0,
+      OBLIGATIONS: 0,
+      CRYPTO: 0,
+      IMMOBILIER: 0,
+      CASH: 0,
+      AUTRE: 0,
+    },
     ...over,
   };
 }

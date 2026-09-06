@@ -27,6 +27,13 @@ describe("allocatePercents — Hamilton", () => {
     expect(pcts.filter((p) => p === 33.4)).toHaveLength(1);
     expect(pcts.filter((p) => p === 33.3)).toHaveLength(2);
   });
+
+  it("un immobilier à 41 % du brut somme encore à 100,0", () => {
+    const weights = [204_590, 192_750, 50_000, 35_500, 15_000];
+    const pcts = allocatePercents(weights, 1);
+    expect(pcts.reduce((s, p) => s + p, 0)).toBeCloseTo(100, 8);
+    expect(pcts[0]).toBeCloseTo(41.1, 1);
+  });
 });
 
 describe("capTinyHoldings", () => {

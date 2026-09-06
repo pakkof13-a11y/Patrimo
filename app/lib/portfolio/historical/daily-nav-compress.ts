@@ -59,7 +59,24 @@ function sameSnapshot(a: DailyNavPoint, b: DailyNavPoint): boolean {
     a.realizedPnl === b.realizedPnl &&
     a.ledgerCashIncome === b.ledgerCashIncome &&
     sameOrigins(a.priceOrigins, b.priceOrigins) &&
-    sameEnvelope(a.byAssetClassAndEnvelope, b.byAssetClassAndEnvelope)
+    sameEnvelope(a.byAssetClassAndEnvelope, b.byAssetClassAndEnvelope) &&
+    sameByAssetClass(a.byAssetClass, b.byAssetClass)
+  );
+}
+
+function sameByAssetClass(
+  a: DailyNavPoint["byAssetClass"] | undefined,
+  b: DailyNavPoint["byAssetClass"] | undefined
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.ACTIONS === b.ACTIONS &&
+    a.OBLIGATIONS === b.OBLIGATIONS &&
+    a.CRYPTO === b.CRYPTO &&
+    a.IMMOBILIER === b.IMMOBILIER &&
+    a.CASH === b.CASH &&
+    a.AUTRE === b.AUTRE
   );
 }
 
