@@ -60,6 +60,7 @@ import {
 } from "@/app/lib/portfolio/daily-nav-view";
 import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
 import { quoteStaleBadgeLabel } from "@/app/lib/ui/quote-staleness";
+import { evolutionRangePeriodLabel } from "@/app/lib/ui/evolution-ranges";
 
 const emptySubscribe = () => () => undefined;
 
@@ -326,6 +327,12 @@ export function DashboardTab({
     const liabilities = kpiSeries(h, (p) => p.liabilitiesBase);
     const latent = kpiSeries(h, latentPnlAt);
     const realized = kpiSeries(h, realizedPlusIncomeAt);
+    /*
+      La série est cumulative depuis l'origine : sa variation sur la fenêtre
+      *est* ce qui a été réalisé et encaissé pendant la fenêtre. Une seule
+      lecture, réutilisée par le montant et par la teinte.
+    */
+    const realizedPeriod = seriesChangeAbs(realized);
 
     return [
       {
@@ -412,14 +419,40 @@ export function DashboardTab({
       },
       {
         key: "realized",
-        label: "Réalisé + revenus",
-        value:
-          num(summary?.realizedPnlBase ?? summary?.realizedPnlEur) +
-          num(summary?.cashIncomeBase ?? summary?.cashIncomeEur),
+        /*
+          Même défaut que le P&L latent, à l'envers : la série est cumulative
+          depuis l'origine, mais la tuile doit porter la somme réalisée +
+          encaissée sur la fenêtre affichée, pas le cumul. Cette somme vaut
+          exactement `dernier − premier` de la série — ce que
+          `seriesChangeAbs` calcule déjà — donc le montant de tête et
+          `seriesChangeAbs(realized)` sont la même grandeur. Pas de seconde
+          formule, et pas de ligne de variation en double en dessous : une
+          fois le montant devenu la variation de la période, la répéter en
+          dessous n'apprendrait rien.
+        */
+        label: `Réalisé + revenus ${evolutionRangePeriodLabel(range)}`,
+        // UNKNOWN ≠ ZERO : une série absente ou à un seul point ne doit pas
+        // se lire comme un réalisé nul sur la période.
+        value: realizedPeriod,
         spark: realized,
         sparkDates,
-        changeAbs: seriesChangeAbs(realized),
-        changePct: seriesChangePct(realized),
+        // Le dénominateur d'un « réalisé en % » serait le capital de la
+        // fenêtre, non calculé ici : un pourcentage adossé à autre chose
+        // serait faux, donc aucun n'est affiché sur cette tuile.
+        changeAbs: undefined,
+        changePct: undefined,
+        /*
+          La teinte se déduisait du signe de `changeAbs`. Celui-ci ayant
+          disparu, la tuile serait retombée en gris neutre alors que son
+          montant, lui, a bien un signe. On le déclare donc explicitement :
+          la couleur décrit le chiffre affiché, comme partout ailleurs.
+        */
+        tone:
+          realizedPeriod == null
+            ? "neutral"
+            : realizedPeriod >= 0
+              ? "positive"
+              : "negative",
       },
     ];
   }, [summary, stableHistory, curveHistory, range]);

@@ -831,7 +831,12 @@ export function TerminalHero({
 export type TerminalKpi = {
   key: string;
   label: string;
-  value: number;
+  /**
+   * `null`/`undefined` — et non zéro — quand le montant n'est pas calculable
+   * sur la fenêtre (série absente ou à un seul point) : « on ne sait pas » et
+   * « rien à afficher » ne se confondent pas avec un montant nul.
+   */
+  value: number | null | undefined;
   /** Série d'historique — omise quand aucune donnée réelle n'existe. */
   spark?: number[];
   /**
@@ -850,6 +855,15 @@ export type TerminalKpi = {
   changeAbs?: number | null;
   /** Variation en % sur la période, si calculable. */
   changePct?: number | null;
+  /**
+   * `undefined` et `null` ne disent pas la même chose sur ces deux champs.
+   *
+   * `null` : la grandeur existe, l'historique ne permet pas de la calculer —
+   * un tiret le dit. `undefined` : cette tuile n'a pas de ligne de variation à
+   * porter, parce que son montant de tête *est* déjà la variation de la
+   * période. Lui afficher un tiret annoncerait une inconnue là où le chiffre
+   * est su, ce qui est la doctrine à l'envers.
+   */
 };
 
 const TONE_STROKE: Record<string, string> = {
@@ -966,6 +980,13 @@ export function TerminalKpiRow({
         const up = abs !== null ? abs >= 0 : pct !== null ? pct >= 0 : false;
         const tone =
           item.tone ?? (signed ? (up ? "positive" : "negative") : "neutral");
+        /*
+          Une tuile dont le montant de tête est déjà la variation de la période
+          n'a pas de seconde ligne à remplir — et surtout pas d'un tiret, qui
+          signifie « inconnu » partout ailleurs dans cette rangée.
+        */
+        const hasChangeLine =
+          item.changeAbs !== undefined || item.changePct !== undefined;
         return (
           <article
             key={item.key}
@@ -984,18 +1005,25 @@ export function TerminalKpiRow({
                   : "text-[var(--foreground)]"
               )}
             >
-              {maskAmount(
-                formatCurrency(item.value, baseCurrency),
-                amountsHidden
-              )}
+              {typeof item.value === "number" && Number.isFinite(item.value)
+                ? maskAmount(
+                    formatCurrency(item.value, baseCurrency),
+                    amountsHidden
+                  )
+                : "—"}
             </p>
 
             <p
               className={cn(
                 "flex min-w-0 items-baseline gap-[var(--space-1)]",
-                "text-[length:var(--text-xs)] leading-none"
+                "text-[length:var(--text-xs)] leading-none",
+                // Hauteur conservée : la grille reste d'aplomb même sans ligne.
+                !hasChangeLine && "invisible"
               )}
-              data-testid={`kpi-${item.key}-change`}
+              data-testid={
+                hasChangeLine ? `kpi-${item.key}-change` : undefined
+              }
+              aria-hidden={hasChangeLine ? undefined : true}
             >
               {signed ? (
                 <>
