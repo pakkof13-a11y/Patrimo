@@ -282,12 +282,12 @@ export const HISTORICAL_PRICES: Readonly<Record<string, Readonly<Record<number, 
   // de la ligne — la conversion est l'affaire du patron, qui écrit son
   // `currency` et son `fxRateToEur` explicitement.
   //
-  // 2008 et 2020 sont des années de baisse partout où le ticker existe.
-  // C'est une règle de forme voulue par le propriétaire (« pas une rampe »),
-  // pas une reconstitution : pour deux valeurs technologiques, 2020 fut en
-  // réalité une année de hausse. On ne prétend donc pas restituer l'histoire
-  // des marchés, mais donner à la démonstration des creux là où un lecteur
-  // les attend.
+  // 2008 recule partout où le ticker existe : la crise financière n'a épargné
+  // aucune de ces lignes. 2020 se lit autrement, et suit ici l'histoire réelle
+  // plutôt qu'une règle uniforme — les cycliques et défensives européennes
+  // reculent, tandis qu'Apple, Microsoft, ASML et Nvidia montent, portées par
+  // le confinement et par la demande de semi-conducteurs. Une baisse imposée à
+  // ces quatre-là aurait été un creux inventé.
 
   // Lyxor CAC 40 (EUR) — support de P02, et la ligne que la vente K2 allège.
   "CAC.PA": {
@@ -323,7 +323,7 @@ export const HISTORICAL_PRICES: Readonly<Record<string, Readonly<Record<number, 
     2008: 2.6, // crise financière
     2009: 6.4, 2010: 9.6, 2011: 11.6, 2012: 16.5, 2013: 14.5, 2014: 19.7,
     2015: 24, 2016: 26, 2017: 39, 2018: 38, 2019: 71,
-    2020: 66, // COVID (règle de forme : la valeur monta en réalité)
+    2020: 95, // COVID : la valeur monta, le numérique porté par le confinement
     2021: 168, 2022: 130, 2023: 190, 2024: 245, 2025: 215, 2026: 198,
   },
   // Microsoft (USD) — cours ajustés des divisions du nominal.
@@ -332,7 +332,7 @@ export const HISTORICAL_PRICES: Readonly<Record<string, Readonly<Record<number, 
     2008: 16, // crise financière
     2009: 23, 2010: 22, 2011: 21, 2012: 22, 2013: 30, 2014: 41,
     2015: 48, 2016: 55, 2017: 74, 2018: 90, 2019: 145,
-    2020: 132, // COVID (règle de forme : la valeur monta en réalité)
+    2020: 180, // COVID : la valeur monta, le numérique porté par le confinement
     2021: 300, 2022: 240, 2023: 330, 2024: 400, 2025: 410, 2026: 415,
   },
   // Nestlé (CHF) — défensive suisse. La devise n'est pas l'euro : le patron
@@ -351,7 +351,7 @@ export const HISTORICAL_PRICES: Readonly<Record<string, Readonly<Record<number, 
     2008: 12, // crise financière
     2009: 18, 2010: 26, 2011: 30, 2012: 40, 2013: 60, 2014: 75,
     2015: 82, 2016: 95, 2017: 145, 2018: 140, 2019: 240,
-    2020: 215, // COVID (règle de forme : la valeur monta en réalité)
+    2020: 330, // COVID : la valeur monta, demande de semi-conducteurs
     2021: 620, 2022: 480, 2023: 620, 2024: 680, 2025: 700, 2026: 710,
   },
   // Nvidia (USD) — cours ajustés des divisions du nominal. La table démarre
@@ -360,7 +360,7 @@ export const HISTORICAL_PRICES: Readonly<Record<string, Readonly<Record<number, 
   NVDA: {
     2010: 9, 2011: 10, 2012: 11, 2013: 14, 2014: 18,
     2015: 24, 2016: 90, 2017: 190, 2018: 150, 2019: 230,
-    2020: 210, // COVID (règle de forme : la valeur monta en réalité)
+    2020: 420, // COVID : la valeur monta, demande de semi-conducteurs
     2021: 590, 2022: 420, 2023: 620, 2024: 780, 2025: 840, 2026: 880,
   },
 };

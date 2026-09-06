@@ -187,13 +187,38 @@ describe("historicalPriceOf — tickers ajoutés en passe 2", () => {
     expect(pendant!.lessThan(avant!)).toBe(true);
   });
 
-  const EXISTE_EN_2020 = [...EXISTE_EN_2008, "NVDA"];
-  it.each(EXISTE_EN_2020)("%s recule en 2020", (ticker) => {
+  /*
+    2020 ne se traite pas comme 2008.
+
+    La crise financière n'avait épargné aucune de ces lignes ; le COVID, si.
+    Les cycliques et défensives européennes reculent, les quatre valeurs
+    technologiques montent — c'est ce que l'histoire dit, et leur imposer un
+    creux aurait fabriqué une observation.
+  */
+  const RECULENT_EN_2020 = ["CAC.PA", "RMS.PA", "AI.PA", "NESN.SW"];
+  it.each(RECULENT_EN_2020)("%s recule en 2020", (ticker) => {
     const avant = historicalPriceOf(ticker, 2019);
     const pendant = historicalPriceOf(ticker, 2020);
     expect(avant, `${ticker} doit coter en 2019`).toBeDefined();
     expect(pendant, `${ticker} doit coter en 2020`).toBeDefined();
     expect(pendant!.lessThan(avant!)).toBe(true);
+  });
+
+  const MONTENT_EN_2020 = ["AAPL", "MSFT", "ASML.AS", "NVDA"];
+  it.each(MONTENT_EN_2020)("%s monte en 2020", (ticker) => {
+    const avant = historicalPriceOf(ticker, 2019);
+    const pendant = historicalPriceOf(ticker, 2020);
+    expect(avant, `${ticker} doit coter en 2019`).toBeDefined();
+    expect(pendant, `${ticker} doit coter en 2020`).toBeDefined();
+    expect(pendant!.greaterThan(avant!)).toBe(true);
+  });
+
+  it("ne casse pas la monotonie de la reprise : 2021 reste au-dessus de 2020", () => {
+    for (const ticker of MONTENT_EN_2020) {
+      const y2020 = historicalPriceOf(ticker, 2020)!;
+      const y2021 = historicalPriceOf(ticker, 2021)!;
+      expect(y2021.greaterThan(y2020), `${ticker} 2021 > 2020`).toBe(true);
+    }
   });
 
   it("ne cote pas avant l'année où la série commence", () => {
