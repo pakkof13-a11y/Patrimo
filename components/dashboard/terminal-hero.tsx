@@ -987,11 +987,24 @@ export function TerminalKpiRow({
         */
         const hasChangeLine =
           item.changeAbs !== undefined || item.changePct !== undefined;
+        /*
+          Le panneau de détail répète, sans troncature, ce que la sous-ligne
+          coupe : Δ et % complets, plus une ligne « P&L » quand le montant de
+          tête porte une grandeur distincte de la variation de fenêtre (cas du
+          P&L latent : encours cumulé depuis l'origine vs. mouvement sur la
+          période affichée).
+        */
+        const detailId = `kpi-detail-${item.key}`;
+        const hasValue =
+          typeof item.value === "number" && Number.isFinite(item.value);
+        const showPnlRow = item.key === "latent" && hasValue;
         return (
           <article
             key={item.key}
-            className="kpi-tile flex flex-col gap-[var(--space-2)] p-[var(--pad-card)]"
+            className="kpi-tile group/kpi relative flex flex-col gap-[var(--space-2)] p-[var(--pad-card)] outline-none"
             data-testid={`kpi-${item.key}`}
+            tabIndex={0}
+            aria-describedby={detailId}
           >
             <h3 className="text-label truncate" title={item.label}>
               {item.label}
@@ -1086,6 +1099,107 @@ export function TerminalKpiRow({
                   className="h-full w-full"
                 />
               )}
+            </div>
+
+            {/*
+              Positionné sous la tuile (jamais dessus) : `top-full` place son
+              bord haut au bord bas de la tuile, la marge l'en écarte encore.
+              Visible au survol de la souris et au focus clavier de la tuile
+              (elle est elle-même le seul élément tabulable ici) ; invisible et
+              non interactif sinon, pour ne rien changer au layout.
+            */}
+            <div
+              id={detailId}
+              role="tooltip"
+              className={cn(
+                "pointer-events-none absolute left-1/2 top-full z-30 mt-[var(--space-2)]",
+                "w-64 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[var(--radius-md)]",
+                "border border-[var(--border)] bg-[var(--card)] p-[var(--space-3)]",
+                "text-[length:var(--text-xs)] shadow-[var(--shadow-md)] opacity-0",
+                "transition-opacity duration-[var(--duration-fast)]",
+                "group-hover/kpi:pointer-events-auto group-hover/kpi:opacity-100",
+                "group-focus-visible/kpi:pointer-events-auto group-focus-visible/kpi:opacity-100"
+              )}
+            >
+              <p className="mb-[var(--space-2)] font-semibold text-[var(--foreground)]">
+                {item.label}
+              </p>
+              <dl className="space-y-[var(--space-1)]">
+                <div className="flex items-baseline justify-between gap-[var(--space-2)]">
+                  <dt className="text-[var(--foreground-faint)]">Valeur</dt>
+                  <dd className="num text-[var(--foreground)]">
+                    {hasValue
+                      ? maskAmount(
+                          formatCurrency(item.value as number, baseCurrency),
+                          amountsHidden
+                        )
+                      : "—"}
+                  </dd>
+                </div>
+                {hasChangeLine && (
+                  <div className="flex items-baseline justify-between gap-[var(--space-2)]">
+                    <dt className="text-[var(--foreground-faint)]">
+                      Δ période
+                    </dt>
+                    <dd
+                      className={cn(
+                        "num text-right",
+                        signed
+                          ? up
+                            ? "val-positive"
+                            : "val-negative"
+                          : "text-[var(--foreground-faint)]"
+                      )}
+                    >
+                      {signed ? (
+                        <>
+                          {abs !== null &&
+                            `${abs >= 0 ? "+" : "−"}${maskAmount(
+                              formatCurrency(Math.abs(abs), baseCurrency),
+                              amountsHidden
+                            )}`}
+                          {abs !== null && pct !== null && " · "}
+                          {pct !== null && formatPct(pct)}
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </dd>
+                  </div>
+                )}
+                {showPnlRow && (
+                  <div className="flex items-baseline justify-between gap-[var(--space-2)]">
+                    <dt className="text-[var(--foreground-faint)]">P&L</dt>
+                    <dd className="num text-right text-[var(--foreground)]">
+                      {maskAmount(
+                        formatCurrency(item.value as number, baseCurrency),
+                        amountsHidden
+                      )}{" "}
+                      cumulé
+                      {abs !== null && (
+                        <>
+                          {" "}
+                          ·{" "}
+                          <span className={up ? "val-positive" : "val-negative"}>
+                            {abs >= 0 ? "+" : "−"}
+                            {maskAmount(
+                              formatCurrency(Math.abs(abs), baseCurrency),
+                              amountsHidden
+                            )}
+                          </span>{" "}
+                          sur la fenêtre
+                        </>
+                      )}
+                    </dd>
+                  </div>
+                )}
+                <div className="flex items-baseline justify-between gap-[var(--space-2)]">
+                  <dt className="text-[var(--foreground-faint)]">Période</dt>
+                  <dd className="text-right text-[var(--foreground)]">
+                    {evolutionRangePeriodLabel(range)}
+                  </dd>
+                </div>
+              </dl>
             </div>
           </article>
         );
