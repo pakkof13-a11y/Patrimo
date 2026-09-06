@@ -47,7 +47,6 @@ import {
   HERO_NAV_SCOPE_HEADING,
   HERO_NAV_SCOPE_LABEL,
   HERO_NAV_SCOPE_TITLE,
-  HERO_NAV_SCOPES,
   heroModeHelpLine,
 } from "@/app/lib/portfolio/daily-nav-view";
 
@@ -59,6 +58,27 @@ function pickerFor(mode: HeroMode) {
   if (mode === "financier") return financierAt;
   if (mode === "net") return netWorthAt;
   return grossAssetsAt;
+}
+
+/**
+ * Les deux cartes que la carte de tête montre désormais — Financier a quitté
+ * l'écran (D19). `scope=financier` reste lisible côté données
+ * (`daily-nav-view.ts`, `hero-series.ts`) ; ce tableau ne pilote que l'affichage.
+ */
+const HERO_CARD_MODES = ["net", "brut"] as const;
+type HeroCardMode = (typeof HERO_CARD_MODES)[number];
+
+/**
+ * Ramène une carte disparue vers un mode encore affiché.
+ *
+ * Une préférence enregistrée avant D19 peut encore valoir `financier` — c'est
+ * la seule provenance possible, plus aucun contrôle ne l'écrit. La rejouer
+ * telle quelle pointerait le hero sur une carte qui n'existe plus : ni bouton
+ * actif dans le sélecteur, ni titre à afficher. On retombe sur `net`, le
+ * défaut le plus sûr, plutôt que de laisser l'écran vide.
+ */
+function toDisplayedMode(mode: HeroMode): HeroCardMode {
+  return mode === "financier" ? "net" : mode;
 }
 
 /**
@@ -105,7 +125,10 @@ function pickerFor(mode: HeroMode) {
 export function TerminalHero({
   netWorth,
   grossAssets,
-  financier,
+  // Non lu ici depuis D19 (Financier a quitté le hero) ; conservé côté
+  // signature, `dashboard-tab.tsx` continue de le calculer pour d'autres
+  // usages de `scope=financier`.
+  financier: _financier,
   history,
   baseCurrency,
   loading,
@@ -119,12 +142,23 @@ export function TerminalHero({
   netWorth: number | null;
   /** Somme des actifs, sans déduction des passifs. */
   grossAssets: number | null;
-  /** Agrégat T-01 Financier — défaut de la courbe. */
+  /**
+   * Agrégat T-01 Financier.
+   *
+   * N'alimente plus aucune carte à l'écran depuis D19 : Financier a quitté le
+   * hero. Le prop reste dans la signature parce que `dashboard-tab.tsx`
+   * continue de le calculer pour d'autres lecteurs de `scope=financier` — pas
+   * pour être rendu ici.
+   */
   financier: number | null;
   history: HistoryPoint[];
   baseCurrency: string;
   loading?: boolean;
-  /** Carte active — brut / net / financier. */
+  /**
+   * Carte active — net ou brut. Peut encore valoir `financier` si une
+   * préférence antérieure à D19 est rejouée telle quelle ; `toDisplayedMode`
+   * la retombe alors sur `net`.
+   */
   scope: HeroMode;
   onScopeChange: (scope: HeroMode) => void;
   /**
@@ -151,15 +185,17 @@ export function TerminalHero({
    */
   servedNavFrom?: string;
 }) {
-  const mode = scope;
+  /*
+    Financier a quitté l'écran (D19) : la carte, le chip et tout ce qui les
+    exposait à l'utilisateur ont disparu. `scope` peut malgré tout encore
+    valoir `financier` — une préférence enregistrée avant ce chantier — et
+    `toDisplayedMode` la ramène alors sur `net` plutôt que de laisser le hero
+    pointer une carte qu'on ne rend plus.
+  */
+  const mode = toDisplayedMode(scope);
   const [amountsHidden] = useAmountsHidden();
 
-  const currentValue =
-    mode === "financier"
-      ? financier
-      : mode === "net"
-        ? netWorth
-        : grossAssets;
+  const currentValue = mode === "net" ? netWorth : grossAssets;
 
   /*
     L'historique, coupé à la période partagée.
@@ -196,12 +232,14 @@ export function TerminalHero({
     return map;
   }, [firstHistoryDate]);
 
-  const stroke =
-    mode === "financier"
-      ? "var(--chart-gold)"
-      : mode === "brut"
-        ? "var(--chart-cyan)"
-        : "var(--chart-gold)";
+  /*
+    Net et Brut partagent désormais le même vert (D19) : la couleur portait
+    jusqu'ici une distinction de périmètre (or pour Financier, cyan pour
+    Brut) que la disparition de la carte Financier rend caduque. Une seule
+    teinte, la verte du projet — celle qu'on lisait déjà sur les tuiles KPI
+    positives.
+  */
+  const stroke = "var(--chart-positive)";
 
   /*
     Série lisible — la même que celle tracée, augmentée de quoi la décrire.
@@ -229,8 +267,7 @@ export function TerminalHero({
   );
 
   const cardChanges = useMemo(() => {
-    const out = {} as Record<HeroMode, ReturnType<typeof heroWindowChange>>;
-    out.financier = heroWindowChange(kpiSeries(windowed, financierAt) ?? []);
+    const out = {} as Record<HeroCardMode, ReturnType<typeof heroWindowChange>>;
     out.brut = heroWindowChange(kpiSeries(windowed, grossAssetsAt) ?? []);
     out.net = heroWindowChange(kpiSeries(windowed, netWorthAt) ?? []);
     return out;
@@ -455,19 +492,14 @@ export function TerminalHero({
           </div>
 
           <div
-            className="mt-[var(--space-3)] grid w-full grid-cols-3 gap-[var(--space-2)]"
+            className="mt-[var(--space-3)] grid w-full grid-cols-2 gap-[var(--space-2)]"
             role="tablist"
-            aria-label="Lecture Brut, Net ou Financier"
+            aria-label="Lecture Net ou Brut"
             data-testid="hero-mode-toggle"
           >
-              {HERO_NAV_SCOPES.map((m) => {
+              {HERO_CARD_MODES.map((m) => {
                 const selected = mode === m;
-                const live =
-                  m === "financier"
-                    ? financier
-                    : m === "net"
-                      ? netWorth
-                      : grossAssets;
+                const live = m === "net" ? netWorth : grossAssets;
                 const change = cardChanges[m];
                 return (
                   <button

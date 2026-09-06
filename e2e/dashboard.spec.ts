@@ -179,7 +179,7 @@ test.describe("Tableau de bord", () => {
     await verifierCoherence("7J");
   });
 
-  test("carte Patrimoine total : une seule, Net/Brut, périodes propres", async ({
+  test("carte de patrimoine : une seule, Net/Brut, périodes propres", async ({
     page,
     request,
   }) => {
@@ -191,9 +191,21 @@ test.describe("Tableau de bord", () => {
     // Une seule carte de patrimoine sur l'écran — le doublon d'un chantier
     // précédent ne doit pas revenir par une autre porte.
     await expect(carte).toHaveCount(1);
+    /*
+      Le titre nomme le périmètre affiché, et non plus un « Patrimoine total »
+      qui n'existe plus depuis que la carte a un mode. L'assertion visait ce
+      libellé disparu : elle ne protégeait donc plus rien, et un hero sans titre
+      l'aurait laissée passer. Elle dit désormais ce que l'écran affirme au
+      démarrage — le net.
+    */
     await expect(
-      page.getByRole("heading", { name: "Patrimoine total" })
+      page.getByRole("heading", { name: "Patrimoine net" })
     ).toBeVisible();
+
+    // Le Financier a quitté l'écran en D19 : deux cartes, pas trois.
+    await expect(page.getByTestId("hero-mode-financier")).toHaveCount(0);
+    await expect(page.getByTestId("hero-mode-net")).toBeVisible();
+    await expect(page.getByTestId("hero-mode-brut")).toBeVisible();
 
     /*
       La carte et le panneau « Évolution » partagent désormais une seule et
@@ -251,8 +263,9 @@ test.describe("Tableau de bord", () => {
       "data-active",
       "true"
     );
+    // Le titre suit le mode : passer en brut le dit, il ne reste pas générique.
     await expect(
-      page.getByRole("heading", { name: "Patrimoine total" })
+      page.getByRole("heading", { name: "Patrimoine brut" })
     ).toBeVisible();
     const grossText = await page.getByTestId("hero-net-worth").innerText();
     expect(parseHeadline(grossText)).toBe(expectedGross);
