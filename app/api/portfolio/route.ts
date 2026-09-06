@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
+import { getAllocationByVenueApi } from "@/app/lib/portfolio/allocation-by-venue-api";
 import {
   getPortfolioBundle,
   getPortfolioHistory,
@@ -44,14 +45,16 @@ export async function GET(req: Request) {
       }
     }
 
-    const [bundle, history] = await Promise.all([
+    const [bundle, history, allocationByVenue] = await Promise.all([
       getPortfolioBundle(userId, base),
       getPortfolioHistory(userId, base),
+      getAllocationByVenueApi(userId),
     ]);
 
     return NextResponse.json({
       summary: bundle.summary,
       allocation: bundle.allocation,
+      allocationByVenue,
       history,
       baseCurrency: base,
     });
