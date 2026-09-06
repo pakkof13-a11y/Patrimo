@@ -44,6 +44,46 @@ export function usePortfolioHistoryQuery(baseCurrency: string) {
   });
 }
 
+const DAILY_NAV_STALE_MS = 60_000;
+
+export type DailyNavQueryResult =
+  import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavResult;
+export type DailyNavQueryScope = import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavScope;
+
+/**
+ * Série dense T-05 — `GET /api/portfolio/daily-nav`.
+ *
+ * Le hero demande `scope=financier` : chaque point porte déjà brut / net /
+ * financier / listed / poches. Cliquer une carte ne refetch pas.
+ * Un filtre de poche (T-4.F) demande le scope correspondant — même
+ * `from`/`to` que le hero, clamp `earliestDayForScope` côté API.
+ */
+export function useDailyNavQuery(
+  from: string,
+  to: string,
+  options?: { enabled?: boolean; scope?: DailyNavQueryScope }
+) {
+  const enabled = options?.enabled ?? true;
+  const scope = options?.scope ?? "financier";
+  return useQuery({
+    queryKey: ["portfolio-daily-nav", scope, from, to],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        scope,
+        from,
+        to,
+      });
+      return fetchJson<DailyNavQueryResult>(
+        `/api/portfolio/daily-nav?${params.toString()}`
+      );
+    },
+    enabled: enabled && Boolean(from && to),
+    staleTime: DAILY_NAV_STALE_MS,
+    placeholderData: keepPreviousData,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function usePlatformsQuery(baseCurrency: string) {
   return useQuery({
     queryKey: ["platforms", baseCurrency],

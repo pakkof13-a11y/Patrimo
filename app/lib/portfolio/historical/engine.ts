@@ -37,6 +37,7 @@
  */
 
 import { endOfParisDay, parisDayKey } from "../../dates/paris";
+import type { LastCloseAsOf } from "../../market/last-close-as-of";
 import { toEur } from "../../accounting/fx";
 import {
   applyTransaction,
@@ -46,7 +47,11 @@ import {
 } from "../../accounting/ledger";
 import type { LedgerState, LedgerTx } from "../../accounting/types";
 import { d, zero, type Decimal } from "../../money/decimal";
-import { closeAtOrBefore, type DailyCloseIndex } from "../class-history";
+import {
+  closeAtOrBefore,
+  closeOnDay,
+  type DailyCloseIndex,
+} from "../class-history";
 import {
   ENVELOPE_CAPABLE_CLASSES,
   VALUATION_ASSET_CLASSES,
@@ -95,6 +100,16 @@ import type {
   PortfolioValuationPoint,
   ValuationComponent,
 } from "./types";
+import {
+  PATRIMONY_POCKETS,
+  classifyHolding,
+  computePatrimonyMetrics,
+  isFondsEuroHolding,
+  type ClassifiableHolding,
+  type HoldingPocket,
+  type PatrimonyAssetPocket,
+  type PatrimonyPocket,
+} from "../patrimony-metrics";
 
 /**
  * Tout ce dont le moteur a besoin, chargé une fois pour toutes.
@@ -142,6 +157,19 @@ export type HistoricalInputs = {
    * fait le moteur du jour — l'argent est sorti et ne revient pas.
    */
   excludedAssetIds: Set<string>;
+  /**
+   * Méta T-01 par actif : `accountType`, fiches immo, fonds euro.
+   *
+   * Sans elle, `classifyHolding` n'a que la classe brute — une ligne AV
+   * déjà remappée en `ASSURANCE_VIE` reste classable, mais le fonds euro
+   * et une fiche `RealEstateDetail` sur une SCPI mal étiquetée disparaîtraient.
+   */
+  holdingMetaById?: Map<string, HistoricalHoldingMeta>;
+  /**
+   * Dernière clôture par actif — même règle que l'overlay du jour
+   * (`last-close-as-of.ts`). Hero / KPI / watchlist lisent cette date.
+   */
+  lastCloseAsOf?: Map<string, LastCloseAsOf>;
   closes: DailyCloseIndex;
   cashAccounts: CashAccountRow[];
   cashEvents: CashEventRow[];
@@ -153,6 +181,14 @@ export type HistoricalInputs = {
   liabilities: LiabilityRow[];
 };
 
+/** Champs nécessaires à `classifyHolding` / `isFondsEuroHolding`. */
+export type HistoricalHoldingMeta = {
+  accountType: string;
+  name?: string | null;
+  hasRealEstateDetail?: boolean;
+  hasIndirectRealEstateDetail?: boolean;
+  isFondsEuro?: boolean;
+};
 
 /**
  * Part des positions valorisées autrement qu'au prix de revient.
@@ -368,6 +404,35 @@ function componentOfAssetClass(assetClass: string | undefined): ValuationCompone
   }
 }
 
+/**
+ * Ligne du journal au format T-01, à partir de la méta chargée (ou déduite
+ * du remap AV / immo déjà appliqué à `assetClassById`).
+ */
+function classifiableHoldingOf(
+  assetId: string,
+  marketValueEur: Decimal,
+  rawClass: string | undefined,
+  remappedClass: string | undefined,
+  meta?: HistoricalHoldingMeta
+): ClassifiableHolding {
+  const inferredAccountType =
+    remappedClass === "ASSURANCE_VIE"
+      ? "AV"
+      : remappedClass === "IMMOBILIER" || rawClass === "IMMOBILIER"
+        ? "IMMOBILIER"
+        : "CTO";
+  return {
+    id: assetId,
+    assetClass: rawClass || "AUTRE",
+    accountType: meta?.accountType || inferredAccountType,
+    marketValueEur,
+    name: meta?.name,
+    hasRealEstateDetail: meta?.hasRealEstateDetail,
+    hasIndirectRealEstateDetail: meta?.hasIndirectRealEstateDetail,
+    isFondsEuro: meta?.isFondsEuro,
+  };
+}
+
 type SleeveState = {
   timelines: ValueTimeline[];
   flowsByDay: Map<DayKey, Decimal>;
@@ -404,7 +469,9 @@ export class PortfolioValuationEngine {
   private readonly cash: SleeveState;
   private readonly alternatives: SleeveState;
   private readonly employeeSavings: SleeveState;
+  private readonly esLiquid: SleeveState;
   private readonly liabilities: SleeveState;
+  private readonly holdingMetaById: Map<string, HistoricalHoldingMeta>;
 
   constructor(inputs: HistoricalInputs) {
     this.inputs = inputs;
@@ -429,12 +496,26 @@ export class PortfolioValuationEngine {
     this.employeeSavings = toSleeveState(
       buildEmployeeSavingsSleeve(inputs.employeeSavings)
     );
+    this.esLiquid = toSleeveState(
+      buildEmployeeSavingsSleeve(
+        inputs.employeeSavings.filter((r) => r.isLiquid === true)
+      )
+    );
     this.liabilities = toSleeveState(buildLiabilitiesSleeve(inputs.liabilities));
+    this.holdingMetaById = inputs.holdingMetaById ?? new Map();
   }
 
   /**
-   * Premier jour où le patrimoine existe : la plus ancienne date connue, toutes
-   * sources confondues. Commencer avant afficherait une ligne plate à zéro.
+   * Premier jour où le patrimoine existe : la plus ancienne date **observée**,
+   * toutes sources confondues. Commencer avant afficherait une ligne plate à
+   * zéro.
+   *
+   * Un repli `createdAt`/`updatedAt` (`observed: false`, posé par
+   * `components.ts` quand aucune date réelle n'est connue) n'entre pas dans ce
+   * calcul : ce n'est pas un fait constaté, seulement une date de saisie. Une
+   * acquisition de 1998 sans écriture au journal reste la borne, même si le
+   * compte de cash le plus ancien n'a de solde connu que depuis sa dernière
+   * mise à jour.
    */
   earliestDay(): DayKey | null {
     const candidates: DayKey[] = [];
@@ -448,12 +529,114 @@ export class PortfolioValuationEngine {
       this.liabilities,
     ]) {
       for (const t of sleeve.timelines) {
-        const first = t.firstDay;
+        const first = t.earliestObservedDay;
         if (first) candidates.push(first);
       }
     }
     if (candidates.length === 0) return null;
     return candidates.reduce((min, c) => (c < min ? c : min));
+  }
+
+  /**
+   * Ligne du journal, sous la forme minimale que `classifyHolding` /
+   * `isFondsEuroHolding` réclament — sans valeur de marché, puisque la
+   * classification n'en dépend jamais.
+   */
+  private classifiableOf(assetId: string): ClassifiableHolding {
+    return classifiableHoldingOf(
+      assetId,
+      zero(),
+      this.inputs.rawAssetClassById.get(assetId),
+      this.inputs.assetClassById.get(assetId),
+      this.holdingMetaById.get(assetId)
+    );
+  }
+
+  /**
+   * Premier jour où une ligne du journal tombe dans la poche demandée, ou dans
+   * le sous-ensemble fonds euro de l'AV.
+   *
+   * Le journal est déjà trié par date : le premier tirage suffit, aucun besoin
+   * de balayer l'ensemble. La classification (`assetClassById` / méta T-01) ne
+   * varie pas dans le temps ici — seule l'enveloppe fiscale le ferait, et elle
+   * n'intervient pas dans le partage des sept poches.
+   */
+  private earliestHoldingDay(
+    predicate: (h: ClassifiableHolding) => boolean
+  ): DayKey | null {
+    for (let i = 0; i < this.sortedTxs.length; i++) {
+      const tx = this.sortedTxs[i]!;
+      if (!tx.assetId || this.inputs.excludedAssetIds.has(tx.assetId)) continue;
+      if (predicate(this.classifiableOf(tx.assetId))) return this.txDays[i]!;
+    }
+    return null;
+  }
+
+  private earliestSleeveDay(sleeve: SleeveState): DayKey | null {
+    let min: DayKey | null = null;
+    for (const t of sleeve.timelines) {
+      const first = t.earliestObservedDay;
+      if (first && (min == null || first < min)) min = first;
+    }
+    return min;
+  }
+
+  private static minDay(days: Array<DayKey | null>): DayKey | null {
+    let min: DayKey | null = null;
+    for (const d of days) {
+      if (d != null && (min == null || d < min)) min = d;
+    }
+    return min;
+  }
+
+  /**
+   * Borne « Tout » **par scope**, et non plus toutes sources confondues.
+   *
+   * `earliestDay()` répond « depuis quand le patrimoine existe » ; cette
+   * méthode répond « depuis quand *ce* scope existe ». Brut et Net remontent
+   * aussi loin que le patrimoine entier — ils en sont la somme — quand
+   * Financier ou une poche isolée peuvent commencer bien plus tard : le
+   * premier jour observé du scope demandé, jamais avant.
+   *
+   * Chaque poche d'actif se résout par sa propre source : les positions du
+   * journal pour `listed` / `immobilier` / `av` / `autre`, la chronologie de
+   * poche pour `cash` / `alternatifs` / `employeeSavings`. `financier`
+   * recompose la même borne que `computePatrimonyMetrics` — listed, cash
+   * d'investissement (V1 = tout le cash), fonds euro, épargne salariale
+   * liquide — sans reformuler l'agrégat.
+   */
+  earliestDayForScope(
+    scope: "brut" | "net" | "financier" | PatrimonyAssetPocket
+  ): DayKey | null {
+    switch (scope) {
+      case "brut":
+      case "net":
+        return this.earliestDay();
+      case "financier":
+        return PortfolioValuationEngine.minDay([
+          this.earliestHoldingDay((h) => classifyHolding(h) === "listed"),
+          this.earliestSleeveDay(this.cash),
+          this.earliestHoldingDay(
+            (h) => classifyHolding(h) === "av" && isFondsEuroHolding(h)
+          ),
+          this.earliestSleeveDay(this.esLiquid),
+        ]);
+      case "listed":
+      case "immobilier":
+      case "av":
+      case "autre":
+        return this.earliestHoldingDay(
+          (h) => classifyHolding(h) === (scope as HoldingPocket)
+        );
+      case "cash":
+        return this.earliestSleeveDay(this.cash);
+      case "alternatifs":
+        return this.earliestSleeveDay(this.alternatives);
+      case "employeeSavings":
+        return this.earliestSleeveDay(this.employeeSavings);
+      default:
+        return this.earliestDay();
+    }
   }
 
   /**
@@ -508,23 +691,6 @@ export class PortfolioValuationEngine {
   }
 
   /**
-   * Valorisation d'une journée à partir d'un état de journal déjà positionné.
-   *
-   * Séparée de la boucle pour que `calculatePortfolioValueAt` puisse la
-   * réutiliser sans dupliquer une seule ligne d'arithmétique — c'est la
-   * garantie mécanique que le point du jour et un point d'historique sont
-   * calculés par le même code.
-   */
-  /**
-   * Résolveur du jour — le comportement historique, inchangé.
-   *
-   * `closeAtOrBefore` reporte déjà la dernière clôture connue et la courbe
-   * quotidienne l'annonce `EXACT`. C'est discutable pour un jour de marché
-   * fermé, mais c'est la sémantique en place : la modifier ferait bouger la
-   * courbe existante, ce qui n'est pas l'objet de ce chantier. Le résolveur
-   * quotidien déclare donc `observed: true`, comme avant.
-   */
-  /**
    * Ajoute le flux d'une transaction à sa classe — ou l'écarte.
    *
    * Deux règles, dans cet ordre :
@@ -548,12 +714,26 @@ export class PortfolioValuationEngine {
     addFlow(flows, assetClassOf(this.inputs.rawAssetClassById.get(tx.assetId ?? "")), amount);
   }
 
+  /**
+   * Résolveur du jour — cotés / crypto : `qty(t) × close(t)`.
+   *
+   * Une barre **du jour** est `DAILY_EXACT` (point `EXACT`). Week-end, férié
+   * ou trou : LOCF de la dernière clôture, tagué `MARKET_CARRIED` donc
+   * `ESTIMATED`. Pas de calendrier férié : l'absence de barre du jour suffit.
+   * Pas de padding à 0 : sans aucune clôture antérieure, `null` et la
+   * position reste au coût (`UNAVAILABLE`).
+   */
   private dailyPriceResolver(day: DayKey): PriceResolver {
     return (assetId) => {
-      const close = closeAtOrBefore(this.inputs.closes.get(assetId), day);
-      return close == null
+      const series = this.inputs.closes.get(assetId);
+      const exact = closeOnDay(series, day);
+      if (exact != null) {
+        return { priceEur: exact, origin: "DAILY_EXACT" as const };
+      }
+      const carried = closeAtOrBefore(series, day);
+      return carried == null
         ? null
-        : { priceEur: close, origin: "DAILY_EXACT" as const };
+        : { priceEur: carried, origin: "MARKET_CARRIED" as const };
     };
   }
 
@@ -785,6 +965,40 @@ export class PortfolioValuationEngine {
     const lifeInsurance = byComponent.get("lifeInsurance") ?? zero();
     const otherAssets = byComponent.get("otherAssets") ?? zero();
 
+    const esLiquid = sumTimelinesAt(this.esLiquid.timelines, day);
+
+    const holdings: ClassifiableHolding[] = [];
+    for (const pos of state.positions.values()) {
+      if (pos.quantity.isZero()) continue;
+      if (this.inputs.excludedAssetIds.has(pos.assetId)) continue;
+      const price = resolve(pos.assetId);
+      const marketValueEur =
+        price == null
+          ? pos.costBasisEur
+          : pos.quantity.times(d(price.priceEur));
+      holdings.push(
+        classifiableHoldingOf(
+          pos.assetId,
+          marketValueEur,
+          this.inputs.rawAssetClassById.get(pos.assetId),
+          this.inputs.assetClassById.get(pos.assetId),
+          this.holdingMetaById.get(pos.assetId)
+        )
+      );
+    }
+
+    const metrics = computePatrimonyMetrics({
+      holdings,
+      cash: cash.totalEur,
+      alternatives: alternatives.totalEur,
+      employeeSavings: {
+        total: employeeSavings.totalEur,
+        esLiquid: esLiquid.totalEur,
+      },
+      liabilities: liabilities.totalEur,
+      asOf: day,
+    });
+
     /*
       Les poches sans position au journal rejoignent la classe qui les décrit.
 
@@ -889,6 +1103,17 @@ export class PortfolioValuationEngine {
       alternatives: alternatives.totalEur.toNumber(),
       employeeSavings: employeeSavings.totalEur.toNumber(),
       otherAssets: otherAssets.toNumber(),
+
+      listed: metrics.pockets.listed.toNumber(),
+      financier: metrics.financier.toNumber(),
+      fondsEuro: metrics.fondsEuro.toNumber(),
+      esLiquid: metrics.esLiquid.toNumber(),
+      brut: metrics.brut.toNumber(),
+      net: metrics.net.toNumber(),
+      pockets: Object.fromEntries(
+        PATRIMONY_POCKETS.map((k) => [k, metrics.pockets[k].toNumber()])
+      ) as Record<PatrimonyPocket, number>,
+
       byAssetClass: Object.fromEntries(
         VALUATION_ASSET_CLASSES.map((c) => [c, byClass[c].toNumber()])
       ) as Record<ValuationAssetClass, number>,

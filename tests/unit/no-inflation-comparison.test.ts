@@ -135,7 +135,7 @@ describe("le code propre au comparatif a disparu, et lui seul", () => {
     const cron = lire("app/api/cron/collect-intraday/route.ts");
     expect(cron).not.toMatch(/[Cc]pi/);
     expect(cron).toMatch(/collectIntradayBars\s*\(/);
-    expect(cron).toMatch(/collectDailyClosesForAssets\s*\(/);
+    expect(cron).toMatch(/backfillDailyClosesFromFirstTx\s*\(/);
   });
 
   it("l'agrégation ne connaît plus le mode inflation", () => {

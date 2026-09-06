@@ -331,6 +331,14 @@ export type EmployeeSavingsRow = {
   contributedEur: Decimal | null;
   /** `parts × VL` courant. */
   currentEur: Decimal;
+  /**
+   * Statut Disponible **courant** (`resolveUnlock` à aujourd'hui).
+   *
+   * V1 : la liquidité historique suit l'état du jour, pas la date de
+   * déblocage au fil du temps. Une ligne débloquée hier apparaît liquide
+   * sur toute la série. C'est le même raccourci que `getEmployeeSavingsTotalsEur`.
+   */
+  isLiquid?: boolean;
 };
 
 /**

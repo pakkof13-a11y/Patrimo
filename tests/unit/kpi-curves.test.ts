@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 import { valueHeldAtDay } from "@/app/lib/market/daily-valuation";
 import type { DailyCloseIndex } from "@/app/lib/portfolio/class-history";
-import { downsampleSeries } from "@/app/lib/portfolio/service";
+import { downsampleSeries, DAILY_TAIL_DAYS } from "@/app/lib/portfolio/service";
 
 /** Fabrique un index de clôtures : `{ actif: { jour: cours } }`. */
 function index(spec: Record<string, Record<string, number>>): DailyCloseIndex {
@@ -295,5 +295,34 @@ describe("downsampling — une transformation d'affichage, rien de plus", () => 
       const attendu = parJour.get(p.day);
       if (attendu != null) expect(p.grossAssets).toBe(attendu);
     }
+  });
+
+  it("une fenêtre ≤1A extraite d'une série longue reste quotidienne", () => {
+    /*
+      T-05 : downsample ne casse pas la densification quotidienne sur ≤1A.
+      La queue conservée (DAILY_TAIL_DAYS ≥ 366) couvre une année civile
+      bissextile : chaque jour des 366 derniers est encore dans le rendu.
+    */
+    expect(DAILY_TAIL_DAYS).toBeGreaterThanOrEqual(366);
+
+    const full = longSeries(N);
+    const shown = downsampleSeries(full, 300);
+    expect(shown.length).toBeLessThan(full.length);
+
+    const lastYear = full.slice(-366);
+    const shownDays = new Set(shown.map((p) => p.day));
+    for (const p of lastYear) {
+      expect(shownDays.has(p.day)).toBe(true);
+    }
+    expect(shown.slice(-366).map((p) => p.day)).toEqual(
+      lastYear.map((p) => p.day)
+    );
+  });
+
+  it("une série d'exactement 1A (365 j) n'est pas éclaircie", () => {
+    const full = longSeries(365);
+    const shown = downsampleSeries(full, 200);
+    expect(shown).toHaveLength(365);
+    expect(shown.map((p) => p.day)).toEqual(full.map((p) => p.day));
   });
 });

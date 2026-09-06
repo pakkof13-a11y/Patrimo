@@ -6,9 +6,18 @@ import {
   totalRealizedPnl,
 } from "../accounting";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
+import {
+  oldestFetchedAt,
+  readLastClosesAsOf,
+  resolveLastCloseAsOf,
+} from "../market/last-close-as-of";
 import { endOfParisDay, parisDayKey, parisDayStart } from "../dates/paris";
 import { PortfolioValuationEngine } from "./historical/engine";
 import { loadHistoricalInputs } from "./historical/load";
+import {
+  financierFlowOf,
+  listedTransactionFlow,
+} from "./historical/get-daily-nav";
 import type {
   HistoricalDataStatus,
   PortfolioValuationPoint,
@@ -28,6 +37,14 @@ import {
 } from "./holdings-platform-slice";
 import { asAccountType } from "../types/account-type";
 import { remainingAmountAt } from "../liabilities/amortization";
+import {
+  allocationAssetClass,
+  computePatrimonyMetrics,
+  formatPatrimonyPocketTable,
+  serializePatrimonyMetrics,
+  type ClassifiableHolding,
+} from "./patrimony-metrics";
+import { resolveUnlock } from "../employee-savings/logic";
 import { isNonOwnedStatus } from "../crypto/nft-taxonomy";
 import {
   asBaseAmount,
@@ -138,6 +155,10 @@ export type HoldingRow = {
   priceSource: string | null;
   priceStatus: string | null;
   lastUpdatedAt: string | null;
+  /** Dernière clôture alignée getDailyNav — Vague2 D4. */
+  closeDay: string | null;
+  /** Collecte de cette clôture — Vague2 D11. */
+  fetchedAt: string | null;
   logoUrl: string | null;
   priceProvider: string;
   /** Fees paid on purchases (EUR, cumulative) */
@@ -170,6 +191,23 @@ export type HoldingRow = {
    */
   hasSecondaryLevels: boolean;
 };
+
+/** Dernière clôture la plus fraîche des deux jambes fusionnées. */
+function preferCloseAsOf(
+  a: Pick<HoldingRow, "closeDay" | "fetchedAt">,
+  b: Pick<HoldingRow, "closeDay" | "fetchedAt">
+): Pick<HoldingRow, "closeDay" | "fetchedAt"> {
+  if (!a.closeDay) return { closeDay: b.closeDay, fetchedAt: b.fetchedAt };
+  if (!b.closeDay) return { closeDay: a.closeDay, fetchedAt: a.fetchedAt };
+  if (a.fetchedAt && b.fetchedAt) {
+    return a.fetchedAt >= b.fetchedAt
+      ? { closeDay: a.closeDay, fetchedAt: a.fetchedAt }
+      : { closeDay: b.closeDay, fetchedAt: b.fetchedAt };
+  }
+  return a.closeDay >= b.closeDay
+    ? { closeDay: a.closeDay, fetchedAt: a.fetchedAt }
+    : { closeDay: b.closeDay, fetchedAt: b.fetchedAt };
+}
 
 /** Helpers locaux — toFixed → montants brandés */
 const qtyS = (v: string) => asQuantityString(v);
@@ -262,6 +300,8 @@ export async function getHoldings(
   }
 
   const assetMap = new Map(assets.map((a) => [a.id, a]));
+  const lastDailyByAsset = await readLastClosesAsOf([...assetMap.keys()]);
+  const closeAsOfToday = parisDayKey(new Date());
   // Also index platforms for positions whose platform differs from asset.home
   const platformIds = new Set<string>();
   for (const pos of ledger.positions.values()) platformIds.add(pos.platformId);
@@ -306,6 +346,18 @@ export async function getHoldings(
       priceEur = pos.costBasisEur.div(pos.quantity);
       priceNative = priceEur;
     }
+
+    const quoteForAsOf = priceEur.gt(0)
+      ? {
+          priceEur: priceEur.toNumber(),
+          lastUpdatedAt: asset.priceQuote?.lastUpdatedAt ?? null,
+        }
+      : null;
+    const closeAsOf = resolveLastCloseAsOf({
+      today: closeAsOfToday,
+      lastDaily: lastDailyByAsset.get(asset.id) ?? null,
+      quote: quoteForAsOf,
+    });
 
     const marketValue = pos.quantity.times(priceEur);
     const unrealized = marketValue.minus(pos.costBasisEur);
@@ -379,6 +431,8 @@ export async function getHoldings(
       priceSource: asset.priceQuote?.source ?? (asset.manualPrice ? "manual" : "coût"),
       priceStatus: asset.priceQuote?.status ?? (asset.manualPrice ? "OK" : "OK"),
       lastUpdatedAt: asset.priceQuote?.lastUpdatedAt?.toISOString() ?? null,
+      closeDay: closeAsOf?.day ?? null,
+      fetchedAt: closeAsOf?.fetchedAt ?? null,
       logoUrl: assetLogo,
       priceProvider: asset.priceProvider,
       acquisitionFeesEur: eurS(toFixed(fees, 8)),
@@ -538,6 +592,7 @@ export async function getHoldings(
       priceProvider: preferLive.priceProvider || prev.priceProvider,
       priceStatus: preferLive.priceStatus || prev.priceStatus,
       lastUpdatedAt: preferLive.lastUpdatedAt || prev.lastUpdatedAt,
+      ...preferCloseAsOf(prev, row),
       acquisitionFeesEur: eurS(toFixed(fees, 8)),
       acquisitionFeesBase: baseS(toBase(fees)),
       passiveIncomeEur: eurS(toFixed(income, 8)),
@@ -780,23 +835,71 @@ export async function getPlatformCashBalances(
  * pas de résumé, et la bande d'indicateurs affiche « — € » — son placeholder
  * de montant inconnu. Rien à inventer pour la transporter.
  */
+export async function getEmployeeSavingsTotalsEur(
+  userId: string,
+  rates?: Record<string, number>
+): Promise<{ totalEur: ReturnType<typeof d>; esLiquidEur: ReturnType<typeof d> }> {
+  const fx = rates ?? (await getEurRates());
+  const rows = await prisma.employeeSavingsLine.findMany({
+    where: { userId },
+    select: {
+      units: true,
+      nav: true,
+      currency: true,
+      planType: true,
+      unlockMode: true,
+      unlockDate: true,
+      contributionDate: true,
+    },
+  });
+  let total = zero();
+  let liquid = zero();
+  for (const r of rows) {
+    const mv = d(r.units.toString()).times(d(r.nav.toString()));
+    const eur = d(convertToEurSync(mv.toString(), r.currency || "EUR", fx));
+    total = total.plus(eur);
+    const unlock = resolveUnlock({
+      planType: r.planType,
+      unlockMode: r.unlockMode,
+      unlockDate: r.unlockDate,
+      contributionDate: r.contributionDate,
+    });
+    if (unlock.liquidityStatus === "AVAILABLE") liquid = liquid.plus(eur);
+  }
+  return { totalEur: total, esLiquidEur: liquid };
+}
+
 export async function getEmployeeSavingsTotalEur(
   userId: string,
   rates?: Record<string, number>
 ) {
-  const fx = rates ?? (await getEurRates());
-  const rows = await prisma.employeeSavingsLine.findMany({
-    where: { userId },
-    select: { units: true, nav: true, currency: true },
-  });
-  let total = zero();
-  for (const r of rows) {
-    const mv = d(r.units.toString()).times(d(r.nav.toString()));
-    total = total.plus(
-      d(convertToEurSync(mv.toString(), r.currency || "EUR", fx))
-    );
-  }
-  return total;
+  return (await getEmployeeSavingsTotalsEur(userId, rates)).totalEur;
+}
+
+async function loadHoldingClassificationFlags(userId: string): Promise<{
+  realEstateAssetIds: Set<string>;
+  indirectRealEstateAssetIds: Set<string>;
+  fondsEuroAssetIds: Set<string>;
+}> {
+  const [direct, indirect, fondsEuro] = await Promise.all([
+    prisma.realEstateDetail.findMany({
+      where: { asset: { userId } },
+      select: { assetId: true },
+    }),
+    prisma.indirectRealEstateDetail.findMany({
+      where: { asset: { userId } },
+      select: { assetId: true },
+    }),
+    prisma.lifeInsuranceSupport.findMany({
+      where: { asset: { userId }, kind: "FONDS_EURO" },
+      select: { assetId: true },
+    }),
+  ]);
+  return {
+    realEstateAssetIds: new Set(direct.map((r) => r.assetId)),
+    indirectRealEstateAssetIds: new Set(indirect.map((r) => r.assetId)),
+    fondsEuroAssetIds: new Set(fondsEuro.map((r) => r.assetId)),
+  };
 }
 
 export async function getLiabilitiesTotalEur(
@@ -835,7 +938,7 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
   const { getExplicitCashTotalEur } = await import("../cash/pockets");
   const { getAlternativesPortfolioSlice } = await import("../alternatives/portfolio");
 
-  const [holdings, platforms, liabilitiesEur, explicitCash, alternatives, esEur] =
+  const [holdings, platforms, liabilitiesEur, explicitCash, alternatives, es, flags] =
     await Promise.all([
       getHoldings(userId, base, rates),
       getPlatformCashBalances(userId, base, rates, ledger),
@@ -851,12 +954,12 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
         lui inventer une règle propre.
       */
       getAlternativesPortfolioSlice(userId, rates),
-      getEmployeeSavingsTotalEur(userId, rates),
+      getEmployeeSavingsTotalsEur(userId, rates),
+      loadHoldingClassificationFlags(userId),
     ]);
 
   const marketValue = holdings.reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
   const costBasis = totalCostBasis(ledger);
-  // Cash pockets: only balances explicitly entered and > 0 (banks, livrets, CTO/PEA/AV)
   const cash = explicitCash.totalEur;
   /*
     Ni `?.` ni `?? 0` : la promesse rend une tranche complète ou échoue. Ce
@@ -864,26 +967,44 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     derrière le zéro que ce chantier retire.
   */
   const alternativesEur = d(String(alternatives.totalEur));
-  const employeeSavingsEur = esEur;
-  // Sous-totaux informatifs — déjà inclus dans marketValue (holdings), pas
-  // additifs au net worth (contrairement à alternatives/ES qui vivent hors holdings).
-  const realEstateEur = holdings
-    .filter((h) => h.accountType === "IMMOBILIER")
-    .reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
-  const lifeInsuranceEur = holdings
-    .filter((h) => h.accountType === "AV")
-    .reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
+
+  const classifiable: ClassifiableHolding[] = holdings.map((row) => ({
+    id: row.assetId,
+    assetClass: row.assetClass,
+    accountType: row.accountType,
+    marketValueEur: row.marketValueEur,
+    name: row.name,
+    hasRealEstateDetail: flags.realEstateAssetIds.has(row.assetId),
+    hasIndirectRealEstateDetail: flags.indirectRealEstateAssetIds.has(row.assetId),
+    isFondsEuro: flags.fondsEuroAssetIds.has(row.assetId),
+  }));
+
+  const metrics = computePatrimonyMetrics({
+    holdings: classifiable,
+    cash: { total: cash },
+    alternatives: alternativesEur,
+    employeeSavings: { total: es.totalEur, esLiquid: es.esLiquidEur },
+    liabilities: liabilitiesEur,
+  });
+  if (process.env.PATRIMONY_METRICS_DEBUG === "1") {
+    console.info(formatPatrimonyPocketTable(metrics));
+  }
+
+  const realEstateEur = metrics.pockets.immobilier;
+  const lifeInsuranceEur = metrics.pockets.av;
+  const employeeSavingsEur = metrics.pockets.employeeSavings;
   const realized = totalRealizedPnl(ledger);
   const unrealized = marketValue.minus(costBasis);
   const cashIncome = ledger.cashIncomeEur;
   const totalReturn = unrealized.plus(realized).plus(cashIncome);
-  // Net worth = cotés + cash + alternatifs + épargne salariale − passifs
-  // Note crowdlending: capital ACTIVE/LATE only (see alternatives/portfolio.ts)
-  const totalAssets = marketValue
-    .plus(cash)
-    .plus(alternativesEur)
-    .plus(employeeSavingsEur);
-  const netWorth = totalAssets.minus(liabilitiesEur);
+  /*
+    Brut / net du contrat PatrimonyMetrics — plus le résidu
+    « toutes les lignes − cash − alt − ES » qui réintroduisait immo et AV
+    dans « Cotés ».
+  */
+  const totalAssets = metrics.brut;
+  const netWorth = metrics.net;
+  const metricsJson = serializePatrimonyMetrics(metrics);
 
   const summary = {
     baseCurrency: base,
@@ -894,13 +1015,41 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     totalAlternativesBase: toBase(alternativesEur),
     totalEmployeeSavingsEur: toFixed(employeeSavingsEur, 8),
     totalEmployeeSavingsBase: toBase(employeeSavingsEur),
-    /** Sous-total holdings accountType=IMMOBILIER — déjà dans totalMarketValueEur */
     totalRealEstateEur: toFixed(realEstateEur, 8),
     totalRealEstateBase: toBase(realEstateEur),
-    /** Sous-total holdings accountType=AV — déjà dans totalMarketValueEur */
     totalLifeInsuranceEur: toFixed(lifeInsuranceEur, 8),
     totalLifeInsuranceBase: toBase(lifeInsuranceEur),
-    /** Actif brut = cotés + cash + alternatifs + ES */
+    /** Listed du contrat : ACTIONS + OBLIGATIONS + CRYPTO, hors IMMO/AV. */
+    totalListedEur: toFixed(metrics.pockets.listed, 8),
+    totalListedBase: toBase(metrics.pockets.listed),
+    totalAutreEur: toFixed(metrics.pockets.autre, 8),
+    totalAutreBase: toBase(metrics.pockets.autre),
+    totalFinancierEur: toFixed(metrics.financier, 8),
+    totalFinancierBase: toBase(metrics.financier),
+    fondsEuroEur: toFixed(metrics.fondsEuro, 8),
+    fondsEuroBase: toBase(metrics.fondsEuro),
+    esLiquidEur: toFixed(metrics.esLiquid, 8),
+    esLiquidBase: toBase(metrics.esLiquid),
+    cashInvestissementEur: toFixed(metrics.cashInvestissement, 8),
+    cashInvestissementBase: toBase(metrics.cashInvestissement),
+    metricsAsOf: metrics.asOf,
+    /**
+     * Dernier jour de courbe getDailyNav (to = aujourd'hui Paris).
+     * Watchlist.closeDay doit rester à ≤ 1 séance (Vague2 D4).
+     */
+    navAsOfDay: parisDayKey(new Date()),
+    fetchedAt:
+      oldestFetchedAt(
+        holdings
+          .filter((h) => h.fetchedAt)
+          .map((h) => ({
+            day: h.closeDay ?? parisDayKey(new Date()),
+            closeEur: 0,
+            fetchedAt: h.fetchedAt,
+            source: "daily-close" as const,
+          }))
+      ) ?? "",
+    /** Actif brut = Σ poches d'actif (contrat PatrimonyMetrics). */
     portfolioPlusCashEur: toFixed(totalAssets, 8),
     totalGrossAssetsEur: toFixed(totalAssets, 8),
     totalGrossAssetsBase: toBase(totalAssets),
@@ -927,21 +1076,29 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
   const byClass: Record<string, number> = {};
   const byPlatform: Record<string, number> = {};
   const byAccountType: Record<string, number> = {};
-  for (const h of holdings) {
-    const v = Number(h.marketValueBase || h.marketValueEur);
-    byClass[h.assetClass] = (byClass[h.assetClass] ?? 0) + v;
-    byPlatform[h.platformName] = (byPlatform[h.platformName] ?? 0) + v;
-    const at = h.accountType;
+  for (let i = 0; i < holdings.length; i++) {
+    const row = holdings[i]!;
+    const classified = classifiable[i]!;
+    const v = Number(row.marketValueBase || row.marketValueEur);
+    const cls = allocationAssetClass(classified);
+    if (cls !== "IMMOBILIER") {
+      byClass[cls] = (byClass[cls] ?? 0) + v;
+    }
+    byPlatform[row.platformName] = (byPlatform[row.platformName] ?? 0) + v;
+    const at = row.accountType;
     byAccountType[at] = (byAccountType[at] ?? 0) + v;
+  }
+  const immoBase = Number(toBase(metrics.pockets.immobilier));
+  if (immoBase > 0 || metrics.pockets.immobilier.gt(0)) {
+    byClass["IMMOBILIER"] = immoBase;
   }
   // Cash (poches banques + ledger) rattaché aux plateformes pour le camembert « par plateforme »
   for (const p of platforms) {
-    const cash = Number(p.cashBase || p.cashEur || 0);
-    if (cash > 0) {
-      byPlatform[p.name] = (byPlatform[p.name] ?? 0) + cash;
+    const platCash = Number(p.cashBase || p.cashEur || 0);
+    if (platCash > 0) {
+      byPlatform[p.name] = (byPlatform[p.name] ?? 0) + platCash;
     }
   }
-  // Classe CASH = total cash patrimoine (poches Banques/Livrets/enveloppes/AV > 0)
   const cashClassBase = Number(summary.totalCashBase || summary.totalCashEur || 0);
   if (cashClassBase > 0) {
     byClass["CASH"] = (byClass["CASH"] ?? 0) + cashClassBase;
@@ -952,6 +1109,7 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     holdings,
     platforms,
     summary,
+    metrics: metricsJson,
     allocation: {
       byClass: Object.entries(byClass).map(([name, value]) => ({ name, value })),
       byPlatform: Object.entries(byPlatform).map(([name, value]) => ({ name, value })),
@@ -1066,11 +1224,25 @@ export type PortfolioHistoryPoint = {
   liabilitiesBase?: number;
   /** Capital externe entré (net) ce jour-là — jamais compté en performance. */
   externalFlowsBase?: number;
+  /**
+   * Flux du journal coté (ACTIONS + OBLIGATIONS + CRYPTO).
+   * Pastilles de la courbe Financier — un achat immo n'y figure pas.
+   */
+  transactionFlowBase?: number;
+  /**
+   * Flux qui touchent l'agrégat Financier. Sans ce champ, `heroAttribution`
+   * en mode financier rend `null` et les pastilles Marché/Flux disparaissent.
+   */
+  financierFlowsBase?: number;
   /** Résultat du jour, flux neutralisés. */
   investmentPerformanceBase?: number;
 
   securitiesBase?: number;
   cryptoBase?: number;
+  /** Poche T-01 `listed` — ACTIONS+OBLIGATIONS+CRYPTO hors IMMO/AV. */
+  listedBase?: number;
+  /** Agrégat T-01 `financier`. */
+  financierBase?: number;
   realEstateBase?: number;
   lifeInsuranceBase?: number;
   alternativesBase?: number;
@@ -1139,6 +1311,15 @@ function attachIncomeSplit(
 const HISTORY_DISPLAY_POINTS = 900;
 
 /**
+ * Jours récents conservés au jour le jour par `downsampleSeries`.
+ *
+ * 400 > 366 : une fenêtre ≤1A (365, bissextile 366) extraite de la queue
+ * d'un historique long reste quotidienne. En dessous, « 1A » perdrait des
+ * jours civils et la densification T-05 serait une promesse d'écran.
+ */
+export const DAILY_TAIL_DAYS = 400;
+
+/**
  * Réduit une série quotidienne pour l'affichage **sans jamais altérer une
  * valeur**.
  *
@@ -1164,7 +1345,6 @@ export function downsampleSeries<
     lointain, que l'écran ne montre qu'écrasé sur quelques pixels, est
     échantillonné.
   */
-  const DAILY_TAIL_DAYS = 400;
   for (let i = Math.max(0, series.length - DAILY_TAIL_DAYS); i < series.length; i++) {
     keep.add(i);
   }
@@ -1320,6 +1500,8 @@ export async function getPortfolioHistory(
       netWorthBase: toBase(d(p.netWorth)),
       liabilitiesBase: toBase(d(p.liabilities)),
       externalFlowsBase: toBase(d(p.externalFlows)),
+      transactionFlowBase: toBase(d(listedTransactionFlow(p.flowsByAssetClass))),
+      financierFlowsBase: toBase(d(financierFlowOf(p.flowsByAssetClass))),
       investmentPerformanceBase: toBase(d(p.investmentPerformance)),
 
       /*
@@ -1404,6 +1586,8 @@ export async function getPortfolioHistory(
 
       securitiesBase: toBase(d(p.securities)),
       cryptoBase: toBase(d(p.crypto)),
+      listedBase: toBase(d(p.listed)),
+      financierBase: toBase(d(p.financier)),
       realEstateBase: toBase(d(p.realEstate)),
       lifeInsuranceBase: toBase(d(p.lifeInsurance)),
       alternativesBase: toBase(d(p.alternatives)),

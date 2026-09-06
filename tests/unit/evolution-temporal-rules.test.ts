@@ -135,7 +135,7 @@ describe("Règle 1M / 3M — semaines ISO lundi→dimanche", () => {
     expect(label).toMatch(/-/);
   });
 
-  it("1M : un point par semaine ISO, stock = dernière obs de la semaine", () => {
+  it("1M : un point par jour, abscisse temporelle", () => {
     const history = dailyHistory(NOW, 45);
     const { points, interval } = buildEvolutionSeries(
       history,
@@ -143,23 +143,16 @@ describe("Règle 1M / 3M — semaines ISO lundi→dimanche", () => {
       "cumul",
       NOW
     );
-    expect(interval).toBe("week");
-    // ~30–35 j → 5–6 semaines
-    expect(points.length).toBeGreaterThanOrEqual(4);
-    expect(points.length).toBeLessThanOrEqual(7);
-
-    const weekKeys = points.map((p) => bucketKey(p.date, "week"));
-    expect(new Set(weekKeys).size).toBe(weekKeys.length);
-
-    // Labels axe : S. 13 juil. - 19 juil.
-    for (const p of points) {
-      expect(p.label).toMatch(/^S\.\s+/);
-      expect(p.label).toMatch(/-/);
-      expect(p.intervalType).toBe("week");
+    expect(interval).toBe("day");
+    expect(points.length).toBeGreaterThanOrEqual(20);
+    expect(points.every((p) => p.intervalType === "day")).toBe(true);
+    expect(points.every((p) => Number.isFinite(p.t))).toBe(true);
+    for (let i = 1; i < points.length; i++) {
+      expect(points[i]!.t!).toBeGreaterThan(points[i - 1]!.t!);
     }
   });
 
-  it("3M : agrégation hebdomadaire sur fenêtre plus longue", () => {
+  it("3M : même échelle quotidienne sur une fenêtre plus longue", () => {
     const history = dailyHistory(NOW, 100);
     const { points, interval } = buildEvolutionSeries(
       history,
@@ -167,12 +160,9 @@ describe("Règle 1M / 3M — semaines ISO lundi→dimanche", () => {
       "cumul",
       NOW
     );
-    expect(interval).toBe("week");
-    // ~13 semaines
-    expect(points.length).toBeGreaterThanOrEqual(10);
-    expect(points.length).toBeLessThanOrEqual(16);
+    expect(interval).toBe("day");
+    expect(points.length).toBeGreaterThanOrEqual(80);
 
-    // Semaines strictement croissantes
     for (let i = 1; i < points.length; i++) {
       expect(Date.parse(points[i]!.date)).toBeGreaterThan(
         Date.parse(points[i - 1]!.date)
@@ -180,12 +170,11 @@ describe("Règle 1M / 3M — semaines ISO lundi→dimanche", () => {
     }
   });
 
-  it("valeur de semaine = dernière observation du dimanche (ou live en cours)", () => {
-    // Deux obs même semaine : mercredi bas, vendredi haut → bucket = vendredi
+  it("chaque observation quotidienne survit — plus de seau hebdo", () => {
     const history = [
       pt("2026-07-13T10:00:00.000Z", 100), // Mon
       pt("2026-07-15T10:00:00.000Z", 110), // Wed
-      pt("2026-07-17T10:00:00.000Z", 125), // Fri — last of week
+      pt("2026-07-17T10:00:00.000Z", 125), // Fri
       pt("2026-07-20T10:00:00.000Z", 130), // next Mon
     ];
     const { points } = buildEvolutionSeries(
@@ -194,10 +183,6 @@ describe("Règle 1M / 3M — semaines ISO lundi→dimanche", () => {
       "cumul",
       new Date("2026-07-21T12:00:00.000Z")
     );
-    const weekOf13 = points.find(
-      (p) => bucketKey(p.date, "week") === "W2026-07-13"
-    );
-    expect(weekOf13).toBeTruthy();
-    expect(weekOf13!.total).toBe(125);
+    expect(points.map((p) => p.total)).toEqual([100, 110, 125, 130]);
   });
 });

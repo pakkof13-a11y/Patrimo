@@ -18,44 +18,40 @@
 import type { HistoryPoint } from "@/app/lib/types/ui";
 
 /**
- * Valeur des positions « cotées » à une date.
+ * Valeur des positions **cotées** à une date.
  *
- * Le périmètre est celui de `summary.totalMarketValue`, et il est obtenu par la
- * même équation que le résumé emploie pour le construire :
+ * Préfère `listedBase` (poche T-01 : ACTIONS + OBLIGATIONS + CRYPTO hors
+ * IMMO/AV) dès que le moteur la publie. Repli : `securitiesBase + cryptoBase`,
+ * qui mélangeait les UC d'AV dans « Cotés » dès que `securities` incluait
+ * l'assurance-vie.
  *
- * ```
- * // getPortfolioBundle (service.ts)
- * totalAssets = marketValue + cash + alternatives + employeeSavings
- * ```
- *
- * d'où `marketValue = grossAssets − cash − alternatives − employeeSavings`.
- * Côté moteur, la même soustraction laisse exactement les compartiments issus
- * du journal — `securities + crypto + realEstate + lifeInsurance +
- * otherAssets` —, c'est-à-dire les lignes que `getHoldings` additionne.
- *
- * La série lisait auparavant `positionsBase` (= brut − cash), qui compte en
- * plus les alternatifs et l'épargne salariale : la tuile bougeait quand un
- * métal était revalorisé, alors que son montant, lui, ne le voyait pas. Les
- * deux poches ont d'ailleurs leur propre tuile dans le même bandeau.
- *
- * `undefined` dès qu'un des termes manque : mieux vaut pas de courbe qu'une
- * courbe dont on ne sait pas ce qu'elle couvre.
+ * Plus de repli `gross − cash − alt − ES` : ce résidu réintroduisait immo et
+ * AV dans « Cotés ». Si les champs manquent, la série est inconnue.
  */
 export function listedValueAt(p: HistoryPoint): number | undefined {
-  const gross = p.grossAssetsBase;
-  const cash = p.cashTotalBase;
-  const alternatives = p.alternativesBase;
-  const employeeSavings = p.employeeSavingsBase;
+  const listed = p.listedBase;
+  if (listed != null && Number.isFinite(listed)) return listed;
+  const securities = p.securitiesBase;
+  const crypto = p.cryptoBase;
   if (
-    gross == null ||
-    cash == null ||
-    alternatives == null ||
-    employeeSavings == null
+    securities != null &&
+    crypto != null &&
+    Number.isFinite(securities) &&
+    Number.isFinite(crypto)
   ) {
-    return undefined;
+    return securities + crypto;
   }
-  const listed = gross - cash - alternatives - employeeSavings;
-  return Number.isFinite(listed) ? listed : undefined;
+  return undefined;
+}
+
+/**
+ * Patrimoine financier à une date — même agrégat que le hero Financier
+ * (`computePatrimonyMetrics.financier` : listed + cashInvest + fondsEuro +
+ * esLiquid). Tolérance d'identité 0,01 € avec le point live du jour.
+ */
+export function financierAt(p: HistoryPoint): number | undefined {
+  const v = p.financierBase;
+  return v != null && Number.isFinite(v) ? v : undefined;
 }
 
 /**

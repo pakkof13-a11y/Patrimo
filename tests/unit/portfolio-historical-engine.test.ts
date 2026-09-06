@@ -519,3 +519,80 @@ describe("actifs écartés du patrimoine", () => {
     expect(seul.netWorth).toBeCloseTo(sans.netWorth, 6);
   });
 });
+
+describe("earliestDay — la borne exclut les replis non observés", () => {
+  it("un compte de cash sans événement (repli createdAt, observed: false) ne borne pas", () => {
+    const e = new PortfolioValuationEngine(
+      inputs({
+        cashAccounts: [
+          { id: "b1", balanceEur: d(1_000), createdAt: DAY("2010-01-01") },
+        ],
+      })
+    );
+    // Aucun fait observé : la borne n'existe pas.
+    expect(e.earliestDay()).toBeNull();
+  });
+
+  it("un métal acquis (observed: true) reste la borne même sans transaction", () => {
+    const e = new PortfolioValuationEngine(
+      inputs({
+        metals: [
+          {
+            id: "m1",
+            acquiredAt: DAY("1998-06-20"),
+            createdAt: DAY("2024-01-01"),
+            updatedAt: DAY("2024-01-01"),
+            costEur: d(240),
+            currentValueEur: d(1_000),
+          },
+        ],
+        // Repli non observé, plus ancien que le métal si on le laissait
+        // compter : il ne doit pas gagner.
+        cashAccounts: [
+          { id: "b1", balanceEur: d(1_000), createdAt: DAY("1990-01-01") },
+        ],
+      })
+    );
+    expect(e.earliestDay()).toBe("1998-06-20");
+  });
+
+  it("un patrimoine sans aucune transaction garde sa borne d'acquisition", () => {
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [],
+        metals: [
+          {
+            id: "m1",
+            acquiredAt: DAY("1998-06-20"),
+            createdAt: DAY("2024-01-01"),
+            updatedAt: DAY("2024-01-01"),
+            costEur: d(240),
+            currentValueEur: d(1_000),
+          },
+        ],
+      })
+    );
+    expect(e.earliestDay()).toBe("1998-06-20");
+  });
+
+  it("une transaction plus récente que l'acquisition observée ne l'emporte pas", () => {
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [buy("t1", "aapl", "2021-09-03", 1, 100)],
+        assetClassById: new Map([["aapl", "ACTIONS"]]),
+        rawAssetClassById: new Map([["aapl", "ACTIONS"]]),
+        metals: [
+          {
+            id: "m1",
+            acquiredAt: DAY("1998-06-20"),
+            createdAt: DAY("2024-01-01"),
+            updatedAt: DAY("2024-01-01"),
+            costEur: d(240),
+            currentValueEur: d(1_000),
+          },
+        ],
+      })
+    );
+    expect(e.earliestDay()).toBe("1998-06-20");
+  });
+});

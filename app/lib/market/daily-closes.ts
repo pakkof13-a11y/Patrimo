@@ -18,6 +18,7 @@ import { parisDayKey } from "../dates/paris";
 import { toFixed } from "../money/decimal";
 import type { DailyCloseIndex, DayKey } from "../portfolio/class-history";
 import { getAssetPriceHistory } from "./price-history";
+import type { PriceHistoryRange } from "./price-history-types";
 
 /**
  * Fraîcheur exigée du cache pour le jour courant. En deçà, on ne redemande
@@ -117,9 +118,20 @@ export async function fillDailyCloses(
   from: Date,
   now = new Date()
 ): Promise<number> {
-  const result = await getAssetPriceHistory(userId, assetId, "1y", {
+  const spanDays = Math.max(
+    0,
+    (now.getTime() - from.getTime()) / 86_400_000
+  );
+  // `options.from` borne déjà le fetch ; le range n'est qu'un libellé, mais
+  // « all » documente une fenêtre plus longue qu'un an (premier achat).
+  const range: PriceHistoryRange = spanDays > 400 ? "all" : "1y";
+  const floor = new Date(now.getTime());
+  floor.setUTCFullYear(floor.getUTCFullYear() - 30);
+  const fromClamped = from < floor ? floor : from;
+
+  const result = await getAssetPriceHistory(userId, assetId, range, {
     interval: "1d",
-    from,
+    from: fromClamped,
   });
   if (!result || result.source === "mock" || result.points.length === 0) {
     return 0;
@@ -133,28 +145,73 @@ export async function fillDailyCloses(
     // Plusieurs barres sur un même jour civil : la dernière fait la clôture.
     byDay.set(day, point.close);
   }
+  console.info(
+    `[daily-closes] ${assetId} — reçus=${result.points.length} retenus=${byDay.size}`
+  );
   if (byDay.size === 0) return 0;
 
   const source = result.source;
-  await prisma.$transaction(
-    [...byDay].map(([day, close]) =>
-      prisma.assetDailyClose.upsert({
-        where: { assetId_day: { assetId, day } },
-        create: {
-          assetId,
-          day,
-          closeEur: toFixed(close, 12),
-          source,
-        },
-        update: {
-          closeEur: toFixed(close, 12),
-          source,
-          fetchedAt: now,
-        },
-      })
-    )
-  );
+  await writeDailyCloses(assetId, byDay, source, now);
   return byDay.size;
+}
+
+/**
+ * Écrit les clôtures d'un actif sans passer par une transaction interactive.
+ *
+ * `$transaction([...upserts])` chronométrait toute la série dans un budget de
+ * 5 s côté Prisma : un actif détenu depuis des années (des milliers de jours)
+ * n'aboutissait jamais et repartait en rollback intégral (mesuré en preview :
+ * jusqu'à 8,5 s pour une transaction qui expire à 5 s). `createMany` avec
+ * `skipDuplicates` est une seule instruction SQL (`INSERT ... ON CONFLICT DO
+ * NOTHING`), sans transaction interactive, donc sans ce plafond — le motif
+ * déjà utilisé pour le seed (`prisma/seed-portfolio.ts`).
+ *
+ * Deux jours récents sont malgré tout traités en `upsert` :
+ * `skipDuplicates` n'écrase jamais une ligne déjà présente, or le jour
+ * courant (et la veille, pour couvrir un cron qui tourne avant clôture) doit
+ * pouvoir être rafraîchi, et une ligne `source: "seed"` doit pouvoir être
+ * remplacée par une vraie donnée fournisseur.
+ *
+ * Le reste s'écrit **du plus récent au plus ancien**. `needsHistoryBackfill`
+ * ne juge que `minDay`/`maxDay` : si un lot est coupé en cours de route (fin
+ * de budget, exception réseau au lot suivant), `minDay` ne descend jusqu'à la
+ * borne attendue qu'au tout dernier lot. Un actif partiellement écrit garde
+ * donc un `minDay` trop récent, reste jugé incomplet, et sera repris au
+ * passage suivant — jamais oublié en silence.
+ */
+async function writeDailyCloses(
+  assetId: string,
+  byDay: Map<DayKey, number>,
+  source: string,
+  now: Date
+): Promise<void> {
+  const RECENT_UPSERT_DAYS = 2;
+  const BATCH_SIZE = 500;
+
+  const sortedDesc = [...byDay.entries()].sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0));
+  const recent = sortedDesc.slice(0, RECENT_UPSERT_DAYS);
+  const rest = sortedDesc.slice(RECENT_UPSERT_DAYS);
+
+  for (const [day, close] of recent) {
+    await prisma.assetDailyClose.upsert({
+      where: { assetId_day: { assetId, day } },
+      create: { assetId, day, closeEur: toFixed(close, 12), source },
+      update: { closeEur: toFixed(close, 12), source, fetchedAt: now },
+    });
+  }
+
+  for (let i = 0; i < rest.length; i += BATCH_SIZE) {
+    const batch = rest.slice(i, i + BATCH_SIZE);
+    await prisma.assetDailyClose.createMany({
+      data: batch.map(([day, close]) => ({
+        assetId,
+        day,
+        closeEur: toFixed(close, 12),
+        source,
+      })),
+      skipDuplicates: true,
+    });
+  }
 }
 
 /** Exécute `worker` sur `items` avec une concurrence bornée. */

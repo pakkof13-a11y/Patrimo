@@ -43,8 +43,7 @@ test.describe("Évolution — par classe d'actif", () => {
     await page.getByTestId("evolution-class-CRYPTO").click();
     await expect(panel).toContainText("Crypto", { timeout: 15_000 });
 
-    // Le périmètre brut/net disparaît : une classe n'a pas de version nette,
-    // les dettes n'appartenant à aucune classe.
+    // Net/Brut ne vit plus ici : il est sur la carte de tête.
     await expect(page.getByTestId("evolution-scope-gross")).toHaveCount(0);
   });
 
@@ -128,7 +127,6 @@ test.describe("Évolution — par classe d'actif", () => {
 
     await page.getByTestId("evolution-class-all").click();
     await expect(panel).toContainText("Actifs bruts", { timeout: 15_000 });
-    // Le choix brut/net redevient disponible.
-    await expect(page.getByTestId("evolution-scope-gross")).toBeVisible();
+    await expect(page.getByTestId("evolution-scope-gross")).toHaveCount(0);
   });
 });

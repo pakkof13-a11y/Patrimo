@@ -15,7 +15,12 @@ import {
   WatchlistCard,
 } from "@/components/dashboard/terminal-panels";
 import type { DashboardNavTarget } from "@/components/dashboard/dashboard-quick-actions";
-import { getAssetClassLabel, cn } from "@/app/lib/utils";
+import { cn } from "@/app/lib/utils";
+import {
+  allocationLegendForScope,
+  allocationSliceLabel,
+  allocationSlicesForScope,
+} from "@/app/lib/portfolio/allocation-scope";
 import type {
   Holding,
   HistoryPoint,
@@ -45,16 +50,21 @@ import {
   seriesChangeAbs,
   seriesChangePct,
 } from "@/app/lib/portfolio/kpi-series";
+import { useDailyNavQuery } from "@/app/hooks/use-portfolio-queries";
+import { parisDayKey } from "@/app/lib/dates/paris";
+import {
+  dailyNavQueryWindow,
+  dailyNavToHistoryPoints,
+  servedDailyNavFrom,
+  type HeroNavScope,
+} from "@/app/lib/portfolio/daily-nav-view";
+import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
+import { quoteStaleBadgeLabel } from "@/app/lib/ui/quote-staleness";
 
 const emptySubscribe = () => () => undefined;
 
 function useIsClient() {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
-}
-
-function round2(n: number): number {
-  if (!Number.isFinite(n)) return 0;
-  return Math.round(n * 100) / 100;
 }
 
 function num(v: unknown): number {
@@ -145,14 +155,36 @@ export function DashboardTab({
   }
   const displayAllocation = stableAllocation ?? allocation;
 
+  const [navScope, setNavScope] = useState<HeroNavScope>("financier");
+
+  /*
+    Les valeurs brutes, sans `round2`.
+
+    Arrondir ici avant que Hamilton ne répartisse les pourcentages faisait
+    somner 100,1 % : chaque part était déjà écornée, puis `formatPct` arrondissait
+    une seconde fois. `AllocationCard` applique `allocatePercents` sur ces
+    montants tels quels.
+
+    Le camembert lit le même périmètre que la carte active : Financier
+    n'inclut pas l'immobilier, Brut/Net le portent, Net le dit « hors passifs ».
+  */
   const classChart = useMemo(
     () =>
-      displayAllocation?.byClass.map((x) => ({
-        name: getAssetClassLabel(x.name),
-        value: round2(num(x.value)),
-      })) ?? [],
-    [displayAllocation?.byClass]
+      allocationSlicesForScope(navScope, {
+        byClass: displayAllocation?.byClass ?? [],
+        holdings,
+        cashInvestissement: num(
+          summary?.cashInvestissementBase ?? summary?.cashInvestissementEur
+        ),
+        fondsEuro: num(summary?.fondsEuroBase ?? summary?.fondsEuroEur),
+        esLiquid: num(summary?.esLiquidBase ?? summary?.esLiquidEur),
+      }).map((x) => ({
+        name: allocationSliceLabel(x.name),
+        value: x.value,
+      })),
+    [displayAllocation?.byClass, holdings, navScope, summary]
   );
+  const allocationLegend = allocationLegendForScope(navScope);
 
   const [stableHistory, setStableHistory] = useState<HistoryPoint[]>(history);
   const [prevHistory, setPrevHistory] = useState(history);
@@ -179,6 +211,14 @@ export function DashboardTab({
    *
    * La préférence enregistrée reste celle du panneau (`evolutionPrefs.v5`) :
    * partager l'état ne devait pas créer une seconde période mémorisée.
+   *
+   * Le hero porte lui aussi les huit chips (`RANGES`, définies dans
+   * `portfolio-evolution-panel.tsx` et réutilisées ici pour éviter deux
+   * listes divergentes) : un clic dans la carte de tête appelle le même
+   * `changeRange` que le panneau du bas, donc écrit le même état et la même
+   * préférence — deux endroits pour changer une seule période, jamais deux
+   * périodes. Les fenêtres, elles, s'ouvrent toutes depuis
+   * `heroWindowReference` — la dernière valorisation, pas l'horloge.
    */
   const isClient = useIsClient();
   const [range, setRange] = useState<EvolutionRange>(
@@ -214,6 +254,45 @@ export function DashboardTab({
     setRange("7d");
   }
 
+  const referenceDay = parisDayKey(heroWindowReference(stableHistory));
+  const earliestDay = stableHistory[0]?.date
+    ? parisDayKey(new Date(stableHistory[0]!.date))
+    : null;
+  /*
+    Fenêtre API : 1A couvre 7J…1A (texture quotidienne identique, recoupe
+    côté client). 5A / Tout élargissent la requête.
+  */
+  const fetchRange: EvolutionRange =
+    range === "5y" || range === "all" ? range : "1y";
+  const navWindow = dailyNavQueryWindow(
+    fetchRange,
+    referenceDay,
+    earliestDay
+  );
+  const dailyNavQ = useDailyNavQuery(navWindow.from, navWindow.to);
+  const dailyNavPoints = dailyNavQ.data?.points;
+  /*
+    Libellé de période : borne **servie**, jamais celle demandée, jamais
+    le `from` d'une fenêtre 1A encore affichée par `keepPreviousData`.
+  */
+  const servedNavFrom = servedDailyNavFrom(dailyNavQ.data, {
+    isPlaceholderData: dailyNavQ.isPlaceholderData,
+  });
+  const staleQuotesLabel = quoteStaleBadgeLabel(
+    dailyNavQ.isPlaceholderData ? undefined : dailyNavQ.data?.fetchedAt
+  );
+  const navHistory = useMemo(
+    () =>
+      dailyNavPoints && dailyNavPoints.length >= 2
+        ? dailyNavToHistoryPoints(dailyNavPoints)
+        : [],
+    [dailyNavPoints]
+  );
+  const curveHistory = navHistory.length >= 2 ? navHistory : stableHistory;
+  const showNavLoading =
+    showHistoryLoading ||
+    (dailyNavQ.isPending && navHistory.length === 0);
+
   /**
    * Indicateurs — l'ordre du mockup, qui est aussi l'ordre de pilotage :
    * d'abord l'exposition cotée et le résultat, puis les poches annexes.
@@ -230,32 +309,14 @@ export function DashboardTab({
    * soient calculés.
    */
   const kpis = useMemo<TerminalKpi[]>(() => {
-    /*
-      La période choisie, et rien d'autre.
+    const source = curveHistory.length >= 2 ? curveHistory : stableHistory;
+    const h = windowForRange(
+      source,
+      range,
+      heroWindowReference(source)
+    );
+    const sparkDates = h.map((p) => p.date);
 
-      `windowForRange` est la fonction qu'emploie la courbe d'évolution : même
-      découpe, même point d'ancrage en tête pour la valeur de départ. La
-      variation de chaque tuile porte donc exactement sur la tranche de temps
-      que le graphique dessine juste en dessous.
-
-      La fenêtre glissante de trente points qui régnait ici évitait la variation
-      « depuis l'origine », illisible sur un portefeuille parti de zéro. Ce
-      compromis n'a plus à être arbitré dans le code : l'utilisateur choisit sa
-      période, « Tout » compris, et `seriesChangePct` prend de toute façon pour
-      base la première valeur non nulle.
-    */
-    const h = windowForRange(stableHistory, range);
-
-    /*
-      Une grandeur absente ne devient pas zéro.
-
-      `kpiSeries` rend `undefined` dès qu'un point ne porte pas le champ
-      demandé, au lieu de le remplacer par zéro pour faire tenir la courbe.
-      Une ligne parfaitement plate à zéro est indiscernable d'un patrimoine
-      réellement stable : c'est précisément la confusion que la doctrine du
-      projet interdit. Un zéro véritable, lui, passe — une poche vide vaut
-      zéro, et la courbe doit le dire.
-    */
     const listed = kpiSeries(h, listedValueAt);
     const cash = kpiSeries(h, (p) => p.cashTotalBase);
     const alternatives = kpiSeries(h, (p) => p.alternativesBase);
@@ -267,18 +328,36 @@ export function DashboardTab({
     return [
       {
         key: "listed",
-        label: "Cotés",
-        value: num(summary?.totalMarketValueBase ?? summary?.totalMarketValueEur),
+        label: "Titres & crypto",
+        /*
+          Poche T-01 `listed` : ACTIONS + OBLIGATIONS + CRYPTO, hors IMMO/AV.
+          Même série / fenêtre que le hero (getDailyNav).
+        */
+        value: num(
+          summary?.totalListedBase ??
+            summary?.totalListedEur ??
+            listed?.[listed.length - 1]
+        ),
         spark: listed,
+        sparkDates,
         changeAbs: seriesChangeAbs(listed),
         changePct: seriesChangePct(listed),
         tone: "gold",
       },
       {
         key: "latent",
-        label: "P&L latent",
+        /*
+          Le suffixe n'est pas décoratif. Toutes les autres tuiles présentent un
+          encours du jour surmontant une variation sur la période choisie ; le
+          P&L latent, lui, est déjà un cumul depuis l'origine. Posé sans horizon
+          à côté d'une variation à sept jours, il se lisait comme s'il portait
+          la même fenêtre — d'où « Titres −872 € » et « P&L latent +14 606 € »
+          sur le même écran, deux grandeurs justes que rien ne distinguait.
+        */
+        label: "P&L latent depuis l'origine",
         value: num(summary?.unrealizedPnlBase ?? summary?.unrealizedPnlEur),
         spark: latent,
+        sparkDates,
         changeAbs: seriesChangeAbs(latent),
         changePct: seriesChangePct(latent),
       },
@@ -287,6 +366,7 @@ export function DashboardTab({
         label: "Cash",
         value: num(summary?.totalCashBase ?? summary?.totalCashEur),
         spark: cash,
+        sparkDates,
         changeAbs: seriesChangeAbs(cash),
         changePct: seriesChangePct(cash),
         tone: "cyan",
@@ -296,6 +376,7 @@ export function DashboardTab({
         label: "Alternatifs",
         value: num(summary?.totalAlternativesBase ?? summary?.totalAlternativesEur),
         spark: alternatives,
+        sparkDates,
         changeAbs: seriesChangeAbs(alternatives),
         changePct: seriesChangePct(alternatives),
         tone: "neutral",
@@ -307,6 +388,7 @@ export function DashboardTab({
           summary?.totalEmployeeSavingsBase ?? summary?.totalEmployeeSavingsEur
         ),
         spark: employeeSavings,
+        sparkDates,
         changeAbs: seriesChangeAbs(employeeSavings),
         changePct: seriesChangePct(employeeSavings),
         tone: "neutral",
@@ -316,6 +398,7 @@ export function DashboardTab({
         label: "Passifs",
         value: num(summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur),
         spark: liabilities,
+        sparkDates,
         /*
           Le signe n'est pas retourné : une dette qui baisse affiche bien une
           variation négative. Inverser la convention ici ferait de cette tuile
@@ -332,11 +415,12 @@ export function DashboardTab({
           num(summary?.realizedPnlBase ?? summary?.realizedPnlEur) +
           num(summary?.cashIncomeBase ?? summary?.cashIncomeEur),
         spark: realized,
+        sparkDates,
         changeAbs: seriesChangeAbs(realized),
         changePct: seriesChangePct(realized),
       },
     ];
-  }, [summary, stableHistory, range]);
+  }, [summary, stableHistory, curveHistory, range]);
 
   const netWorth = summary
     ? num(summary.netWorthBase ?? summary.netWorthEur)
@@ -344,6 +428,9 @@ export function DashboardTab({
   /** Somme des actifs, sans déduction des passifs — même source que `netWorth`. */
   const grossAssets = summary
     ? num(summary.totalGrossAssetsBase ?? summary.totalGrossAssetsEur)
+    : null;
+  const financier = summary
+    ? num(summary.totalFinancierBase ?? summary.totalFinancierEur)
     : null;
 
   /*
@@ -371,10 +458,46 @@ export function DashboardTab({
         <TerminalHero
           netWorth={netWorth}
           grossAssets={grossAssets}
-          history={stableHistory}
+          financier={financier}
+          history={curveHistory}
           baseCurrency={baseCurrency}
-          loading={showHistoryLoading}
+          loading={showNavLoading}
+          scope={navScope}
+          onScopeChange={setNavScope}
+          range={range}
+          onRangeChange={changeRange}
+          firstHistoryDate={firstHistoryDate}
+          servedNavFrom={servedNavFrom}
         />
+      )}
+
+      {blocks.showEvolutionChart && staleQuotesLabel && (
+          <p
+            className="-mt-[var(--space-2)] px-[var(--space-1)] text-[length:var(--text-2xs)] text-[var(--foreground-secondary)]"
+            data-testid="hero-stale-quotes"
+            role="status"
+          >
+            {staleQuotesLabel}
+          </p>
+        )}
+
+      {/*
+        Ce que la courbe raconte, dit une fois pour toutes.
+
+        La ligne trace la NAV, capital investi compris : un achat la fait monter
+        sans qu'aucune valeur ait progressé. La performance, elle, retire ce
+        capital — elle peut donc être négative le mois où le patrimoine atteint
+        son plus haut. Les deux affirmations sont vraies en même temps, et
+        c'est précisément ce qui déroute sans cette phrase.
+      */}
+      {blocks.showEvolutionChart && (
+        <p
+          className="-mt-[var(--space-2)] px-[var(--space-1)] text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
+          data-testid="hero-legend"
+        >
+          La courbe inclut le capital investi. La performance peut être négative
+          même si le patrimoine monte.
+        </p>
       )}
 
       {/* —— 2. Indicateurs —— */}
@@ -399,9 +522,14 @@ export function DashboardTab({
         >
           {blocks.showEvolutionChart && (
             <PortfolioEvolutionPanel
-              history={stableHistory}
+              history={curveHistory}
+              dailyNav={dailyNavPoints ?? []}
+              navScope={navScope}
+              navQueryFrom={navWindow.from}
+              navQueryTo={navWindow.to}
+              servedNavFrom={servedNavFrom}
               baseCurrency={baseCurrency}
-              loading={showHistoryLoading}
+              loading={showNavLoading}
               className="min-h-[22rem]"
               range={range}
               onRangeChange={changeRange}
@@ -410,7 +538,14 @@ export function DashboardTab({
 
           {blocks.showAllocations && (
             <div className="flex min-w-0 flex-col gap-[var(--gap-card)]">
-              <AllocationCard data={classChart} baseCurrency={baseCurrency} />
+              <AllocationCard
+                data={classChart}
+                holdings={holdings}
+                periodRange={range}
+                baseCurrency={baseCurrency}
+                scope={navScope}
+                legend={allocationLegend}
+              />
               <WatchlistCard
                 holdings={holdings}
                 onUnwatch={onUnwatch}

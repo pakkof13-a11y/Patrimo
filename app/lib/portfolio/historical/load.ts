@@ -14,6 +14,11 @@ import { prisma } from "../../prisma";
 import { d, zero, type Decimal } from "../../money/decimal";
 import { convertToEurSync, getEurRates } from "../../market/fx";
 import { readDailyCloses } from "../../market/daily-closes";
+import {
+  resolveLastCloseAsOf,
+  readLastClosesAsOf,
+  type LastCloseAsOf,
+} from "../../market/last-close-as-of";
 import { parisDayKey } from "../../dates/paris";
 import { remainingAmountAt } from "../../liabilities/amortization";
 import { isNonOwnedStatus } from "../../crypto/nft-taxonomy";
@@ -24,7 +29,8 @@ import {
 } from "../../money/savings";
 import { mapDbTx } from "../tx-mapper";
 import type { DailyCloseIndex } from "../class-history";
-import type { HistoricalInputs } from "./engine";
+import type { HistoricalInputs, HistoricalHoldingMeta } from "./engine";
+import { resolveUnlock } from "../../employee-savings/logic";
 
 type Rates = Record<string, number>;
 
@@ -74,11 +80,12 @@ export async function loadHistoricalInputs(
       where: { userId },
       select: {
         id: true,
+        name: true,
         assetClass: true,
         accountType: true,
         currency: true,
         manualPrice: true,
-        priceQuote: { select: { priceEur: true } },
+        priceQuote: { select: { priceEur: true, lastUpdatedAt: true } },
         // Mêmes relations que `getPortfolioBundle` : sans elles, la courbe
         // valoriserait des positions que le patrimoine du jour écarte.
         defiPosition: { select: { isIgnoredInPortfolio: true } },
@@ -153,12 +160,13 @@ export async function loadHistoricalInputs(
 
   const assetClassById = new Map<string, string>();
   /**
-   * Classe d'actif **brute**, sans la surcharge assurance-vie.
+   * Classe d'actif **brute**, sans la surcharge assurance-vie / immobilier.
    *
    * `assetClassById` mélange délibérément deux informations : la classe de
-   * l'actif, et le fait qu'il soit détenu dans un contrat d'assurance-vie.
-   * C'est ce qu'il faut pour la ventilation par compartiment, où l'AV forme
-   * une poche à part.
+   * l'actif, et le fait qu'il soit détenu dans un contrat d'assurance-vie
+   * **ou** une poche immobilière. C'est ce qu'il faut pour la ventilation par
+   * compartiment, où l'AV et l'immo forment des poches à part — le même
+   * ordre que `classifyHolding` (T-01).
    *
    * Pour une ventilation par **classe d'actif**, c'est faux : une UC actions
    * logée dans un contrat reste une action. Et surtout, la surcharge repose
@@ -171,32 +179,78 @@ export async function loadHistoricalInputs(
    * décrire honnêtement.
    */
   const rawAssetClassById = new Map<string, string>();
-  for (const a of assets) {
-    // Un contrat d'assurance-vie est porté par `accountType`, pas par la classe
-    // de l'actif : ses supports restent des actions ou des obligations.
-    assetClassById.set(a.id, a.accountType === "AV" ? "ASSURANCE_VIE" : a.assetClass);
-    rawAssetClassById.set(a.id, a.assetClass);
-  }
+  const holdingMetaById = new Map<string, HistoricalHoldingMeta>();
 
   /*
-    Journal des enveloppes fiscales, chargé une fois pour toute la série.
+    Journal des enveloppes fiscales + drapeaux T-01, chargés une fois pour
+    toute la série.
 
     Le moteur est synchrone : il ne peut pas interroger la base à chaque point
     d'une série de dix mille jours. Les événements sont donc préchargés et
     indexés par actif, exactement comme les clôtures et les classes — la
     résolution se fait ensuite en mémoire, par `resolveEnvelopeFromEvents`.
   */
-  const envelopeEvents = await prisma.assetEnvelopeEvent.findMany({
-    where: { userId },
-    orderBy: { occurredAt: "asc" },
-    select: {
-      assetId: true,
-      occurredAt: true,
-      accountType: true,
-      securitiesAccountId: true,
-      envelopeType: true,
-    },
-  });
+  const [envelopeEvents, directRE, indirectRE, fondsEuroRows] = await Promise.all([
+    prisma.assetEnvelopeEvent.findMany({
+      where: { userId },
+      orderBy: { occurredAt: "asc" },
+      select: {
+        assetId: true,
+        occurredAt: true,
+        accountType: true,
+        securitiesAccountId: true,
+        envelopeType: true,
+      },
+    }),
+    prisma.realEstateDetail.findMany({
+      where: { asset: { userId } },
+      select: { assetId: true },
+    }),
+    prisma.indirectRealEstateDetail.findMany({
+      where: { asset: { userId } },
+      select: { assetId: true },
+    }),
+    prisma.lifeInsuranceSupport.findMany({
+      where: { asset: { userId }, kind: "FONDS_EURO" },
+      select: { assetId: true },
+    }),
+  ]);
+
+  const realEstateAssetIds = new Set(directRE.map((r) => r.assetId));
+  const indirectRealEstateAssetIds = new Set(indirectRE.map((r) => r.assetId));
+  const fondsEuroAssetIds = new Set(fondsEuroRows.map((r) => r.assetId));
+
+  for (const a of assets) {
+    const hasRealEstateDetail = realEstateAssetIds.has(a.id);
+    const hasIndirectRealEstateDetail = indirectRealEstateAssetIds.has(a.id);
+    const isFondsEuro = fondsEuroAssetIds.has(a.id);
+    const isImmo =
+      a.accountType === "IMMOBILIER" ||
+      a.assetClass === "IMMOBILIER" ||
+      hasRealEstateDetail ||
+      hasIndirectRealEstateDetail;
+
+    // Un contrat d'assurance-vie est porté par `accountType`, pas par la classe
+    // de l'actif : ses supports restent des actions ou des obligations.
+    // L'immobilier gagne ensuite, comme `classifyHolding` : une SCPI mal
+    // étiquetée ACTIONS avec fiche immo rejoint la poche immobilière.
+    assetClassById.set(
+      a.id,
+      a.accountType === "AV"
+        ? "ASSURANCE_VIE"
+        : isImmo
+          ? "IMMOBILIER"
+          : a.assetClass
+    );
+    rawAssetClassById.set(a.id, a.assetClass);
+    holdingMetaById.set(a.id, {
+      accountType: a.accountType,
+      name: a.name,
+      hasRealEstateDetail,
+      hasIndirectRealEstateDetail,
+      isFondsEuro,
+    });
+  }
 
   const envelopeEventsByAsset = new Map<string, typeof envelopeEvents>();
   for (const e of envelopeEvents) {
@@ -205,7 +259,11 @@ export async function loadHistoricalInputs(
     else envelopeEventsByAsset.set(e.assetId, [e]);
   }
 
-  const closes = await loadCloses(transactions, assets.map((a) => a.id));
+  const assetIds = assets.map((a) => a.id);
+  const [closes, lastDailyByAsset] = await Promise.all([
+    loadCloses(transactions, assetIds),
+    readLastClosesAsOf(assetIds),
+  ]);
 
   /*
     Le cours du jour complète le cache de clôtures.
@@ -219,14 +277,31 @@ export async function loadHistoricalInputs(
 
     Le cours n'est inscrit **que** sur le jour courant : il ne descend jamais
     dans le passé, où seules les clôtures réellement observées font foi.
+
+    Vague2 D4 : la même résolution (`resolveLastCloseAsOf`) alimente
+    `lastCloseAsOf`, que la watchlist et l'enveloppe daily-nav publient.
   */
   const today = parisDayKey(new Date());
+  const lastCloseAsOf = new Map<string, LastCloseAsOf>();
   for (const a of assets) {
     const priceEur = a.priceQuote
       ? d(a.priceQuote.priceEur.toString())
       : a.manualPrice
         ? d(convertToEurSync(a.manualPrice.toString(), a.currency || "EUR", rates))
         : null;
+    const quote =
+      priceEur && priceEur.gt(0)
+        ? {
+            priceEur: priceEur.toNumber(),
+            lastUpdatedAt: a.priceQuote?.lastUpdatedAt ?? null,
+          }
+        : null;
+    const asOf = resolveLastCloseAsOf({
+      today,
+      lastDaily: lastDailyByAsset.get(a.id) ?? null,
+      quote,
+    });
+    if (asOf) lastCloseAsOf.set(a.id, asOf);
     if (!priceEur || priceEur.lte(0)) continue;
     const byDay = closes.get(a.id) ?? new Map<string, number>();
     byDay.set(today, priceEur.toNumber());
@@ -349,6 +424,8 @@ export async function loadHistoricalInputs(
     rawAssetClassById,
     envelopeEventsByAsset,
     excludedAssetIds,
+    holdingMetaById,
+    lastCloseAsOf,
     closes,
     cashAccounts,
     cashEvents,
@@ -416,21 +493,30 @@ export async function loadHistoricalInputs(
       })),
     })),
 
-    employeeSavings: employeeSavings.map((l) => ({
-      id: l.id,
-      contributionDate: l.contributionDate,
-      createdAt: l.createdAt,
-      updatedAt: l.updatedAt,
-      contributedEur:
-        l.contributedAmount == null
-          ? null
-          : eur(l.contributedAmount, l.currency, rates),
-      currentEur: eur(
-        d(l.units.toString()).times(d(l.nav.toString())).toString(),
-        l.currency,
-        rates
-      ),
-    })),
+    employeeSavings: employeeSavings.map((l) => {
+      const unlock = resolveUnlock({
+        planType: l.planType,
+        unlockMode: l.unlockMode,
+        unlockDate: l.unlockDate,
+        contributionDate: l.contributionDate,
+      });
+      return {
+        id: l.id,
+        contributionDate: l.contributionDate,
+        createdAt: l.createdAt,
+        updatedAt: l.updatedAt,
+        contributedEur:
+          l.contributedAmount == null
+            ? null
+            : eur(l.contributedAmount, l.currency, rates),
+        currentEur: eur(
+          d(l.units.toString()).times(d(l.nav.toString())).toString(),
+          l.currency,
+          rates
+        ),
+        isLiquid: unlock.liquidityStatus === "AVAILABLE",
+      };
+    }),
 
     liabilities: liabilities.map((l) => ({
       id: l.id,

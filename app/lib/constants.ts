@@ -2,6 +2,7 @@ export const ASSET_CLASSES = {
   ACTIONS: "Actions / ETF",
   CRYPTO: "Cryptomonnaies",
   IMMOBILIER: "Immobilier",
+  /** Obligations — clé `OBLIGATIONS`, jamais `OBL`. */
   OBLIGATIONS: "Obligations",
   CASH: "Liquidités / Cash",
   AUTRE: "Autre",

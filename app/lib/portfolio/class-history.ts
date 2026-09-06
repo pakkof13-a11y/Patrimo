@@ -95,6 +95,23 @@ function toRecord(acc: Map<string, Decimal>): Record<string, number> {
 }
 
 /**
+ * Clôture **observée ce jour-là**, sans report.
+ *
+ * Distingue une barre du jour (`DAILY_EXACT`) d'un LOCF week-end / férié
+ * (`MARKET_CARRIED`). `closeAtOrBefore` fusionne les deux ; cette lecture
+ * permet au résolveur quotidien de les taguer correctement.
+ */
+export function closeOnDay(
+  closes: Map<DayKey, number> | undefined,
+  day: DayKey
+): number | null {
+  if (!closes || closes.size === 0) return null;
+  const exact = closes.get(day);
+  if (exact != null && Number.isFinite(exact)) return exact;
+  return null;
+}
+
+/**
  * Cours de clôture d'un actif à une date, avec report du dernier cours connu.
  * `null` si aucun cours n'a jamais été observé jusqu'à ce jour inclus.
  *
@@ -107,8 +124,8 @@ export function closeAtOrBefore(
   day: DayKey
 ): number | null {
   if (!closes || closes.size === 0) return null;
-  const exact = closes.get(day);
-  if (exact != null && Number.isFinite(exact)) return exact;
+  const exact = closeOnDay(closes, day);
+  if (exact != null) return exact;
   let best: number | null = null;
   let bestDay = "";
   for (const [k, v] of closes) {

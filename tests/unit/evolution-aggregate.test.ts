@@ -176,25 +176,31 @@ describe("buildEvolutionSeries", () => {
     expect(last.date.slice(0, 10)).toBe("2026-07-16");
   });
 
-  it("1m aggregates by ISO week", () => {
+  it("1m keeps a daily point on a time axis, not a weekly category", () => {
     const { points, interval } = buildEvolutionSeries(
       history,
       "1m",
       "cumul",
       now
     );
-    expect(interval).toBe("week");
-    // ~30 days → ~5 weeks
-    expect(points.length).toBeGreaterThanOrEqual(3);
-    expect(points.length).toBeLessThanOrEqual(7);
-    // Labels semaine ISO : S. 13 juil. - 19 juil.
-    expect(points[0]!.label).toMatch(/^S\.\s+/);
-    expect(points[0]!.label).toMatch(/-/);
+    expect(interval).toBe("day");
+    // Fenêtre ~30 j + ancre : plus de seaux hebdo (3–7 points).
+    expect(points.length).toBeGreaterThanOrEqual(20);
+    expect(points.every((p) => Number.isFinite(p.t))).toBe(true);
+    for (let i = 1; i < points.length; i++) {
+      expect(points[i]!.t!).toBeGreaterThan(points[i - 1]!.t!);
+    }
   });
 
-  it("3m is weekly", () => {
-    const { interval } = buildEvolutionSeries(history, "3m", "cumul", now);
-    expect(interval).toBe("week");
+  it("3m is daily on the same time scale", () => {
+    const { interval, points } = buildEvolutionSeries(
+      history,
+      "3m",
+      "cumul",
+      now
+    );
+    expect(interval).toBe("day");
+    expect(points.length).toBe(history.length);
   });
 
   it("period returns deltas", () => {
@@ -392,11 +398,7 @@ describe("statut EXACT / ESTIMATED — l'agrégation ne le perd plus", () => {
     expect(points.at(-1)?.status).toBe("ESTIMATED");
   });
 
-  it("un seul jour estimé rend tout le bucket estimé", () => {
-    /*
-      Un mois dont un jour repose sur une valeur reportée ne peut pas être
-      annoncé comme observé : le total du bucket dépend de cette valeur.
-    */
+  it("chaque jour garde son statut — plus de seau qui contamine le mois", () => {
     const { points } = buildEvolutionSeries(
       [
         ptStatut("2026-01-05T12:00:00Z", 100, "EXACT"),
@@ -406,7 +408,11 @@ describe("statut EXACT / ESTIMATED — l'agrégation ne le perd plus", () => {
       "all",
       "cumul"
     );
-    expect(points.every((p) => p.status === "ESTIMATED")).toBe(true);
+    expect(points.map((p) => p.status)).toEqual([
+      "EXACT",
+      "ESTIMATED",
+      "EXACT",
+    ]);
   });
 
   it("un statut absent n'affirme rien", () => {

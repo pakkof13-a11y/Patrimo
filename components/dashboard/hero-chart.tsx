@@ -34,6 +34,7 @@ const STROKE_WIDTH = 2;
  */
 export function HeroChart({
   values,
+  dates,
   stroke,
   activeIndex,
   setContainer,
@@ -44,6 +45,12 @@ export function HeroChart({
   ariaLabel,
 }: {
   values: number[];
+  /**
+   * Horodatages alignés sur `values`. Même série que celle passée au survol :
+   * l'abscisse temporelle du trait et celle de l'aimantation ne peuvent pas
+   * diverger.
+   */
+  dates?: Array<string | number | Date | null | undefined>;
   /** Couleur du trait — toujours un token (`var(--chart-…)`). */
   stroke: string;
   /**
@@ -72,8 +79,9 @@ export function HeroChart({
   ariaLabel: string;
 }) {
   const geometry = useMemo(
-    () => sparklineGeometry(values, VIEW_WIDTH, VIEW_HEIGHT, STROKE_WIDTH),
-    [values]
+    () =>
+      sparklineGeometry(values, VIEW_WIDTH, VIEW_HEIGHT, STROKE_WIDTH, dates),
+    [values, dates]
   );
 
   const marker = useMemo(() => {
@@ -114,6 +122,7 @@ export function HeroChart({
           index: e.index,
           amount: e.amount,
           left: `${(p.x / VIEW_WIDTH) * 100}%`,
+          top: `${(p.y / VIEW_HEIGHT) * 100}%`,
         },
       ];
     });
@@ -138,6 +147,7 @@ export function HeroChart({
     >
       <Sparkline
         values={values}
+        dates={dates}
         stroke={stroke}
         fill
         width={VIEW_WIDTH}
@@ -147,32 +157,40 @@ export function HeroChart({
       />
 
       {/*
-        Repères des mouvements de capitaux, sur le socle du cadre.
+        Repères des mouvements de capitaux, **sur** la courbe.
 
-        En bas plutôt que sur le trait : posés sur la courbe, ils entreraient
-        en concurrence avec la pastille du survol, et deux points de même taille
-        au même endroit ne se distinguent plus. En pied, ils marquent la
-        colonne du jour sans rien recouvrir.
+        Ils lisent la même géométrie que le trait : left + top, pas le socle
+        du cadre. Entrée en vert, sortie en rouge — les mêmes jetons que le
+        reste de l'écran (`--chart-positive` / `--chart-negative`). Au survol
+        du jour, le repère s'efface : la pastille du curseur le remplace, et
+        deux points superposés ne se distingueraient plus.
 
         `aria-hidden` : ce ne sont pas des commandes. L'information qu'ils
         signalent est dite par l'info-bulle du jour, atteignable au clavier
         comme au pointeur.
       */}
-      {eventDots.map((e) => (
-        <span
-          key={e.index}
-          aria-hidden
-          data-testid="hero-chart-event"
-          data-index={e.index}
-          data-direction={e.amount >= 0 ? "in" : "out"}
-          className={cn(
-            "pointer-events-none absolute bottom-0 h-1.5 w-1.5 -translate-x-1/2",
-            "rounded-full bg-[var(--primary-text)]",
-            activeIndex === e.index ? "opacity-100" : "opacity-60"
-          )}
-          style={{ left: e.left }}
-        />
-      ))}
+      {eventDots.map((e) => {
+        const incoming = e.amount >= 0;
+        const hovering = activeIndex === e.index;
+        return (
+          <span
+            key={e.index}
+            aria-hidden
+            data-testid="hero-chart-event"
+            data-index={e.index}
+            data-direction={incoming ? "in" : "out"}
+            className={cn(
+              "pointer-events-none absolute h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2",
+              "rounded-full",
+              incoming
+                ? "bg-[var(--chart-positive)]"
+                : "bg-[var(--chart-negative)]",
+              hovering ? "opacity-25" : "opacity-80"
+            )}
+            style={{ left: e.left, top: e.top }}
+          />
+        );
+      })}
 
       {marker && (
         <>
