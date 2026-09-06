@@ -273,6 +273,96 @@ export const HISTORICAL_PRICES: Readonly<Record<string, Readonly<Record<number, 
     2020: 600,
     2021: 3200, 2022: 1100, 2023: 2100, 2024: 3300, 2025: 3800, 2026: 4000,
   },
+
+  // ── Passe 2 : les tickers que les patrons P01, P02 et P05 exigent ─────────
+  //
+  // Chaque série se termine sur le `marketPrice` que la position porte déjà
+  // dans ce fichier, pour que l'historique rejoigne le portefeuille courant
+  // sans marche à la soudure. Les cours sont exprimés dans la devise native
+  // de la ligne — la conversion est l'affaire du patron, qui écrit son
+  // `currency` et son `fxRateToEur` explicitement.
+  //
+  // 2008 et 2020 sont des années de baisse partout où le ticker existe.
+  // C'est une règle de forme voulue par le propriétaire (« pas une rampe »),
+  // pas une reconstitution : pour deux valeurs technologiques, 2020 fut en
+  // réalité une année de hausse. On ne prétend donc pas restituer l'histoire
+  // des marchés, mais donner à la démonstration des creux là où un lecteur
+  // les attend.
+
+  // Lyxor CAC 40 (EUR) — support de P02, et la ligne que la vente K2 allège.
+  "CAC.PA": {
+    2001: 42, 2002: 32, 2003: 36, 2004: 40, 2005: 46, 2006: 53, 2007: 55,
+    2008: 34, // crise financière
+    2009: 40, 2010: 40, 2011: 34, 2012: 38, 2013: 44, 2014: 45,
+    2015: 48, 2016: 47, 2017: 53, 2018: 48, 2019: 58,
+    2020: 47, // COVID
+    2021: 60, 2022: 56, 2023: 64, 2024: 68, 2025: 71, 2026: 74,
+  },
+  // Hermès (EUR) — luxe, historique complet.
+  "RMS.PA": {
+    2001: 130, 2002: 120, 2003: 135, 2004: 150, 2005: 180, 2006: 200, 2007: 210,
+    2008: 120, // crise financière
+    2009: 160, 2010: 230, 2011: 250, 2012: 280, 2013: 300, 2014: 290,
+    2015: 350, 2016: 370, 2017: 450, 2018: 480, 2019: 660,
+    2020: 590, // COVID
+    2021: 1400, 2022: 1300, 2023: 1900, 2024: 2000, 2025: 2100, 2026: 2200,
+  },
+  // Air Liquide (EUR) — industrielle défensive, historique complet.
+  "AI.PA": {
+    2001: 65, 2002: 58, 2003: 62, 2004: 68, 2005: 75, 2006: 85, 2007: 92,
+    2008: 62, // crise financière
+    2009: 72, 2010: 88, 2011: 85, 2012: 92, 2013: 98, 2014: 100,
+    2015: 112, 2016: 105, 2017: 110, 2018: 108, 2019: 125,
+    2020: 118, // COVID
+    2021: 150, 2022: 132, 2023: 155, 2024: 160, 2025: 164, 2026: 168,
+  },
+  // Apple (USD) — cours ajustés des divisions du nominal ; P05 l'achète à
+  // partir de 2005, la table ne remonte donc pas plus haut.
+  AAPL: {
+    2005: 1.2, 2006: 2.3, 2007: 5.4,
+    2008: 2.6, // crise financière
+    2009: 6.4, 2010: 9.6, 2011: 11.6, 2012: 16.5, 2013: 14.5, 2014: 19.7,
+    2015: 24, 2016: 26, 2017: 39, 2018: 38, 2019: 71,
+    2020: 66, // COVID (règle de forme : la valeur monta en réalité)
+    2021: 168, 2022: 130, 2023: 190, 2024: 245, 2025: 215, 2026: 198,
+  },
+  // Microsoft (USD) — cours ajustés des divisions du nominal.
+  MSFT: {
+    2005: 20, 2006: 22, 2007: 26,
+    2008: 16, // crise financière
+    2009: 23, 2010: 22, 2011: 21, 2012: 22, 2013: 30, 2014: 41,
+    2015: 48, 2016: 55, 2017: 74, 2018: 90, 2019: 145,
+    2020: 132, // COVID (règle de forme : la valeur monta en réalité)
+    2021: 300, 2022: 240, 2023: 330, 2024: 400, 2025: 410, 2026: 415,
+  },
+  // Nestlé (CHF) — défensive suisse. La devise n'est pas l'euro : le patron
+  // doit écrire son `fxRateToEur`, la table ne convertit rien.
+  "NESN.SW": {
+    2005: 30, 2006: 34, 2007: 38,
+    2008: 25, // crise financière
+    2009: 33, 2010: 40, 2011: 42, 2012: 50, 2013: 55, 2014: 60,
+    2015: 63, 2016: 62, 2017: 68, 2018: 65, 2019: 90,
+    2020: 84, // COVID
+    2021: 105, 2022: 95, 2023: 92, 2024: 85, 2025: 86, 2026: 88,
+  },
+  // ASML (EUR) — semi-conducteurs.
+  "ASML.AS": {
+    2005: 15, 2006: 18, 2007: 20,
+    2008: 12, // crise financière
+    2009: 18, 2010: 26, 2011: 30, 2012: 40, 2013: 60, 2014: 75,
+    2015: 82, 2016: 95, 2017: 145, 2018: 140, 2019: 240,
+    2020: 215, // COVID (règle de forme : la valeur monta en réalité)
+    2021: 620, 2022: 480, 2023: 620, 2024: 680, 2025: 700, 2026: 710,
+  },
+  // Nvidia (USD) — cours ajustés des divisions du nominal. La table démarre
+  // en 2010 : avant, le cours ajusté descend sous le centime et une quantité
+  // dérivée d'un montant n'aurait plus aucun sens de lecture.
+  NVDA: {
+    2010: 9, 2011: 10, 2012: 11, 2013: 14, 2014: 18,
+    2015: 24, 2016: 90, 2017: 190, 2018: 150, 2019: 230,
+    2020: 210, // COVID (règle de forme : la valeur monta en réalité)
+    2021: 590, 2022: 420, 2023: 620, 2024: 780, 2025: 840, 2026: 880,
+  },
 };
 
 /**

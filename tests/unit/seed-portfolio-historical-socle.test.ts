@@ -144,3 +144,70 @@ describe("historicalPriceOf — UNKNOWN ≠ ZERO", () => {
     expect(c50At.lessThan(c50Before)).toBe(true);
   });
 });
+
+/*
+  Passe 2 — les huit tickers que P01, P02 et P05 exigent.
+
+  Deux invariants les distinguent des dix premiers. D'abord la soudure : la
+  dernière année de chaque série doit valoir le `marketPrice` que la position
+  porte déjà dans le seed, faute de quoi la courbe ferait une marche au point
+  de jonction entre l'historique reconstitué et le portefeuille courant.
+  Ensuite la règle de forme : 2008 et 2020 sont des années de baisse partout
+  où le ticker existe — y compris là où l'histoire réelle dit le contraire,
+  ce qui est une décision assumée et non un oubli.
+*/
+describe("historicalPriceOf — tickers ajoutés en passe 2", () => {
+  /** Cours 2026 attendu = `marketPrice` de la position homonyme du seed. */
+  const SOUDURE_2026: ReadonlyArray<readonly [string, number]> = [
+    ["CAC.PA", 74],
+    ["RMS.PA", 2200],
+    ["AI.PA", 168],
+    ["AAPL", 198],
+    ["MSFT", 415],
+    ["NESN.SW", 88],
+    ["ASML.AS", 710],
+    ["NVDA", 880],
+  ];
+
+  it.each(SOUDURE_2026)(
+    "%s rejoint le portefeuille courant sans marche en 2026",
+    (ticker, attendu) => {
+      const p = historicalPriceOf(ticker, 2026);
+      expect(p, `${ticker} doit avoir un cours 2026`).toBeDefined();
+      expect(p!.toNumber()).toBe(attendu);
+    }
+  );
+
+  const EXISTE_EN_2008 = ["CAC.PA", "RMS.PA", "AI.PA", "AAPL", "MSFT", "NESN.SW", "ASML.AS"];
+  it.each(EXISTE_EN_2008)("%s recule en 2008", (ticker) => {
+    const avant = historicalPriceOf(ticker, 2007);
+    const pendant = historicalPriceOf(ticker, 2008);
+    expect(avant, `${ticker} doit coter en 2007`).toBeDefined();
+    expect(pendant, `${ticker} doit coter en 2008`).toBeDefined();
+    expect(pendant!.lessThan(avant!)).toBe(true);
+  });
+
+  const EXISTE_EN_2020 = [...EXISTE_EN_2008, "NVDA"];
+  it.each(EXISTE_EN_2020)("%s recule en 2020", (ticker) => {
+    const avant = historicalPriceOf(ticker, 2019);
+    const pendant = historicalPriceOf(ticker, 2020);
+    expect(avant, `${ticker} doit coter en 2019`).toBeDefined();
+    expect(pendant, `${ticker} doit coter en 2020`).toBeDefined();
+    expect(pendant!.lessThan(avant!)).toBe(true);
+  });
+
+  it("ne cote pas avant l'année où la série commence", () => {
+    // P05 n'achète l'international qu'à partir de 2005.
+    expect(historicalPriceOf("AAPL", 2004)).toBeUndefined();
+    expect(historicalPriceOf("MSFT", 2004)).toBeUndefined();
+    expect(historicalPriceOf("NESN.SW", 2004)).toBeUndefined();
+    expect(historicalPriceOf("ASML.AS", 2004)).toBeUndefined();
+    // Nvidia : au-delà de 2010, le cours ajusté devient illisible.
+    expect(historicalPriceOf("NVDA", 2009)).toBeUndefined();
+    expect(historicalPriceOf("NVDA", 2010)).toBeDefined();
+    // Les trois lignes françaises, elles, couvrent toute la période.
+    expect(historicalPriceOf("CAC.PA", 2001)).toBeDefined();
+    expect(historicalPriceOf("RMS.PA", 2001)).toBeDefined();
+    expect(historicalPriceOf("AI.PA", 2001)).toBeDefined();
+  });
+});
