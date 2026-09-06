@@ -67,7 +67,7 @@ describe("ALLOCATION_BY_VENUE_HELP — lock texte « ? »", () => {
 });
 
 describe("palette — 1 hex / endroit, identique light/dark", () => {
-  it("colle exactement au PDF D14 (Laurent)", () => {
+  it("couvre les 10 clés avec des hex figés", () => {
     expect(VENUE_KEYS).toHaveLength(10);
     expect(VENUE_COLORS).toEqual({
       pea: "#C4A35A",
