@@ -60,38 +60,36 @@ test.describe("Évolution — par classe d'actif", () => {
     expect(somme).toBeCloseTo(Number(dernier.grossAssetsBase), 2);
   });
 
-  test("Valeur et Performance sont deux lectures distinctes", async ({ page }) => {
+  test("la courbe d'une classe est toujours une valeur", async ({ page }) => {
     const panel = page.getByTestId("portfolio-evolution-panel");
 
-    // Sans classe, la distinction n'a pas d'objet : le sélecteur est absent.
+    /*
+      Le sélecteur Valeur / Performance a été retiré (D15.E1) : il ne
+      fonctionnait pas, et le garder laissait l'utilisateur croire qu'une
+      seconde lecture existait. La série est désormais toujours l'encours.
+
+      Ce test ne vérifie plus qu'un libellé bascule — il vérifie que le
+      sélecteur a bien disparu des deux états où il apparaissait, et que la
+      courbe annonce la grandeur qu'elle trace.
+    */
     await expect(page.getByTestId("evolution-metric-value")).toHaveCount(0);
+    await expect(page.getByTestId("evolution-metric-performance")).toHaveCount(0);
 
     await page.getByTestId("evolution-class-CRYPTO").click();
     await expect(panel).toContainText("Crypto — valeur", { timeout: 15_000 });
-
-    await page.getByTestId("evolution-metric-performance").click();
-    await expect(panel).toContainText("Crypto — performance", { timeout: 15_000 });
+    await expect(page.getByTestId("evolution-metric-performance")).toHaveCount(0);
 
     /*
-      Les deux grandeurs ne coïncident pas : l'encours se compte en dizaines de
-      milliers, le résultat cumulé est d'un tout autre ordre. Vérifier
-      seulement que le libellé change laisserait passer une courbe identique
-      sous deux noms.
+      L'encours reste une vraie grandeur, pas un libellé : la série publiée
+      par l'API porte bien une valeur positive pour la classe affichée.
     */
     const body = await (await page.request.get("/api/portfolio?base=EUR")).json();
     const dernier = [...(body.history ?? [])]
       .reverse()
       .find((p: { byAssetClassBase?: Record<string, number> }) => p.byAssetClassBase);
 
-    expect(dernier.flowsByAssetClassBase).toBeTruthy();
+    expect(dernier.byAssetClassBase).toBeTruthy();
     expect(Number(dernier.byAssetClassBase.CRYPTO)).toBeGreaterThan(0);
-    // La performance d'un jour calme est très inférieure à l'encours.
-    const perf = dernier.performanceByAssetClassBase?.CRYPTO;
-    if (perf != null) {
-      expect(Math.abs(Number(perf))).toBeLessThan(
-        Number(dernier.byAssetClassBase.CRYPTO)
-      );
-    }
   });
 
   test("les trois identités tiennent dans la réponse de l'API", async ({ page }) => {

@@ -243,10 +243,8 @@ test.describe("Évolution — croisement classe × enveloppe", () => {
       choix produirait un chiffre faux.
     */
     await page.getByTestId("evolution-class-ACTIONS").click();
-    await expect(page.getByTestId("evolution-metric-performance")).toBeVisible();
 
     await page.getByTestId("evolution-envelope-PEA").click();
-    await expect(page.getByTestId("evolution-metric-performance")).toHaveCount(0);
   });
 
   test("le comparatif avec indice reste disponible", async ({ page }) => {

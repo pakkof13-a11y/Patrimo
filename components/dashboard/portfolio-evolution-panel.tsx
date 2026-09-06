@@ -137,20 +137,6 @@ const ENVELOPE_CHOICES: {
   },
 ];
 
-const METRIC_CHOICES: {
-  id: "value" | "performance";
-  label: string;
-  title: string;
-}[] = [
-  { id: "value", label: "Valeur", title: "Encours de la classe, apports compris" },
-  {
-    id: "performance",
-    label: "Performance",
-    title:
-      "Résultat cumulé de la classe, mouvements de capitaux retirés — hors revenus encaissés",
-  },
-];
-
 
 const VERSUS_CHOICES: {
   id: EvolutionBenchmark;
@@ -295,7 +281,13 @@ export function PortfolioEvolutionPanel({
   */
   const scope = "gross" as const;
   const assetClass = prefs.assetClass ?? null;
-  const classMetric = prefs.classMetric ?? "value";
+  /*
+    Le toggle Valeur / Performance a été retiré (D15.E1) : la série tracée
+    est toujours la valeur, apports compris. `classMetric` reste dans le
+    schéma des préférences stockées (compat v5), mais plus rien à l'écran ne
+    l'écrit ni ne le lit ailleurs qu'ici, en épinglant "value".
+  */
+  const classMetric = "value" as const;
   const envelope = prefs.envelope ?? null;
 
   /*
@@ -498,8 +490,16 @@ export function PortfolioEvolutionPanel({
   /*
     Vs indice : fenêtre servie (clamp getDailyNav), pas la borne demandée.
     Marge amont de 7 j pour une close ≤ ancre (LOCF vendredi).
+
+    Cette fenêtre ne vaut que pour la NAV **non filtrée** — dailyNav est la
+    série du hero (Brut/Net/Financier), quel que soit le filtre de classe
+    actif ici. Un filtre de classe ou d'enveloppe compare donc `scopedHistory`
+    (via `rawPoints`, juste sous ce bloc) plutôt que cette fenêtre-là :
+    l'indice doit suivre la série réellement tracée à l'écran, pas *Tout*.
   */
+  const isPocketFiltered = Boolean(assetClass);
   const vsNavWindowed = useMemo(() => {
+    if (isPocketFiltered) return [];
     if (!dailyNav?.length) return [];
     return windowVsIndexNav(
       dailyNav,
@@ -507,24 +507,32 @@ export function PortfolioEvolutionPanel({
       dailyNav[dailyNav.length - 1]!.day,
       servedNavFrom
     );
-  }, [dailyNav, range, servedNavFrom]);
+  }, [dailyNav, range, servedNavFrom, isPocketFiltered]);
 
   const wantIndex = versus === "index";
   /*
     `from` = ancre servie, jamais `navQueryFrom` (borne demandée, ex. 1998
     alors que getDailyNav a clampé à 2022). `to` = dernier jour de la
     fenêtre affichée, pas une date demandée plus large.
+
+    Filtré : l'ancre est le premier jour de `rawPoints` — la fenêtre que
+    `scopedHistory` sert réellement pour cette classe/enveloppe, pas celle
+    du hero.
   */
-  const idxFromKey =
-    servedNavFrom ??
-    vsNavWindowed[0]?.day ??
-    dailyNav?.[0]?.day ??
-    "";
-  const idxToKey =
-    vsNavWindowed[vsNavWindowed.length - 1]?.day ??
-    dailyNav?.[dailyNav.length - 1]?.day ??
-    navQueryTo ??
-    "";
+  const idxFromKey = isPocketFiltered
+    ? (rawPoints[0] ? parisDayKey(rawPoints[0].date) : "")
+    : servedNavFrom ??
+      vsNavWindowed[0]?.day ??
+      dailyNav?.[0]?.day ??
+      "";
+  const idxToKey = isPocketFiltered
+    ? (rawPoints[rawPoints.length - 1]
+        ? parisDayKey(rawPoints[rawPoints.length - 1]!.date)
+        : "")
+    : vsNavWindowed[vsNavWindowed.length - 1]?.day ??
+      dailyNav?.[dailyNav.length - 1]?.day ??
+      navQueryTo ??
+      "";
   const indexQ = useQuery({
     queryKey: ["evolution-index", indexKey, idxFromKey, idxToKey],
     enabled:
@@ -551,9 +559,13 @@ export function PortfolioEvolutionPanel({
   const points = rawPoints;
 
   /*
-    Deux niveaux (NAV hero, clôture Yahoo), base 100 à l'ancre servie.
-    Overlay absent si 429 / vide / aucune close ≤ ancre — NAV intacte.
-    Pas `toPercentSeries` : sans `growth`, le portefeuille restait à +0 %.
+    Deux niveaux (NAV hero ou série filtrée, clôture Yahoo), base 100 à
+    l'ancre servie. Overlay absent si 429 / vide / aucune close ≤ ancre —
+    la série portefeuille reste intacte. Pas `toPercentSeries` : sans
+    `growth`, le portefeuille restait à +0 %.
+
+    Filtrée (classe/enveloppe active) : `rawPoints` — la série réellement
+    tracée — sert de base 100, jamais la NAV hero non filtrée.
   */
   const vsIndexSeries = useMemo(() => {
     if (versus !== "index") return [];
@@ -561,15 +573,24 @@ export function PortfolioEvolutionPanel({
       day: c.date,
       value: c.close,
     }));
-    const portfolioLevels =
-      vsNavWindowed.length > 1
+    const scopedLevels = rawPoints.map((p) => ({
+      day: parisDayKey(p.date),
+      value: p.total,
+    }));
+    const portfolioLevels = isPocketFiltered
+      ? scopedLevels
+      : vsNavWindowed.length > 1
         ? dailyNavToVsIndexLevels(vsNavWindowed, activeNavScope)
-        : rawPoints.map((p) => ({
-            day: parisDayKey(p.date),
-            value: p.total,
-          }));
+        : scopedLevels;
     return rebaseToCommonBase100(portfolioLevels, indexLevels);
-  }, [versus, indexCloses, vsNavWindowed, activeNavScope, rawPoints]);
+  }, [
+    versus,
+    indexCloses,
+    vsNavWindowed,
+    activeNavScope,
+    rawPoints,
+    isPocketFiltered,
+  ]);
 
   const percentPoints = useMemo(
     () => (versus === "none" ? [] : toVsIndexPercentPoints(vsIndexSeries)),
@@ -650,7 +671,7 @@ export function PortfolioEvolutionPanel({
             {assetClass && envelope
               ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass} en ${envelope} — valeur`
               : assetClass
-              ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass}${assetClass === "OBLIGATIONS" ? " (CTO)" : ""} — ${classMetric === "performance" ? "performance" : "valeur"}`
+              ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass}${assetClass === "OBLIGATIONS" ? " (CTO)" : ""} — valeur`
               : useDailyNavCurve
               ? `${HERO_NAV_SCOPE_LABEL[activeNavScope]} — NAV quotidienne`
               : "Actifs bruts"}
@@ -680,7 +701,7 @@ export function PortfolioEvolutionPanel({
                 {navMarket >= 0 ? "+" : ""}
                 {formatCurrency(navMarket, baseCurrency)}
               </div>
-              <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
+              <div className="text-xs font-medium text-[var(--muted-foreground)]">
                 Performance {HERO_NAV_SCOPE_LABEL[activeNavScope].toLowerCase()}
                 {navFlux != null && navFlux !== 0 ? (
                   <span data-testid="evolution-headline-flux">
@@ -704,7 +725,7 @@ export function PortfolioEvolutionPanel({
                 {pocketSummary.delta >= 0 ? "+" : ""}
                 {formatCurrency(pocketSummary.delta, baseCurrency)}
               </div>
-              <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
+              <div className="text-xs font-medium text-[var(--muted-foreground)]">
                 {`${pocketSummary.pct >= 0 ? "+" : ""}${pocketSummary.pct.toFixed(1)} % de rendement`}
               </div>
             </div>
@@ -721,7 +742,7 @@ export function PortfolioEvolutionPanel({
                 {summary.delta >= 0 ? "+" : ""}
                 {formatCurrency(summary.delta, baseCurrency)}
               </div>
-              <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
+              <div className="text-xs font-medium text-[var(--muted-foreground)]">
                 {versus === "none"
                   ? /*
                        Deux chiffres, deux significations.
@@ -752,7 +773,7 @@ export function PortfolioEvolutionPanel({
                 {headlinePct >= 0 ? "+" : ""}
                 {headlinePct.toFixed(1)}&nbsp;%
               </div>
-              <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
+              <div className="text-xs font-medium text-[var(--muted-foreground)]">
                 {`Vs ${benchmarkDisplayName}`}
               </div>
             </div>
@@ -847,25 +868,6 @@ export function PortfolioEvolutionPanel({
               }
               ariaLabel="Enveloppe fiscale"
               testIdPrefix="evolution-envelope"
-            />
-          )}
-          {/*
-            Valeur ou performance : la distinction n'a de sens que sur une
-            classe, la courbe globale ayant déjà sa propre lecture.
-
-            Retirée dès qu'une enveloppe est choisie : la performance se calcule
-            en retirant les flux, et aucun flux historique n'est attribuable à
-            une enveloppe — l'enveloppe d'un achat de 2024 est précisément ce
-            que le journal ne dit pas. Proposer le choix produirait un chiffre
-            faux.
-          */}
-          {assetClass && !envelope && (
-            <Segmented
-              items={METRIC_CHOICES}
-              value={classMetric}
-              onChange={(v) => update({ classMetric: v })}
-              ariaLabel="Grandeur tracée"
-              testIdPrefix="evolution-metric"
             />
           )}
           <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
