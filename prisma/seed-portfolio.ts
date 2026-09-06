@@ -884,6 +884,57 @@ export async function seedUserPortfolio(
       notes: note("Transfert crypto → CTO"),
   });
 
+  /*
+    Trois écritures datées dans les trois derniers mois.
+
+    Le KPI « réalisé et revenus » se lit sur une fenêtre glissante, et le
+    journal généré plus bas ne garantit rien à l'intérieur : ses ventes
+    partielles et ses coupons tombent où les calendriers relatifs les placent,
+    et la fenêtre 3M s'était retrouvée sans une seule vente. Une tuile qui
+    affiche zéro parce que le jeu de démonstration est muet n'apprend rien de
+    la tuile.
+
+    Elles sont donc écrites ici, avant le plafond `TARGET_TX` : leur présence
+    ne dépend pas de la place qu'il reste. Les montants sont adossés au seed,
+    pas choisis pour faire un joli chiffre — le cours de vente est le cours de
+    marché de la ligne, le coupon suit la convention du générateur
+    (`qty × 2 % × nominal`).
+  */
+  const cac = positions.find((p) => p.ticker === "CAC.PA")!;
+  const san = positions.find((p) => p.ticker === "SAN.PA")!;
+  const oat = positions.find((p) => p.ticker === "FR0013313582")!;
+
+  pushTx({
+    type: "VENTE",
+    platformId: cac.platformId,
+    assetId: cac.id,
+    quantity: 20,
+    unitPrice: cac.marketPrice,
+    fees: 2.5,
+    currency: cac.currency,
+    occurredAt: daysAgo(70),
+    notes: note("Allègement Lyxor CAC 40 (PEA)"),
+  });
+  qtyLive.set(cac.id, (qtyLive.get(cac.id) ?? cac.qty) - 20);
+  pushTx({
+    type: "DIVIDENDE",
+    platformId: san.platformId,
+    assetId: san.id,
+    cashAmount: 180,
+    currency: san.currency,
+    occurredAt: daysAgo(53),
+    notes: note("Dividende annuel Sanofi (PEA)"),
+  });
+  pushTx({
+    type: "COUPON",
+    platformId: oat.platformId,
+    assetId: oat.id,
+    cashAmount: moneyN(oat.qty * 0.02 * oat.buyPrice),
+    currency: oat.currency,
+    occurredAt: daysAgo(27),
+    notes: note("Coupon OAT 2030"),
+  });
+
   const lastDay = new Map(positions.map((p) => [p.id, p.openDaysAgo]));
   const activityPlan: Array<() => void> = [];
 
