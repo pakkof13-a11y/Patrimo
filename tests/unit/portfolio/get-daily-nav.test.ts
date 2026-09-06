@@ -695,11 +695,14 @@ describe("T-04 lot D — borne « Tout » par scope", () => {
       })
     );
 
-    expect(e.earliestDayForScope("brut")).toBe("1998-06-20");
-    expect(e.earliestDayForScope("net")).toBe("1998-06-20");
-    expect(e.earliestDayForScope("financier")).toBe("2022-10-06");
-    expect(e.earliestDayForScope("immobilier")).toBe("1998-06-20");
-    expect(e.earliestDayForScope("listed")).toBe("2022-10-06");
+    // `now` proche de 2022 : le cap MAX_HISTORY_YEARS (6 ans) ne doit pas
+    // interférer avec ce que ce test vérifie — le clamp par scope.
+    const now = DAY("2004-06-01");
+    expect(e.earliestDayForScope("brut", now)).toBe("1998-06-20");
+    expect(e.earliestDayForScope("net", now)).toBe("1998-06-20");
+    expect(e.earliestDayForScope("financier", now)).toBe("2022-10-06");
+    expect(e.earliestDayForScope("immobilier", now)).toBe("1998-06-20");
+    expect(e.earliestDayForScope("listed", now)).toBe("2022-10-06");
   });
 
   it("un scope entièrement vide n'a pas de borne (null)", () => {
@@ -729,8 +732,10 @@ describe("T-04 lot D — borne « Tout » par scope", () => {
         ],
       })
     );
-    expect(e.earliestDayForScope("financier")).toBe("2010-01-01");
-    expect(e.earliestDayForScope("listed")).toBeNull();
+    expect(e.earliestDayForScope("financier", DAY("2011-01-01"))).toBe(
+      "2010-01-01"
+    );
+    expect(e.earliestDayForScope("listed", DAY("2011-01-01"))).toBeNull();
   });
 });
 

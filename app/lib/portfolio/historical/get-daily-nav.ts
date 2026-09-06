@@ -231,9 +231,12 @@ export async function getDailyNav(opts: {
   scope: DailyNavScope;
   from: DayKey;
   to: DayKey;
+  /** Référence du cap `MAX_HISTORY_YEARS` — tests seulement, jamais fourni en production. */
+  now?: Date;
 }): Promise<DailyNavResult> {
   const requestedFrom = opts.from <= opts.to ? opts.from : opts.to;
   const to = opts.from <= opts.to ? opts.to : opts.from;
+  const now = opts.now ?? new Date();
 
   const inputs = await loadHistoricalInputs(opts.userId);
   const engine = new PortfolioValuationEngine(inputs);
@@ -249,7 +252,7 @@ export async function getDailyNav(opts: {
     après `to`, ne produit aucun point : une série fantôme serait pire qu'une
     réponse vide.
   */
-  const scopeEarliest = engine.earliestDayForScope(opts.scope);
+  const scopeEarliest = engine.earliestDayForScope(opts.scope, now);
   if (scopeEarliest == null || scopeEarliest > to) {
     return {
       scope: opts.scope,

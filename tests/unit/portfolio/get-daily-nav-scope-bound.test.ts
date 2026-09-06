@@ -97,6 +97,9 @@ describe("getDailyNav — borne « Tout » par scope", () => {
       scope: "brut",
       from: "1900-01-01",
       to: "2022-10-06",
+      // `now` proche de 2022 : le cap MAX_HISTORY_YEARS (6 ans) ne doit pas
+      // interférer avec ce que ce test vérifie — le clamp par scope.
+      now: DAY("2004-06-01"),
     });
     expect(r.from).toBe("1998-06-20");
     expect(r.points[0]!.day).toBe("1998-06-20");
@@ -124,12 +127,14 @@ describe("getDailyNav — borne « Tout » par scope", () => {
       scope: "brut",
       from: "1900-01-01",
       to: "2022-10-06",
+      now: DAY("2004-06-01"),
     });
     const financier = await getDailyNav({
       userId: "u1",
       scope: "financier",
       from: "1900-01-01",
       to: "2022-10-06",
+      now: DAY("2004-06-01"),
     });
     expect(brut.from).toBe("1998-06-20");
     expect(financier.from).toBe("2022-10-06");
@@ -148,18 +153,40 @@ describe("getDailyNav — borne « Tout » par scope", () => {
     expect(r.fetchedAt).toBeNull();
   });
 
-  it("from=1900-01-01, scope=immobilier : clamp 1998, au moins 2 points", async () => {
+  it("from=1900-01-01, scope=immobilier : clamp 1998, au moins 2 points (fenêtre 1998, `now` 1998)", async () => {
+    // `now` posé la même année que la fenêtre demandée : le cap
+    // MAX_HISTORY_YEARS (6 ans) ne mord alors pas sur 1998, et ce test
+    // vérifie exactement ce qu'il vérifiait avant D19 — le clamp par scope,
+    // pas le cap de profondeur.
     const r = await getDailyNav({
       userId: "u1",
       scope: "immobilier",
       from: "1900-01-01",
       to: "1998-07-20",
+      now: DAY("1998-08-01"),
     });
     expect(r.from).toBe("1998-06-20");
     expect(r.points.length).toBeGreaterThanOrEqual(2);
     expect(r.points[0]!.day).toBe("1998-06-20");
     expect(r.points.every((p) => p.immobilier > 0)).toBe(true);
     expect(pocketSeriesTooShort(r.points)).toBe(false);
+  });
+
+  it("D19 — une fenêtre entièrement antérieure au plancher (aujourd'hui − 6 ans) ne produit aucun point", async () => {
+    // Nouvelle vérité du cap : avec `now` réel (2026), le plancher est
+    // 2020-09-06. Une demande bornée à 1998-07-20 tombe entièrement avant
+    // ce plancher — `scopeEarliest > to`, donc une réponse vide, pas une
+    // série tronquée à 1998. Les transactions de 1998 restent en base ;
+    // seule leur lecture s'arrête.
+    const r = await getDailyNav({
+      userId: "u1",
+      scope: "immobilier",
+      from: "1900-01-01",
+      to: "1998-07-20",
+      now: DAY("2026-09-06"),
+    });
+    expect(r.points).toEqual([]);
+    expect(r.asOfDay).toBeNull();
   });
 
   it("from déjà valide (postérieur à la borne) n'est pas modifié", async () => {

@@ -553,7 +553,10 @@ describe("earliestDay — la borne exclut les replis non observés", () => {
         ],
       })
     );
-    expect(e.earliestDay()).toBe("1998-06-20");
+    // `now` proche des dates du scénario : le cap MAX_HISTORY_YEARS (6 ans)
+    // ne doit pas interférer avec ce que ce test vérifie — quel candidat
+    // l'emporte, pas la profondeur d'historique servie.
+    expect(e.earliestDay(DAY("2001-01-01"))).toBe("1998-06-20");
   });
 
   it("un patrimoine sans aucune transaction garde sa borne d'acquisition", () => {
@@ -572,7 +575,7 @@ describe("earliestDay — la borne exclut les replis non observés", () => {
         ],
       })
     );
-    expect(e.earliestDay()).toBe("1998-06-20");
+    expect(e.earliestDay(DAY("2001-01-01"))).toBe("1998-06-20");
   });
 
   it("une transaction plus récente que l'acquisition observée ne l'emporte pas", () => {
@@ -593,6 +596,28 @@ describe("earliestDay — la borne exclut les replis non observés", () => {
         ],
       })
     );
-    expect(e.earliestDay()).toBe("1998-06-20");
+    expect(e.earliestDay(DAY("2001-01-01"))).toBe("1998-06-20");
+  });
+
+  it("le cap MAX_HISTORY_YEARS ramène une acquisition ancienne au plancher, sans la faire disparaître", () => {
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [],
+        metals: [
+          {
+            id: "m1",
+            acquiredAt: DAY("1998-06-20"),
+            createdAt: DAY("2024-01-01"),
+            updatedAt: DAY("2024-01-01"),
+            costEur: d(240),
+            currentValueEur: d(1_000),
+          },
+        ],
+      })
+    );
+    // `now` réel du chantier D19 : 2026-09-06. Le plancher (6 ans) est
+    // 2020-09-06 — la transaction de 1998 reste en base, seule la lecture
+    // s'arrête au plancher.
+    expect(e.earliestDay(DAY("2026-09-06"))).toBe("2020-09-06");
   });
 });

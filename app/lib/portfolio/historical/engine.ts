@@ -38,6 +38,7 @@
 
 import { endOfParisDay, parisDayKey } from "../../dates/paris";
 import type { LastCloseAsOf } from "../../market/last-close-as-of";
+import { capEarliestDay } from "./history-window";
 import { toEur } from "../../accounting/fx";
 import {
   applyTransaction,
@@ -516,8 +517,15 @@ export class PortfolioValuationEngine {
    * acquisition de 1998 sans écriture au journal reste la borne, même si le
    * compte de cash le plus ancien n'a de solde connu que depuis sa dernière
    * mise à jour.
+   *
+   * Ramenée sous `historyFloorDay` (`MAX_HISTORY_YEARS`, cf. `history-window.ts`) :
+   * la donnée plus ancienne reste en base, l'application cesse simplement de
+   * la rejouer à chaque lecture. Ce n'est pas une purge, c'est une borne.
+   *
+   * `now` n'existe que pour les tests (date de référence du cap) ; en
+   * production l'appelant ne le fournit jamais et l'horloge fait foi.
    */
-  earliestDay(): DayKey | null {
+  earliestDay(now: Date = new Date()): DayKey | null {
     const candidates: DayKey[] = [];
     if (this.sortedTxs.length > 0) {
       candidates.push(this.txDays[0]!);
@@ -534,7 +542,10 @@ export class PortfolioValuationEngine {
       }
     }
     if (candidates.length === 0) return null;
-    return candidates.reduce((min, c) => (c < min ? c : min));
+    return capEarliestDay(
+      candidates.reduce((min, c) => (c < min ? c : min)),
+      now
+    );
   }
 
   /**
@@ -606,12 +617,28 @@ export class PortfolioValuationEngine {
    * liquide — sans reformuler l'agrégat.
    */
   earliestDayForScope(
-    scope: "brut" | "net" | "financier" | PatrimonyAssetPocket
+    scope: "brut" | "net" | "financier" | PatrimonyAssetPocket,
+    now: Date = new Date()
+  ): DayKey | null {
+    return capEarliestDay(this.uncappedEarliestDayForScope(scope, now), now);
+  }
+
+  /**
+   * Résolution par scope, avant le cap `MAX_HISTORY_YEARS`.
+   *
+   * `earliestDay()` capant déjà lui-même, `brut` / `net` / le repli passent
+   * par lui directement — la seconde application de `capEarliestDay` en
+   * amont (`earliestDayForScope`) est sans effet (idempotente), pas une
+   * seconde source de vérité.
+   */
+  private uncappedEarliestDayForScope(
+    scope: "brut" | "net" | "financier" | PatrimonyAssetPocket,
+    now: Date
   ): DayKey | null {
     switch (scope) {
       case "brut":
       case "net":
-        return this.earliestDay();
+        return this.earliestDay(now);
       case "financier":
         return PortfolioValuationEngine.minDay([
           this.earliestHoldingDay((h) => classifyHolding(h) === "listed"),
@@ -635,7 +662,7 @@ export class PortfolioValuationEngine {
       case "employeeSavings":
         return this.earliestSleeveDay(this.employeeSavings);
       default:
-        return this.earliestDay();
+        return this.earliestDay(now);
     }
   }
 

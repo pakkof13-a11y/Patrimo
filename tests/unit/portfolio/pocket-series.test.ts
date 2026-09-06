@@ -159,8 +159,12 @@ function pt(
 
 describe("mesure — T-4 D clamp vs écran vide", () => {
   it("scope=immobilier + from trop ancien : le clamp produit ≥ 2 points", () => {
+    // `now` posé en 1998 : le cap MAX_HISTORY_YEARS (6 ans) ne mord pas sur
+    // la fenêtre, et ce test vérifie exactement ce qu'il vérifiait avant
+    // D19 — le clamp par scope, pas le cap de profondeur.
     const e = maisonEtAction();
-    const earliest = e.earliestDayForScope("immobilier");
+    const now = DAY("1998-08-01");
+    const earliest = e.earliestDayForScope("immobilier", now);
     expect(earliest).toBe("1998-06-20");
 
     const from = clampRequestedFrom("1900-01-01", earliest);
@@ -365,10 +369,11 @@ describe("contrainte métier F — LOCF, flux immo, trop courte", () => {
   });
 
   it("après un achat immo la série tient le prix — palier, pas une pente", () => {
+    // `now` posé en 1998, comme au test précédent : hors du champ du cap.
     const e = maisonEtAction();
     const from = clampRequestedFrom(
       "1900-01-01",
-      e.earliestDayForScope("immobilier")
+      e.earliestDayForScope("immobilier", DAY("1998-08-01"))
     );
     const nav = dailyNavFromSeries(
       e.buildSeries(from!, "1998-07-20"),
