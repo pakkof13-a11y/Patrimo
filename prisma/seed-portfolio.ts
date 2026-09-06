@@ -42,6 +42,254 @@ function hashSeed(s: string): number {
   return h >>> 0;
 }
 
+// ---------------------------------------------------------------------------
+// Socle temporel absolu (2001-2020) — préparation de l'extension historique.
+//
+// Le fichier vit aujourd'hui sur un seul régime temporel : `daysAgo(n)`,
+// entièrement relatif à `new Date()`. C'est voulu pour la fenêtre récente
+// (les trois écritures K2 de `daysAgo(70)`, `daysAgo(53)`, `daysAgo(27)`
+// doivent rester dans la fenêtre glissante de trois mois quelle que soit la
+// date d'exécution — les figer en dates absolues les ferait sortir de la
+// fenêtre au bout de quelques mois et fausserait la tuile Réalisé).
+//
+// L'historique long (2001-2020) a besoin du régime inverse : des dates
+// d'année civile *ancrées*, identiques d'une exécution à l'autre, pour que
+// `npm run db:seed` produise le même jeu de données à chaque lancement. Les
+// deux régimes coexistent donc délibérément dans ce fichier : `daysAgo` pour
+// le présent glissant, le calendrier ancré ci-dessous pour le passé fixe.
+// Ce socle n'est pas encore branché sur les écritures du seed — c'est
+// l'objet de la passe suivante (les patrons métier de l'historique).
+// ---------------------------------------------------------------------------
+
+/** Générateur de nombres pseudo-aléatoires, déterministe pour une graine donnée. */
+export type Rng = () => number;
+
+/**
+ * mulberry32 — PRNG déterministe et rapide, suffisant pour une démo (pas un
+ * usage cryptographique). Deux instanciations avec la même graine rendent
+ * exactement la même suite de tirages, dans le même ordre.
+ *
+ * Convention de consommation pour un patron métier : quand un patron a
+ * besoin à la fois d'une dérive de date et d'une dérive de montant, il tire
+ * la dérive de date en premier puis la dérive de montant — dans cet ordre,
+ * systématiquement — afin qu'ajouter ou retirer un patron n'inverse jamais
+ * l'usage des tirages des patrons voisins (chaque patron doit recevoir sa
+ * propre instance de `Rng`, dérivée de la graine globale via `deriveRng`,
+ * plutôt que de partager un flux global).
+ */
+export function mulberry32(seed = 25): Rng {
+  let a = seed >>> 0;
+  return function rng(): number {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Dérive un PRNG indépendant pour un patron donné à partir d'une graine
+ * globale et d'un nom de patron stable. Évite qu'un patron consomme les
+ * tirages destinés à un autre : chaque patron a son propre flux, mais tous
+ * restent reproductibles à partir de la même graine globale.
+ */
+export function deriveRng(globalSeed: number, patternName: string): Rng {
+  return mulberry32((globalSeed ^ hashSeed(patternName)) >>> 0);
+}
+
+/** Entier tiré uniformément dans [min, max] (bornes incluses). */
+function nextInt(rng: Rng, min: number, max: number): number {
+  return min + Math.floor(rng() * (max - min + 1));
+}
+
+function isWeekend(d: Date): boolean {
+  const day = d.getUTCDay();
+  return day === 0 || day === 6;
+}
+
+/** Recule jusqu'au jour ouvré précédent (inclus si `d` est déjà ouvré). */
+function previousBusinessDay(d: Date): Date {
+  const r = new Date(d.getTime());
+  while (isWeekend(r)) {
+    r.setUTCDate(r.getUTCDate() - 1);
+  }
+  return r;
+}
+
+function dateFromDayOfYear(year: number, dayOfYear: number): Date {
+  const d = new Date(Date.UTC(year, 0, 1, 10, 0, 0));
+  d.setUTCDate(d.getUTCDate() + (dayOfYear - 1));
+  return d;
+}
+
+/**
+ * Rend une date ancrée sur une année et un jour-de-l'année, avec un décalage
+ * de ±11 jours tiré du PRNG, recalée sur le jour ouvré précédent si elle
+ * tombe un week-end. `usedDayKeys`, quand fourni, garantit que deux appels
+ * pour un même patron (donc partageant le même Set) ne rendent jamais le
+ * même jour : en cas de collision, on retire un nouveau décalage.
+ */
+export function anchoredDate(
+  rng: Rng,
+  year: number,
+  anchorDayOfYear: number,
+  usedDayKeys?: Set<string>,
+): Date {
+  const maxAttempts = 40;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const offset = nextInt(rng, -11, 11);
+    const candidate = previousBusinessDay(dateFromDayOfYear(year, anchorDayOfYear + offset));
+    const key = dayKeyOf(candidate);
+    if (!usedDayKeys || !usedDayKeys.has(key)) {
+      usedDayKeys?.add(key);
+      return candidate;
+    }
+  }
+  throw new Error(
+    `anchoredDate: aucun jour disponible pour l'année ${year} (ancre ${anchorDayOfYear}) après ${maxAttempts} tirages`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Échelle de vie du patrimoine : s(y) = 1.07^(y - 2001).
+// ---------------------------------------------------------------------------
+
+const LIFE_SCALE_BASE_YEAR = 2001;
+const LIFE_SCALE_GROWTH = D(1.07);
+
+/** Facteur d'échelle appliqué aux montants de l'historique pour l'année `year`. */
+export function lifeScale(year: number): Prisma.Decimal {
+  return LIFE_SCALE_GROWTH.pow(year - LIFE_SCALE_BASE_YEAR);
+}
+
+/**
+ * Applique l'échelle de vie à un montant de base et arrondit selon la règle
+ * imposée par la spec : au multiple de 10 € le plus proche au-dessus de
+ * 1 000 €, au multiple de 1 € en dessous. Toujours en `Decimal` — jamais de
+ * `Math.round` sur un `number` dans ce chemin.
+ */
+export function scaledAmount(baseAmount: number, year: number): Prisma.Decimal {
+  const raw = D(baseAmount).mul(lifeScale(year));
+  const step = raw.abs().greaterThanOrEqualTo(1000) ? 10 : 1;
+  return raw.dividedBy(step).toDecimalPlaces(0).mul(step).toDecimalPlaces(2);
+}
+
+// ---------------------------------------------------------------------------
+// Table de cours historiques (2001-2026) — environ dix tickers cotés.
+//
+// Une année sans prix pour un ticker est une absence assumée, pas une
+// interpolation à venir : `historicalPriceOf` rend `undefined` ("inconnu"),
+// jamais 0 et jamais une valeur lissée entre deux années connues. Les
+// tickers respectent leurs dates d'existence réelles : cryptos pas avant
+// 2017, CW8.PA à partir de 2009, C50.PA à partir de 2008, AIR.PA (Airbus)
+// pas avant 2014 — avant, SU.PA (Schneider Electric) tient lieu de valeur
+// industrielle française sur 2001-2013. TTE.PA est volontairement exclu de
+// cet historique (décision du propriétaire du produit).
+// ---------------------------------------------------------------------------
+
+export const HISTORICAL_PRICES: Readonly<Record<string, Readonly<Record<number, number>>>> = {
+  // ETF monde, réplique MSCI World — dispo depuis 2009 ; creux net 2020 (COVID).
+  "CW8.PA": {
+    2009: 120, 2010: 140, 2011: 135, 2012: 150, 2013: 175, 2014: 195,
+    2015: 210, 2016: 215, 2017: 245, 2018: 235, 2019: 275,
+    2020: 240, // COVID
+    2021: 320, 2022: 300, 2023: 350, 2024: 400, 2025: 430, 2026: 450,
+  },
+  // ETF CAC 40 — dispo depuis 2008 ; creux marqué en 2008 et en 2020.
+  "C50.PA": {
+    2008: 60, // crise financière
+    2009: 75, 2010: 78, 2011: 70, 2012: 76, 2013: 88, 2014: 92,
+    2015: 100, 2016: 98, 2017: 112, 2018: 100,
+    2019: 118,
+    2020: 95, // COVID
+    2021: 135, 2022: 128, 2023: 148, 2024: 160, 2025: 170, 2026: 180,
+  },
+  // Schneider Electric — sert de proxy industriel français 2001-2013
+  // (avant l'existence d'AIR.PA sous ce nom : c'était EADS jusqu'en 2013).
+  "SU.PA": {
+    2001: 35, 2002: 28, 2003: 32, 2004: 45, 2005: 55, 2006: 70,
+    2007: 95,
+    2008: 40, // crise financière : chute nette
+    2009: 55, 2010: 90, 2011: 40, 2012: 50, 2013: 60,
+  },
+  // Airbus — utilisable à partir de 2014 seulement (avant : EADS, hors périmètre).
+  "AIR.PA": {
+    2014: 45, 2015: 60, 2016: 55, 2017: 75, 2018: 95, 2019: 130,
+    2020: 55, // COVID : aviation à l'arrêt
+    2021: 100, 2022: 95, 2023: 130, 2024: 145, 2025: 160, 2026: 170,
+  },
+  // Sanofi — pharma défensive, historique complet 2001-2026.
+  "SAN.PA": {
+    2001: 65, 2002: 55, 2003: 60, 2004: 62, 2005: 70, 2006: 68,
+    2007: 65,
+    2008: 45, // crise financière
+    2009: 50, 2010: 48, 2011: 52, 2012: 65, 2013: 75, 2014: 80,
+    2015: 78, 2016: 70, 2017: 75, 2018: 70, 2019: 85,
+    2020: 82, // COVID : recul modéré, secteur défensif
+    2021: 90, 2022: 88, 2023: 95, 2024: 100, 2025: 105, 2026: 110,
+  },
+  // LVMH — luxe, historique complet 2001-2026.
+  "MC.PA": {
+    2001: 40, 2002: 30, 2003: 38, 2004: 50, 2005: 60, 2006: 75,
+    2007: 90,
+    2008: 45, // crise financière
+    2009: 65, 2010: 105, 2011: 110, 2012: 130, 2013: 135, 2014: 130,
+    2015: 155, 2016: 165, 2017: 235, 2018: 260,
+    2019: 375,
+    2020: 350, // COVID
+    2021: 640, 2022: 700, 2023: 780, 2024: 620, 2025: 650, 2026: 680,
+  },
+  // Société Générale — banque, très exposée 2008 et re-touchée 2020.
+  "GLE.PA": {
+    2001: 65, 2002: 55, 2003: 65, 2004: 75, 2005: 95, 2006: 120,
+    2007: 100,
+    2008: 35, // crise financière : effondrement bancaire
+    2009: 45, 2010: 40, 2011: 20, 2012: 22, 2013: 30, 2014: 35,
+    2015: 38, 2016: 32, 2017: 42, 2018: 30,
+    2019: 27,
+    2020: 13, // COVID : plus bas historique
+    2021: 25, 2022: 24, 2023: 26, 2024: 22, 2025: 24, 2026: 25,
+  },
+  // L'Oréal — historique complet 2001-2026.
+  "OR.PA": {
+    2001: 75, 2002: 65, 2003: 60, 2004: 62, 2005: 65, 2006: 75,
+    2007: 85,
+    2008: 55, // crise financière
+    2009: 65, 2010: 80, 2011: 85, 2012: 100, 2013: 120, 2014: 135,
+    2015: 165, 2016: 155, 2017: 185, 2018: 175,
+    2019: 250,
+    2020: 260, // COVID : impact limité, cosmétique résiliente
+    2021: 385, 2022: 335, 2023: 400, 2024: 420, 2025: 440, 2026: 460,
+  },
+  // Bitcoin (EUR) — pas d'historique avant 2017.
+  BTC: {
+    2017: 12000, 2018: 3500, 2019: 6500,
+    2020: 25000, // portée par la fin d'année 2020, malgré le creux de mars
+    2021: 42000, 2022: 15000, 2023: 40000, 2024: 60000, 2025: 90000, 2026: 95000,
+  },
+  // Ethereum (EUR) — pas d'historique avant 2017.
+  ETH: {
+    2017: 700, 2018: 130, 2019: 130,
+    2020: 600,
+    2021: 3200, 2022: 1100, 2023: 2100, 2024: 3300, 2025: 3800, 2026: 4000,
+  },
+};
+
+/**
+ * Lit le cours d'un ticker pour une année donnée. Rend `undefined` — pas
+ * `0`, pas une valeur interpolée — quand l'année est absente de la table.
+ * UNKNOWN ≠ ZERO : c'est à l'appelant (les patrons de la passe suivante) de
+ * décider comment traiter l'absence (position au coût de revient, point
+ * marqué estimé), jamais à cette fonction de la masquer.
+ */
+export function historicalPriceOf(ticker: string, year: number): Prisma.Decimal | undefined {
+  const series = HISTORICAL_PRICES[ticker];
+  if (!series) return undefined;
+  const price = series[year];
+  if (price === undefined) return undefined;
+  return D(price);
+}
+
 type AssetSeed = {
   name: string;
   ticker: string;
