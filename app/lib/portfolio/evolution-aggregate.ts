@@ -773,6 +773,70 @@ export function evolutionDeltaSummary(points: EvolutionSeriesPoint[]): {
   return { first, last, delta, pct, flows };
 }
 
+/**
+ * P&L de période, distinct du Δ de stock affiché juste au-dessus.
+ *
+ * `delta = last − first` inclut les versements ; `pnl = delta − flows` les
+ * neutralise. Le pourcentage rapporte ce P&L à un capital moyen **pondéré
+ * par le temps** : `first + Σ flowᵢ · (T − tᵢ) / T`. `first` seul surévalue le
+ * rendement quand un apport arrive tard dans la fenêtre ; `first + flows` le
+ * sous-évalue en traitant un apport de la veille comme investi depuis le
+ * premier jour. Le pondéré est le seul stable dans les deux sens.
+ *
+ * Rend `null` — jamais un zéro, jamais un pourcentage inventé — dès que la
+ * base est indéfinie : fenêtre à un point, capital de référence non positif,
+ * ou flux déclarés non fiables par l'appelant (poche croisée par enveloppe,
+ * où le flux est forcé à 0 faute de ventilation).
+ */
+export function evolutionPnlSummary(
+  points: EvolutionSeriesPoint[],
+  opts?: { flowsUnreliable?: boolean }
+): {
+  delta: number;
+  flows: number;
+  pnl: number;
+  pct: number | null;
+} | null {
+  const summary = evolutionDeltaSummary(points);
+  if (!summary) return null;
+  const { delta, flows } = summary;
+  const pnl = delta - flows;
+
+  if (opts?.flowsUnreliable) {
+    return { delta, flows, pnl, pct: null };
+  }
+  if (points.length < 2) {
+    return { delta, flows, pnl, pct: null };
+  }
+
+  /*
+    Capital engagé sur la fenêtre : la valeur de départ plus les versements
+    nets, sans pondération temporelle.
+
+    Le capital moyen pondéré par le temps est méthodologiquement plus fin —
+    il tient compte du moment où l'argent arrive. Mesuré sur le compte de
+    démonstration, il rend cette ligne inutilisable dès que la fenêtre est
+    longue : sur « Tout », qui remonte à 1998 alors que les versements datent
+    des trois dernières années, leurs poids `(T − tᵢ)/T` s'effondrent, le
+    dénominateur tombe à quelques milliers d'euros et l'écran annonce
+    « +217 % » sur les actions et « +567 % » sur la crypto. Ces nombres sont
+    exacts au sens de leur définition, et faux au sens où on les lit.
+
+    Le capital engagé donne 15,0 % et 46,7 % sur les mêmes séries — et
+    surtout, il se **déduit** des deux montants affichés juste au-dessus :
+    P&L divisé par ce que l'on a mis. C'est tout l'objet de ce bandeau, où le
+    reproche initial était justement que le pourcentage ne se rattachait à
+    aucun des euros qui l'entouraient.
+  */
+  const refCapital = points[0]!.total + flows;
+
+  if (!(refCapital > 0)) {
+    return { delta, flows, pnl, pct: null };
+  }
+
+  return { delta, flows, pnl, pct: (pnl / refCapital) * 100 };
+}
+
 /** Périodes activables selon profondeur d’historique disponible. */
 export function isEvolutionRangeEnabled(
   range: EvolutionRange,

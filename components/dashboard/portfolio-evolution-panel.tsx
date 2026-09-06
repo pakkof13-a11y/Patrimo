@@ -13,6 +13,7 @@ import {
   buildEvolutionSeries,
   benchmarkLabel,
   evolutionDeltaSummary,
+  evolutionPnlSummary,
   evolutionIntervalHint,
   evolutionIntervalLabel,
   isEvolutionRangeEnabled,
@@ -618,9 +619,27 @@ export function PortfolioEvolutionPanel({
     versus === "index" ? marketIndexLabel(indexKey) : benchmarkLabel(versus);
 
   const summary = useMemo(() => evolutionDeltaSummary(points), [points]);
+  const pnlSummary = useMemo(() => evolutionPnlSummary(points), [points]);
   const pocketSummary = useMemo(
     () => (usePocketCurve ? evolutionDeltaSummary(pocketPoints) : null),
     [usePocketCurve, pocketPoints]
+  );
+  /*
+    Le flux par enveloppe n'est pas reconstructible : `flowsByAssetClass` est
+    forcé à 0 dès qu'on filtre PEA/CTO (`pocket-series.ts`), et il n'existe
+    aucune ventilation flux × classe × enveloppe dans le dépôt. `pnl = delta`
+    recopierait donc la ligne du dessus — la ligne 2 dit `n/d` plutôt que de
+    prétendre neutraliser un versement qu'on n'a pas su isoler.
+  */
+  const pocketFlowsUnreliable = Boolean(envelope);
+  const pocketPnlSummary = useMemo(
+    () =>
+      usePocketCurve
+        ? evolutionPnlSummary(pocketPoints, {
+            flowsUnreliable: pocketFlowsUnreliable,
+          })
+        : null,
+    [usePocketCurve, pocketPoints, pocketFlowsUnreliable]
   );
   const headlinePct =
     chartKind === "percent" && percentPoints.length > 0
@@ -721,12 +740,23 @@ export function PortfolioEvolutionPanel({
                     ? "text-[var(--success)]"
                     : "text-[var(--danger)]"
                 )}
+                data-testid="evolution-headline-delta"
               >
                 {pocketSummary.delta >= 0 ? "+" : ""}
                 {formatCurrency(pocketSummary.delta, baseCurrency)}
               </div>
-              <div className="text-xs font-medium text-[var(--muted-foreground)]">
-                {`${pocketSummary.pct >= 0 ? "+" : ""}${pocketSummary.pct.toFixed(1)} % de rendement`}
+              <div
+                className="text-xs font-medium text-[var(--muted-foreground)]"
+                data-testid="evolution-headline-pnl"
+                title={
+                  pocketFlowsUnreliable
+                    ? "Flux non disponibles pour une poche filtrée par enveloppe (PEA/CTO) : le P&L de période ne peut pas être isolé des versements."
+                    : "Ce montant inclut vos versements ; ce P&L ne les compte pas."
+                }
+              >
+                {pocketPnlSummary == null || pocketPnlSummary.pct == null
+                  ? "P&L n/d"
+                  : `P&L ${pocketPnlSummary.pnl >= 0 ? "+" : ""}${formatCurrency(pocketPnlSummary.pnl, baseCurrency)} · ${pocketPnlSummary.pct >= 0 ? "+" : ""}${pocketPnlSummary.pct.toFixed(1)} %`}
               </div>
             </div>
           ) : summary && points.length > 0 && chartKind !== "percent" ? (
@@ -738,23 +768,34 @@ export function PortfolioEvolutionPanel({
                     ? "text-[var(--success)]"
                     : "text-[var(--danger)]"
                 )}
+                data-testid="evolution-headline-delta"
               >
                 {summary.delta >= 0 ? "+" : ""}
                 {formatCurrency(summary.delta, baseCurrency)}
               </div>
-              <div className="text-xs font-medium text-[var(--muted-foreground)]">
+              <div
+                className="text-xs font-medium text-[var(--muted-foreground)]"
+                data-testid={versus === "none" ? "evolution-headline-pnl" : undefined}
+                title={
+                  versus === "none"
+                    ? "Ce montant inclut vos versements ; ce P&L ne les compte pas."
+                    : undefined
+                }
+              >
                 {versus === "none"
                   ? /*
                        Deux chiffres, deux significations.
 
                        Le montant au-dessus est la variation du patrimoine,
-                       versements compris. Le pourcentage est le rendement des
-                       investissements, versements neutralisés — c'est pourquoi
-                       il ne vaut pas « montant / valeur de départ ». Le dire
-                       explicitement évite de lire l'un comme le ratio de
-                       l'autre.
+                       versements compris. La ligne du dessous est le P&L de la
+                       période — ce même montant moins les versements — et son
+                       pourcentage rapporte ce P&L à un capital moyen pondéré
+                       par le temps. Le dire explicitement évite de lire l'un
+                       comme le ratio de l'autre.
                     */
-                    `${summary.pct >= 0 ? "+" : ""}${summary.pct.toFixed(1)} % de rendement`
+                    pnlSummary == null || pnlSummary.pct == null
+                    ? "P&L n/d"
+                    : `P&L ${pnlSummary.pnl >= 0 ? "+" : ""}${formatCurrency(pnlSummary.pnl, baseCurrency)} · ${pnlSummary.pct >= 0 ? "+" : ""}${pnlSummary.pct.toFixed(1)} %`
                   : chartKind === "index-unavailable"
                     ? INDEX_UNAVAILABLE_TITLE
                     : `Vs ${benchmarkDisplayName}`}
