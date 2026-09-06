@@ -26,7 +26,7 @@ import {
 import { scopeHistory } from "@/app/lib/portfolio/scope-history";
 import {
   clampRequestedFrom,
-  dailyNavScopeForClass,
+  dailyNavScopeForAccount,
   locfValueAt,
   pocketChartLineType,
   pocketEmptyState,
@@ -36,6 +36,7 @@ import {
   PERIOD_TOO_SHORT_TITLE,
   toPocketChartPoints,
   windowPocketDailyNav,
+  titresUnknownEnvelopeEur,
 } from "@/app/lib/portfolio/pocket-series";
 import { d } from "@/app/lib/money/decimal";
 import type { LedgerTx } from "@/app/lib/accounting/types";
@@ -128,7 +129,7 @@ function pt(
   const cash = over.cash ?? 0;
   return {
     day,
-    nav: over.nav ?? immobilier,
+    nav: over.nav ?? (immobilier || cash),
     status: over.status ?? "EXACT",
     externalFlows: over.externalFlows ?? 0,
     transactionFlow: over.transactionFlow ?? 0,
@@ -299,11 +300,12 @@ describe("Immo / cash / alternatifs — marches, pas d'interpolation", () => {
     expect(invented).toEqual([]);
   });
 
-  it("cash et AUTRE (alternatifs) se dessinent en stepAfter", () => {
+  it("cash, immobilier, alternatifs et épargne salariale se dessinent en stepAfter", () => {
     expect(pocketChartLineType("IMMOBILIER")).toBe("stepAfter");
     expect(pocketChartLineType("CASH")).toBe("stepAfter");
-    expect(pocketChartLineType("AUTRE")).toBe("stepAfter");
-    expect(pocketChartLineType("ACTIONS")).toBe("linear");
+    expect(pocketChartLineType("ALTERNATIFS")).toBe("stepAfter");
+    expect(pocketChartLineType("EPARGNE_SALARIALE")).toBe("stepAfter");
+    expect(pocketChartLineType("TITRES")).toBe("linear");
     expect(pocketChartLineType(null)).toBe("linear");
   });
 
@@ -320,26 +322,30 @@ describe("Immo / cash / alternatifs — marches, pas d'interpolation", () => {
   });
 });
 
-describe("mapping classe → scope de clamp", () => {
-  it("Immo / Cash / cotés / AUTRE", () => {
-    expect(dailyNavScopeForClass("IMMOBILIER")).toBe("immobilier");
-    expect(dailyNavScopeForClass("CASH")).toBe("cash");
-    expect(dailyNavScopeForClass("ACTIONS")).toBe("listed");
-    expect(dailyNavScopeForClass("CRYPTO")).toBe("listed");
-    expect(dailyNavScopeForClass("AUTRE")).toBe("brut");
+describe("mapping compte → scope de clamp", () => {
+  it("Immo / Cash / Titres / crypto / assurance-vie / alternatifs / épargne salariale", () => {
+    expect(dailyNavScopeForAccount("IMMOBILIER")).toBe("immobilier");
+    expect(dailyNavScopeForAccount("CASH")).toBe("cash");
+    expect(dailyNavScopeForAccount("TITRES")).toBe("listed");
+    expect(dailyNavScopeForAccount("CRYPTO")).toBe("listed");
+    expect(dailyNavScopeForAccount("ASSURANCE_VIE")).toBe("av");
+    expect(dailyNavScopeForAccount("ALTERNATIFS")).toBe("alternatifs");
+    expect(dailyNavScopeForAccount("EPARGNE_SALARIALE")).toBe("employeeSavings");
   });
 
-  it("pocketValueAt préfère byAssetClass, repli poche pour l'illiquide", () => {
+  it("pocketValueAt lit le scope demandé (`nav`) pour un compte hors Titres/crypto", () => {
+    /*
+      La requête `getDailyNav` porte déjà le scope du compte
+      (`dailyNavScopeForAccount`) : `nav` est donc directement la bonne
+      grandeur, sans repli sur `byAssetClass` — qui agrégerait l'assurance-vie
+      avec les comptes-titres pour ACTIONS/OBLIGATIONS.
+    */
     const p = pt("2024-01-01", {
       immobilier: 10,
+      nav: 10,
       byAssetClass: emptyClass({ IMMOBILIER: 42 }),
     });
-    expect(pocketValueAt(p, "IMMOBILIER")).toBe(42);
-    const sansClasse = {
-      ...p,
-      byAssetClass: undefined as unknown as DailyNavPoint["byAssetClass"],
-    };
-    expect(pocketValueAt(sansClasse, "IMMOBILIER")).toBe(10);
+    expect(pocketValueAt(p, "IMMOBILIER")).toBe(10);
   });
 });
 
@@ -436,5 +442,59 @@ describe("contrainte métier F — LOCF, flux immo, trop courte", () => {
     expect(empty!.title).not.toBe(PERIOD_TOO_SHORT_TITLE);
     expect(pocketEmptyState(1)?.kind).toBe("too-short");
     expect(pocketEmptyState(2)).toBeNull();
+  });
+});
+
+/*
+  L'écart « hors comptes-titres » — la grandeur, pas seulement son affichage.
+
+  La première rédaction sommait les cases `UNKNOWN` du croisement. Elle rendait
+  zéro dès que l'enveloppe de chaque ligne était connue, et surtout elle
+  interrogeait le registre des comptes-titres au sujet d'une ligne — un CFD —
+  qui n'y figure pas. Aucun test ne la couvrait : c'est ce qui l'a laissée
+  passer. Ces contrôles épinglent la soustraction, pas son résultat sur le seed.
+*/
+describe("titresUnknownEnvelopeEur — ce qu'aucun compte-titres ne porte", () => {
+  const cote = (over: Partial<DailyNavPoint>) =>
+    pt("2026-09-06", {
+      nav: 189153.4,
+      byAssetClass: emptyClass({ ACTIONS: 137575.4, CRYPTO: 51578 }),
+      byAssetClassAndEnvelope: {
+        ACTIONS: { PEA: 39319.5, CTO: 42863.9, UNKNOWN: 0 },
+        OBLIGATIONS: { PEA: 0, CTO: 744, UNKNOWN: 0 },
+      },
+      ...over,
+    });
+
+  it("retranche la crypto et les deux comptes-titres de l'exposition cotée", () => {
+    // 189 153,40 − 51 578,00 − 82 927,40 : la ligne CFD, et rien d'autre.
+    expect(titresUnknownEnvelopeEur(cote({}))).toBeCloseTo(54648, 2);
+  });
+
+  it("rend zéro quand tout le coté tient dans un compte", () => {
+    const p = cote({ nav: 134505.4 });
+    expect(titresUnknownEnvelopeEur(p)).toBeCloseTo(0, 2);
+  });
+
+  it("ne se laisse pas duper par des cases UNKNOWN nulles", () => {
+    /*
+      Le piège de la première rédaction : `UNKNOWN` vaut zéro sur ce point,
+      et pourtant l'écart est bien réel. Lire l'un pour l'autre affichait
+      « rien à signaler » sur 54 648 € orphelins.
+    */
+    const p = cote({});
+    const e = p.byAssetClassAndEnvelope!;
+    expect((e.ACTIONS.UNKNOWN ?? 0) + (e.OBLIGATIONS.UNKNOWN ?? 0)).toBe(0);
+    expect(titresUnknownEnvelopeEur(p)).not.toBe(0);
+  });
+
+  it("rend null — pas zéro — quand une enveloppe n'est pas démontrée", () => {
+    const p = cote({
+      byAssetClassAndEnvelope: {
+        ACTIONS: { PEA: null, CTO: 42863.9, UNKNOWN: 0 },
+        OBLIGATIONS: { PEA: 0, CTO: 744, UNKNOWN: 0 },
+      },
+    });
+    expect(titresUnknownEnvelopeEur(p)).toBeNull();
   });
 });

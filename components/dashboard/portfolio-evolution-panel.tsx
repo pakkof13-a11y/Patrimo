@@ -40,7 +40,7 @@ import {
   saveEvolutionPrefs,
   type EvolutionBenchmark,
   type EvolutionPrefsV5,
-  type EvolutionAssetClass,
+  type EvolutionAccount,
 } from "@/app/lib/portfolio/evolution-prefs";
 import {
   MARKET_INDICES,
@@ -65,10 +65,12 @@ import {
   type HeroNavScope,
 } from "@/app/lib/portfolio/daily-nav-view";
 import {
-  dailyNavScopeForClass,
+  dailyNavScopeForAccount,
   pocketChartLineType,
   pocketEmptyState,
+  pocketFlowsUnreliable,
   pocketSeriesTooShort,
+  titresUnknownEnvelopeEur,
   toPocketEvolutionPoints,
   windowPocketDailyNav,
 } from "@/app/lib/portfolio/pocket-series";
@@ -80,29 +82,51 @@ function useIsClient() {
 }
 
 /**
- * Classes proposées au sélecteur.
+ * Comptes proposés au sélecteur.
  *
- * Les six valeurs de `Asset.assetClass`, plus « Tout ». Cette taxonomie est la
- * seule reconstructible historiquement : `assetClass` n'a aucun chemin de mise
- * à jour, là où `category` et `accountType` sont mutables sans journal — les
- * utiliser ferait qu'un reclassement d'aujourd'hui réécrirait tout le passé.
+ * « Compte » — où l'argent est déposé — et non « Catégorie » : Titres
+ * additionne PEA et CTO (deux comptes réels), jamais une classe d'actif qui
+ * mélangerait l'assurance-vie avec elle. Chaque entrée correspond à un scope
+ * `getDailyNav` distinct (Titres excepté, qui lit le croisement classe ×
+ * enveloppe) — voir `dailyNavScopeForAccount`.
+ *
+ * Pas de Tangibles ni de Trading : les tangibles sont fusionnés avec métaux,
+ * private equity et crowdlending dans la seule manche Alternatifs du moteur,
+ * et les positions de trading (CFD) vivent dans `TradingPosition`, que le
+ * moteur historique ne charge jamais.
  */
-const CLASS_CHOICES: {
-  id: EvolutionAssetClass | "all";
+const ACCOUNT_CHOICES: {
+  id: EvolutionAccount | "all";
   label: string;
   title: string;
 }[] = [
-  { id: "all", label: "Tout", title: "Patrimoine entier, toutes classes confondues" },
-  { id: "ACTIONS", label: "Actions", title: "Actions et ETF" },
-  { id: "OBLIGATIONS", label: "Obligations", title: "Obligations et fonds obligataires" },
+  { id: "all", label: "Tout", title: "Patrimoine entier, tous comptes confondus" },
+  {
+    id: "TITRES",
+    label: "Titres",
+    title: "Comptes-titres — PEA et CTO, actions et obligations",
+  },
+  {
+    id: "ASSURANCE_VIE",
+    label: "Assurance-vie",
+    title: "Unités de compte et fonds euro, tous contrats confondus",
+  },
   { id: "CRYPTO", label: "Crypto", title: "Toutes les positions crypto détenues à chaque date" },
   { id: "IMMOBILIER", label: "Immobilier", title: "Biens directs et véhicules indirects" },
-  { id: "CASH", label: "Cash", title: "Trésorerie — comptes, livrets, dépôts à terme" },
   {
-    id: "AUTRE",
-    label: "Autre",
-    title:
-      "Alternatifs, épargne salariale et actifs sans classe dédiée dans cette taxonomie",
+    id: "ALTERNATIFS",
+    label: "Alternatifs",
+    title: "Métaux, private equity, crowdlending et tangibles",
+  },
+  {
+    id: "EPARGNE_SALARIALE",
+    label: "Épargne salariale",
+    title: "PEE, PER et PERCO — le moteur ne distingue pas les plans entre eux",
+  },
+  {
+    id: "CASH",
+    label: "Banques / liquidités",
+    title: "Trésorerie — comptes, livrets, dépôts à terme",
   },
 ];
 
@@ -125,7 +149,7 @@ const ENVELOPE_CHOICES: {
   label: string;
   title: string;
 }[] = [
-  { id: "all", label: "Tout", title: "Patrimoine entier, toutes enveloppes confondues" },
+  { id: "all", label: "Tout", title: "Les deux comptes-titres, PEA et CTO, additionnés" },
   {
     id: "PEA",
     label: "PEA",
@@ -281,7 +305,7 @@ export function PortfolioEvolutionPanel({
     un indice.
   */
   const scope = "gross" as const;
-  const assetClass = prefs.assetClass ?? null;
+  const account = prefs.account ?? null;
   /*
     Le toggle Valeur / Performance a été retiré (D15.E1) : la série tracée
     est toujours la valeur, apports compris. `classMetric` reste dans le
@@ -314,13 +338,13 @@ export function PortfolioEvolutionPanel({
     les deux séries en base 100 à cette ancre.
   */
   const wantPocketDailyNav =
-    Boolean(assetClass) &&
+    Boolean(account) &&
     versus === "none" &&
     classMetric === "value" &&
     !showIntraday &&
     Boolean(navQueryFrom && navQueryTo);
-  const pocketScope = assetClass
-    ? dailyNavScopeForClass(assetClass)
+  const pocketScope = account
+    ? dailyNavScopeForAccount(account)
     : "listed";
   const pocketNavQ = useDailyNavQuery(navQueryFrom ?? "", navQueryTo ?? "", {
     enabled: wantPocketDailyNav,
@@ -331,22 +355,22 @@ export function PortfolioEvolutionPanel({
   });
   const pocketWindowed = useMemo(() => {
     const points = pocketNavQ.data?.points;
-    if (!points?.length || !assetClass) return [];
+    if (!points?.length || !account) return [];
     const ref =
       points[points.length - 1]?.day ??
       dailyNav?.[dailyNav.length - 1]?.day ??
       "";
     if (!ref) return [];
     return windowPocketDailyNav(points, range, ref, pocketServedFrom);
-  }, [pocketNavQ.data?.points, assetClass, range, pocketServedFrom, dailyNav]);
+  }, [pocketNavQ.data?.points, account, range, pocketServedFrom, dailyNav]);
   const pocketPoints = useMemo(
     () =>
-      assetClass
-        ? toPocketEvolutionPoints(pocketWindowed, assetClass, envelope)
+      account
+        ? toPocketEvolutionPoints(pocketWindowed, account, envelope)
         : [],
-    [pocketWindowed, assetClass, envelope]
+    [pocketWindowed, account, envelope]
   );
-  const pocketLineType = pocketChartLineType(assetClass);
+  const pocketLineType = pocketChartLineType(account);
   const pocketReady =
     wantPocketDailyNav &&
     !pocketNavQ.isPending &&
@@ -358,7 +382,7 @@ export function PortfolioEvolutionPanel({
 
   const canUseDailyNavSeries =
     Boolean(dailyNav && dailyNav.length > 1) &&
-    !assetClass &&
+    !account &&
     !showIntraday;
 
   const navWindowed = useMemo(() => {
@@ -398,7 +422,7 @@ export function PortfolioEvolutionPanel({
       */
       const next = {
         ...fusion,
-        envelope: normalizeEnvelopeFor(fusion.assetClass, fusion.envelope),
+        envelope: normalizeEnvelopeFor(fusion.account, fusion.envelope),
       };
       /*
         La période partagée est réinjectée à chaque écriture.
@@ -440,10 +464,32 @@ export function PortfolioEvolutionPanel({
     un mouvement de marché. Réécrire le total en amont garantit qu'une seule
     des deux métriques circule dans toute la chaîne d'affichage.
   */
+  /*
+    « Tout » seulement — jamais un compte. `scopeHistory` connaît les six
+    `assetClass` du moteur (ACTIONS, OBLIGATIONS…), pas les comptes de D18 :
+    Titres additionne deux classes par enveloppe, et Assurance-vie/Alternatifs/
+    Épargne salariale n'ont pas de clé dans `byAssetClassBase`. Chaque compte
+    est donc tracé exclusivement via `pocketPoints` (`getDailyNav`), jamais
+    via cette projection — voir `pocketPoints`, `vsIndexSeries` plus bas.
+  */
   const scopedHistory = useMemo(
-    () => scopeHistory(history, { scope, assetClass, envelope, classMetric }),
-    [history, scope, assetClass, classMetric, envelope]
+    () => scopeHistory(history, { scope, assetClass: null, envelope: null, classMetric }),
+    [history, scope, classMetric]
   );
+
+  /**
+   * Part des titres qui n'est ni PEA ni CTO, sur le dernier point de la
+   * fenêtre affichée — CFD non historisé, ou enveloppe pas encore démontrée.
+   *
+   * Lue sur `pocketWindowed` (même requête `getDailyNav` que la courbe), pas
+   * sur `history` : c'est la source qui porte le croisement classe ×
+   * enveloppe pour Titres, jamais `byAssetClass`.
+   */
+  const titresGapEur = useMemo(() => {
+    if (account !== "TITRES") return null;
+    const last = pocketWindowed[pocketWindowed.length - 1];
+    return last ? titresUnknownEnvelopeEur(last) : null;
+  }, [account, pocketWindowed]);
 
   /**
    * Part des titres dont l'enveloppe n'est pas démontrée, sur toute la fenêtre.
@@ -460,22 +506,25 @@ export function PortfolioEvolutionPanel({
    * c'est la part que la courbe ne démontre pas.
    *
    * `startOfRange` est celle de la série, pour que l'avertissement couvre
-   * exactement ce que l'œil voit.
+   * exactement ce que l'œil voit. Titres seul est concerné — ACTIONS et
+   * OBLIGATIONS sont désormais additionnées dans ce compte.
    */
   const unknownEnvelopeEur = useMemo(() => {
-    if (!assetClass || !envelope) return 0;
+    if (account !== "TITRES" || !envelope) return 0;
     const from = startOfRange(range, heroWindowReference(history));
     const fromT = from ? from.getTime() : -Infinity;
     let max = 0;
     for (const p of history) {
       if (Date.parse(p.date) < fromT) continue;
-      const u = Number(
-        p.byAssetClassAndEnvelopeBase?.[assetClass]?.UNKNOWN ?? 0
+      const uActions = Number(p.byAssetClassAndEnvelopeBase?.ACTIONS?.UNKNOWN ?? 0);
+      const uObligations = Number(
+        p.byAssetClassAndEnvelopeBase?.OBLIGATIONS?.UNKNOWN ?? 0
       );
+      const u = uActions + uObligations;
       if (Number.isFinite(u) && u > max) max = u;
     }
     return max;
-  }, [history, assetClass, envelope, range]);
+  }, [history, account, envelope, range]);
 
   const { points: rawPoints, interval } = useMemo(
     () =>
@@ -493,12 +542,12 @@ export function PortfolioEvolutionPanel({
     Marge amont de 7 j pour une close ≤ ancre (LOCF vendredi).
 
     Cette fenêtre ne vaut que pour la NAV **non filtrée** — dailyNav est la
-    série du hero (Brut/Net/Financier), quel que soit le filtre de classe
-    actif ici. Un filtre de classe ou d'enveloppe compare donc `scopedHistory`
-    (via `rawPoints`, juste sous ce bloc) plutôt que cette fenêtre-là :
-    l'indice doit suivre la série réellement tracée à l'écran, pas *Tout*.
+    série du hero (Brut/Net/Financier), quel que soit le compte actif ici. Un
+    compte filtré compare donc `pocketPoints` (juste au-dessus) plutôt que
+    cette fenêtre-là : l'indice doit suivre la série réellement tracée à
+    l'écran, pas *Tout*.
   */
-  const isPocketFiltered = Boolean(assetClass);
+  const isPocketFiltered = Boolean(account);
   const vsNavWindowed = useMemo(() => {
     if (isPocketFiltered) return [];
     if (!dailyNav?.length) return [];
@@ -516,19 +565,18 @@ export function PortfolioEvolutionPanel({
     alors que getDailyNav a clampé à 2022). `to` = dernier jour de la
     fenêtre affichée, pas une date demandée plus large.
 
-    Filtré : l'ancre est le premier jour de `rawPoints` — la fenêtre que
-    `scopedHistory` sert réellement pour cette classe/enveloppe, pas celle
-    du hero.
+    Filtré : l'ancre est le premier jour de `pocketPoints` — la fenêtre que
+    `getDailyNav` sert réellement pour ce compte/enveloppe, pas celle du hero.
   */
   const idxFromKey = isPocketFiltered
-    ? (rawPoints[0] ? parisDayKey(rawPoints[0].date) : "")
+    ? (pocketPoints[0] ? parisDayKey(pocketPoints[0].date) : "")
     : servedNavFrom ??
       vsNavWindowed[0]?.day ??
       dailyNav?.[0]?.day ??
       "";
   const idxToKey = isPocketFiltered
-    ? (rawPoints[rawPoints.length - 1]
-        ? parisDayKey(rawPoints[rawPoints.length - 1]!.date)
+    ? (pocketPoints[pocketPoints.length - 1]
+        ? parisDayKey(pocketPoints[pocketPoints.length - 1]!.date)
         : "")
     : vsNavWindowed[vsNavWindowed.length - 1]?.day ??
       dailyNav?.[dailyNav.length - 1]?.day ??
@@ -539,7 +587,9 @@ export function PortfolioEvolutionPanel({
     enabled:
       wantIndex &&
       Boolean(idxFromKey && idxToKey) &&
-      (vsNavWindowed.length > 1 || rawPoints.length > 1),
+      (isPocketFiltered
+        ? pocketPoints.length > 1
+        : vsNavWindowed.length > 1 || rawPoints.length > 1),
     staleTime: 30 * 60_000,
     retry: false,
     queryFn: () => {
@@ -557,7 +607,7 @@ export function PortfolioEvolutionPanel({
     [indexQ.data, indexQ.isError]
   );
 
-  const points = rawPoints;
+  const points = isPocketFiltered ? pocketPoints : rawPoints;
 
   /*
     Deux niveaux (NAV hero ou série filtrée, clôture Yahoo), base 100 à
@@ -565,8 +615,9 @@ export function PortfolioEvolutionPanel({
     la série portefeuille reste intacte. Pas `toPercentSeries` : sans
     `growth`, le portefeuille restait à +0 %.
 
-    Filtrée (classe/enveloppe active) : `rawPoints` — la série réellement
-    tracée — sert de base 100, jamais la NAV hero non filtrée.
+    Filtrée (compte/enveloppe actif) : `pocketPoints` — la série réellement
+    tracée pour ce compte — sert de base 100, jamais la NAV hero non filtrée
+    ni `rawPoints`, qui reste celle du patrimoine entier.
   */
   const vsIndexSeries = useMemo(() => {
     if (versus !== "index") return [];
@@ -574,10 +625,12 @@ export function PortfolioEvolutionPanel({
       day: c.date,
       value: c.close,
     }));
-    const scopedLevels = rawPoints.map((p) => ({
-      day: parisDayKey(p.date),
-      value: p.total,
-    }));
+    const scopedLevels = (isPocketFiltered ? pocketPoints : rawPoints).map(
+      (p) => ({
+        day: parisDayKey(p.date),
+        value: p.total,
+      })
+    );
     const portfolioLevels = isPocketFiltered
       ? scopedLevels
       : vsNavWindowed.length > 1
@@ -590,6 +643,7 @@ export function PortfolioEvolutionPanel({
     vsNavWindowed,
     activeNavScope,
     rawPoints,
+    pocketPoints,
     isPocketFiltered,
   ]);
 
@@ -627,19 +681,20 @@ export function PortfolioEvolutionPanel({
   /*
     Le flux par enveloppe n'est pas reconstructible : `flowsByAssetClass` est
     forcé à 0 dès qu'on filtre PEA/CTO (`pocket-series.ts`), et il n'existe
-    aucune ventilation flux × classe × enveloppe dans le dépôt. `pnl = delta`
-    recopierait donc la ligne du dessus — la ligne 2 dit `n/d` plutôt que de
-    prétendre neutraliser un versement qu'on n'a pas su isoler.
+    aucune ventilation flux × classe × enveloppe dans le dépôt. Assurance-vie,
+    alternatifs et épargne salariale n'ont pas non plus de clé de flux dédiée.
+    `pnl = delta` recopierait donc la ligne du dessus — la ligne 2 dit `n/d`
+    plutôt que de prétendre neutraliser un versement qu'on n'a pas su isoler.
   */
-  const pocketFlowsUnreliable = Boolean(envelope);
+  const pnlUnreliable = pocketFlowsUnreliable(account, envelope);
   const pocketPnlSummary = useMemo(
     () =>
       usePocketCurve
         ? evolutionPnlSummary(pocketPoints, {
-            flowsUnreliable: pocketFlowsUnreliable,
+            flowsUnreliable: pnlUnreliable,
           })
         : null,
-    [usePocketCurve, pocketPoints, pocketFlowsUnreliable]
+    [usePocketCurve, pocketPoints, pnlUnreliable]
   );
   const headlinePct =
     chartKind === "percent" && percentPoints.length > 0
@@ -676,7 +731,7 @@ export function PortfolioEvolutionPanel({
       )}
       data-testid="portfolio-evolution-panel"
       data-nav-scope={activeNavScope}
-      data-pocket-class={assetClass ?? "all"}
+      data-pocket-account={account ?? "all"}
       data-chart-kind={chartKind}
       data-vs-base-day={versus === "index" ? vsIndexSeries[0]?.day : undefined}
       data-line-type={
@@ -687,10 +742,10 @@ export function PortfolioEvolutionPanel({
         title="Évolution du portefeuille"
         subtitle={
           <>
-            {assetClass && envelope
-              ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass} en ${envelope} — valeur`
-              : assetClass
-              ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass}${assetClass === "OBLIGATIONS" ? " (CTO)" : ""} — valeur`
+            {account && envelope
+              ? `Compte : ${ACCOUNT_CHOICES.find((c) => c.id === account)?.label ?? account} · ${envelope}`
+              : account
+              ? `Compte : ${ACCOUNT_CHOICES.find((c) => c.id === account)?.label ?? account}`
               : useDailyNavCurve
               ? `${HERO_NAV_SCOPE_LABEL[activeNavScope]} — NAV quotidienne`
               : "Actifs bruts"}
@@ -749,8 +804,8 @@ export function PortfolioEvolutionPanel({
                 className="text-xs font-medium text-[var(--muted-foreground)]"
                 data-testid="evolution-headline-pnl"
                 title={
-                  pocketFlowsUnreliable
-                    ? "Flux non disponibles pour une poche filtrée par enveloppe (PEA/CTO) : le P&L de période ne peut pas être isolé des versements."
+                  pnlUnreliable
+                    ? "Flux non disponibles pour ce compte : le P&L de période ne peut pas être isolé des versements."
                     : "Ce montant inclut vos versements ; ce P&L ne les compte pas."
                 }
               >
@@ -868,39 +923,53 @@ export function PortfolioEvolutionPanel({
 
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
           {/*
-            La classe commande, l'enveloppe précise.
+            Le compte commande, l'enveloppe précise.
 
-            Les deux ne sont plus exclusives : « où sont mes actions » est une
-            question qui a un sens, et y répondre demandait de composer les deux
-            filtres. La hiérarchie est celle de la question — on choisit d'abord
-            ce que l'on détient, puis, quand cela s'y prête, où.
+            « Compte » — où l'argent est déposé — remplace la classe d'actif :
+            Actions additionnait PEA + CTO + unités de compte d'assurance-vie,
+            et ni PEA ni CTO ne sont cette somme. Un unique sélecteur — pas une
+            rangée de chips — car les huit comptes ne sont pas des variations
+            d'une même question mais des poches disjointes du patrimoine.
 
-            Changer de classe remet l'enveloppe à « Tout » : garder « PEA » en
+            Changer de compte remet l'enveloppe à « Tout » : garder « PEA » en
             passant sur la crypto laisserait un filtre actif qu'aucun contrôle
             n'affiche plus.
           */}
-          <Segmented
-            items={CLASS_CHOICES}
-            value={assetClass ?? "all"}
-            onChange={(v) =>
-              update({
-                assetClass: v === "all" ? null : (v as EvolutionAssetClass),
-                envelope: null,
-              })
-            }
-            ariaLabel="Classe d'actifs"
-            testIdPrefix="evolution-class"
-          />
+          <label className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--muted-foreground)]">
+            <span className="text-[10px] font-medium uppercase tracking-wide">
+              Compte
+            </span>
+            <select
+              className="input !h-7 w-auto !min-w-0 py-0 pl-2 pr-6 text-[11px]"
+              value={account ?? "all"}
+              onChange={(e) =>
+                update({
+                  account:
+                    e.target.value === "all"
+                      ? null
+                      : (e.target.value as EvolutionAccount),
+                  envelope: null,
+                })
+              }
+              data-testid="evolution-account-select"
+              aria-label="Compte"
+            >
+              {ACCOUNT_CHOICES.map((c) => (
+                <option key={c.id} value={c.id} title={c.title}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
           {/*
-            Le sélecteur d'enveloppe n'existe que là où la question se pose.
+            La sous-rangée d'enveloppe n'existe que là où la question se pose.
 
-            Sur les actions seulement : ce sont les seules lignes dont le
-            portefeuille de démonstration comme le modèle admettent les deux
-            enveloppes. Les obligations reçoivent une indication plutôt qu'un
-            choix — voir le sous-titre — et la crypto, l'immobilier, le cash et
-            « Autre » n'ont aucun rapport avec un compte-titres.
+            Sur Titres seulement : c'est le seul compte que le journal sait
+            recouper avec PEA ou CTO. Assurance-vie, crypto, immobilier,
+            alternatifs, épargne salariale et banques n'ont aucun rapport avec
+            un compte-titres.
           */}
-          {assetClass === "ACTIONS" && (
+          {account === "TITRES" && (
             <Segmented
               items={ENVELOPE_CHOICES}
               value={envelope ?? "all"}
@@ -1034,7 +1103,7 @@ export function PortfolioEvolutionPanel({
             <PortfolioValueChart
               data={points}
               baseCurrency={baseCurrency}
-              lineType={pocketChartLineType(assetClass)}
+              lineType={pocketChartLineType(account)}
             />
           ) : (
             <PortfolioPercentChart
@@ -1045,7 +1114,7 @@ export function PortfolioEvolutionPanel({
         </div>
       </div>
 
-      {envelope && !empty && (
+      {account === "TITRES" && envelope && !empty && (
         <p
           className="text-meta mt-1.5 shrink-0"
           data-testid="evolution-envelope-reclass"
@@ -1089,6 +1158,31 @@ export function PortfolioEvolutionPanel({
           constat d&apos;enveloppe — jusqu&apos;à{" "}
           {formatCurrency(unknownEnvelopeEur, baseCurrency)} de titres non
           rattachés sur cette période.
+        </p>
+      )}
+
+      {/*
+        `null` ne s'affiche pas, et zéro non plus — mais pas pour la même
+        raison : l'un dit qu'on ne sait pas, l'autre que tout est rattaché.
+        Aucun des deux ne mérite une ligne, et les confondre ferait afficher
+        « 0 € hors comptes-titres » là où l'enveloppe est simplement inconnue.
+      */}
+      {account === "TITRES" &&
+        !empty &&
+        titresGapEur != null &&
+        Math.abs(titresGapEur) >= 0.01 && (
+        <p
+          className="text-meta mt-1.5 shrink-0"
+          data-testid="evolution-titres-cfd-gap"
+        >
+          {/*
+            La valeur de ligne, pas la marge : un CFD non historisé pèse ici
+            pour l'exposition qu'il porte, pas pour le résultat qu'il dégage —
+            ce sont deux grandeurs distinctes, et la confusion inventerait un
+            écart qui ne correspond à rien de mesuré.
+          */}
+          {formatCurrency(titresGapEur, baseCurrency)} hors comptes-titres —
+          CFD non historisé (valeur de ligne, pas la marge).
         </p>
       )}
 

@@ -2,14 +2,19 @@ import { test, expect } from "@playwright/test";
 import { gotoDashboard } from "./helpers";
 
 /**
- * Courbes d'évolution par classe d'actif.
+ * Courbes d'évolution par compte.
+ *
+ * D18 remplace la rangée de chips par classe d'actif (`evolution-class-*`) par
+ * un unique sélecteur de compte (`evolution-account-select`) : « Actions »
+ * additionnait PEA + CTO + unités de compte d'assurance-vie, et ni PEA ni CTO
+ * ne sont cette somme.
  *
  * Le contrôle est **numérique** : le chiffre affiché en tête du panneau doit
- * correspondre à la classe sélectionnée, et non au patrimoine entier. Un test
- * qui se contenterait de vérifier qu'un bouton devient actif ne dirait rien de
+ * correspondre au compte sélectionné, et non au patrimoine entier. Un test qui
+ * se contenterait de vérifier qu'une option devient active ne dirait rien de
  * ce que la courbe représente.
  */
-test.describe("Évolution — par classe d'actif", () => {
+test.describe("Évolution — par compte", () => {
   test.beforeEach(async ({ page }) => {
     await gotoDashboard(page);
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
@@ -40,7 +45,9 @@ test.describe("Évolution — par classe d'actif", () => {
     expect(crypto).toBeGreaterThan(0);
     expect(crypto).toBeLessThan(brut);
 
-    await page.getByTestId("evolution-class-CRYPTO").click();
+    await page
+      .getByTestId("evolution-account-select")
+      .selectOption("CRYPTO");
     await expect(panel).toContainText("Crypto", { timeout: 15_000 });
 
     // Net/Brut ne vit plus ici : il est sur la carte de tête.
@@ -75,8 +82,10 @@ test.describe("Évolution — par classe d'actif", () => {
     await expect(page.getByTestId("evolution-metric-value")).toHaveCount(0);
     await expect(page.getByTestId("evolution-metric-performance")).toHaveCount(0);
 
-    await page.getByTestId("evolution-class-CRYPTO").click();
-    await expect(panel).toContainText("Crypto — valeur", { timeout: 15_000 });
+    await page
+      .getByTestId("evolution-account-select")
+      .selectOption("CRYPTO");
+    await expect(panel).toContainText("Compte : Crypto", { timeout: 15_000 });
     await expect(page.getByTestId("evolution-metric-performance")).toHaveCount(0);
 
     /*
@@ -120,10 +129,12 @@ test.describe("Évolution — par classe d'actif", () => {
   test("revenir à « Tout » restaure le patrimoine entier", async ({ page }) => {
     const panel = page.getByTestId("portfolio-evolution-panel");
 
-    await page.getByTestId("evolution-class-CRYPTO").click();
+    await page
+      .getByTestId("evolution-account-select")
+      .selectOption("CRYPTO");
     await expect(panel).toContainText("Crypto", { timeout: 15_000 });
 
-    await page.getByTestId("evolution-class-all").click();
+    await page.getByTestId("evolution-account-select").selectOption("all");
     await expect(panel).toContainText("Actifs bruts", { timeout: 15_000 });
     await expect(page.getByTestId("evolution-scope-gross")).toHaveCount(0);
   });
