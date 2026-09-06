@@ -230,11 +230,10 @@ test.describe("Tableau de bord", () => {
     const parseHeadline = (t: string) => Number(t.replace(/[^\d-]/g, ""));
 
     /*
-      Le défaut réel de la carte est « Financier » (dashboard-tab.tsx), pas
-      Net : le supposer actif laissait le test dépendre d'un écran qui n'existe
-      plus. Ce que ce test doit prouver survit au changement de défaut — que
+      Le défaut de la carte est désormais « Net » (D14.3b, dashboard-tab.tsx).
+      Ce que ce test doit prouver survit à un futur changement de défaut — que
       Net = Brut − Passifs s'affiche bien quand ce mode est sélectionné — donc
-      on active Net explicitement au lieu de le tenir pour acquis.
+      on l'active explicitement au lieu de le tenir pour acquis.
     */
     await page.getByTestId("hero-mode-net").click();
     await expect(page.getByTestId("hero-mode-net")).toHaveAttribute(

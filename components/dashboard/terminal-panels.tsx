@@ -14,10 +14,12 @@ import {
   Star,
   type LucideIcon,
 } from "lucide-react";
+import { HelpCircle } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import { AssetLogo } from "@/components/ui/platform-logo";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import type { Holding } from "@/app/lib/types/ui";
+import type { AllocationByVenueApiVenue } from "@/app/lib/portfolio/allocation-by-venue-api";
 import {
   allocatePercents,
   capTinyHoldings,
@@ -124,6 +126,8 @@ function holdingPerf(h: Holding): number | null {
 export function AllocationCard({
   data,
   holdings,
+  venueSlices,
+  venueHelp,
   periodRange,
   baseCurrency,
   className,
@@ -141,8 +145,21 @@ export function AllocationCard({
   /**
    * Lignes détenues — mosaïque Coin360 (aire ∝ MV). Absentes, le second
    * mode n'est pas proposé : le camembert de classes reste seul.
+   *
+   * Ignoré quand `venueSlices` est fourni : la mosaïque suit alors les
+   * mêmes endroits que le camembert, pas les lignes détenues (D14.4).
    */
   holdings?: Holding[];
+  /**
+   * Répartition par endroit (D14.1/D14.2) — remplace `data` sur ce pavé.
+   *
+   * `percent` et `color` viennent déjà de l'API (`allocation-by-venue.ts` /
+   * `allocation-by-venue-api.ts`) : on ne les recalcule pas ici, deux
+   * arrondis divergeraient. Camembert et mosaïque lisent la même liste.
+   */
+  venueSlices?: AllocationByVenueApiVenue[];
+  /** Texte d'aide du pavé — `ALLOCATION_BY_VENUE_HELP`, exposé tel quel. */
+  venueHelp?: string;
   /**
    * Période partagée du tableau de bord. La mosaïque colore chaque ligne
    * par son P&L latent (coût → maintenant) : le moteur ne publie pas de
@@ -168,7 +185,8 @@ export function AllocationCard({
   /**
    * Teinte d'une part. Le tableau de bord répartit par classe d'actifs, la vue
    * PEA & CTO par sous-catégorie : deux vocabulaires, donc deux palettes, mais
-   * un seul camembert.
+   * un seul camembert. Ignoré en mode `venueSlices` : la couleur vient de
+   * l'API (`slice.color`), en clair comme en sombre (D14.5).
    */
   toneOf?: (label: string) => string;
   /** Anneau resserré : la légende porte alors les montants sans se faire rogner. */
@@ -177,6 +195,15 @@ export function AllocationCard({
   const [mode, setMode] = useState<"pie" | "treemap">("pie");
 
   const rows = useMemo(() => {
+    if (venueSlices) {
+      const sorted = [...venueSlices].sort((a, b) => b.amountEur - a.amountEur);
+      return sorted.map((s) => ({
+        name: s.label,
+        value: s.amountEur,
+        pct: s.pct,
+        tone: s.color,
+      }));
+    }
     const positive = data.filter((d) => d.value > 0);
     const sorted = [...positive].sort((a, b) => b.value - a.value);
     const pcts = allocatePercents(sorted.map((d) => d.value), 1);
@@ -185,9 +212,20 @@ export function AllocationCard({
       pct: pcts[i] ?? 0,
       tone: toneOf(d.name),
     }));
-  }, [data, toneOf]);
+  }, [data, venueSlices, toneOf]);
 
   const mosaic = useMemo(() => {
+    if (venueSlices) {
+      const items = venueSlices
+        .filter((s) => s.amountEur > 0)
+        .map((s) => ({
+          name: s.label,
+          value: s.amountEur,
+          pct: s.pct,
+          color: s.color,
+        }));
+      return squarify(items);
+    }
     if (!holdings?.length) return [];
     const items = capTinyHoldings(
       holdings
@@ -209,9 +247,10 @@ export function AllocationCard({
           : perfTone(it.perfPct),
     }));
     return squarify(labeled);
-  }, [holdings]);
+  }, [holdings, venueSlices]);
 
   const canTreemap = mosaic.length > 0;
+  const legendShowsValues = showValues || Boolean(venueSlices);
 
   return (
     <section
@@ -222,8 +261,26 @@ export function AllocationCard({
     >
       <div className="panel-head">
         <div className="min-w-0">
-          <h3 id="allocation-heading" className="text-title">
+          <h3 id="allocation-heading" className="flex items-center gap-[var(--space-1)] text-title">
             {title}
+            {venueHelp && (
+              <span
+                className="group relative inline-flex align-middle text-[var(--foreground-faint)]"
+                tabIndex={0}
+                role="img"
+                aria-label={venueHelp}
+                title={venueHelp}
+                data-testid="allocation-venue-help"
+              >
+                <HelpCircle className="h-3.5 w-3.5 opacity-60 transition group-hover:opacity-100 group-focus:opacity-100" />
+                <span
+                  className="pointer-events-none absolute left-0 top-full z-40 mt-1.5 w-64 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-left text-[length:var(--text-2xs)] font-normal leading-snug text-[var(--foreground-secondary)] opacity-0 shadow-lg transition group-hover:opacity-100 group-focus:opacity-100 motion-reduce:transition-none"
+                  role="tooltip"
+                >
+                  {venueHelp}
+                </span>
+              </span>
+            )}
           </h3>
           {subtitle && <p className="text-meta">{subtitle}</p>}
         </div>
@@ -362,7 +419,7 @@ export function AllocationCard({
                   <span className="num shrink-0 text-[var(--foreground)]">
                     {formatPct1(r.pct)}
                   </span>
-                  {showValues && (
+                  {legendShowsValues && (
                     <span className="num shrink-0 text-right text-[length:var(--text-xs)] text-[var(--foreground-faint)]">
                       {formatCurrency(r.value, baseCurrency)}
                     </span>

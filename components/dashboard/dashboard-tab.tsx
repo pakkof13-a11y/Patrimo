@@ -17,7 +17,6 @@ import {
 import type { DashboardNavTarget } from "@/components/dashboard/dashboard-quick-actions";
 import { cn } from "@/app/lib/utils";
 import {
-  allocationLegendForScope,
   allocationSliceLabel,
   allocationSlicesForScope,
 } from "@/app/lib/portfolio/allocation-scope";
@@ -26,6 +25,7 @@ import type {
   HistoryPoint,
   PortfolioAllocation,
 } from "@/app/lib/types/ui";
+import type { AllocationByVenueApi } from "@/app/lib/portfolio/allocation-by-venue-api";
 import {
   dashboardBlocksFor,
   resolveDashboardMaturity,
@@ -76,6 +76,8 @@ export type DashboardTabProps = {
   baseCurrency: string;
   summary?: Record<string, string | number>;
   allocation?: PortfolioAllocation;
+  /** D14.2 — répartition par endroit de détention, dénominateur du pavé Répartition. */
+  allocationByVenue?: AllocationByVenueApi;
   history: HistoryPoint[];
   historyLoading?: boolean;
   /** Lignes détenues — alimentent la watchlist. */
@@ -107,6 +109,7 @@ export function DashboardTab({
   baseCurrency,
   summary,
   allocation,
+  allocationByVenue,
   history,
   historyLoading,
   holdings = [],
@@ -155,7 +158,7 @@ export function DashboardTab({
   }
   const displayAllocation = stableAllocation ?? allocation;
 
-  const [navScope, setNavScope] = useState<HeroNavScope>("financier");
+  const [navScope, setNavScope] = useState<HeroNavScope>("net");
 
   /*
     Les valeurs brutes, sans `round2`.
@@ -184,7 +187,6 @@ export function DashboardTab({
       })),
     [displayAllocation?.byClass, holdings, navScope, summary]
   );
-  const allocationLegend = allocationLegendForScope(navScope);
 
   const [stableHistory, setStableHistory] = useState<HistoryPoint[]>(history);
   const [prevHistory, setPrevHistory] = useState(history);
@@ -540,11 +542,13 @@ export function DashboardTab({
             <div className="flex min-w-0 flex-col gap-[var(--gap-card)]">
               <AllocationCard
                 data={classChart}
-                holdings={holdings}
+                venueSlices={allocationByVenue?.venues}
+                venueHelp={allocationByVenue?.help}
+                title="Répartition par endroit"
                 periodRange={range}
                 baseCurrency={baseCurrency}
                 scope={navScope}
-                legend={allocationLegend}
+                emptyHint="Les endroits de détention apparaîtront dès le premier compte alimenté."
               />
               <WatchlistCard
                 holdings={holdings}
