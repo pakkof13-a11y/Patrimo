@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
+import { getAllocationByVenueApi } from "@/app/lib/portfolio/allocation-by-venue-api";
 import { getPortfolioBundle } from "@/app/lib/portfolio/service";
 import { clientErrorMessage } from "@/app/lib/api/error-response";
 
@@ -18,13 +19,19 @@ export async function GET(req: Request) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const base = searchParams.get("base") || user?.baseCurrency || "EUR";
 
-    const bundle = await getPortfolioBundle(userId, base);
-    return NextResponse.json(bundle, {
-      headers: {
-        "Cache-Control": "no-store, no-cache, must-revalidate",
-        Pragma: "no-cache",
-      },
-    });
+    const [bundle, allocationByVenue] = await Promise.all([
+      getPortfolioBundle(userId, base),
+      getAllocationByVenueApi(userId),
+    ]);
+    return NextResponse.json(
+      { ...bundle, allocationByVenue },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+          Pragma: "no-cache",
+        },
+      }
+    );
   } catch (e) {
     console.error("GET /api/holdings", e);
     const msg = clientErrorMessage(e, "Erreur chargement portefeuille");

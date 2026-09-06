@@ -1,4 +1,5 @@
 import type { AccountType } from "@/app/lib/constants";
+import type { AllocationByVenueApi } from "@/app/lib/portfolio/allocation-by-venue-api";
 import type { PatrimonyMetricsJson } from "@/app/lib/portfolio/patrimony-metrics";
 import type {
   BaseAmount,
@@ -361,6 +362,11 @@ export type HoldingsResponse = {
   /** Contrat T-01 — Hero / KPI / allocation lisent cet objet, pas un résidu. */
   metrics?: PatrimonyMetricsJson;
   allocation: PortfolioAllocation;
+  /**
+   * D14.2 — répartition par endroit. Même contrat que
+   * `GET /api/portfolio.allocationByVenue` (`venues` / `help` / `total` / `asOf`).
+   */
+  allocationByVenue?: AllocationByVenueApi;
   baseCurrency: string;
 };
 
