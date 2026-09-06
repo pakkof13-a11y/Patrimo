@@ -226,7 +226,9 @@ test.describe("DeFi — wizard d'ajout", () => {
 
     const row = page.getByTestId("defi-row").filter({ hasText: `EigenLayer ${runId}` });
     await row.getByTestId("defi-row-open").click();
-    await expect(page.getByTestId("defi-badge-points")).toContainText("hors valorisation");
+    await expect(
+      page.getByTestId("defi-detail-header").getByTestId("defi-badge-points")
+    ).toContainText("hors valorisation");
   });
 
   test("liquid staking : le jeton reçu porte un libellé dédié (cas B)", async ({ page }) => {

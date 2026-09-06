@@ -191,8 +191,13 @@ test.describe("Tableau de bord", () => {
     // Une seule carte de patrimoine sur l'écran — le doublon d'un chantier
     // précédent ne doit pas revenir par une autre porte.
     await expect(carte).toHaveCount(1);
+    /*
+      T-4 : le titre nomme le scope actif. « Patrimoine total » au-dessus du
+      Financier affirmait l'exhaustivité d'un sous-ensemble. Le défaut est
+      Financier — `HERO_NAV_SCOPE_HEADING.financier`.
+    */
     await expect(
-      page.getByRole("heading", { name: "Patrimoine total" })
+      page.getByRole("heading", { name: "Patrimoine financier" })
     ).toBeVisible();
 
     /*
@@ -241,10 +246,13 @@ test.describe("Tableau de bord", () => {
       "data-active",
       "true"
     );
+    await expect(
+      page.getByRole("heading", { name: "Patrimoine net" })
+    ).toBeVisible();
     const netText = await page.getByTestId("hero-net-worth").innerText();
     expect(parseHeadline(netText)).toBe(expectedNet);
 
-    // Passage en brut : la valeur suit, le titre ne bouge pas.
+    // Passage en brut : la valeur suit, et le titre nomme ce périmètre.
     // Le scope se nomme `brut` (`HERO_NAV_SCOPES`), pas `gross` — un testid
     // `hero-mode-gross` viserait un bouton qui n'a jamais existé.
     await page.getByTestId("hero-mode-brut").click();
@@ -253,7 +261,7 @@ test.describe("Tableau de bord", () => {
       "true"
     );
     await expect(
-      page.getByRole("heading", { name: "Patrimoine total" })
+      page.getByRole("heading", { name: "Patrimoine brut" })
     ).toBeVisible();
     const grossText = await page.getByTestId("hero-net-worth").innerText();
     expect(parseHeadline(grossText)).toBe(expectedGross);
