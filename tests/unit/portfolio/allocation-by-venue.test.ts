@@ -6,6 +6,7 @@ import {
   ALLOCATION_BY_VENUE_HELP,
   VENUE_COLORS,
   VENUE_KEYS,
+  VENUE_LABELS,
   computeAllocationByVenue,
   immoNet,
   principalPaidOfInstallment,
@@ -66,13 +67,35 @@ describe("ALLOCATION_BY_VENUE_HELP — lock texte « ? »", () => {
 });
 
 describe("palette — 1 hex / endroit, identique light/dark", () => {
-  it("couvre les 10 clés avec des hex figés", () => {
+  it("colle exactement au PDF D14 (Laurent)", () => {
     expect(VENUE_KEYS).toHaveLength(10);
+    expect(VENUE_COLORS).toEqual({
+      pea: "#C4A35A",
+      cto: "#8B7340",
+      av: "#5B7C99",
+      immo: "#7A5C4A",
+      cash: "#8A93A0",
+      es: "#6A7D8F",
+      trading: "#8B4A4A",
+      crypto: "#C47A4A",
+      alt: "#8B6B7A",
+      tangible: "#6B8F71",
+    });
+    expect(VENUE_LABELS).toEqual({
+      pea: "PEA",
+      cto: "CTO",
+      av: "Assurance-vie",
+      immo: "Immobilier",
+      cash: "Liquidités",
+      es: "Épargne salariale",
+      trading: "Trading",
+      crypto: "Crypto",
+      alt: "Alternatifs",
+      tangible: "Tangibles",
+    });
     for (const key of VENUE_KEYS) {
       expect(VENUE_COLORS[key]).toMatch(/^#[0-9A-Fa-f]{6}$/);
     }
-    expect(VENUE_COLORS.pea).toBe("#C4A35A");
-    expect(VENUE_COLORS.tangible).toBe("#6B8F71");
   });
 });
 

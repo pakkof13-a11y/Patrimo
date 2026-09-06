@@ -86,31 +86,30 @@ export const VENUE_LABELS: Record<VenueKey, string> = {
   cto: "CTO",
   av: "Assurance-vie",
   immo: "Immobilier",
-  cash: "Cash",
+  cash: "Liquidités",
   es: "Épargne salariale",
   trading: "Trading",
   crypto: "Crypto",
   alt: "Alternatifs",
-  tangible: "Tangible",
+  tangible: "Tangibles",
 };
 
 /**
  * Une teinte hex par endroit, identique light / dark.
  *
- * Source : table Métier / PDF D14 — PEA `#C4A35A` et Tangible `#6B8F71`
- * figés. Les huit autres clés n'étaient pas dans le tip : hex figés ici
- * (terre / ardoise, distinguables) pour que le donut ne dépende pas du thème.
+ * Source : PDF D14 (Laurent) — table Métier complète. Les mêmes hex
+ * servent les deux thèmes.
  */
 export const VENUE_COLORS: Record<VenueKey, string> = {
   pea: "#C4A35A",
-  cto: "#7A5C38",
-  av: "#4F6F8F",
-  immo: "#C46A4A",
-  cash: "#3D8B7A",
-  es: "#7B5E8A",
-  trading: "#B5443A",
-  crypto: "#4A6FA5",
-  alt: "#A67C4A",
+  cto: "#8B7340",
+  av: "#5B7C99",
+  immo: "#7A5C4A",
+  cash: "#8A93A0",
+  es: "#6A7D8F",
+  trading: "#8B4A4A",
+  crypto: "#C47A4A",
+  alt: "#8B6B7A",
   tangible: "#6B8F71",
 };
 
