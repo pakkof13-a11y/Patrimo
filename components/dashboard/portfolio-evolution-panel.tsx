@@ -1004,6 +1004,31 @@ export function PortfolioEvolutionPanel({
         </div>
       </div>
 
+      {envelope && !empty && (
+        <p
+          className="text-meta mt-1.5 shrink-0"
+          data-testid="evolution-envelope-reclass"
+        >
+          {/*
+            Ce que la variation d'une enveloppe mesure vraiment.
+
+            Mesuré sur trois mois du compte de démonstration : PEA passe de 0 à
+            40 799,50 € et CTO de 0 à 42 863,90 €, pendant que la poche
+            « inconnu » se vide de 82 397 €. Aucun de ces mouvements n'est du
+            marché — c'est le journal qui commence à démontrer un rattachement,
+            et la valeur change simplement de colonne.
+
+            Lue comme une performance, cette courbe raconte donc n'importe
+            quoi : une enveloppe peut plonger le jour où ses titres sont
+            reconnus ailleurs. La série n'est pas fausse, c'est sa lecture
+            spontanée qui l'est — d'où cette ligne plutôt qu'un correctif de
+            calcul.
+          */}
+          Variation d&apos;enveloppe, hors marché — un titre entre dans cette
+          courbe le jour où le journal démontre son rattachement.
+        </p>
+      )}
+
       {envelope && unknownEnvelopeEur > 0 && !empty && (
         <p
           className="text-meta mt-1.5 shrink-0"
