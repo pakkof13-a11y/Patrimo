@@ -267,13 +267,6 @@ export function TerminalHero({
     [values]
   );
 
-  const cardChanges = useMemo(() => {
-    const out = {} as Record<HeroCardMode, ReturnType<typeof heroWindowChange>>;
-    out.brut = heroWindowChange(kpiSeries(windowed, grossAssetsAt) ?? []);
-    out.net = heroWindowChange(kpiSeries(windowed, netWorthAt) ?? []);
-    return out;
-  }, [windowed]);
-
   /** Passifs en fin de fenêtre — « dont passifs », en mode net seulement. */
   const liabilitiesNow = useMemo(() => {
     if (mode !== "net") return undefined;
@@ -490,18 +483,23 @@ export function TerminalHero({
             >
               ?
             </span>
-          </div>
 
-          <div
-            className="mt-[var(--space-3)] grid w-full grid-cols-2 gap-[var(--space-2)]"
-            role="tablist"
-            aria-label="Lecture Net ou Brut"
-            data-testid="hero-mode-toggle"
-          >
+            {/*
+              Bascule Net / Brut — même motif que `kpi-pnl-toggle` (deux
+              pastilles côte à côte, la sélection en fond plein) plutôt qu'un
+              second système : la carte de tête n'a plus qu'un chiffre, un
+              graphique et un Δ, et le mode qui les pilote tous les trois se
+              choisit ici, pas dans deux mini-cartes qui dupliquaient déjà
+              presque tout ce que le corps de la carte affiche.
+            */}
+            <div
+              className="ml-auto flex shrink-0 gap-0.5"
+              role="tablist"
+              aria-label="Lecture Net ou Brut"
+              data-testid="hero-mode-toggle"
+            >
               {HERO_CARD_MODES.map((m) => {
                 const selected = mode === m;
-                const live = m === "net" ? netWorth : grossAssets;
-                const change = cardChanges[m];
                 return (
                   <button
                     key={m}
@@ -510,49 +508,25 @@ export function TerminalHero({
                     aria-selected={selected}
                     data-active={selected}
                     title={HERO_NAV_SCOPE_TITLE[m]}
-                    className={cn(
-                      "min-w-0 rounded-[var(--radius-md)] border px-[var(--space-2)] py-[var(--space-2)] text-left",
-                      "transition-colors duration-[var(--duration-fast)]",
-                      "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-                      selected
-                        ? "border-[var(--border-strong)] bg-[var(--surface-sunken)]"
-                        : "border-[var(--border)] hover:bg-[var(--surface-hover)]"
-                    )}
                     data-testid={`hero-mode-${m}`}
                     onClick={() => {
                       onScopeChange(m);
                       hover.reset();
                     }}
-                  >
-                    <span className="text-label block truncate">
-                      {HERO_NAV_SCOPE_LABEL[m]}
-                    </span>
-                    <span
-                      className={cn(
-                        "num mt-[var(--space-1)] block truncate text-[length:var(--text-sm)] font-semibold leading-none",
-                        selected
-                          ? "text-[var(--foreground)]"
-                          : "text-[var(--foreground-secondary)]"
-                      )}
-                    >
-                      {live === null
-                        ? "—"
-                        : maskAmount(formatHeroAmount(live), amountsHidden)}
-                    </span>
-                    {change && (
-                      <span
-                        className={cn(
-                          "num mt-[var(--space-1)] block truncate text-[length:var(--text-2xs)]",
-                          change.abs >= 0 ? "val-positive" : "val-negative"
-                        )}
-                      >
-                        {formatSignedAmount(change.abs, (v) => money(v))}
-                      </span>
+                    className={cn(
+                      "rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px] font-medium leading-none transition",
+                      "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+                      selected
+                        ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]"
+                        : "bg-[var(--muted)]/70 text-[var(--foreground)] hover:bg-[var(--muted)]"
                     )}
+                  >
+                    {HERO_NAV_SCOPE_LABEL[m]}
                   </button>
                 );
               })}
             </div>
+          </div>
 
           <div className="mt-[var(--space-3)] flex flex-wrap items-baseline gap-[var(--space-3)]">
             {loading && headlineValue === null ? (
@@ -1100,11 +1074,23 @@ export function TerminalKpiRow({
         </button>
       </div>
 
+      {/*
+        Flexbox plutôt qu'une grille à paliers fixes (D19, U1).
+        Sous une grille `grid-cols-*`, masquer des tuiles via le
+        sélecteur ci-dessus laissait les colonnes à leur largeur d'avant et un
+        vide à droite — le nombre de colonnes restait celui de neuf tuiles
+        même quand il n'en restait que quatre. Ici chaque tuile grandit pour
+        occuper l'espace libéré (`flex-grow`), plafonnée à 320 px pour ne
+        pas étirer un texte de trois mots sur toute la largeur du bandeau, et
+        repasse à la ligne sous 200 px (`min-width`) — le même seuil que
+        l'ancien `grid-cols-2` protégeait.
+        `items-stretch` (par défaut) égalise la hauteur des tuiles d'une même
+        ligne, mais rien dans une tuile ne dépend de sa largeur — libellé et
+        montant sont tronqués, la zone de sparkline a une hauteur fixe — donc
+        la largeur ne fait pas varier la hauteur de la rangée.
+      */}
       <div
-        className={cn(
-          "grid min-w-0 gap-[var(--gap-card)]",
-          "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-9"
-        )}
+        className="flex min-w-0 flex-wrap gap-[var(--gap-card)]"
         data-testid="terminal-kpi-row"
         data-range={range}
       >
@@ -1146,7 +1132,7 @@ export function TerminalKpiRow({
         return (
           <article
             key={item.key}
-            className="kpi-tile group/kpi relative z-0 flex flex-col gap-[var(--space-2)] p-[var(--pad-card)] outline-none hover:z-20 focus-visible:z-20 focus-within:z-20"
+            className="kpi-tile group/kpi relative z-0 flex min-w-[200px] max-w-[320px] flex-1 flex-col gap-[var(--space-2)] p-[var(--pad-card)] outline-none hover:z-20 focus-visible:z-20 focus-within:z-20"
             data-testid={`kpi-${item.key}`}
             tabIndex={0}
             aria-describedby={detailId}
