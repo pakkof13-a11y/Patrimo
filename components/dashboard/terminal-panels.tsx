@@ -119,7 +119,7 @@ export function perfTone(pct: number | null | undefined): string {
  * recalculer la couleur elle-même (celle-ci vient de l'API, cf.
  * `allocation-by-venue-api.ts`, ou d'un jeton de ce fichier).
  */
-function hexRelativeLuminance(hex: string): number {
+export function hexRelativeLuminance(hex: string): number {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(hex);
   if (!m) return NaN;
   const int = parseInt(m[1]!, 16);
@@ -133,19 +133,41 @@ function hexRelativeLuminance(hex: string): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
+/** Contraste WCAG entre deux luminances relatives (1 = blanc, 0 = noir). */
+function contrastRatio(l1: number, l2: number): number {
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 /**
  * Texte clair ou sombre selon le fond de la case.
  *
- * Les couleurs de la mosaïque « par endroit » sont des hex fournis par
- * l'API — leur luminance se calcule directement. Celles des mosaïques par
- * classe/valeur (`allocationTone`, `perfTone`) restent des jetons CSS
- * (`var(--chart-…)`, `color-mix(...)`) qu'on ne peut pas résoudre en dehors
- * du navigateur ; leur nom dit déjà s'ils sont plutôt clairs ou sombres.
+ * Les couleurs de la mosaïque « par endroit » et « par patrimoine » sont des
+ * hex fixes, identiques en clair et en sombre (D14.5, dashboard-tab.tsx) —
+ * leur luminance se calcule directement. Le texte posé dessus doit l'être
+ * tout autant : `var(--foreground)`/`var(--background)` changent de valeur
+ * avec le thème (le premier est l'encre sombre en clair mais l'encre claire
+ * en sombre, et inversement pour le second), alors que la case, elle, ne
+ * change pas. Sur `#d9a64d` (Titres), le jeton retenu par un simple seuil de
+ * luminance tombe à ~1,8:1 dans l'un des deux thèmes selon celui qui est
+ * actif — illisible côté sombre ou côté clair selon le choix. Noir et blanc
+ * sont les deux seules valeurs stables des deux côtés ; on retient celle qui,
+ * mesurée sur ce fond précis, l'emporte réellement — pas une luminance de
+ * fond seule, dont le seuil se déplace d'une teinte à l'autre.
+ *
+ * Celles des mosaïques par classe/valeur (`allocationTone`, `perfTone`)
+ * restent des jetons CSS (`var(--chart-…)`, `color-mix(...)`) qui, eux,
+ * *changent* avec le thème par construction — on ne peut pas les résoudre en
+ * dehors du navigateur, et le repli sur `var(--foreground)`/`var(--background)`
+ * reste correct puisque fond et texte s'adaptent alors ensemble.
  */
-function tileTextColor(color: string): string {
+export function tileTextColor(color: string): string {
   const luminance = hexRelativeLuminance(color);
   if (Number.isFinite(luminance)) {
-    return luminance > 0.55 ? "var(--foreground)" : "var(--background)";
+    return contrastRatio(luminance, 1) >= contrastRatio(luminance, 0)
+      ? "#ffffff"
+      : "#000000";
   }
   if (/gold/i.test(color)) return "var(--foreground)";
   return "var(--background)";
