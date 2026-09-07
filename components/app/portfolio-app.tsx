@@ -30,7 +30,6 @@ import {
   useHoldingsQuery,
   usePatrimonyStateQuery,
   usePlatformsQuery,
-  usePortfolioHistoryQuery,
   useTransactionsMetaQuery,
 } from "@/app/hooks/use-portfolio-queries";
 import { ShortcutsHelpPanel } from "@/components/layout/shortcuts-help-panel";
@@ -435,7 +434,17 @@ function PortfolioAppClient({
   // ─── Data ───────────────────────────────────────────────────────────────────
 
   const holdingsQ = useHoldingsQuery(baseCurrency);
-  const historyQ = usePortfolioHistoryQuery(baseCurrency);
+  /*
+    Plus de requête d'historique au chargement de la page.
+
+    `GET /api/portfolio` n'était appelé que pour son `history[]` : le résumé et
+    l'allocation viennent de `useHoldingsQuery`. Depuis que la route ne calcule
+    plus de série, cet appel ne rapportait plus rien — il bloquait seulement le
+    rendu derrière un 504 mesuré à 10 238 ms en préproduction.
+
+    Les courbes du tableau de bord sont servies par `daily-nav`, bornées au
+    chip demandé, et la profondeur cliquable par la constante du cap.
+  */
   const platformsQ = usePlatformsQuery(baseCurrency);
   /*
     Compte vierge ou compte actif ?
@@ -856,7 +865,7 @@ function PortfolioAppClient({
     platformCount: platforms.length,
     transactionCount: txCount,
     holdingCount: allHoldings.length,
-    historyPointCount: historyQ.data?.history?.length ?? 0,
+    historyPointCount: 0,
   });
   const dashBlocks = dashboardBlocksFor(dashboardMaturity);
   /**
@@ -1205,7 +1214,6 @@ function PortfolioAppClient({
                 <KpiStrip
                   summary={summary}
                   baseCurrency={baseCurrency}
-                  history={historyQ.data?.history}
                   smartFilter={isDashboard && dashBlocks.kpiSmartFilter}
                   /*
                     Même garde que les modules refondus : `isPending && !data`.
@@ -1276,7 +1284,6 @@ function PortfolioAppClient({
                   <HoldingsSection
                     tab={tab}
                     holdings={holdings}
-                    history={historyQ.data?.history}
                     loading={holdingsQ.isPending && !holdingsQ.data}
                     baseCurrency={baseCurrency}
                     envelopeFilters={envelopeFilters}
@@ -1440,13 +1447,13 @@ function PortfolioAppClient({
                 holdings={allHoldings}
                 allocation={holdingsQ.data?.allocation}
                 allocationByVenue={holdingsQ.data?.allocationByVenue}
-                history={historyQ.data?.history ?? []}
-                historyLoading={historyQ.isPending && !historyQ.data}
+                history={[]}
+                historyLoading={false}
                 maturityInput={{
                   platformCount: platforms.length,
                   transactionCount: txCount,
                   holdingCount: allHoldings.length,
-                  historyPointCount: historyQ.data?.history?.length ?? 0,
+                  historyPointCount: 0,
                 }}
                 portfolioTickers={portfolioTickers}
                 onAddPlatform={() => {

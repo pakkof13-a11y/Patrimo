@@ -46,6 +46,7 @@ import {
 import { seriesChangeAbs, seriesChangePct } from "@/app/lib/portfolio/kpi-series";
 import { useDailyNavQuery } from "@/app/hooks/use-portfolio-queries";
 import { parisDayKey, endOfParisDay } from "@/app/lib/dates/paris";
+import { historyFloorDay } from "@/app/lib/portfolio/historical/history-window";
 import {
   dailyNavQueryWindow,
   dailyNavToHistoryPoints,
@@ -54,7 +55,7 @@ import {
   type HeroNavScope,
 } from "@/app/lib/portfolio/daily-nav-view";
 import type { DailyNavPoint } from "@/app/lib/portfolio/historical/get-daily-nav";
-import { heroPeriodLabel, heroWindowReference } from "@/app/lib/portfolio/hero-range";
+import { heroPeriodLabel } from "@/app/lib/portfolio/hero-range";
 import { quoteStaleBadgeLabel } from "@/app/lib/ui/quote-staleness";
 import { evolutionRangePeriodLabel } from "@/app/lib/ui/evolution-ranges";
 
@@ -278,7 +279,30 @@ export function DashboardTab({
     historique encore court, pas un choix de l'utilisateur, et l'écraser lui
     ferait perdre sa période dès que la courbe s'allonge.
   */
-  const firstHistoryDate = stableHistory[0]?.date ?? null;
+  /*
+    Les bornes viennent du cap, plus d'une série que la page n'attend plus.
+
+    `GET /api/portfolio` ne calcule plus d'historique : il tombait en 504 avant
+    de le rendre, et les chips restaient grisés non parce que la profondeur
+    manquait, mais parce que la réponse n'arrivait jamais. Lire `history[0]`
+    pour décider ce qui est cliquable revenait à faire dépendre l'écran d'un
+    appel dont il n'a plus besoin.
+
+    La profondeur lisible est une constante — `MAX_HISTORY_YEARS`, six ans,
+    la même qui borne le moteur. Un chip est donc activé parce que la période
+    tient sous le cap, jamais parce qu'un tableau est arrivé rempli.
+
+    Le jour de référence est aujourd'hui. Il ne peut pas être le dernier point
+    servi : c'est lui qui compose la fenêtre demandée à `daily-nav`, dont la
+    réponse fournirait ce point — la boucle se refermerait sur elle-même. Et
+    c'est la fin de la fenêtre, pas son début : elle ne dépend d'aucune
+    profondeur d'historique.
+  */
+  const floorDay = useMemo(() => historyFloorDay(), []);
+  const firstHistoryDate = useMemo(
+    () => endOfParisDay(floorDay).toISOString(),
+    [floorDay]
+  );
   if (
     rangeHydrated &&
     range !== "7d" &&
@@ -287,10 +311,8 @@ export function DashboardTab({
     setRange("7d");
   }
 
-  const referenceDay = parisDayKey(heroWindowReference(stableHistory));
-  const earliestDay = stableHistory[0]?.date
-    ? parisDayKey(new Date(stableHistory[0]!.date))
-    : null;
+  const referenceDay = parisDayKey(new Date());
+  const earliestDay = floorDay;
   /*
     Fenêtre API : 1A couvre 7J…1A (texture quotidienne identique, recoupe
     côté client). 5A / Tout élargissent la requête.

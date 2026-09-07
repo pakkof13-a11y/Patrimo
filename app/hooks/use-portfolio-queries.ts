@@ -3,7 +3,6 @@
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { fetchJson } from "@/app/lib/api-client";
 import type {
-  HistoryPoint,
   HoldingsResponse,
   PlatformRow,
   TxRow,
@@ -36,7 +35,7 @@ export function usePortfolioHistoryQuery(baseCurrency: string) {
   return useQuery({
     queryKey: ["portfolio-history", baseCurrency],
     queryFn: () =>
-      fetchJson<{ history: HistoryPoint[]; baseCurrency: string }>(
+      fetchJson<{ baseCurrency: string }>(
         `/api/portfolio?base=${encodeURIComponent(baseCurrency)}`
       ),
     staleTime: HISTORY_STALE_MS,
