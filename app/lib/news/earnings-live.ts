@@ -426,7 +426,16 @@ export async function resolveEarningsCalendar(opts: {
   const targets = dedupeRefs([...portfolio, ...watch]).slice(0, 16);
 
   const now = new Date();
-  const from = isoDate(addDays(now, -2));
+  /*
+    Bornée à la barre de jours de l'écran (J−7…J+7), pas à J−2.
+
+    La barre de jours du panneau laisse choisir n'importe quel jour de cette
+    fenêtre ; interroger moins large que la barre affichée aurait rendu des
+    jours passés cliquables mais silencieux — une fenêtre de fournisseur trop
+    étroite, indiscernable à l'écran d'un vrai jour sans publication. `to` va
+    au-delà (J+21) : ce qui dépasse la barre reste utile au « Voir plus ».
+  */
+  const from = isoDate(addDays(now, -7));
   const to = isoDate(addDays(now, 21));
 
   let universeSource: "finnhub" | "no-key" = "no-key";
@@ -494,27 +503,33 @@ export async function resolveEarningsCalendar(opts: {
       était d'autant plus pollué que le portefeuille était petit.
 
       Ce qui change tient à ces deux points, pas à l'envie d'en montrer plus.
-      La fenêtre est bornée à vingt-quatre heures — ce qui publie aujourd'hui
-      et demain, pas un mois de calendrier — et `inPortfolio` sépare les deux
-      familles à l'écran : cadre jaune pour ce que l'on détient, style neutre
-      pour le reste. Une annonce qui ne vous concerne pas ne peut plus être
-      prise pour une qui vous concerne.
+      `inPortfolio` sépare les deux familles à l'écran : cadre jaune pour ce
+      que l'on détient, style neutre pour le reste. Une annonce qui ne vous
+      concerne pas ne peut plus être prise pour une qui vous concerne.
 
       Ce n'est plus un repli : la demande est faite quelle que soit la richesse
       du portefeuille, et son absence ne dégrade rien.
+
+      La fenêtre est passée de vingt-quatre heures à J−7…J+7 : la barre de
+      jours de l'écran couvre quinze jours, et un vrac limité à demain aurait
+      laissé onze d'entre eux vides côté « univers » alors que le fournisseur
+      les couvre. `universeRaw`/`universeKept` mesurent ce que ça donne
+      réellement, `universeSource` dit si l'absence vient d'une clé manquante
+      ou d'une réponse vide.
     */
     universeSource = "finnhub";
+    const universeFromTs = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+    const universeToTs = now.getTime() + 7 * 24 * 60 * 60 * 1000;
     const universeRows = await fetchFinnhubCalendar({
-      from: isoDate(now),
-      to: isoDate(addDays(now, 1)),
+      from: isoDate(new Date(universeFromTs)),
+      to: isoDate(new Date(universeToTs)),
     });
     universeRaw = universeRows.length;
-    const universeMaxTs = now.getTime() + 24 * 60 * 60 * 1000;
     for (const row of universeRows) {
       const ev = finnhubRowToEvent(row, nameByTicker, portfolioSet);
       if (!ev) continue;
       const t = Date.parse(ev.time);
-      if (!Number.isFinite(t) || t > universeMaxTs) continue;
+      if (!Number.isFinite(t) || t < universeFromTs || t > universeToTs) continue;
       sourcesUsed.add("finnhub");
       const k = `${normalizeKey(ev.ticker)}|${ev.time.slice(0, 10)}`;
       universeKept += 1;
@@ -530,8 +545,9 @@ export async function resolveEarningsCalendar(opts: {
     return Date.parse(a.time) - Date.parse(b.time);
   });
 
-  // Fenêtre utile : J-2 → J+21 (ignorer dates trop lointaines si beaucoup)
-  const minTs = addDays(now, -3).getTime();
+  // Fenêtre utile : J-7 → J+45 (couvre la barre de jours J-7…J+7 de l'écran,
+  // avec une marge d'un jour ; au-delà, ignorer les dates trop lointaines).
+  const minTs = addDays(now, -8).getTime();
   const maxTs = addDays(now, 45).getTime();
   events = events.filter((e) => {
     const t = Date.parse(e.time);

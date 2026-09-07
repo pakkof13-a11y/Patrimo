@@ -29,7 +29,16 @@ type FinnhubNewsRow = {
   url?: string;
 };
 
-/** Sources privilégiées (FR + grands fils en français). */
+/**
+ * Sources privilégiées (FR + grands fils en français).
+ *
+ * Mesuré sur le flux réel (Google News RSS, hl=fr&gl=FR) : l'étiquette
+ * `source` que Google renvoie pour BFM est « BFM » ou « BFM Bourse », jamais
+ * « bfmtv »/« bfmbusiness ». Ces deux derniers ne correspondent à rien dans
+ * `source.includes(f)` — BFM entrait dans le flux (4 items bruts sur 48 mesurés
+ * un jour ouvré) sans jamais recevoir le bonus. Le terme nu `"bfm"` couvre les
+ * deux étiquettes observées.
+ */
 const FR_SOURCE_BOOST = [
   "les echos",
   "le monde",
@@ -43,6 +52,7 @@ const FR_SOURCE_BOOST = [
   "zonebourse",
   "investir",
   "capital",
+  "bfm", // couvre « BFM » et « BFM Bourse », les étiquettes réellement rendues
   "bfmtv",
   "bfm business",
   "bfmbusiness",
@@ -50,9 +60,24 @@ const FR_SOURCE_BOOST = [
   "boursier.com",
   "france 24",
   "reuters", // souvent dispo en FR via Google News FR
+  "agefi", // « L'Agefi »
+  "usine nouvelle", // « L'Usine Nouvelle »
+  // L'édition française porte le suffixe « France » dans l'étiquette Google
+  // News (mesuré : « Investing.com France », jamais « Investing.com » nu avec
+  // hl=fr&gl=FR) — le bonus ne cible qu'elle, pas une édition anglophone.
+  "investing.com france",
 ];
 
-/** Domaines économie francophones ciblés par requête RSS dédiée. */
+/**
+ * Domaines économie francophones ciblés par requête RSS dédiée.
+ *
+ * `fr.investing.com` (édition FR seulement — pas `investing.com` nu, qui
+ * pourrait rendre l'édition anglophone), `agefi.fr`, `usinenouvelle.com`
+ * ajoutés. `lemonde.fr` et `lefigaro.fr` aussi : ces deux titres portaient déjà
+ * un bonus sur le nom (`FR_SOURCE_BOOST`) mais aucune requête dédiée ne les
+ * ciblait — mesuré, ils n'apparaissaient que par accident, quand une requête
+ * générique les faisait remonter.
+ */
 const FR_ECONOMY_DOMAINS = [
   "bfmbusiness.com",
   "boursier.com",
@@ -60,6 +85,11 @@ const FR_ECONOMY_DOMAINS = [
   "latribune.fr",
   "lesechos.fr",
   "challenges.fr",
+  "fr.investing.com",
+  "agefi.fr",
+  "usinenouvelle.com",
+  "lemonde.fr",
+  "lefigaro.fr",
 ];
 
 export function isUsableArticleUrl(url: string | null | undefined): boolean {
@@ -80,7 +110,7 @@ export function newsSearchFallbackUrl(title: string, source?: string): string {
   return `https://news.google.com/search?q=${encodeURIComponent(q)}&hl=fr&gl=FR&ceid=FR:fr`;
 }
 
-function isFrSource(source: string): boolean {
+export function isFrSource(source: string): boolean {
   const s = source.toLowerCase();
   return FR_SOURCE_BOOST.some((f) => s.includes(f));
 }
