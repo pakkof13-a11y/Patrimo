@@ -777,11 +777,15 @@ export function evolutionDeltaSummary(points: EvolutionSeriesPoint[]): {
  * P&L de période, distinct du Δ de stock affiché juste au-dessus.
  *
  * `delta = last − first` inclut les versements ; `pnl = delta − flows` les
- * neutralise. Le pourcentage rapporte ce P&L à un capital moyen **pondéré
- * par le temps** : `first + Σ flowᵢ · (T − tᵢ) / T`. `first` seul surévalue le
- * rendement quand un apport arrive tard dans la fenêtre ; `first + flows` le
- * sous-évalue en traitant un apport de la veille comme investi depuis le
- * premier jour. Le pondéré est le seul stable dans les deux sens.
+ * neutralise. Le pourcentage rapporte ce P&L au **capital engagé** sur la
+ * fenêtre — `first + flows`, la valeur de départ plus les versements nets,
+ * sans pondération temporelle.
+ *
+ * Le capital moyen pondéré par le temps serait méthodologiquement plus fin, et
+ * il a été essayé : sur une fenêtre longue il rend la ligne inutilisable. Le
+ * commentaire du corps donne les chiffres mesurés qui l'ont fait écarter, et la
+ * raison qui a emporté la décision — le capital engagé se **déduit** des deux
+ * montants affichés juste au-dessus, ce qui est tout l'objet de ce bandeau.
  *
  * Rend `null` — jamais un zéro, jamais un pourcentage inventé — dès que la
  * base est indéfinie : fenêtre à un point, capital de référence non positif,

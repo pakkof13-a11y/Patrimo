@@ -1038,17 +1038,25 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
      * Watchlist.closeDay doit rester à ≤ 1 séance (Vague2 D4).
      */
     navAsOfDay: parisDayKey(new Date()),
+    /*
+      Collecte la plus ancienne parmi les lignes détenues, ou `null`.
+
+      Le calcul passait par `oldestFetchedAt`, qui attend des relevés de
+      clôture : il fallait donc fabriquer une ligne complète par actif — avec
+      un `day`, un `closeEur` à zéro et une `source` inventée — dont la
+      fonction ne lit jamais que `fetchedAt`. Ces trois champs ne décrivaient
+      rien ; ils servaient à satisfaire un type.
+
+      Le minimum direct dit ce qu'on cherche. Et l'absence se rend en `null`,
+      comme partout ailleurs dans ce résumé : la chaîne vide passait les
+      vérifications de présence et devenait une date invalide chez l'appelant.
+    */
     fetchedAt:
-      oldestFetchedAt(
-        holdings
-          .filter((h) => h.fetchedAt)
-          .map((h) => ({
-            day: h.closeDay ?? parisDayKey(new Date()),
-            closeEur: 0,
-            fetchedAt: h.fetchedAt,
-            source: "daily-close" as const,
-          }))
-      ) ?? "",
+      holdings.reduce<string | null>((plusAncien, h) => {
+        const f = h.fetchedAt;
+        if (!f) return plusAncien;
+        return plusAncien == null || f < plusAncien ? f : plusAncien;
+      }, null),
     /** Actif brut = Σ poches d'actif (contrat PatrimonyMetrics). */
     portfolioPlusCashEur: toFixed(totalAssets, 8),
     totalGrossAssetsEur: toFixed(totalAssets, 8),
