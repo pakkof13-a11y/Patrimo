@@ -490,8 +490,9 @@ export function PreferencesPanel({
               P&amp;L latent — période
             </p>
             <p className="text-meta mb-2">
-              Période affichée sur l&apos;indicateur P&amp;L latent (bandeau KPI).
-              « Tout » = latent total actuel.
+              Période affichée sur l&apos;indicateur P&amp;L (bandeau KPI).
+              « Tout » remonte à la profondeur servie, six ans au plus — ce
+              n&apos;est plus le cumul depuis l&apos;origine.
             </p>
             <div
               className="flex flex-nowrap gap-0.5 overflow-x-auto pb-0.5"

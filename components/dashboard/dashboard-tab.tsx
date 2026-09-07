@@ -36,7 +36,6 @@ import {
 } from "@/app/lib/dashboard/maturity";
 import {
   isEvolutionRangeEnabled,
-  windowForRange,
   type EvolutionRange,
 } from "@/app/lib/portfolio/evolution-aggregate";
 import {
@@ -44,25 +43,45 @@ import {
   loadEvolutionPrefs,
   saveEvolutionRange,
 } from "@/app/lib/portfolio/evolution-prefs";
-import {
-  kpiSeries,
-  latentPnlAt,
-  listedValueAt,
-  realizedPlusIncomeAt,
-  seriesChangeAbs,
-  seriesChangePct,
-} from "@/app/lib/portfolio/kpi-series";
+import { seriesChangeAbs, seriesChangePct } from "@/app/lib/portfolio/kpi-series";
 import { useDailyNavQuery } from "@/app/hooks/use-portfolio-queries";
-import { parisDayKey } from "@/app/lib/dates/paris";
+import { parisDayKey, endOfParisDay } from "@/app/lib/dates/paris";
 import {
   dailyNavQueryWindow,
   dailyNavToHistoryPoints,
   servedDailyNavFrom,
+  windowDailyNav,
   type HeroNavScope,
 } from "@/app/lib/portfolio/daily-nav-view";
-import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
+import type { DailyNavPoint } from "@/app/lib/portfolio/historical/get-daily-nav";
+import { heroPeriodLabel, heroWindowReference } from "@/app/lib/portfolio/hero-range";
 import { quoteStaleBadgeLabel } from "@/app/lib/ui/quote-staleness";
 import { evolutionRangePeriodLabel } from "@/app/lib/ui/evolution-ranges";
+
+/**
+ * Série dense sur une fenêtre `getDailyNav`, ou rien.
+ *
+ * Même règle que `kpiSeries` (UNKNOWN ≠ ZERO), adaptée à `DailyNavPoint` —
+ * `titresValueAt` et le croisement classe × enveloppe rendent `null` plutôt
+ * qu'une valeur inventée, et un seul point manquant invalide toute la série
+ * plutôt que de la combler.
+ */
+function denseNavSeries(
+  points: DailyNavPoint[],
+  pick: (p: DailyNavPoint) => number | null | undefined
+): number[] | undefined {
+  if (points.length < 2) return undefined;
+  const out: number[] = [];
+  for (const p of points) {
+    const v = pick(p);
+    if (v == null || !Number.isFinite(v)) return undefined;
+    out.push(v);
+  }
+  return out;
+}
+
+/** États basculables de la tuile P&L — cf. AGENTS.md D19 P&L. */
+type PnlTileMode = "latent" | "realized";
 
 const emptySubscribe = () => () => undefined;
 
@@ -165,6 +184,12 @@ export function DashboardTab({
   const displayAllocation = stableAllocation ?? allocation;
 
   const [navScope, setNavScope] = useState<HeroNavScope>("net");
+  /**
+   * État de la tuile P&L — Latent par défaut. Ni l'un ni l'autre n'est
+   * persisté : c'est une lecture ponctuelle du même écran, pas une
+   * préférence durable comme la période ou le scope Net/Brut.
+   */
+  const [pnlMode, setPnlMode] = useState<PnlTileMode>("latent");
 
   /*
     Les valeurs brutes, sans `round2`.
@@ -279,6 +304,21 @@ export function DashboardTab({
   );
   const dailyNavQ = useDailyNavQuery(navWindow.from, navWindow.to);
   const dailyNavPoints = dailyNavQ.data?.points;
+
+  /*
+    Fenêtre du bandeau d'indicateurs — même mécanique que la courbe
+    (`windowDailyNav`, ancre conservée en tête pour le Δ), appliquée à la
+    série brute `getDailyNav` plutôt qu'à sa recomposition `HistoryPoint` :
+    c'est elle qui porte le croisement classe × enveloppe (Titres) et
+    `byAssetClass` (Crypto), que `dailyNavToHistoryPoints` ne transporte pas.
+  */
+  const navWindowed = useMemo(
+    () =>
+      dailyNavPoints && dailyNavPoints.length
+        ? windowDailyNav(dailyNavPoints, range, referenceDay)
+        : [],
+    [dailyNavPoints, range, referenceDay]
+  );
 
   /*
     Répartition du patrimoine (D19 P2bis) — sept parts par classe de
@@ -458,63 +498,173 @@ export function DashboardTab({
    * soient calculés.
    */
   const kpis = useMemo<TerminalKpi[]>(() => {
-    const source = curveHistory.length >= 2 ? curveHistory : stableHistory;
-    const h = windowForRange(
-      source,
-      range,
-      heroWindowReference(source)
-    );
-    const sparkDates = h.map((p) => p.date);
+    const sparkDates = navWindowed.map((p) => endOfParisDay(p.day).toISOString());
 
-    const listed = kpiSeries(h, listedValueAt);
-    const cash = kpiSeries(h, (p) => p.cashTotalBase);
-    const alternatives = kpiSeries(h, (p) => p.alternativesBase);
-    const employeeSavings = kpiSeries(h, (p) => p.employeeSavingsBase);
-    const liabilities = kpiSeries(h, (p) => p.liabilitiesBase);
-    const latent = kpiSeries(h, latentPnlAt);
-    const realized = kpiSeries(h, realizedPlusIncomeAt);
     /*
-      La série est cumulative depuis l'origine : sa variation sur la fenêtre
-      *est* ce qui a été réalisé et encaissé pendant la fenêtre. Une seule
-      lecture, réutilisée par le montant et par la teinte.
+      Titres : croisement classe × enveloppe (PEA + CTO), jamais
+      `byAssetClass` — même lecture que la répartition du patrimoine
+      (`patrimonySlices` ci-dessus), pas une seconde formule.
     */
+    const titres = denseNavSeries(navWindowed, (p) => titresValueAt(p));
+    const crypto = denseNavSeries(navWindowed, (p) => p.byAssetClass?.CRYPTO);
+    const av = denseNavSeries(navWindowed, (p) => p.av);
+    /*
+      Immobilier net : valeur des biens moins la dette qui les porte — même
+      recomposition que `patrimonySlices.immobilier` (les seuls passifs
+      actuels sont des crédits immobiliers), pas une seconde formule de
+      valorisation.
+    */
+    const realEstateNet = denseNavSeries(navWindowed, (p) => p.immobilier - p.passifs);
+    const alternatives = denseNavSeries(navWindowed, (p) => p.alternatifs);
+    const employeeSavings = denseNavSeries(navWindowed, (p) => p.employeeSavings);
+    const cash = denseNavSeries(navWindowed, (p) => p.cash);
+    const liabilities = denseNavSeries(navWindowed, (p) => p.passifs);
+    const latent = denseNavSeries(navWindowed, (p) => p.unrealizedPnl);
+    // Réalisé pur (cessions), sans les revenus encaissés — cf. AGENTS.md D19 :
+    // le repère de contrôle 3M (+117,08 €) est la seule vente de la période.
+    const realized = denseNavSeries(navWindowed, (p) => p.realizedPnl);
+
+    /*
+      Ni `unrealizedPnl` ni `realizedPnl` ne sont périodiques : ce sont des
+      cumuls à date. La tuile P&L affiche donc toujours un Δ de fenêtre —
+      dernier point moins l'ancre que `windowDailyNav` conserve en tête —
+      jamais le cumul brut, qui ne bougerait pas d'un chip de période à
+      l'autre.
+    */
+    const latentPeriod = seriesChangeAbs(latent);
     const realizedPeriod = seriesChangeAbs(realized);
+    const pnlPeriod = pnlMode === "latent" ? latentPeriod : realizedPeriod;
+    const pnlSpark = pnlMode === "latent" ? latent : realized;
+    /*
+      « Tout » n'est plus « depuis l'origine » depuis le cap de six ans : son
+      ancre est le plancher servi (`servedNavFrom`), daté explicitement — sinon
+      le chip affirmerait une origine que l'application ne sert plus.
+    */
+    const periodPhrase =
+      range === "all"
+        ? heroPeriodLabel(range, servedNavFrom)
+        : evolutionRangePeriodLabel(range);
+    const pnlLabel =
+      pnlMode === "latent"
+        ? `P&L latent ${periodPhrase}`
+        : `P&L réalisé ${periodPhrase}`;
+
+    const cryptoNow = num(
+      displayAllocation?.byClass?.find((s) => s.name === "CRYPTO")?.value ?? 0
+    );
+    const listedNow = num(
+      summary?.totalListedBase ??
+        summary?.totalListedEur ??
+        summary?.totalMarketValueBase ??
+        summary?.totalMarketValueEur
+    );
+    /*
+      Même repli que `patrimonySlices` : croisement classe × enveloppe en
+      priorité, `listed − crypto` seulement s'il n'est pas encore chargé.
+      Pas une seconde formule — la même lecture, appliquée au dernier point
+      de la fenêtre `getDailyNav` plutôt qu'à celui de la répartition.
+    */
+    const lastNavPoint = navWindowed[navWindowed.length - 1];
+    const titresCroisementNow = lastNavPoint
+      ? titresValueAt(lastNavPoint)
+      : null;
+    const realEstateNetNow =
+      num(summary?.totalRealEstateBase ?? summary?.totalRealEstateEur) -
+      num(summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur);
 
     return [
       {
-        key: "listed",
-        label: "Titres & crypto",
-        /*
-          Poche T-01 `listed` : ACTIONS + OBLIGATIONS + CRYPTO, hors IMMO/AV.
-          Même série / fenêtre que le hero (getDailyNav).
-        */
-        value: num(
-          summary?.totalListedBase ??
-            summary?.totalListedEur ??
-            listed?.[listed.length - 1]
-        ),
-        spark: listed,
+        key: "pnl",
+        label: pnlLabel,
+        // UNKNOWN ≠ ZERO : une fenêtre trop courte ne doit pas se lire comme
+        // un P&L nul sur la période.
+        value: pnlPeriod,
+        spark: pnlSpark,
         sparkDates,
-        changeAbs: seriesChangeAbs(listed),
-        changePct: seriesChangePct(listed),
+        changeAbs: undefined,
+        changePct: undefined,
+        tone: pnlPeriod == null ? "neutral" : pnlPeriod >= 0 ? "positive" : "negative",
+        /*
+          Bascule Latent / Réalisé, à l'intérieur de la tuile — la seule à en
+          porter une : les deux grandeurs partagent la même définition (Δ de
+          fenêtre sur un cumul à date), et n'ont donc pas besoin de deux
+          tuiles séparées.
+        */
+        toggle: {
+          active: pnlMode,
+          options: [
+            { id: "latent", label: "Latent" },
+            { id: "realized", label: "Réalisé" },
+          ],
+          onChange: (id) => setPnlMode(id as PnlTileMode),
+        },
+      },
+      {
+        key: "titres",
+        label: "Titres",
+        help: "PEA + CTO (actions, obligations). Hors crypto et hors CFD.",
+        value: num(
+          titresCroisementNow ??
+            Math.max(0, listedNow - cryptoNow)
+        ),
+        spark: titres,
+        sparkDates,
+        changeAbs: seriesChangeAbs(titres),
+        changePct: seriesChangePct(titres),
         tone: "gold",
       },
       {
-        key: "latent",
-        /*
-          Le suffixe n'est pas décoratif. Toutes les autres tuiles présentent un
-          encours du jour surmontant une variation sur la période choisie ; le
-          P&L latent, lui, est déjà un cumul depuis l'origine. Posé sans horizon
-          à côté d'une variation à sept jours, il se lisait comme s'il portait
-          la même fenêtre — d'où « Titres −872 € » et « P&L latent +14 606 € »
-          sur le même écran, deux grandeurs justes que rien ne distinguait.
-        */
-        label: "P&L latent depuis l'origine",
-        value: num(summary?.unrealizedPnlBase ?? summary?.unrealizedPnlEur),
-        spark: latent,
+        key: "crypto",
+        label: "Crypto",
+        value: cryptoNow,
+        spark: crypto,
         sparkDates,
-        changeAbs: seriesChangeAbs(latent),
-        changePct: seriesChangePct(latent),
+        changeAbs: seriesChangeAbs(crypto),
+        changePct: seriesChangePct(crypto),
+        tone: "gold",
+      },
+      {
+        key: "life-insurance",
+        label: "Assurance-vie",
+        value: num(summary?.totalLifeInsuranceBase ?? summary?.totalLifeInsuranceEur),
+        spark: av,
+        sparkDates,
+        changeAbs: seriesChangeAbs(av),
+        changePct: seriesChangePct(av),
+        tone: "neutral",
+      },
+      {
+        key: "real-estate",
+        label: "Immobilier net",
+        help: "Valeur des biens moins la dette qui les porte.",
+        value: realEstateNetNow,
+        spark: realEstateNet,
+        sparkDates,
+        changeAbs: seriesChangeAbs(realEstateNet),
+        changePct: seriesChangePct(realEstateNet),
+        tone: "cyan",
+      },
+      {
+        key: "alternatives",
+        label: "Alternatifs",
+        value: num(summary?.totalAlternativesBase ?? summary?.totalAlternativesEur),
+        spark: alternatives,
+        sparkDates,
+        changeAbs: seriesChangeAbs(alternatives),
+        changePct: seriesChangePct(alternatives),
+        tone: "neutral",
+      },
+      {
+        key: "employee-savings",
+        label: "Épargne salariale",
+        value: num(
+          summary?.totalEmployeeSavingsBase ?? summary?.totalEmployeeSavingsEur
+        ),
+        spark: employeeSavings,
+        sparkDates,
+        changeAbs: seriesChangeAbs(employeeSavings),
+        changePct: seriesChangePct(employeeSavings),
+        tone: "neutral",
       },
       {
         key: "cash",
@@ -543,28 +693,6 @@ export function DashboardTab({
         tone: "cyan",
       },
       {
-        key: "alternatives",
-        label: "Alternatifs",
-        value: num(summary?.totalAlternativesBase ?? summary?.totalAlternativesEur),
-        spark: alternatives,
-        sparkDates,
-        changeAbs: seriesChangeAbs(alternatives),
-        changePct: seriesChangePct(alternatives),
-        tone: "neutral",
-      },
-      {
-        key: "employee-savings",
-        label: "Épargne salariale",
-        value: num(
-          summary?.totalEmployeeSavingsBase ?? summary?.totalEmployeeSavingsEur
-        ),
-        spark: employeeSavings,
-        sparkDates,
-        changeAbs: seriesChangeAbs(employeeSavings),
-        changePct: seriesChangePct(employeeSavings),
-        tone: "neutral",
-      },
-      {
         key: "liabilities",
         label: "Passifs",
         value: num(summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur),
@@ -579,45 +707,8 @@ export function DashboardTab({
         changePct: seriesChangePct(liabilities),
         tone: "negative",
       },
-      {
-        key: "realized",
-        /*
-          Même défaut que le P&L latent, à l'envers : la série est cumulative
-          depuis l'origine, mais la tuile doit porter la somme réalisée +
-          encaissée sur la fenêtre affichée, pas le cumul. Cette somme vaut
-          exactement `dernier − premier` de la série — ce que
-          `seriesChangeAbs` calcule déjà — donc le montant de tête et
-          `seriesChangeAbs(realized)` sont la même grandeur. Pas de seconde
-          formule, et pas de ligne de variation en double en dessous : une
-          fois le montant devenu la variation de la période, la répéter en
-          dessous n'apprendrait rien.
-        */
-        label: `Réalisé + revenus ${evolutionRangePeriodLabel(range)}`,
-        // UNKNOWN ≠ ZERO : une série absente ou à un seul point ne doit pas
-        // se lire comme un réalisé nul sur la période.
-        value: realizedPeriod,
-        spark: realized,
-        sparkDates,
-        // Le dénominateur d'un « réalisé en % » serait le capital de la
-        // fenêtre, non calculé ici : un pourcentage adossé à autre chose
-        // serait faux, donc aucun n'est affiché sur cette tuile.
-        changeAbs: undefined,
-        changePct: undefined,
-        /*
-          La teinte se déduisait du signe de `changeAbs`. Celui-ci ayant
-          disparu, la tuile serait retombée en gris neutre alors que son
-          montant, lui, a bien un signe. On le déclare donc explicitement :
-          la couleur décrit le chiffre affiché, comme partout ailleurs.
-        */
-        tone:
-          realizedPeriod == null
-            ? "neutral"
-            : realizedPeriod >= 0
-              ? "positive"
-              : "negative",
-      },
     ];
-  }, [summary, stableHistory, curveHistory, range]);
+  }, [summary, navWindowed, range, pnlMode, servedNavFrom, displayAllocation?.byClass]);
 
   const netWorth = summary
     ? num(summary.netWorthBase ?? summary.netWorthEur)

@@ -23,7 +23,7 @@ test.describe("Confidentialité des montants", () => {
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
     const netWorth = page.getByTestId("hero-net-worth");
-    const tile = page.getByTestId("kpi-listed");
+    const tile = page.getByTestId("kpi-titres");
 
     /*
       Attendre la donnée, et non seulement l'élément.

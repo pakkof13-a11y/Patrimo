@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import { endOfParisDay } from "@/app/lib/dates/paris";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, ChevronDown, ChevronUp } from "lucide-react";
 import { maskAmount, useAmountsHidden } from "@/app/lib/ui/privacy-prefs";
+import { loadUiPref, saveUiPref } from "@/app/lib/ui-preferences";
 import type { HistoryPoint } from "@/app/lib/types/ui";
 import { Sparkline } from "@/components/ui/sparkline";
 import {
@@ -905,7 +906,20 @@ export type TerminalKpi = {
    * déjà pour le Δ est le bon endroit.
    */
   help?: string;
+  /**
+   * Bascule interne à la tuile — seul le P&L en porte une (Latent / Réalisé).
+   * Les deux options lisent la même définition (Δ de fenêtre sur un cumul à
+   * date) ; ce n'est donc pas deux tuiles, mais deux lectures d'une seule.
+   */
+  toggle?: {
+    active: string;
+    options: { id: string; label: string }[];
+    onChange: (id: string) => void;
+  };
 };
+
+/** Préférence de visibilité des tuiles — clés masquées, P&L exclu. */
+const KPI_HIDDEN_KEY = "dashboardKpiHiddenKeys";
 
 const TONE_STROKE: Record<string, string> = {
   gold: "var(--chart-gold)",
@@ -949,6 +963,38 @@ export function TerminalKpiRow({
 }) {
   const [amountsHidden, setAmountsHidden] = useAmountsHidden();
 
+  /*
+    Sélecteur d'indicateurs — masque ou affiche chaque tuile hormis P&L, qui
+    n'est pas décochable : c'est la seule grandeur que la doctrine impose de
+    toujours montrer. La préférence survit au rechargement (`loadUiPref`), et
+    une clé qui nommerait une tuile disparue (« Réalisé + revenus »,
+    « Financier ») est ignorée sans casser l'écran — elle ne correspond à
+    aucun `item.key` connu.
+  */
+  const [hiddenKeys, setHiddenKeys] = useState<string[]>(() =>
+    typeof window !== "undefined" ? loadUiPref<string[]>(KPI_HIDDEN_KEY, []) : []
+  );
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const knownKeys = items.map((i) => i.key);
+  const hidden = hiddenKeys.filter(
+    (k) => knownKeys.includes(k) && k !== "pnl"
+  );
+  const visibleItems = items.filter(
+    (item) => item.key === "pnl" || !hidden.includes(item.key)
+  );
+
+  function toggleTile(key: string) {
+    if (key === "pnl") return;
+    setHiddenKeys((prev) => {
+      const cur = prev.filter((k) => knownKeys.includes(k) && k !== "pnl");
+      const next = cur.includes(key)
+        ? cur.filter((k) => k !== key)
+        : [...cur, key];
+      saveUiPref(KPI_HIDDEN_KEY, next);
+      return next;
+    });
+  }
+
   return (
     <div className="min-w-0 space-y-[var(--space-2)]">
       {/*
@@ -958,6 +1004,68 @@ export function TerminalKpiRow({
       */}
       <div className="flex items-center justify-between gap-[var(--space-2)]">
         <p className="text-label hidden sm:block">Indicateurs</p>
+
+        <div className="relative ml-auto">
+          <button
+            type="button"
+            onClick={() => setPickerOpen((v) => !v)}
+            data-testid="kpi-visibility-toggle"
+            aria-expanded={pickerOpen}
+            className={cn(
+              "inline-flex items-center gap-[var(--space-1)] rounded-[var(--radius-md)]",
+              "px-[var(--space-2)] py-[var(--space-1)] text-[length:var(--text-2xs)] font-medium",
+              "text-[var(--foreground-faint)] transition-colors duration-[var(--duration-fast)]",
+              "hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]",
+              "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+            )}
+          >
+            {pickerOpen ? (
+              <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+            )}
+            <span className="hidden sm:inline">Afficher les indicateurs</span>
+          </button>
+
+          {pickerOpen && (
+            <div
+              role="menu"
+              data-testid="kpi-visibility-menu"
+              className={cn(
+                "absolute right-0 top-full z-30 mt-[var(--space-1)] w-56",
+                "rounded-[var(--radius-md)] border border-[var(--border)]",
+                "bg-[var(--card)] p-[var(--space-2)] shadow-[var(--shadow-md)]"
+              )}
+            >
+              {items.map((item) => {
+                const isPnl = item.key === "pnl";
+                const checked = isPnl || !hidden.includes(item.key);
+                return (
+                  <label
+                    key={item.key}
+                    className={cn(
+                      "flex items-center gap-[var(--space-2)] rounded-[var(--radius-sm)]",
+                      "px-[var(--space-1)] py-[var(--space-1)] text-[length:var(--text-xs)]",
+                      isPnl
+                        ? "text-[var(--foreground-faint)]"
+                        : "cursor-pointer text-[var(--foreground)] hover:bg-[var(--surface-hover)]"
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={isPnl}
+                      onChange={() => toggleTile(item.key)}
+                      data-testid={`kpi-visibility-${item.key}`}
+                    />
+                    {typeof item.label === "string" ? item.label : item.key}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         <button
           type="button"
           onClick={() => setAmountsHidden(!amountsHidden)}
@@ -972,7 +1080,7 @@ export function TerminalKpiRow({
             amountsHidden ? "Afficher les montants" : "Masquer les montants"
           }
           className={cn(
-            "ml-auto inline-flex items-center gap-[var(--space-1)] rounded-[var(--radius-md)]",
+            "inline-flex items-center gap-[var(--space-1)] rounded-[var(--radius-md)]",
             "px-[var(--space-2)] py-[var(--space-1)] text-[length:var(--text-2xs)] font-medium",
             "transition-colors duration-[var(--duration-fast)] hover:bg-[var(--surface-hover)]",
             "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
@@ -995,12 +1103,12 @@ export function TerminalKpiRow({
       <div
         className={cn(
           "grid min-w-0 gap-[var(--gap-card)]",
-          "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7"
+          "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-9"
         )}
         data-testid="terminal-kpi-row"
         data-range={range}
       >
-      {items.map((item) => {
+      {visibleItems.map((item) => {
         /*
           Montant et pourcentage décrivent la même variation, sur la même
           période et la même série. L'un peut manquer sans l'autre : un
@@ -1030,15 +1138,11 @@ export function TerminalKpiRow({
           item.changeAbs !== undefined || item.changePct !== undefined;
         /*
           Le panneau de détail répète, sans troncature, ce que la sous-ligne
-          coupe : Δ et % complets, plus une ligne « P&L » quand le montant de
-          tête porte une grandeur distincte de la variation de fenêtre (cas du
-          P&L latent : encours cumulé depuis l'origine vs. mouvement sur la
-          période affichée).
+          coupe : Δ et % complets.
         */
         const detailId = `kpi-detail-${item.key}`;
         const hasValue =
           typeof item.value === "number" && Number.isFinite(item.value);
-        const showPnlRow = item.key === "latent" && hasValue;
         return (
           <article
             key={item.key}
@@ -1047,9 +1151,42 @@ export function TerminalKpiRow({
             tabIndex={0}
             aria-describedby={detailId}
           >
-            <h3 className="text-label truncate" title={item.label}>
-              {item.label}
-            </h3>
+            <div className="flex items-center justify-between gap-[var(--space-1)]">
+              <h3 className="text-label truncate" title={item.label}>
+                {item.label}
+              </h3>
+              {item.toggle && (
+                <div
+                  className="flex shrink-0 gap-0.5"
+                  role="tablist"
+                  aria-label="Latent ou réalisé"
+                  data-testid={`kpi-${item.key}-toggle`}
+                >
+                  {item.toggle.options.map((opt) => {
+                    const selected = item.toggle!.active === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={selected}
+                        data-testid={`kpi-${item.key}-toggle-${opt.id}`}
+                        onClick={() => item.toggle!.onChange(opt.id)}
+                        className={cn(
+                          "rounded-[var(--radius-sm)] px-1 py-0.5 text-[9px] font-medium leading-none transition",
+                          "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+                          selected
+                            ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                            : "bg-[var(--muted)]/70 text-[var(--foreground-secondary)] hover:bg-[var(--muted)]"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             <p
               className={cn(
@@ -1209,32 +1346,6 @@ export function TerminalKpiRow({
                         </>
                       ) : (
                         "—"
-                      )}
-                    </dd>
-                  </div>
-                )}
-                {showPnlRow && (
-                  <div className="flex items-baseline justify-between gap-[var(--space-2)]">
-                    <dt className="text-[var(--foreground-faint)]">P&L</dt>
-                    <dd className="num text-right text-[var(--foreground)]">
-                      {maskAmount(
-                        formatCurrency(item.value as number, baseCurrency),
-                        amountsHidden
-                      )}{" "}
-                      cumulé
-                      {abs !== null && (
-                        <>
-                          {" "}
-                          ·{" "}
-                          <span className={up ? "val-positive" : "val-negative"}>
-                            {abs >= 0 ? "+" : "−"}
-                            {maskAmount(
-                              formatCurrency(Math.abs(abs), baseCurrency),
-                              amountsHidden
-                            )}
-                          </span>{" "}
-                          sur la fenêtre
-                        </>
                       )}
                     </dd>
                   </div>
