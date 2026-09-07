@@ -8,6 +8,7 @@
  * Aucune valeur n'est calculée ici qui ne soit déjà sur le point T-05.
  */
 
+import { mondayOfWeek } from "./historical/history-window";
 import { endOfParisDay, parisDayKey } from "../dates/paris";
 import {
   startOfRange,
@@ -305,6 +306,26 @@ export type DailyNavChartPoint = {
  * `delta` du premier point vaut 0 : l'ancre borne la fenêtre, elle n'est
  * pas une barre de la période. Hover : Marché = `delta`, Flux = `flux`.
  */
+/**
+ * Ce qu'une barre désigne au survol.
+ *
+ * Au pas quotidien, la clé du jour suffit. Au pas hebdomadaire elle induirait
+ * en erreur : la barre porte la performance et les flux de **toute** la
+ * semaine, et l'annoncer par un seul jour ferait lire un mouvement de sept
+ * jours comme celui du lundi. Elle est donc nommée par la semaine qu'elle
+ * couvre.
+ *
+ * Le lundi n'est pas toujours la date du point — les deux bornes de la fenêtre
+ * tombent où elles tombent — d'où le rattachement à la semaine civile plutôt
+ * qu'à la date elle-même : un point du vendredi 6 clôt bien la semaine du
+ * lundi 2, et c'est cet intervalle que le lecteur cherche.
+ */
+export function navPointPeriodLabel(p: DailyNavPoint): string {
+  return p.intervalType === "week"
+    ? `semaine du ${mondayOfWeek(p.day)}`
+    : p.day;
+}
+
 export function toDailyNavChartPoints(
   points: DailyNavPoint[],
   scope: HeroNavScope
@@ -317,7 +338,7 @@ export function toDailyNavChartPoints(
       date: at.toISOString(),
       t: at.getTime(),
       day: p.day,
-      periodLabel: p.day,
+      periodLabel: navPointPeriodLabel(p),
       total: navOfPoint(p, scope),
       delta: deltas[i] ?? 0,
       flux: fluxOfDay(p, prev, scope),

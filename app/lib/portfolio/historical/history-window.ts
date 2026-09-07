@@ -102,6 +102,23 @@ function weekdayOf(day: DayKey): number {
 }
 
 /**
+ * Lundi de la semaine civile qui contient `day`.
+ *
+ * Sert à nommer un point hebdomadaire. Le point lui-même tombe sur un lundi,
+ * sauf aux deux bornes de la fenêtre — celle qui l'ouvre, et celle qui la
+ * ferme sur le jour demandé. Les nommer par leur propre date laisserait
+ * croire à une semaine qui commencerait un vendredi ; les nommer par leur
+ * lundi dit l'intervalle qu'ils closent, ce qui est ce que le lecteur cherche.
+ */
+export function mondayOfWeek(day: DayKey): DayKey {
+  const [y, m, dd] = day.split("-").map(Number);
+  const d = new Date(Date.UTC(y!, m! - 1, dd!, 12));
+  const recul = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - recul);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+/**
  * Jours où la série **émet un point**, bornes incluses.
  *
  * Pas quotidien : tous les jours civils — contrat T-05 inchangé.

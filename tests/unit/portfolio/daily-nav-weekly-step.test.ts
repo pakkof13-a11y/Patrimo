@@ -1,3 +1,5 @@
+import { mondayOfWeek } from "@/app/lib/portfolio/historical/history-window";
+import { navPointPeriodLabel } from "@/app/lib/portfolio/daily-nav-view";
 import { describe, expect, it } from "vitest";
 import {
   PortfolioValuationEngine,
@@ -317,5 +319,47 @@ describe("dailyNavFromSeries — le pas est publié, pas deviné", () => {
       "day"
     );
     expect(jour.every((p) => p.intervalType === "day")).toBe(true);
+  });
+});
+
+/*
+  Le libellé d'une barre hebdomadaire.
+
+  Une barre au pas semaine porte la performance et les flux de sept jours.
+  L'annoncer par la seule date du point ferait lire ce mouvement comme celui
+  du lundi — et pour les deux bornes de la fenêtre, qui ne tombent pas un
+  lundi, comme celui d'une semaine qui commencerait un vendredi.
+*/
+describe("navPointPeriodLabel — ce qu'une barre désigne", () => {
+  const pt = (day: string, intervalType: "day" | "week") =>
+    ({ day, intervalType }) as unknown as Parameters<
+      typeof navPointPeriodLabel
+    >[0];
+
+  it("au pas quotidien, la barre porte son jour", () => {
+    expect(navPointPeriodLabel(pt("2026-09-04", "day"))).toBe("2026-09-04");
+  });
+
+  it("au pas hebdomadaire, elle porte la semaine qu'elle couvre", () => {
+    expect(navPointPeriodLabel(pt("2026-08-31", "week"))).toBe(
+      "semaine du 2026-08-31"
+    );
+  });
+
+  it("un point qui ne tombe pas un lundi est rattaché à son lundi", () => {
+    // Borne de fenêtre : le vendredi 4 clôt la semaine du lundi 31.
+    expect(navPointPeriodLabel(pt("2026-09-04", "week"))).toBe(
+      "semaine du 2026-08-31"
+    );
+    // Dimanche : rattaché au lundi qui ouvre sa semaine, pas au suivant.
+    expect(navPointPeriodLabel(pt("2026-09-06", "week"))).toBe(
+      "semaine du 2026-08-31"
+    );
+  });
+
+  it("mondayOfWeek est stable un lundi et traverse les mois", () => {
+    expect(mondayOfWeek("2026-08-31")).toBe("2026-08-31");
+    expect(mondayOfWeek("2026-03-01")).toBe("2026-02-23");
+    expect(mondayOfWeek("2026-01-01")).toBe("2025-12-29");
   });
 });
