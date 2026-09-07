@@ -16,8 +16,11 @@ import { compressDailyNavPoints } from "@/app/lib/portfolio/historical/daily-nav
 /**
  * GET /api/portfolio/daily-nav?scope=financier&from=YYYY-MM-DD&to=YYYY-MM-DD
  *
- * `getDailyNav` rend une série dense T-05 : un point par jour civil, scopes
- * PatrimonyMetrics. Lecture pure — aucune collecte de clôtures.
+ * `getDailyNav` rend une série T-05 au pas décidé par l'étendue servie : un
+ * point par jour civil jusqu'à ~1 an, un point par semaine civile (lundi)
+ * au-delà. Le pas est publié dans `step` et dans `intervalType` de chaque
+ * point — le client le lit, il ne le recalcule pas. Lecture pure : aucune
+ * collecte de clôtures.
  *
  * La réponse HTTP, elle, comprime les suites de jours strictement identiques
  * (cf. `daily-nav-compress.ts`) : c'est ce qui évite qu'un « Tout » sur un

@@ -1,12 +1,20 @@
 /**
  * Échantillonnage aval de la série `daily-nav`, à la frontière HTTP.
  *
- * Le moteur (`buildSeries`) et `getDailyNav` restent **denses** : un point par
- * jour civil, sans exception — c'est leur contrat, vérifié par les tests
- * golden de `get-daily-nav.test.ts`. Cette compression n'y touche pas ; elle
- * s'applique en aval, sur la réponse déjà construite, pour que « Tout » sur un
- * patrimoine à plateau (années sans écriture entre deux acquisitions) ne
- * traîne pas des milliers de points identiques jusqu'au client.
+ * Le moteur (`buildSeries`) et `getDailyNav` décident du **pas** — jour civil
+ * jusqu'à ~1 an, semaine civile au-delà (`history-window.ts`). Cette
+ * compression ne décide de rien : elle s'applique en aval, sur la réponse déjà
+ * construite, et ne fait que retirer des points dont le rendu serait superposé
+ * au précédent.
+ *
+ * Ce qu'elle apporte depuis le pas hebdomadaire : mesuré sur l'utilisateur
+ * demo (2026-09-07, scope financier, fenêtre 5A/Tout), elle replie encore 314
+ * points en 294 — les paliers d'un patrimoine sans écriture, où même un point
+ * par semaine se superpose au précédent. Beaucoup moins qu'avant (1 876 sur
+ * 2 191), et c'est normal : le gros du travail a été déplacé en amont, où il
+ * économise en plus la valorisation. Elle reste utile sur les scopes à long
+ * plateau — une poche immobilière ne bouge qu'aux expertises — et sur les
+ * fenêtres denses elle ne retire toujours rien.
  *
  * Règle, volontairement sans seuil ni interpolation :
  *

@@ -1,9 +1,20 @@
 /**
  * T-05 — `getDailyNav({ scope, from, to })`.
  *
- * Une série **dense** : exactement un point par jour civil Paris, bornes
- * incluses. Pas d'échantillonnage (l'écran peut réduire une copie ; ce
- * contrat, lui, ne retire aucun jour). Les scopes lisent le contrat T-01
+ * Une série dont le **pas dépend de l'étendue servie** : un point par jour
+ * civil Paris jusqu'à ~1 an, un point par semaine civile (lundi) au-delà. La
+ * règle est unique et vit dans `history-window.ts`, à côté du cap de
+ * profondeur ; `DailyNavResult.step` et `DailyNavPoint.intervalType` la
+ * publient pour que personne n'ait à la rejouer.
+ *
+ * Sur une série hebdomadaire, les **flux sont sommés sur l'intervalle** entre
+ * deux points émis (cf. `engine.buildSeries`) : sans cela, un apport du
+ * mercredi tomberait dans la barre « Performance » du lundi suivant. Le
+ * journal, lui, reste rejoué jour par jour. Le dernier point est toujours le
+ * jour demandé, même si la semaine en cours est incomplète.
+ *
+ * Aucun lissage : rien n'est interpolé entre deux points, une semaine sans
+ * observation n'est pas une semaine à zéro. Les scopes lisent le contrat T-01
  * (`computePatrimonyMetrics`) via les champs que le moteur publie déjà à
  * chaque date — aucune seconde formule.
  *
@@ -25,6 +36,7 @@ import {
   PATRIMONY_ASSET_POCKETS,
   type PatrimonyAssetPocket,
 } from "../patrimony-metrics";
+import { historyStepForWindow, type HistoryStep } from "./history-window";
 import { loadHistoricalInputs } from "./load";
 import { PortfolioValuationEngine } from "./engine";
 import type { PriceOrigin } from "./price-resolver";
@@ -54,6 +66,20 @@ export function isDailyNavScope(value: string): value is DailyNavScope {
 
 export type DailyNavPoint = {
   day: DayKey;
+  /**
+   * Durée que le point couvre — `"day"` ou `"week"`.
+   *
+   * Même information que `EvolutionSeriesPoint.intervalType`, et pour la même
+   * raison : l'appelant ne doit pas avoir à deviner le pas de l'écart entre
+   * deux dates, qui est de toute façon irrégulier (le premier et le dernier
+   * intervalle d'une série hebdomadaire sont plus courts que sept jours).
+   *
+   * Sur un point hebdomadaire, `externalFlows` / `transactionFlow` /
+   * `financierFlows` / `flowsByAssetClass` sont la **somme de l'intervalle**
+   * qui sépare ce point du précédent ; `nav` et les ventilations restent des
+   * stocks à la date du point.
+   */
+  intervalType: HistoryStep;
   nav: number;
   status: HistoricalDataStatus;
   /** Capital externe du jour (apports / retraits / achats hors cash explicite). */
@@ -142,7 +168,14 @@ export type DailyNavResult = {
   scope: DailyNavScope;
   from: DayKey;
   to: DayKey;
-  /** Un point par jour civil, `from` → `to` inclus. */
+  /**
+   * Pas de la série servie — `"day"` ou `"week"` (`history-window.ts`).
+   *
+   * Décidé sur la fenêtre servie, jamais recopié par l'appelant : le client le
+   * relit ici plutôt que de rejouer la règle sur la période qu'il a demandée.
+   */
+  step: HistoryStep;
+  /** Un point par jour civil, ou par semaine civile si `step === "week"`. */
   points: DailyNavPoint[];
   /**
    * Jour du dernier point — ancre hero / KPI / watchlist (Vague2 D4).
@@ -185,10 +218,12 @@ export function navAtScope(
 
 export function dailyNavFromSeries(
   series: PortfolioValuationPoint[],
-  scope: DailyNavScope
+  scope: DailyNavScope,
+  step: HistoryStep = "day"
 ): DailyNavPoint[] {
   return series.map((p) => ({
     day: p.day,
+    intervalType: step,
     nav: navAtScope(p, scope),
     status: p.status,
     externalFlows: p.externalFlows,
@@ -258,6 +293,7 @@ export async function getDailyNav(opts: {
       scope: opts.scope,
       from: requestedFrom,
       to,
+      step: "day",
       points: [],
       asOfDay: null,
       fetchedAt: null,
@@ -265,14 +301,23 @@ export async function getDailyNav(opts: {
   }
   const from = requestedFrom < scopeEarliest ? scopeEarliest : requestedFrom;
 
-  const series = engine.buildSeries(from, to);
-  const points = dailyNavFromSeries(series, opts.scope);
+  /*
+    Le pas se décide sur la fenêtre **servie**, pas sur celle qui a été
+    demandée : « Tout » sur un scope né il y a trois mois est une fenêtre
+    courte, et rien ne justifierait de la servir à la semaine. La règle vit
+    dans `history-window.ts`, avec le cap de profondeur — un seul endroit
+    décide « depuis quand » et « tous les combien ».
+  */
+  const step = historyStepForWindow(from, to);
+  const series = engine.buildSeries(from, to, step);
+  const points = dailyNavFromSeries(series, opts.scope, step);
   const last = points[points.length - 1];
 
   return {
     scope: opts.scope,
     from,
     to,
+    step,
     points,
     asOfDay: last?.day ?? null,
     fetchedAt: oldestFetchedAt(inputs.lastCloseAsOf?.values()),

@@ -11,6 +11,7 @@ import type { DailyNavPoint } from "@/app/lib/portfolio/historical/get-daily-nav
 function base(day: string, over: Partial<DailyNavPoint> = {}): DailyNavPoint {
   return {
     day,
+    intervalType: over.intervalType ?? "day",
     nav: 0,
     status: "EXACT",
     externalFlows: 0,

@@ -38,7 +38,11 @@
 
 import { endOfParisDay, parisDayKey } from "../../dates/paris";
 import type { LastCloseAsOf } from "../../market/last-close-as-of";
-import { capEarliestDay } from "./history-window";
+import {
+  capEarliestDay,
+  seriesEmissionDays,
+  type HistoryStep,
+} from "./history-window";
 import { toEur } from "../../accounting/fx";
 import {
   applyTransaction,
@@ -667,44 +671,68 @@ export class PortfolioValuationEngine {
   }
 
   /**
-   * Valorise le patrimoine sur une fenêtre, jour par jour.
+   * Valorise le patrimoine sur une fenêtre, au pas demandé.
    *
-   * Renvoie la série **quotidienne complète**. L'échantillonnage pour
-   * l'affichage est une décision d'écran, prise en aval (`downsample`), et il ne
-   * modifie aucune valeur.
+   * **Le journal est rejoué jour par jour, quel que soit le pas.** L'état
+   * comptable d'un lundi dépend de toutes les écritures qui l'ont précédé, pas
+   * seulement de celles des lundis : le curseur de transactions avance sur
+   * chaque jour civil, et `applyLedgerTx` ne saute jamais. Ce qui s'espace,
+   * c'est la **valorisation** — le seul poste dont le coût est linéaire en
+   * jours rejoués.
+   *
+   * **Les flux sont sommés sur l'intervalle entre deux points émis**, jamais
+   * sur le seul jour du point. C'est la condition pour que
+   * `Δmarché(t) = NAV_t − NAV_{t−1} − flux_t` tienne : cette identité est
+   * indexée sur les points émis, pas sur les jours. Avec le flux du seul lundi,
+   * un apport du mercredi passerait pour de la performance de marché.
+   *
+   * Les flux de poches (livrets, alternatifs, épargne salariale), datés au
+   * jour, sont cumulés ici sur le même intervalle — d'où `countSleeveFlows =
+   * false` à l'appel : `valuationAt` n'ajouterait que ceux du jour du point. Au
+   * pas quotidien l'intervalle vaut un jour et le résultat est identique.
    */
-  buildSeries(from: DayKey, to: DayKey): PortfolioValuationPoint[] {
+  buildSeries(
+    from: DayKey,
+    to: DayKey,
+    step: HistoryStep = "day"
+  ): PortfolioValuationPoint[] {
     const days = enumerateDays(from, to);
     if (days.length === 0) return [];
+    const emit = new Set(seriesEmissionDays(from, to, step));
 
     const state = createEmptyLedger();
     let cursor = 0;
-    // Flux du journal cumulés dans la journée courante — remis à zéro à chaque
-    // jour, car un flux appartient au jour où il a eu lieu.
-    let ledgerFlowToday = emptyFlows();
+    /*
+      Flux cumulés depuis le point précédent — remis à zéro à chaque point
+      **émis**, et non à chaque jour : un flux appartient à l'intervalle du
+      point qui le suit.
+    */
+    let flowsSincePoint = emptyFlows();
 
     const out: PortfolioValuationPoint[] = [];
     let previousGross: Decimal | null = null;
     const realized = new RealizedPnlAccumulator();
 
     for (const day of days) {
-      ledgerFlowToday = emptyFlows();
       while (cursor < this.sortedTxs.length) {
         const tx = this.sortedTxs[cursor]!;
         if (this.txDays[cursor]! > day) break;
-        this.accumulateLedgerFlow(ledgerFlowToday, tx);
+        this.accumulateLedgerFlow(flowsSincePoint, tx);
         applyLedgerTx(state, tx);
         cursor += 1;
       }
+      this.accumulateSleeveFlows(flowsSincePoint, day);
+
+      if (!emit.has(day)) continue;
 
       const point = this.valuationAt(
         day,
         state,
-        ledgerFlowToday,
+        flowsSincePoint,
         previousGross,
         undefined,
-        true,
-        // La ventilation de la veille — la seule référence qui rende la
+        false,
+        // La ventilation du point précédent — la seule référence qui rende la
         // performance d'une classe mesurable.
         out.length > 0 ? out[out.length - 1]!.byAssetClass : null,
         undefined,
@@ -712,9 +740,31 @@ export class PortfolioValuationEngine {
       );
       out.push(point);
       previousGross = d(point.grossAssets);
+      flowsSincePoint = emptyFlows();
     }
 
     return out;
+  }
+
+  /**
+   * Flux de poches d'un jour civil, ventilés comme leurs valeurs.
+   *
+   * Même routage que `valuationAt` — trésorerie → `CASH`, alternatifs et
+   * épargne salariale → `AUTRE`. Extrait ici pour pouvoir les cumuler sur un
+   * intervalle de plusieurs jours sans dupliquer la règle de ventilation.
+   */
+  private accumulateSleeveFlows(flows: FlowsByAssetClass, day: DayKey): void {
+    addFlow(flows, classOfComponent("cash"), this.cash.flowsByDay.get(day) ?? zero());
+    addFlow(
+      flows,
+      classOfComponent("alternatives"),
+      this.alternatives.flowsByDay.get(day) ?? zero()
+    );
+    addFlow(
+      flows,
+      classOfComponent("employeeSavings"),
+      this.employeeSavings.flowsByDay.get(day) ?? zero()
+    );
   }
 
   /**

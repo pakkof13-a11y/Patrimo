@@ -130,6 +130,7 @@ function pt(
   const cash = over.cash ?? 0;
   return {
     day,
+    intervalType: "day",
     nav: over.nav ?? (immobilier || cash),
     status: over.status ?? "EXACT",
     externalFlows: over.externalFlows ?? 0,

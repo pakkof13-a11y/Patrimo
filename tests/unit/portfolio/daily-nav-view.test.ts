@@ -31,6 +31,7 @@ function pt(
 ): DailyNavPoint {
   return {
     day,
+    intervalType: "day",
     nav: over.nav ?? over.financier,
     status: over.status ?? "EXACT",
     externalFlows: over.externalFlows ?? 0,
