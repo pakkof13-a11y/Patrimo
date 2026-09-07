@@ -37,6 +37,7 @@ import {
   toPocketChartPoints,
   windowPocketDailyNav,
   titresUnknownEnvelopeEur,
+  accountsGapEur,
 } from "@/app/lib/portfolio/pocket-series";
 import { d } from "@/app/lib/money/decimal";
 import type { LedgerTx } from "@/app/lib/accounting/types";
@@ -501,5 +502,67 @@ describe("titresUnknownEnvelopeEur — ce qu'aucun compte-titres ne porte", () =
       },
     });
     expect(titresUnknownEnvelopeEur(p)).toBeNull();
+  });
+});
+
+/*
+  L'écart sous « Tout » — la partition du sélecteur n'est pas complète.
+
+  Une ligne en CFD n'a pas de compte : ni comptes-titres, ni assurance-vie, ni
+  crypto au sens du sélecteur. Elle est donc dans le patrimoine sans être dans
+  aucune option, et « Tout » afficherait un montant que la somme des options ne
+  retrouve pas. Ces contrôles épinglent la soustraction, pas sa valeur du jour.
+*/
+describe("accountsGapEur — ce qu'aucune option du sélecteur ne couvre", () => {
+  const point = (over: Partial<DailyNavPoint> = {}) =>
+    pt("2026-09-06", {
+      brut: 1000,
+      byAssetClass: emptyClass({ CRYPTO: 100 }),
+      byAssetClassAndEnvelope: {
+        ACTIONS: { PEA: 200, CTO: 300, UNKNOWN: 0 },
+        OBLIGATIONS: { PEA: 0, CTO: 50, UNKNOWN: 0 },
+      },
+      av: 120,
+      immobilier: 80,
+      alternatifs: 40,
+      employeeSavings: 10,
+      cash: 30,
+      ...over,
+    });
+
+  it("retranche du brut les sept comptes du sélecteur", () => {
+    // 1000 − (550 titres + 100 crypto + 120 + 80 + 40 + 10 + 30) = 70
+    expect(accountsGapEur(point())).toBeCloseTo(70, 2);
+  });
+
+  it("rend zéro quand la partition couvre tout le patrimoine", () => {
+    expect(accountsGapEur(point({ brut: 930 }))).toBeCloseTo(0, 2);
+  });
+
+  it("rend null — pas zéro — quand l'enveloppe des titres n'est pas démontrée", () => {
+    /*
+      Ne pas savoir ce que portent les comptes-titres n'autorise pas à affirmer
+      que rien ne manque : ce serait annoncer une partition complète sur la foi
+      d'une absence de constat.
+    */
+    const p = point({
+      byAssetClassAndEnvelope: {
+        ACTIONS: { PEA: null, CTO: 300, UNKNOWN: 0 },
+        OBLIGATIONS: { PEA: 0, CTO: 50, UNKNOWN: 0 },
+      },
+    });
+    expect(accountsGapEur(p)).toBeNull();
+  });
+
+  it("ne confond pas son écart avec celui de la ligne Titres", () => {
+    /*
+      Les deux se chevauchent : l'écart « Tout » contient l'écart « Titres ».
+      Les additionner compterait deux fois la même ligne cotée.
+    */
+    const p = point();
+    const tout = accountsGapEur(p)!;
+    const titres = titresUnknownEnvelopeEur({ ...p, nav: 650 })!;
+    expect(tout).not.toBe(titres);
+    expect(tout).toBeGreaterThan(0);
   });
 });

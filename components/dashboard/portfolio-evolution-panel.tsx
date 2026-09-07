@@ -71,6 +71,7 @@ import {
   pocketFlowsUnreliable,
   pocketSeriesTooShort,
   titresUnknownEnvelopeEur,
+  accountsGapEur,
   toPocketEvolutionPoints,
   windowPocketDailyNav,
 } from "@/app/lib/portfolio/pocket-series";
@@ -490,6 +491,24 @@ export function PortfolioEvolutionPanel({
     const last = pocketWindowed[pocketWindowed.length - 1];
     return last ? titresUnknownEnvelopeEur(last) : null;
   }, [account, pocketWindowed]);
+
+  /**
+   * Ce que « Tout » porte et qu'aucune option du sélecteur ne couvre.
+   *
+   * Le sélecteur partitionne le patrimoine par lieu de dépôt, et la partition
+   * n'est pas complète : les lignes en CFD n'ont pas de compte. Sans cette
+   * ligne, « Tout » afficherait un montant que la somme des options ne
+   * retrouve pas, sans que rien ne le dise.
+   *
+   * Lue sur `dailyNav`, la série que « Tout » trace déjà — pas sur une requête
+   * supplémentaire, et pas sur `rawPoints`, qui a perdu la ventilation par
+   * poche en devenant des points de graphique.
+   */
+  const accountsGap = useMemo(() => {
+    if (account != null) return null;
+    const last = dailyNav?.[dailyNav.length - 1];
+    return last ? accountsGapEur(last) : null;
+  }, [account, dailyNav]);
 
   /**
    * Part des titres dont l'enveloppe n'est pas démontrée, sur toute la fenêtre.
@@ -1183,6 +1202,25 @@ export function PortfolioEvolutionPanel({
           */}
           {formatCurrency(titresGapEur, baseCurrency)} hors comptes-titres —
           CFD non historisé (valeur de ligne, pas la marge).
+        </p>
+      )}
+
+      {/*
+        Même distinction que sous Titres : `null` ne s'affiche pas, et zéro non
+        plus — l'un dit qu'on ne sait pas, l'autre que la partition est
+        complète. Le libellé nomme les deux natures présentes, CFD et devise,
+        plutôt que de les ranger sous un mot qui n'en couvrirait qu'une.
+      */}
+      {account == null &&
+        !empty &&
+        accountsGap != null &&
+        Math.abs(accountsGap) >= 0.01 && (
+        <p
+          className="text-meta mt-1.5 shrink-0"
+          data-testid="evolution-accounts-gap"
+        >
+          Hors comptes : {formatCurrency(accountsGap, baseCurrency)} (CFD /
+          devises non historisés).
         </p>
       )}
 

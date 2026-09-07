@@ -247,6 +247,40 @@ export function titresUnknownEnvelopeEur(point: DailyNavPoint): number | null {
 }
 
 /**
+ * Ce que le patrimoine porte et qu'aucune option du sélecteur ne couvre.
+ *
+ * Le sélecteur Compte partitionne le patrimoine par lieu de dépôt. La
+ * partition n'est pas complète : une ligne en CFD n'a pas de compte — ni
+ * comptes-titres, ni assurance-vie, ni crypto au sens du sélecteur — et se
+ * retrouve donc dans « Tout » sans appartenir à aucune option. Mesuré sur le
+ * jeu de démonstration : 77 734 €, soit le NASDAQ 100, l'EUR/USD et l'or.
+ *
+ * La grandeur est une soustraction, pas une liste : elle vaut zéro le jour où
+ * une option couvrira ces lignes, sans qu'il y ait rien à retirer ici.
+ *
+ * `null` quand une brique manque — notamment quand l'enveloppe des titres
+ * n'est pas démontrée. Ne pas savoir n'autorise pas à affirmer que rien ne
+ * manque.
+ */
+export function accountsGapEur(point: DailyNavPoint): number | null {
+  const titres = titresValueAt(point);
+  if (titres == null) return null;
+  const crypto = point.byAssetClass?.CRYPTO;
+  if (crypto == null || !Number.isFinite(crypto)) return null;
+  const brut = point.brut;
+  const couvert =
+    titres +
+    crypto +
+    point.av +
+    point.immobilier +
+    point.alternatifs +
+    point.employeeSavings +
+    point.cash;
+  if (!Number.isFinite(brut) || !Number.isFinite(couvert)) return null;
+  return brut - couvert;
+}
+
+/**
  * Valeur tracée pour un compte, à un jour donné.
  *
  * `TITRES` lit exclusivement le croisement (`titresValueAt`) ; `CRYPTO` lit
