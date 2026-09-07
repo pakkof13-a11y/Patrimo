@@ -61,3 +61,12 @@ couvre, quand il n'est pas évident. Français, comme le reste du dépôt.
 
 Ce qui passe, ce qui casse avec la sortie réelle, ce que tu as ajouté, et ce
 qui reste non couvert. Dix lignes. Ne commit pas.
+
+## Effort
+
+**Moyen.** La consigne est répétée ici, et pas seulement dans le frontmatter :
+le lanceur local ne lit pas toujours ce champ.
+
+Et le rappel qui compte plus que l'effort : **il est interdit d'affaiblir une
+assertion pour la faire passer**. Si elle devient fausse, elle est réécrite sur
+la nouvelle vérité, et tu dis laquelle et pourquoi.

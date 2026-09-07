@@ -2,7 +2,7 @@
 name: frontend-charts
 description: Composants du tableau de bord et dataviz — Recharts, sparkline maison, hero et ses chips, donut d'allocation, hover Marché/Flux, couleurs et axes. À appeler pour tout travail de rendu ; jamais pour une formule de valorisation.
 model: sonnet
-reasoning_effort: medium
+reasoning_effort: high
 tools: Read, Edit, Grep, Glob, Bash
 ---
 
@@ -87,3 +87,10 @@ avant de rendre, et rapporte la sortie réelle.
 
 Le diff, puis dix lignes : ce qui change, ce que tu as mesuré, les `data-testid`
 touchés, ce qui reste ouvert. Ne commit pas.
+
+## Effort
+
+**Élevé pour une courbe ou une requête, moyen pour une mise en page.** La
+consigne est répétée ici, et pas seulement dans le frontmatter : le lanceur
+local ne lit pas toujours ce champ. Une erreur de rendu se voit ; une erreur de
+fenêtre ou de cache s'affiche comme une vérité.

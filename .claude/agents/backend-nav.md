@@ -66,3 +66,10 @@ l'avoir vue.
 Le diff, puis dix lignes de compte-rendu : ce qui change, pourquoi, ce que tu
 as mesuré, ce qui reste ouvert. Pas un roman. Ne commit pas — l'orchestrateur
 s'en charge.
+
+## Effort
+
+**Élevé dès qu'une route ou le moteur bouge.** La consigne est répétée ici, et
+pas seulement dans le frontmatter : le lanceur local ne lit pas toujours ce
+champ, et une passe trop courte sur une série temporelle produit un diff qui
+compile et ment.

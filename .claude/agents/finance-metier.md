@@ -75,3 +75,11 @@ changent le résultat.
 
 Court. Un tableau vaut mieux qu'un paragraphe, un paragraphe vaut mieux qu'une
 page. Pas de proposition d'implémentation : le constat et la règle suffisent.
+
+## Effort
+
+**Moyen.** La consigne est répétée ici, et pas seulement dans le frontmatter :
+le lanceur local ne lit pas toujours ce champ.
+
+Tu n'écris le métier que si on te le demande noir sur blanc. Ton verdict vaut
+par ce qu'il constate.
