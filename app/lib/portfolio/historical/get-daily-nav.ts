@@ -2,16 +2,17 @@
  * T-05 — `getDailyNav({ scope, from, to })`.
  *
  * Une série dont le **pas dépend de l'étendue servie** : un point par jour
- * civil Paris jusqu'à ~1 an, un point par semaine civile (lundi) au-delà. La
- * règle est unique et vit dans `history-window.ts`, à côté du cap de
+ * civil Paris jusqu'à ~1 an, un point par semaine civile (dimanche) au-delà.
+ * La règle est unique et vit dans `history-window.ts`, à côté du cap de
  * profondeur ; `DailyNavResult.step` et `DailyNavPoint.intervalType` la
  * publient pour que personne n'ait à la rejouer.
  *
  * Sur une série hebdomadaire, les **flux sont sommés sur l'intervalle** entre
  * deux points émis (cf. `engine.buildSeries`) : sans cela, un apport du
- * mercredi tomberait dans la barre « Performance » du lundi suivant. Le
- * journal, lui, reste rejoué jour par jour. Le dernier point est toujours le
- * jour demandé, même si la semaine en cours est incomplète.
+ * mercredi tomberait dans la barre « Performance » du dimanche suivant. Le
+ * journal, lui, reste rejoué jour par jour. Le dernier point est le dernier
+ * dimanche ≤ `to` : la semaine en cours, elle, n'est jamais servie
+ * (`seriesEmissionDays`).
  *
  * Aucun lissage : rien n'est interpolé entre deux points, une semaine sans
  * observation n'est pas une semaine à zéro. Les scopes lisent le contrat T-01

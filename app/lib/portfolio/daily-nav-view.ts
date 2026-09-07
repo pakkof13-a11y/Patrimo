@@ -8,7 +8,7 @@
  * Aucune valeur n'est calculée ici qui ne soit déjà sur le point T-05.
  */
 
-import { mondayOfWeek } from "./historical/history-window";
+import { sundayOfWeek } from "./historical/history-window";
 import { endOfParisDay, parisDayKey } from "../dates/paris";
 import {
   startOfRange,
@@ -312,17 +312,18 @@ export type DailyNavChartPoint = {
  * Au pas quotidien, la clé du jour suffit. Au pas hebdomadaire elle induirait
  * en erreur : la barre porte la performance et les flux de **toute** la
  * semaine, et l'annoncer par un seul jour ferait lire un mouvement de sept
- * jours comme celui du lundi. Elle est donc nommée par la semaine qu'elle
+ * jours comme celui d'un seul. Elle est donc nommée par la semaine qu'elle
  * couvre.
  *
- * Le lundi n'est pas toujours la date du point — les deux bornes de la fenêtre
- * tombent où elles tombent — d'où le rattachement à la semaine civile plutôt
- * qu'à la date elle-même : un point du vendredi 6 clôt bien la semaine du
- * lundi 2, et c'est cet intervalle que le lecteur cherche.
+ * Le point tombe presque toujours sur le dimanche qui ouvre sa semaine —
+ * seule la borne qui ouvre la fenêtre (`from`) peut différer, d'où le
+ * rattachement à la semaine civile plutôt qu'à la date brute du point :
+ * `sundayOfWeek` retrouve le dimanche même quand le point ne tombe pas
+ * dessus.
  */
 export function navPointPeriodLabel(p: DailyNavPoint): string {
   return p.intervalType === "week"
-    ? `semaine du ${mondayOfWeek(p.day)}`
+    ? `semaine du dimanche ${sundayOfWeek(p.day)}`
     : p.day;
 }
 

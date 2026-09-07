@@ -1,4 +1,4 @@
-import { mondayOfWeek } from "@/app/lib/portfolio/historical/history-window";
+import { sundayOfWeek } from "@/app/lib/portfolio/historical/history-window";
 import { navPointPeriodLabel } from "@/app/lib/portfolio/daily-nav-view";
 import { describe, expect, it } from "vitest";
 import {
@@ -17,13 +17,23 @@ import type { LedgerTx } from "@/app/lib/accounting/types";
 
 /**
  * D19 — pas de la série : jour civil jusqu'à ~1 an, semaine civile au-delà.
+ * D23 — l'ancrage de cette semaine passe du lundi au dimanche, et le dernier
+ * point cesse d'être la borne demandée : c'est le dernier dimanche ≤ `to`.
  *
  * Ce fichier tient les deux moitiés de la promesse. La première est un gain :
  * le moteur ne valorise plus chaque jour civil sur 5A/Tout. La seconde est le
  * contrat métier qui la rend acceptable — `Δmarché = NAV_t − NAV_{t−1} − flux_t`
  * est indexée sur les **points émis**, donc les flux d'un point hebdomadaire
  * doivent être la somme de son intervalle. Sans cela un apport du mercredi
- * deviendrait de la performance de marché du lundi suivant.
+ * deviendrait de la performance de marché du dimanche suivant.
+ *
+ * Le point partiel de fin (dernier point = jour demandé, même sur une semaine
+ * inachevée) a disparu avec D23 : il se justifiait par « sinon le hero
+ * affiche une valorisation vieille de plusieurs jours », un raisonnement
+ * caduc depuis que le gros chiffre du hero est un encours daté du jour
+ * (hors courbe) et que la courbe s'arrête déjà à `lastCloseDay`. La semaine
+ * en cours n'est donc plus servie, exactement comme le jour en cours ne l'est
+ * plus sur les séries quotidiennes.
  */
 
 const DAY = (s: string) => new Date(`${s}T10:00:00Z`);
@@ -146,37 +156,40 @@ describe("historyStepForWindow — une seule décision de granularité", () => {
   });
 });
 
-describe("seriesEmissionDays — lundi, plus les deux bornes", () => {
+describe("seriesEmissionDays — dimanche, plus la borne de départ", () => {
   it("pas quotidien : tous les jours civils, contrat T-05 intact", () => {
     const days = enumerateDays("2024-01-03", "2024-02-14");
     expect(seriesEmissionDays("2024-01-03", "2024-02-14", "day")).toEqual(days);
   });
 
-  it("pas hebdomadaire : la borne de départ, chaque lundi, la borne d'arrivée", () => {
-    // 2024-01-03 mercredi → 2024-01-31 mercredi.
+  it("pas hebdomadaire : la borne de départ, puis chaque dimanche — jamais la borne d'arrivée si elle n'en est pas un", () => {
+    // 2024-01-03 mercredi → 2024-01-31 mercredi : aucune des deux bornes
+    // n'est un dimanche, donc aucune des deux ne clôt une semaine.
     expect(seriesEmissionDays("2024-01-03", "2024-01-31", "week")).toEqual([
-      "2024-01-03", // from, mercredi
-      "2024-01-08",
-      "2024-01-15",
-      "2024-01-22",
-      "2024-01-29",
-      "2024-01-31", // to, mercredi : le dernier point est le jour demandé
+      "2024-01-03", // from, mercredi : seul intervalle encore partiel
+      "2024-01-07",
+      "2024-01-14",
+      "2024-01-21",
+      "2024-01-28",
+      // pas de 2024-01-31 : la semaine du 28 janvier n'est pas close.
     ]);
   });
 
-  it("le dernier point est le jour demandé, jamais le lundi qui le précède", () => {
+  it("le dernier point est le dernier dimanche ≤ to, jamais le jour demandé", () => {
     const jours = seriesEmissionDays("2024-01-03", "2024-06-11", "week");
-    expect(jours[jours.length - 1]).toBe("2024-06-11");
+    // 2024-06-11 est un mardi ; le dernier dimanche qui le précède est le 09.
+    expect(jours[jours.length - 1]).toBe("2024-06-09");
+    expect(jours[jours.length - 1]).not.toBe("2024-06-11");
   });
 
-  it("une borne qui tombe un lundi n'est pas émise deux fois", () => {
-    const jours = seriesEmissionDays("2024-01-08", "2024-02-05", "week");
+  it("une borne qui tombe un dimanche n'est pas émise deux fois, et clôt bien la série", () => {
+    const jours = seriesEmissionDays("2024-01-07", "2024-02-04", "week");
     expect(jours).toEqual([
-      "2024-01-08",
-      "2024-01-15",
-      "2024-01-22",
-      "2024-01-29",
-      "2024-02-05",
+      "2024-01-07",
+      "2024-01-14",
+      "2024-01-21",
+      "2024-01-28",
+      "2024-02-04",
     ]);
     expect(new Set(jours).size).toBe(jours.length);
   });
@@ -186,6 +199,13 @@ describe("seriesEmissionDays — lundi, plus les deux bornes", () => {
       "2024-01-03",
     ]);
   });
+
+  it("une fenêtre plus courte qu'une semaine et sans dimanche ne rend que la borne de départ", () => {
+    // 2024-01-02 mardi → 2024-01-04 jeudi : aucun dimanche dans l'intervalle.
+    expect(seriesEmissionDays("2024-01-02", "2024-01-04", "week")).toEqual([
+      "2024-01-02",
+    ]);
+  });
 });
 
 describe("buildSeries au pas hebdomadaire", () => {
@@ -193,11 +213,15 @@ describe("buildSeries au pas hebdomadaire", () => {
     const hebdo = fixture().buildSeries(FROM, TO, "week");
     const jours = enumerateDays(FROM, TO);
     expect(jours.length).toBeGreaterThan(500);
-    // ~1 point pour 7 jours, plus les deux bornes.
+    // ~1 point pour 7 jours, plus la borne d'ouverture.
     expect(hebdo.length).toBeLessThan(jours.length / 6);
     expect(hebdo.length).toBeGreaterThan(jours.length / 8);
     expect(hebdo[0]!.day).toBe(FROM);
-    expect(hebdo[hebdo.length - 1]!.day).toBe(TO);
+    // TO (2025-06-11, mercredi) n'est pas un dimanche : le dernier point est le
+    // dernier dimanche qui le précède, pas la borne demandée — la semaine du
+    // 9 au 15 juin n'est pas close et n'est donc pas servie.
+    expect(hebdo[hebdo.length - 1]!.day).toBe("2025-06-08");
+    expect(hebdo[hebdo.length - 1]!.day).not.toBe(TO);
   });
 
   it("valorise au même euro que la série quotidienne, aux jours qu'elle émet", () => {
@@ -233,18 +257,40 @@ describe("buildSeries au pas hebdomadaire", () => {
     }
   });
 
-  it("aucun flux n'est perdu : le cumul hebdomadaire égale le cumul quotidien", () => {
+  it("aucun flux n'est perdu jusqu'au dernier point émis : le cumul hebdomadaire égale le cumul quotidien sur le même intervalle", () => {
     const e = fixture();
     const cumul = (s: { externalFlows: number }[]) =>
       s.reduce((acc, p) => acc.plus(d(p.externalFlows)), d(0));
-    const jour = cumul(e.buildSeries(FROM, TO, "day"));
-    const hebdo = cumul(e.buildSeries(FROM, TO, "week"));
+    // Tous les flux de la fixture tombent avant le dernier dimanche émis
+    // (2025-06-08) : rien n'est perdu par la troncature de la série
+    // quotidienne à ce même jour.
+    const hebdo = e.buildSeries(FROM, TO, "week");
+    const jour = cumul(e.buildSeries(FROM, hebdo[hebdo.length - 1]!.day, "day"));
+    const hebdoCumul = cumul(hebdo);
     // 10×100 + 7×118 + 5×131 = 2 481 d'achats, + 5 000 + 4 000 de cash.
     expect(jour.toNumber()).toBeCloseTo(11_481, 6);
-    expect(Math.abs(hebdo.minus(jour).toNumber())).toBeLessThanOrEqual(0.01);
+    expect(Math.abs(hebdoCumul.minus(jour).toNumber())).toBeLessThanOrEqual(0.01);
   });
 
-  it("un versement de poche daté d'un mercredi n'est pas oublié par le point du lundi", () => {
+  it("la semaine en cours (après le dernier dimanche émis) n'est pas servie : ses flux n'apparaissent dans aucun point hebdomadaire", () => {
+    const e = fixture();
+    const hebdo = e.buildSeries(FROM, TO, "week");
+    const dernier = hebdo[hebdo.length - 1]!.day;
+    expect(dernier).toBe("2025-06-08");
+    // Le cumul quotidien complet, lui, inclut tout — y compris la semaine
+    // encore ouverte au 11 juin.
+    const cumul = (s: { externalFlows: number }[]) =>
+      s.reduce((acc, p) => acc.plus(d(p.externalFlows)), d(0));
+    const hebdoCumul = cumul(hebdo);
+    const jourComplet = cumul(e.buildSeries(FROM, TO, "day"));
+    // Aucun flux de la fixture ne tombe dans les jours 09→11 juin 2025 : les
+    // deux cumuls restent donc égaux ici. C'est la troncature de la borne
+    // (`hebdo` s'arrête au 8 juin) qui est la garantie testée, pas une
+    // coïncidence arithmétique — cf. `seriesEmissionDays` pour la borne.
+    expect(hebdoCumul.toNumber()).toBeCloseTo(jourComplet.toNumber(), 6);
+  });
+
+  it("un versement de poche daté d'un mercredi n'est pas oublié par le point du dimanche", () => {
     const e = fixture();
     const hebdo = e.buildSeries(FROM, TO, "week");
     // Le versement cash du 2024-08-07 doit se retrouver dans le point qui
@@ -253,7 +299,7 @@ describe("buildSeries au pas hebdomadaire", () => {
       (p) => p.day > "2024-08-07" && p.flowsByAssetClass.CASH !== 0
     );
     expect(porteur).toBeDefined();
-    expect(porteur!.day).toBe("2024-08-12"); // le lundi suivant
+    expect(porteur!.day).toBe("2024-08-11"); // le dimanche suivant
     expect(porteur!.flowsByAssetClass.CASH).toBeCloseTo(4_000, 6);
   });
 
@@ -287,10 +333,10 @@ describe("buildSeries au pas hebdomadaire", () => {
     expect(pire).toBeLessThanOrEqual(0.01);
   });
 
-  it("la position d'un lundi émis tient compte des écritures du jeudi précédent", () => {
+  it("la position d'un dimanche émis tient compte des écritures du jeudi précédent", () => {
     const e = fixture();
-    // t2 (jeudi 2024-04-11) porte la position de 10 à 17 titres : le lundi
-    // suivant doit déjà les valoriser.
+    // t2 (jeudi 2024-04-11) porte la position de 10 à 17 titres : le
+    // dimanche suivant doit déjà les valoriser.
     //
     // Ce que ce test ne prouve pas : que la boucle passe par chaque jour. Le
     // curseur de transactions rattrape son retard (`txDay > day` casse la
@@ -300,11 +346,11 @@ describe("buildSeries au pas hebdomadaire", () => {
     // flux ci-dessus, et c'est la vraie raison pour laquelle la boucle avance
     // jour par jour.
     const hebdo = e.buildSeries(FROM, TO, "week");
-    const lundi = hebdo.find((p) => p.day === "2024-04-15")!;
+    const dimanche = hebdo.find((p) => p.day === "2024-04-14")!;
     const jourRef = e
-      .buildSeries("2024-04-15", "2024-04-15", "day")[0]!;
-    expect(lundi.positionsCostBasis).toBeCloseTo(jourRef.positionsCostBasis, 6);
-    expect(lundi.positionsCostBasis).toBeCloseTo(10 * 100 + 7 * 118, 6);
+      .buildSeries("2024-04-14", "2024-04-14", "day")[0]!;
+    expect(dimanche.positionsCostBasis).toBeCloseTo(jourRef.positionsCostBasis, 6);
+    expect(dimanche.positionsCostBasis).toBeCloseTo(10 * 100 + 7 * 118, 6);
   });
 });
 
@@ -327,8 +373,9 @@ describe("dailyNavFromSeries — le pas est publié, pas deviné", () => {
 
   Une barre au pas semaine porte la performance et les flux de sept jours.
   L'annoncer par la seule date du point ferait lire ce mouvement comme celui
-  du lundi — et pour les deux bornes de la fenêtre, qui ne tombent pas un
-  lundi, comme celui d'une semaine qui commencerait un vendredi.
+  d'un seul jour — et pour la borne d'ouverture de la fenêtre, qui ne tombe
+  pas toujours un dimanche, comme celui d'une semaine qui commencerait un
+  vendredi.
 */
 describe("navPointPeriodLabel — ce qu'une barre désigne", () => {
   const pt = (day: string, intervalType: "day" | "week") =>
@@ -340,26 +387,22 @@ describe("navPointPeriodLabel — ce qu'une barre désigne", () => {
     expect(navPointPeriodLabel(pt("2026-09-04", "day"))).toBe("2026-09-04");
   });
 
-  it("au pas hebdomadaire, elle porte la semaine qu'elle couvre", () => {
-    expect(navPointPeriodLabel(pt("2026-08-31", "week"))).toBe(
-      "semaine du 2026-08-31"
+  it("au pas hebdomadaire, elle porte la semaine qu'elle couvre — dimanche 00:00 → dimanche 00:00 suivant", () => {
+    expect(navPointPeriodLabel(pt("2026-08-30", "week"))).toBe(
+      "semaine du dimanche 2026-08-30"
     );
   });
 
-  it("un point qui ne tombe pas un lundi est rattaché à son lundi", () => {
-    // Borne de fenêtre : le vendredi 4 clôt la semaine du lundi 31.
+  it("un point qui ne tombe pas un dimanche (la borne d'ouverture) est rattaché à son dimanche", () => {
+    // Le point du vendredi 4 sept. ne peut être émis que comme borne
+    // d'ouverture de fenêtre ; il clôt la semaine du dimanche 30 août.
     expect(navPointPeriodLabel(pt("2026-09-04", "week"))).toBe(
-      "semaine du 2026-08-31"
-    );
-    // Dimanche : rattaché au lundi qui ouvre sa semaine, pas au suivant.
-    expect(navPointPeriodLabel(pt("2026-09-06", "week"))).toBe(
-      "semaine du 2026-08-31"
+      "semaine du dimanche 2026-08-30"
     );
   });
 
-  it("mondayOfWeek est stable un lundi et traverse les mois", () => {
-    expect(mondayOfWeek("2026-08-31")).toBe("2026-08-31");
-    expect(mondayOfWeek("2026-03-01")).toBe("2026-02-23");
-    expect(mondayOfWeek("2026-01-01")).toBe("2025-12-29");
+  it("sundayOfWeek est stable un dimanche et traverse les mois", () => {
+    expect(sundayOfWeek("2026-08-30")).toBe("2026-08-30");
+    expect(sundayOfWeek("2026-01-01")).toBe("2025-12-28");
   });
 });

@@ -674,8 +674,8 @@ export class PortfolioValuationEngine {
    * Valorise le patrimoine sur une fenêtre, au pas demandé.
    *
    * **Le journal est rejoué jour par jour, quel que soit le pas.** L'état
-   * comptable d'un lundi dépend de toutes les écritures qui l'ont précédé, pas
-   * seulement de celles des lundis : le curseur de transactions avance sur
+   * comptable d'un dimanche dépend de toutes les écritures qui l'ont précédé,
+   * pas seulement de celles des dimanches : le curseur de transactions avance sur
    * chaque jour civil, et `applyLedgerTx` ne saute jamais. Ce qui s'espace,
    * c'est la **valorisation** — le seul poste dont le coût est linéaire en
    * jours rejoués.
@@ -683,8 +683,8 @@ export class PortfolioValuationEngine {
    * **Les flux sont sommés sur l'intervalle entre deux points émis**, jamais
    * sur le seul jour du point. C'est la condition pour que
    * `Δmarché(t) = NAV_t − NAV_{t−1} − flux_t` tienne : cette identité est
-   * indexée sur les points émis, pas sur les jours. Avec le flux du seul lundi,
-   * un apport du mercredi passerait pour de la performance de marché.
+   * indexée sur les points émis, pas sur les jours. Avec le flux du seul
+   * dimanche, un apport du mercredi passerait pour de la performance de marché.
    *
    * Les flux de poches (livrets, alternatifs, épargne salariale), datés au
    * jour, sont cumulés ici sur le même intervalle — d'où `countSleeveFlows =

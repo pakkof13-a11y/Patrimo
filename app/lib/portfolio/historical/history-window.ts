@@ -120,25 +120,26 @@ export function historyStepForWindow(from: DayKey, to: DayKey): HistoryStep {
   return spanInDays(from, to) >= WEEKLY_STEP_MIN_SPAN_DAYS ? "week" : "day";
 }
 
-/** Lundi = 1, dimanche = 0 — jour civil, sans dépendance au fuseau de la machine. */
+/** Dimanche = 0 — jour civil, sans dépendance au fuseau de la machine. */
 function weekdayOf(day: DayKey): number {
   const [y, m, dd] = day.split("-").map(Number);
   return new Date(Date.UTC(y!, m! - 1, dd!, 12)).getUTCDay();
 }
 
 /**
- * Lundi de la semaine civile qui contient `day`.
+ * Dimanche de la semaine civile qui contient `day`.
  *
- * Sert à nommer un point hebdomadaire. Le point lui-même tombe sur un lundi,
- * sauf aux deux bornes de la fenêtre — celle qui l'ouvre, et celle qui la
- * ferme sur le jour demandé. Les nommer par leur propre date laisserait
- * croire à une semaine qui commencerait un vendredi ; les nommer par leur
- * lundi dit l'intervalle qu'ils closent, ce qui est ce que le lecteur cherche.
+ * Sert à nommer un point hebdomadaire. Le point lui-même tombe sur un
+ * dimanche, sauf à la borne qui ouvre la fenêtre — la seule qui reste
+ * partielle depuis que la borne de fin ne l'est plus (cf.
+ * `seriesEmissionDays`). Nommer ce point par sa propre date laisserait croire
+ * à une semaine qui commencerait un mercredi ; le nommer par son dimanche dit
+ * l'intervalle qu'il ouvre, ce qui est ce que le lecteur cherche.
  */
-export function mondayOfWeek(day: DayKey): DayKey {
+export function sundayOfWeek(day: DayKey): DayKey {
   const [y, m, dd] = day.split("-").map(Number);
   const d = new Date(Date.UTC(y!, m! - 1, dd!, 12));
-  const recul = (d.getUTCDay() + 6) % 7;
+  const recul = d.getUTCDay(); // dimanche = 0, donc déjà le recul cherché.
   d.setUTCDate(d.getUTCDate() - recul);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
@@ -148,19 +149,28 @@ export function mondayOfWeek(day: DayKey): DayKey {
  *
  * Pas quotidien : tous les jours civils — contrat T-05 inchangé.
  *
- * Pas hebdomadaire : `from`, chaque **lundi** de la fenêtre, et `to`. La
- * semaine civile est ancrée sur le lundi comme le reste du moteur (jours
- * Europe/Paris).
+ * Pas hebdomadaire : `from`, puis chaque **dimanche** de la fenêtre —
+ * jamais `to` en plus, sauf s'il tombe lui-même un dimanche. La semaine
+ * civile va de dimanche 00:00 Paris au dimanche 00:00 suivant ; le dernier
+ * point émis est donc le dernier dimanche ≤ `to`, et la semaine en cours
+ * (celle que `to` traverse sans la clore) n'est **pas servie** — exactement
+ * comme le jour en cours a été retiré des séries quotidiennes
+ * (`lastCloseDay`).
  *
- * Deux intervalles sont donc plus courts que sept jours : celui qui ouvre la
- * fenêtre (`from` → premier lundi) et celui qui la ferme (dernier lundi →
- * `to`). Ce dernier est délibéré : le dernier point est **toujours le jour
- * demandé**, jamais le lundi qui précède. Un hero titré « valo au 6 sept. »
- * au-dessus d'une valorisation du 1er serait faux de cinq jours de marché.
- * Un intervalle court n'est pas un problème pour l'identité métier
- * `Δmarché = NAV_t − NAV_{t−1} − flux_t` : celle-ci est indexée sur les points
- * émis, et les flux sont sommés sur l'intervalle qui sépare deux points, quelle
- * qu'en soit la durée.
+ * Décision produit tranchée le 2026-09-07, qui remplace l'ancien ancrage au
+ * lundi *et* le point partiel de fin. Le point partiel se justifiait par « le
+ * hero afficherait sinon une valorisation vieille de plusieurs jours » — un
+ * raisonnement qui ne tient plus : le gros chiffre du hero est un encours
+ * daté du jour (`grossAssets`/`netWorth` du jour, hors courbe), et la courbe,
+ * elle, s'arrête déjà à la clôture (`lastCloseDay`). Rien ne demandait donc
+ * plus à la courbe hebdomadaire de forcer un point sur un jour qui n'a pas
+ * clos sa semaine.
+ *
+ * Un seul intervalle reste donc plus court que sept jours : celui qui ouvre
+ * la fenêtre (`from` → premier dimanche). Il n'est pas un problème pour
+ * l'identité métier `Δmarché = NAV_t − NAV_{t−1} − flux_t` : celle-ci est
+ * indexée sur les points émis, et les flux sont sommés sur l'intervalle qui
+ * sépare deux points, quelle qu'en soit la durée.
  */
 export function seriesEmissionDays(
   from: DayKey,
@@ -169,8 +179,5 @@ export function seriesEmissionDays(
 ): DayKey[] {
   const days = enumerateDays(from, to);
   if (step === "day" || days.length === 0) return days;
-  const last = days.length - 1;
-  return days.filter(
-    (day, i) => i === 0 || i === last || weekdayOf(day) === 1
-  );
+  return days.filter((day, i) => i === 0 || weekdayOf(day) === 0);
 }
