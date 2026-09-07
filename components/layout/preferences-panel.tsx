@@ -1,5 +1,6 @@
 "use client";
 
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -220,7 +221,7 @@ export function PreferencesPanel({
         qc.invalidateQueries({ queryKey: ["holdings"] }),
         qc.invalidateQueries({ queryKey: ["transactions"] }),
         qc.invalidateQueries({ queryKey: ["assets"] }),
-        qc.invalidateQueries({ queryKey: ["portfolio-history"] }),
+        Promise.resolve(invalidatePortfolioView(qc)),
         qc.invalidateQueries({ queryKey: ["platforms"] }),
         qc.invalidateQueries({ queryKey: ["asset-detail"] }),
         qc.invalidateQueries({ queryKey: ["banks"] }),

@@ -28,6 +28,7 @@
  * utiles.
  */
 
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Plus, RefreshCw } from "lucide-react";
@@ -130,7 +131,7 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
       qc.invalidateQueries({ queryKey: ["term-deposits"] }),
       qc.invalidateQueries({ queryKey: ["holdings"] }),
       qc.invalidateQueries({ queryKey: ["platforms"] }),
-      qc.invalidateQueries({ queryKey: ["portfolio-history"] }),
+      Promise.resolve(invalidatePortfolioView(qc)),
     ]);
   };
 

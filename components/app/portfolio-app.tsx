@@ -1,5 +1,6 @@
 "use client";
 
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import {
   useCallback,
   useEffect,
@@ -601,7 +602,7 @@ function PortfolioAppClient({
       await qc.invalidateQueries({ queryKey: ["assets"] });
       await qc.invalidateQueries({ queryKey: ["platforms"] });
       await qc.invalidateQueries({ queryKey: ["asset-detail"] });
-      void qc.invalidateQueries({ queryKey: ["portfolio-history"] });
+      invalidatePortfolioView(qc);
       const fresh = await reloadHoldings(qc, baseCurrency);
       const aid = res?.transaction?.assetId;
       const row = aid ? fresh.holdings.find((h: Holding) => h.assetId === aid) : null;
@@ -627,7 +628,7 @@ function PortfolioAppClient({
       toast.success("Transaction supprimée — positions recalculées");
       await qc.invalidateQueries({ queryKey: ["transactions"] });
       await qc.invalidateQueries({ queryKey: ["asset-detail"] });
-      void qc.invalidateQueries({ queryKey: ["portfolio-history"] });
+      invalidatePortfolioView(qc);
       await reloadHoldings(qc, baseCurrency);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -777,7 +778,7 @@ function PortfolioAppClient({
       void qc.invalidateQueries({ queryKey: ["platforms"] });
       void qc.invalidateQueries({ queryKey: ["holdings"] });
       void qc.invalidateQueries({ queryKey: ["transactions"] });
-      void qc.invalidateQueries({ queryKey: ["portfolio-history"] });
+      invalidatePortfolioView(qc);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -1663,7 +1664,7 @@ function PortfolioAppClient({
           await qc.invalidateQueries({ queryKey: ["transactions"] });
           await qc.invalidateQueries({ queryKey: ["assets"] });
           await qc.invalidateQueries({ queryKey: ["platforms"] });
-          void qc.invalidateQueries({ queryKey: ["portfolio-history"] });
+          invalidatePortfolioView(qc);
           await reloadHoldings(qc, baseCurrency);
         }}
         onViewJournal={() => setTab("holdings")}
