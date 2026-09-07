@@ -15,11 +15,13 @@ import {
   WatchlistCard,
 } from "@/components/dashboard/terminal-panels";
 import type { DashboardNavTarget } from "@/components/dashboard/dashboard-quick-actions";
-import { cn } from "@/app/lib/utils";
+import { cn, formatCurrency } from "@/app/lib/utils";
 import {
   allocationSliceLabel,
   allocationSlicesForScope,
 } from "@/app/lib/portfolio/allocation-scope";
+import { allocatePercents } from "@/app/lib/ui/allocate-percents";
+import { titresValueAt } from "@/app/lib/portfolio/pocket-series";
 import type {
   Holding,
   HistoryPoint,
@@ -110,7 +112,10 @@ export function DashboardTab({
   baseCurrency,
   summary,
   allocation,
-  allocationByVenue,
+  // `allocationByVenue` (D14.2) n'alimente plus ce pavé — remplacé par la
+  // répartition par classe de détention (D19 P2bis). Le prop reste dans le
+  // contrat pour ne pas casser l'appelant ; l'API `allocation-by-venue`
+  // continue d'exister pour d'autres usages.
   history,
   historyLoading,
   holdings = [],
@@ -274,6 +279,147 @@ export function DashboardTab({
   );
   const dailyNavQ = useDailyNavQuery(navWindow.from, navWindow.to);
   const dailyNavPoints = dailyNavQ.data?.points;
+
+  /*
+    Répartition du patrimoine (D19 P2bis) — sept parts par classe de
+    détention, plus une notice de passifs sous le pavé. Remplace la vue « par
+    endroit » (PEA / CTO / Tangibles) de ce panneau précis.
+
+    Chaque montant reprend un total déjà publié et vérifié ailleurs sur
+    l'écran (les mêmes chiffres que les tuiles KPI) : aucune formule de
+    valorisation n'est recalculée ici, seulement une recomposition d'aire.
+    « Titres » retire la part crypto de `totalListedBase` (ACTIONS +
+    OBLIGATIONS + CRYPTO) via `byClass`, pour isoler PEA + CTO de la crypto —
+    même source, pas un second calcul.
+
+    Pas de part Trading : `TradingPosition` n'est pas chargé par le moteur
+    historique, la série n'existe pas — UNKNOWN ≠ ZERO, donc omise plutôt
+    qu'affichée à zéro.
+
+    Couleurs en hex fixe (pas de jeton `var(--chart-…)`) : elles doivent
+    rester identiques en clair et en sombre, comme les couleurs par endroit
+    (D14.5) dont ce pavé reprend le mécanisme d'affichage.
+  */
+  const patrimonySlices = useMemo(() => {
+    const byClass = displayAllocation?.byClass ?? [];
+    const cryptoValue = byClass.find((s) => s.name === "CRYPTO")?.value ?? 0;
+    const crypto = num(cryptoValue);
+    const listed = num(
+      summary?.totalListedBase ??
+        summary?.totalListedEur ??
+        summary?.totalMarketValueBase ??
+        summary?.totalMarketValueEur
+    );
+    /*
+      « Titres » est PEA + CTO, et se lit au croisement classe × enveloppe.
+
+      `listed − crypto` paraissait équivalent et ne l'est pas : mesuré au
+      2026-09-06, il vaut 1 471 154,16 € contre 1 416 506,17 € pour les deux
+      comptes-titres. Les 54 648 € d'écart sont la ligne NASDAQ 100 en CFD —
+      cotée, donc dans `listed`, mais dans aucun compte. La ranger dans
+      « Titres » contredirait le sélecteur Compte d'E18, qui l'exclut
+      explicitement, et ferait porter à une part un montant qu'aucun compte ne
+      détient. Elle rejoint l'écart annoncé sous le pavé.
+
+      Repli sur `listed − crypto` seulement si le croisement n'est pas encore
+      chargé : une part absente vaut mieux qu'une part fausse, mais un écran
+      vide au premier rendu ne rend service à personne.
+    */
+    const dernierPoint = dailyNavPoints?.[dailyNavPoints.length - 1];
+    const titresCroisement = dernierPoint ? titresValueAt(dernierPoint) : null;
+    const titres = titresCroisement ?? Math.max(0, listed - crypto);
+    /*
+      Immobilier **net** : la valeur des biens moins la dette qui les porte.
+
+      Le passif du patrimoine est aujourd'hui constitué des seuls crédits
+      immobiliers — le crédit auto est intégralement amorti, son capital
+      restant dû vaut zéro. Retrancher le total des passifs est donc exact ici,
+      et c'est ce qui fait que la somme des parts retombe sur le patrimoine
+      net. Si une dette non immobilière réapparaissait, cette ligne devrait
+      lire les passifs adossés aux biens plutôt que leur total.
+    */
+    const immobilierBrut = num(
+      summary?.totalRealEstateBase ?? summary?.totalRealEstateEur
+    );
+    const passifs = num(
+      summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur
+    );
+    const immobilier = Math.max(0, immobilierBrut - passifs);
+    const av = num(
+      summary?.totalLifeInsuranceBase ?? summary?.totalLifeInsuranceEur
+    );
+    const es = num(
+      summary?.totalEmployeeSavingsBase ?? summary?.totalEmployeeSavingsEur
+    );
+    const alt = num(
+      summary?.totalAlternativesBase ?? summary?.totalAlternativesEur
+    );
+    const cash = num(summary?.totalCashBase ?? summary?.totalCashEur);
+
+    const parts = [
+      { key: "titres", label: "Titres", value: titres, color: "#d9a64d" },
+      {
+        key: "immobilier",
+        label: "Immobilier net",
+        value: immobilier,
+        color: "#1f9bb3",
+      },
+      { key: "av", label: "Assurance-vie", value: av, color: "#2e9e63" },
+      { key: "es", label: "Épargne salariale", value: es, color: "#0d6f80" },
+      { key: "crypto", label: "Crypto", value: crypto, color: "#b8860b" },
+      { key: "alt", label: "Alternatifs", value: alt, color: "#7c5cbf" },
+      { key: "liquidites", label: "Liquidités", value: cash, color: "#6b7280" },
+    ].filter((p) => p.value > 0);
+
+    const pcts = allocatePercents(
+      parts.map((p) => p.value),
+      1
+    );
+    return parts.map((p, i) => ({
+      id: p.key,
+      label: p.label,
+      amountEur: p.value,
+      pct: pcts[i] ?? 0,
+      color: p.color,
+    }));
+  }, [displayAllocation?.byClass, summary, dailyNavPoints]);
+
+  const liabilitiesTotal = num(
+    summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur
+  );
+  /*
+    Notice, pas une part : les passifs ne se dessinent ni dans le donut ni
+    dans la mosaïque (cf. Passifs, KPI dédié). Montant négatif — c'est ce
+    qu'ils retranchent du patrimoine net.
+  */
+  /*
+    Ce que la somme des parts ne couvre pas.
+
+    Les parts doivent retomber sur le patrimoine net affiché au hero. Elles n'y
+    retombent pas exactement, et l'écart a une composition connue : les lignes
+    en CFD — NASDAQ 100, EUR/USD, or — sont dans le patrimoine mais
+    n'appartiennent à aucun compte, donc à aucune part. Plutôt que de les
+    diluer dans une part qui ne les détient pas, ou de laisser le lecteur
+    découvrir que le camembert ne fait pas le total, le pavé le dit.
+
+    Calculé, jamais écrit en dur : si une part venait à couvrir ces lignes,
+    l'écart tomberait à zéro et la mention disparaîtrait d'elle-même.
+  */
+  const patrimonyNet = num(summary?.netWorthBase ?? summary?.netWorthEur);
+  const patrimonySum = patrimonySlices.reduce((a, s) => a + s.amountEur, 0);
+  const patrimonyGap = patrimonyNet - patrimonySum;
+
+  const patrimonyFootnote = [
+    liabilitiesTotal > 0
+      ? `dont passifs −${formatCurrency(liabilitiesTotal, baseCurrency)}`
+      : null,
+    Math.abs(patrimonyGap) >= 1
+      ? `hors comptes ${formatCurrency(patrimonyGap, baseCurrency)} (CFD / devises non historisés)`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ") || undefined;
+
   /*
     Libellé de période : borne **servie**, jamais celle demandée, jamais
     le `from` d'une fenêtre 1A encore affichée par `keepPreviousData`.
@@ -372,7 +518,23 @@ export function DashboardTab({
       },
       {
         key: "cash",
-        label: "Cash",
+        /*
+          « Cash » désignait la poche sans dire ce qu'elle contient, et laissait
+          croire à la seule trésorerie bancaire. Elle porte aussi le disponible
+          des enveloppes d'investissement — mesuré : 11 820,75 € de comptes
+          courants, 53 450,00 € de livrets, et 8 540,50 € en PEA, CTO et AV.
+
+          Les trois enveloppes sont nommées, sans points de suspension :
+          `EnvelopeCash` n'a que ces trois valeurs, et en promettre d'autres
+          annoncerait un périmètre qui n'existe pas.
+
+          Les intérêts de livrets déjà versés restent dans le montant : ils sont
+          capitalisés dans le solde, et les en retirer ferait mentir la tuile.
+        */
+        label: "Liquidités",
+        help:
+          "Comptes courants, livrets et épargne bancaire, plus le cash non " +
+          "investi des comptes d’investissement (PEA, CTO, AV). Pas les titres.",
         value: num(summary?.totalCashBase ?? summary?.totalCashEur),
         spark: cash,
         sparkDates,
@@ -575,13 +737,13 @@ export function DashboardTab({
             <div className="flex min-w-0 flex-col gap-[var(--gap-card)]">
               <AllocationCard
                 data={classChart}
-                venueSlices={allocationByVenue?.venues}
-                venueHelp={allocationByVenue?.help}
-                title="Répartition par endroit"
+                classSlices={patrimonySlices}
+                footnote={patrimonyFootnote}
+                title="Répartition du patrimoine"
                 periodRange={range}
                 baseCurrency={baseCurrency}
                 scope={navScope}
-                emptyHint="Les endroits de détention apparaîtront dès le premier compte alimenté."
+                emptyHint="Les classes de détention apparaîtront dès le premier compte alimenté."
               />
               <WatchlistCard
                 holdings={holdings}

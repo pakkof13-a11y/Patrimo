@@ -151,6 +151,36 @@ function tileTextColor(color: string): string {
   return "var(--background)";
 }
 
+/**
+ * Part de la répartition du patrimoine (D19 P2bis) — même forme que
+ * `AllocationByVenueApiVenue`, mais pas les mêmes clés (`VenueKey` typerait
+ * "par endroit" ; ici la clé est une classe de détention, PEA/CTO fusionnés).
+ * `color` est un hex fixe, choisi côté appelant, identique en clair et en
+ * sombre — même contrat que les couleurs par endroit (D14.5).
+ */
+export type AllocationPatrimonySlice = {
+  id: string;
+  label: string;
+  amountEur: number;
+  pct: number;
+  color: string;
+};
+
+/** Abréviation 2 à 4 lettres pour les cases trop étroites pour le nom entier. */
+const PATRIMONY_ABBR: Record<string, string> = {
+  Titres: "TITR",
+  "Immobilier net": "IMMO",
+  "Assurance-vie": "AV",
+  "Épargne salariale": "ES",
+  Crypto: "CRYP",
+  Alternatifs: "ALT",
+  Liquidités: "LIQ",
+};
+
+function abbreviateLabel(name: string): string {
+  return PATRIMONY_ABBR[name] ?? name.slice(0, 4).toUpperCase();
+}
+
 function holdingValue(h: Holding): number {
   const v = Number(h.marketValueBase ?? h.marketValueEur);
   return Number.isFinite(v) ? v : 0;
@@ -166,6 +196,8 @@ export function AllocationCard({
   holdings,
   venueSlices,
   venueHelp,
+  classSlices,
+  footnote,
   periodRange,
   baseCurrency,
   className,
@@ -184,8 +216,8 @@ export function AllocationCard({
    * Lignes détenues — mosaïque Coin360 (aire ∝ MV). Absentes, le second
    * mode n'est pas proposé : le camembert de classes reste seul.
    *
-   * Ignoré quand `venueSlices` est fourni : la mosaïque suit alors les
-   * mêmes endroits que le camembert, pas les lignes détenues (D14.4).
+   * Ignoré quand `venueSlices` ou `classSlices` est fourni : la mosaïque suit
+   * alors les mêmes parts que le camembert, pas les lignes détenues (D14.4).
    */
   holdings?: Holding[];
   /**
@@ -198,6 +230,17 @@ export function AllocationCard({
   venueSlices?: AllocationByVenueApiVenue[];
   /** Texte d'aide du pavé — `ALLOCATION_BY_VENUE_HELP`, exposé tel quel. */
   venueHelp?: string;
+  /**
+   * Répartition du patrimoine par classe de détention (D19 P2bis) — remplace
+   * `data` et `venueSlices` sur ce pavé quand fournie. Prioritaire sur
+   * `venueSlices` si les deux sont passés (ne devrait pas arriver).
+   */
+  classSlices?: AllocationPatrimonySlice[];
+  /**
+   * Notice sous le pavé, montant déjà signé (ex. « dont passifs −119 947,88
+   * € ») — pas une part du camembert ni de la mosaïque.
+   */
+  footnote?: string;
   /**
    * Période partagée du tableau de bord. La mosaïque colore chaque ligne
    * par son P&L latent (coût → maintenant) : le moteur ne publie pas de
@@ -232,9 +275,13 @@ export function AllocationCard({
 }) {
   const [mode, setMode] = useState<"pie" | "treemap">("pie");
 
+  const overrideSlices = classSlices ?? venueSlices;
+
   const rows = useMemo(() => {
-    if (venueSlices) {
-      const sorted = [...venueSlices].sort((a, b) => b.amountEur - a.amountEur);
+    if (overrideSlices) {
+      const sorted = [...overrideSlices].sort(
+        (a, b) => b.amountEur - a.amountEur
+      );
       return sorted.map((s) => ({
         name: s.label,
         value: s.amountEur,
@@ -250,11 +297,11 @@ export function AllocationCard({
       pct: pcts[i] ?? 0,
       tone: toneOf(d.name),
     }));
-  }, [data, venueSlices, toneOf]);
+  }, [data, overrideSlices, toneOf]);
 
   const mosaic = useMemo(() => {
-    if (venueSlices) {
-      const items = venueSlices
+    if (overrideSlices) {
+      const items = overrideSlices
         .filter((s) => s.amountEur > 0)
         .map((s) => ({
           name: s.label,
@@ -285,10 +332,10 @@ export function AllocationCard({
           : perfTone(it.perfPct),
     }));
     return squarify(labeled);
-  }, [holdings, venueSlices]);
+  }, [holdings, overrideSlices]);
 
   const canTreemap = mosaic.length > 0;
-  const legendShowsValues = showValues || Boolean(venueSlices);
+  const legendShowsValues = showValues || Boolean(overrideSlices);
 
   return (
     <section
@@ -389,6 +436,15 @@ export function AllocationCard({
                   const spacious = hPx >= 70 && wPx >= 110;
                   const showAmount = spacious;
                   const textColor = tileTextColor(t.color);
+                  /*
+                    Une case étroite porte une abréviation, pas un nom coupé.
+
+                    « Épargne salariale » tronqué donnait « Épar… », qui ne
+                    désigne rien ; « ES » désigne la part. L'abréviation n'est
+                    utilisée que là où le nom entier ne tient pas — au-dessus,
+                    le mot complet reste préférable.
+                  */
+                  const nomAffiche = roomy ? t.name : abbreviateLabel(t.name);
                   return (
                     <div
                       key={t.name}
@@ -409,13 +465,13 @@ export function AllocationCard({
                           className={cn(
                             "w-full truncate font-semibold",
                             spacious
-                              ? "text-[length:var(--text-sm)]"
+                              ? "text-[length:var(--text-base)]"
                               : roomy
-                                ? "text-[length:var(--text-xs)]"
-                                : "text-[length:var(--text-2xs)]"
+                                ? "text-[length:var(--text-sm)]"
+                                : "text-[length:var(--text-xs)]"
                           )}
                         >
-                          {t.name}
+                          {nomAffiche}
                         </div>
                       )}
                       {showPct && (
@@ -423,9 +479,9 @@ export function AllocationCard({
                           className={cn(
                             "num w-full truncate font-semibold",
                             spacious
-                              ? "text-[length:var(--text-base)]"
+                              ? "text-[length:var(--text-lg)]"
                               : roomy
-                                ? "text-[length:var(--text-sm)]"
+                                ? "text-[length:var(--text-base)]"
                                 : "text-[length:var(--text-xs)]"
                           )}
                         >
@@ -539,6 +595,24 @@ export function AllocationCard({
             data-testid="allocation-scope-legend"
           >
             {legend}
+          </p>
+        )}
+
+        {/*
+          Notice, jamais une part.
+
+          Les passifs et les lignes qu'aucun compte ne porte retranchent ou
+          ajoutent au patrimoine sans occuper d'aire : les dessiner dans le
+          camembert reviendrait à leur donner une place dans une partition
+          d'actifs à laquelle ils n'appartiennent pas. Ils se lisent ici, en
+          toutes lettres, sous les parts qu'ils expliquent.
+        */}
+        {footnote && rows.length > 0 && (
+          <p
+            className="mt-[var(--space-2)] text-[length:var(--text-xs)] text-[var(--foreground-faint)]"
+            data-testid="allocation-patrimony-footnote"
+          >
+            {footnote}
           </p>
         )}
       </div>

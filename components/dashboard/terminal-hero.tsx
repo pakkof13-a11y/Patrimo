@@ -896,6 +896,15 @@ export type TerminalKpi = {
    * période. Lui afficher un tiret annoncerait une inconnue là où le chiffre
    * est su, ce qui est la doctrine à l'envers.
    */
+  /**
+   * Phrase de périmètre, montrée dans le panneau de détail.
+   *
+   * Elle dit ce que le montant contient — et ce qu'il ne contient pas. Un
+   * libellé d'un mot ne peut pas porter cette précision, et un « ? » de plus
+   * dans une rangée de dix tuiles alourdirait l'écran : le panneau qui existe
+   * déjà pour le Δ est le bon endroit.
+   */
+  help?: string;
 };
 
 const TONE_STROKE: Record<string, string> = {
@@ -1033,7 +1042,7 @@ export function TerminalKpiRow({
         return (
           <article
             key={item.key}
-            className="kpi-tile group/kpi relative flex flex-col gap-[var(--space-2)] p-[var(--pad-card)] outline-none"
+            className="kpi-tile group/kpi relative z-0 flex flex-col gap-[var(--space-2)] p-[var(--pad-card)] outline-none hover:z-20 focus-visible:z-20 focus-within:z-20"
             data-testid={`kpi-${item.key}`}
             tabIndex={0}
             aria-describedby={detailId}
@@ -1144,7 +1153,7 @@ export function TerminalKpiRow({
               id={detailId}
               role="tooltip"
               className={cn(
-                "pointer-events-none absolute left-1/2 top-full z-30 mt-[var(--space-2)]",
+                "pointer-events-none absolute left-1/2 top-full z-50 mt-[var(--space-2)]",
                 "w-64 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[var(--radius-md)]",
                 "border border-[var(--border)] bg-[var(--card)] p-[var(--space-3)]",
                 "text-[length:var(--text-xs)] shadow-[var(--shadow-md)] opacity-0",
@@ -1156,6 +1165,11 @@ export function TerminalKpiRow({
               <p className="mb-[var(--space-2)] font-semibold text-[var(--foreground)]">
                 {item.label}
               </p>
+              {item.help && (
+                <p className="mb-[var(--space-2)] text-[var(--foreground-faint)]">
+                  {item.help}
+                </p>
+              )}
               <dl className="space-y-[var(--space-1)]">
                 <div className="flex items-baseline justify-between gap-[var(--space-2)]">
                   <dt className="text-[var(--foreground-faint)]">Valeur</dt>
