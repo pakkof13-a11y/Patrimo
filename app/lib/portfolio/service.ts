@@ -7,7 +7,6 @@ import {
 } from "../accounting";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
 import {
-  oldestFetchedAt,
   readLastClosesAsOf,
   resolveLastCloseAsOf,
 } from "../market/last-close-as-of";
