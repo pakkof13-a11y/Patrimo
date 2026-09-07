@@ -350,6 +350,7 @@ export function PortfolioEvolutionPanel({
   const pocketNavQ = useDailyNavQuery(navQueryFrom ?? "", navQueryTo ?? "", {
     enabled: wantPocketDailyNav,
     scope: pocketScope,
+    range,
   });
   const pocketServedFrom = servedDailyNavFrom(pocketNavQ.data, {
     isPlaceholderData: pocketNavQ.isPlaceholderData,
@@ -602,7 +603,7 @@ export function PortfolioEvolutionPanel({
       navQueryTo ??
       "";
   const indexQ = useQuery({
-    queryKey: ["evolution-index", indexKey, idxFromKey, idxToKey],
+    queryKey: ["evolution-index", indexKey, range, idxFromKey, idxToKey],
     enabled:
       wantIndex &&
       Boolean(idxFromKey && idxToKey) &&
@@ -611,13 +612,20 @@ export function PortfolioEvolutionPanel({
         : vsNavWindowed.length > 1 || rawPoints.length > 1),
     staleTime: 30 * 60_000,
     retry: false,
-    queryFn: () => {
+    /*
+      Même règle que la série de valeur : changer de période annule la
+      requête d'indice en vol. Sans cela, une réponse lente pour « 1A »
+      pouvait s'installer sous un chip « Tout » déjà actif, et l'overlay
+      comparait deux fenêtres différentes.
+    */
+    queryFn: ({ signal }) => {
       const fromMs = Date.parse(idxFromKey) - 7 * 24 * 60 * 60 * 1000;
       const from = new Date(fromMs).toISOString();
       const to = idxToKey;
       const params = new URLSearchParams({ symbol: indexKey, from, to });
       return fetchJson<{ points: IndexClosePoint[] }>(
-        `/api/benchmark?${params.toString()}`
+        `/api/benchmark?${params.toString()}`,
+        { signal }
       );
     },
   });

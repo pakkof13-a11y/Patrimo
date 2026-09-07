@@ -60,25 +60,53 @@ export type DailyNavQueryScope = import("@/app/lib/portfolio/historical/get-dail
 export function useDailyNavQuery(
   from: string,
   to: string,
-  options?: { enabled?: boolean; scope?: DailyNavQueryScope }
+  options?: {
+    enabled?: boolean;
+    scope?: DailyNavQueryScope;
+    /**
+     * Période demandée. Elle ne construit pas l'URL — `from`/`to` s'en
+     * chargent — mais rend la clé de cache lisible, et garantit que deux
+     * périodes ne partageront jamais une entrée si leurs bornes venaient à
+     * coïncider après un clamp.
+     */
+    range?: string;
+  }
 ) {
   const enabled = options?.enabled ?? true;
   const scope = options?.scope ?? "financier";
+  const range = options?.range ?? "";
   return useQuery({
-    queryKey: ["portfolio-daily-nav", scope, from, to],
-    queryFn: () => {
-      const params = new URLSearchParams({
-        scope,
-        from,
-        to,
-      });
+    queryKey: ["portfolio-daily-nav", scope, range, from, to],
+    /*
+      `signal` est celui de React Query : changer de période annule la requête
+      en vol au lieu de la laisser courir. Une réponse qui arriverait après un
+      autre clic ne peut donc plus s'installer — elle est abandonnée avant
+      d'être lue, et non départagée après coup par un numéro de séquence.
+    */
+    queryFn: ({ signal }) => {
+      const params = new URLSearchParams({ scope, from, to });
       return fetchJson<DailyNavQueryResult>(
-        `/api/portfolio/daily-nav?${params.toString()}`
+        `/api/portfolio/daily-nav?${params.toString()}`,
+        { signal }
       );
     },
     enabled: enabled && Boolean(from && to),
     staleTime: DAILY_NAV_STALE_MS,
-    placeholderData: keepPreviousData,
+    /*
+      Pas de `keepPreviousData` ici, contrairement aux holdings.
+
+      Il rendait la série précédente pendant le chargement de la nouvelle, et
+      l'écran l'affichait comme si elle était la courante : cliquer « Tout »
+      depuis « 1A » montrait la courbe 1A sous un chip Tout déjà actif, et il
+      fallait un second clic pour voir la bonne. Le libellé de borne servie s'en
+      gardait déjà via `isPlaceholderData` ; la courbe, elle, ne s'en gardait
+      pas.
+
+      Une donnée absente pendant le chargement rend l'erreur impossible, au lieu
+      d'obliger chaque lecteur à s'en méfier : le squelette dit qu'on charge, ce
+      qui est vrai, là où l'ancienne courbe affirmait une période qu'on n'avait
+      pas encore.
+    */
     refetchOnWindowFocus: false,
   });
 }

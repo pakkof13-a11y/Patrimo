@@ -352,7 +352,9 @@ export function DashboardTab({
     referenceDay,
     earliestDay
   );
-  const dailyNavQ = useDailyNavQuery(navWindow.from, navWindow.to);
+  const dailyNavQ = useDailyNavQuery(navWindow.from, navWindow.to, {
+    range: fetchRange,
+  });
   const dailyNavPoints = dailyNavQ.data?.points;
 
   /*
@@ -528,9 +530,17 @@ export function DashboardTab({
     [dailyNavPoints]
   );
   const curveHistory = navHistory.length >= 2 ? navHistory : stableHistory;
+  /*
+    On charge tant que la série de la période demandée n'est pas là.
+
+    `isPending` seul ne suffisait pas : la requête change de clé à chaque chip,
+    et l'écran doit dire qu'il charge plutôt que de laisser la place à ce
+    qu'il affichait avant. Depuis que la série ne conserve plus la précédente,
+    `navHistory` est vide pendant ce temps — la condition tient donc sur ce que
+    l'écran a réellement à tracer, pas sur l'état interne de la requête.
+  */
   const showNavLoading =
-    showHistoryLoading ||
-    (dailyNavQ.isPending && navHistory.length === 0);
+    showHistoryLoading || (dailyNavQ.isFetching && navHistory.length === 0);
 
   /**
    * Indicateurs — l'ordre du mockup, qui est aussi l'ordre de pilotage :

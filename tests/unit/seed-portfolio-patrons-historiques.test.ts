@@ -26,7 +26,20 @@ import {
 } from "../../prisma/seed-portfolio";
 
 const racine = join(__dirname, "..", "..");
-const seed = readFileSync(join(racine, "prisma/seed-portfolio.ts"), "utf8");
+/*
+  La source est lue avec des fins de ligne normalisées.
+
+  Les contrôles ci-dessous découpent le fichier par des marqueurs textuels —
+  une accolade fermante précédée et suivie d'un saut de ligne, par exemple.
+  Sur une copie de travail Windows, ces marqueurs ne trouvent jamais leur
+  borne : la tranche déborde alors sur le code voisin, et le test échoue sur
+  une ligne qu'il ne visait pas. Il passait sous Linux et tombait sous
+  Windows, pour une raison sans rapport avec ce qu'il vérifie.
+*/
+const seed = readFileSync(
+  join(racine, "prisma/seed-portfolio.ts"),
+  "utf8"
+).replace(/\r\n/g, "\n");
 /** Le bloc historique seul — les patrons, pas la fenêtre récente. */
 const bloc = seed.slice(
   seed.indexOf("Historique long 2001-2026"),
