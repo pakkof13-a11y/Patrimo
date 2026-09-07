@@ -520,8 +520,20 @@ describe("actifs écartés du patrimoine", () => {
   });
 });
 
-describe("earliestDay — la borne exclut les replis non observés", () => {
-  it("un compte de cash sans événement (repli createdAt, observed: false) ne borne pas", () => {
+describe("earliestDay — un fait observé l'emporte toujours sur un repli non observé", () => {
+  it("un compte de cash sans événement (repli createdAt, observed: false), seul dans le patrimoine, borne quand même — au jour connu, jamais à null", () => {
+    /*
+      D26 point 2 — un patrimoine sans journal.
+
+      Réécrit : avant, l'absence de tout fait *observé* rendait `null`, et
+      `earliestDayForScope`/`getDailyNav` en dérivaient une série vide pour un
+      compte qui a pourtant une trésorerie bien réelle (seulement saisie à la
+      main, sans `CashEvent`). Reproduit isolément dans
+      `earliest-day-without-ledger.test.ts` : `null` n'est acceptable que
+      lorsque *rien* — ni fait observé, ni repli connu — n'existe nulle part.
+      Ici il existe un repli (`createdAt`) : la borne y retombe, cappée par
+      `MAX_HISTORY_YEARS` comme n'importe quelle autre date ancienne.
+    */
     const e = new PortfolioValuationEngine(
       inputs({
         cashAccounts: [
@@ -529,7 +541,11 @@ describe("earliestDay — la borne exclut les replis non observés", () => {
         ],
       })
     );
-    // Aucun fait observé : la borne n'existe pas.
+    expect(e.earliestDay(DAY("2026-09-07"))).toBe("2020-09-07");
+  });
+
+  it("un patrimoine réellement vide (aucun fait, aucun repli) reste `null`", () => {
+    const e = new PortfolioValuationEngine(inputs());
     expect(e.earliestDay()).toBeNull();
   });
 

@@ -127,19 +127,28 @@ function weekdayOf(day: DayKey): number {
 }
 
 /**
- * Dimanche de la semaine civile qui contient `day`.
+ * Lundi de la semaine civile (lundi → dimanche) qui contient `day`.
  *
  * Sert à nommer un point hebdomadaire. Le point lui-même tombe sur un
- * dimanche, sauf à la borne qui ouvre la fenêtre — la seule qui reste
- * partielle depuis que la borne de fin ne l'est plus (cf.
- * `seriesEmissionDays`). Nommer ce point par sa propre date laisserait croire
- * à une semaine qui commencerait un mercredi ; le nommer par son dimanche dit
- * l'intervalle qu'il ouvre, ce qui est ce que le lecteur cherche.
+ * vendredi — le dernier jour de bourse de la semaine (cf.
+ * `seriesEmissionDays`) — sauf à la borne qui ouvre la fenêtre, la seule qui
+ * reste partielle. Nommer ce point par sa propre date laisserait croire à une
+ * semaine qui commencerait un mardi ; le nommer par son lundi dit l'intervalle
+ * qu'il couvre, ce qui est ce que le lecteur cherche.
+ *
+ * Anciennement `sundayOfWeek` : la semaine était ancrée dimanche → dimanche,
+ * et le point émis tombait sur un dimanche. Un dimanche n'a jamais de
+ * cotation — chaque point hebdomadaire se reportait donc systématiquement
+ * (`MARKET_CARRIED`), et la série entière se déclarait `ESTIMATED` (mesuré :
+ * 314/314 sur `demo`, fenêtre « Tout »). Le jour d'émission a changé
+ * (vendredi), et le jour de nommage suit : le lundi qui ouvre la même
+ * semaine.
  */
-export function sundayOfWeek(day: DayKey): DayKey {
+export function mondayOfWeek(day: DayKey): DayKey {
   const [y, m, dd] = day.split("-").map(Number);
   const d = new Date(Date.UTC(y!, m! - 1, dd!, 12));
-  const recul = d.getUTCDay(); // dimanche = 0, donc déjà le recul cherché.
+  const weekday = d.getUTCDay(); // dimanche = 0 … samedi = 6
+  const recul = (weekday + 6) % 7; // lundi = 0, …, dimanche = 6
   d.setUTCDate(d.getUTCDate() - recul);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
@@ -149,25 +158,26 @@ export function sundayOfWeek(day: DayKey): DayKey {
  *
  * Pas quotidien : tous les jours civils — contrat T-05 inchangé.
  *
- * Pas hebdomadaire : `from`, puis chaque **dimanche** de la fenêtre —
- * jamais `to` en plus, sauf s'il tombe lui-même un dimanche. La semaine
- * civile va de dimanche 00:00 Paris au dimanche 00:00 suivant ; le dernier
- * point émis est donc le dernier dimanche ≤ `to`, et la semaine en cours
+ * Pas hebdomadaire : `from`, puis le **dernier jour de bourse de chaque
+ * semaine civile** — lundi à vendredi, en jours Europe/Paris — jamais `to` en
+ * plus, sauf s'il tombe lui-même un vendredi. Aucun calendrier férié : le
+ * moteur n'en tient pas ailleurs (`dailyPriceResolver`), et vendredi est donc
+ * le seul jour retenu, sans chercher le dernier jour ouvré effectif. Le
+ * dernier point émis est le dernier vendredi ≤ `to`, et la semaine en cours
  * (celle que `to` traverse sans la clore) n'est **pas servie** — exactement
  * comme le jour en cours a été retiré des séries quotidiennes
  * (`lastCloseDay`).
  *
- * Décision produit tranchée le 2026-09-07, qui remplace l'ancien ancrage au
- * lundi *et* le point partiel de fin. Le point partiel se justifiait par « le
- * hero afficherait sinon une valorisation vieille de plusieurs jours » — un
- * raisonnement qui ne tient plus : le gros chiffre du hero est un encours
- * daté du jour (`grossAssets`/`netWorth` du jour, hors courbe), et la courbe,
- * elle, s'arrête déjà à la clôture (`lastCloseDay`). Rien ne demandait donc
- * plus à la courbe hebdomadaire de forcer un point sur un jour qui n'a pas
- * clos sa semaine.
+ * Décision produit tranchée le 2026-09-07 (D26) : l'ancrage dimanche
+ * (retenu le même jour, plus haut dans l'historique de ce fichier) émettait
+ * un point qu'aucune action ne cote jamais, si bien que chaque point
+ * hebdomadaire se reportait (`MARKET_CARRIED`) et que la série entière se
+ * déclarait `ESTIMATED` — `lastObserved` n'était donc plus jamais assigné
+ * dans `buildHeroSeries`. Le regroupement hebdomadaire reste : seul le jour
+ * d'émission change, du dimanche au vendredi.
  *
  * Un seul intervalle reste donc plus court que sept jours : celui qui ouvre
- * la fenêtre (`from` → premier dimanche). Il n'est pas un problème pour
+ * la fenêtre (`from` → premier vendredi). Il n'est pas un problème pour
  * l'identité métier `Δmarché = NAV_t − NAV_{t−1} − flux_t` : celle-ci est
  * indexée sur les points émis, et les flux sont sommés sur l'intervalle qui
  * sépare deux points, quelle qu'en soit la durée.
@@ -179,5 +189,5 @@ export function seriesEmissionDays(
 ): DayKey[] {
   const days = enumerateDays(from, to);
   if (step === "day" || days.length === 0) return days;
-  return days.filter((day, i) => i === 0 || weekdayOf(day) === 0);
+  return days.filter((day, i) => i === 0 || weekdayOf(day) === 5);
 }

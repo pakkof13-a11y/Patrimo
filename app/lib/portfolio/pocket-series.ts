@@ -22,6 +22,7 @@ import { endOfParisDay } from "../dates/paris";
 import type { EvolutionAccount } from "./evolution-prefs";
 import type { EvolutionSeriesPoint } from "./evolution-aggregate";
 import {
+  navPointPeriodLabel,
   windowDailyNav,
   type DailyNavChartPoint,
 } from "./daily-nav-view";
@@ -409,11 +410,11 @@ export function toPocketEvolutionPoints(
       date: at.toISOString(),
       t: at.getTime(),
       label: p.day,
-      periodLabel: p.day,
+      periodLabel: navPointPeriodLabel(p),
       total,
       flows,
       chartValue: total,
-      intervalType: "day",
+      intervalType: p.intervalType,
       status: p.status === "EXACT" ? "EXACT" : "ESTIMATED",
       ...emptyStockFields(total),
     });

@@ -49,14 +49,17 @@ describe("lastCloseDay", () => {
 describe("pas hebdomadaire borné à la dernière clôture", () => {
   const now = new Date("2026-09-07T11:00:00.000Z");
 
-  it("le dernier point est la clôture, jamais le jour en cours", () => {
+  it("le dernier point est au plus tard la clôture, jamais le jour en cours", () => {
+    // `lastCloseDay(now)` (2026-09-06) est un dimanche : le pas hebdomadaire
+    // n'émet plus sur ce jour (D26 — il n'a jamais de cotation). Le dernier
+    // point servi est donc le dernier vendredi ≤ cette clôture, ici le 4.
     const jours = seriesEmissionDays(
       historyFloorDay(now),
       lastCloseDay(now),
       "week"
     );
     const dernier = jours[jours.length - 1]!;
-    expect(dernier).toBe("2026-09-06");
+    expect(dernier).toBe("2026-09-04");
     expect(jours).not.toContain("2026-09-07");
   });
 

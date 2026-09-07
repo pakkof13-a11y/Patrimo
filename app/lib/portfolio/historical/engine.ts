@@ -517,10 +517,19 @@ export class PortfolioValuationEngine {
    *
    * Un repli `createdAt`/`updatedAt` (`observed: false`, posé par
    * `components.ts` quand aucune date réelle n'est connue) n'entre pas dans ce
-   * calcul : ce n'est pas un fait constaté, seulement une date de saisie. Une
-   * acquisition de 1998 sans écriture au journal reste la borne, même si le
-   * compte de cash le plus ancien n'a de solde connu que depuis sa dernière
-   * mise à jour.
+   * calcul **tant qu'un fait constaté existe ailleurs** : ce n'est pas un fait
+   * constaté, seulement une date de saisie. Une acquisition de 1998 sans
+   * écriture au journal reste la borne, même si le compte de cash le plus
+   * ancien n'a de solde connu que depuis sa dernière mise à jour.
+   *
+   * Dernier recours quand **rien** n'est jamais observé nulle part — aucune
+   * transaction, aucun constat daté sur aucun compartiment — un patrimoine
+   * saisi entièrement à la main (soldes courants, aucun événement) rendait
+   * `null` : `earliestDayForScope` en dérivait `null`, et `getDailyNav`
+   * répondait une série vide à un compte qui a pourtant une trésorerie bien
+   * réelle. Le repli ne s'applique que dans ce cas — jamais quand un fait
+   * observé existe déjà, pour ne jamais préférer une date de saisie à une date
+   * réelle.
    *
    * Ramenée sous `historyFloorDay` (`MAX_HISTORY_YEARS`, cf. `history-window.ts`) :
    * la donnée plus ancienne reste en base, l'application cesse simplement de
@@ -530,9 +539,10 @@ export class PortfolioValuationEngine {
    * production l'appelant ne le fournit jamais et l'horloge fait foi.
    */
   earliestDay(now: Date = new Date()): DayKey | null {
-    const candidates: DayKey[] = [];
+    const observed: DayKey[] = [];
+    const known: DayKey[] = [];
     if (this.sortedTxs.length > 0) {
-      candidates.push(this.txDays[0]!);
+      observed.push(this.txDays[0]!);
     }
     for (const sleeve of [
       this.cash,
@@ -542,12 +552,15 @@ export class PortfolioValuationEngine {
     ]) {
       for (const t of sleeve.timelines) {
         const first = t.earliestObservedDay;
-        if (first) candidates.push(first);
+        if (first) observed.push(first);
+        const any = t.firstDay;
+        if (any) known.push(any);
       }
     }
-    if (candidates.length === 0) return null;
+    const pool = observed.length > 0 ? observed : known;
+    if (pool.length === 0) return null;
     return capEarliestDay(
-      candidates.reduce((min, c) => (c < min ? c : min)),
+      pool.reduce((min, c) => (c < min ? c : min)),
       now
     );
   }
@@ -587,13 +600,27 @@ export class PortfolioValuationEngine {
     return null;
   }
 
+  /**
+   * Premier jour du compartiment — observé de préférence, connu à défaut.
+   *
+   * Même repli qu'`earliestDay()`, borné à ce seul compartiment : si aucune
+   * ligne de la poche ne porte de constat observé (un cash saisi à la main,
+   * sans le moindre `CashEvent`), la poche entière rendrait `null` — pas
+   * « je ne sais pas remonter aussi loin », mais « cette poche n'existe pas »,
+   * ce qui est faux. Le repli ne joue que faute de tout constat observé dans
+   * *cette* poche ; une poche qui en a un ne recule jamais vers une ligne
+   * seulement connue.
+   */
   private earliestSleeveDay(sleeve: SleeveState): DayKey | null {
     let min: DayKey | null = null;
+    let minKnown: DayKey | null = null;
     for (const t of sleeve.timelines) {
       const first = t.earliestObservedDay;
       if (first && (min == null || first < min)) min = first;
+      const any = t.firstDay;
+      if (any && (minKnown == null || any < minKnown)) minKnown = any;
     }
-    return min;
+    return min ?? minKnown;
   }
 
   private static minDay(days: Array<DayKey | null>): DayKey | null {
@@ -702,6 +729,22 @@ export class PortfolioValuationEngine {
 
     const state = createEmptyLedger();
     let cursor = 0;
+    /*
+      Rejoue l'état comptable antérieur à `from` sans en compter les flux.
+
+      Sans cette avance, le premier jour de la boucle (`from`) draine par le
+      `while` ci-dessous **toutes** les écritures du journal jusque-là — pas
+      seulement celles de son propre intervalle — et le premier point émis
+      hérite de l'histoire entière du compte. Mesuré sur `demo`, scope
+      `financier` : un point à 1 058 469,65 € de flux en fenêtre 1A, quand la
+      somme de tous les apports du compte ne fait que 554 752 €. L'état
+      (positions, cash) doit rester rejoué depuis l'origine — seule
+      l'attribution du flux au point est bornée à la fenêtre servie.
+    */
+    while (cursor < this.sortedTxs.length && this.txDays[cursor]! < from) {
+      applyLedgerTx(state, this.sortedTxs[cursor]!);
+      cursor += 1;
+    }
     /*
       Flux cumulés depuis le point précédent — remis à zéro à chaque point
       **émis**, et non à chaque jour : un flux appartient à l'intervalle du
