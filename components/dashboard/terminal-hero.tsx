@@ -478,6 +478,23 @@ export function TerminalHero({
             <h2 id="hero-heading" className="sr-only">
               {HERO_NAV_SCOPE_HEADING[mode]}
             </h2>
+            {/*
+              Le mot manquant depuis D20 P2 : le repère `sr-only` ci-dessus
+              porte le périmètre pour qui lit sans voir, mais rien ne
+              nommait plus la carte pour qui la regarde. « PATRIMOINE » —
+              pas « PATRIMOINE TOTAL », pas « Patrimoine net » : la bascule
+              juste à côté dit déjà lequel des deux est affiché, le répéter
+              ici serait la redondance que D20 P2 avait précisément retirée.
+
+              `.text-label` : la même classe que les titres des tuiles KPI
+              (« TITRES », « CRYPTO »… — `kpi-tile` plus bas dans ce
+              fichier, `<h3 className="text-label truncate">`), pour que le
+              mot le plus important de la carte de tête ne parle pas un
+              autre langage typographique que le reste du tableau de bord.
+            */}
+            <span className="text-label shrink-0" data-testid="hero-title">
+              Patrimoine
+            </span>
             <span
               className={cn(
                 "inline-flex h-4 w-4 cursor-help select-none items-center justify-center",
@@ -523,7 +540,20 @@ export function TerminalHero({
                       hover.reset();
                     }}
                     className={cn(
-                      "rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px] font-medium leading-none transition",
+                      /*
+                        Bascule montée d'un cran (espacement `px-1.5 py-0.5`
+                        → `--space-2`/`--space-1`, texte `10px` →
+                        `--text-xs` 11px) pour rester lisible à côté du
+                        nouveau titre
+                        « PATRIMOINE » — sans le dépasser : deux lettres de
+                        plus (11px contre les 10px de `.text-label`), et
+                        « Net »/« Brut » restent deux mots courts face à un
+                        titre en capitales espacées sur neuf caractères. Un
+                        contrôle qu'on presse, pas le mot qu'on lit en
+                        premier.
+                      */
+                      "rounded-[var(--radius-sm)] px-[var(--space-2)] py-[var(--space-1)]",
+                      "text-[length:var(--text-xs)] font-medium leading-none transition",
                       "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
                       selected
                         ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]"
