@@ -27,7 +27,7 @@ import {
   type MarketReleaseFilter,
 } from "@/app/lib/news/release-filter";
 import {
-  buildMarketDayWindow,
+  buildReleaseDayWindow,
   coveredDayRange,
   isDayCovered,
   type MarketDay,
@@ -106,17 +106,28 @@ export function NewsMacroPanel({
     useState<MarketReleaseFilter>("upcoming");
 
   /*
-    Barre de jours J−7…J+7 (civil Europe/Paris), un jour sélectionné à la
-    fois. Calculée une fois au montage : le calendrier ne doit pas sauter de
-    jour sous les pieds de l'utilisateur pendant qu'il consulte le panneau.
+    Deux modes mutuellement exclusifs, un seul jour affiché à la fois par
+    carte : « À venir » couvre J…J+6, « Publiées » couvre J−6…J. L'ancre
+    temporelle (`mountNow`) est figée une fois au montage — le calendrier ne
+    doit pas sauter de jour sous les pieds de l'utilisateur pendant qu'il
+    consulte le panneau — et sert à calculer `todayKey` ainsi que la barre de
+    chaque carte, recalculée quand son onglet change.
   */
-  const dayWindow = useMemo<MarketDay[]>(() => buildMarketDayWindow(new Date()), []);
+  const [mountNow] = useState<Date>(() => new Date());
   const todayKey = useMemo(
-    () => dayWindow.find((d) => d.isToday)?.key ?? dayWindow[7]!.key,
-    [dayWindow]
+    () => parisDayOf(mountNow) ?? mountNow.toISOString().slice(0, 10),
+    [mountNow]
   );
   const [macroDay, setMacroDay] = useState<string>(todayKey);
   const [earnDay, setEarnDay] = useState<string>(todayKey);
+  const macroDayWindow = useMemo<MarketDay[]>(
+    () => buildReleaseDayWindow(macroFilter, mountNow),
+    [macroFilter, mountNow]
+  );
+  const earnDayWindow = useMemo<MarketDay[]>(
+    () => buildReleaseDayWindow(earnFilter, mountNow),
+    [earnFilter, mountNow]
+  );
 
   const tickersParam = useMemo(() => {
     return portfolioTickers
@@ -367,7 +378,7 @@ export function NewsMacroPanel({
           </header>
 
           <DayBar
-            days={dayWindow}
+            days={macroDayWindow}
             coverage={macroCoverage}
             value={macroDay}
             onChange={(d) => {
@@ -381,6 +392,10 @@ export function NewsMacroPanel({
             value={macroFilter}
             onChange={(f) => {
               setMacroFilter(f);
+              // Changer d'onglet remet le jour sur J : la barre change de
+              // sens (J…J+6 ↔ J−6…J) et l'ancien jour sélectionné peut ne
+              // plus exister côté nouvel onglet.
+              setMacroDay(todayKey);
               setMacroMore(false);
             }}
             testId="macro-time-filter"
@@ -499,7 +514,7 @@ export function NewsMacroPanel({
           </header>
 
           <DayBar
-            days={dayWindow}
+            days={earnDayWindow}
             coverage={null}
             value={earnDay}
             onChange={(d) => {
@@ -513,6 +528,9 @@ export function NewsMacroPanel({
             value={earnFilter}
             onChange={(f) => {
               setEarnFilter(f);
+              // Même règle que Macro : l'onglet change le sens de la barre,
+              // le jour sélectionné revient sur J.
+              setEarnDay(todayKey);
               setEarnMore(false);
             }}
             testId="earn-time-filter"
@@ -558,67 +576,66 @@ export function NewsMacroPanel({
                     })}
               </p>
             ) : (
+              /*
+                Même gabarit de ligne que la carte Macro juste à côté — mêmes
+                classes de hauteur, de fond et d'interligne (`flex flex-wrap
+                items-center gap-1.5 … px-0.5 py-1 text-xs`, figures sur une
+                ligne pleine largeur en dessous). Le logo 40×40 sur deux
+                lignes de texte séparées produisait des cartes bien plus
+                hautes et plus creuses côté Résultats qu'en Macro ; ici le
+                logo rejoint la taille du drapeau macro et le nom tient sur la
+                même ligne que l'heure.
+              */
               <ul className="space-y-1.5">
                 {earnVisible.map((e) => (
                   <li
                     key={e.id}
                     className={cn(
-                      "rounded-[var(--radius-md)] border border-transparent px-1 py-1.5 text-xs",
+                      "flex flex-wrap items-center gap-1.5 rounded-[var(--radius-md)] border border-transparent px-0.5 py-1 text-xs sm:gap-2",
                       e.inPortfolio &&
                         "border-[var(--primary-soft)] bg-[var(--primary-soft)]/40"
                     )}
                     data-in-portfolio={e.inPortfolio ? "true" : "false"}
                   >
-                    <div className="flex min-w-0 items-start gap-2 mb-1.5">
-                      <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
-                        {parisEventClock(e.time)}
+                    <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
+                      {parisEventClock(e.time)}
+                    </span>
+                    <div className="relative shrink-0">
+                      <CompanyLogo
+                        src={e.logoUrl}
+                        name={e.companyName}
+                        ticker={e.ticker}
+                        sizeClassName="h-5 w-5"
+                        radiusClassName="rounded-md"
+                      />
+                      <div className="absolute -bottom-0.5 -right-0.5">
+                        <CountryFlag
+                          code={e.countryCode || "us"}
+                          showCode={false}
+                          imgClassName="h-2 w-3"
+                          className="px-0.5 py-0 shadow-sm ring-1 ring-white dark:ring-slate-900 bg-white dark:bg-slate-900 text-[8px]"
+                        />
+                      </div>
+                    </div>
+                    <span className="min-w-0 flex-1 truncate leading-snug text-[var(--foreground)]">
+                      {e.companyName}
+                      <span className="ml-1 font-mono text-[10px] text-[var(--muted-foreground)]">
+                        {e.ticker}
                       </span>
-                    </div>
-                    <div className="flex min-w-0 gap-3">
-                      <div className="relative shrink-0">
-                        <CompanyLogo
-                          src={e.logoUrl}
-                          name={e.companyName}
-                          ticker={e.ticker}
-                          sizeClassName="h-10 w-10"
-                          radiusClassName="rounded-lg"
-                        />
-                        <div className="absolute -bottom-0 -right-0">
-                          <CountryFlag
-                            code={e.countryCode || "us"}
-                            showCode={false}
-                            imgClassName="h-3 w-4"
-                            className="px-0.5 py-0.5 shadow-sm ring-1 ring-white dark:ring-slate-900 bg-white dark:bg-slate-900 text-[10px]"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-baseline gap-2 mb-1">
-                          <span className="block truncate font-medium leading-tight text-[var(--foreground)]">
-                            {e.companyName}
-                          </span>
-                          {e.inPortfolio && (
-                            <span className="shrink-0 rounded-full bg-[var(--primary)]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--primary)]">
-                              Portefeuille
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-2 items-center text-[10px]">
-                          <span className="font-mono text-[var(--muted-foreground)]">
-                            {e.ticker}
-                          </span>
-                          <span className="text-[var(--muted-foreground)]">·</span>
-                          <span className="text-[var(--muted-foreground)]">
-                            {earningsTimingLabel(e.timing)}
-                          </span>
-                        </div>
-                        <EarningsFigures
-                          estimate={e.epsEstimate}
-                          actual={e.epsActual}
-                          mode={earnFilter}
-                        />
-                      </div>
-                    </div>
+                    </span>
+                    {e.inPortfolio && (
+                      <span className="shrink-0 rounded-full bg-[var(--primary)]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--primary)]">
+                        Portefeuille
+                      </span>
+                    )}
+                    <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                      {earningsTimingLabel(e.timing)}
+                    </span>
+                    <EarningsFigures
+                      estimate={e.epsEstimate}
+                      actual={e.epsActual}
+                      mode={earnFilter}
+                    />
                   </li>
                 ))}
               </ul>
@@ -818,7 +835,7 @@ function EarningsFigures({
   if (mode === "upcoming") {
     if (!estimate) return null;
     return (
-      <p className="mt-0.5 pl-12 text-[10px] text-[var(--muted-foreground)]">
+      <p className="w-full pl-12 text-[10px] text-[var(--muted-foreground)]">
         <span className="font-medium">Cons.</span> EPS {estimate}
       </p>
     );
@@ -826,7 +843,7 @@ function EarningsFigures({
   if (!actual && !estimate) return null;
   const cmp = compareActualToConsensus(actual, estimate);
   return (
-    <p className="mt-0.5 pl-12 text-[10px] tabular-nums text-[var(--muted-foreground)]">
+    <p className="w-full pl-12 text-[10px] tabular-nums text-[var(--muted-foreground)]">
       <span className="font-medium">Cons.</span> {estimate?.trim() || "—"}
       {" · "}
       <span className="font-medium">Rés.</span>{" "}

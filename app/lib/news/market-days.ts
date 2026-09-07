@@ -1,5 +1,5 @@
 /**
- * Barre de jours J−7…J+7 (civil Europe/Paris) pour les calendriers marché.
+ * Barre de jours (civil Europe/Paris) pour les calendriers marché.
  *
  * Un « jour » est ici une clé civile parisienne (YYYY-MM-DD), pas une fenêtre
  * de 24 h UTC : deux instants voisins en UTC peuvent tomber sur deux jours
@@ -8,9 +8,16 @@
  * changement d'heure Europe/Paris, dont le décalage ne dépasse jamais deux
  * heures — plutôt que d'ajouter 24 h à l'instant courant, ce qui décalerait
  * le jour civil affiché les nuits de changement d'heure.
+ *
+ * `buildMarketDayWindow` est le primitif générique (`before`/`after` jours
+ * de part et d'autre d'aujourd'hui). Le produit ne l'utilise plus en mode
+ * symétrique J−7…J+7 : les deux onglets À venir / Publiées ont chacun leur
+ * propre fenêtre de sept jours, disjointe sauf en J — voir
+ * `buildReleaseDayWindow`.
  */
 
 import { parisDayOf } from "@/app/lib/ui/paris-clock";
+import type { MarketReleaseFilter } from "@/app/lib/news/release-filter";
 
 export type MarketDay = {
   /** Clé civile Europe/Paris, YYYY-MM-DD. */
@@ -48,7 +55,12 @@ export function buildMarketDayWindow(
   const anchor = parisNoonAnchor(now);
   const todayKey = parisDayOf(anchor)!;
   const days: MarketDay[] = [];
-  for (let offset = -before; offset <= after; offset++) {
+  // `before === 0` donnerait un premier offset `-0` (JS : `-0` littéral) : un
+  // même nombre que `0` en valeur, mais que `toEqual`/`Object.is` distinguent.
+  // `buildReleaseDayWindow("upcoming", …)` appelle justement `before=0` : la
+  // barre « À venir » démarre bien sur l'offset `0`, pas `-0`.
+  const start = before === 0 ? 0 : -before;
+  for (let offset = start; offset <= after; offset++) {
     const d = new Date(anchor.getTime() + offset * 86_400_000);
     const key = parisDayOf(d)!;
     days.push({
@@ -59,6 +71,26 @@ export function buildMarketDayWindow(
     });
   }
   return days;
+}
+
+/**
+ * Barre de jours d'un onglet À venir / Publiées — deux modes mutuellement
+ * exclusifs, un seul jour affichable à la fois de chaque côté.
+ *
+ * « À venir » : J…J+6, aujourd'hui inclus, ordre chronologique croissant.
+ * « Publiées » : J−6…J, aujourd'hui inclus, même ordre. J−1 et au-delà ne
+ * sont ni visibles ni cliquables côté « À venir » ; J+1 et au-delà ne le sont
+ * pas côté « Publiées ». Les deux fenêtres se rejoignent sur J, jamais
+ * ailleurs : un jour ne peut jamais apparaître dans les deux barres à la
+ * fois hors de ce point commun.
+ */
+export function buildReleaseDayWindow(
+  filter: MarketReleaseFilter,
+  now: Date = new Date()
+): MarketDay[] {
+  return filter === "upcoming"
+    ? buildMarketDayWindow(now, 0, 6)
+    : buildMarketDayWindow(now, 6, 0);
 }
 
 /**

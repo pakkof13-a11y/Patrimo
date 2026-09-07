@@ -17,6 +17,7 @@ import { toYahooSymbol, toFinnhubSymbol } from "@/app/lib/market/symbol";
 import { logoByName, logoByTicker } from "@/app/lib/logos/logodev";
 import { withTimeout } from "@/app/lib/utils/with-timeout";
 import { parisLocalToUtcIso } from "@/app/lib/utils/timezone";
+import { parisDayOf } from "@/app/lib/ui/paris-clock";
 
 const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey"],
@@ -44,8 +45,9 @@ export type EarningsCalendarResult = {
    * de filtrage là où il n'y en a pas.
    *
    * `universeRaw` est le nombre de lignes rendues par le fournisseur avant tout
-   * filtre, `universeKept` ce qui survit à la fenêtre de vingt-quatre heures.
-   * `universeSource` dit lequel des deux cas on est.
+   * filtre, `universeKept` ce qui survit à la fenêtre stricte J−6…J+6 (la
+   * barre de jours de l'écran). `universeSource` dit lequel des deux cas on
+   * est.
    */
   diagnostics: {
     universeSource: "finnhub" | "no-key";
@@ -71,6 +73,43 @@ function addDays(base: Date, days: number): Date {
   const d = new Date(base.getTime());
   d.setUTCDate(d.getUTCDate() + days);
   return d;
+}
+
+/**
+ * Jour civil Europe/Paris décalé de `offsetDays` par rapport à `now`.
+ *
+ * Ancré à midi UTC du jour civil parisien courant plutôt que sur `now` telle
+ * quelle — même précaution que `market-days.ts` : ajouter des jours en
+ * millisecondes à un instant qui peut tomber n'importe où dans la journée
+ * (avant ou après le changement d'heure CET/CEST) décale parfois le jour
+ * civil obtenu. Ancrer à midi élimine ce risque, l'écart CET/CEST ne
+ * dépassant jamais deux heures.
+ */
+function parisCivilOffset(
+  now: Date,
+  offsetDays: number
+): { y: number; m: number; d: number; key: string } {
+  const todayKey = parisDayOf(now);
+  if (!todayKey) {
+    // Repli défensif — Intl est toujours disponible en pratique.
+    const d = addDays(now, offsetDays);
+    return {
+      y: d.getUTCFullYear(),
+      m: d.getUTCMonth() + 1,
+      d: d.getUTCDate(),
+      key: isoDate(d),
+    };
+  }
+  const [y0, m0, d0] = todayKey.split("-").map(Number) as [
+    number,
+    number,
+    number,
+  ];
+  const anchorNoonUtc = new Date(Date.UTC(y0, m0 - 1, d0, 12, 0, 0));
+  const shifted = new Date(anchorNoonUtc.getTime() + offsetDays * 86_400_000);
+  const key = parisDayOf(shifted) ?? isoDate(shifted);
+  const [y, m, d] = key.split("-").map(Number) as [number, number, number];
+  return { y, m, d, key };
 }
 
 function formatEps(n: number | null | undefined): string | null {
@@ -427,16 +466,43 @@ export async function resolveEarningsCalendar(opts: {
 
   const now = new Date();
   /*
-    Bornée à la barre de jours de l'écran (J−7…J+7), pas à J−2.
+    Bornée à la barre de jours de l'écran — deux fenêtres disjointes qui se
+    rejoignent sur J : « Publiées » couvre J−6…J, « À venir » couvre J…J+6.
+    Interroger moins large que ça rendrait des jours affichables mais
+    silencieux — une fenêtre de fournisseur trop étroite, indiscernable à
+    l'écran d'un vrai jour sans publication.
 
-    La barre de jours du panneau laisse choisir n'importe quel jour de cette
-    fenêtre ; interroger moins large que la barre affichée aurait rendu des
-    jours passés cliquables mais silencieux — une fenêtre de fournisseur trop
-    étroite, indiscernable à l'écran d'un vrai jour sans publication. `to` va
-    au-delà (J+21) : ce qui dépasse la barre reste utile au « Voir plus ».
+    La requête HTTP (`fetchFrom`/`fetchTo`) garde un jour de marge de chaque
+    côté (J−7…J+7) : les dates de Finnhub ne sont pas garanties tomber sur le
+    même jour civil parisien une fois converties (bord de fuseau). Le filtre
+    qui compte — celui qui décide ce qui atteint l'écran — se fait plus bas
+    sur l'instant absolu, borné strictement à J−6…J+6 : ce que la marge
+    HTTP laisse passer en trop (J−7, J+7) y est retranché.
   */
-  const from = isoDate(addDays(now, -7));
-  const to = isoDate(addDays(now, 21));
+  const fetchFrom = parisCivilOffset(now, -7).key;
+  const fetchTo = parisCivilOffset(now, 7).key;
+  const from = fetchFrom;
+  const to = fetchTo;
+
+  const windowStartTs = Date.parse(
+    parisLocalToUtcIso(
+      parisCivilOffset(now, -6).y,
+      parisCivilOffset(now, -6).m,
+      parisCivilOffset(now, -6).d,
+      0,
+      0
+    )
+  );
+  // Borne haute exclusive : début du jour J+7, donc J+6 y compris tout entier.
+  const windowEndTsExclusive = Date.parse(
+    parisLocalToUtcIso(
+      parisCivilOffset(now, 7).y,
+      parisCivilOffset(now, 7).m,
+      parisCivilOffset(now, 7).d,
+      0,
+      0
+    )
+  );
 
   let universeSource: "finnhub" | "no-key" = "no-key";
   let universeRaw = 0;
@@ -510,26 +576,27 @@ export async function resolveEarningsCalendar(opts: {
       Ce n'est plus un repli : la demande est faite quelle que soit la richesse
       du portefeuille, et son absence ne dégrade rien.
 
-      La fenêtre est passée de vingt-quatre heures à J−7…J+7 : la barre de
-      jours de l'écran couvre quinze jours, et un vrac limité à demain aurait
-      laissé onze d'entre eux vides côté « univers » alors que le fournisseur
-      les couvre. `universeRaw`/`universeKept` mesurent ce que ça donne
-      réellement, `universeSource` dit si l'absence vient d'une clé manquante
-      ou d'une réponse vide.
+      La fenêtre couvre désormais J−6…J+6 (les deux onglets de la barre, qui
+      se rejoignent sur J), pas vingt-quatre heures : un vrac limité à demain
+      aurait laissé la quasi-totalité de la barre vide côté « univers » alors
+      que le fournisseur la couvre. `universeRaw`/`universeKept` mesurent ce
+      que ça donne réellement — `universeKept` compte ce qui survit à la
+      fenêtre stricte J−6…J+6, pas à une fenêtre de vingt-quatre heures.
+      `universeSource` dit si l'absence vient d'une clé manquante ou d'une
+      réponse vide.
     */
     universeSource = "finnhub";
-    const universeFromTs = now.getTime() - 7 * 24 * 60 * 60 * 1000;
-    const universeToTs = now.getTime() + 7 * 24 * 60 * 60 * 1000;
     const universeRows = await fetchFinnhubCalendar({
-      from: isoDate(new Date(universeFromTs)),
-      to: isoDate(new Date(universeToTs)),
+      from: fetchFrom,
+      to: fetchTo,
     });
     universeRaw = universeRows.length;
     for (const row of universeRows) {
       const ev = finnhubRowToEvent(row, nameByTicker, portfolioSet);
       if (!ev) continue;
       const t = Date.parse(ev.time);
-      if (!Number.isFinite(t) || t < universeFromTs || t > universeToTs) continue;
+      if (!Number.isFinite(t) || t < windowStartTs || t >= windowEndTsExclusive)
+        continue;
       sourcesUsed.add("finnhub");
       const k = `${normalizeKey(ev.ticker)}|${ev.time.slice(0, 10)}`;
       universeKept += 1;
@@ -537,22 +604,43 @@ export async function resolveEarningsCalendar(opts: {
     }
   }
 
-  let events = Array.from(byKey.values());
+  /*
+    Fenêtre stricte d'abord, plafond ensuite — et le plafond s'applique par
+    jour affiché, pas à la collecte entière.
 
-  // Trier : portefeuille d’abord, puis date croissante
-  events.sort((a, b) => {
-    if (a.inPortfolio !== b.inPortfolio) return a.inPortfolio ? -1 : 1;
-    return Date.parse(a.time) - Date.parse(b.time);
-  });
-
-  // Fenêtre utile : J-7 → J+45 (couvre la barre de jours J-7…J+7 de l'écran,
-  // avec une marge d'un jour ; au-delà, ignorer les dates trop lointaines).
-  const minTs = addDays(now, -8).getTime();
-  const maxTs = addDays(now, 45).getTime();
-  events = events.filter((e) => {
+    L'ordre inverse était le bug mesuré : `events.slice(0, limit)` coupait la
+    liste triée « portefeuille d'abord, puis date croissante » à soixante
+    lignes *avant* qu'aucun jour n'ait été choisi. Avec `portfolioTargets: 0`,
+    le tri est purement chronologique ; les soixante plus anciens gagnaient et
+    le futur n'était jamais atteint — mesuré : sur 292 événements dans
+    l'ancienne fenêtre (J−7…J+7), seuls trois jours (J−7, J−6, J−5) passaient
+    la coupe. Un jour très fourni (58 événements mesurés un J−4) épuiserait
+    le même plafond au détriment des jours suivants si le plafond restait
+    global ; il ne reste donc plus qu'un garde-fou par jour.
+  */
+  const windowed = Array.from(byKey.values()).filter((e) => {
     const t = Date.parse(e.time);
-    return Number.isFinite(t) && t >= minTs && t <= maxTs;
+    return Number.isFinite(t) && t >= windowStartTs && t < windowEndTsExclusive;
   });
+
+  const byDay = new Map<string, EarningsEvent[]>();
+  for (const e of windowed) {
+    const day = parisDayOf(e.time);
+    if (!day) continue;
+    const list = byDay.get(day);
+    if (list) list.push(e);
+    else byDay.set(day, [e]);
+  }
+
+  const events: EarningsEvent[] = [];
+  for (const list of byDay.values()) {
+    list.sort((a, b) => {
+      if (a.inPortfolio !== b.inPortfolio) return a.inPortfolio ? -1 : 1;
+      return Date.parse(a.time) - Date.parse(b.time);
+    });
+    events.push(...list.slice(0, limit));
+  }
+  events.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
 
   if (events.length > 0) {
     // `sourcesUsed` est nécessairement non vide ici : sans source interrogée,
@@ -567,7 +655,11 @@ export async function resolveEarningsCalendar(opts: {
             : "finnhub";
 
     return {
-      events: events.slice(0, limit).map(enrichEarningsVisuals),
+      // Déjà borné à J−6…J+6 et plafonné par jour ci-dessus : pas de nouvelle
+      // coupe globale ici, qui reproduirait le bug mesuré (les jours les plus
+      // anciens dans la liste triée par date auraient à nouveau évincé les
+      // plus récents).
+      events: events.map(enrichEarningsVisuals),
       source,
       diagnostics: {
         universeSource,
