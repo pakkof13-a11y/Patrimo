@@ -232,6 +232,78 @@ function Segmented<T extends string>({
 }
 
 /**
+ * Ce que le corps du panneau montre, une fois pour toutes.
+ *
+ * Extraite du JSX pour rester testable sans rendu React (pas de harnais DOM
+ * dans ce dépôt) : une chaîne de `? :` imbriqués ne se rejoue pas dans un
+ * test, une fonction pure si.
+ *
+ * L'ordre des branches **est** la décision — chacune coupe court aux
+ * suivantes, exactement comme le faisait la chaîne de conditions qu'elle
+ * remplace. Deux ajouts par rapport à cette chaîne : `"main-error"` et
+ * `"pocket-error"`, qui distinguent désormais une requête en échec d'une
+ * absence de données (UNKNOWN ≠ ZERO ≠ ERROR) — l'un et l'autre affichaient
+ * auparavant la même carte « rien à voir », alors qu'un échec appelle un
+ * autre message et un bouton, pas un conseil qui ne peut pas aider.
+ */
+export type EvolutionPanelBodyState =
+  | "intraday"
+  | "loading"
+  | "main-error"
+  | "empty"
+  | "pocket-error"
+  | "pocket-empty"
+  | "no-points-envelope-unknown"
+  | "no-points-too-short"
+  | "index-unavailable"
+  | "pocket-curve"
+  | "daily-nav-curve"
+  | "value-curve"
+  | "percent-curve";
+
+export function resolveEvolutionPanelBodyState(input: {
+  showIntraday: boolean;
+  showPanelLoading: boolean;
+  /** `dailyNavQ.isError` côté tableau de bord — jamais `history.length === 0`. */
+  mainError: boolean;
+  /** `!showPanelLoading && !mainError && history.length === 0`. */
+  empty: boolean;
+  wantPocketDailyNav: boolean;
+  /** `pocketNavQ.isError` — une poche dont la requête a échoué, pas un compte vierge. */
+  pocketError: boolean;
+  pocketEmptyKind: "empty" | "too-short" | null;
+  noPoints: boolean;
+  /** `Boolean(envelope) && unknownEnvelopeEur > 0`. */
+  envelopeUnknown: boolean;
+  indexUnavailable: boolean;
+  versusNone: boolean;
+  usePocketCurve: boolean;
+  useDailyNavCurve: boolean;
+  chartKindPercent: boolean;
+}): EvolutionPanelBodyState {
+  if (input.showIntraday) return "intraday";
+  if (input.showPanelLoading) return "loading";
+  if (input.mainError) return "main-error";
+  if (input.empty) return "empty";
+  if (input.wantPocketDailyNav && input.pocketError) return "pocket-error";
+  if (input.wantPocketDailyNav && input.pocketEmptyKind === "empty") {
+    return "pocket-empty";
+  }
+  if (input.noPoints) {
+    return input.envelopeUnknown
+      ? "no-points-envelope-unknown"
+      : "no-points-too-short";
+  }
+  if (input.indexUnavailable) return "index-unavailable";
+  if (input.versusNone && input.usePocketCurve) return "pocket-curve";
+  if (!input.chartKindPercent && input.useDailyNavCurve) {
+    return "daily-nav-curve";
+  }
+  if (!input.chartKindPercent) return "value-curve";
+  return "percent-curve";
+}
+
+/**
  * Module Évolution du portefeuille — refonte « premium » orientée
  * investissement, à deux réglages seulement : la période et la comparaison
  * (« Versus »). Le vs-indice (T-4.E) rebase NAV et clôtures à 100 à
@@ -247,9 +319,12 @@ export function PortfolioEvolutionPanel({
   servedNavFrom,
   baseCurrency,
   loading,
+  navError,
+  onRetryNav,
   className,
   range,
   onRangeChange,
+  firstHistoryDate,
 }: {
   history: HistoryPoint[];
   /** Série dense T-05 — courbe par défaut (Financier / Brut / Net). */
@@ -268,6 +343,18 @@ export function PortfolioEvolutionPanel({
   servedNavFrom?: string;
   baseCurrency: string;
   loading?: boolean;
+  /**
+   * La requête `getDailyNav` principale (scope hero, jamais celle d'une
+   * poche) a échoué — `dailyNavQ.isError` côté tableau de bord.
+   *
+   * Distinct de `history.length === 0` : une réponse en erreur et une
+   * réponse vide sont deux faits différents, UNKNOWN ≠ ERROR. Confondre les
+   * deux annonçait « Historique encore vide » et proposait d'actualiser les
+   * cours — un geste qui ne peut rien changer à une requête qui a échoué.
+   */
+  navError?: boolean;
+  /** Rejoue la requête principale — bouton « Réessayer » de l'état d'échec. */
+  onRetryNav?: () => void;
   className?: string;
   /**
    * Période affichée — détenue par le tableau de bord, pas par ce panneau.
@@ -279,6 +366,18 @@ export function PortfolioEvolutionPanel({
    */
   range: EvolutionRange;
   onRangeChange: (range: EvolutionRange) => void;
+  /**
+   * Première date lisible, tous scopes confondus — le plancher de six ans
+   * (`historyFloorDay`), jamais `dailyNav?.[0]?.day` ni `history[0]?.date`.
+   *
+   * Ces deux sources sont vides pendant chaque chargement (`useDailyNavQuery`
+   * ne garde plus la réponse précédente, et `history` est désormais toujours
+   * `[]` côté route) : les lire ici éteignait les chips à chaque clic, le
+   * temps de la requête. La carte de tête calcule cette même borne depuis la
+   * même constante (`firstHistoryDate` dans `dashboard-tab.tsx`) — un seul
+   * calcul, passé aux deux rangées, pour qu'elles ne se contredisent jamais.
+   */
+  firstHistoryDate: string | null;
 }) {
   const isClient = useIsClient();
   const [prefs, setPrefs] = useState<EvolutionPrefsV5>(DEFAULT_EVOLUTION_PREFS);
@@ -374,10 +473,23 @@ export function PortfolioEvolutionPanel({
     [pocketWindowed, account, envelope]
   );
   const pocketLineType = pocketChartLineType(account);
+  /*
+    Une requête en échec n'est pas « prête ».
+
+    TanStack met `isPending: false` dès qu'une requête atterrit sur
+    `status: "error"` — sans le exclure ici, une poche dont l'API a rendu 500
+    se lisait « prête » avec zéro point, et l'écran affirmait « cette poche
+    n'a pas encore de valorisation » à quelqu'un dont la requête avait
+    simplement échoué. `pocketError`, juste en dessous, porte ce troisième
+    état — ni prêt, ni vide, en échec — et le panneau lui donne son propre
+    message plutôt que de le confondre avec une absence.
+  */
   const pocketReady =
     wantPocketDailyNav &&
     !pocketNavQ.isPending &&
-    !pocketNavQ.isPlaceholderData;
+    !pocketNavQ.isPlaceholderData &&
+    !pocketNavQ.isError;
+  const pocketError = wantPocketDailyNav && pocketNavQ.isError;
   const usePocketCurve =
     pocketReady && !pocketSeriesTooShort(pocketPoints);
   const pocketTooShort =
@@ -440,8 +552,6 @@ export function PortfolioEvolutionPanel({
     });
   };
 
-  const firstDate = dailyNav?.[0]?.day ?? history[0]?.date ?? null;
-
   /*
     Périodes proposées, selon la profondeur de l'historique.
 
@@ -450,14 +560,23 @@ export function PortfolioEvolutionPanel({
     détient l'état. Écrire l'état d'un parent pendant le rendu d'un enfant
     n'est pas permis, et la règle est de toute façon commune aux deux blocs :
     c'est la même fonction qui la tranche des deux côtés.
+
+    La profondeur lue est `firstHistoryDate` — le plancher de six ans,
+    constant, jamais `dailyNav?.[0]?.day` ni `history[0]?.date`. Ces deux
+    séries sont vides pendant chaque chargement (`useDailyNavQuery` sans
+    `keepPreviousData`, `history` toujours `[]` côté route) : les lire ici
+    éteignait les huit chips à chaque clic de période, le temps de la
+    requête, alors que la carte de tête — qui lit déjà le plancher constant —
+    restait pleinement cliquable. Deux rangées pilotant le même état ne
+    doivent jamais se contredire.
   */
   const rangeEnabled = useMemo(() => {
     const map = {} as Record<EvolutionRange, boolean>;
     for (const r of RANGES) {
-      map[r.id] = isEvolutionRangeEnabled(r.id, firstDate);
+      map[r.id] = isEvolutionRangeEnabled(r.id, firstHistoryDate);
     }
     return map;
-  }, [firstDate]);
+  }, [firstHistoryDate]);
 
   /*
     Le périmètre est choisi **avant** l'agrégation, pas après.
@@ -733,7 +852,18 @@ export function PortfolioEvolutionPanel({
     loading ||
       (wantPocketDailyNav && !pocketReady && !pocketNavQ.isError)
   );
-  const empty = !showPanelLoading && history.length === 0;
+  /*
+    Une requête principale en échec n'est pas un historique vide.
+
+    `history` (donc `history.length === 0`) ne dit plus rien de la requête
+    elle-même depuis que la route ne calcule plus de série : elle vaut `[]`
+    aussi bien pendant un chargement, après un échec, ou sur un compte
+    réellement vierge. `mainError` sépare le second cas — celui où
+    « Actualisez les cours » ne peut rien changer, la requête ayant déjà
+    échoué avant d'atteindre les cours.
+  */
+  const mainError = Boolean(navError);
+  const empty = !showPanelLoading && !mainError && history.length === 0;
   const pocketEmpty = pocketReady ? pocketEmptyState(pocketPoints.length) : null;
   /*
     « Période trop courte » seulement après clamp : moins de deux points
@@ -750,6 +880,26 @@ export function PortfolioEvolutionPanel({
           ? percentPoints.length < 2
           : rawPoints.length === 0 && vsNavWindowed.length < 2 && navChart.length < 2
         : rawPoints.length === 0);
+
+  const bodyState = resolveEvolutionPanelBodyState({
+    showIntraday,
+    showPanelLoading,
+    mainError,
+    empty,
+    wantPocketDailyNav,
+    pocketError,
+    pocketEmptyKind: pocketEmpty?.kind ?? null,
+    noPoints,
+    envelopeUnknown: Boolean(envelope) && unknownEnvelopeEur > 0,
+    indexUnavailable:
+      chartKind === "index-unavailable" &&
+      navChart.length < 2 &&
+      points.length < 2,
+    versusNone: versus === "none",
+    usePocketCurve,
+    useDailyNavCurve,
+    chartKindPercent: chartKind === "percent",
+  });
 
   return (
     <div
@@ -1014,10 +1164,14 @@ export function PortfolioEvolutionPanel({
             L'intraday court-circuite les états de la courbe quotidienne : il a
             les siens, et « historique encore vide » ne décrirait pas la même
             chose qu'« aucune donnée intraday collectée ».
+
+            Le reste du corps rend `bodyState` — décision prise en amont par
+            `resolveEvolutionPanelBodyState`, pure et testée sans lui, plutôt
+            que redérivée ici branche par branche.
           */}
-          {showIntraday ? (
+          {bodyState === "intraday" ? (
             <IntradaySection baseCurrency={baseCurrency} />
-          ) : showPanelLoading ? (
+          ) : bodyState === "loading" ? (
             <div
               className="flex h-full flex-col gap-3 px-2 py-2"
               data-testid="evolution-loading-skeleton"
@@ -1034,21 +1188,86 @@ export function PortfolioEvolutionPanel({
                 <Skeleton className="h-2 w-12" />
               </div>
             </div>
-          ) : empty ? (
+          ) : bodyState === "main-error" ? (
+            /*
+              Un échec réseau n'est pas une absence de donnée (UNKNOWN ≠
+              ERROR) : « Historique encore vide » invitait à actualiser les
+              cours, un geste qui ne peut rien changer à une requête qui a
+              déjà échoué.
+            */
+            <EmptyPlaceholder
+              compact
+              testId="evolution-main-error"
+              emptyKind="error"
+              title="Échec du chargement de l'historique"
+              description="La requête n'a pas abouti. Réessayez — vos données ne sont pas perdues."
+              action={
+                onRetryNav ? (
+                  <button
+                    type="button"
+                    onClick={onRetryNav}
+                    data-testid="evolution-main-retry"
+                    className={cn(
+                      "rounded-[var(--radius-sm)] bg-[var(--muted)]/70 px-2.5 py-1 text-[11px] font-medium",
+                      "text-[var(--foreground)] transition hover:bg-[var(--muted)]",
+                      "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                    )}
+                  >
+                    Réessayer
+                  </button>
+                ) : undefined
+              }
+            />
+          ) : bodyState === "empty" ? (
             <EmptyPlaceholder
               compact
               title="Historique encore vide"
               description="Actualisez les cours pour enregistrer un premier point de courbe."
             />
-          ) : wantPocketDailyNav && pocketEmpty?.kind === "empty" ? (
+          ) : bodyState === "pocket-error" ? (
+            /*
+              Même distinction que `main-error`, côté requête de poche : sur
+              une erreur, `pocketReady` (plus haut) n'est plus jamais vrai, et
+              cette branche prend le relais avant que le panneau n'ait la
+              tentation de lire « pas encore de valorisation » sur une requête
+              qui n'a simplement pas abouti.
+            */
+            <EmptyPlaceholder
+              compact
+              testId="evolution-pocket-error"
+              emptyKind="error"
+              title="Échec du chargement de cette poche"
+              description="La requête n'a pas abouti. Réessayez — le reste du patrimoine affiché ailleurs reste valable."
+              action={
+                <button
+                  type="button"
+                  onClick={() => void pocketNavQ.refetch()}
+                  data-testid="evolution-pocket-retry"
+                  className={cn(
+                    "rounded-[var(--radius-sm)] bg-[var(--muted)]/70 px-2.5 py-1 text-[11px] font-medium",
+                    "text-[var(--foreground)] transition hover:bg-[var(--muted)]",
+                    "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                  )}
+                >
+                  Réessayer
+                </button>
+              }
+            />
+          ) : bodyState === "pocket-empty" ? (
+            /*
+              `bodyState === "pocket-empty"` n'est atteignable que si
+              `pocketEmptyKind === "empty"` (voir `resolveEvolutionPanelBodyState`
+              ci-dessus), donc seulement quand `pocketEmpty` est non nul —
+              c'est la même valeur qui a nourri la décision.
+            */
             <EmptyPlaceholder
               compact
               testId="evolution-pocket-empty"
               emptyKind="pocket"
-              title={pocketEmpty.title}
-              description={pocketEmpty.description}
+              title={pocketEmpty!.title}
+              description={pocketEmpty!.description}
             />
-          ) : noPoints ? (
+          ) : bodyState === "no-points-envelope-unknown" ? (
             /*
               Deux raisons très différentes de n'avoir aucun point, et une seule
               phrase les couvrait. Quand l'enveloppe est inconnue sur toute la
@@ -1056,24 +1275,20 @@ export function PortfolioEvolutionPanel({
               ne révélera jamais rien, l'historique manquant étant justement
               plus ancien. On dit donc ce qui manque réellement.
             */
-            envelope && unknownEnvelopeEur > 0 ? (
-              <EmptyPlaceholder
-                compact
-                testId="evolution-envelope-all-unknown"
-                title="Enveloppe inconnue sur cette période"
-                description="Le journal des enveloppes ne remonte pas jusqu'ici : aucune valeur PEA ou CTO n'y est démontrable. Une plage plus récente en montrera la partie connue."
-              />
-            ) : (
-              <EmptyPlaceholder
-                compact
-                testId="evolution-too-short"
-                title="Période trop courte"
-                description="Choisissez une plage plus large ou attendez davantage d'historique."
-              />
-            )
-          ) : chartKind === "index-unavailable" &&
-            navChart.length < 2 &&
-            points.length < 2 ? (
+            <EmptyPlaceholder
+              compact
+              testId="evolution-envelope-all-unknown"
+              title="Enveloppe inconnue sur cette période"
+              description="Le journal des enveloppes ne remonte pas jusqu'ici : aucune valeur PEA ou CTO n'y est démontrable. Une plage plus récente en montrera la partie connue."
+            />
+          ) : bodyState === "no-points-too-short" ? (
+            <EmptyPlaceholder
+              compact
+              testId="evolution-too-short"
+              title="Période trop courte"
+              description="Choisissez une plage plus large ou attendez davantage d'historique."
+            />
+          ) : bodyState === "index-unavailable" ? (
             <EmptyPlaceholder
               compact
               testId="evolution-index-unavailable"
@@ -1081,18 +1296,18 @@ export function PortfolioEvolutionPanel({
               title={INDEX_UNAVAILABLE_TITLE}
               description="Le fournisseur d’indice n’a pas répondu. La comparaison est masquée — aucun +0 % inventé."
             />
-          ) : versus === "none" && usePocketCurve ? (
+          ) : bodyState === "pocket-curve" ? (
             <PortfolioValueChart
               data={pocketPoints}
               baseCurrency={baseCurrency}
               lineType={pocketLineType}
             />
-          ) : chartKind !== "percent" && useDailyNavCurve ? (
+          ) : bodyState === "daily-nav-curve" ? (
             <DailyNavChart
               data={navChart}
               baseCurrency={baseCurrency}
             />
-          ) : chartKind !== "percent" ? (
+          ) : bodyState === "value-curve" ? (
             <PortfolioValueChart
               data={points}
               baseCurrency={baseCurrency}
@@ -1107,7 +1322,7 @@ export function PortfolioEvolutionPanel({
         </div>
       </div>
 
-      {account === "TITRES" && envelope && !empty && (
+      {account === "TITRES" && envelope && !empty && !mainError && !pocketError && (
         <p
           className="text-meta mt-1.5 shrink-0"
           data-testid="evolution-envelope-reclass"

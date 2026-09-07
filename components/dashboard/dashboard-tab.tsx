@@ -113,6 +113,33 @@ function knownTailSeries(
   };
 }
 
+/**
+ * Le libellé de période affiché sous chaque variation du bandeau KPI (et dans
+ * son panneau de détail) — extrait pour rester testable sans rendre le
+ * tableau de bord.
+ *
+ * « Tout » n'est plus « depuis l'origine » depuis le cap de six ans
+ * (`MAX_HISTORY_YEARS`) : `evolutionRangePeriodLabel("all")` répond
+ * invariablement cette phrase, devenue fausse dès que l'historique réel
+ * dépasse le cap. Cette fonction reprend alors la borne **servie**
+ * (`servedNavFrom`) — la même que celle déjà lue par la tuile P&L — plutôt
+ * que d'affirmer une origine que l'application ne sert plus. Sur les sept
+ * autres périodes, la formule ne dépend pas de la profondeur d'historique et
+ * `evolutionRangePeriodLabel` reste exacte.
+ *
+ * Tant que `servedNavFrom` n'est pas encore posé (chargement, ou requête en
+ * erreur), rend `""` — jamais « depuis l'origine » qui céderait ensuite à
+ * « depuis octobre 2022 » une fois la réponse arrivée.
+ */
+export function kpiPeriodLabelFor(
+  range: EvolutionRange,
+  servedNavFrom: string | undefined
+): string {
+  return range === "all"
+    ? heroPeriodLabel(range, servedNavFrom)
+    : evolutionRangePeriodLabel(range);
+}
+
 /** États basculables de la tuile P&L — cf. AGENTS.md D19 P&L. */
 type PnlTileMode = "latent" | "realized";
 
@@ -545,6 +572,19 @@ export function DashboardTab({
   const staleQuotesLabel = quoteStaleBadgeLabel(
     dailyNavQ.isPlaceholderData ? undefined : dailyNavQ.data?.fetchedAt
   );
+  /*
+    Libellé de période partagé par les tuiles KPI — Δ de chaque tuile et
+    panneau de détail (`TerminalKpiRow`).
+
+    Même décision que celle déjà appliquée juste au-dessus par la tuile P&L
+    (`kpiPeriodLabelFor`, en tête de ce fichier) : la borne réellement servie
+    sur « Tout », jamais « depuis l'origine » sous le cap de six ans. Avant ce
+    partage, huit tuiles rappelaient chacune `evolutionRangePeriodLabel(range)`
+    sans jamais lire `servedNavFrom` — la tuile P&L annonçait « depuis
+    septembre 2020 » à côté de huit voisines annonçant « depuis l'origine »,
+    la seconde affirmation étant fausse dès que l'historique dépasse six ans.
+  */
+  const kpiPeriodLabel = kpiPeriodLabelFor(range, servedNavFrom);
   const navHistory = useMemo(
     () =>
       dailyNavPoints && dailyNavPoints.length >= 2
@@ -629,15 +669,14 @@ export function DashboardTab({
       « Tout » n'est plus « depuis l'origine » depuis le cap de six ans : son
       ancre est le plancher servi (`servedNavFrom`), daté explicitement — sinon
       le chip affirmerait une origine que l'application ne sert plus.
+
+      `kpiPeriodLabel` (calculé plus haut) porte désormais cette même règle
+      pour les huit tuiles voisines — ce n'est plus une phrase propre au P&L.
     */
-    const periodPhrase =
-      range === "all"
-        ? heroPeriodLabel(range, servedNavFrom)
-        : evolutionRangePeriodLabel(range);
     const pnlLabel =
       pnlMode === "latent"
-        ? `P&L latent ${periodPhrase}`
-        : `P&L réalisé ${periodPhrase}`;
+        ? `P&L latent ${kpiPeriodLabel}`
+        : `P&L réalisé ${kpiPeriodLabel}`;
 
     const cryptoNow = num(
       displayAllocation?.byClass?.find((s) => s.name === "CRYPTO")?.value ?? 0
@@ -798,7 +837,7 @@ export function DashboardTab({
         tone: "negative",
       },
     ];
-  }, [summary, navWindowed, range, pnlMode, servedNavFrom, displayAllocation?.byClass]);
+  }, [summary, navWindowed, pnlMode, displayAllocation?.byClass, kpiPeriodLabel]);
 
   const netWorth = summary
     ? num(summary.netWorthBase ?? summary.netWorthEur)
@@ -894,6 +933,7 @@ export function DashboardTab({
           items={kpis}
           baseCurrency={baseCurrency}
           range={range}
+          periodLabel={kpiPeriodLabel}
         />
       )}
 
@@ -918,9 +958,12 @@ export function DashboardTab({
               servedNavFrom={servedNavFrom}
               baseCurrency={baseCurrency}
               loading={showNavLoading}
+              navError={dailyNavQ.isError}
+              onRetryNav={() => void dailyNavQ.refetch()}
               className="min-h-[22rem]"
               range={range}
               onRangeChange={changeRange}
+              firstHistoryDate={firstHistoryDate}
             />
           )}
 

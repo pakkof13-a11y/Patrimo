@@ -26,10 +26,7 @@ import {
   heroWindowChange,
   heroWindowReference,
 } from "@/app/lib/portfolio/hero-range";
-import {
-  EVOLUTION_RANGE_CHIPS as RANGES,
-  evolutionRangePeriodLabel,
-} from "@/app/lib/ui/evolution-ranges";
+import { EVOLUTION_RANGE_CHIPS as RANGES } from "@/app/lib/ui/evolution-ranges";
 import {
   heroAttribution,
   heroEventMarkers,
@@ -220,6 +217,17 @@ export function TerminalHero({
     () => kpiSeries(windowed, pickerFor(mode)),
     [windowed, mode]
   );
+
+  /*
+    Horodatages alignés sur `values`, mémoïsés à côté d'elle.
+
+    `windowed.map((p) => p.date)` construit un tableau neuf à chaque rendu ;
+    passé tel quel à `HeroChart`/`Sparkline`, il annulait leur `useMemo`
+    (`[values, dates]`) même quand ni l'un ni l'autre n'avait changé — chaque
+    déplacement du survol relançait `sparklineGeometry` sur toute la fenêtre,
+    jusqu'à environ 2 200 points sur « Tout ».
+  */
+  const dates = useMemo(() => windowed.map((p) => p.date), [windowed]);
 
   /*
     Chips de période — même règle d'activation que le panneau Évolution
@@ -814,7 +822,7 @@ export function TerminalHero({
             {values && values.length >= 2 ? (
               <HeroChart
                 values={values}
-                dates={windowed.map((p) => p.date)}
+                dates={dates}
                 stroke={stroke}
                 activeIndex={hover.activeIndex}
                 setContainer={hover.setContainer}
@@ -920,6 +928,7 @@ export function TerminalKpiRow({
   items,
   baseCurrency,
   range,
+  periodLabel,
 }: {
   items: TerminalKpi[];
   baseCurrency: string;
@@ -936,6 +945,19 @@ export function TerminalKpiRow({
    * ne partageant aucun texte à l'écran.
    */
   range: EvolutionRange;
+  /**
+   * La période écrite en toutes lettres, calculée une fois par le tableau de
+   * bord — jamais `evolutionRangePeriodLabel(range)` redérivé ici.
+   *
+   * Sur « Tout », `evolutionRangePeriodLabel` répond invariablement « depuis
+   * l'origine », ce qui devient faux dès que l'historique dépasse le cap de
+   * six ans : l'origine réelle n'est plus servie. La tuile P&L, elle, a
+   * toujours pris soin de lire la borne **servie** (`servedNavFrom`) pour
+   * dire « depuis septembre 2020 » — cette prop fait descendre exactement ce
+   * même libellé jusqu'à ses huit voisines, pour qu'aucune n'affirme une
+   * origine que l'application ne sert plus.
+   */
+  periodLabel: string;
 }) {
   const [amountsHidden, setAmountsHidden] = useAmountsHidden();
 
@@ -1240,7 +1262,7 @@ export function TerminalKpiRow({
                     que rien ne le montre.
                   */}
                   <span className="shrink-0 truncate text-[var(--foreground-faint)]">
-                    {evolutionRangePeriodLabel(range)}
+                    {periodLabel}
                   </span>
                 </>
               ) : (
@@ -1341,7 +1363,7 @@ export function TerminalKpiRow({
                 <div className="flex items-baseline justify-between gap-[var(--space-2)]">
                   <dt className="text-[var(--foreground-faint)]">Période</dt>
                   <dd className="text-right text-[var(--foreground)]">
-                    {evolutionRangePeriodLabel(range)}
+                    {periodLabel}
                   </dd>
                 </div>
               </dl>
