@@ -197,10 +197,21 @@ test.describe("Tableau de bord", () => {
       libellé disparu : elle ne protégeait donc plus rien, et un hero sans titre
       l'aurait laissée passer. Elle dit désormais ce que l'écran affirme au
       démarrage — le net.
+
+      Il n'est plus visible à l'écran depuis D20 : la bascule Net / Brut a pris
+      sa place, et le répéter en toutes lettres à côté d'un bouton qui le dit
+      était redondant. Le titre reste dans le document pour qui lit sans voir,
+      d'où `toBeAttached` plutôt que `toBeVisible` — on vérifie qu'il existe et
+      qu'il nomme le bon périmètre, ce qui est ce qu'il doit faire.
     */
     await expect(
       page.getByRole("heading", { name: "Patrimoine net" })
-    ).toBeVisible();
+    ).toBeAttached();
+    // Ce que l'œil lit à sa place : la pastille du mode actif.
+    await expect(page.getByTestId("hero-mode-net")).toHaveAttribute(
+      "data-active",
+      "true"
+    );
 
     // Le Financier a quitté l'écran en D19 : deux cartes, pas trois.
     await expect(page.getByTestId("hero-mode-financier")).toHaveCount(0);
@@ -264,9 +275,10 @@ test.describe("Tableau de bord", () => {
       "true"
     );
     // Le titre suit le mode : passer en brut le dit, il ne reste pas générique.
+    // Attaché et non visible — la bascule occupe désormais la ligne du titre.
     await expect(
       page.getByRole("heading", { name: "Patrimoine brut" })
-    ).toBeVisible();
+    ).toBeAttached();
     const grossText = await page.getByTestId("hero-net-worth").innerText();
     expect(parseHeadline(grossText)).toBe(expectedGross);
 

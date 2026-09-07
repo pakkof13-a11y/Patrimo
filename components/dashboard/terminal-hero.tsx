@@ -8,6 +8,7 @@ import { maskAmount, useAmountsHidden } from "@/app/lib/ui/privacy-prefs";
 import { loadUiPref, saveUiPref } from "@/app/lib/ui-preferences";
 import type { HistoryPoint } from "@/app/lib/types/ui";
 import { Sparkline } from "@/components/ui/sparkline";
+import { RangeChips } from "@/components/dashboard/range-chips";
 import {
   financierAt,
   grossAssetsAt,
@@ -466,7 +467,15 @@ export function TerminalHero({
         */}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-[var(--space-2)]">
-            <h2 id="hero-heading" className="text-label">
+            {/*
+              Le titre reste pour qui lit l'écran sans le voir, mais il ne
+              prend plus la place : la bascule Net / Brut dit déjà le périmètre
+              affiché, et l'avoir en toutes lettres à côté d'un bouton qui le
+              répète était redondant. Le libellé n'est pas supprimé — un
+              document sans titre de section perd sa structure — il cesse
+              seulement d'occuper la ligne.
+            */}
+            <h2 id="hero-heading" className="sr-only">
               {HERO_NAV_SCOPE_HEADING[mode]}
             </h2>
             <span
@@ -493,7 +502,7 @@ export function TerminalHero({
               presque tout ce que le corps de la carte affiche.
             */}
             <div
-              className="ml-auto flex shrink-0 gap-0.5"
+              className="flex shrink-0 gap-0.5"
               role="tablist"
               aria-label="Lecture Net ou Brut"
               data-testid="hero-mode-toggle"
@@ -757,50 +766,13 @@ export function TerminalHero({
           reprend toute la largeur, comme avant, le bloc passant à la ligne.
         */}
         <div className="flex w-full min-w-0 flex-col items-end gap-[var(--space-2)] sm:w-[55%] sm:flex-none">
-          <div
-            className="flex min-w-0 flex-wrap items-center justify-end gap-0.5"
-            role="tablist"
-            aria-label="Période"
-            data-testid="hero-range-toggle"
-            data-range={range}
-          >
-            {RANGES.map((r) => {
-              const enabled = rangeEnabled[r.id] !== false;
-              const selected = range === r.id;
-              return (
-                <button
-                  key={r.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  aria-disabled={!enabled}
-                  disabled={!enabled}
-                  title={
-                    enabled
-                      ? undefined
-                      : "Historique trop court pour cette période"
-                  }
-                  data-testid={`hero-range-${r.id}`}
-                  data-active={selected ? "true" : "false"}
-                  onClick={() => enabled && onRangeChange(r.id)}
-                  className={cn(
-                    "rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px] font-medium leading-none transition",
-                    "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-                    !enabled &&
-                      "cursor-not-allowed bg-[var(--muted)]/40 text-[var(--muted-foreground)] opacity-40",
-                    enabled &&
-                      selected &&
-                      "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]",
-                    enabled &&
-                      !selected &&
-                      "bg-[var(--muted)]/70 text-[var(--foreground)] hover:bg-[var(--muted)]"
-                  )}
-                >
-                  {r.label}
-                </button>
-              );
-            })}
-          </div>
+          <RangeChips
+            range={range}
+            onRangeChange={onRangeChange}
+            rangeEnabled={rangeEnabled}
+            testIdPrefix="hero-range"
+            className="justify-end"
+          />
           <p
             className="text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
             data-testid="hero-range-subtitle"

@@ -54,6 +54,7 @@ import {
   DailyNavChart,
 } from "@/components/dashboard/portfolio-evolution-charts";
 import { IntradaySection } from "@/components/dashboard/intraday-section";
+import { RangeChips } from "@/components/dashboard/range-chips";
 import type { DailyNavPoint } from "@/app/lib/portfolio/historical/get-daily-nav";
 import {
   headerFlux,
@@ -906,47 +907,12 @@ export function PortfolioEvolutionPanel({
 
       {/* Période + Versus — deux réglages, rien d'autre. */}
       <div className="mb-2.5 space-y-2" data-testid="evolution-controls">
-        <div
-          className="flex min-w-0 flex-wrap items-center gap-0.5 sm:gap-1"
-          role="tablist"
-          aria-label="Période"
-        >
-          {RANGES.map((r) => {
-            const enabled = rangeEnabled[r.id] !== false;
-            const selected = range === r.id;
-            return (
-              <button
-                key={r.id}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                aria-disabled={!enabled}
-                disabled={!enabled}
-                title={
-                  enabled
-                    ? undefined
-                    : "Historique trop court pour cette période"
-                }
-                data-testid={`evolution-range-${r.id}`}
-                onClick={() => enabled && onRangeChange(r.id)}
-                className={cn(
-                  "rounded-[var(--radius-sm)] px-2 py-1 text-[11px] font-medium transition",
-                  "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-                  !enabled &&
-                    "cursor-not-allowed bg-[var(--muted)]/40 text-[var(--muted-foreground)] opacity-40",
-                  enabled &&
-                    selected &&
-                    "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]",
-                  enabled &&
-                    !selected &&
-                    "bg-[var(--muted)]/70 text-[var(--foreground)] hover:bg-[var(--muted)]"
-                )}
-              >
-                {r.label}
-              </button>
-            );
-          })}
-        </div>
+        <RangeChips
+          range={range}
+          onRangeChange={onRangeChange}
+          rangeEnabled={rangeEnabled}
+          testIdPrefix="evolution-range"
+        />
 
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
           {/*
