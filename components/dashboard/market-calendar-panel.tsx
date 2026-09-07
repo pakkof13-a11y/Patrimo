@@ -1,5 +1,6 @@
 "use client";
 
+import { parisEventClock, PARIS_CLOCK_NOTE } from "@/app/lib/ui/paris-clock";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Briefcase, CalendarDays, Landmark } from "lucide-react";
@@ -54,17 +55,6 @@ function StatusBadge({ published }: { published: boolean }) {
 
 export type PortfolioTickerProp = { ticker: string; name: string };
 
-function clockTime(iso: string): string {
-  try {
-    return new Intl.DateTimeFormat("fr-FR", {
-      timeZone: "Europe/Paris",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(iso));
-  } catch {
-    return "—";
-  }
-}
 
 type CalTab = "macro" | "earnings";
 
@@ -159,8 +149,13 @@ export function MarketCalendarPanel({
         >
           Calendrier de marché
         </h3>
+        {/* Le fuseau est dit une fois, en tête de carte : une heure seule
+            laisse le lecteur la rapporter au sien, ou à celui du pays de
+            l'indicateur — le piège d'un calendrier international. */}
         {!compact && (
-          <p className="text-meta">Indicateurs et publications</p>
+          <p className="text-meta">
+            Indicateurs et publications · {PARIS_CLOCK_NOTE}
+          </p>
         )}
       </div>
 
@@ -239,7 +234,7 @@ export function MarketCalendarPanel({
                   data-testid="macro-event"
                 >
                   <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
-                    {clockTime(e.time)}
+                    {parisEventClock(e.time)}
                   </span>
                   <CountryFlag code={e.countryCode || e.country} showCode />
                   <span className="min-w-0 flex-1 leading-snug text-[var(--foreground)]">
@@ -323,7 +318,7 @@ export function MarketCalendarPanel({
                 >
                   <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                     <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
-                      {clockTime(e.time)}
+                      {parisEventClock(e.time)}
                     </span>
                     <CountryFlag code={e.countryCode || "us"} showCode />
                     {e.logoUrl ? (

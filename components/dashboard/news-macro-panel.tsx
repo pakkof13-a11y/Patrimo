@@ -1,5 +1,6 @@
 "use client";
 
+import { parisEventClock, PARIS_CLOCK_NOTE } from "@/app/lib/ui/paris-clock";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -56,17 +57,6 @@ function relativeTime(iso: string): string {
   }
 }
 
-function clockTime(iso: string): string {
-  try {
-    return new Intl.DateTimeFormat("fr-FR", {
-      timeZone: "Europe/Paris",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(iso));
-  } catch {
-    return "—";
-  }
-}
 
 /**
  * Contexte marché — 3 tuiles analytiques (Actualités · Macro · Résultats).
@@ -292,11 +282,20 @@ export function NewsMacroPanel({
             <div className="min-w-0 flex-1">
               <h3 className="text-title">Macroéconomie</h3>
               <p className="text-meta">
+                {/*
+                  Le fuseau est dit une fois, ici, plutôt que sur chaque ligne.
+
+                  Sans lui, une heure seule laissait le lecteur la rapporter à
+                  son propre fuseau — ou à celui du pays de l'indicateur, ce qui
+                  est le piège d'un calendrier international. La conversion était
+                  juste ; c'est l'écran qui ne disait pas dans quelle unité il
+                  parlait.
+                */}
                 {macroQ.data &&
                 "source" in (macroQ.data as { source?: string }) &&
                 (macroQ.data as { source?: string }).source === "forexfactory"
-                  ? "Calendrier du jour (live)"
-                  : "Indicateurs du jour"}
+                  ? `Calendrier de la semaine (live) · ${PARIS_CLOCK_NOTE}`
+                  : `Indicateurs de la semaine · ${PARIS_CLOCK_NOTE}`}
               </p>
             </div>
           </header>
@@ -338,7 +337,7 @@ export function NewsMacroPanel({
                     className="flex flex-wrap items-center gap-1.5 rounded-[var(--radius-md)] px-0.5 py-1 text-xs sm:gap-2"
                   >
                     <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
-                      {clockTime(e.time)}
+                      {parisEventClock(e.time)}
                     </span>
                     <CountryFlag code={e.countryCode || e.country} showCode />
                     <span className="min-w-0 flex-1 leading-snug text-[var(--foreground)]">
@@ -451,7 +450,7 @@ export function NewsMacroPanel({
                   >
                     <div className="flex min-w-0 items-start gap-2 mb-1.5">
                       <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
-                        {clockTime(e.time)}
+                        {parisEventClock(e.time)}
                       </span>
                     </div>
                     <div className="flex min-w-0 gap-3">
