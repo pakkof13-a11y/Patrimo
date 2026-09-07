@@ -71,14 +71,42 @@ function denseNavSeries(
   points: DailyNavPoint[],
   pick: (p: DailyNavPoint) => number | null | undefined
 ): number[] | undefined {
-  if (points.length < 2) return undefined;
-  const out: number[] = [];
-  for (const p of points) {
-    const v = pick(p);
-    if (v == null || !Number.isFinite(v)) return undefined;
-    out.push(v);
+  return knownTailSeries(points, pick)?.values;
+}
+
+/**
+ * La plus longue fin de série continûment connue, avec ses dates.
+ *
+ * Rendre `undefined` au premier point manquant était juste — on ne comble pas
+ * une absence — mais trop absolu : mesuré sur « Tout », 825 des 1 876 points
+ * portent une enveloppe titres inconnue, parce que le journal d'enveloppes ne
+ * remonte qu'à l'acquisition de chaque ligne. Toute la courbe Titres
+ * disparaissait donc à cause de ses six premières années, alors que les
+ * dernières sont parfaitement connues.
+ *
+ * On repart donc après le **dernier** point inconnu, jamais avant : un trou au
+ * milieu coupe la série plutôt que d'être enjambé. Ce qui est tracé est
+ * intégralement observé, et ce qui ne l'est pas n'est simplement pas tracé —
+ * la courbe est plus courte, pas inventée.
+ *
+ * Les dates suivent les valeurs : une série tronquée sous l'axe temporel de
+ * ses voisines afficherait ses paliers aux mauvaises dates.
+ */
+function knownTailSeries(
+  points: DailyNavPoint[],
+  pick: (p: DailyNavPoint) => number | null | undefined
+): { values: number[]; dates: string[] } | undefined {
+  let debut = 0;
+  for (let i = 0; i < points.length; i++) {
+    const v = pick(points[i]!);
+    if (v == null || !Number.isFinite(v)) debut = i + 1;
   }
-  return out;
+  const utiles = points.slice(debut);
+  if (utiles.length < 2) return undefined;
+  return {
+    values: utiles.map((p) => pick(p) as number),
+    dates: utiles.map((p) => endOfParisDay(p.day).toISOString()),
+  };
 }
 
 /** États basculables de la tuile P&L — cf. AGENTS.md D19 P&L. */
@@ -527,7 +555,14 @@ export function DashboardTab({
       `byAssetClass` — même lecture que la répartition du patrimoine
       (`patrimonySlices` ci-dessus), pas une seconde formule.
     */
-    const titres = denseNavSeries(navWindowed, (p) => titresValueAt(p));
+    /*
+      Titres est la seule série dont la profondeur diffère de ses voisines :
+      son enveloppe n'est démontrée qu'à partir de l'acquisition de chaque
+      ligne. Elle porte donc ses propres dates, sans quoi ses paliers se
+      liraient aux dates des autres tuiles.
+    */
+    const titresSerie = knownTailSeries(navWindowed, (p) => titresValueAt(p));
+    const titres = titresSerie?.values;
     const crypto = denseNavSeries(navWindowed, (p) => p.byAssetClass?.CRYPTO);
     const av = denseNavSeries(navWindowed, (p) => p.av);
     /*
@@ -630,7 +665,7 @@ export function DashboardTab({
             Math.max(0, listedNow - cryptoNow)
         ),
         spark: titres,
-        sparkDates,
+        sparkDates: titresSerie?.dates ?? sparkDates,
         changeAbs: seriesChangeAbs(titres),
         changePct: seriesChangePct(titres),
         tone: "gold",
