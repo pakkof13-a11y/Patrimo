@@ -301,6 +301,25 @@ export async function DELETE(req: Request) {
             where: { platformId: id, userId },
           });
 
+          /*
+            Les comptes-titres de la plateforme, avant la plateforme elle-même.
+
+            `SecuritiesAccount.platform` est en `onDelete: Restrict` : tant
+            qu'un compte-titres pointe vers elle, la base refuse de supprimer la
+            plateforme. La transaction entière échouait alors, et l'utilisateur
+            voyait sa ligne rester en place — la cascade n'omettait pas ces
+            comptes par choix, elle ne les connaissait pas.
+
+            Aucun compte-titres n'existe sur la base de préproduction, ce qui
+            explique que le défaut n'y soit pas visible : il attend le premier
+            utilisateur qui en aura créé un. Leurs versements partent en cascade
+            (`SecuritiesAccountContribution` est en `Cascade`), et les actifs qui
+            s'y rattachent sont de toute façon supprimés juste après.
+          */
+          await tx.securitiesAccount.deleteMany({
+            where: { platformId: id, userId },
+          });
+
           await tx.asset.deleteMany({ where: { platformId: id, userId } });
           await tx.platform.deleteMany({ where: { id, userId } });
         },

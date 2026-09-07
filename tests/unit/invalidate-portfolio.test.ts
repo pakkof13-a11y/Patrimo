@@ -18,7 +18,10 @@ import {
 */
 describe("invalidatePortfolioView", () => {
   function faux() {
-    const invalidateQueries = vi.fn(() => Promise.resolve());
+    const invalidateQueries =
+      vi.fn<(args: { queryKey: string[] }) => Promise<void>>(() =>
+        Promise.resolve()
+      );
     return {
       qc: { invalidateQueries } as unknown as QueryClient,
       invalidateQueries,
@@ -28,18 +31,14 @@ describe("invalidatePortfolioView", () => {
   it("invalide la série dense que la courbe dessine", () => {
     const { qc, invalidateQueries } = faux();
     invalidatePortfolioView(qc);
-    const cles = invalidateQueries.mock.calls.map(
-      (c) => (c[0] as { queryKey: string[] }).queryKey[0]
-    );
+    const cles = invalidateQueries.mock.calls.map((c) => c[0].queryKey[0]);
     expect(cles).toContain("portfolio-daily-nav");
   });
 
   it("couvre les positions, le journal et les plateformes", () => {
     const { qc, invalidateQueries } = faux();
     invalidatePortfolioView(qc);
-    const cles = invalidateQueries.mock.calls.map(
-      (c) => (c[0] as { queryKey: string[] }).queryKey[0]
-    );
+    const cles = invalidateQueries.mock.calls.map((c) => c[0].queryKey[0]);
     for (const attendue of ["holdings", "transactions", "platforms"]) {
       expect(cles).toContain(attendue);
     }
@@ -60,8 +59,7 @@ describe("invalidatePortfolioView", () => {
     */
     const { qc, invalidateQueries } = faux();
     invalidatePortfolioView(qc);
-    for (const call of invalidateQueries.mock.calls) {
-      const { queryKey } = call[0] as { queryKey: string[] };
+    for (const [{ queryKey }] of invalidateQueries.mock.calls) {
       expect(queryKey).toHaveLength(1);
     }
   });
