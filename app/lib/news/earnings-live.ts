@@ -34,6 +34,25 @@ export type EarningsSource = "yahoo" | "finnhub" | "mixed" | "none";
 export type EarningsCalendarResult = {
   events: EarningsEvent[];
   source: EarningsSource;
+  /**
+   * Pourquoi la liste ressemble à ce qu'elle est.
+   *
+   * Une liste réduite aux seuls titres détenus a deux causes indiscernables à
+   * l'écran : le fournisseur d'univers n'a pas été interrogé — pas de clé — ou
+   * il a répondu sans rien. Le premier cas est une configuration absente, le
+   * second une journée sans publication. Les confondre fait chercher un défaut
+   * de filtrage là où il n'y en a pas.
+   *
+   * `universeRaw` est le nombre de lignes rendues par le fournisseur avant tout
+   * filtre, `universeKept` ce qui survit à la fenêtre de vingt-quatre heures.
+   * `universeSource` dit lequel des deux cas on est.
+   */
+  diagnostics: {
+    universeSource: "finnhub" | "no-key";
+    universeRaw: number;
+    universeKept: number;
+    portfolioTargets: number;
+  };
 };
 
 function finnhubApiKey(): string | null {
@@ -410,6 +429,10 @@ export async function resolveEarningsCalendar(opts: {
   const from = isoDate(addDays(now, -2));
   const to = isoDate(addDays(now, 21));
 
+  let universeSource: "finnhub" | "no-key" = "no-key";
+  let universeRaw = 0;
+  let universeKept = 0;
+
   const sourcesUsed = new Set<"yahoo" | "finnhub">();
   const byKey = new Map<string, EarningsEvent>();
 
@@ -480,10 +503,12 @@ export async function resolveEarningsCalendar(opts: {
       Ce n'est plus un repli : la demande est faite quelle que soit la richesse
       du portefeuille, et son absence ne dégrade rien.
     */
+    universeSource = "finnhub";
     const universeRows = await fetchFinnhubCalendar({
       from: isoDate(now),
       to: isoDate(addDays(now, 1)),
     });
+    universeRaw = universeRows.length;
     const universeMaxTs = now.getTime() + 24 * 60 * 60 * 1000;
     for (const row of universeRows) {
       const ev = finnhubRowToEvent(row, nameByTicker, portfolioSet);
@@ -492,6 +517,7 @@ export async function resolveEarningsCalendar(opts: {
       if (!Number.isFinite(t) || t > universeMaxTs) continue;
       sourcesUsed.add("finnhub");
       const k = `${normalizeKey(ev.ticker)}|${ev.time.slice(0, 10)}`;
+      universeKept += 1;
       if (!byKey.has(k)) byKey.set(k, ev);
     }
   }
@@ -527,6 +553,12 @@ export async function resolveEarningsCalendar(opts: {
     return {
       events: events.slice(0, limit).map(enrichEarningsVisuals),
       source,
+      diagnostics: {
+        universeSource,
+        universeRaw,
+        universeKept,
+        portfolioTargets: targets.length,
+      },
     };
   }
 
@@ -538,5 +570,14 @@ export async function resolveEarningsCalendar(opts: {
     n'ont aucun moyen d'être reconnus comme faux par celui qui les lit — c'est
     la pire des trois sources d'erreur, parce qu'elle est invisible.
   */
-  return { events: [], source: "none" };
+  return {
+    events: [],
+    source: "none",
+    diagnostics: {
+      universeSource,
+      universeRaw,
+      universeKept,
+      portfolioTargets: targets.length,
+    },
+  };
 }

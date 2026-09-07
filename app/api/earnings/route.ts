@@ -43,7 +43,7 @@ export async function GET(req: Request) {
     .filter((p) => p.ticker);
 
   try {
-    const { events, source } = await resolveEarningsCalendar({
+    const { events, source, diagnostics } = await resolveEarningsCalendar({
       portfolio,
       limit,
     });
@@ -74,6 +74,16 @@ export async function GET(req: Request) {
         return Number.isFinite(t) && t <= nowMs;
       }),
       source,
+      /*
+        Pourquoi la liste ressemble à ce qu'elle est.
+
+        Une liste réduite aux titres détenus a deux causes que l'écran ne
+        distingue pas : le fournisseur d'univers n'a pas été interrogé — pas
+        de clé — ou il a répondu sans rien. La première est une configuration
+        absente, la seconde une journée sans publication. Les confondre fait
+        chercher un défaut de filtrage là où il n'y en a pas.
+      */
+      diagnostics,
       date: new Date().toISOString().slice(0, 10),
       generatedAt: new Date().toISOString(),
     });

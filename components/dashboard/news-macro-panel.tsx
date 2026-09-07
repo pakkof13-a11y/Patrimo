@@ -35,6 +35,20 @@ import type { PortfolioTickerProp } from "@/components/dashboard/market-calendar
 
 export type { MarketReleaseFilter };
 
+/*
+  Les trois cartes de contexte partagent un plancher de hauteur.
+
+  La grille les étire déjà l'une sur l'autre — mais seulement au-delà de
+  , où elles tiennent sur une même ligne. En deçà, « Résultats » occupe sa
+  propre rangée et se réduisait à son contenu : deux annonces suffisaient à en
+  faire une carte deux fois plus courte que ses voisines, ce qui la faisait
+  passer pour une tuile secondaire alors qu'elle porte la même information.
+
+  Un plancher commun, plutôt qu'une hauteur fixe : une carte bien remplie
+  continue de grandir, aucune ne se recroqueville.
+*/
+const CARTE_CONTEXTE = "min-h-[20rem]";
+
 const IMPACT_LABEL: Record<MacroImpact, string> = {
   low: "Faible",
   medium: "Moyen",
@@ -179,7 +193,7 @@ export function NewsMacroPanel({
       >
         {/* —— Actualités —— */}
         <article
-          className="card flex min-h-0 min-w-0 flex-col p-3.5 sm:p-4"
+          className={cn(CARTE_CONTEXTE, "card flex min-w-0 flex-col p-3.5 sm:p-4")}
           data-testid="market-tile-news"
         >
           <header className="mb-2.5 flex items-start gap-2">
@@ -271,7 +285,7 @@ export function NewsMacroPanel({
 
         {/* —— Macroéconomie —— */}
         <article
-          className="card flex min-h-0 min-w-0 flex-col p-3.5 sm:p-4"
+          className={cn(CARTE_CONTEXTE, "card flex min-w-0 flex-col p-3.5 sm:p-4")}
           data-testid="market-cal-macro"
         >
           <header className="mb-2 flex items-start gap-2">
@@ -377,7 +391,7 @@ export function NewsMacroPanel({
 
         {/* —— Résultats —— */}
         <article
-          className="card flex min-h-0 min-w-0 flex-col p-3.5 sm:p-4 sm:col-span-2 lg:col-span-1"
+          className={cn(CARTE_CONTEXTE, "card flex min-w-0 flex-col p-3.5 sm:p-4 sm:col-span-2 lg:col-span-1")}
           data-testid="market-cal-earnings"
         >
           <header className="mb-2 flex items-start gap-2">
