@@ -80,6 +80,40 @@ function relativeTime(iso: string): string {
   }
 }
 
+/**
+ * Ancre un jour civil (`YYYY-MM-DD`, Europe/Paris — la clé `MarketDay.key`)
+ * à un instant représentatif, pour servir de référence à `parisEventClock`.
+ *
+ * Midi UTC : jamais à cheval sur un changement d'heure Europe/Paris, dont le
+ * décalage ne dépasse jamais deux heures — même construction que
+ * `parisNoonAnchor` dans `app/lib/news/market-days.ts`, ici locale plutôt que
+ * réexportée pour rester dans le périmètre de ce fichier.
+ *
+ * Sert à faire lire à `parisEventClock` « le jour de la ligne » comme le
+ * jour sélectionné dans la barre plutôt que la date réelle du navigateur :
+ * `macroDayEvents`/`earnDayEvents` filtrent déjà chaque liste sur
+ * `parisDayOf(e.time) === macroDay/earnDay`, donc toute ligne visible partage
+ * par construction le jour de son ancre — l'heure seule (forme courte)
+ * suffit, le jour étant déjà porté par l'onglet actif de la barre, toujours
+ * rendue au-dessus de la liste (jamais masquée quand des lignes s'affichent).
+ * Si un jour incohérent devait un jour s'y glisser, `parisEventClock`
+ * retomberait sur la forme longue plutôt que d'afficher une heure trompeuse.
+ */
+export function dayAnchor(dayKey: string): Date {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  if (!y || !m || !d) return new Date(NaN);
+  return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+}
+
+/**
+ * Largeur de la cellule d'heure : minimale plutôt que fixe. En régime normal
+ * (voir `dayAnchor`) la forme courte (« 00:45 ») suffit largement aux 2,5rem
+ * historiques ; en `min-w-` plutôt qu'en `w-` fixe, une forme longue qui
+ * s'y glisserait malgré tout repousserait le drapeau/logo suivant au lieu de
+ * déborder dessus (le conteneur est `flex flex-wrap`).
+ */
+const EVENT_CLOCK_CLASS =
+  "min-w-[2.5rem] shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]";
 
 /**
  * Contexte marché — 3 tuiles analytiques (Actualités · Macro · Résultats).
@@ -438,8 +472,8 @@ export function NewsMacroPanel({
                     key={e.id}
                     className="flex flex-wrap items-center gap-1.5 rounded-[var(--radius-md)] px-0.5 py-1 text-xs sm:gap-2"
                   >
-                    <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
-                      {parisEventClock(e.time)}
+                    <span className={EVENT_CLOCK_CLASS}>
+                      {parisEventClock(e.time, dayAnchor(macroDay))}
                     </span>
                     <CountryFlag code={e.countryCode || e.country} showCode />
                     <span className="min-w-0 flex-1 leading-snug text-[var(--foreground)]">
@@ -597,8 +631,8 @@ export function NewsMacroPanel({
                     )}
                     data-in-portfolio={e.inPortfolio ? "true" : "false"}
                   >
-                    <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
-                      {parisEventClock(e.time)}
+                    <span className={EVENT_CLOCK_CLASS}>
+                      {parisEventClock(e.time, dayAnchor(earnDay))}
                     </span>
                     <div className="relative shrink-0">
                       <CompanyLogo
