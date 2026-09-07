@@ -34,6 +34,7 @@ import {
   type DashboardMaturity,
   type DashboardMaturityInput,
 } from "@/app/lib/dashboard/maturity";
+import { resolveDashboardContentVisibility } from "@/components/dashboard/dashboard-content-visibility";
 import {
   isEvolutionRangeEnabled,
   type EvolutionRange,
@@ -821,6 +822,16 @@ export function DashboardTab({
   */
   const onboardingAlone = false;
 
+  /*
+    « setup » n'est pas « vide » — cf. dashboard-content-visibility.ts pour le
+    détail : le cockpit a déjà écarté le compte réellement vierge en amont,
+    et la carte de tête / le journal savent dire l'absence sans rien inventer.
+  */
+  const { showHeroCard, showJournal } = resolveDashboardContentVisibility(
+    maturity,
+    blocks
+  );
+
   return (
     <div
       className={cn(
@@ -831,7 +842,7 @@ export function DashboardTab({
       data-maturity={maturity}
     >
       {/* —— 1. Patrimoine (net ou brut, sélecteur dans la carte) —— */}
-      {blocks.showEvolutionChart && (
+      {showHeroCard && (
         <TerminalHero
           netWorth={netWorth}
           grossAssets={grossAssets}
@@ -848,7 +859,7 @@ export function DashboardTab({
         />
       )}
 
-      {blocks.showEvolutionChart && staleQuotesLabel && (
+      {showHeroCard && staleQuotesLabel && (
           <p
             className="-mt-[var(--space-2)] px-[var(--space-1)] text-[length:var(--text-2xs)] text-[var(--foreground-secondary)]"
             data-testid="hero-stale-quotes"
@@ -867,7 +878,7 @@ export function DashboardTab({
         son plus haut. Les deux affirmations sont vraies en même temps, et
         c'est précisément ce qui déroute sans cette phrase.
       */}
-      {blocks.showEvolutionChart && (
+      {showHeroCard && (
         <p
           className="-mt-[var(--space-2)] px-[var(--space-1)] text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
           data-testid="hero-legend"
@@ -936,7 +947,7 @@ export function DashboardTab({
       )}
 
       {/* —— 5. Activité récente —— */}
-      {blocks.showEvolutionChart && (
+      {showJournal && (
         <RecentActivityCard
           baseCurrency={baseCurrency}
           onOpenJournal={() => handleNav("transactions")}
