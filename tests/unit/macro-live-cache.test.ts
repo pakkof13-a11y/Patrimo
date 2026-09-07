@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetMacroLiveCache,
-  resolveMacroCalendarToday,
+  resolveMacroCalendarWeek,
 } from "@/app/lib/news/macro-live";
 
 describe("macro-live e2e / rate-limit", () => {
@@ -18,7 +18,7 @@ describe("macro-live e2e / rate-limit", () => {
   it("E2E=1 n’appelle pas l’API externe (évite 429 Playwright)", async () => {
     vi.stubEnv("E2E", "1");
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const r = await resolveMacroCalendarToday();
+    const r = await resolveMacroCalendarWeek();
     expect(r.source).toBe("mock");
     expect(r.events.length).toBeGreaterThan(0);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -27,7 +27,7 @@ describe("macro-live e2e / rate-limit", () => {
   it("PLAYWRIGHT=1 → mock sans fetch", async () => {
     vi.stubEnv("PLAYWRIGHT", "1");
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const r = await resolveMacroCalendarToday();
+    const r = await resolveMacroCalendarWeek();
     expect(r.source).toBe("mock");
     expect(fetchSpy).not.toHaveBeenCalled();
   });

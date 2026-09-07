@@ -61,21 +61,7 @@ function parisDay(d: Date): string {
   }).format(d);
 }
 
-/** Même jour civil parisien (l'événement « du jour » pour un utilisateur FR). */
-function sameLocalDay(iso: string, now: Date): boolean {
-  return sameCalendarDay(iso, parisDay(now));
-}
 
-/**
- * Compare la date ISO d'un événement à une date cible (YYYY-MM-DD), en
- * jour civil parisien — évite le décalage UTC vs Europe/Paris en soirée
- * (événements « demain UTC ») ou tôt le matin (événements « hier UTC »).
- */
-function sameCalendarDay(iso: string, targetDate: string): boolean {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return false;
-  return parisDay(new Date(t)) === targetDate;
-}
 
 function emptyToNull(s: string | undefined): string | null {
   const t = (s || "").trim();
@@ -151,12 +137,12 @@ function isE2eOrDisabled(): boolean {
 }
 
 /**
- * Calendrier macro du jour (événements du jour civil local).
+ * Calendrier macro de la semaine (fenêtre rendue par la source).
  * - Cache mémoire 30 min
  * - Sur HTTP 429 : cooldown 15 min + mock (log throttlé)
  * - E2E / CI / MACRO_LIVE_DISABLED : mock direct (pas d’appel externe)
  */
-export async function resolveMacroCalendarToday(): Promise<MacroLiveResult> {
+export async function resolveMacroCalendarWeek(): Promise<MacroLiveResult> {
   const now = new Date();
   const date = now.toISOString().slice(0, 10);
   const nowMs = Date.now();
@@ -221,9 +207,21 @@ export async function resolveMacroCalendarToday(): Promise<MacroLiveResult> {
     const parsed = rows
       .map((r, i) => ffRowToMacro(r, i))
       .filter((e): e is MacroEvent => e != null);
-    const events = parsed
-      .filter((e) => sameLocalDay(e.time, now))
-      .sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
+    /*
+      La semaine entière, pas le seul jour courant.
+
+      La source est `ff_calendar_thisweek.json` : elle rend déjà les
+      événements des sept jours. On n'en gardait qu'un — le jour civil
+      parisien — et les publications de lundi disparaissaient dès mardi. La
+      liste « Passés » ne pouvait donc rien montrer : ce qu'elle aurait dû
+      contenir était écarté au chargement, avant même d'être trié.
+
+      La fenêtre est bornée par la source elle-même, qui ne dépasse pas la
+      semaine. Rien n'est demandé de plus au fournisseur.
+    */
+    const events = parsed.sort(
+      (a, b) => Date.parse(a.time) - Date.parse(b.time)
+    );
 
     if (events.length === 0) {
       // Source valide (rows non vide) mais rien pour le jour civil parisien
