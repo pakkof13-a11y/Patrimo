@@ -378,7 +378,7 @@ export async function resolveEarningsCalendar(opts: {
   watchlist?: PortfolioTickerRef[];
   limit?: number;
 }): Promise<EarningsCalendarResult> {
-  const limit = Math.min(20, Math.max(1, opts.limit ?? 8));
+  const limit = Math.min(60, Math.max(1, opts.limit ?? 8));
   const portfolio = dedupeRefs(opts.portfolio ?? []);
   const watch = dedupeRefs(opts.watchlist ?? []);
 
@@ -405,9 +405,6 @@ export async function resolveEarningsCalendar(opts: {
     qui parle d'autre chose.
   */
   const targets = dedupeRefs([...portfolio, ...watch]).slice(0, 16);
-  if (targets.length === 0) {
-    return { events: [], source: "none" };
-  }
 
   const now = new Date();
   const from = isoDate(addDays(now, -2));
@@ -465,13 +462,38 @@ export async function resolveEarningsCalendar(opts: {
     }
 
     /*
-      Le calendrier américain en vrac a été retiré.
+      Le calendrier en vrac revient, sur une fenêtre courte et signé.
 
-      Il se déclenchait dès que moins de quatre annonces sortaient des symboles
-      détenus, et versait alors jusqu'à quarante sociétés quelconques dans la
-      liste. C'était la principale cause d'annonces sans rapport : le panneau
-      était d'autant plus pollué que le portefeuille était petit ou peu couvert.
+      Il avait été retiré, et pour une bonne raison : déclenché en repli dès
+      que le portefeuille rendait peu d'annonces, il versait jusqu'à quarante
+      sociétés quelconques dans la même liste et avec la même mise en forme que
+      les lignes détenues. Rien à l'écran ne les distinguait, et le panneau
+      était d'autant plus pollué que le portefeuille était petit.
+
+      Ce qui change tient à ces deux points, pas à l'envie d'en montrer plus.
+      La fenêtre est bornée à vingt-quatre heures — ce qui publie aujourd'hui
+      et demain, pas un mois de calendrier — et `inPortfolio` sépare les deux
+      familles à l'écran : cadre jaune pour ce que l'on détient, style neutre
+      pour le reste. Une annonce qui ne vous concerne pas ne peut plus être
+      prise pour une qui vous concerne.
+
+      Ce n'est plus un repli : la demande est faite quelle que soit la richesse
+      du portefeuille, et son absence ne dégrade rien.
     */
+    const universeRows = await fetchFinnhubCalendar({
+      from: isoDate(now),
+      to: isoDate(addDays(now, 1)),
+    });
+    const universeMaxTs = now.getTime() + 24 * 60 * 60 * 1000;
+    for (const row of universeRows) {
+      const ev = finnhubRowToEvent(row, nameByTicker, portfolioSet);
+      if (!ev) continue;
+      const t = Date.parse(ev.time);
+      if (!Number.isFinite(t) || t > universeMaxTs) continue;
+      sourcesUsed.add("finnhub");
+      const k = `${normalizeKey(ev.ticker)}|${ev.time.slice(0, 10)}`;
+      if (!byKey.has(k)) byKey.set(k, ev);
+    }
   }
 
   let events = Array.from(byKey.values());

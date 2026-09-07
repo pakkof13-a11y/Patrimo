@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import type { PortfolioTickerRef } from "@/app/lib/news/service";
-import { isEarningsEventPublished } from "@/app/lib/news/service";
 import { resolveEarningsCalendar } from "@/app/lib/news/earnings-live";
 
 /**
@@ -17,8 +16,16 @@ export async function GET(req: Request) {
   }
 
   const { searchParams } = new URL(req.url);
+  /*
+    Le plafond passe de 20 à 60.
+
+    Il suffisait tant que la liste ne portait que les titres détenus. Depuis que
+    les publications des vingt-quatre heures y figurent aussi, vingt lignes se
+    remplissaient des seules valeurs du portefeuille — triées en tête — et
+    l'univers était tronqué avant d'atteindre l'écran.
+  */
   const limit = Math.min(
-    20,
+    60,
     Math.max(1, Number(searchParams.get("limit") || 8) || 8)
   );
   const raw = searchParams.get("tickers") || "";
@@ -41,10 +48,31 @@ export async function GET(req: Request) {
       limit,
     });
 
+    /*
+      Même règle de partage que le calendrier macro, et pour la même raison.
+
+      `isEarningsEventPublished` répond à « le bénéfice par action est-il
+      tombé ? ». Une publication dont le fournisseur ne renseigne jamais l'EPS
+      réel restait donc « à venir » indéfiniment, des jours après son heure.
+      C'est le temps qui tranche : passé son heure, une annonce quitte « à
+      venir » et rejoint « passés ».
+
+      La sémantique de `isEarningsEventPublished` est conservée pour le détail
+      affiché — l'EPS réel n'a de sens à montrer que s'il existe.
+    */
+    const nowMs = Date.now();
+    const timeOf = (e: { time: string }) => Date.parse(e.time);
+
     return NextResponse.json({
       events,
-      upcoming: events.filter((e) => !isEarningsEventPublished(e)),
-      published: events.filter((e) => isEarningsEventPublished(e)),
+      upcoming: events.filter((e) => {
+        const t = timeOf(e);
+        return !Number.isFinite(t) || t > nowMs;
+      }),
+      published: events.filter((e) => {
+        const t = timeOf(e);
+        return Number.isFinite(t) && t <= nowMs;
+      }),
       source,
       date: new Date().toISOString().slice(0, 10),
       generatedAt: new Date().toISOString(),

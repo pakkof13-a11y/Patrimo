@@ -131,7 +131,14 @@ export function NewsMacroPanel({
   const earnQ = useQuery({
     queryKey: ["earnings-calendar", tickersParam],
     queryFn: () => {
-      const q = new URLSearchParams({ limit: "10" });
+      /*
+        Dix suffisaient quand la liste ne portait que les titres détenus. Les
+        publications des vingt-quatre heures s'y ajoutent désormais, et le tri
+        place le portefeuille en tête : à dix, l'univers n'atteignait jamais
+        l'écran. Le panneau n'en affiche toujours que quelques-unes à la fois —
+        c'est « Voir plus » qui déroule le reste.
+      */
+      const q = new URLSearchParams({ limit: "40" });
       if (tickersParam) q.set("tickers", tickersParam);
       return fetchJson<{
         upcoming: EarningsEvent[];
