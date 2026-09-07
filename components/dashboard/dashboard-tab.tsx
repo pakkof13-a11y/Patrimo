@@ -45,8 +45,11 @@ import {
 } from "@/app/lib/portfolio/evolution-prefs";
 import { seriesChangeAbs, seriesChangePct } from "@/app/lib/portfolio/kpi-series";
 import { useDailyNavQuery } from "@/app/hooks/use-portfolio-queries";
-import { parisDayKey, endOfParisDay } from "@/app/lib/dates/paris";
-import { historyFloorDay } from "@/app/lib/portfolio/historical/history-window";
+import { endOfParisDay } from "@/app/lib/dates/paris";
+import {
+  historyFloorDay,
+  lastCloseDay,
+} from "@/app/lib/portfolio/historical/history-window";
 import {
   dailyNavQueryWindow,
   dailyNavToHistoryPoints,
@@ -339,7 +342,26 @@ export function DashboardTab({
     setRange("7d");
   }
 
-  const referenceDay = parisDayKey(new Date());
+  /*
+    La courbe s'arrête à la dernière clôture, pas à aujourd'hui.
+
+    Un point du jour mélange une journée inachevée à une série de journées
+    closes, et les compare comme si elles étaient de même nature : les
+    écritures passées depuis ce matin s'y ajoutent, la valorisation n'est
+    celle d'aucune clôture, et le dernier segment ne raconte pas la même chose
+    que les précédents.
+
+    Le gros chiffre de la carte de tête ne suit pas cette règle et n'a pas à la
+    suivre — c'est un encours daté du jour, et c'est ce qu'on veut savoir
+    maintenant. Ce sont la courbe, les écarts de période et les barres qui
+    s'arrêtent à la veille.
+
+    Une seule borne pour toute la page : ce jour est le `to` demandé à
+    `daily-nav` et la fin de la fenêtre découpée côté client, et il descend au
+    panneau Évolution par ses props. Deux bornes différentes feraient afficher à
+    la carte et au panneau deux derniers points distincts.
+  */
+  const referenceDay = lastCloseDay();
   const earliestDay = floorDay;
   /*
     Fenêtre API : 1A couvre 7J…1A (texture quotidienne identique, recoupe

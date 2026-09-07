@@ -30,6 +30,31 @@ export function historyFloorDay(now: Date = new Date()): DayKey {
 }
 
 /**
+ * Dernière clôture calendaire — le jour où la courbe s'arrête.
+ *
+ * Décision produit, et non une correction mesurée : la courbe patrimoniale
+ * trace des **clôtures**. Pas un NAV intra-journalier, pas une valorisation à
+ * seize heures, pas les écritures du jour en cours. Un point d'aujourd'hui
+ * mélange une journée inachevée à une série de journées closes, et les compare
+ * comme si elles étaient de même nature.
+ *
+ * Le gros chiffre de la carte de tête ne suit pas cette règle et n'a pas à la
+ * suivre : c'est un encours, daté « valo au » du jour, et c'est bien ce que
+ * l'on veut savoir maintenant. Ce sont la courbe, les écarts de période et les
+ * barres qui s'arrêtent à la veille.
+ *
+ * Un mur en fin de courbe a été signalé sur le 7 septembre 2026. Le lien avec
+ * cette règle **n'a pas été mesuré** — la machine où ce commit est écrit n'a
+ * pas de base. Si le mur subsiste après ce changement, il est ailleurs, dans le
+ * jeu de données, et il ne faut pas couper un jour de plus pour le cacher.
+ */
+export function lastCloseDay(now: Date = new Date()): DayKey {
+  const veille = new Date(now.getTime());
+  veille.setUTCDate(veille.getUTCDate() - 1);
+  return parisDayKey(veille);
+}
+
+/**
  * Borne « depuis quand » ramenée sous le cap — jamais avant `historyFloorDay`.
  *
  * `null` reste `null` : un scope sans aucune donnée observée n'en acquiert
