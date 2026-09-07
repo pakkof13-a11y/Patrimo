@@ -611,9 +611,19 @@ export function PlatformsTab({
     setDeleteConfirmText("");
     setDetachedLiabilities([]);
     try {
+      /*
+        Lecture, jamais suppression.
+
+        Cet inventaire s'obtenait en appelant `DELETE` sans `force`, en
+        comptant sur le 409 pour le rendre. Mais ce 409 n'arrive que si la
+        plateforme a des dépendances : sans actif ni transaction — une
+        plateforme qu'on vient de créer — la route ne refusait rien, elle
+        supprimait. La boîte s'ouvrait donc sur une plateforme déjà détruite,
+        et la confirmation repartait en 404 « Introuvable », la ligne restant
+        affichée faute d'invalidation sur le chemin d'erreur.
+      */
       const res = await fetch(
-        `/api/platforms?id=${encodeURIComponent(p.id)}`,
-        { method: "DELETE" }
+        `/api/platforms?impact=${encodeURIComponent(p.id)}`
       );
       const body = await res.json();
       if (Array.isArray(body?.detachedLiabilities)) {

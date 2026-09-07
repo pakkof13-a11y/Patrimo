@@ -14,9 +14,80 @@ import { PLATFORM_PRESETS } from "@/app/lib/platforms/presets";
 import { findOrCreatePlatform } from "@/app/lib/platforms/upsert";
 import { clientErrorMessage } from "@/app/lib/api/error-response";
 
-export async function GET() {
+/**
+ * Ce qu'une suppression emporterait — sans rien supprimer.
+ *
+ * La boîte de confirmation a besoin de l'inventaire : combien d'actifs, combien
+ * d'écritures, quels crédits perdraient leur bien. Elle l'obtenait en appelant
+ * `DELETE` sans `force`, en comptant sur le 409 pour le lui rendre.
+ *
+ * Or ce 409 n'arrive que si la plateforme a des dépendances. Sans actif ni
+ * transaction — le cas d'une plateforme qu'on vient de créer — la route ne
+ * refuse rien : elle supprime, et rend `{ ok: true }`. La boîte s'ouvrait donc
+ * sur une plateforme **déjà détruite**, et la confirmation repartait en 404
+ * « Introuvable » avec la ligne toujours à l'écran.
+ *
+ * Un inventaire est une lecture. Il se demande en lecture.
+ */
+async function platformImpact(userId: string, id: string) {
+  const existing = await prisma.platform.findFirst({
+    where: { id, userId },
+    select: { id: true, name: true },
+  });
+  if (!existing) return null;
+
+  const [assetCount, txCount, detachedRows] = await Promise.all([
+    prisma.asset.count({ where: { platformId: id, userId } }),
+    prisma.transaction.count({
+      where: { userId, OR: [{ platformId: id }, { toPlatformId: id }] },
+    }),
+    prisma.liability.findMany({
+      where: { userId, asset: { is: { platformId: id, userId } } },
+      select: {
+        id: true,
+        name: true,
+        remainingAmount: true,
+        monthlyPayment: true,
+        paymentDay: true,
+        startDate: true,
+        endDate: true,
+        lastPaymentAppliedAt: true,
+        asset: { select: { name: true } },
+      },
+    }),
+  ]);
+
+  return {
+    id: existing.id,
+    name: existing.name,
+    assetCount,
+    txCount,
+    detachedLiabilities: detachedRows.map((l) => ({
+      id: l.id,
+      name: l.name,
+      remainingAmountEur: remainingAmountAt(l),
+      propertyName: l.asset?.name ?? null,
+    })),
+  };
+}
+
+export async function GET(req: Request) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+
+  /*
+    Inventaire d'impact : lecture seule, sur demande explicite.
+    C'est ce que la boîte de confirmation appelle avant de proposer la
+    suppression — jamais un DELETE, qui détruirait ce qu'elle veut décrire.
+  */
+  const impactId = new URL(req.url).searchParams.get("impact");
+  if (impactId) {
+    const impact = await platformImpact(userId, impactId);
+    if (!impact) {
+      return NextResponse.json({ error: "Introuvable" }, { status: 404 });
+    }
+    return NextResponse.json(impact);
+  }
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   const platforms = await getPlatformCashBalances(
