@@ -363,8 +363,13 @@ export type HoldingsResponse = {
   metrics?: PatrimonyMetricsJson;
   allocation: PortfolioAllocation;
   /**
-   * D14.2 — répartition par endroit. Même contrat que
-   * `GET /api/portfolio.allocationByVenue` (`venues` / `help` / `total` / `asOf`).
+   * D14.2 — répartition par endroit (`venues` / `help` / `total` / `asOf`).
+   *
+   * Servie uniquement ici. `GET /api/portfolio` la calculait aussi, sans
+   * qu'aucun consommateur ne la lise (le tableau de bord lit toujours
+   * celle-ci, `holdingsQ.data.allocationByVenue`) : retirée de cette autre
+   * route pour ne plus payer une valorisation complète que personne
+   * n'affichait.
    */
   allocationByVenue?: AllocationByVenueApi;
   baseCurrency: string;

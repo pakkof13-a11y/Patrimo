@@ -14,9 +14,17 @@
  * Indice : pas d'interpolation. Week-end = LOCF last-close. Aucune close
  * ≤ ancre → overlay absent (`undefined`), jamais 0 ni 100 inventé.
  * Réseau down / 429 / vide → même règle : overlay off, NAV intacte.
+ *
+ * Grille d'échantillonnage de l'indice : voir `fillFlatGaps`. La réponse
+ * `daily-nav` comprime les paliers NAV à leurs deux bords ; sans reconstituer
+ * les jours intermédiaires, l'indice n'y serait relu qu'à ces deux dates et
+ * se dessinerait plat sur tout le palier même s'il a bougé. `fillFlatGaps`
+ * les réinsère quand deux jours fournis partagent une valeur NAV identique —
+ * jamais une NAV inventée, juste sa relecture aux jours qu'elle couvrait déjà.
  */
 
 import { endOfParisDay, parisDayKey } from "../dates/paris";
+import { enumerateDays } from "./historical/timeline";
 import type { EvolutionPercentPoint, EvolutionRange } from "./evolution-aggregate";
 import {
   navOfPoint,
@@ -136,6 +144,49 @@ export function indexCloseAtAnchor(
 }
 
 /**
+ * Réinsère les jours civils intermédiaires d'un palier NAV strictement plat.
+ *
+ * `compressDailyNavPoints` replie une suite de jours dont **toutes** les
+ * grandeurs publiées sont identiques en ne gardant que ses deux extrémités
+ * (plus un repère par année civile) — la réponse HTTP de `daily-nav` n'en
+ * porte donc que les bords. Rien à faire tant que Versus ne compare à rien :
+ * `rebaseToCommonBase100` sans indice n'a besoin que des bords, la NAV y est
+ * constante entre eux par construction (`sameSnapshot`, `daily-nav-compress.ts`).
+ *
+ * Mais dès qu'un indice est comparé, échantillonner l'indice à ces seuls
+ * bords le dessine plat sur tout le palier, y compris s'il a réellement
+ * bougé pendant ce temps. Deux jours consécutifs *fournis* qui portent la
+ * **même valeur NAV** signent un tel palier — c'est la garantie que donne
+ * `compressDailyNavPoints` : un jour n'y est retiré que si rien de ce que le
+ * point publie, `nav` compris, ne change par rapport à son voisin. On peut
+ * donc, sans inventer aucune NAV (elle est réellement inchangée sur tout
+ * l'intervalle), réinsérer les jours civils intermédiaires pour que l'indice
+ * y soit relu à sa vraie densité.
+ *
+ * Compromis assumé : sur un palier NAV long (des années sans écriture), ceci
+ * réintroduit jusqu'à un point par jour civil — jusqu'à ~2 191 dans le pire
+ * cas (`MAX_HISTORY_YEARS` borne toute fenêtre à six ans), jamais plus. C'est
+ * strictement le module Versus qui regonfle ainsi ; la réponse `daily-nav`
+ * servie au client, elle, reste comprimée — cette fonction ne la relit pas,
+ * elle reconstruit son propre axe de jours à partir des seuls points reçus.
+ */
+function fillFlatGaps(levels: readonly VsIndexLevel[]): VsIndexLevel[] {
+  if (levels.length < 2) return levels.slice();
+  const out: VsIndexLevel[] = [levels[0]!];
+  for (let i = 1; i < levels.length; i++) {
+    const prev = levels[i - 1]!;
+    const cur = levels[i]!;
+    if (prev.value === cur.value) {
+      for (const day of enumerateDays(prev.day, cur.day).slice(1, -1)) {
+        out.push({ day, value: prev.value });
+      }
+    }
+    out.push(cur);
+  }
+  return out;
+}
+
+/**
  * Rebase à 100 à l'ancre NAV (premier jour de la fenêtre).
  *
  * Overlay seulement si une close existe ≤ ancre. Sinon les points NAV
@@ -146,7 +197,14 @@ export function rebaseToCommonBase100(
   portfolio: readonly VsIndexLevel[],
   index: readonly VsIndexLevel[] = []
 ): VsIndexBase100Point[] {
-  const navs = usableLevels(portfolio);
+  /*
+    Sans indice, rien à échantillonner de plus finement : la NAV seule reste
+    au régime de `portfolio` tel que reçu, comme avant ce changement.
+  */
+  const navs =
+    index.length > 0
+      ? fillFlatGaps(usableLevels(portfolio))
+      : usableLevels(portfolio);
   if (navs.length === 0) return [];
 
   const navByDay = new Map<string, number>();

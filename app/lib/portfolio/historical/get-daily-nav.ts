@@ -37,7 +37,11 @@ import {
   PATRIMONY_ASSET_POCKETS,
   type PatrimonyAssetPocket,
 } from "../patrimony-metrics";
-import { historyStepForWindow, type HistoryStep } from "./history-window";
+import {
+  historyStepForWindow,
+  lastCloseDay,
+  type HistoryStep,
+} from "./history-window";
 import { loadHistoricalInputs } from "./load";
 import { PortfolioValuationEngine } from "./engine";
 import type { PriceOrigin } from "./price-resolver";
@@ -250,11 +254,22 @@ export function dailyNavFromSeries(
   }));
 }
 
+/**
+ * Fenêtre par défaut quand l'appelant omet `from`/`to` — un an, jusqu'à la
+ * dernière clôture.
+ *
+ * `to` était `parisDayKey(now)` : la documentation de la route dit pourtant
+ * que la journée en cours n'est jamais servie (`lastCloseDay`, D22 P0). Le
+ * tableau de bord ne voyait pas l'écart, il passe toujours `lastCloseDay()`
+ * explicitement — mais un appelant qui s'en tient à la valeur par défaut
+ * documentée recevait un dernier point mêlant une journée inachevée aux
+ * journées closes qui le précèdent, et `asOfDay` valait aujourd'hui.
+ */
 export function defaultDailyNavWindow(now = new Date()): {
   from: DayKey;
   to: DayKey;
 } {
-  const to = parisDayKey(now);
+  const to = lastCloseDay(now);
   const from = parisDayKey(new Date(now.getTime() - 365 * 86_400_000));
   return { from, to };
 }

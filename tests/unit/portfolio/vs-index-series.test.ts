@@ -206,6 +206,67 @@ describe("rebaseToCommonBase100 — ancre servie", () => {
   });
 });
 
+describe("rebaseToCommonBase100 — l'indice n'est pas aminci par un palier NAV (revue P27.7)", () => {
+  // `compressDailyNavPoints` replie un palier NAV plat à ses deux bords ;
+  // `dailyNavToVsIndexLevels` ne reçoit alors que ces deux jours. Sans
+  // réinsertion, l'indice n'y serait relu qu'à ces deux dates et se
+  // dessinerait plat même s'il a bougé pendant les huit jours du palier.
+  const plateauNav = [nav("2020-01-03", 100_000), nav("2020-01-10", 100_000)];
+  const indiceMouvant = [
+    cac("2020-01-03", 7_000),
+    cac("2020-01-04", 7_200),
+    cac("2020-01-05", 6_800),
+    cac("2020-01-06", 7_500),
+    cac("2020-01-10", 7_100),
+  ];
+
+  it("réinsère les 8 jours civils du palier quand un indice est comparé", () => {
+    const out = rebaseToCommonBase100(plateauNav, indiceMouvant);
+    expect(out).toHaveLength(8);
+    expect(out.map((p) => p.day)).toEqual([
+      "2020-01-03",
+      "2020-01-04",
+      "2020-01-05",
+      "2020-01-06",
+      "2020-01-07",
+      "2020-01-08",
+      "2020-01-09",
+      "2020-01-10",
+    ]);
+  });
+
+  it("la NAV reste réellement plate (aucune inventée) pendant que l'indice bouge", () => {
+    const out = rebaseToCommonBase100(plateauNav, indiceMouvant);
+    expect(out.every((p) => p.portfolioBase100 === 100)).toBe(true);
+    expect(out.every((p) => p.portfolioPct === 0)).toBe(true);
+
+    const parJour = new Map(out.map((p) => [p.day, p.indexBase100]));
+    expect(parJour.get("2020-01-06")).toBeCloseTo((100 * 7_500) / 7_000, 6);
+    expect(parJour.get("2020-01-05")).toBeCloseTo((100 * 6_800) / 7_000, 6);
+
+    // L'indice bouge vraiment d'un jour à l'autre à l'intérieur du palier —
+    // le bug corrigé le dessinait plat faute d'y être échantillonné.
+    const bouge = out.some(
+      (p, i) => i > 0 && p.indexBase100 !== out[i - 1]!.indexBase100
+    );
+    expect(bouge).toBe(true);
+  });
+
+  it("sans comparateur, le palier n'est pas regonflé — 2 points, comme avant", () => {
+    const out = rebaseToCommonBase100(plateauNav);
+    expect(out).toHaveLength(2);
+    expect(out.every((p) => p.indexBase100 === undefined)).toBe(true);
+  });
+
+  it("une fenêtre sans palier (aucun jour identique consécutif) n'ajoute aucun point", () => {
+    const out = rebaseToCommonBase100(
+      [nav("2026-01-05", 200_000), nav("2026-01-06", 210_000)],
+      [cac("2026-01-05", 7_000), cac("2026-01-06", 7_350)]
+    );
+    expect(out).toHaveLength(2);
+  });
+});
+
 describe("achat immo — Financier ne cliff pas, Brut peut sauter", () => {
   it("base100 Financier reste 100 ; Brut saute de l'achat", () => {
     const days = [

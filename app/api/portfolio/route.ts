@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
-import { getAllocationByVenueApi } from "@/app/lib/portfolio/allocation-by-venue-api";
 import {
   getPortfolioBundle,
   recordPortfolioSnapshot,
@@ -59,15 +58,21 @@ export async function GET(req: Request) {
       Les deux sont désormais séparés — l'instantané ici, la série dans
       `daily-nav`, bornée au chip demandé et déjà verte.
     */
-    const [bundle, allocationByVenue] = await Promise.all([
-      getPortfolioBundle(userId, base),
-      getAllocationByVenueApi(userId),
-    ]);
+    /*
+      Vérifié (revue P27) : aucun consommateur ne lit `allocationByVenue`
+      ici — `portfolio-app.tsx` prend `allocationByVenue` depuis
+      `holdingsQ.data`, et `/api/holdings` la sert déjà. Cette route en
+      calculait pourtant une seconde valorisation complète (onze requêtes,
+      cf. `allocation-by-venue.ts`) sur un chemin qui avait justement été
+      allégé pour ne plus tomber en 504 (53b4a47, 25a8265) : la série est
+      sortie, cette lecture morte y était restée. Retirée — voir aussi
+      `HoldingsResponse.allocationByVenue` dans `app/lib/types/ui.ts`.
+    */
+    const bundle = await getPortfolioBundle(userId, base);
 
     return NextResponse.json({
       summary: bundle.summary,
       allocation: bundle.allocation,
-      allocationByVenue,
       baseCurrency: base,
     });
   } catch (e) {

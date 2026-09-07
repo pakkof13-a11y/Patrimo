@@ -7,12 +7,14 @@ import {
 } from "@/app/lib/portfolio/historical/engine";
 import {
   dailyNavFromSeries,
+  defaultDailyNavWindow,
   financierFlowOf,
   isDailyNavScope,
   listedTransactionFlow,
   navAtScope,
   parseDayKey,
 } from "@/app/lib/portfolio/historical/get-daily-nav";
+import { lastCloseDay } from "@/app/lib/portfolio/historical/history-window";
 import { d } from "@/app/lib/money/decimal";
 import { enumerateDays } from "@/app/lib/portfolio/historical/timeline";
 import type { LedgerTx } from "@/app/lib/accounting/types";
@@ -115,6 +117,31 @@ describe("parse / scopes", () => {
     expect(parseDayKey("2026-1-15")).toBeNull();
     expect(parseDayKey("not-a-day")).toBeNull();
     expect(parseDayKey(null)).toBeNull();
+  });
+
+  it("rejette une date de forme valide mais calendairement inexistante", () => {
+    // Février n'a jamais 30 jours ; il n'existe pas de 13e mois. Sans ce
+    // contrôle, `Date.UTC` glissait silencieusement vers une autre date
+    // (2 ou 3 mars, janvier de l'année suivante…) et la chaîne d'origine,
+    // renvoyée telle quelle par la route, affichait une date qui n'a jamais
+    // existé.
+    expect(parseDayKey("2026-02-30")).toBeNull();
+    expect(parseDayKey("2026-13-45")).toBeNull();
+    expect(parseDayKey("2026-04-31")).toBeNull();
+    // 2024 est bissextile, 2026 ne l'est pas.
+    expect(parseDayKey("2024-02-29")).toBe("2024-02-29");
+    expect(parseDayKey("2026-02-29")).toBeNull();
+  });
+
+  it("defaultDailyNavWindow se termine à lastCloseDay(), pas aujourd'hui", () => {
+    // D22 P0 pose la règle : la courbe trace des clôtures, jamais la journée
+    // en cours. `defaultDailyNavWindow` disait `to = parisDayKey(now)` — un
+    // appelant qui omet `to` recevait un dernier point mêlant une journée
+    // inachevée aux journées closes qui le précèdent.
+    const now = new Date("2026-09-07T15:00:00Z");
+    const { to } = defaultDailyNavWindow(now);
+    expect(to).toBe(lastCloseDay(now));
+    expect(to).not.toBe("2026-09-07");
   });
 
   it("les scopes T-01 + poches d'actif sont reconnus — pas les passifs", () => {
