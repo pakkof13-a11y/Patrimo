@@ -80,6 +80,11 @@ import { PlatformModal } from "@/components/modals/platform-modal";
 import { AssetPanel } from "@/components/holdings/asset-panel";
 import { ImportCsvModal } from "@/components/modals/import-csv-modal";
 import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
+import { FirstOperationsModal } from "@/components/modals/first-operations-modal";
+import {
+  shouldOfferFirstOperations,
+  type FirstOperationsPlatformInput,
+} from "@/components/dashboard/first-operations-options";
 import { PropertyModal } from "@/components/modals/property-modal";
 import { RealEstateTab } from "@/components/real-estate/real-estate-tab";
 import { SecuritiesPage } from "@/components/securities/securities-page";
@@ -262,6 +267,16 @@ function PortfolioAppClient({
   const [newPlatformIds, setNewPlatformIds] = useState<Set<string>>(
     () => new Set()
   );
+  /**
+   * Plateforme à proposer comme point de départ pour « Ajouter vos premières
+   * opérations » (D23) — non nul seulement juste après une création réussie
+   * depuis le chemin dédié, sur un compte sans journal. `null` referme la
+   * fenêtre ; ce n'est jamais un passage forcé.
+   */
+  const [firstOperationsPlatform, setFirstOperationsPlatform] =
+    useState<FirstOperationsPlatformInput | null>(null);
+  /** Plateforme sur laquelle ouvrir directement l'édition (adresse / clé API) en arrivant sur l'onglet Plateformes. */
+  const [focusPlatformId, setFocusPlatformId] = useState<string | null>(null);
   const [detailAssetId, setDetailAssetId] = useState<string | null>(null);
   const [cryptoSub, setCryptoSub] = useState<CryptoSubTab>("DASHBOARD");
   const [assetLabel, setAssetLabel] = useState("");
@@ -1550,6 +1565,8 @@ function PortfolioAppClient({
                   setShowImport(true);
                 }}
                 onViewTransactions={(p) => viewTransactionsForPlatform(p)}
+                focusPlatformId={focusPlatformId}
+                onFocusHandled={() => setFocusPlatformId(null)}
               />
             )}
 
@@ -1694,6 +1711,53 @@ function PortfolioAppClient({
               ? `Plateforme « ${p.name} » créée et sélectionnée`
               : `Plateforme « ${p.name} » sélectionnée`
           );
+          /*
+            Deuxième étape : un compte sans journal qui vient de créer sa
+            plateforme (chemin dédié, pas un détour depuis la transaction ou
+            l'import) n'a rien à faire du tableau de bord tant qu'aucune
+            opération n'existe. `txCount` ici est celui d'avant cette
+            création — créer une plateforme n'ajoute aucune transaction.
+          */
+          if (
+            shouldOfferFirstOperations({
+              target: quickPlatformTarget,
+              created: p.created,
+              transactionCountBeforeCreate: txCount,
+            })
+          ) {
+            setFirstOperationsPlatform({
+              id: p.id,
+              name: p.name,
+              type: p.type,
+              logoKey: p.logoKey,
+            });
+          }
+        }}
+      />
+
+      <FirstOperationsModal
+        open={Boolean(firstOperationsPlatform)}
+        platform={firstOperationsPlatform}
+        onClose={() => setFirstOperationsPlatform(null)}
+        onAddTransaction={() => {
+          const target = firstOperationsPlatform;
+          setFirstOperationsPlatform(null);
+          openNewTransaction(
+            "ACHAT",
+            undefined,
+            target ? { id: target.id, name: target.name } : undefined
+          );
+        }}
+        onImportCsv={() => {
+          const target = firstOperationsPlatform;
+          setFirstOperationsPlatform(null);
+          if (target) setImportDefaultPlatform({ id: target.id, name: target.name });
+          setShowImport(true);
+        }}
+        onSync={(syncable) => {
+          setFirstOperationsPlatform(null);
+          setFocusPlatformId(syncable.id);
+          setTab("platforms");
         }}
       />
 

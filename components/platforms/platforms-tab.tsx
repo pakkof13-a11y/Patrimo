@@ -101,6 +101,8 @@ export function PlatformsTab({
   onImportForPlatform,
   onViewTransactions,
   loading,
+  focusPlatformId,
+  onFocusHandled,
 }: {
   /**
    * Chargement de la liste en cours.
@@ -126,6 +128,14 @@ export function PlatformsTab({
   onImportForPlatform?: (platform: PlatformRow) => void;
   /** Ouvre Transactions avec filtre plateforme. */
   onViewTransactions?: (platform: PlatformRow) => void;
+  /**
+   * Ouvre directement le panneau d'édition (adresse / clé API) de cette
+   * plateforme au montage — arrivée depuis « Ajouter vos premières
+   * opérations » (D23) quand la plateforme créée sait se synchroniser.
+   */
+  focusPlatformId?: string | null;
+  /** Prévient que la demande de focus a été traitée — évite de la rejouer. */
+  onFocusHandled?: () => void;
 }) {
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [statusFilter, setStatusFilter] = useState<PlatformStatusFilter>("ALL");
@@ -313,6 +323,36 @@ export function PlatformsTab({
     setEditApiKey(cap?.defaultApiKey || "");
     setEditMoneroAmount("");
   }
+
+  /*
+    Arrivée guidée depuis « Ajouter vos premières opérations » (D23) : ouvre
+    le panneau d'édition — celui qui porte le champ adresse / clé API — sur la
+    plateforme que l'utilisateur vient de désigner comme synchronisable,
+    plutôt que de dupliquer ce formulaire dans la modale d'onboarding.
+
+    Ajustement pendant le rendu (pas un effet) : la cible peut ne pas encore
+    figurer dans `platforms` le temps du premier chargement — dans ce cas on
+    attend simplement le prochain rendu où elle y sera, sans consommer la
+    demande.
+  */
+  const [handledFocusPlatformId, setHandledFocusPlatformId] = useState<
+    string | null
+  >(null);
+  if (focusPlatformId && focusPlatformId !== handledFocusPlatformId) {
+    const target = platforms.find((p) => p.id === focusPlatformId);
+    if (target) {
+      setHandledFocusPlatformId(focusPlatformId);
+      openEdit(target);
+    }
+  }
+
+  // Notifie le parent une fois la demande traitée — simple appel de prop,
+  // aucun état local n'est modifié ici.
+  useEffect(() => {
+    if (focusPlatformId && handledFocusPlatformId === focusPlatformId) {
+      onFocusHandled?.();
+    }
+  }, [focusPlatformId, handledFocusPlatformId, onFocusHandled]);
 
   function openMerge(p: PlatformRow) {
     setMergeSource(p);

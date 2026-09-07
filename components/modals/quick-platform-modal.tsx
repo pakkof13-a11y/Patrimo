@@ -18,6 +18,8 @@ export type CreatedPlatform = {
   name: string;
   type: string;
   logoUrl: string | null;
+  /** Capacité de synchro (D23) : lue depuis la réponse serveur, jamais devinée ici. */
+  logoKey: string | null;
   created: boolean;
 };
 
@@ -113,6 +115,7 @@ export function QuickPlatformModal({
           name: string;
           type: string;
           logoUrl: string | null;
+          logoKey: string | null;
         };
         created?: boolean;
       }>("/api/platforms", {
@@ -131,6 +134,7 @@ export function QuickPlatformModal({
         name: res.platform.name,
         type: res.platform.type,
         logoUrl: res.platform.logoUrl,
+        logoKey: res.platform.logoKey ?? null,
         created: res.created !== false,
       });
       onClose();
