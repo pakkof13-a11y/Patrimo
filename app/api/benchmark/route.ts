@@ -5,6 +5,7 @@ import { cacheGet, cacheSet, cachePrune } from "@/app/lib/api/memory-cache";
 import { consumeRateLimit } from "@/app/lib/api/simple-rate-limit";
 import { withTimeout } from "@/app/lib/utils/with-timeout";
 import { MARKET_INDEX_SYMBOLS } from "@/app/lib/portfolio/market-indices";
+import { MAX_HISTORY_YEARS } from "@/app/lib/portfolio/historical/history-window";
 import { serverErrorDetail } from "@/app/lib/api/error-response";
 
 const yahooFinance = new YahooFinance({
@@ -79,11 +80,29 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Dates invalides" }, { status: 400 });
   }
 
-  // Borne la plage (évite requêtes Yahoo abusives)
-  const maxSpanMs = 6 * 365 * 24 * 60 * 60 * 1000;
-  if (to.getTime() - from.getTime() > maxSpanMs) {
+  /*
+    Borne de plage — la même profondeur que le reste de l'application.
+
+    Elle valait `6 * 365` jours, soit 2 190. Six ans civils en comptent 2 191
+    dès qu'une année bissextile s'y trouve, et le panneau demande en plus sept
+    jours avant la fenêtre pour disposer d'une ancre de rebasage. Une demande
+    « Tout » pesait donc 2 198 jours et repartait en 400 : l'indice était
+    absent de la seule période où on voulait le comparer, et rien à l'écran ne
+    disait pourquoi.
+
+    Le plafond se dérive maintenant de `MAX_HISTORY_YEARS`, la constante qui
+    borne déjà le moteur, en années civiles et non en tranches de 365 jours.
+    La marge d'ancrage est nommée plutôt que devinée : un fournisseur ne rend
+    pas de cours les jours fériés, et l'ancre doit pouvoir reculer jusqu'à
+    trouver une séance.
+  */
+  const ANCHOR_MARGIN_DAYS = 30;
+  const spanFloor = new Date(to.getTime());
+  spanFloor.setUTCFullYear(spanFloor.getUTCFullYear() - MAX_HISTORY_YEARS);
+  spanFloor.setUTCDate(spanFloor.getUTCDate() - ANCHOR_MARGIN_DAYS);
+  if (from.getTime() < spanFloor.getTime()) {
     return NextResponse.json(
-      { error: "Plage trop large (max 6 ans)" },
+      { error: `Plage trop large (max ${MAX_HISTORY_YEARS} ans)` },
       { status: 400 }
     );
   }
@@ -118,7 +137,15 @@ export async function GET(req: Request) {
         period2: to,
         interval: "1d",
       }),
-      12_000,
+      /*
+        Sous le couperet de la plateforme, pas au-dessus.
+
+        Douze secondes ne pouvaient jamais s'écouler : l'hébergement coupe la
+        fonction autour de dix, et la page recevait une erreur de plateforme au
+        lieu du message de la route. Un délai qui expire après la coupure ne
+        protège de rien — il garantit seulement que l'échec sera muet.
+      */
+      8_000,
       "yahooFinance.chart"
     )) as {
       quotes?: Array<{
