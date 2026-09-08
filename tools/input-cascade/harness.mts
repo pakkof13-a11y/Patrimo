@@ -110,7 +110,19 @@ const MEASURED = [
   "paddingLeft",
 ] as const;
 
-/** La « peau » : ce qui ne doit jamais bouger, dans aucun des quatre états. */
+/**
+ * La « peau » : ce qui ne doit jamais bouger, dans aucun des quatre états.
+ *
+ * `outlineWidth` en a été retiré. Tant qu'`outlineStyle` vaut `none` — ce que
+ * `.input` déclare — la largeur ne décrit rien, et les moteurs ne s'accordent
+ * pas sur ce qu'ils en calculent : mesuré sur un `<input>` sans une ligne de
+ * CSS, Chromium 149, Chrome 152 et Edge 152 rendent tous `3px`, la valeur du
+ * mot-clé `medium`, là où la référence enregistrée porte `0px`. Huit entrées
+ * du relevé ne parlaient donc pas de la cascade mais du moteur qui la lisait.
+ *
+ * `outlineStyle` reste, et suffit : c'est lui que la cascade décide, et une
+ * bordure de mise au point qui apparaîtrait s'y verrait aussitôt.
+ */
 const SKIN = [
   "borderTopWidth",
   "borderTopStyle",
@@ -119,7 +131,6 @@ const SKIN = [
   "backgroundColor",
   "color",
   "outlineStyle",
-  "outlineWidth",
   "boxShadow",
   "opacity",
   "cursor",
