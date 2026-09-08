@@ -1,4 +1,6 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
+import { parisDayKey } from "../app/lib/dates/paris";
+import { lastCloseDay } from "../app/lib/portfolio/historical/history-window";
 
 /**
  * Cohérence des totaux : ce que le tableau de bord annonce pour une famille
@@ -294,30 +296,139 @@ test.describe("Cohérence tableau de bord ↔ modules", () => {
     ).toBeCloseTo(num(av.totalOutstandingEur), 2);
   });
 
-  test("Performance : la courbe se termine sur le patrimoine du jour", async ({
+  test("Performance : la série de NAV s'arrête à la dernière clôture, jamais sur la journée en cours", async ({
     request,
   }) => {
     /*
-      Le dernier point de la courbe et la tuile de patrimoine décrivent le
-      même instant : ils doivent porter le même chiffre.
+      `GET /api/portfolio` ne rend plus `history[]` : la route tombait en 504
+      en préproduction à rejouer le moteur sur toute la profondeur lisible
+      (cf. commentaire de `app/api/portfolio/route.ts`). La série vit
+      désormais dans `GET /api/portfolio/daily-nav`, et c'est elle qu'on
+      interroge — on ne redemande pas la réinjection de `history[]`, ce qui
+      ramènerait le 504.
 
-      C'est aussi le garde-fou des `PortfolioSnapshot`. La courbe est
-      reconstruite par `PortfolioValuationEngine` et ne lit pas cette table —
-      qui ne couvre que le périmètre « titres ». Y réinjecter des points
-      ferait décrocher la fin de courbe du patrimoine, ce que cette assertion
-      attrape.
+      ## L'invariant a changé de cible, et c'est délibéré
+
+      Ce garde-fou comparait la fin de série au patrimoine net du résumé.
+      Cette formulation n'est plus exprimable : la route plafonne désormais
+      `to` à `lastCloseDay()`, si bien que le dernier point servi date de la
+      veille tandis que le résumé date du jour. Mesuré sur ce dépôt le
+      2026-09-07 : 2 918 743,67 € au 06/09 contre 3 300 955,98 € au 07/09 —
+      plus de 380 000 € d'écart qui ne sont pas un bug, seulement une journée
+      d'activité entre deux dates.
+
+      Le plafond reste, et l'égalité tombe : un encours du jour n'est pas une
+      clôture, et la courbe trace des clôtures (D22 P0). Le décalage entre le
+      hero et la fin de courbe est donc **attendu** — l'affirmer serait un
+      faux garde-fou. Aucune route « net à la veille » n'a été créée pour
+      sauver l'ancienne assertion : ce serait fabriquer du produit pour un
+      test.
+
+      ## Ce que ce test affirme désormais
+
+      - la borne servie est `lastCloseDay()` en heure de Paris, même si le
+        client demande le jour courant ;
+      - cette borne est strictement antérieure à aujourd'hui ;
+      - le dernier point de la série porte cette borne, et aucun point ne la
+        dépasse ;
+      - `asOfDay` — la date que le hero affiche — est celle de la clôture, pas
+        celle d'une horloge ;
+      - `scope=net` est bien le périmètre servi.
+
+      ## Ce qu'il protège encore
+
+      La réinjection, en queue de série, d'un instantané « patrimoine du
+      jour » : un `PortfolioSnapshot` recollé au bout de la courbe, ou une
+      valorisation de la journée en cours ajoutée pour faire joindre les deux
+      chiffres du tableau de bord. Toute tentative de ce genre daterait le
+      dernier point d'aujourd'hui, et échouerait ici.
     */
-    const portfolio = await getJson(request, "/api/portfolio");
-    const history = portfolio.history ?? [];
-    expect(history.length, "Aucun point d'historique").toBeGreaterThan(0);
+    const aujourdHui = parisDayKey(new Date());
+    const derniereCloture = lastCloseDay();
 
-    const dernier = history[history.length - 1];
-    expectCoherent({
-      family: "Patrimoine net (fin de courbe)",
-      dashboard: num(portfolio.summary?.netWorthEur),
-      module: num(dernier.netWorthBase),
-      moduleSource: `le dernier des ${history.length} points, daté du ${String(dernier.date).slice(0, 10)}`,
-    });
+    /*
+      La borne haute est demandée, jamais héritée d'un défaut : le jour
+      courant est passé explicitement, et c'est le plafonnement qu'on observe.
+      Un test qui omettrait `to` vérifierait la valeur par défaut, pas la
+      règle — et resterait vert le jour où quelqu'un rouvrirait la borne aux
+      clients qui la fixent.
+    */
+    const dailyNav = await getJson(
+      request,
+      `/api/portfolio/daily-nav?scope=net&to=${aujourdHui}`
+    );
+
+    expect(dailyNav.scope, "Le périmètre servi n'est pas celui demandé.").toBe(
+      "net"
+    );
+
+    expect(
+      dailyNav.to,
+      `La route a servi ${dailyNav.to} pour une demande au ${aujourdHui} : ` +
+        `la borne haute doit être plafonnée à la dernière clôture ` +
+        `(${derniereCloture}), la journée en cours n'étant pas close.`
+    ).toBe(derniereCloture);
+
+    /*
+      Vérifié indépendamment de `lastCloseDay()` : si cette fonction se
+      mettait à rendre le jour courant, l'assertion précédente resterait verte
+      en comparant l'erreur à elle-même. Celle-ci ne le permet pas.
+    */
+    expect(
+      derniereCloture < aujourdHui,
+      `La dernière clôture (${derniereCloture}) n'est pas antérieure au jour ` +
+        `courant (${aujourdHui}) : la série porterait une journée inachevée.`
+    ).toBe(true);
+
+    const points = (dailyNav.points ?? []) as Array<{
+      day: string;
+      net: string | number;
+    }>;
+    expect(points.length, "Aucun point de NAV quotidienne").toBeGreaterThan(0);
+
+    expect(
+      dailyNav.step,
+      `La fenêtre servie (${dailyNav.from} → ${dailyNav.to}) rend un pas ` +
+        `hebdomadaire : le dernier point ne serait plus daté de la clôture ` +
+        `demandée mais de sa semaine.`
+    ).toBe("day");
+
+    const dernier = points[points.length - 1];
+    expect(
+      dernier.day,
+      `Le dernier des ${points.length} points date du ${dernier.day}, la ` +
+        `borne servie du ${dailyNav.to} : la série n'atteint pas sa clôture.`
+    ).toBe(derniereCloture);
+
+    /*
+      Le dernier point n'est pas seul concerné : un instantané du jour glissé
+      n'importe où dans la série la ferait sortir de son périmètre de
+      clôtures. La compression HTTP retire des jours, elle n'en ajoute jamais
+      — un jour au-delà de la borne ne peut venir que d'une réinjection.
+    */
+    const horsBorne = points.filter((p) => p.day > derniereCloture);
+    expect(
+      horsBorne.map((p) => p.day),
+      `Des points dépassent la dernière clôture (${derniereCloture}) : la ` +
+        `série de clôtures a reçu de la journée en cours.`
+    ).toEqual([]);
+
+    // Le hero date sur cette ancre — pas sur une horloge.
+    expect(
+      dailyNav.asOfDay,
+      `L'ancre publiée (${dailyNav.asOfDay}) n'est pas la dernière clôture ` +
+        `(${derniereCloture}) : le hero afficherait une date que la série ne porte pas.`
+    ).toBe(derniereCloture);
+
+    /*
+      Et le point porte bien une valeur : sans cela, toutes les assertions de
+      date ci-dessus tiendraient sur une série de trous.
+    */
+    const net = Number(dernier.net);
+    expect(
+      Number.isFinite(net),
+      `Le point de clôture du ${dernier.day} ne porte pas de patrimoine net exploitable (${dernier.net}).`
+    ).toBe(true);
   });
 
   test("Passifs : le module et le patrimoine soustraient la même dette", async ({
