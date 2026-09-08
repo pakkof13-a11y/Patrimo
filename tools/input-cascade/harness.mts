@@ -136,48 +136,282 @@ export type Snapshot = {
 /* ── 4. Le navigateur ────────────────────────────────────────────────── */
 
 /**
- * Chromium, ou rien.
+ * Emplacement de l'exécutable **à l'intérieur** d'un dossier de build.
  *
- * L'exécutable pointé par Playwright manque dans certains environnements
- * (conteneur dont la version diffère de celle épinglée). On tente alors les
- * versions présentes plutôt que d'échouer : un harnais qu'on ne peut pas
- * lancer localement finit par ne plus être lancé du tout. `null` fait passer
- * le test en « ignoré », jamais en « vert ».
+ * Playwright range chaque build sous `<pool>/chromium-<révision>/`, et la
+ * suite du chemin dépend du système. Cette table n'est qu'un dernier recours :
+ * quand Playwright répond, on lui emprunte sa propre disposition
+ * (`splitExpectedPath`), ce qui vaut mieux que de la deviner.
+ *
+ * Relevé sur la machine où ce correctif a été écrit (Windows) :
+ *   chromium-1228/chrome-win64/chrome.exe
+ *   chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe
+ *
+ * Les entrées macOS et Linux viennent de la disposition publiée par
+ * Playwright et n'ont **pas** pu être vérifiées ici. Elles ne sont atteintes
+ * que si `chromium.executablePath()` échoue — installation incomplète — ce qui
+ * est justement le cas où deviner reste préférable à abandonner.
  */
-export function resolveChromium(): string | null {
-  const candidates: string[] = [];
-  try {
-    candidates.push(chromium.executablePath());
-  } catch {
-    /* Playwright ne sait pas où il l'a mis — les chemins ci-dessous restent. */
+const LAYOUTS: Record<string, readonly string[]> = {
+  win32: [
+    "chrome-win64/chrome.exe",
+    "chrome-win/chrome.exe",
+    "chrome-headless-shell-win64/chrome-headless-shell.exe",
+  ],
+  darwin: [
+    "chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+    "chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    "chrome-headless-shell-mac-x64/chrome-headless-shell",
+  ],
+  linux: [
+    "chrome-linux/chrome",
+    "chrome-headless-shell-linux64/chrome-headless-shell",
+  ],
+};
+
+/** `chromium-1228`, `chromium_headless_shell-1228` — le dossier d'un build. */
+const BUILD_DIR = /^chromium(?:_headless_shell)?-(\d+)$/;
+
+/**
+ * Les seules variables que la résolution lit.
+ *
+ * Déclarées plutôt que `NodeJS.ProcessEnv` : la signature dit exactement ce
+ * qui est consulté, et un appelant peut lui passer un environnement de test
+ * sans reconstituer celui du processus.
+ */
+export type BrowserEnv = {
+  PLAYWRIGHT_CHROMIUM_EXECUTABLE?: string;
+  PLAYWRIGHT_BROWSERS_PATH?: string;
+  LOCALAPPDATA?: string;
+  HOME?: string;
+  USERPROFILE?: string;
+  /*
+    L'indice ouvert n'est pas de la complaisance : sans lui, un type dont
+    toutes les propriétés sont facultatives refuse `process.env`, qui ne les
+    déclare pas nommément. Les noms au-dessus restent la documentation de ce
+    qui est réellement lu.
+  */
+  [key: string]: string | undefined;
+};
+
+/**
+ * Le dossier où Playwright range ses navigateurs faute de
+ * `PLAYWRIGHT_BROWSERS_PATH`.
+ *
+ * Ce cas n'est pas marginal, c'est le cas courant : la variable n'était pas
+ * posée sur la machine où ces tests se sont ignorés trois semaines durant, si
+ * bien que l'ancienne boucle de repli ne s'exécutait même pas.
+ */
+export function defaultBrowsersPool(
+  platform: string,
+  env: BrowserEnv
+): string | null {
+  if (platform === "win32") {
+    return env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, "ms-playwright") : null;
   }
-  const pool = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (pool) {
-    let entries: string[] = [];
-    try {
-      entries = readdirSync(pool);
-    } catch {
-      entries = [];
-    }
-    for (const dir of entries.sort().reverse()) {
-      if (dir.startsWith("chromium-")) {
-        candidates.push(path.join(pool, dir, "chrome-linux/chrome"));
-      } else if (dir.startsWith("chromium_headless_shell-")) {
-        candidates.push(
-          path.join(pool, dir, "chrome-headless-shell-linux64/chrome-headless-shell")
-        );
+  const home = env.HOME ?? env.USERPROFILE;
+  if (!home) return null;
+  if (platform === "darwin") return path.join(home, "Library/Caches/ms-playwright");
+  return path.join(home, ".cache/ms-playwright");
+}
+
+/**
+ * Coupe le chemin attendu en (pool, disposition).
+ *
+ * `…/ms-playwright/chromium-1228/chrome-win64/chrome.exe` donne le pool d'un
+ * côté et `chrome-win64/chrome.exe` de l'autre. C'est Playwright lui-même qui
+ * nous apprend ainsi la disposition de la plateforme courante — aucune table à
+ * tenir à jour, et le résultat est juste par construction là où une table
+ * vieillit.
+ */
+export function splitExpectedPath(
+  expected: string
+): { pool: string; layout: string } | null {
+  const parts = expected.split(/[\\/]/);
+  const i = parts.findIndex((part) => BUILD_DIR.test(part));
+  if (i <= 0 || i >= parts.length - 1) return null;
+  return {
+    pool: parts.slice(0, i).join(path.sep),
+    layout: parts.slice(i + 1).join(path.sep),
+  };
+}
+
+export type ChromiumCandidate = {
+  path: string;
+  /** D'où vient ce chemin — c'est ce qu'un message d'échec doit nommer. */
+  origin: string;
+};
+
+export type ChromiumSearch = {
+  platform: string;
+  pools: string[];
+  candidates: ChromiumCandidate[];
+};
+
+/**
+ * Les chemins à essayer, dans l'ordre — sans toucher au disque.
+ *
+ * Séparé de la recherche elle-même pour être vérifiable : la disposition
+ * Windows ou macOS se teste depuis n'importe quelle machine, ce qui est
+ * exactement ce qui manquait quand la fonction ne connaissait que Linux.
+ */
+export function chromiumCandidates(input: {
+  platform: string;
+  /** `chromium.executablePath()`, ou `null` s'il a jeté. */
+  expected: string | null;
+  env: BrowserEnv;
+  listPool: (pool: string) => string[];
+}): ChromiumSearch {
+  const { platform, expected, env, listPool } = input;
+  const candidates: ChromiumCandidate[] = [];
+  const seen = new Set<string>();
+  const add = (candidate: string, origin: string) => {
+    if (seen.has(candidate)) return;
+    seen.add(candidate);
+    candidates.push({ path: candidate, origin });
+  };
+
+  /*
+    Le chemin imposé à la main d'abord. `playwright.config.ts` honore déjà
+    `PLAYWRIGHT_CHROMIUM_EXECUTABLE` ; ce harnais l'ignorait, si bien que la
+    même machine pouvait faire tourner les recettes E2E et refuser celle-ci.
+  */
+  const forced = env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
+  if (forced) add(forced, "PLAYWRIGHT_CHROMIUM_EXECUTABLE");
+
+  const split = expected ? splitExpectedPath(expected) : null;
+  if (expected) add(expected, "chromium.executablePath()");
+
+  // La disposition apprise de Playwright passe avant celle de la table.
+  const layouts = [...(split ? [split.layout] : []), ...(LAYOUTS[platform] ?? [])];
+
+  /*
+    Les trois sources donnent souvent le même dossier sous deux écritures —
+    `C:/…/pool` par la variable d'environnement, `C:\…\pool` par le chemin
+    que Playwright annonce. Sans normalisation, il est scanné deux fois et le
+    message d'échec le nomme deux fois : le lecteur croit à deux emplacements.
+  */
+  const pools: string[] = [];
+  const seenPools = new Set<string>();
+  for (const pool of [
+    split?.pool,
+    env.PLAYWRIGHT_BROWSERS_PATH,
+    defaultBrowsersPool(platform, env),
+  ]) {
+    if (!pool) continue;
+    const normalized = path.normalize(pool);
+    const key = platform === "win32" ? normalized.toLowerCase() : normalized;
+    if (seenPools.has(key)) continue;
+    seenPools.add(key);
+    pools.push(normalized);
+  }
+
+  for (const pool of pools) {
+    /*
+      Décroissant sur la révision, et numériquement : à défaut du build
+      attendu, on prend le plus récent des présents. Un tri alphabétique
+      placerait `chromium-999` après `chromium-1228`.
+
+      À révision égale, le navigateur complet passe avant le shell sans
+      interface. Les deux savent calculer un style, mais `chromium-` est ce
+      que ce harnais a toujours lancé : à défaut de raison de changer, on ne
+      change pas ce qui est mesuré.
+    */
+    const builds = listPool(pool)
+      .map((dir) => ({
+        dir,
+        revision: Number(BUILD_DIR.exec(dir)?.[1] ?? NaN),
+        complet: dir.startsWith("chromium-") ? 0 : 1,
+      }))
+      .filter((b) => Number.isFinite(b.revision))
+      .sort(
+        (a, b) =>
+          b.revision - a.revision || a.complet - b.complet || a.dir.localeCompare(b.dir)
+      );
+    for (const build of builds) {
+      for (const layout of layouts) {
+        add(path.join(pool, build.dir, layout), `${build.dir} · ${pool}`);
       }
     }
   }
-  for (const c of candidates) {
+
+  return { platform, pools, candidates };
+}
+
+/**
+ * Chromium, ou rien — mais jamais sans dire ce qui a été cherché.
+ *
+ * L'exécutable épinglé par Playwright manque dans certains environnements : la
+ * version installée diffère de celle attendue. On tente alors les versions
+ * présentes plutôt que d'échouer, car un harnais qu'on ne peut pas lancer
+ * localement finit par ne plus être lancé du tout.
+ *
+ * La recherche est rendue avec le résultat : un appelant qui ne trouve rien
+ * dispose de la liste exacte des chemins essayés. C'est ce qui manquait — le
+ * `null` seul a laissé passer trois semaines de faux vert.
+ */
+export function findChromium(): { path: string | null; search: ChromiumSearch } {
+  let expected: string | null = null;
+  try {
+    expected = chromium.executablePath();
+  } catch {
+    /* Playwright ne sait pas où il l'a mis — les autres pistes restent. */
+  }
+  const search = chromiumCandidates({
+    platform: process.platform,
+    expected,
+    env: process.env,
+    listPool: (pool) => {
+      try {
+        return readdirSync(pool);
+      } catch {
+        return [];
+      }
+    },
+  });
+  for (const candidate of search.candidates) {
     try {
-      statSync(c);
-      return c;
+      statSync(candidate.path);
+      return { path: candidate.path, search };
     } catch {
       /* candidat suivant */
     }
   }
-  return null;
+  return { path: null, search };
+}
+
+/** Le chemin seul. `null` fait passer le test en « ignoré », jamais en « vert ». */
+export function resolveChromium(): string | null {
+  return findChromium().path;
+}
+
+/**
+ * Ce que la recherche a tenté, et où.
+ *
+ * Un test qui ne peut pas s'exécuter doit le dire. Le message nomme la
+ * plateforme, les dossiers consultés et chaque chemin essayé avec son origine,
+ * pour qu'on sache si le build manque, si le dossier est ailleurs, ou si
+ * Playwright n'a rien à répondre.
+ */
+export function explainChromiumSearch(search: ChromiumSearch): string {
+  const lines = [`Aucun Chromium utilisable (plateforme ${search.platform}).`];
+  lines.push(
+    search.pools.length
+      ? `Dossiers de navigateurs consultés :\n${search.pools.map((p) => `  ${p}`).join("\n")}`
+      : "Aucun dossier de navigateurs connu — ni PLAYWRIGHT_BROWSERS_PATH, ni emplacement par défaut."
+  );
+  lines.push(
+    search.candidates.length
+      ? `Chemins essayés, dans l'ordre :\n${search.candidates
+          .map((c) => `  ${c.path}\n      ← ${c.origin}`)
+          .join("\n")}`
+      : "Aucun chemin candidat."
+  );
+  lines.push(
+    "Pour l'exécuter : poser PLAYWRIGHT_CHROMIUM_EXECUTABLE sur un binaire existant, " +
+      "ou installer le build attendu (npx playwright install chromium)."
+  );
+  return lines.join("\n");
 }
 
 /* ── 5. La mesure ────────────────────────────────────────────────────── */
@@ -229,10 +463,13 @@ function buildPage(css: string, combinations: Combination[], theme: Theme): stri
 }
 
 export async function measure(): Promise<Snapshot> {
-  const executablePath = resolveChromium();
-  if (!executablePath) {
-    throw new Error("Aucun Chromium utilisable — voir resolveChromium().");
+  const found = findChromium();
+  if (!found.path) {
+    // Le détail plutôt qu'un renvoi vers la fonction : c'est ici qu'on a
+    // besoin de savoir ce qui a été cherché, pas dans le code source.
+    throw new Error(explainChromiumSearch(found.search));
   }
+  const executablePath = found.path;
   const combinations = extractCombinations();
   const css = await compileCss();
 
