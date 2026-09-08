@@ -120,7 +120,29 @@ export async function loadPatrimonyPresence(
     exists((a) => prisma.bankAccount.findFirst(a)),
     exists((a) => prisma.savingsAccount.findFirst(a)),
     exists((a) => prisma.lifeInsurance.findFirst(a)),
-    exists((a) => prisma.envelopeCash.findFirst(a)),
+    /*
+      La poche d'espèces ne compte que si elle porte un montant.
+
+      `listEnvelopeCash` créait les trois poches à la lecture : ouvrir
+      l'onglet Titres suffisait à matérialiser trois lignes à zéro, et leur
+      seule existence déclarait le patrimoine non vide. Le cockpit d'accueil
+      ne revenait alors plus jamais, sur un compte où rien n'avait été saisi.
+
+      Le GET ne crée plus rien, mais les comptes déjà passés par là portent
+      ces lignes : le test se fait donc sur le **montant** et non sur
+      l'existence, ce qui répare aussi l'existant.
+
+      `NOT: { balance: 0 }` et non `gt: 0` : un découvert de compte-titres est
+      une donnée saisie au même titre qu'un solde créditeur.
+    */
+    some(async () =>
+      (await prisma.envelopeCash.findFirst({
+        where: { userId, NOT: { balance: 0 } },
+        select: { id: true },
+      }))
+        ? 1
+        : 0
+    ),
     exists((a) => prisma.employeeSavingsLine.findFirst(a)),
     exists((a) => prisma.preciousMetalPosition.findFirst(a)),
     exists((a) => prisma.privateEquityPosition.findFirst(a)),

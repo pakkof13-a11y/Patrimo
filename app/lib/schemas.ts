@@ -844,12 +844,43 @@ export const lifeProductUpdateSchema = z.object({
 
 export type LifeProductUpdateForm = z.infer<typeof lifeProductUpdateSchema>;
 
+/**
+ * Enveloppes dont la poche d'espèces ne peut pas être débitrice.
+ *
+ * Ce n'est pas du zèle de validation, c'est la règle de chaque enveloppe :
+ * le compte espèces d'un PEA ne connaît ni découvert, ni crédit, ni SRD — un
+ * ordre est refusé quand les liquidités manquent — et une assurance-vie n'a
+ * pas de poche débitrice, ses rachats et arbitrages étant bornés par
+ * l'encours. L'avance sur contrat existe bien, mais c'est un passif distinct,
+ * hors du périmètre d'`EnvelopeCash`.
+ *
+ * Le CTO en est absent, et délibérément : découvert, appel de marge et
+ * règlement différé y sont des situations réelles. Son solde négatif est un
+ * fait comptable que le patrimoine compte avec son signe (cf. l'en-tête de
+ * `getExplicitCashTotalEur`).
+ */
+const NON_DEBITABLE_ENVELOPES = ["PEA", "AV"] as const;
+
 /** PUT /api/envelopes */
-export const envelopeCashUpdateSchema = z.object({
-  envelope: z.enum(["CTO", "PEA", "AV"]),
-  balance: decimalString.optional(),
-  currency: currencyCode.optional(),
-});
+export const envelopeCashUpdateSchema = z
+  .object({
+    envelope: z.enum(["CTO", "PEA", "AV"]),
+    balance: decimalString.optional(),
+    currency: currencyCode.optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.balance == null || data.balance === "") return;
+    if (!(NON_DEBITABLE_ENVELOPES as readonly string[]).includes(data.envelope)) {
+      return;
+    }
+    if (Number(data.balance) < 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Le solde d'un ${data.envelope} ne peut pas être négatif.`,
+        path: ["balance"],
+      });
+    }
+  });
 
 export type EnvelopeCashUpdateForm = z.infer<typeof envelopeCashUpdateSchema>;
 

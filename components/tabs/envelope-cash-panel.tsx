@@ -4,7 +4,24 @@ import { fetchJson } from "@/app/lib/api-client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { currencyLabel } from "@/app/lib/money/currencies";
 import { formatCurrency } from "@/app/lib/utils";
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import { toast } from "sonner";
+
+/**
+ * Ce que la poche fait au patrimoine, dit par enveloppe.
+ *
+ * Une seule phrase pour les trois se tromperait deux fois sur trois : le
+ * découvert est une situation réelle sur un compte-titres ordinaire — et le
+ * patrimoine le compte avec son signe — alors qu'un compte espèces de PEA et
+ * une assurance-vie ne peuvent pas être débiteurs, et que l'API refuse la
+ * saisie (400). Promettre « avec son signe » sur ces deux-là annoncerait une
+ * liberté que l'écran n'a pas.
+ */
+const AIDE_SOLDE: Record<"CTO" | "PEA" | "AV", string> = {
+  CTO: "Défaut 0 — compté avec son signe, découvert compris",
+  PEA: "Défaut 0 — compté dès qu'il est saisi ; un solde négatif est refusé",
+  AV: "Défaut 0 — compté dès qu'il est saisi ; un solde négatif est refusé",
+};
 
 /** Editable cash pocket for CTO / PEA / AV */
 export function EnvelopeCashPanel({
@@ -24,7 +41,6 @@ export function EnvelopeCashPanel({
           envelope: string;
           balance: string;
           currency: string;
-          countsInNetWorth: boolean;
         }>;
       }>("/api/envelopes"),
   });
@@ -42,7 +58,7 @@ export function EnvelopeCashPanel({
         }),
       });
       await qc.invalidateQueries({ queryKey: ["envelopes"] });
-      await qc.invalidateQueries({ queryKey: ["holdings"] });
+      invalidatePortfolioView(qc);
       toast.success("Solde cash enregistré");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur");
@@ -55,9 +71,7 @@ export function EnvelopeCashPanel({
         <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
           Solde cash ({envelope})
         </div>
-        <p className="text-[11px] text-zinc-400">
-          Défaut 0 — inclus dans le patrimoine seulement si &gt; 0
-        </p>
+        <p className="text-[11px] text-zinc-400">{AIDE_SOLDE[envelope]}</p>
       </div>
       <label className="text-xs">
         Solde
@@ -95,9 +109,6 @@ export function EnvelopeCashPanel({
         <span className="text-xs text-zinc-500">Affiché : </span>
         <span className="font-semibold tabular-nums">
           {formatCurrency(row?.balance ?? "0", row?.currency ?? "EUR")}
-        </span>
-        <span className="ml-2 text-[10px] text-zinc-400">
-          {row?.countsInNetWorth ? "Inclus" : "Ignoré (0)"}
         </span>
       </div>
     </div>
