@@ -1,0 +1,11 @@
+# Les polices sont des octets, jamais du texte.
+#
+# `core.autocrlf` est actif sur les postes Windows du projet. Git reconnaît
+# seul un woff2 comme binaire — vérifié, l'empreinte de l'objet indexé est
+# identique à celle du fichier — mais la fixture du harnais de cascade `.input`
+# ne vaut que si elle est exacte au bit près : son empreinte est consignée dans
+# `tools/input-cascade/baseline.json`. On ne laisse pas cela à une heuristique.
+*.woff2 binary
+*.woff   binary
+*.ttf    binary
+*.otf    binary

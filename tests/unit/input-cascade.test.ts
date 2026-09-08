@@ -5,6 +5,7 @@ import {
   extractCombinations,
   findChromium,
   formatDiff,
+  formatEnvironment,
   measure,
   readBaseline,
 } from "../../tools/input-cascade/harness.mjs";
@@ -79,8 +80,14 @@ describe("cascade .input", () => {
     "le rendu calculé est identique à la référence",
     async (ctx) => {
       if (!chromiumOuSaut(ctx)) return;
-      const differences = diff(readBaseline(), await measure());
-      expect(differences, formatDiff(differences)).toEqual([]);
+      const reference = readBaseline();
+      const mesure = await measure();
+      const differences = diff(reference, mesure);
+      expect(
+        differences,
+        formatDiff(differences) +
+          formatEnvironment(reference.environment, mesure.environment)
+      ).toEqual([]);
     },
     60_000
   );
@@ -99,6 +106,45 @@ describe("cascade .input", () => {
         d.scope.startsWith("peau")
       );
       expect(differences, formatDiff(differences)).toEqual([]);
+    },
+    60_000
+  );
+
+  it(
+    "chaque champ mesuré rend avec la police du produit",
+    async (ctx) => {
+      /*
+        Le harnais mesurait la police de l'hôte, pas celle de l'application :
+        la page statique ne charge pas next/font, --font-plex-sans y était
+        indéfinie, et le rendu retombait sur la pile générique du système.
+        Cette assertion est ce qui empêche d'y revenir sans le voir.
+      */
+      if (!chromiumOuSaut(ctx)) return;
+      const { fonts } = await measure();
+
+      expect(fonts, "le relevé de police manque").toBeDefined();
+      expect(
+        fonts!.loaded,
+        "la fixture n'est pas chargée : les largeurs relevées sont celles du repli"
+      ).toEqual({ "400": true, "600": true });
+
+      // Ce que le moteur a réellement employé, et non ce qu'on lui a demandé.
+      expect(fonts!.platformFonts).toContain(fonts!.declared);
+
+      /*
+        La règle : tout champ dont la largeur dépend de la police doit avoir
+        résolu la fixture. Un champ monospace en w-full ne dépend de rien ; le
+        jour où il passe en w-auto, il apparaît ici au lieu d'hériter du Sans
+        en silence.
+      */
+      expect(
+        fonts!.unresolved,
+        "des champs dépendent d'une police que le harnais n'embarque pas"
+      ).toEqual([]);
+
+      // Le garde-fou du garde-fou : une mesure où plus rien ne dépendrait de
+      // la police passerait le test ci-dessus sans rien prouver.
+      expect(fonts!.fontDependent).toBeGreaterThan(0);
     },
     60_000
   );

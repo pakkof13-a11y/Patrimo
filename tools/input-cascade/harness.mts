@@ -30,11 +30,12 @@
  * référence — et son absence de la référence enregistrée le signale.
  */
 
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import postcss from "postcss";
 import tailwind from "@tailwindcss/postcss";
-import { chromium, type Browser } from "@playwright/test";
+import { chromium, type Browser, type Page } from "@playwright/test";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 
@@ -137,11 +138,48 @@ const SKIN = [
 ] as const;
 
 export type Measurement = Record<string, string>;
+/**
+ * Ce que le harnais a chargé comme police, et ce que les champs en ont fait.
+ */
+export type FontReport = {
+  /** Famille déclarée par la fixture — celle que tout champ mesuré doit résoudre. */
+  declared: string;
+  /** Famille annoncée aux champs qui demandent du monospace, volontairement absente. */
+  monoPlaceholder: string;
+  file: string;
+  sha256: string;
+  /** Les deux graisses mesurées sont-elles réellement chargées ? */
+  loaded: Record<string, boolean>;
+  /** Police physique retenue par le moteur, sur un témoin porteur de texte. */
+  platformFonts: string[];
+  /** Combien de largeurs dépendent réellement de la police. */
+  fontDependent: number;
+  /**
+   * Champs dont la largeur dépend de la police **et** qui n'ont pas résolu la
+   * fixture. Vide en régime normal ; non vide, c'est une mesure qui décrit
+   * autre chose que ce qu'elle prétend.
+   */
+  unresolved: Array<{ classes: string; resolved: string }>;
+};
+
+/** Les conditions de la prise. Consignées, jamais comparées. */
+export type EnvironmentReport = {
+  engine: string;
+  platform: string;
+  arch: string;
+  recordedAt: string;
+  /** Ce qu'il ne faut pas redécouvrir. Voir `FONT_NOTE`. */
+  note: string;
+};
+
 export type Snapshot = {
   /** Géométrie et typographie, une entrée par combinaison de classes. */
   combinations: Array<{ classes: string; count: number; computed: Measurement }>;
   /** Peau du champ témoin, par palette et par état (`light.hover`…). */
   skin: Record<string, Measurement>;
+  /** Facultatifs : une référence enregistrée avant D34 n'en porte pas. */
+  fonts?: FontReport;
+  environment?: EnvironmentReport;
 };
 
 /* ── 4. Le navigateur ────────────────────────────────────────────────── */
@@ -427,6 +465,105 @@ export function explainChromiumSearch(search: ChromiumSearch): string {
 
 /* ── 5. La mesure ────────────────────────────────────────────────────── */
 
+/* ── 4 bis. La police du produit ─────────────────────────────────────── */
+
+/**
+ * Le fichier embarqué, et pourquoi il l'est.
+ *
+ * La page du harnais ne charge pas `next/font` : `--font-plex-sans` y était
+ * indéfinie, `--font-sans` — qui vaut `var(--font-plex-sans), ui-sans-serif,
+ * …` — devenait invalide à la valeur calculée, et le rendu retombait sur la
+ * pile générique du système. La largeur d'un champ `w-auto` décrivait donc la
+ * machine qui exécutait la mesure, pas la cascade du dépôt.
+ *
+ * Provenance et métriques : `fonts/README.md`. En deux mots — c'est le
+ * fichier que Google Fonts distribue et que `next/font` réémet pour
+ * l'application, et non celui qu'IBM publie, dont les métriques diffèrent.
+ */
+const FONT_FILE = path.join(import.meta.dirname, "fonts/ibm-plex-sans-latin.woff2");
+
+/** Famille déclarée par la fixture — celle que tout champ mesuré doit résoudre. */
+const FONT_FAMILY = "IBM Plex Sans";
+
+/**
+ * Famille annoncée aux champs qui demandent du monospace — et qui n'existe pas.
+ *
+ * Le harnais n'embarque que le Sans : c'est le seul dont une largeur mesurée
+ * dépende aujourd'hui, les deux champs `font-mono` du dépôt étant en `w-full`,
+ * donc à 600 px imposés par leur conteneur.
+ *
+ * Le laisser indéfini serait pourtant le piège de D33 rejoué : `--font-mono`
+ * deviendrait invalide à la valeur calculée, et `font-family` étant héritée,
+ * un champ monospace retomberait **silencieusement** sur le Sans. En pointant
+ * une famille impossible, on le rend visible : `measure()` voit ce nom, et le
+ * signale si la largeur de ce champ dépend de la police.
+ */
+const MONO_PLACEHOLDER = "IBM Plex Mono absente du harnais";
+
+/**
+ * Ce qu'il ne faut pas redécouvrir.
+ *
+ * La partie la plus périssable de ce chantier : sans cette trace, le prochain
+ * qui voudra « simplifier » en prenant un fichier publié par IBM refera
+ * l'enquête depuis zéro — et conclura probablement l'inverse.
+ */
+const FONT_NOTE =
+  "Police servie par Google Fonts via next/font, et non celle publiée par IBM. " +
+  "Sur un <input> vide, Google rend 149 px à 13 px là où @ibm/plex-sans@1.1.0 " +
+  "et @ibm/plex-sans-variable@0.2.0 rendent 153 px. L'écart est proportionnel " +
+  "à la taille (4 px à 13 px, 8 px à 26 px, 32 px à 104 px) et les chasses de " +
+  "glyphes sont identiques (78,000 px pour 0123456789). Prendre un fichier " +
+  "d'IBM ferait donc mesurer une largeur que l'application n'affiche jamais. " +
+  "Voir tools/input-cascade/fonts/README.md.";
+
+/**
+ * La règle `@font-face`, police incluse en base64.
+ *
+ * Une seule face pour les deux graisses : le fichier est une police
+ * **variable**, et un intervalle `font-weight` évite d'embarquer deux fois
+ * les mêmes 39 Ko dans la page. L'empreinte accompagne la règle — c'est elle
+ * qui, consignée dans la référence, permettra de voir qu'un fichier a changé.
+ */
+function fontFaceCss(): { css: string; sha256: string } {
+  const bytes = readFileSync(FONT_FILE);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const css =
+    `@font-face{font-family:"${FONT_FAMILY}";font-style:normal;` +
+    `font-weight:100 700;font-stretch:100%;` +
+    `src:url(data:font/woff2;base64,${bytes.toString("base64")}) format("woff2");` +
+    `font-display:block}`;
+  return { css, sha256 };
+}
+
+/**
+ * La police physique réellement retenue par le moteur.
+ *
+ * Le protocole de débogage est le seul à pouvoir répondre : `fontFamily`
+ * calculée ne rend que la liste demandée, pas ce qui a servi. Son absence ne
+ * doit pas faire échouer une mesure — c'est une trace, pas une assertion.
+ */
+async function platformFontsOf(page: Page, selector: string): Promise<string[]> {
+  try {
+    const client = await page.context().newCDPSession(page);
+    await client.send("DOM.enable");
+    await client.send("CSS.enable");
+    const { root } = (await client.send("DOM.getDocument")) as {
+      root: { nodeId: number };
+    };
+    const { nodeId } = (await client.send("DOM.querySelector", {
+      nodeId: root.nodeId,
+      selector,
+    })) as { nodeId: number };
+    const { fonts } = (await client.send("CSS.getPlatformFontsForNode", {
+      nodeId,
+    })) as { fonts: Array<{ familyName: string }> };
+    await client.detach();
+    return fonts.map((f) => f.familyName);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Largeur du conteneur de chaque champ.
  *
@@ -448,7 +585,12 @@ const HOST_WIDTH = 600;
 const THEMES = ["light", "dark"] as const;
 type Theme = (typeof THEMES)[number];
 
-function buildPage(css: string, combinations: Combination[], theme: Theme): string {
+function buildPage(
+  css: string,
+  fontCss: string,
+  combinations: Combination[],
+  theme: Theme
+): string {
   const fields = combinations
     .map(
       (c, i) =>
@@ -458,7 +600,19 @@ function buildPage(css: string, combinations: Combination[], theme: Theme): stri
   return `<!doctype html><html class="${theme === "dark" ? "dark" : ""}"><head><meta charset="utf-8"><style>
     html,body{margin:0;padding:0}
     .host{width:${HOST_WIDTH}px}
+    ${fontCss}
     ${css}
+    /*
+      La police du produit, déclarée là où next/font la déclare dans
+      l'application : sur la racine, et après le CSS du dépôt pour l'emporter.
+      Sans elle, --font-sans devient invalide à la valeur calculée et le rendu
+      retombe sur la pile générique du système — ce qui faisait mesurer au
+      harnais la police de l'hôte plutôt que la sienne.
+
+      --font-plex-mono pointe une famille impossible : voir MONO_PLACEHOLDER
+      dans ce fichier.
+    */
+    :root{--font-plex-sans:"${FONT_FAMILY}";--font-plex-mono:"${MONO_PLACEHOLDER}"}
     /*
       Sans cela, les états sont mesurés en cours d'interpolation : la classe
       anime border-color et box-shadow sur 0,12 s, et une lecture immédiate
@@ -470,7 +624,113 @@ function buildPage(css: string, combinations: Combination[], theme: Theme): stri
     ${fields}
     <div class="host"><input id="witness" class="input"></div>
     <div class="host"><input id="witness-disabled" class="input" disabled></div>
+    <!--
+      Un témoin porteur de texte : un champ vide ne dessine aucun glyphe, et
+      le protocole ne peut donc pas dire quelle police a réellement servi.
+    -->
+    <span id="font-witness">0123456789 Montant net</span>
   </body></html>`;
+}
+
+/** Un champ mesuré, vu sous l'angle de la police. */
+export type FieldFontRow = {
+  classes: string;
+  /** Première famille de la liste calculée — celle que le moteur essaie. */
+  resolved: string;
+  /** Sa largeur bouge-t-elle quand la police change ? */
+  dependent: boolean;
+};
+
+/**
+ * La seule règle qui vaille : **tout champ dont la largeur dépend de la
+ * police doit avoir résolu la fixture**.
+ *
+ * Un champ monospace en `w-full` ne dépend de rien et ne gêne personne — le
+ * harnais n'embarque que le Sans, et c'est assez. Le jour où ce même champ
+ * passe en `w-auto`, sa largeur se met à dépendre d'une police absente : il
+ * est alors signalé, au lieu d'hériter du Sans en silence et de faire
+ * enregistrer une largeur que l'application n'affiche pas.
+ *
+ * Séparée du navigateur pour être vérifiable sans lui — la leçon de D33.
+ */
+export function unresolvedFields(
+  rows: FieldFontRow[],
+  declared: string
+): Array<{ classes: string; resolved: string }> {
+  return rows
+    .filter((r) => r.dependent && r.resolved !== declared)
+    .map(({ classes, resolved }) => ({ classes, resolved }));
+}
+
+/** `"IBM Plex Sans", ui-sans-serif, …` → `IBM Plex Sans`. */
+export function firstFamily(list: string): string {
+  return (list.split(",")[0] ?? "").trim().replace(/^["']|["']$/g, "");
+}
+
+/**
+ * Ce que les champs ont fait de la police, et lesquels en dépendent.
+ *
+ * La dépendance n'est pas devinée, elle est **mesurée** : on substitue une
+ * autre famille aux deux variables, on relit les largeurs, et celles qui
+ * bougent sont celles dont la police décide. Un `w-full` ne bouge pas, un
+ * `w-auto` bouge. Aucune liste à tenir à jour : le jour où un champ change de
+ * classe, la mesure change de réponse toute seule.
+ *
+ * De là, la seule règle qui vaille : **tout champ dont la largeur dépend de la
+ * police doit avoir résolu la fixture**. Un champ monospace en `w-full` ne
+ * dépend de rien et ne gêne personne ; le jour où il passe en `w-auto`, il
+ * dépend d'une police que le harnais n'embarque pas, et il est signalé.
+ */
+async function collectFontReport(
+  page: Page,
+  combinations: Combination[],
+  loaded: Record<string, boolean>,
+  sha256: string
+): Promise<FontReport> {
+  const nominal = await page.evaluate(
+    ({ n }) => {
+      const rows: Array<{ family: string; width: string }> = [];
+      for (let i = 0; i < n; i++) {
+        const cs = getComputedStyle(document.getElementById(`c${i}`)!);
+        rows.push({ family: cs.fontFamily, width: cs.width });
+      }
+      return rows;
+    },
+    { n: combinations.length }
+  );
+
+  const substitue = await page.evaluate(
+    ({ n }) => {
+      const root = document.documentElement;
+      const widths: string[] = [];
+      root.style.setProperty("--font-plex-sans", "serif");
+      root.style.setProperty("--font-plex-mono", "serif");
+      for (let i = 0; i < n; i++) {
+        widths.push(getComputedStyle(document.getElementById(`c${i}`)!).width);
+      }
+      root.style.removeProperty("--font-plex-sans");
+      root.style.removeProperty("--font-plex-mono");
+      return widths;
+    },
+    { n: combinations.length }
+  );
+
+  const lignes: FieldFontRow[] = combinations.map((c, i) => ({
+    classes: c.classes,
+    resolved: firstFamily(nominal[i].family),
+    dependent: nominal[i].width !== substitue[i],
+  }));
+
+  return {
+    declared: FONT_FAMILY,
+    monoPlaceholder: MONO_PLACEHOLDER,
+    file: path.basename(FONT_FILE),
+    sha256,
+    loaded,
+    platformFonts: await platformFontsOf(page, "#font-witness"),
+    fontDependent: lignes.filter((l) => l.dependent).length,
+    unresolved: unresolvedFields(lignes, FONT_FAMILY),
+  };
 }
 
 export async function measure(): Promise<Snapshot> {
@@ -483,6 +743,7 @@ export async function measure(): Promise<Snapshot> {
   const executablePath = found.path;
   const combinations = extractCombinations();
   const css = await compileCss();
+  const font = fontFaceCss();
 
   let browser: Browser | undefined;
   try {
@@ -495,7 +756,30 @@ export async function measure(): Promise<Snapshot> {
     };
 
     for (const theme of THEMES) {
-      await page.setContent(buildPage(css, combinations, theme), { waitUntil: "load" });
+      await page.setContent(buildPage(css, font.css, combinations, theme), {
+        waitUntil: "load",
+      });
+
+      /*
+        La police est chargée avant toute lecture.
+
+        `document.fonts.ready` seul ne suffit pas : une face n'est demandée
+        qu'à son premier usage, et une largeur relevée avant l'arrivée du
+        fichier serait celle du repli — précisément l'erreur que ce chantier
+        corrige.
+      */
+      const loaded = await page.evaluate(
+        async ({ family }) => {
+          await document.fonts.load(`400 13px "${family}"`);
+          await document.fonts.load(`600 13px "${family}"`);
+          await document.fonts.ready;
+          return {
+            "400": document.fonts.check(`400 13px "${family}"`),
+            "600": document.fonts.check(`600 13px "${family}"`),
+          };
+        },
+        { family: FONT_FAMILY }
+      );
 
       /*
         Le corps passé au navigateur reste sans fonction nommée intermédiaire :
@@ -544,7 +828,28 @@ export async function measure(): Promise<Snapshot> {
       snapshot.skin[`${theme}.focus`] = await readSkin("#witness");
       await page.mouse.move(0, 0);
       snapshot.skin[`${theme}.disabled`] = await readSkin("#witness-disabled");
+
+      /*
+        Le relevé de police une seule fois : il ne dépend pas de la palette, et
+        la substitution qu'il opère vaut mieux hors de la boucle de mesure.
+      */
+      if (theme === "light") {
+        snapshot.fonts = await collectFontReport(
+          page,
+          combinations,
+          loaded,
+          font.sha256
+        );
+      }
     }
+
+    snapshot.environment = {
+      engine: browser.version(),
+      platform: process.platform,
+      arch: process.arch,
+      recordedAt: new Date().toISOString(),
+      note: FONT_NOTE,
+    };
 
     return snapshot;
   } finally {
@@ -639,6 +944,37 @@ export function formatDiff(differences: Difference[]): string {
     `\n${byScope.size} entrée(s) modifiée(s), ${occurrences} occurrence(s) dans le dépôt.`
   );
   return lines.join("\n");
+}
+
+/**
+ * Les conditions de la référence contre celles de la mesure.
+ *
+ * Ajouté au message d'échec : un écart de moteur ou de plateforme explique
+ * souvent vingt-trois lignes de différences, et se lit alors en une.
+ */
+export function formatEnvironment(
+  before?: EnvironmentReport,
+  after?: EnvironmentReport
+): string {
+  if (!before) return "\n\nRéférence enregistrée sans métadonnées d'environnement.";
+  if (!after) return "";
+  const lignes: string[] = [];
+  if (before.engine !== after.engine) {
+    lignes.push(`  moteur      référence ${before.engine} · ici ${after.engine}`);
+  }
+  if (before.platform !== after.platform || before.arch !== after.arch) {
+    lignes.push(
+      `  plateforme  référence ${before.platform}/${before.arch} · ici ${after.platform}/${after.arch}`
+    );
+  }
+  if (lignes.length === 0) return "";
+  return [
+    "",
+    "",
+    "Conditions de prise différentes :",
+    ...lignes,
+    `  référence enregistrée le ${before.recordedAt}`,
+  ].join("\n");
 }
 
 export const BASELINE_PATH = path.join(import.meta.dirname, "baseline.json");
