@@ -37,7 +37,6 @@ import { EnvelopeCashPanel } from "@/components/tabs/envelope-cash-panel";
 import { LifeInsuranceTab } from "@/components/tabs/life-insurance-tab";
 import { PositionCategoryGroupHeader } from "@/components/holdings/position-category-group-header";
 import { PositionGroupHeader } from "@/components/holdings/position-group-header";
-import { EditAssetCategoryModal } from "@/components/holdings/edit-asset-category-modal";
 import {
   HoldingsToolbar,
   type HoldingsPageSize,
@@ -79,11 +78,7 @@ import {
   getChangeColor,
   cn,
 } from "@/app/lib/utils";
-import {
-  type HistoryPoint,
-  type Holding,
-  type MainTab,
-} from "@/app/lib/types/ui";
+import { type Holding, type MainTab } from "@/app/lib/types/ui";
 import {
   HOLDINGS_GROUP_BY_KEY,
   HOLDINGS_GROUP_COLLAPSED_KEY,
@@ -154,7 +149,6 @@ const SPARKLINE_STALE_MS = 5 * 60_000;
 export function HoldingsSection({
   tab,
   holdings,
-  history,
   loading,
   baseCurrency,
   envelopeFilters,
@@ -163,14 +157,11 @@ export function HoldingsSection({
   onTriggerLevelChange,
   onRowDoubleClick,
   selectedAssetId,
-  onCategoryChange,
   onAddTransaction,
   onImport,
 }: {
   tab: MainTab;
   holdings: Holding[];
-  /** Historique patrimonial global — alimente les sparklines des KPI. */
-  history?: HistoryPoint[];
   loading: boolean;
   baseCurrency: string;
   /** Multi-sélection d’enveloppes (filtrage déjà appliqué côté parent ou ici) */
@@ -188,8 +179,6 @@ export function HoldingsSection({
   /** CTA empty state */
   onAddTransaction?: () => void;
   onImport?: () => void;
-  /** Après changement de sous-catégorie (rechargement holdings) */
-  onCategoryChange?: (assetId: string, category: string) => void;
 }) {
   const { layoutWidth } = useDisplay();
   const router = useRouter();
@@ -231,11 +220,6 @@ export function HoldingsSection({
   const [collapsedByEnvelope, setCollapsedByEnvelope] = useState<
     Record<string, Record<string, boolean>>
   >({});
-  const [categoryOverrides, setCategoryOverrides] = useState<
-    Record<string, string>
-  >({});
-  const [editCategoryHolding, setEditCategoryHolding] =
-    useState<Holding | null>(null);
 
   const envelopeKey =
     envelopeFilters.length === 0
@@ -436,15 +420,21 @@ export function HoldingsSection({
   );
 
 
+  /*
+    La sous-catégorie vient du serveur, sans surcharge locale.
+
+    Une carte d'overrides existait pour refléter immédiatement une écriture
+    faite depuis la modale montée ici — modale que rien n'ouvrait. L'écriture
+    part désormais de la fiche (`portfolio-app`), qui recharge les positions
+    dans la foulée : le tableau reçoit la nouvelle catégorie de la même source
+    que toutes les autres, au lieu de la garder à part en mémoire.
+  */
   const holdingsWithCategory = useMemo(() => {
     return holdings.map((h) => ({
       ...h,
-      category:
-        categoryOverrides[h.assetId] ??
-        h.category ??
-        "UNCLASSIFIED",
+      category: h.category ?? "UNCLASSIFIED",
     }));
-  }, [holdings, categoryOverrides]);
+  }, [holdings]);
 
   const filteredHoldings = useMemo(() => {
     const visible = holdingsWithCategory.filter((h) => {
@@ -1252,12 +1242,42 @@ export function HoldingsSection({
   const [prevGroupPaginationKey, setPrevGroupPaginationKey] = useState(
     groupPaginationKey
   );
+  /**
+   * Le `pageSize` que l'utilisateur avait choisi avant le regroupement (défaut
+   * `DEFAULT_PAGE_SIZE`, ou 10/50/100 s'il l'avait changé). Capturé au moment
+   * précis où l'on bascule en mode groupé — pas à chaque changement de
+   * `groupPaginationKey` pendant qu'on y reste, sinon un filtre appliqué en
+   * cours de regroupement écraserait cette mémoire avec la taille forcée
+   * (« toute la liste sur une page ») plutôt qu'avec le vrai choix initial.
+   */
+  const preGroupPageSizeRef = useRef(pagination.pageSize);
   if (groupPaginationKey !== prevGroupPaginationKey) {
+    const wasGrouped = prevGroupPaginationKey.startsWith("true:");
     setPrevGroupPaginationKey(groupPaginationKey);
     if (groupMode) {
+      if (!wasGrouped) {
+        preGroupPageSizeRef.current = pagination.pageSize;
+      }
       setPagination({
         pageIndex: 0,
         pageSize: Math.max(filteredHoldings.length, 1),
+      });
+    } else if (wasGrouped) {
+      // Sortie du regroupement : on rend à l'utilisateur SON pageSize, pas un
+      // défaut arbitraire — sinon « Regrouper → Aucun » après un « Par page »
+      // à 50 le ramène silencieusement à 20, et le `<select>` de la toolbar
+      // (qui n'a que 10/20/50/100 comme options) se retrouve sans option
+      // correspondante dès que le nombre de lignes groupées diffère de ces
+      // valeurs — il s'affiche vide.
+      //
+      // `wasGrouped` est indispensable : cette clé change aussi quand un filtre
+      // fait varier le nombre de lignes **hors regroupement**. Sans lui, taper
+      // dans la recherche après avoir choisi « 50 par page » rétablissait la
+      // taille mémorisée à l'entrée du dernier regroupement — 20 par défaut.
+      // Le correctif d'un écrasement silencieux en aurait installé un autre.
+      setPagination({
+        pageIndex: 0,
+        pageSize: preGroupPageSizeRef.current,
       });
     }
   }
@@ -1391,13 +1411,22 @@ export function HoldingsSection({
     .getVisibleLeafColumns()
     .map((c) => c.id)
     .join("|");
-  /** +1 expand (plus de colonne ⋯ — actions dans l’historique) */
+  /** Identifiants des colonnes visibles, dans l’ordre du tableau. */
   const visibleLeafIds = useMemo(
     () => (visibleLeafKey ? visibleLeafKey.split("|") : []),
     [visibleLeafKey]
   );
-  /** +2 : colonne sélection + colonne expand (plus de colonne ⋯ — actions dans l’historique) */
-  const visibleColCount = visibleLeafIds.length + 2;
+  /**
+   * Colonnes réellement rendues par ligne — vérifié sur `renderHoldingRow`
+   * (holding-table-row.tsx), qui émet `row.getVisibleCells().length` cellules,
+   * et sur le `<thead>` ci-dessous, qui itère `table.getHeaderGroups()` :
+   * les deux correspondent exactement aux colonnes visibles, sans colonne de
+   * sélection ni d'expand (supprimées). Le `+2` budgétait deux colonnes
+   * fantômes ; les `colSpan` qui s'appuient sur cette valeur débordaient donc
+   * de deux cellules (invisible aujourd'hui car les navigateurs bornent un
+   * colspan excédentaire, mais faux).
+   */
+  const visibleColCount = visibleLeafIds.length;
 
   /**
    * Colonnes visibles avec leur largeur — les en-têtes de groupe rendent une
@@ -1517,7 +1546,6 @@ export function HoldingsSection({
       )}
       <PortfolioKpiCards
         holdings={filteredHoldings}
-        history={history}
         baseCurrency={baseCurrency}
         filtered={hasActiveFilters}
       />
@@ -2068,25 +2096,6 @@ export function HoldingsSection({
         })()}
       </div>
 
-      {editCategoryHolding && (
-        <EditAssetCategoryModal
-          open
-          assetId={editCategoryHolding.assetId}
-          assetName={editCategoryHolding.name}
-          ticker={editCategoryHolding.ticker}
-          accountType={editCategoryHolding.accountType}
-          currentCategory={editCategoryHolding.category}
-          onClose={() => setEditCategoryHolding(null)}
-          onSaved={(category) => {
-            setCategoryOverrides((prev) => ({
-              ...prev,
-              [editCategoryHolding.assetId]: category,
-            }));
-            onCategoryChange?.(editCategoryHolding.assetId, category);
-            setEditCategoryHolding(null);
-          }}
-        />
-      )}
     </section>
   );
 }

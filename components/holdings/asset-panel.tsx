@@ -20,6 +20,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { AssetLogo } from "@/components/ui/platform-logo";
+import { Button } from "@/components/ui/button";
 import { Sparkline } from "@/components/ui/sparkline";
 import {
   sectionsForAsset,
@@ -35,7 +36,10 @@ import {
 } from "@/app/lib/utils";
 import { ACCOUNT_TYPES, type AccountType } from "@/app/lib/constants";
 import { fetchJson } from "@/app/lib/api-client";
-import type { PriceHistoryResult } from "@/app/lib/market/price-history-types";
+import {
+  barIntervalLabel,
+  type PriceHistoryResult,
+} from "@/app/lib/market/price-history-types";
 import { WorkspaceSection } from "@/components/holdings/asset-workspace-sections";
 import type { AssetWorkspaceData } from "@/components/holdings/asset-workspace-sections";
 import { formatRelativeUpdate } from "@/components/holdings/holding-table-row";
@@ -259,6 +263,29 @@ export function AssetPanel({
     };
   }, [historyQ.data?.points, isMock]);
 
+  /**
+   * Ce que mesure réellement l'écart entre les deux derniers points.
+   *
+   * `mini` prend les deux dernières clôtures de la série, dont le pas dépend de
+   * la fenêtre choisie : `barIntervalForRange` sert des barres de 4 heures sur
+   * « 7 J » et des barres hebdomadaires sur « TOUT ». L'écart était pourtant
+   * libellé « séance » dans les trois cas : le même actif annonçait trois
+   * variations quotidiennes différentes selon la pastille cliquée.
+   *
+   * Le pas est lu dans la réponse (`barInterval`), pas recalculé : c'est le
+   * serveur qui décide de la résolution, et rejouer sa règle ici l'aurait fait
+   * mentir dès qu'elle change.
+   *
+   * « Séance » est réservé au pas journalier. Un pas plus fin n'est pas une
+   * séance — c'est une fraction de séance — et un pas hebdomadaire encore
+   * moins : dans les deux cas le libellé nomme la période réelle.
+   */
+  const changeLabel = useMemo(() => {
+    const iv = historyQ.data?.barInterval;
+    if (!iv) return null;
+    return iv === "1d" ? "séance" : `sur ${barIntervalLabel(iv)}`;
+  }, [historyQ.data?.barInterval]);
+
   /* ── Aucun actif sélectionné ─────────────────────────────────────── */
 
   if (!data && !loading) {
@@ -291,9 +318,27 @@ export function AssetPanel({
   const asset = data?.asset;
   const holding = data?.holding;
   const qty = holding ? num(holding.quantity) : null;
+  /*
+    Le PRU reste en euros, comme la colonne « PRU » du tableau qui le libelle
+    explicitement `"EUR"` : c'est le coût unitaire retenu par le journal, la
+    monnaie dans laquelle il est tenu. Les *valeurs*, elles, suivent la devise
+    d'affichage — c'est la convention du tableau, le panneau s'y range.
+  */
   const avgCost = holding ? num(holding.avgCostEur) : null;
-  const marketValue = holding ? num(holding.marketValueEur) : null;
-  const costBasis = qty != null && avgCost != null ? qty * avgCost : null;
+  /*
+    Devise d'affichage : convertie par le serveur pour la position
+    (`marketValueBase`), au taux publié pour tout ce que le panneau dérive
+    lui-même des écritures, qui restent en euros dans le payload.
+
+    Avant, tous ces montants étaient des euros formatés avec le symbole de
+    `baseCurrency` : base en USD, la ligne du tableau montrait le converti,
+    le panneau ouvert à côté montrait l'euro brut — et l'appelait dollar.
+  */
+  const fxRateFromEur = data ? num(data.fxRateFromEur) : 1;
+  const toBase = (eur: number) => eur * (fxRateFromEur > 0 ? fxRateFromEur : 1);
+  const marketValue = holding ? num(holding.marketValueBase) : null;
+  const costBasis =
+    qty != null && avgCost != null ? toBase(qty * avgCost) : null;
   const pnl =
     marketValue != null && costBasis != null ? marketValue - costBasis : null;
   const pnlPct =
@@ -410,13 +455,15 @@ export function AssetPanel({
                 >
                   {formatSignedCurrency(mini.change, quote.nativeCurrency)} (
                   {formatSignedPercent(mini.changePct)}){" "}
-                  <span className="text-[var(--foreground-faint)]">séance</span>
+                  <span className="text-[var(--foreground-faint)]">
+                    {changeLabel ?? "sur la période"}
+                  </span>
                 </span>
               ) : (
                 /* Sans deux clôtures la variation est inconnue — et un
                    « 0,00 % » se lirait « stable », ce qui serait faux. */
                 <span className="text-[var(--foreground-faint)]">
-                  Variation de séance indisponible
+                  Variation indisponible
                 </span>
               )}
             </p>
@@ -431,6 +478,34 @@ export function AssetPanel({
                   height={64}
                   className="h-full w-full"
                 />
+              ) : historyQ.isError ? (
+                /*
+                  Un échec de chargement n'est pas une absence de cours.
+                  « Pas d'historique sur cette période » se lisait « cet actif
+                  n'a pas coté », alors qu'une route en 500 ne dit rien de
+                  l'actif — elle dit que la question n'a pas abouti. Même
+                  doctrine que le tableau de bord (D25) : on nomme l'échec, et
+                  on rend la main pour réessayer.
+                */
+                <span
+                  className="flex h-full items-center gap-[var(--space-2)] text-[length:var(--text-2xs)]"
+                  data-testid="asset-panel-history-error"
+                >
+                  <span className="val-negative">
+                    Historique indisponible — le chargement a échoué
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-[length:var(--text-2xs)]"
+                    onClick={() => void historyQ.refetch()}
+                    disabled={historyQ.isFetching}
+                    data-testid="asset-panel-history-retry"
+                  >
+                    {historyQ.isFetching ? "…" : "Réessayer"}
+                  </Button>
+                </span>
               ) : (
                 <span className="flex h-full items-center text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
                   {historyQ.isPending
@@ -523,9 +598,7 @@ export function AssetPanel({
               />
               <Fact
                 label="PRU"
-                value={
-                  avgCost != null ? formatCurrency(avgCost, baseCurrency) : "—"
-                }
+                value={avgCost != null ? formatCurrency(avgCost, "EUR") : "—"}
               />
               <Fact
                 label="Valeur totale"
@@ -597,9 +670,23 @@ export function AssetPanel({
               aria-label="Sections de l'actif"
               data-testid="asset-panel-sections"
             >
-              {sections
-                .filter((s) => s.id !== "overview")
-                .map((s) => {
+              {/*
+                « Vue d'ensemble » était écartée d'ici, et `setSection` n'était
+                appelé que depuis cette liste : la section n'avait donc aucun
+                chemin d'accès, et avec elle son bouton « Modifier la
+                sous-catégorie » — le seul de l'interface à atteindre
+                `PATCH /api/assets/:id/category`. L'écriture existait, plus
+                personne ne pouvait la déclencher.
+
+                Elle recouvre en partie le sommaire ci-dessus, qui répète
+                plateforme, quantité, PRU et valeur. Elle porte en propre le
+                cours actuel, le capital investi, la classe, la sous-catégorie
+                et son bouton, la devise, l'ISIN, la blockchain et la source du
+                cours. C'est cette moitié-là qui justifie l'entrée ; réduire la
+                redite entre les deux est un travail de rangement, pas une
+                raison de garder l'écriture hors d'atteinte.
+              */}
+              {sections.map((s) => {
                   const Icon = SECTION_ICONS[s.id];
                   return (
                   <button

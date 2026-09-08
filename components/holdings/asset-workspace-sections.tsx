@@ -33,6 +33,7 @@ import {
   cn,
 } from "@/app/lib/utils";
 import { assetCategoryLabel } from "@/app/lib/assets/categories";
+import { acquisitionBreakdown } from "@/app/lib/transactions/acquisition-cost";
 import { formatRelativeUpdate } from "@/components/holdings/holding-table-row";
 import type { TxRow } from "@/app/lib/types/ui";
 
@@ -80,7 +81,13 @@ export type AssetWorkspaceData = {
     quantity: string;
     avgCostEur: string;
     marketValueEur: string;
+    /** Valeur de marché déjà convertie dans la devise d'affichage. */
+    marketValueBase: string;
   } | null;
+  /** Devise d'affichage servie par l'API pour cette fiche. */
+  baseCurrency: string;
+  /** Unités de `baseCurrency` pour un euro, au taux que le serveur a retenu. */
+  fxRateFromEur: string;
   custodyDistribution?: CustodySlice[];
   platforms?: Array<{
     id: string;
@@ -126,6 +133,30 @@ const INCOME_TYPES = new Set([
 function num(v: unknown): number {
   const n = Number(String(v ?? "0").replace(",", "."));
   return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Convertit un montant en euros vers la devise d'affichage.
+ *
+ * Tout ce que cette fiche reçoit — montants des écritures, valeurs des
+ * dépositaires, revenus, retenue à la source — est en euros : c'est la monnaie
+ * du journal. Les sections les formataient pourtant avec le symbole de
+ * `baseCurrency`, qui est réglable (EUR, USD, CHF, GBP, JPY). Base en dollars,
+ * la ligne du tableau montrait la valeur convertie et le panneau ouvert à côté
+ * le montant en euros — libellé `$`. Deux chiffres différents, tous deux
+ * annoncés dans la même devise.
+ *
+ * Le taux vient du serveur (`fxRateFromEur`), qui l'a utilisé pour convertir la
+ * position servie : la fiche et le tableau parlent ainsi du même cours, jamais
+ * d'un taux deviné ici.
+ *
+ * Le PRU fait exception et reste en euros — comme la colonne « PRU » du
+ * tableau, qui le libelle explicitement `"EUR"`. C'est le coût unitaire tenu
+ * par le journal, pas une valeur de marché.
+ */
+function toBase(data: AssetWorkspaceData, eur: number): number {
+  const rate = num(data.fxRateFromEur);
+  return eur * (rate > 0 ? rate : 1);
 }
 
 function Row({
@@ -284,9 +315,11 @@ function Overview({
 }) {
   const { asset, holding } = data;
   const qty = holding ? num(holding.quantity) : null;
+  // PRU en euros (cf. `toBase`), valeurs en devise d'affichage.
   const avgCost = holding ? num(holding.avgCostEur) : null;
-  const marketValue = holding ? num(holding.marketValueEur) : null;
-  const costBasis = qty != null && avgCost != null ? qty * avgCost : null;
+  const marketValue = holding ? num(holding.marketValueBase) : null;
+  const costBasis =
+    qty != null && avgCost != null ? toBase(data, qty * avgCost) : null;
   const pnl =
     marketValue != null && costBasis != null ? marketValue - costBasis : null;
   const pnlPct =
@@ -638,7 +671,7 @@ function Platforms({
           </div>
           <div className="shrink-0 text-right">
             <div className="num text-[length:var(--text-sm)]">
-              {formatCurrency(s.marketValueEur, baseCurrency)}
+              {formatCurrency(toBase(data, s.marketValueEur), baseCurrency)}
             </div>
             <div className="text-meta num">
               {formatQuantity(s.quantity)} · {s.valuePct.toFixed(1)} %
@@ -668,25 +701,45 @@ function CostBasis({
   data: AssetWorkspaceData;
   baseCurrency: string;
 }) {
-  const breakdown = useMemo(() => {
-    const buys = data.transactions.filter((t) => t.type === "ACHAT");
-    if (buys.length === 0) return null;
-    let gross = 0;
-    let fees = 0;
-    for (const t of buys) {
-      const q = num(t.quantity);
-      const p = num(t.unitPrice);
-      const fx = num(t.fxRateToEur) || 1;
-      gross += q * p * fx;
-      const fe = num(t.feesEur ?? t.fees);
-      fees += t.feesEur != null ? fe : fe * fx;
-    }
-    return { gross, fees, net: gross - fees, buyCount: buys.length };
-  }, [data.transactions]);
+  /*
+    La décomposition suit le grand livre, pas une règle d'affichage : la
+    formule vit dans `acquisition-cost.ts`, testée contre `applyBuy` lui-même.
+
+    Ce qu'elle corrige : les frais étaient **soustraits** du cumul des achats,
+    quand `applyBuy` les capitalise (`cost = qty × prix + frais`). Sur 100
+    titres à 100 € avec 20 € de frais, la ligne annonçait 9 980 € tandis que le
+    PRU affiché deux lignes plus bas — 100,20 €, lu du journal — valait
+    10 020 €. Deux fois les frais d'écart, sur le même panneau.
+
+    Les travaux capitalisés entrent désormais dans le cumul. Les ignorer ne
+    rendait pas la décomposition partielle mais fausse : sur un bien à
+    285 000 € plus 30 000 € de travaux, elle prétendait décomposer un prix de
+    revient dont il manquait un dixième.
+  */
+  const breakdown = useMemo(
+    () => acquisitionBreakdown(data.transactions),
+    [data.transactions]
+  );
 
   const qty = data.holding ? num(data.holding.quantity) : 0;
   const avgCost = data.holding ? num(data.holding.avgCostEur) : 0;
   const marketValue = data.holding ? num(data.holding.marketValueEur) : 0;
+  /**
+   * Coût de revient de la position **aujourd'hui**, à opposer au cumul engagé.
+   *
+   * Les deux chiffres sont justes et n'ont pas à coïncider. Le cumul est
+   * historique : il ne diminue pas quand on vend. Le coût de revient, lui,
+   * suit le journal, et trois écritures l'en écartent légitimement — une
+   * `VENTE` libère `CUMP × quantité cédée` du coût sans effacer les achats du
+   * journal ; des `TRAVAUX` ajoutent une dépense sans achat correspondant ;
+   * un `TRANSFERT_TITRE` sortant emporte sa quote-part hors du périmètre.
+   * `REWARD`, `AIRDROP` et `SPLIT` ne les séparent jamais : ils ne changent
+   * que la quantité, donc le prix unitaire, jamais le coût total.
+   *
+   * Afficher les deux, c'est rendre l'écart lisible ; n'en afficher qu'un en
+   * laissant croire à l'autre était le défaut d'origine sous un autre nom.
+   */
+  const positionCost = qty > 0 && avgCost > 0 ? qty * avgCost : null;
 
   return (
     <>
@@ -696,26 +749,52 @@ function CostBasis({
           data-testid="asset-detail-cost-breakdown"
         >
           <Row
-            label={`Dépensé brut (${breakdown.buyCount} achat${breakdown.buyCount > 1 ? "s" : ""})`}
-            value={formatCurrency(breakdown.gross, baseCurrency)}
+            label={`Achats cumulés, hors frais (${breakdown.purchaseCount})`}
+            value={formatCurrency(
+              toBase(data, breakdown.purchasesEur),
+              baseCurrency
+            )}
+          />
+          {breakdown.capitalisedCount > 0 && (
+            <Row
+              label={`Travaux capitalisés (${breakdown.capitalisedCount})`}
+              value={formatCurrency(
+                toBase(data, breakdown.capitalisedEur),
+                baseCurrency
+              )}
+            />
+          )}
+          {/*
+            Le signe est un « + » et le ton neutre : des frais d'acquisition ne
+            sont pas une perte, ce sont du capital immobilisé. Le « − » rouge
+            d'avant annonçait le contraire de ce que le journal en fait.
+          */}
+          <Row
+            label="Frais d'acquisition capitalisés"
+            value={`+${formatCurrency(toBase(data, breakdown.feesEur), baseCurrency)}`}
           />
           <Row
-            label="Frais d'exécution cumulés"
-            tone="val-negative"
-            value={`−${formatCurrency(breakdown.fees, baseCurrency)}`}
+            label="Total investi, frais inclus"
+            value={formatCurrency(
+              toBase(data, breakdown.totalEur),
+              baseCurrency
+            )}
           />
           <Row
-            label="Montant net acquis"
-            value={formatCurrency(breakdown.net, baseCurrency)}
-          />
-          <Row
-            label="Prix de revient unitaire"
+            label="Prix de revient unitaire (frais inclus)"
             value={formatUnitPrice(avgCost, "EUR")}
           />
+          {positionCost != null && (
+            <Row
+              label="Coût de revient de la position"
+              value={formatCurrency(toBase(data, positionCost), baseCurrency)}
+            />
+          )}
         </dl>
       ) : (
         <p className="text-meta">
-          Aucun achat au journal : le prix de revient ne peut pas être décomposé.
+          Aucune écriture d’acquisition au journal : le prix de revient ne peut
+          pas être décomposé.
         </p>
       )}
 
@@ -787,17 +866,17 @@ function Income({
       <dl className="panel divide-y divide-[var(--border-subtle)] p-[var(--pad-card)]">
         <Row
           label="Revenus bruts encaissés"
-          value={formatCurrency(income.gross, baseCurrency)}
+          value={formatCurrency(toBase(data, income.gross), baseCurrency)}
         />
         <Row
           label="Retenue à la source"
           tone={income.tax > 0 ? "val-negative" : undefined}
-          value={`−${formatCurrency(income.tax, baseCurrency)}`}
+          value={`−${formatCurrency(toBase(data, income.tax), baseCurrency)}`}
         />
         <Row
           label="Net perçu"
           tone="val-positive"
-          value={formatCurrency(income.net, baseCurrency)}
+          value={formatCurrency(toBase(data, income.net), baseCurrency)}
         />
       </dl>
 
@@ -806,7 +885,7 @@ function Income({
           <Row
             key={type}
             label={`${TRANSACTION_TYPES[type as keyof typeof TRANSACTION_TYPES] ?? type} (${v.count})`}
-            value={formatCurrency(v.gross, baseCurrency)}
+            value={formatCurrency(toBase(data, v.gross), baseCurrency)}
           />
         ))}
       </dl>
@@ -855,7 +934,7 @@ function Tax({
         />
         <Row
           label="Retenue déjà prélevée"
-          value={formatCurrency(withheld, baseCurrency)}
+          value={formatCurrency(toBase(data, withheld), baseCurrency)}
         />
       </dl>
 
@@ -956,7 +1035,7 @@ function DefiExposure({
           </div>
           <div className="num shrink-0 text-[length:var(--text-sm)]">
             {p.valueEur != null
-              ? formatCurrency(num(p.valueEur), baseCurrency)
+              ? formatCurrency(toBase(data, num(p.valueEur)), baseCurrency)
               : "—"}
           </div>
         </li>
@@ -1043,7 +1122,7 @@ function LinkedNfts({
           </div>
           <div className="num shrink-0 text-[length:var(--text-sm)]">
             {n.valuationEur != null
-              ? formatCurrency(num(n.valuationEur), baseCurrency)
+              ? formatCurrency(toBase(data, num(n.valuationEur)), baseCurrency)
               : "—"}
           </div>
         </li>

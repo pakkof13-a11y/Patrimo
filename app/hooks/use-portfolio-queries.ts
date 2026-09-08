@@ -226,9 +226,20 @@ export function useTransactionsQuery() {
   return useTransactionsMetaQuery();
 }
 
-export function useAssetDetailQuery(detailAssetId: string | null) {
+/**
+ * Fiche d'un actif, dans la devise d'affichage du compte.
+ *
+ * `baseCurrency` entre dans la clé de cache autant que dans l'URL : deux
+ * devises donnent deux réponses différentes pour le même actif, et les
+ * confondre servirait des dollars étiquetés euros au premier changement de
+ * préférence.
+ */
+export function useAssetDetailQuery(
+  detailAssetId: string | null,
+  baseCurrency = "EUR"
+) {
   return useQuery({
-    queryKey: ["asset-detail", detailAssetId],
+    queryKey: ["asset-detail", detailAssetId, baseCurrency],
     enabled: !!detailAssetId,
     queryFn: () =>
       fetchJson<{
@@ -254,7 +265,11 @@ export function useAssetDetailQuery(detailAssetId: string | null) {
           quantity: string;
           avgCostEur: string;
           marketValueEur: string;
+          marketValueBase: string;
         } | null;
+        baseCurrency: string;
+        /** Unités de `baseCurrency` pour un euro, au taux servi. */
+        fxRateFromEur: string;
         transactions: Array<{
           id: string;
           type: string;
@@ -276,7 +291,9 @@ export function useAssetDetailQuery(detailAssetId: string | null) {
           paymentDate?: string | null;
           exDate?: string | null;
         }>;
-      }>(`/api/assets/${detailAssetId}`),
+      }>(
+        `/api/assets/${detailAssetId}?base=${encodeURIComponent(baseCurrency)}`
+      ),
     staleTime: 15_000,
   });
 }

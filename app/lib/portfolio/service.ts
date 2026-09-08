@@ -1628,7 +1628,30 @@ export async function getPortfolioValuationToday(
   return engine.calculateAt(parisDayKey(new Date()));
 }
 
-export async function getAssetDetail(userId: string, assetId: string) {
+/**
+ * Fiche d'un actif : identité, position, dépositaires, écritures.
+ *
+ * `baseCurrency` sert la même fonction qu'ici que sur `getPortfolioBundle` — la
+ * position rendue est convertie dans la devise d'affichage de l'utilisateur, et
+ * le taux retenu est publié avec elle.
+ *
+ * Sans ce paramètre, la fiche était calculée en euros pendant que le tableau
+ * l'était dans la devise choisie : base en USD, la ligne du tableau montrait
+ * `marketValueBase` converti en dollars, le panneau ouvert à côté montrait le
+ * montant en euros — et le libellait `$`. Deux chiffres différents pour la même
+ * ligne, tous deux annoncés dans la même devise.
+ *
+ * `fxRateFromEur` est le taux effectivement utilisé, pas une valeur indicative :
+ * le panneau dérive d'autres montants des écritures (dépenses cumulées, frais,
+ * revenus), qui restent libellés en euros dans le payload. Publier le taux lui
+ * évite d'en supposer un — et garantit que ses agrégats et la position servie
+ * ici parlent la même devise au même cours.
+ */
+export async function getAssetDetail(
+  userId: string,
+  assetId: string,
+  baseCurrency = "EUR"
+) {
   const asset = await prisma.asset.findFirst({
     where: { id: assetId, userId },
     include: {
@@ -1690,7 +1713,14 @@ export async function getAssetDetail(userId: string, assetId: string) {
   }
 
   const siblingIds = siblingAssets.map((s) => s.id);
-  const holdings = await getHoldings(userId, "EUR");
+  /*
+    Les taux sont chargés une fois et prêtés à `getHoldings` : la fiche et le
+    taux qu'elle publie plus bas viennent alors du même relevé, pas de deux
+    appels qui pourraient tomber de part et d'autre d'un rafraîchissement.
+  */
+  const base = (baseCurrency || "EUR").toUpperCase();
+  const fx = await getEurRates();
+  const holdings = await getHoldings(userId, base, fx);
   // Ligne agrégée (après merge) ou fallback assetId
   const holding =
     holdings.find((h) => siblingIds.includes(h.assetId)) ??
@@ -1824,6 +1854,15 @@ export async function getAssetDetail(userId: string, assetId: string) {
         : null,
     },
     holding,
+    /**
+     * Devise d'affichage servie, et son taux depuis l'euro.
+     *
+     * Tout ce que cette fiche rend d'autre — `marketValueEur` des dépositaires,
+     * montants des écritures — reste en euros : c'est la monnaie du journal.
+     * Le client convertit à l'affichage avec ce taux ; il n'en devine aucun.
+     */
+    baseCurrency: base,
+    fxRateFromEur: convertFromEurSync(1, base, fx),
     custodyDistribution,
     platforms: platformsUnique,
     transactions: allTxs.map((t) => ({

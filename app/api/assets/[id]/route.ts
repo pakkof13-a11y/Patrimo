@@ -6,15 +6,28 @@ import { getAssetDetail } from "@/app/lib/portfolio/service";
 import { updateAssetMetadataSchema } from "@/app/lib/schemas";
 import { presentFields, validationErrorResponse } from "@/app/lib/api/validation";
 
+/**
+ * GET /api/assets/:id?base=EUR
+ *
+ * `base` suit exactement la convention de `GET /api/holdings` : paramètre
+ * explicite, sinon la préférence enregistrée du compte, sinon l'euro. Les deux
+ * écrans montrent la même ligne côte à côte — le tableau et la fiche qui
+ * s'ouvre par-dessus — et rien ne justifierait qu'ils la convertissent
+ * différemment.
+ */
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const { id } = await ctx.params;
-  const detail = await getAssetDetail(userId, id);
+  const { searchParams } = new URL(req.url);
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const base = searchParams.get("base") || user?.baseCurrency || "EUR";
+
+  const detail = await getAssetDetail(userId, id, base);
   if (!detail) return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });
 
   return NextResponse.json(detail);

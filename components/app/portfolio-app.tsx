@@ -79,6 +79,7 @@ import { TransactionModal } from "@/components/modals/transaction-modal";
 import { PlatformModal } from "@/components/modals/platform-modal";
 import { AssetPanel } from "@/components/holdings/asset-panel";
 import { ImportCsvModal } from "@/components/modals/import-csv-modal";
+import { EditAssetCategoryModal } from "@/components/holdings/edit-asset-category-modal";
 import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
 import { FirstOperationsModal } from "@/components/modals/first-operations-modal";
 import {
@@ -250,6 +251,14 @@ function PortfolioAppClient({
 
   const [baseCurrency, setBaseCurrency] = useState("EUR");
   const [showTx, setShowTx] = useState(false);
+  /** Actif dont on modifie la sous-catégorie — `null` = modale fermée. */
+  const [editCategoryAsset, setEditCategoryAsset] = useState<{
+    id: string;
+    name: string;
+    ticker: string | null;
+    accountType?: string;
+    category?: string | null;
+  } | null>(null);
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
   const [showPlatform, setShowPlatform] = useState(false);
   const [showQuickPlatform, setShowQuickPlatform] = useState(false);
@@ -472,7 +481,7 @@ function PortfolioAppClient({
     rendre un compte actif, même sans la moindre position calculée.
   */
   const patrimonyQ = usePatrimonyStateQuery();
-  const detailQ = useAssetDetailQuery(detailAssetId);
+  const detailQ = useAssetDetailQuery(detailAssetId, baseCurrency);
   /** Compte total léger (maturité dashboard) — pas le journal paginé. */
   const txMetaQ = useTransactionsMetaQuery();
 
@@ -1308,7 +1317,6 @@ function PortfolioAppClient({
                     onTriggerLevelChange={onTriggerLevelChange}
                     onRowDoubleClick={setDetailAssetId}
                     selectedAssetId={detailAssetId}
-                    onCategoryChange={onCategoryChange}
                     onAddTransaction={() => openNewTransaction("ACHAT")}
                     onImport={() => setShowImport(true)}
                   />
@@ -1343,6 +1351,17 @@ function PortfolioAppClient({
                       });
                     }}
                     onClose={() => setDetailAssetId(null)}
+                    onEditCategory={() => {
+                      const a = detailQ.data?.asset;
+                      if (!a) return;
+                      setEditCategoryAsset({
+                        id: a.id,
+                        name: a.name,
+                        ticker: a.ticker,
+                        accountType: (a as { accountType?: string }).accountType,
+                        category: (a as { category?: string | null }).category,
+                      });
+                    }}
                     onEditTx={(t) => {
                       setDetailAssetId(null);
                       openEditTx(t);
@@ -1391,7 +1410,7 @@ function PortfolioAppClient({
                       d.asset.priceQuote?.priceNative || "0"
                     ),
                     marketValueEur: asEurAmount(d.holding?.marketValueEur || "0"),
-                    marketValueBase: asBaseAmount(d.holding?.marketValueEur || "0"),
+                    marketValueBase: asBaseAmount(d.holding?.marketValueBase || "0"),
                     costBasisBase: asBaseAmount("0"),
                     unrealizedPnlEur: asEurAmount("0"),
                     unrealizedPnlBase: asBaseAmount("0"),
@@ -1646,6 +1665,41 @@ function PortfolioAppClient({
         onSubmit={(v) => savePlatform.mutate(v)}
         pending={savePlatform.isPending}
       />
+
+      {/*
+        Éditeur de sous-catégorie.
+
+        Il vivait dans `HoldingsSection`, sur un état que rien ne remplissait :
+        `setEditCategoryHolding` n'y était appelé qu'avec `null`. La modale
+        n'avait donc aucun chemin d'ouverture, et `PATCH
+        /api/assets/:id/category` était devenu inatteignable depuis l'interface.
+
+        Il est monté ici parce que c'est ici que vit la fiche qui l'ouvre : le
+        panneau connaît l'actif affiché, l'écran connaît le rechargement à
+        déclencher après écriture.
+      */}
+      {editCategoryAsset && (
+        <EditAssetCategoryModal
+          open
+          assetId={editCategoryAsset.id}
+          assetName={editCategoryAsset.name}
+          ticker={editCategoryAsset.ticker}
+          accountType={editCategoryAsset.accountType}
+          currentCategory={editCategoryAsset.category}
+          onClose={() => setEditCategoryAsset(null)}
+          onSaved={(category) => {
+            const assetId = editCategoryAsset.id;
+            setEditCategoryAsset(null);
+            /*
+              La fiche affiche la sous-catégorie : sans cette invalidation elle
+              garderait l'ancienne sous les yeux de qui vient de la changer.
+              Le tableau, lui, est rechargé par `onCategoryChange`.
+            */
+            void qc.invalidateQueries({ queryKey: ["asset-detail", assetId] });
+            void onCategoryChange(assetId, category);
+          }}
+        />
+      )}
 
       {/*
         Import d’abord (layer 0), puis QuickPlatform au-dessus (layer 1).
