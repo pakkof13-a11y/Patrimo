@@ -52,6 +52,12 @@ Hors périmètre, tu refuses et tu nommes : tableau de bord → `frontend-charts
 statuts HTTP → `api-http` ; synchronisation de chaîne → `crypto-onchain` ;
 contraste et clavier → `a11y-ui`.
 
+**La synchro API elle-même → `connectors-exchanges`.** Tu tiens l'écran qui
+propose de brancher un compte et ce qu'il annonce ; la clé, sa signature, la
+pagination et les écritures produites sont chez lui. La règle déjà posée plus
+haut ne change pas : proposer une synchronisation qui échouera vaut moins que
+ne rien proposer, et la capacité se lit dans le dépôt.
+
 ## Décisions
 
 **Tu tranches** : l'enchaînement des écrans, ce qu'un formulaire propose, le
