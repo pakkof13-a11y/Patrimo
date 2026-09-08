@@ -142,10 +142,27 @@ export function envelopeOfEvent(event: {
  *
  * Une date tombant exactement sur un événement prend cet événement : le
  * changement vaut à partir de l'instant qu'il porte, pas après.
+ *
+ * Deux événements à la même milliseconde `occurredAt` (le lot de création des
+ * `AssetEnvelopeEvent` en a produit, ce n'est pas théorique) se départagent
+ * sur `createdAt` — le plus grand gagne — et jamais sur la position dans le
+ * tableau : un appelant qui recevrait ce tableau dans un ordre différent (une
+ * requête sans clé de tri secondaire, par exemple) doit obtenir la même
+ * réponse. C'est le même départage que `resolveEnvelopeAt`, qui lit
+ * directement en base.
+ *
+ * `createdAt` reste **optionnel** dans ce type, et c'est délibéré : le chemin
+ * de production le porte de bout en bout — `loadHistoricalInputs` le charge,
+ * `HistoricalInputs` le déclare, `envelopeBucketOf` le transmet — mais un
+ * appelant qui ne dispose que de `occurredAt` obtient toujours une réponse,
+ * celle d'avant : le dernier événement du tableau reçu. Le rendre obligatoire
+ * n'aurait rien rendu plus juste ; cela aurait seulement fermé la porte à un
+ * appelant qui n'a pas cette colonne sous la main.
  */
 export function resolveEnvelopeFromEvents(
   events: ReadonlyArray<{
     occurredAt: Date;
+    createdAt?: Date;
     accountType: string;
     securitiesAccountId: string | null;
     envelopeType: string | null;
@@ -156,12 +173,25 @@ export function resolveEnvelopeFromEvents(
 
   for (const e of events) {
     if (e.occurredAt.getTime() > at.getTime()) continue;
+    if (retenu == null) {
+      retenu = e;
+      continue;
+    }
+    const occurredAtCmp = e.occurredAt.getTime() - retenu.occurredAt.getTime();
+    if (occurredAtCmp > 0) {
+      retenu = e;
+      continue;
+    }
+    if (occurredAtCmp < 0) continue;
+
     /*
-      Le plus récent l'emporte. La comparaison porte sur `occurredAt` et non
-      sur l'ordre d'insertion : deux événements saisis dans le désordre
-      restent lus dans l'ordre de ce qu'ils décrivent.
+      `occurredAt` égal : `createdAt` — l'ordre d'écriture réel — tranche
+      quand les deux événements le portent. Sinon, on retombe sur l'ordre du
+      tableau reçu, seul repère qui reste.
     */
-    if (retenu == null || e.occurredAt.getTime() >= retenu.occurredAt.getTime()) {
+    if (e.createdAt != null && retenu.createdAt != null) {
+      if (e.createdAt.getTime() >= retenu.createdAt.getTime()) retenu = e;
+    } else {
       retenu = e;
     }
   }
@@ -175,18 +205,29 @@ export function resolveEnvelopeFromEvents(
  *
  * Lecture pure : aucune écriture, aucun appel réseau. Le futur chantier des
  * courbes s'y branchera ; rien ne l'y branche encore.
+ *
+ * `userId` est obligatoire et filtre la requête : `AssetEnvelopeEvent` n'a pas
+ * de clé primaire composite `(id, userId)` qui permette d'utiliser `owned()`
+ * (`app/lib/db/tenant-scope.ts`) — cette fonction lit par `assetId`, pas par
+ * `id`. Le filtre `{ userId }` explicite est donc la forme retenue, celle déjà
+ * en usage pour ce genre de lecture partout ailleurs dans le module (voir
+ * `loadHistoricalInputs`, qui charge `assetEnvelopeEvent.findMany({ where:
+ * { userId } })`). Sans lui, un `assetId` d'un autre utilisateur — deviné ou
+ * fuité — rendrait son enveloppe.
  */
 export async function resolveEnvelopeAt(
   reader: Pick<PrismaClient, "assetEnvelopeEvent">,
   assetId: string,
+  userId: string,
   at: Date
 ): Promise<ResolvedEnvelope> {
   const events = await reader.assetEnvelopeEvent.findMany({
-    where: { assetId, occurredAt: { lte: at } },
+    where: { assetId, userId, occurredAt: { lte: at } },
     orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
     take: 1,
     select: {
       occurredAt: true,
+      createdAt: true,
       accountType: true,
       securitiesAccountId: true,
       envelopeType: true,

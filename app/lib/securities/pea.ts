@@ -99,19 +99,58 @@ export type PeaMaturityStatus = {
 const MS_PER_DAY = 86_400_000;
 
 /**
+ * Ajoute des années civiles à une date UTC, en plafonnant au dernier jour du
+ * mois cible plutôt que de déborder sur le mois suivant.
+ *
+ * `Date.setFullYear` ne le fait pas nativement : un 29 février additionné vers
+ * une année non bissextile déborde sur le 1ᵉʳ mars. Le calcul passe donc par
+ * `Date.UTC`, jamais par les accesseurs locaux, pour ne pas faire glisser une
+ * date déjà en UTC — celles que rend Prisma.
+ */
+function addYearsClampedUtc(date: Date, years: number): Date {
+  const targetYear = date.getUTCFullYear() + years;
+  const month = date.getUTCMonth();
+  // Jour 0 du mois suivant = dernier jour du mois cible.
+  const lastDayOfTargetMonth = new Date(Date.UTC(targetYear, month + 1, 0)).getUTCDate();
+  const day = Math.min(date.getUTCDate(), lastDayOfTargetMonth);
+
+  return new Date(
+    Date.UTC(
+      targetYear,
+      month,
+      day,
+      date.getUTCHours(),
+      date.getUTCMinutes(),
+      date.getUTCSeconds(),
+      date.getUTCMilliseconds()
+    )
+  );
+}
+
+/**
  * Antériorité du plan.
  *
  * `maturityDate` est calculée en ajoutant 5 ans à la date d'ouverture par
  * arithmétique calendaire, et non en ajoutant 5 × 365 jours : un plan ouvert le
  * 1ᵉʳ mars 2019 mûrit le 1ᵉʳ mars 2024, quels que soient les 29 février
  * traversés.
+ *
+ * `Date.setFullYear` ne plafonne pas : un 29 février qui tombe sur une année
+ * non bissextile déborde sur le mois suivant — mesuré,
+ * `new Date("2020-02-29").setFullYear(2025)` rend le **1ᵉʳ mars 2025**, pas le
+ * 28 février. Un PEA ouvert un 29 février serait donc annoncé non mûr un jour
+ * de trop, sous le commentaire ci-dessus qui promet justement le contraire. On
+ * calcule donc la date cible via `Date.UTC` avec le jour d'ouverture, puis on
+ * revient au dernier jour du mois cible s'il a débordé — ce qui couvre aussi
+ * une ouverture un 31 dans un mois cible plus court. Les dates viennent de
+ * Prisma en UTC : tout ce calcul reste en UTC pour ne pas les faire glisser
+ * d'un jour.
  */
 export function peaMaturityStatus(
   openDate: Date,
   at: Date = new Date()
 ): PeaMaturityStatus {
-  const maturityDate = new Date(openDate);
-  maturityDate.setFullYear(maturityDate.getFullYear() + PEA_MATURITY_YEARS);
+  const maturityDate = addYearsClampedUtc(openDate, PEA_MATURITY_YEARS);
 
   const elapsedMs = at.getTime() - openDate.getTime();
   const remainingMs = maturityDate.getTime() - at.getTime();

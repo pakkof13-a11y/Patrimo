@@ -45,6 +45,7 @@ function position(
     name: "Actif",
     ticker: null,
     category: "EQUITY",
+    costBasisEur: "100",
     marketValueEur: "100",
     unrealizedPnlEur: "0",
     unrealizedPnlPct: null,
@@ -54,10 +55,16 @@ function position(
 
 describe("computeTotals", () => {
   it("ajoute les liquidités à la valeur des titres", () => {
-    const t = computeTotals([
-      account({ id: "a1", marketValueEur: "1000", cashEur: "200" }),
-      account({ id: "a2", marketValueEur: "500", cashEur: "50" }),
-    ]);
+    const t = computeTotals(
+      [
+        account({ id: "a1", cashEur: "200" }),
+        account({ id: "a2", cashEur: "50" }),
+      ],
+      [
+        position({ assetId: "p1", marketValueEur: "1000" }),
+        position({ assetId: "p2", marketValueEur: "500" }),
+      ]
+    );
     expect(t.positionsValueEur).toBe(1500);
     expect(t.cashEur).toBe(250);
     expect(t.totalValueEur).toBe(1750);
@@ -65,44 +72,116 @@ describe("computeTotals", () => {
   });
 
   it("rapporte le P&L au capital engagé", () => {
-    const t = computeTotals([
-      account({ id: "a1", costBasisEur: "1000", unrealizedPnlEur: "250" }),
-    ]);
+    const t = computeTotals(
+      [account({ id: "a1" })],
+      [
+        position({
+          assetId: "p1",
+          costBasisEur: "1000",
+          marketValueEur: "1250",
+          unrealizedPnlEur: "250",
+        }),
+      ]
+    );
     expect(t.unrealizedPnlPct).toBeCloseTo(25, 6);
   });
 
   it("ne divise pas par zéro sur un compte vide", () => {
-    const t = computeTotals([account({ id: "a1" })]);
+    const t = computeTotals([account({ id: "a1" })], []);
     expect(t.unrealizedPnlPct).toBeNull();
     expect(t.totalValueEur).toBe(0);
   });
 
-  it("signale un cash non rattaché plutôt que de l'ignorer", () => {
-    expect(
-      computeTotals([
-        account({ id: "a1", cashEur: "300", cashAttributed: false }),
-      ]).hasUnattributedCash
-    ).toBe(true);
-    // Un compte sans cash ne déclenche pas l'alerte, même non rattaché.
-    expect(
-      computeTotals([
-        account({ id: "a1", cashEur: "0", cashAttributed: false }),
-      ]).hasUnattributedCash
-    ).toBe(false);
+  /*
+    Le périmètre : toutes les lignes titres, rattachées ou non.
+
+    Les totaux ne sommaient que les lignes rattachées à un compte déclaré,
+    quand le camembert et les indicateurs partaient de toutes. D'où des parts
+    au-delà de 100 %, et surtout du capital invisible pendant toute la saisie.
+  */
+  it("compte les lignes non rattachées, et le dit", () => {
+    const t = computeTotals(
+      [account({ id: "a1", envelopeType: "PEA" })],
+      [
+        position({ assetId: "p1", securitiesAccountId: "a1", marketValueEur: "10000" }),
+        position({
+          assetId: "p2",
+          securitiesAccountId: null,
+          accountType: "CTO",
+          marketValueEur: "10000",
+        }),
+      ]
+    );
+    expect(t.positionsValueEur).toBe(20_000);
+    expect(t.positionCount).toBe(2);
+    expect(t.positionsWithoutAccountCount).toBe(1);
+  });
+
+  /*
+    La mesure de référence : deux comptes-titres et une poche CTO de 5 000 €.
+
+    `attributeCash` ne sait pas dire lequel des deux la détient, donc aucun ne
+    la porte. Elle entrait alors nulle part — ni au total, ni dans un bandeau,
+    dont le garde ne pouvait pas s'allumer : il exigeait un montant non nul
+    sur un compte où le service venait justement de mettre zéro.
+  */
+  it("ajoute une fois la poche d'enveloppe que personne ne porte", () => {
+    const t = computeTotals(
+      [
+        account({ id: "a1", envelopeType: "CTO", cashEur: "0", cashAttributed: false }),
+        account({ id: "a2", envelopeType: "CTO", cashEur: "0", cashAttributed: false }),
+      ],
+      [position({ assetId: "p1", marketValueEur: "1000" })],
+      { CTO: "5000" }
+    );
+    expect(t.cashEur).toBe(5000);
+    expect(t.totalValueEur).toBe(6000);
+    expect(t.unattributedCashEur).toBe(5000);
+    expect(t.hasUnattributedCash).toBe(true);
+  });
+
+  it("ne compte pas la poche une fois par compte", () => {
+    // Distribuer une grandeur d'enveloppe à N comptes la compterait N fois :
+    // c'est la raison pour laquelle elle n'est pas imputée d'office.
+    const t = computeTotals(
+      [
+        account({ id: "a1", envelopeType: "CTO" }),
+        account({ id: "a2", envelopeType: "CTO" }),
+        account({ id: "a3", envelopeType: "CTO" }),
+      ],
+      [],
+      { CTO: "5000" }
+    );
+    expect(t.cashEur).toBe(5000);
+  });
+
+  it("n'allume rien quand toute la poche est imputée", () => {
+    const t = computeTotals(
+      [account({ id: "a1", cashEur: "300", cashAttributed: true })],
+      [],
+      {}
+    );
+    expect(t.cashEur).toBe(300);
+    expect(t.hasUnattributedCash).toBe(false);
   });
 });
 
 describe("splitByEnvelope", () => {
   it("regroupe par type et calcule les parts", () => {
-    const split = splitByEnvelope([
-      account({ id: "a1", envelopeType: "PEA", marketValueEur: "700", cashEur: "50" }),
-      account({
-        id: "a2",
-        envelopeType: "CTO",
-        envelopeLabel: "Compte-Titres",
-        marketValueEur: "250",
-      }),
-    ]);
+    const accounts = [
+      account({ id: "a1", envelopeType: "PEA", cashEur: "50" }),
+      account({ id: "a2", envelopeType: "CTO", envelopeLabel: "Compte-Titres" }),
+    ];
+    const positions = [
+      position({ assetId: "p1", securitiesAccountId: "a1", marketValueEur: "700" }),
+      position({ assetId: "p2", securitiesAccountId: "a2", marketValueEur: "250" }),
+    ];
+    const split = splitByEnvelope(
+      accounts,
+      positions,
+      {},
+      computeTotals(accounts, positions)
+    );
     expect(split.map((s) => s.envelopeType)).toEqual(["PEA", "CTO"]);
     expect(split[0]!.valueEur).toBe(750);
     expect(split[0]!.sharePct).toBeCloseTo(75, 6);
@@ -110,20 +189,31 @@ describe("splitByEnvelope", () => {
   });
 
   it("agrège plusieurs comptes de la même enveloppe", () => {
-    const split = splitByEnvelope([
-      account({ id: "a1", envelopeType: "PEA", marketValueEur: "100" }),
-      account({ id: "a2", envelopeType: "PEA", marketValueEur: "300" }),
-    ]);
+    const accounts = [
+      account({ id: "a1", envelopeType: "PEA" }),
+      account({ id: "a2", envelopeType: "PEA" }),
+    ];
+    const positions = [
+      position({ assetId: "p1", securitiesAccountId: "a1", marketValueEur: "100" }),
+      position({ assetId: "p2", securitiesAccountId: "a2", marketValueEur: "300" }),
+    ];
+    const split = splitByEnvelope(
+      accounts,
+      positions,
+      {},
+      computeTotals(accounts, positions)
+    );
     expect(split).toHaveLength(1);
     expect(split[0]!.accountCount).toBe(2);
     expect(split[0]!.valueEur).toBe(400);
   });
 
   it("place toujours le PEA en tête", () => {
-    const split = splitByEnvelope([
+    const accounts = [
       account({ id: "a1", envelopeType: "CTO", envelopeLabel: "Compte-Titres" }),
       account({ id: "a2", envelopeType: "PEA" }),
-    ]);
+    ];
+    const split = splitByEnvelope(accounts, [], {}, computeTotals(accounts, []));
     expect(split[0]!.envelopeType).toBe("PEA");
   });
 });
@@ -244,18 +334,16 @@ describe("computeAllocation", () => {
   const label = (c: string) => c;
 
   it("agrège par catégorie, inclut les liquidités et trie par valeur", () => {
-    const totals = computeTotals([
-      account({ id: "a1", marketValueEur: "800", cashEur: "150" }),
-    ]);
-    const slices = computeAllocation(
-      [
-        position({ assetId: "p1", category: "EQUITY", marketValueEur: "500" }),
-        position({ assetId: "p2", category: "ETF", marketValueEur: "200" }),
-        position({ assetId: "p3", category: "EQUITY", marketValueEur: "100" }),
-      ],
-      totals,
-      label
+    const positions = [
+      position({ assetId: "p1", category: "EQUITY", marketValueEur: "500" }),
+      position({ assetId: "p2", category: "ETF", marketValueEur: "200" }),
+      position({ assetId: "p3", category: "EQUITY", marketValueEur: "100" }),
+    ];
+    const totals = computeTotals(
+      [account({ id: "a1", cashEur: "150" })],
+      positions
     );
+    const slices = computeAllocation(positions, totals, label);
     // EQUITY 600, ETF 200, CASH 150 — deux lignes de même catégorie fusionnent.
     expect(slices.map((s) => s.key)).toEqual(["EQUITY", "ETF", "CASH"]);
     expect(slices[0]!.valueEur).toBe(600);
@@ -263,67 +351,59 @@ describe("computeAllocation", () => {
   });
 
   it("omet les liquidités nulles", () => {
-    const totals = computeTotals([account({ id: "a1", marketValueEur: "100" })]);
-    const slices = computeAllocation(
-      [position({ assetId: "p1", marketValueEur: "100" })],
-      totals,
-      label
-    );
+    const positions = [position({ assetId: "p1", marketValueEur: "100" })];
+    const totals = computeTotals([account({ id: "a1" })], positions);
+    const slices = computeAllocation(positions, totals, label);
     expect(slices.some((s) => s.key === "CASH")).toBe(false);
   });
 
   it("ne renvoie rien plutôt qu'un camembert vide", () => {
-    const totals = computeTotals([]);
+    const totals = computeTotals([], []);
     expect(computeAllocation([], totals, label)).toEqual([]);
   });
 });
 
 describe("computeKeyIndicators", () => {
   it("mesure l'exposition actions sur la valeur totale, liquidités comprises", () => {
-    const totals = computeTotals([
-      account({ id: "a1", marketValueEur: "800", cashEur: "200" }),
-    ]);
-    const k = computeKeyIndicators(
-      [
-        position({ assetId: "p1", category: "EQUITY", marketValueEur: "600" }),
-        position({ assetId: "p2", category: "BOND", marketValueEur: "200" }),
-      ],
-      totals
+    const positions = [
+      position({ assetId: "p1", category: "EQUITY", marketValueEur: "600" }),
+      position({ assetId: "p2", category: "BOND", marketValueEur: "200" }),
+    ];
+    const totals = computeTotals(
+      [account({ id: "a1", cashEur: "200" })],
+      positions
     );
+    const k = computeKeyIndicators(positions, totals);
     // 600 / 1 000 : la poche de cash dilue bien l'exposition.
     expect(k.equityExposurePct).toBeCloseTo(60, 6);
   });
 
   it("compte les lignes et le poids moyen", () => {
-    const totals = computeTotals([account({ id: "a1", marketValueEur: "400" })]);
-    const k = computeKeyIndicators(
-      [
-        position({ assetId: "p1", marketValueEur: "100" }),
-        position({ assetId: "p2", marketValueEur: "100" }),
-        position({ assetId: "p3", marketValueEur: "100" }),
-        position({ assetId: "p4", marketValueEur: "100" }),
-      ],
-      totals
-    );
+    const positions = [
+      position({ assetId: "p1", marketValueEur: "100" }),
+      position({ assetId: "p2", marketValueEur: "100" }),
+      position({ assetId: "p3", marketValueEur: "100" }),
+      position({ assetId: "p4", marketValueEur: "100" }),
+    ];
+    const totals = computeTotals([account({ id: "a1" })], positions);
+    const k = computeKeyIndicators(positions, totals);
     expect(k.positionCount).toBe(4);
     expect(k.averageWeightPct).toBeCloseTo(25, 6);
   });
 
   it("expose la plus grosse ligne, que la moyenne masque", () => {
-    const totals = computeTotals([account({ id: "a1", marketValueEur: "1000" })]);
-    const k = computeKeyIndicators(
-      [
-        position({ assetId: "p1", name: "Gros", marketValueEur: "700" }),
-        position({ assetId: "p2", name: "Petit", marketValueEur: "300" }),
-      ],
-      totals
-    );
+    const positions = [
+      position({ assetId: "p1", name: "Gros", marketValueEur: "700" }),
+      position({ assetId: "p2", name: "Petit", marketValueEur: "300" }),
+    ];
+    const totals = computeTotals([account({ id: "a1" })], positions);
+    const k = computeKeyIndicators(positions, totals);
     expect(k.largestPositionName).toBe("Gros");
     expect(k.largestPositionPct).toBeCloseTo(70, 6);
   });
 
   it("reste défini sur un portefeuille vide", () => {
-    const k = computeKeyIndicators([], computeTotals([]));
+    const k = computeKeyIndicators([], computeTotals([], []));
     expect(k.positionCount).toBe(0);
     expect(k.averageWeightPct).toBeNull();
     expect(k.equityExposurePct).toBeNull();

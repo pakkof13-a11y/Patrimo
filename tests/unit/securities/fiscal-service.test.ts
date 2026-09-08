@@ -72,8 +72,24 @@ beforeEach(() => {
 describe("getSecuritiesFiscalBundle — sans compte", () => {
   it("renvoie une liste vide sans interroger la valorisation", async () => {
     accountFindMany.mockResolvedValue([]);
-    await expect(getSecuritiesFiscalBundle(USER, NOW)).resolves.toEqual([]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(bundle.accounts).toEqual([]);
     expect(getAssetValuesMock).not.toHaveBeenCalled();
+  });
+
+  /*
+    Aucun compte déclaré ne veut pas dire aucune trésorerie. La poche existe
+    dès la première saisie d'espèces, souvent avant que le compte-titres qui
+    la porte n'ait été créé — et sortir tôt la faisait disparaître de l'écran.
+  */
+  it("rend quand même la poche d'enveloppe quand aucun compte n'est déclaré", async () => {
+    accountFindMany.mockResolvedValue([]);
+    envelopeCashFindMany.mockResolvedValue([
+      { envelope: "CTO", balance: { toString: () => "5000" } },
+    ]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(bundle.accounts).toEqual([]);
+    expect(bundle.unattributedCashByEnvelope.CTO?.toNumber()).toBe(5_000);
   });
 });
 
@@ -88,7 +104,7 @@ describe("getSecuritiesFiscalBundle — versements", () => {
         ],
       }),
     ]);
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     // Un retrait ne restaure pas de place sous le plafond.
     expect(s!.contributionsEur.toNumber()).toBe(15_000);
     expect(s!.withdrawalsEur.toNumber()).toBe(3_000);
@@ -110,7 +126,7 @@ describe("getSecuritiesFiscalBundle — plafond croisé", () => {
       }),
     ]);
 
-    const summaries = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: summaries } = await getSecuritiesFiscalBundle(USER, NOW);
     const pme = summaries.find((s) => s.accountId === "acc-pme")!;
 
     // Le PEA-PME est vide : isolément il afficherait 225 000 € de place.
@@ -122,7 +138,7 @@ describe("getSecuritiesFiscalBundle — plafond croisé", () => {
     accountFindMany.mockResolvedValue([
       account({ id: "acc-cto", envelopeType: "CTO" }),
     ]);
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.room).toBeNull();
     expect(s!.maturity).toBeNull();
     expect(s!.taxStatusLabel).toBeNull();
@@ -135,7 +151,7 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
     envelopeCashFindMany.mockResolvedValue([
       { envelope: "PEA", balance: { toString: () => "4000" } },
     ]);
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.cashEur.toNumber()).toBe(4_000);
     expect(s!.cashAttributed).toBe(true);
   });
@@ -148,12 +164,21 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
     envelopeCashFindMany.mockResolvedValue([
       { envelope: "CTO", balance: { toString: () => "9000" } },
     ]);
-    const summaries = await getSecuritiesFiscalBundle(USER, NOW);
-    for (const s of summaries) {
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    for (const s of bundle.accounts) {
       expect(s.cashEur.toNumber()).toBe(0);
       // Mieux vaut un zéro signalé qu'une répartition inventée.
       expect(s.cashAttributed).toBe(false);
     }
+    /*
+      Et la poche ressort sur l'enveloppe, une seule fois. Elle ne sortait
+      nulle part : ni sur un compte — le service y met zéro — ni ailleurs, si
+      bien que 9 000 € quittaient l'écran sans un mot. La distribuer aux deux
+      comptes l'aurait comptée deux fois ; l'imputer à l'un des deux aurait
+      faussé son gain fiscal, et le choix aurait basculé d'une carte à l'autre
+      au premier changement de date d'ouverture.
+    */
+    expect(bundle.unattributedCashByEnvelope.CTO?.toNumber()).toBe(9_000);
   });
 
   it("le PEA-PME n'a pas de poche dédiée : rien ne lui est imputé", async () => {
@@ -163,7 +188,7 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
     envelopeCashFindMany.mockResolvedValue([
       { envelope: "PEA", balance: { toString: () => "4000" } },
     ]);
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.cashEur.toNumber()).toBe(0);
     expect(s!.cashAttributed).toBe(false);
   });
@@ -187,7 +212,7 @@ describe("getSecuritiesFiscalBundle — valeur liquidative et gain", () => {
       { envelope: "PEA", balance: { toString: () => "5000" } },
     ]);
 
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.positionsValueEur.toNumber()).toBe(55_000);
     expect(s!.liquidationValueEur.toNumber()).toBe(60_000);
     expect(s!.gainEur.toNumber()).toBe(10_000);
@@ -203,7 +228,7 @@ describe("getSecuritiesFiscalBundle — valeur liquidative et gain", () => {
     getAssetValuesMock.mockResolvedValue(
       new Map([["a1", { marketValueEur: d(38_000) }]])
     );
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.gainEur.toNumber()).toBe(-12_000);
   });
 
@@ -214,7 +239,7 @@ describe("getSecuritiesFiscalBundle — valeur liquidative et gain", () => {
     getAssetValuesMock.mockResolvedValue(
       new Map([["a1", { marketValueEur: d(1_000) }]])
     );
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.positionsValueEur.toNumber()).toBe(1_000);
   });
 });
@@ -222,7 +247,7 @@ describe("getSecuritiesFiscalBundle — valeur liquidative et gain", () => {
 describe("getSecuritiesFiscalBundle — maturité", () => {
   it("un PEA ouvert en 2019 est mûr en 2026 et le libellé mentionne les PS", async () => {
     accountFindMany.mockResolvedValue([account()]);
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.maturity!.isMatured).toBe(true);
     expect(s!.taxStatusLabel).toMatch(/18,6/);
   });
@@ -231,7 +256,7 @@ describe("getSecuritiesFiscalBundle — maturité", () => {
     accountFindMany.mockResolvedValue([
       account({ openDate: new Date("2024-01-01T00:00:00Z") }),
     ]);
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.maturity!.isMatured).toBe(false);
     expect(s!.taxStatusLabel).toMatch(/12,8/);
   });

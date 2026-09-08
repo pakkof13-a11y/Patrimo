@@ -167,17 +167,27 @@ export async function deleteContribution(
 
 // ─── Situation par compte ─────────────────────────────────────────────────────
 
+/** Enveloppes titres portant une poche d'espèces. L'AV n'est pas de ce ressort. */
+const CASH_ENVELOPES = ["PEA", "CTO"] as const;
+
 /**
  * Répartit les poches d'espèces entre les comptes.
  *
- * `EnvelopeCash` est tenue par enveloppe (`CTO`, `PEA`, `AV`), pas par compte.
- * L'imputation n'est donc exacte que lorsqu'un seul compte porte l'enveloppe :
- * c'est toujours le cas du PEA, qui est unique par personne, et seulement
- * parfois celui du CTO. Le PEA-PME n'a aucune poche dédiée dans le modèle
- * actuel — lui attribuer celle du PEA fausserait les deux.
+ * `EnvelopeCash` est tenue par enveloppe (`CTO`, `PEA`, `AV`), pas par compte —
+ * elle est même unique par `(userId, envelope)` au schéma. L'imputation n'est
+ * donc exacte que lorsqu'un seul compte porte l'enveloppe : c'est toujours le
+ * cas du PEA, unique par personne, et seulement parfois celui du CTO. Le
+ * PEA-PME n'a aucune poche dédiée dans le modèle actuel — lui attribuer celle
+ * du PEA fausserait les deux.
  *
- * Quand l'imputation est impossible, on renvoie zéro **et** on le signale,
- * plutôt que de répartir arbitrairement.
+ * Quand l'imputation est impossible, ce compte-ci porte zéro et le dit. La
+ * poche n'est pas perdue pour autant : elle ressort sur l'enveloppe, via
+ * `unattributedEnvelopeCash`, et le total de la page l'ajoute une fois.
+ *
+ * Elle n'est **pas** attribuée d'office au premier compte venu : `cashEur`
+ * nourrit `liquidationValueEur`, donc le gain fiscal du compte. Prêter à un
+ * compte-titres les espèces d'un autre fausserait ce gain sur les deux, pour
+ * rendre juste un total qu'on sait rendre juste autrement.
  */
 function attributeCash(
   envelopeType: SecuritiesEnvelopeType,
@@ -195,17 +205,69 @@ function attributeCash(
 }
 
 /**
+ * Espèces d'enveloppe qu'aucun compte ne peut porter.
+ *
+ * Deux cas : plusieurs comptes se partagent l'enveloppe — on ne sait pas
+ * lequel détient la poche — ou aucun compte titres n'est déclaré alors que la
+ * poche existe, l'état ordinaire d'un début de saisie.
+ *
+ * Ce montant sortait nulle part. Le drapeau censé l'annoncer ne pouvait même
+ * pas s'allumer : le garde de `computeTotals` exigeait
+ * `!cashAttributed && cashEur !== 0`, alors qu'`attributeCash` met justement le
+ * montant à zéro dans les deux branches où il baisse le drapeau. Mesuré : deux
+ * comptes-titres et une poche CTO de 5 000 € — les 5 000 € n'apparaissaient ni
+ * dans le total, ni dans un bandeau.
+ *
+ * Il est compté **une fois par enveloppe**, jamais par compte : le distribuer
+ * aux comptes en doublerait le montant sur la page.
+ */
+function unattributedEnvelopeCash(
+  pockets: Map<string, Decimal>,
+  countByEnvelope: Map<string, number>
+): Record<string, Decimal> {
+  const out: Record<string, Decimal> = {};
+  for (const envelope of CASH_ENVELOPES) {
+    const pocket = pockets.get(envelope);
+    if (!pocket || pocket.lte(0)) continue;
+    // Un seul compte de cette enveloppe : la poche lui est imputée, elle
+    // compte déjà dans son `cashEur`.
+    if ((countByEnvelope.get(envelope) ?? 0) === 1) continue;
+    out[envelope] = pocket;
+  }
+  return out;
+}
+
+export type SecuritiesFiscalBundle = {
+  accounts: AccountFiscalSummary[];
+  /**
+   * Espèces d'enveloppe qu'aucun compte ne porte, **par enveloppe**.
+   *
+   * Par enveloppe et non en un seul montant : c'est la maille à laquelle la
+   * poche existe, celle où l'écran doit la ranger — la répartition par
+   * enveloppe en a besoin — et celle que le bandeau doit nommer. « Une partie
+   * des liquidités » n'apprend rien ; « Liquidités CTO : 5 000 € » se vérifie.
+   *
+   * Vide quand tout est imputé. Voir `unattributedEnvelopeCash`.
+   */
+  unattributedCashByEnvelope: Record<string, Decimal>;
+};
+
+/**
  * Situation fiscale de tous les comptes titres de l'utilisateur.
  *
  * Le plafond est calculé après avoir rassemblé les versements des deux plans :
  * la place disponible sur l'un dépend de ce qui a été versé sur l'autre, via le
  * plafond commun (cf. `peaContributionRoom`). Un calcul compte par compte,
  * isolément, donnerait un chiffre trop élevé.
+ *
+ * Aucun compte déclaré ne fait plus sortir tôt : une poche d'enveloppe peut
+ * exister sans compte en face — c'est même l'état ordinaire d'un début de
+ * saisie — et la taire cacherait du capital.
  */
 export async function getSecuritiesFiscalBundle(
   userId: string,
   at: Date = new Date()
-): Promise<AccountFiscalSummary[]> {
+): Promise<SecuritiesFiscalBundle> {
   const accounts = await prisma.securitiesAccount.findMany({
     where: { userId },
     select: {
@@ -215,9 +277,15 @@ export async function getSecuritiesFiscalBundle(
       assets: { select: { id: true } },
       contributions: { select: { type: true, amountEur: true } },
     },
+    /*
+      `envelopeType` croissant trie les valeurs stockées `CTO | PEA | PEA_PME`,
+      donc les comptes-titres d'abord. L'ordre de lecture utile est celui du
+      poids fiscal — le PEA en tête — et l'écran le rétablit de son côté
+      (`securities-overview.tsx`). Le commentaire disait l'inverse du code ;
+      c'est le commentaire qui avait tort.
+    */
     orderBy: [{ envelopeType: "asc" }, { openDate: "asc" }],
   });
-  if (accounts.length === 0) return [];
 
   const allAssetIds = accounts.flatMap((a) => a.assets.map((x) => x.id));
   const [values, envelopeRows] = await Promise.all([
@@ -260,7 +328,7 @@ export async function getSecuritiesFiscalBundle(
       totals.PEA_PME = totals.PEA_PME.plus(deposits);
   }
 
-  return accounts.map((a) => {
+  const summaries = accounts.map((a) => {
     const envelopeType = a.envelopeType as SecuritiesEnvelopeType;
     const isPea = envelopeType !== "CTO";
 
@@ -303,4 +371,12 @@ export async function getSecuritiesFiscalBundle(
       gainEur: liquidationValue.minus(totalsForAccount.deposits),
     };
   });
+
+  return {
+    accounts: summaries,
+    unattributedCashByEnvelope: unattributedEnvelopeCash(
+      pockets,
+      countByEnvelope
+    ),
+  };
 }

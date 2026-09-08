@@ -10,6 +10,8 @@
  * `null`, et c'est à l'écran de le dire.
  */
 
+import { securitiesEnvelopeLabel } from "./constants";
+
 export type SecuritiesRoom = {
   ownCapEur: string;
   contributionsEur: string;
@@ -52,6 +54,7 @@ export type SecuritiesAccount = {
 
 export type SecuritiesPosition = {
   assetId: string;
+  /** `null` tant que la ligne n'est rattachée à aucun compte déclaré. */
   securitiesAccountId: string | null;
   accountType: string;
   name: string;
@@ -59,10 +62,23 @@ export type SecuritiesPosition = {
   category: string;
   logoUrl?: string | null;
   quantity?: string;
+  /** Prix de revient rejoué depuis le journal — même source pour toute ligne. */
+  costBasisEur: string;
   marketValueEur: string;
   unrealizedPnlEur: string;
   unrealizedPnlPct: string | null;
 };
+
+/**
+ * Espèces d'enveloppe qu'aucun compte ne porte, par enveloppe (`PEA`, `CTO`).
+ *
+ * Servi tel quel par `/api/securities`. Vide quand tout est imputé.
+ */
+export type UnattributedCash = Record<string, string>;
+
+export function sumUnattributedCash(cash: UnattributedCash): number {
+  return Object.values(cash).reduce((total, v) => total + num(v), 0);
+}
 
 export function num(v: string | number | null | undefined): number {
   const n = Number(String(v ?? "0").replace(",", "."));
@@ -85,30 +101,68 @@ export type OverviewTotals = {
   withdrawalsEur: number;
   positionCount: number;
   accountCount: number;
+  /** Lignes détenues qu'aucun compte déclaré ne porte encore. */
+  positionsWithoutAccountCount: number;
+  /** Espèces d'enveloppe comptées au total sans appartenir à un compte. */
+  unattributedCashEur: number;
   /** Une part du cash n'a pas pu être rattachée à un compte précis. */
   hasUnattributedCash: boolean;
 };
 
-export function computeTotals(accounts: SecuritiesAccount[]): OverviewTotals {
+/**
+ * Totaux de la page — sur **toutes** les lignes titres.
+ *
+ * Deux périmètres cohabitaient : ces totaux ne sommaient que les positions
+ * rattachées à un compte déclaré, quand le camembert et les indicateurs
+ * partaient de toutes les lignes. Un PEA de 10 000 € plus 10 000 € de lignes
+ * CTO non rattachées donnait une exposition actions de 200 % et deux totaux
+ * contradictoires côte à côte. Pire : le capital non rattaché — l'état normal
+ * en cours de saisie — n'apparaissait nulle part.
+ *
+ * Un seul périmètre désormais, le plus large : toutes les lignes titres,
+ * rattachées ou non. Les lignes orphelines sont comptées à part
+ * (`positionsWithoutAccountCount`) pour que l'écran puisse inviter à les
+ * rattacher, jamais retirées du total.
+ *
+ * Les versements et retraits restent, eux, des faits de compte : une ligne
+ * sans compte n'a pas de versement déclaré, et rien ne le lui invente.
+ *
+ * `unattributedCash` porte les poches d'enveloppe qu'aucun compte ne porte
+ * (`fiscal-service.unattributedEnvelopeCash`). Chacune entre **une fois** dans
+ * le total : elles sont tenues par enveloppe, pas par compte, et les répartir
+ * entre les comptes d'une même enveloppe les compterait autant de fois qu'il
+ * y a de comptes.
+ */
+export function computeTotals(
+  accounts: SecuritiesAccount[],
+  positions: SecuritiesPosition[] = [],
+  unattributedCash: UnattributedCash = {}
+): OverviewTotals {
+  const unattributedCashEur = sumUnattributedCash(unattributedCash);
   let positionsValueEur = 0;
-  let cashEur = 0;
+  let cashEur = unattributedCashEur;
   let costBasisEur = 0;
   let unrealizedPnlEur = 0;
   let contributionsEur = 0;
   let withdrawalsEur = 0;
-  let positionCount = 0;
-  let hasUnattributedCash = false;
+  let positionsWithoutAccountCount = 0;
+
+  for (const p of positions) {
+    positionsValueEur += num(p.marketValueEur);
+    costBasisEur += num(p.costBasisEur);
+    unrealizedPnlEur += num(p.unrealizedPnlEur);
+    if (!p.securitiesAccountId) positionsWithoutAccountCount += 1;
+  }
 
   for (const a of accounts) {
-    positionsValueEur += num(a.marketValueEur);
+    // Seules les espèces imputées à ce compte : la poche non imputable est
+    // déjà entrée une fois, plus haut.
     cashEur += num(a.cashEur);
-    costBasisEur += num(a.costBasisEur);
-    unrealizedPnlEur += num(a.unrealizedPnlEur);
     contributionsEur += num(a.contributionsEur);
     withdrawalsEur += num(a.withdrawalsEur);
-    positionCount += a.positionCount;
-    if (!a.cashAttributed && num(a.cashEur) !== 0) hasUnattributedCash = true;
   }
+
+  const positionCount = positions.length;
 
   return {
     totalValueEur: positionsValueEur + cashEur,
@@ -122,7 +176,9 @@ export function computeTotals(accounts: SecuritiesAccount[]): OverviewTotals {
     withdrawalsEur,
     positionCount,
     accountCount: accounts.length,
-    hasUnattributedCash,
+    positionsWithoutAccountCount,
+    unattributedCashEur,
+    hasUnattributedCash: unattributedCashEur > 0,
   };
 }
 
@@ -141,29 +197,73 @@ export type EnvelopeSplit = {
  * Regroupe les comptes par type d'enveloppe. La page en montre deux (PEA,
  * CTO), mais rien ici ne suppose qu'il n'y en a que deux : un PEA-PME ou un
  * second CTO apparaîtrait sans changer une ligne de calcul.
+ *
+ * Le dénominateur est celui de la page, reçu et non recalculé : toutes les
+ * parts affichées à l'écran se rapportent au même ensemble, et ces rangées le
+ * couvrent entièrement — lignes rattachées, lignes qui ne le sont pas encore,
+ * espèces imputées et poches d'enveloppe. Elles somment donc à 100 %.
+ *
+ * Elles partaient auparavant des seuls comptes, comme les totaux. Garder cette
+ * base pendant que le total s'élargit aurait déplacé le défaut du camembert
+ * vers ces rangées, au lieu de le supprimer.
  */
 export function splitByEnvelope(
-  accounts: SecuritiesAccount[]
+  accounts: SecuritiesAccount[],
+  positions: SecuritiesPosition[],
+  unattributedCash: UnattributedCash,
+  totals: OverviewTotals
 ): EnvelopeSplit[] {
-  const total = computeTotals(accounts).totalValueEur;
+  const total = totals.totalValueEur;
   const byType = new Map<string, EnvelopeSplit>();
 
-  for (const a of accounts) {
-    const key = a.envelopeType;
-    const value = num(a.marketValueEur) + num(a.cashEur);
+  const envelopeOfAccount = new Map(accounts.map((a) => [a.id, a.envelopeType]));
+  const labelOfEnvelope = new Map(
+    accounts.map((a) => [a.envelopeType, a.envelopeLabel || a.envelopeType])
+  );
+
+  const add = (key: string, value: number, accountCount = 0) => {
     const prev = byType.get(key);
     if (prev) {
       prev.valueEur += value;
-      prev.accountCount += 1;
-    } else {
-      byType.set(key, {
-        envelopeType: key,
-        label: a.envelopeLabel || key,
-        valueEur: value,
-        sharePct: null,
-        accountCount: 1,
-      });
+      prev.accountCount += accountCount;
+      return;
     }
+    byType.set(key, {
+      envelopeType: key,
+      label: labelOfEnvelope.get(key) ?? securitiesEnvelopeLabel(key),
+      valueEur: value,
+      sharePct: null,
+      accountCount,
+    });
+  };
+
+  /*
+    Les lignes d'abord, comptes ou non.
+
+    Une ligne rattachée prend l'enveloppe de son compte — c'est le PEA-PME qui
+    l'exige, lui dont les actifs portent `accountType: "PEA"` faute d'une
+    valeur propre. Une ligne orpheline prend celle qu'elle porte : sans compte
+    déclaré, elle appartient quand même à une enveloppe fiscale, et la ranger
+    ailleurs qu'avec ses semblables serait inventer un troisième périmètre
+    après en avoir supprimé un.
+  */
+  for (const p of positions) {
+    const key =
+      (p.securitiesAccountId
+        ? envelopeOfAccount.get(p.securitiesAccountId)
+        : null) ?? p.accountType;
+    add(key, num(p.marketValueEur));
+  }
+
+  // Les comptes ensuite : leurs espèces imputées, et le décompte des cartes.
+  for (const a of accounts) {
+    add(a.envelopeType, num(a.cashEur), 1);
+  }
+
+  // Enfin les poches qu'aucun compte ne porte, rangées dans leur enveloppe.
+  for (const [envelope, amount] of Object.entries(unattributedCash)) {
+    const value = num(amount);
+    if (value !== 0) add(envelope, value);
   }
 
   const out = [...byType.values()];

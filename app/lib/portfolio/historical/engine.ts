@@ -144,6 +144,15 @@ export type HistoricalInputs = {
     string,
     Array<{
       occurredAt: Date;
+      /**
+       * Ordre d'écriture réel — départage deux événements du même instant.
+       *
+       * Sans lui, le classement retombait sur l'ordre du tableau, c'est-à-dire
+       * sur celui que Postgres avait rendu ; `load.ts` ne triait que par
+       * `occurredAt`, sans clé secondaire, et le même actif pouvait donc être
+       * rangé en PEA à une requête et en CTO à la suivante.
+       */
+      createdAt: Date;
       accountType: string;
       securitiesAccountId: string | null;
       envelopeType: string | null;
@@ -307,6 +316,7 @@ function envelopeBucketOf(
   events:
     | Array<{
         occurredAt: Date;
+        createdAt: Date;
         accountType: string;
         securitiesAccountId: string | null;
         envelopeType: string | null;

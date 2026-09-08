@@ -53,6 +53,42 @@ describe("peaMaturityStatus", () => {
     expect(s.isMatured).toBe(false);
     expect(s.daysToMaturity).toBe(1);
   });
+
+  it("un plan ouvert un 29 février mûrit le 28 février, pas le 1er mars", () => {
+    /*
+      Mesuré : `new Date("2020-02-29").setFullYear(2025)` rend le 1er mars
+      2025. 2025 n'est pas bissextile, et `Date.setFullYear` ne plafonne pas —
+      c'est le bug que ce test verrouille.
+    */
+    const s = peaMaturityStatus(new Date("2020-02-29T00:00:00Z"));
+    expect(s.maturityDate.toISOString().slice(0, 10)).toBe("2025-02-28");
+  });
+
+  it("le 28 février 2025, un plan ouvert le 29 février 2020 est déjà mûr", () => {
+    // Conséquence directe du cas précédent : au lieu d'annoncer « 1 jour »
+    // restant, le plan doit être mûr ce jour-là.
+    const s = peaMaturityStatus(
+      new Date("2020-02-29T00:00:00Z"),
+      new Date("2025-02-28T00:00:00Z")
+    );
+    expect(s.isMatured).toBe(true);
+    expect(s.daysToMaturity).toBe(0);
+  });
+
+  it("un plan ouvert le 31 janvier mûrit le 31 janvier, cas ordinaire", () => {
+    // Aucun mois cible traversé par +5 ans n'est plus court que janvier :
+    // le plafonnement ne doit rien changer ici.
+    const s = peaMaturityStatus(new Date("2019-01-31T00:00:00Z"));
+    expect(s.maturityDate.toISOString().slice(0, 10)).toBe("2024-01-31");
+  });
+
+  it("le calcul reste en UTC — pas de glissement d'un jour depuis Prisma", () => {
+    const s = peaMaturityStatus(new Date("2020-02-29T00:00:00.000Z"));
+    expect(s.maturityDate.getUTCFullYear()).toBe(2025);
+    expect(s.maturityDate.getUTCMonth()).toBe(1); // février, 0-indexé
+    expect(s.maturityDate.getUTCDate()).toBe(28);
+    expect(s.maturityDate.getUTCHours()).toBe(0);
+  });
 });
 
 describe("peaContributionRoom — plan isolé", () => {

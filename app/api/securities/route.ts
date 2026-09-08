@@ -33,7 +33,7 @@ export async function GET() {
       listSecuritiesPositions(userId),
     ]);
 
-    const fiscalById = new Map(fiscal.map((f) => [f.accountId, f]));
+    const fiscalById = new Map(fiscal.accounts.map((f) => [f.accountId, f]));
 
     return NextResponse.json(
       {
@@ -114,6 +114,22 @@ export async function GET() {
           unrealizedPnlEur: p.unrealizedPnlEur.toFixed(2),
           unrealizedPnlPct: p.unrealizedPnlPct?.toFixed(2) ?? null,
         })),
+
+        /**
+         * Espèces d'enveloppe qu'aucun compte ne porte, par enveloppe.
+         *
+         * Servi à part des comptes parce que la poche l'est aussi :
+         * `EnvelopeCash` est unique par `(userId, envelope)` et ne connaît pas
+         * les comptes. L'écran l'ajoute une fois à son total, la range dans la
+         * bonne enveloppe et la nomme ; la distribuer aux comptes la
+         * compterait deux fois.
+         */
+        unattributedCashByEnvelope: Object.fromEntries(
+          Object.entries(fiscal.unattributedCashByEnvelope).map(([k, v]) => [
+            k,
+            v.toFixed(2),
+          ])
+        ),
 
         summary: (() => {
           const totals = summarizePositions(positions);

@@ -135,6 +135,7 @@ describe("ce que la résolution rend sur une ligne seedée", () => {
   const evenementSeed = (creeLe: Date, accountType: string) => [
     {
       occurredAt: creeLe,
+      createdAt: creeLe,
       accountType,
       securitiesAccountId: null,
       envelopeType: null,

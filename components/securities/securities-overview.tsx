@@ -28,6 +28,7 @@ import {
   type AccountView,
   type SecuritiesAccount,
   type SecuritiesPosition,
+  type UnattributedCash,
 } from "@/app/lib/securities/overview";
 import {
   formatCurrency,
@@ -39,6 +40,8 @@ import {
 type SecuritiesResponse = {
   accounts: SecuritiesAccount[];
   positions: SecuritiesPosition[];
+  /** Poches d'enveloppe qu'aucun compte ne porte — comptées une fois au total. */
+  unattributedCashByEnvelope?: UnattributedCash;
 };
 
 /** Prélèvements sociaux sur les gains — taux en vigueur, source unique. */
@@ -196,8 +199,24 @@ export function SecuritiesOverview({
   const accounts = useMemo(() => q.data?.accounts ?? [], [q.data]);
   const positions = useMemo(() => q.data?.positions ?? [], [q.data]);
 
-  const totals = useMemo(() => computeTotals(accounts), [accounts]);
-  const envelopes = useMemo(() => splitByEnvelope(accounts), [accounts]);
+  /*
+    Un seul périmètre pour toute la page : toutes les lignes titres,
+    rattachées ou non, plus la poche d'enveloppe non imputable. Le total, le
+    camembert et les indicateurs partagent ainsi le même dénominateur — ils
+    n'en avaient pas deux par choix, mais par accident.
+  */
+  const unattributedCash = useMemo(
+    () => q.data?.unattributedCashByEnvelope ?? {},
+    [q.data]
+  );
+  const totals = useMemo(
+    () => computeTotals(accounts, positions, unattributedCash),
+    [accounts, positions, unattributedCash]
+  );
+  const envelopes = useMemo(
+    () => splitByEnvelope(accounts, positions, unattributedCash, totals),
+    [accounts, positions, unattributedCash, totals]
+  );
   /**
    * Cartes de compte, PEA en tête : l'enveloppe fiscale se lit avant le
    * compte ordinaire, et l'ordre doit être le même à chaque chargement.
@@ -313,15 +332,27 @@ export function SecuritiesOverview({
           label="Investi"
           value={formatCurrency(totals.costBasisEur, "EUR")}
         >
+          {/*
+            Deux périmètres dans la même tuile, et c'est irréductible : le prix
+            de revient se lit sur toutes les lignes titres, les versements sont
+            déclarés compte par compte (`SecuritiesAccountContribution`) et une
+            ligne non rattachée n'en a pas. Le dire vaut mieux que de les
+            laisser se comparer en silence.
+          */}
           <dl className="text-meta num space-y-[var(--space-px)]">
             <div className="flex justify-between gap-[var(--space-2)]">
-              <dt>+ Versements</dt>
+              <dt>+ Versements déclarés</dt>
               <dd>{formatCurrency(totals.contributionsEur, "EUR")}</dd>
             </div>
             <div className="flex justify-between gap-[var(--space-2)]">
-              <dt>− Retraits</dt>
+              <dt>− Retraits déclarés</dt>
               <dd>{formatCurrency(totals.withdrawalsEur, "EUR")}</dd>
             </div>
+            {totals.positionsWithoutAccountCount > 0 && (
+              <p className="pt-[var(--space-1)] text-[var(--foreground-faint)]">
+                Versements comptés sur les comptes déclarés uniquement.
+              </p>
+            )}
           </dl>
         </KpiCard>
 
@@ -437,14 +468,28 @@ export function SecuritiesOverview({
                 label="Lignes détenues"
                 value={String(totals.positionCount)}
               />
+              {totals.positionsWithoutAccountCount > 0 && (
+                <SummaryRow
+                  label="dont non rattachées"
+                  value={String(totals.positionsWithoutAccountCount)}
+                />
+              )}
             </dl>
+            {/*
+              Le montant, pas « une partie ». Il est connu au centime, et la
+              phrase d'avant promettait qu'il comptait « dans le total » alors
+              qu'il ne comptait nulle part.
+            */}
             {totals.hasUnattributedCash && (
               <p
                 className="text-meta mt-[var(--space-3)]"
                 data-testid="securities-cash-warning"
               >
-                Une partie des liquidités n&apos;a pas pu être rattachée à un
-                compte précis : elle compte dans le total, pas dans le détail.
+                Liquidités tenues au niveau de l&apos;enveloppe :{" "}
+                {formatCurrency(totals.unattributedCashEur, "EUR")}. Elles
+                comptent une fois dans le total ci-dessus et n&apos;apparaissent
+                sur aucune carte de compte — plusieurs comptes se partagent
+                l&apos;enveloppe, ou aucun n&apos;est encore déclaré.
               </p>
             )}
           </section>

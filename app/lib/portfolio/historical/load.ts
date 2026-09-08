@@ -193,10 +193,20 @@ export async function loadHistoricalInputs(
   const [envelopeEvents, directRE, indirectRE, fondsEuroRows] = await Promise.all([
     prisma.assetEnvelopeEvent.findMany({
       where: { userId },
-      orderBy: { occurredAt: "asc" },
+      /*
+        `occurredAt` ASC puis `createdAt` ASC — même départage que
+        `resolveEnvelopeAt` (lu DESC/DESC) et que la fonction pure
+        `resolveEnvelopeFromEvents`. Sans clé secondaire, deux événements à la
+        même milliseconde `occurredAt` — le lot de création des
+        `AssetEnvelopeEvent` en a produit — reviendraient dans un ordre non
+        spécifié par Postgres, et `envelopeBucketOf` classerait le même actif
+        tantôt en PEA tantôt en CTO selon la requête.
+      */
+      orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }],
       select: {
         assetId: true,
         occurredAt: true,
+        createdAt: true,
         accountType: true,
         securitiesAccountId: true,
         envelopeType: true,

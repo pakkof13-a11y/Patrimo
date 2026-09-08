@@ -16,15 +16,24 @@ export const SECURITIES_ENVELOPE_TYPES = {
 export type SecuritiesEnvelopeType = keyof typeof SECURITIES_ENVELOPE_TYPES;
 
 export function securitiesEnvelopeLabel(value: string): string {
-  return (
-    SECURITIES_ENVELOPE_TYPES[value as SecuritiesEnvelopeType] ?? value
-  );
+  /*
+    `in` — et l'indexation directe qui suivait ici — remontent aussi les clés
+    héritées du prototype (`toString`, `constructor`, `__proto__`…) : mesuré,
+    `"toString" in SECURITIES_ENVELOPE_TYPES` vaut `true`, et
+    `SECURITIES_ENVELOPE_TYPES["toString"]` rend la fonction héritée plutôt que
+    `undefined` — le `??` ne se déclenche donc jamais pour ces clés-là.
+    `isSecuritiesEnvelopeType` (ci-dessous, sur `Object.hasOwn`) garantit qu'on
+    n'indexe l'objet qu'avec une clé qui lui appartient réellement.
+  */
+  return isSecuritiesEnvelopeType(value)
+    ? SECURITIES_ENVELOPE_TYPES[value]
+    : value;
 }
 
 export function isSecuritiesEnvelopeType(
   value: string
 ): value is SecuritiesEnvelopeType {
-  return value in SECURITIES_ENVELOPE_TYPES;
+  return Object.hasOwn(SECURITIES_ENVELOPE_TYPES, value);
 }
 
 /**
