@@ -30,8 +30,11 @@
 
 import { parisDayKey } from "../../dates/paris";
 import { oldestFetchedAt } from "../../market/last-close-as-of";
-import { parseDayKey } from "./day-key";
-
+/*
+  Ré-export seul : `parseDayKey` n'est pas utilisé dans ce fichier, il y
+  transite pour les appelants qui lisent la fenêtre par ici (la route
+  daily-nav). L'import jumeau qui l'accompagnait était mort.
+*/
 export { parseDayKey } from "./day-key";
 import {
   PATRIMONY_ASSET_POCKETS,

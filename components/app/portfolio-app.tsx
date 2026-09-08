@@ -1481,7 +1481,6 @@ function PortfolioAppClient({
                 summary={summary}
                 holdings={allHoldings}
                 allocation={holdingsQ.data?.allocation}
-                allocationByVenue={holdingsQ.data?.allocationByVenue}
                 history={[]}
                 historyLoading={false}
                 maturityInput={{

@@ -56,17 +56,9 @@ describe("toAllocationByVenueApi — contrat { venues, help, total, asOf }", () 
         ],
         envelopeCash: [{ envelope: "AV", balanceEur: "0" }],
         crowdlending: [{ status: "REPAID", capitalInvestedEur: "3000" }],
-        tradingPositions: [
-          {
-            isOpen: false,
-            direction: "LONG",
-            leverage: "2",
-            sizeContracts: "1",
-            entryPrice: "10",
-            markPrice: "12",
-            marginUsed: "5",
-          },
-        ],
+        // Position close : equity nulle. La manche reçoit des euros, la
+        // conversion ayant lieu au chargement (D29).
+        tradingPositions: [{ equityEur: "0" }],
       })
     );
 
@@ -154,6 +146,11 @@ describe("toAllocationByVenueApi — contrat { venues, help, total, asOf }", () 
       ],
       total: 1000,
       asOf: "2026-09-06T00:00:00.000Z",
+      // Ni dette non affectée, ni position non convertie dans ce cas
+      // construit : ces deux champs existent depuis D29 et font partie du
+      // contrat même à zéro.
+      unallocatedLiabilitiesEur: 0,
+      unconvertedTradingPositions: 0,
     });
     expect(api.venues.map((v) => v.id)).toEqual(["pea"]);
     expect(api.venues.every((v) => v.amountEur > 0)).toBe(true);
@@ -257,17 +254,7 @@ describe("toAllocationByVenueApi — contrat { venues, help, total, asOf }", () 
         employeeSavings: [{ valueEur: "70" }],
         privateEquity: [{ currentNavEur: "80" }],
         tangibles: [{ estimatedValueEur: "90" }],
-        tradingPositions: [
-          {
-            isOpen: true,
-            direction: "LONG",
-            leverage: "10",
-            sizeContracts: "1",
-            entryPrice: "100",
-            markPrice: "100",
-            marginUsed: "100",
-          },
-        ],
+        tradingPositions: [{ equityEur: "100" }],
       })
     );
     const api = toAllocationByVenueApi(computed);

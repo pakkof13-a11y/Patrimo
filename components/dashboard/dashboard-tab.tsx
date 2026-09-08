@@ -27,7 +27,6 @@ import type {
   HistoryPoint,
   PortfolioAllocation,
 } from "@/app/lib/types/ui";
-import type { AllocationByVenueApi } from "@/app/lib/portfolio/allocation-by-venue-api";
 import {
   dashboardBlocksFor,
   resolveDashboardMaturity,
@@ -158,8 +157,6 @@ export type DashboardTabProps = {
   baseCurrency: string;
   summary?: Record<string, string | number>;
   allocation?: PortfolioAllocation;
-  /** D14.2 — répartition par endroit de détention, dénominateur du pavé Répartition. */
-  allocationByVenue?: AllocationByVenueApi;
   history: HistoryPoint[];
   historyLoading?: boolean;
   /** Lignes détenues — alimentent la watchlist. */
@@ -191,10 +188,6 @@ export function DashboardTab({
   baseCurrency,
   summary,
   allocation,
-  // `allocationByVenue` (D14.2) n'alimente plus ce pavé — remplacé par la
-  // répartition par classe de détention (D19 P2bis). Le prop reste dans le
-  // contrat pour ne pas casser l'appelant ; l'API `allocation-by-venue`
-  // continue d'exister pour d'autres usages.
   history,
   historyLoading,
   holdings = [],

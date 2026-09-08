@@ -32,6 +32,21 @@ export type AllocationByVenueApi = {
   help: typeof ALLOCATION_BY_VENUE_HELP;
   total: number;
   asOf: string;
+  /**
+   * Dette rattachée à un actif que le camembert n'a pas pu réduire — bien
+   * vendu dont le prêt vit encore, ou CRD dépassant la valeur de sa ligne.
+   *
+   * Zéro dans le cas normal. Non nulle, elle doit apparaître **à côté** du
+   * camembert et jamais dedans : celui-ci ventile ce que l'on détient. La
+   * taire ferait disparaître une dette d'un écran à l'autre.
+   */
+  unallocatedLiabilitiesEur: number;
+  /**
+   * Positions de trading écartées faute de taux pour leur devise de cotation
+   * (USDT, USDC). Non nul, la manche « Trading » est incomplète et l'écran
+   * doit le dire — une position tue vaudrait zéro, ce qu'elle n'est pas.
+   */
+  unconvertedTradingPositions: number;
 };
 
 /**
@@ -59,6 +74,8 @@ export function toAllocationByVenueApi(
     help: ALLOCATION_BY_VENUE_HELP,
     total: result.total,
     asOf: result.asOf,
+    unallocatedLiabilitiesEur: result.unallocatedLiabilitiesEur,
+    unconvertedTradingPositions: result.unconvertedTradingPositions,
   };
 }
 

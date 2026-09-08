@@ -11,6 +11,7 @@ import {
   immoNet,
   principalPaidOfInstallment,
   sumVenueAmounts,
+  tradingEquityEur,
   tradingEquityOf,
   type AllocationByVenueInput,
   type VenueHoldingInput,
@@ -158,6 +159,7 @@ describe("trading — marge ± P&L, jamais le notionnel", () => {
       entryPrice: "61200",
       markPrice: "63480",
       marginUsed: "5140.80",
+      quoteCurrency: "USD",
     };
     const equity = tradingEquityOf(position);
     const pnl = unrealizedPnl("LONG", d("0.42"), d("61200"), d("63480"));
@@ -176,7 +178,9 @@ describe("trading — marge ± P&L, jamais le notionnel", () => {
             marketValueEur: "54648",
           }),
         ],
-        tradingPositions: [position],
+        // La manche reçoit désormais une equity **déjà en euros** — la
+        // conversion se fait au chargement, comme pour toutes les autres.
+        tradingPositions: [{ equityEur: equity }],
       })
     );
     expect(amountOf(result, "trading")).toBeCloseTo(equity.toNumber(), 6);
@@ -194,6 +198,7 @@ describe("trading — marge ± P&L, jamais le notionnel", () => {
       entryPrice: "2480.50",
       markPrice: "2712.00",
       marginUsed: "2000",
+      quoteCurrency: "USD",
     };
     expect(tradingEquityOf(closed).toNumber()).toBe(0);
 
@@ -207,7 +212,7 @@ describe("trading — marge ± P&L, jamais le notionnel", () => {
             marketValueEur: "12050",
           }),
         ],
-        tradingPositions: [closed],
+        tradingPositions: [{ equityEur: tradingEquityOf(closed) }],
       })
     );
     expect(result.slices.find((s) => s.key === "trading")).toBeUndefined();
@@ -222,6 +227,7 @@ describe("trading — marge ± P&L, jamais le notionnel", () => {
       entryPrice: "60000",
       markPrice: "60000",
       marginUsed: null,
+      quoteCurrency: "USD",
     };
     const equity = tradingEquityOf(position);
     const margin = requiredMargin(notionalOf(d(1), d(60000)), d(10));
@@ -404,17 +410,7 @@ describe("identité du donut — Σ, Hamilton, parts nulles", () => {
           }),
         ],
         crowdlending: [{ status: "REPAID", capitalInvestedEur: "3000" }],
-        tradingPositions: [
-          {
-            isOpen: false,
-            direction: "LONG",
-            leverage: "2",
-            sizeContracts: "1",
-            entryPrice: "10",
-            markPrice: "12",
-            marginUsed: "5",
-          },
-        ],
+        tradingPositions: [{ equityEur: 0 }],
       })
     );
     expect(result.slices.every((s) => s.amount > 0)).toBe(true);
@@ -463,5 +459,229 @@ describe("identité du donut — Σ, Hamilton, parts nulles", () => {
     const ifRounded = allocatePercents(roundedFirst, 1);
     expect(result.slices.map((s) => s.percent)).toEqual(hamilton);
     void ifRounded;
+  });
+});
+
+/**
+ * D29 — l'immobilier au sens du contrat, et les dettes qui ne s'évaporent plus.
+ *
+ * Deux défauts relevés en revue, mesurés ici : une SCPI mal étiquetée quittait
+ * l'immobilier et emportait la déduction de son crédit ; une dette rattachée à
+ * un actif que le camembert ne pouvait pas réduire disparaissait sans trace,
+ * gonflant le total et donc les dix pourcentages.
+ */
+describe("D29 — classement immobilier et dettes non affectées", () => {
+  it("range une SCPI étiquetée ACTIONS dans l'immobilier, et lui soustrait son crédit", () => {
+    const res = computeAllocationByVenue(
+      baseInput({
+        holdings: [
+          holding({
+            id: "scpi-1",
+            accountType: "CTO",
+            assetClass: "ACTIONS",
+            marketValueEur: 100_000,
+            hasIndirectRealEstateDetail: true,
+          }),
+        ],
+        liabilities: [{ assetId: "scpi-1", remainingEur: 40_000 }],
+      })
+    );
+
+    // Avant : 100 000 € en `cto`, crédit jamais soustrait — le donut portait
+    // le prêt entier en trop, quand la bande d'indicateurs rangeait la même
+    // ligne dans l'immobilier.
+    expect(amountOf(res, "immo")).toBe(60_000);
+    expect(amountOf(res, "cto")).toBe(0);
+    expect(res.unallocatedLiabilitiesEur).toBe(0);
+  });
+
+  it("suit `classifyHolding` aussi pour une fiche immobilier direct", () => {
+    const res = computeAllocationByVenue(
+      baseInput({
+        holdings: [
+          holding({
+            id: "bien-1",
+            accountType: "CTO",
+            assetClass: "AUTRE",
+            marketValueEur: 250_000,
+            hasRealEstateDetail: true,
+          }),
+        ],
+      })
+    );
+    expect(amountOf(res, "immo")).toBe(250_000);
+  });
+
+  it("réduit le CTO d'un prêt lombard adossé à une ligne du compte", () => {
+    const res = computeAllocationByVenue(
+      baseInput({
+        holdings: [
+          holding({
+            id: "action-1",
+            accountType: "CTO",
+            assetClass: "ACTIONS",
+            marketValueEur: 80_000,
+          }),
+        ],
+        liabilities: [{ assetId: "action-1", remainingEur: 30_000 }],
+      })
+    );
+    expect(amountOf(res, "cto")).toBe(50_000);
+    expect(res.unallocatedLiabilitiesEur).toBe(0);
+  });
+
+  it("compte hors camembert la dette d'un bien vendu", () => {
+    // Le bien est sorti du journal (quantité nulle → absent des holdings), le
+    // prêt existe encore. Il ne réduit plus rien : il doit se voir ailleurs.
+    const res = computeAllocationByVenue(
+      baseInput({
+        holdings: [
+          holding({
+            id: "pea-1",
+            accountType: "PEA",
+            assetClass: "ACTIONS",
+            marketValueEur: 20_000,
+          }),
+        ],
+        liabilities: [{ assetId: "bien-vendu", remainingEur: 120_000 }],
+      })
+    );
+
+    expect(amountOf(res, "pea")).toBe(20_000);
+    expect(res.total).toBe(20_000);
+    expect(res.unallocatedLiabilitiesEur).toBe(120_000);
+  });
+
+  it("compte hors camembert la part de CRD qui dépasse la valeur du bien", () => {
+    const res = computeAllocationByVenue(
+      baseInput({
+        holdings: [
+          holding({
+            id: "bien-1",
+            accountType: "IMMOBILIER",
+            assetClass: "IMMOBILIER",
+            marketValueEur: 150_000,
+          }),
+        ],
+        liabilities: [{ assetId: "bien-1", remainingEur: 200_000 }],
+      })
+    );
+
+    // La part reste plancher à zéro — on n'invente pas un endroit négatif —
+    // mais les 50 000 € que le plancher absorbait ne sont plus perdus.
+    expect(amountOf(res, "immo")).toBe(0);
+    expect(res.unallocatedLiabilitiesEur).toBe(50_000);
+  });
+
+  it("ne laisse pas un CFD consommer la dette qu'il ne peut pas réduire", () => {
+    // Une ligne CFD est hors donut (le notionnel n'y entre jamais). Sa dette
+    // éventuelle ne doit pas s'évaporer avec elle.
+    const res = computeAllocationByVenue(
+      baseInput({
+        holdings: [
+          holding({
+            id: "cfd-1",
+            accountType: "CFD",
+            assetClass: "ACTIONS",
+            marketValueEur: 10_000,
+          }),
+        ],
+        liabilities: [{ assetId: "cfd-1", remainingEur: 5_000 }],
+      })
+    );
+    expect(res.total).toBe(0);
+    expect(res.unallocatedLiabilitiesEur).toBe(5_000);
+  });
+
+  it("laisse un passif sans assetId hors du compte : il n'a pas de collatéral", () => {
+    const res = computeAllocationByVenue(
+      baseInput({
+        holdings: [
+          holding({
+            id: "pea-1",
+            accountType: "PEA",
+            assetClass: "ACTIONS",
+            marketValueEur: 20_000,
+          }),
+        ],
+        liabilities: [{ assetId: null, remainingEur: 15_000 }],
+      })
+    );
+    expect(amountOf(res, "pea")).toBe(20_000);
+    expect(res.unallocatedLiabilitiesEur).toBe(0);
+  });
+});
+
+/**
+ * D29 — le trading entrait brut dans un camembert en euros.
+ *
+ * `toFuturesView` rend une equity dans la devise de cotation ; le suffixe
+ * `Eur` de `unrealizedPnlEur` est un abus de langage hérité, rien ne convertit
+ * dans la chaîne trading. Un perpétuel BTC/USDT à 10 000 USDT de marge pesait
+ * donc 10 000 € — et faussait le dénominateur, donc les dix pourcentages.
+ */
+describe("D29 — equity de trading ramenée en euros", () => {
+  const RATES = { USD: 1.08 };
+
+  const position = {
+    isOpen: true,
+    direction: "LONG" as const,
+    leverage: "10",
+    sizeContracts: "1",
+    entryPrice: "60000",
+    markPrice: "60000",
+    marginUsed: null,
+    quoteCurrency: "USD",
+  };
+
+  it("convertit l'equity depuis la devise de cotation", () => {
+    const brut = tradingEquityOf(position);
+    expect(brut.toFixed(2)).toBe("6000.00");
+
+    const eur = tradingEquityEur(position, RATES);
+    expect(eur).not.toBeNull();
+    // 6 000 USD à 1,08 USD pour un euro : 5 555,56 €, pas 6 000 €.
+    expect(eur!.toFixed(2)).toBe("5555.56");
+    expect(eur!.lt(brut)).toBe(true);
+  });
+
+  it("laisse un montant déjà en euros intact", () => {
+    const eur = tradingEquityEur(
+      { ...position, quoteCurrency: "EUR" },
+      RATES
+    );
+    expect(eur!.toFixed(2)).toBe("6000.00");
+  });
+
+  it("rend null — ni zéro, ni parité — quand la devise n'a pas de taux", () => {
+    /*
+      `USDT` est la cotation du perpétuel le plus courant et n'est dans aucune
+      table de taux : ni Frankfurter (ISO seulement), ni le repli maison. Le
+      compter à parité inventerait un taux ; le compter zéro effacerait la
+      position ; laisser l'exception remonter ferait tomber tout le donut pour
+      une ligne. UNKNOWN n'est ni ZERO ni ERROR.
+    */
+    expect(tradingEquityEur({ ...position, quoteCurrency: "USDT" }, RATES)).toBeNull();
+    expect(tradingEquityEur({ ...position, quoteCurrency: "USDC" }, RATES)).toBeNull();
+  });
+
+  it("rend zéro sans convertir quand la position est close", () => {
+    const eur = tradingEquityEur(
+      { ...position, isOpen: false, quoteCurrency: "USDT" },
+      RATES
+    );
+    expect(eur).not.toBeNull();
+    expect(eur!.toNumber()).toBe(0);
+  });
+
+  it("le résultat compte les positions écartées faute de taux", () => {
+    const res = computeAllocationByVenue(
+      baseInput({
+        tradingPositions: [{ equityEur: "5555.56" }],
+        unconvertedTradingPositions: 2,
+      })
+    );
+    expect(amountOf(res, "trading")).toBeCloseTo(5555.56, 6);
+    expect(res.unconvertedTradingPositions).toBe(2);
   });
 });

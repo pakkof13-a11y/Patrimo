@@ -1,5 +1,4 @@
 import type { AccountType } from "@/app/lib/constants";
-import type { AllocationByVenueApi } from "@/app/lib/portfolio/allocation-by-venue-api";
 import type { PatrimonyMetricsJson } from "@/app/lib/portfolio/patrimony-metrics";
 import type {
   BaseAmount,
@@ -362,16 +361,6 @@ export type HoldingsResponse = {
   /** Contrat T-01 — Hero / KPI / allocation lisent cet objet, pas un résidu. */
   metrics?: PatrimonyMetricsJson;
   allocation: PortfolioAllocation;
-  /**
-   * D14.2 — répartition par endroit (`venues` / `help` / `total` / `asOf`).
-   *
-   * Servie uniquement ici. `GET /api/portfolio` la calculait aussi, sans
-   * qu'aucun consommateur ne la lise (le tableau de bord lit toujours
-   * celle-ci, `holdingsQ.data.allocationByVenue`) : retirée de cette autre
-   * route pour ne plus payer une valorisation complète que personne
-   * n'affichait.
-   */
-  allocationByVenue?: AllocationByVenueApi;
   baseCurrency: string;
 };
 

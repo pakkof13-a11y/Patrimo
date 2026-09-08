@@ -875,7 +875,7 @@ export async function getEmployeeSavingsTotalEur(
   return (await getEmployeeSavingsTotalsEur(userId, rates)).totalEur;
 }
 
-async function loadHoldingClassificationFlags(userId: string): Promise<{
+export async function loadHoldingClassificationFlags(userId: string): Promise<{
   realEstateAssetIds: Set<string>;
   indirectRealEstateAssetIds: Set<string>;
   fondsEuroAssetIds: Set<string>;
