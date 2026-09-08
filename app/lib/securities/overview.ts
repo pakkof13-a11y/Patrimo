@@ -10,7 +10,10 @@
  * `null`, et c'est à l'écran de le dire.
  */
 
-import { securitiesEnvelopeLabel } from "./constants";
+import {
+  securitiesEnvelopeLabel,
+  type CashAttribution,
+} from "./constants";
 
 export type SecuritiesRoom = {
   ownCapEur: string;
@@ -37,7 +40,9 @@ export type SecuritiesAccount = {
   unrealizedPnlEur: string;
   unrealizedPnlPct: string | null;
   cashEur: string;
-  cashAttributed: boolean;
+  /** Voir `CashAttribution` : hors `ATTRIBUTED`, `cashEur` vaut zéro et ce
+      zéro n'est pas un relevé. */
+  cashAttribution: CashAttribution;
   liquidationValueEur: string;
   contributionsEur: string;
   withdrawalsEur: string;
@@ -80,9 +85,55 @@ export function sumUnattributedCash(cash: UnattributedCash): number {
   return Object.values(cash).reduce((total, v) => total + num(v), 0);
 }
 
+/**
+ * Vrai dès qu'**une** poche non imputée porte un montant, quel qu'en soit le
+ * signe.
+ *
+ * Se décide poche par poche, jamais sur `sumUnattributedCash` : une poche CTO
+ * de +5 000 € et une poche PEA de −5 000 € somment à zéro alors que deux
+ * montants réels sont entrés dans le total sans appartenir à aucun compte.
+ * Un bandeau muet sur ce cas laisserait 10 000 € circuler sans mention — le
+ * silence exact que ce bandeau existe pour rompre.
+ */
+export function hasAnyUnattributedCash(cash: UnattributedCash): boolean {
+  return Object.values(cash).some((v) => num(v) !== 0);
+}
+
 export function num(v: string | number | null | undefined): number {
   const n = Number(String(v ?? "0").replace(",", "."));
   return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Ce qu'une carte de compte affiche à la place d'un montant d'espèces, et
+ * l'infobulle qui le justifie. `null` sous `ATTRIBUTED` : il y a un montant,
+ * la carte l'affiche.
+ *
+ * Ici plutôt que dans chacun des deux écrans qui en ont besoin : ils
+ * disaient déjà la même chose de deux façons, et l'un d'eux accusait le
+ * PEA-PME d'un défaut de ventilation qui n'existe pas.
+ */
+export function cashAttributionNotice(
+  attribution: CashAttribution
+): { short: string; title: string } | null {
+  if (attribution === "ENVELOPE_LEVEL") {
+    return {
+      short: "tenues par l'enveloppe",
+      title:
+        "La poche d'espèces est tenue par enveloppe et non par compte, et " +
+        "plusieurs comptes de ce type se la partagent : on ne sait pas lequel " +
+        "la détient. Son montant est donné sous la vue d'ensemble.",
+    };
+  }
+  if (attribution === "NOT_TRACKED") {
+    return {
+      short: "non suivies",
+      title:
+        "Aucune poche d'espèces n'est tenue pour cette enveloppe. Le montant " +
+        "est inconnu, pas nul.",
+    };
+  }
+  return null;
 }
 
 /* ── Totaux de la page ────────────────────────────────────────────── */
@@ -103,9 +154,19 @@ export type OverviewTotals = {
   accountCount: number;
   /** Lignes détenues qu'aucun compte déclaré ne porte encore. */
   positionsWithoutAccountCount: number;
-  /** Espèces d'enveloppe comptées au total sans appartenir à un compte. */
+  /**
+   * Espèces d'enveloppe comptées au total sans appartenir à un compte.
+   *
+   * Somme algébrique : deux poches de signes opposés peuvent s'annuler ici
+   * sans que la page n'en porte aucune. C'est `hasUnattributedCash` qui dit
+   * s'il y en a, pas ce montant.
+   */
   unattributedCashEur: number;
-  /** Une part du cash n'a pas pu être rattachée à un compte précis. */
+  /**
+   * Au moins une poche non imputée porte un montant non nul — le bandeau doit
+   * s'allumer. Jamais déduit de `unattributedCashEur`, qui peut être nul sur
+   * des poches bien réelles.
+   */
   hasUnattributedCash: boolean;
 };
 
@@ -132,11 +193,18 @@ export type OverviewTotals = {
  * le total : elles sont tenues par enveloppe, pas par compte, et les répartir
  * entre les comptes d'une même enveloppe les compterait autant de fois qu'il
  * y a de comptes.
+ *
+ * Les trois paramètres sont **obligatoires**, et c'est le point : tant que
+ * `positions` et `unattributedCash` avaient un défaut, un appel resté à un
+ * seul argument — l'ancienne signature, celle des comptes seuls — compilait
+ * sans une ligne rouge et rendait un portefeuille vide, prix de revient et
+ * P&L à zéro. Le périmètre d'avant, en pire, et en silence. `splitByEnvelope`
+ * exige déjà les siens ; les deux fonctions se lisent maintenant pareil.
  */
 export function computeTotals(
   accounts: SecuritiesAccount[],
-  positions: SecuritiesPosition[] = [],
-  unattributedCash: UnattributedCash = {}
+  positions: SecuritiesPosition[],
+  unattributedCash: UnattributedCash
 ): OverviewTotals {
   const unattributedCashEur = sumUnattributedCash(unattributedCash);
   let positionsValueEur = 0;
@@ -178,7 +246,7 @@ export function computeTotals(
     accountCount: accounts.length,
     positionsWithoutAccountCount,
     unattributedCashEur,
-    hasUnattributedCash: unattributedCashEur > 0,
+    hasUnattributedCash: hasAnyUnattributedCash(unattributedCash),
   };
 }
 

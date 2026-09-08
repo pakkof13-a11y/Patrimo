@@ -22,6 +22,7 @@ import { owned, wroteOne } from "../db/tenant-scope";
 import { getAssetValues } from "../portfolio/asset-values";
 import {
   securitiesEnvelopeLabel,
+  type CashAttribution,
   type SecuritiesEnvelopeType,
 } from "./constants";
 import { SecuritiesInputError } from "./account-service";
@@ -65,14 +66,21 @@ export type AccountFiscalSummary = {
   positionsValueEur: Decimal;
   cashEur: Decimal;
   /**
-   * Faux quand les espèces de l'enveloppe n'ont pas pu être imputées à ce
-   * compte en particulier. La poche `EnvelopeCash` est tenue par enveloppe et
-   * non par compte : elle s'impute exactement au PEA, qui est unique, mais
-   * répartir un solde CTO entre plusieurs comptes-titres relèverait de
-   * l'invention. L'UI doit le signaler plutôt que d'afficher un total faux.
+   * D'où vient — ou pourquoi manque — le montant ci-dessus. Voir
+   * `CashAttribution` : hors de `ATTRIBUTED`, `cashEur` vaut zéro et ce zéro
+   * n'est pas un relevé.
    */
-  cashAttributed: boolean;
-  /** Titres + espèces imputées — l'assiette du calcul de retrait. */
+  cashAttribution: CashAttribution;
+  /**
+   * Titres + espèces imputées — l'assiette du calcul de retrait.
+   *
+   * Complète sous `ATTRIBUTED` seulement. Sous `ENVELOPE_LEVEL` c'est un
+   * minorant : la poche existe mais n'est pas rattachable ici. Le cas ne
+   * concerne que le CTO — PEA et PEA-PME sont uniques par personne
+   * (`SINGLE_ACCOUNT_ENVELOPES`, index partiel en base), donc toujours
+   * `ATTRIBUTED` ou `NOT_TRACKED` — et le CTO ne fait l'objet d'aucune
+   * simulation de retrait.
+   */
   liquidationValueEur: Decimal;
   /** Valeur liquidative − versements. Négatif en cas de moins-value. */
   gainEur: Decimal;
@@ -188,20 +196,41 @@ const CASH_ENVELOPES = ["PEA", "CTO"] as const;
  * nourrit `liquidationValueEur`, donc le gain fiscal du compte. Prêter à un
  * compte-titres les espèces d'un autre fausserait ce gain sur les deux, pour
  * rendre juste un total qu'on sait rendre juste autrement.
+ *
+ * L'ordre des tests n'est pas indifférent. L'absence de poche se tranche
+ * **avant** le nombre de comptes : deux CTO sans un euro d'espèces n'ont rien
+ * à se partager, et les renvoyer « non ventilés » accusait d'un échec de
+ * ventilation deux comptes qui n'avaient rien à ventiler. C'est exactement le
+ * reproche fait au PEA-PME, sur un cas bien plus courant.
+ *
+ * L'état rendu est le miroir exact de `unattributedEnvelopeCash` :
+ * `ENVELOPE_LEVEL` sur un compte ⟺ son enveloppe figure dans
+ * `unattributedCashByEnvelope`. Les deux fonctions décident sur les mêmes
+ * conditions, dans le même ordre, pour qu'aucune poche ne puisse être
+ * annoncée deux fois ni oubliée par les deux.
  */
 function attributeCash(
   envelopeType: SecuritiesEnvelopeType,
   accountsOfSameEnvelope: number,
   pockets: Map<string, Decimal>
-): { cashEur: Decimal; cashAttributed: boolean } {
+): { cashEur: Decimal; cashAttribution: CashAttribution } {
   if (envelopeType === "PEA_PME") {
-    return { cashEur: d(0), cashAttributed: false };
+    return { cashEur: d(0), cashAttribution: "NOT_TRACKED" };
   }
-  if (accountsOfSameEnvelope !== 1) {
-    return { cashEur: d(0), cashAttributed: false };
-  }
+
   const pocket = pockets.get(envelopeType === "PEA" ? "PEA" : "CTO");
-  return { cashEur: pocket ?? d(0), cashAttributed: true };
+
+  // Pas de poche, ou une poche à zéro : rien à imputer, et rien à signaler.
+  // Le zéro rendu ici est un fait — l'enveloppe est suivie, son solde est nul.
+  if (!pocket || pocket.isZero()) {
+    return { cashEur: d(0), cashAttribution: "ATTRIBUTED" };
+  }
+
+  if (accountsOfSameEnvelope !== 1) {
+    return { cashEur: d(0), cashAttribution: "ENVELOPE_LEVEL" };
+  }
+
+  return { cashEur: pocket, cashAttribution: "ATTRIBUTED" };
 }
 
 /**
@@ -220,6 +249,14 @@ function attributeCash(
  *
  * Il est compté **une fois par enveloppe**, jamais par compte : le distribuer
  * aux comptes en doublerait le montant sur la page.
+ *
+ * Le signe ne filtre pas. Une poche négative — découvert, appel de marge,
+ * règlement différé — est un fait comptable au même titre qu'une poche
+ * créditrice, et `attributeCash` ne l'a jamais filtrée : avec un seul compte
+ * de l'enveloppe, un solde de −1 200 € entre dans son `cashEur`, donc dans le
+ * total. La jeter ici faisait dépendre le total de la page du **nombre de
+ * comptes** : 1 200 € d'écart entre un CTO et deux, pour la même dette. Seul
+ * le zéro strict est sauté, parce qu'il n'y a rien à annoncer.
  */
 function unattributedEnvelopeCash(
   pockets: Map<string, Decimal>,
@@ -228,7 +265,7 @@ function unattributedEnvelopeCash(
   const out: Record<string, Decimal> = {};
   for (const envelope of CASH_ENVELOPES) {
     const pocket = pockets.get(envelope);
-    if (!pocket || pocket.lte(0)) continue;
+    if (!pocket || pocket.isZero()) continue;
     // Un seul compte de cette enveloppe : la poche lui est imputée, elle
     // compte déjà dans son `cashEur`.
     if ((countByEnvelope.get(envelope) ?? 0) === 1) continue;
@@ -338,7 +375,7 @@ export async function getSecuritiesFiscalBundle(
       if (v) positionsValue = positionsValue.plus(v.marketValueEur);
     }
 
-    const { cashEur, cashAttributed } = attributeCash(
+    const { cashEur, cashAttribution } = attributeCash(
       envelopeType,
       countByEnvelope.get(envelopeType) ?? 0,
       pockets
@@ -366,7 +403,7 @@ export async function getSecuritiesFiscalBundle(
       withdrawalsEur: totalsForAccount.withdrawals,
       positionsValueEur: positionsValue,
       cashEur,
-      cashAttributed,
+      cashAttribution,
       liquidationValueEur: liquidationValue,
       gainEur: liquidationValue.minus(totalsForAccount.deposits),
     };

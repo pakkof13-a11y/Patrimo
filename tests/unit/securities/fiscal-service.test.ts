@@ -153,7 +153,7 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
     ]);
     const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.cashEur.toNumber()).toBe(4_000);
-    expect(s!.cashAttributed).toBe(true);
+    expect(s!.cashAttribution).toBe("ATTRIBUTED");
   });
 
   it("avec deux CTO, la poche n'est imputée à aucun — et c'est signalé", async () => {
@@ -168,7 +168,7 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
     for (const s of bundle.accounts) {
       expect(s.cashEur.toNumber()).toBe(0);
       // Mieux vaut un zéro signalé qu'une répartition inventée.
-      expect(s.cashAttributed).toBe(false);
+      expect(s.cashAttribution).toBe("ENVELOPE_LEVEL");
     }
     /*
       Et la poche ressort sur l'enveloppe, une seule fois. Elle ne sortait
@@ -181,7 +181,62 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
     expect(bundle.unattributedCashByEnvelope.CTO?.toNumber()).toBe(9_000);
   });
 
-  it("le PEA-PME n'a pas de poche dédiée : rien ne lui est imputé", async () => {
+  /*
+    Une poche négative — découvert, appel de marge, règlement différé — se
+    traite comme une poche créditrice.
+
+    Elle était jetée (`pocket.lte(0)`) alors qu'`attributeCash` ne l'a jamais
+    filtrée : avec un seul CTO, les −1 200 € entraient dans son `cashEur` et
+    dans le total ; avec deux, ils disparaissaient. Le même découvert déplaçait
+    le total de la page de 1 200 € selon le nombre de comptes déclarés.
+  */
+  it("une poche négative ressort sur l'enveloppe au lieu d'être jetée", async () => {
+    accountFindMany.mockResolvedValue([
+      account({ id: "cto-1", envelopeType: "CTO" }),
+      account({ id: "cto-2", envelopeType: "CTO" }),
+    ]);
+    envelopeCashFindMany.mockResolvedValue([
+      { envelope: "CTO", balance: { toString: () => "-1200" } },
+    ]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    for (const s of bundle.accounts) expect(s.cashEur.toNumber()).toBe(0);
+    expect(bundle.unattributedCashByEnvelope.CTO?.toNumber()).toBe(-1_200);
+  });
+
+  it("le même découvert sur un seul CTO lui est imputé : même montant, autre porteur", async () => {
+    accountFindMany.mockResolvedValue([
+      account({ id: "cto-1", envelopeType: "CTO" }),
+    ]);
+    envelopeCashFindMany.mockResolvedValue([
+      { envelope: "CTO", balance: { toString: () => "-1200" } },
+    ]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(bundle.accounts[0]!.cashEur.toNumber()).toBe(-1_200);
+    // Imputée : elle ne doit pas être comptée une seconde fois sur l'enveloppe.
+    expect(bundle.unattributedCashByEnvelope.CTO).toBeUndefined();
+  });
+
+  // Zéro reste sauté : il n'y a rien à annoncer, et le bandeau n'a pas à
+  // s'allumer sur une poche vide.
+  it("une poche à zéro ne ressort pas", async () => {
+    accountFindMany.mockResolvedValue([
+      account({ id: "cto-1", envelopeType: "CTO" }),
+      account({ id: "cto-2", envelopeType: "CTO" }),
+    ]);
+    envelopeCashFindMany.mockResolvedValue([
+      { envelope: "CTO", balance: { toString: () => "0" } },
+    ]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(bundle.unattributedCashByEnvelope).toEqual({});
+  });
+
+  /*
+    Le PEA-PME ne partage pas la poche du PEA, et n'en a aucune : `NOT_TRACKED`
+    et non `ENVELOPE_LEVEL`. La nuance n'est pas cosmétique — le second fait
+    dire à la carte « on ne sait pas lequel des comptes la détient » sur une
+    enveloppe où aucune poche n'existe.
+  */
+  it("le PEA-PME n'a pas de poche dédiée : espèces non suivies", async () => {
     accountFindMany.mockResolvedValue([
       account({ id: "acc-pme", envelopeType: "PEA_PME" }),
     ]);
@@ -190,7 +245,27 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
     ]);
     const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.cashEur.toNumber()).toBe(0);
-    expect(s!.cashAttributed).toBe(false);
+    expect(s!.cashAttribution).toBe("NOT_TRACKED");
+  });
+
+  /*
+    Deux CTO et aucune poche : il n'y a rien à se partager. L'ancien booléen
+    rendait `false` ici aussi, et la carte accusait d'un défaut de ventilation
+    deux comptes qui n'avaient rien à ventiler — le même reproche que le
+    PEA-PME, sur un cas bien plus courant.
+  */
+  it("deux CTO sans poche : espèces imputées à zéro, rien à signaler", async () => {
+    accountFindMany.mockResolvedValue([
+      account({ id: "cto-1", envelopeType: "CTO" }),
+      account({ id: "cto-2", envelopeType: "CTO" }),
+    ]);
+    envelopeCashFindMany.mockResolvedValue([]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    for (const s of bundle.accounts) {
+      expect(s.cashEur.toNumber()).toBe(0);
+      expect(s.cashAttribution).toBe("ATTRIBUTED");
+    }
+    expect(bundle.unattributedCashByEnvelope).toEqual({});
   });
 });
 

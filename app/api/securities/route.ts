@@ -60,9 +60,18 @@ export async function GET() {
             unrealizedPnlPct: totals.unrealizedPnlPct?.toFixed(2) ?? null,
 
             cashEur: f?.cashEur.toFixed(2) ?? "0.00",
-            // Faux quand la poche de l'enveloppe n'a pas pu être imputée à ce
-            // compte : l'UI doit le dire plutôt que d'afficher 0 € comme un fait.
-            cashAttributed: f?.cashAttributed ?? false,
+            /*
+              Trois états, pas un booléen : « imputée à ce compte », « tenue au
+              niveau de l'enveloppe » et « pas de poche pour cette enveloppe »
+              ne s'affichent pas de la même façon. Voir `CashAttribution`.
+
+              Le repli `ATTRIBUTED` suit la convention des `?? "0.00"`
+              voisins : il ne décrit pas un état métier mais un compte lu par
+              `listAccounts` et absent du bundle fiscal — deux requêtes, un
+              compte supprimé entre les deux. Annoncer « non ventilé » sur ce
+              cas allumerait un signalement pour une ligne qui n'existe plus.
+            */
+            cashAttribution: f?.cashAttribution ?? "ATTRIBUTED",
             liquidationValueEur: f?.liquidationValueEur.toFixed(2) ?? "0.00",
 
             contributionsEur: f?.contributionsEur.toFixed(2) ?? "0.00",

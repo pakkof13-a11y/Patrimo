@@ -19,6 +19,7 @@ import { PendingBackend } from "@/components/ui/pending-backend";
 import { assetCategoryLabel } from "@/app/lib/assets/categories";
 import {
   buildAccountView,
+  cashAttributionNotice,
   computeAllocation,
   computeKeyIndicators,
   computeTotals,
@@ -348,12 +349,29 @@ export function SecuritiesOverview({
               <dt>− Retraits déclarés</dt>
               <dd>{formatCurrency(totals.withdrawalsEur, "EUR")}</dd>
             </div>
-            {totals.positionsWithoutAccountCount > 0 && (
-              <p className="pt-[var(--space-1)] text-[var(--foreground-faint)]">
-                Versements comptés sur les comptes déclarés uniquement.
-              </p>
-            )}
           </dl>
+          {totals.positionsWithoutAccountCount > 0 && (
+            /* Hors du <dl> : ce n'est ni un <dt> ni un <dd>, et le modèle de
+               contenu d'un <dl> n'admet que dt, dd, div, script et template
+               — un <div> qui ne contiendrait que ce <p> n'y serait pas plus
+               conforme. Le bandeau de la colonne contextuelle, plus bas, est
+               déjà placé après sa </dl> pour la même raison.
+
+               Trois classes restituent ce que la mention tenait de son
+               parent : mt-[var(--space-px)] pour le margin-top que le
+               space-y-[var(--space-px)] du <dl> lui donnait en 3e enfant, la
+               taille et l'interligne pour ce qu'elle héritait de `text-meta`
+               — mesuré : rien ne pose de font-size entre <html> et cette
+               carte, la mention serait donc passée de 11 px aux 16 px du
+               document. Poser `text-meta` ici aurait réglé la taille mais
+               changé la couleur : la règle ne vit dans aucune couche CSS,
+               elle l'emporte sur l'utilitaire text-[var(--foreground-faint)]
+               (même mécanisme que la note de `@layer components`, plus bas
+               dans globals.css). */
+            <p className="mt-[var(--space-px)] pt-[var(--space-1)] text-[length:var(--text-xs)] leading-[var(--leading-normal)] text-[var(--foreground-faint)]">
+              Versements comptés sur les comptes déclarés uniquement.
+            </p>
+          )}
         </KpiCard>
 
         <KpiCard
@@ -537,6 +555,7 @@ function AccountCard({
   onOpenPositions?: (envelopeType: string) => void;
 }) {
   const a = view.account;
+  const cashNotice = cashAttributionNotice(a.cashAttribution);
 
   return (
     <section
@@ -581,15 +600,24 @@ function AccountCard({
       </div>
 
       <div className="mt-[var(--space-4)] grid grid-cols-2 gap-[var(--space-3)] border-t border-[var(--border-subtle)] px-[var(--pad-card)] pt-[var(--space-3)]">
+        {/* Un tiret, pas un 0,00 € : hors `ATTRIBUTED`, le compte ne porte
+            aucun montant connu, et l'afficher à zéro le ferait passer pour
+            un relevé. L'infobulle dit lequel des deux cas c'est. */}
         <Metric
           label="Liquidités"
-          value={formatCurrency(view.cashEur, "EUR")}
+          value={
+            cashNotice ? (
+              <span title={cashNotice.title}>—</span>
+            ) : (
+              formatCurrency(view.cashEur, "EUR")
+            )
+          }
           hint={
-            a.cashAttributed
-              ? view.cashSharePct != null
+            cashNotice
+              ? cashNotice.short
+              : view.cashSharePct != null
                 ? `${pct(view.cashSharePct, 1)} du compte`
                 : undefined
-              : "Poche non rattachée à ce compte"
           }
         />
         <Metric

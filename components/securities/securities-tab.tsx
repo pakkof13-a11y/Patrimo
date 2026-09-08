@@ -21,7 +21,9 @@ import { d } from "@/app/lib/money/decimal";
 import {
   eligibleAccounts,
   SECURITIES_ENVELOPE_TYPES,
+  type CashAttribution,
 } from "@/app/lib/securities/constants";
+import { cashAttributionNotice } from "@/app/lib/securities/overview";
 import {
   PEA_INCOME_TAX_RATE,
   PEA_SOCIAL_CHARGES_RATE,
@@ -57,7 +59,9 @@ type AccountRow = {
   unrealizedPnlEur: string;
   unrealizedPnlPct: string | null;
   cashEur: string;
-  cashAttributed: boolean;
+  /** Voir `CashAttribution` : hors `ATTRIBUTED`, `cashEur` vaut zéro et ce
+      zéro n'est pas un relevé. */
+  cashAttribution: CashAttribution;
   liquidationValueEur: string;
   contributionsEur: string;
   withdrawalsEur: string;
@@ -881,17 +885,28 @@ export function SecuritiesTab({ className }: { className?: string }) {
                       Espèces
                     </span>
                     <span className="tabular-nums">
-                      {a.cashAttributed ? (
-                        formatCurrency(a.cashEur, "EUR")
-                      ) : (
-                        <span
-                          className="text-[var(--muted-foreground)]"
-                          title="La poche d'espèces est tenue par enveloppe et non par compte : elle ne peut pas être ventilée entre plusieurs comptes de même type."
-                          data-testid="securities-cash-unattributed"
-                        >
-                          non ventilées
-                        </span>
-                      )}
+                      {(() => {
+                        /*
+                          Trois états, pas deux. « non ventilées » s'affichait
+                          aussi sur un PEA-PME, qui n'a aucune poche à ventiler
+                          — le drapeau disait « pas imputé » là où la vérité
+                          est « pas suivi ». Le libellé vient maintenant de
+                          `cashAttributionNotice`, partagé avec la vue
+                          d'ensemble : un seul texte pour un seul état.
+                        */
+                        const notice = cashAttributionNotice(a.cashAttribution);
+                        if (!notice) return formatCurrency(a.cashEur, "EUR");
+                        return (
+                          <span
+                            className="text-[var(--muted-foreground)]"
+                            title={notice.title}
+                            data-testid="securities-cash-unattributed"
+                            data-cash-attribution={a.cashAttribution}
+                          >
+                            {notice.short}
+                          </span>
+                        );
+                      })()}
                     </span>
                   </div>
 

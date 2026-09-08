@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAccountView,
+  cashAttributionNotice,
   computeAllocation,
   computeKeyIndicators,
   computeTotals,
@@ -24,7 +25,7 @@ function account(p: Partial<SecuritiesAccount> & { id: string }): SecuritiesAcco
     unrealizedPnlEur: "0",
     unrealizedPnlPct: null,
     cashEur: "0",
-    cashAttributed: true,
+    cashAttribution: "ATTRIBUTED",
     liquidationValueEur: "0",
     contributionsEur: "0",
     withdrawalsEur: "0",
@@ -63,7 +64,8 @@ describe("computeTotals", () => {
       [
         position({ assetId: "p1", marketValueEur: "1000" }),
         position({ assetId: "p2", marketValueEur: "500" }),
-      ]
+      ],
+      {}
     );
     expect(t.positionsValueEur).toBe(1500);
     expect(t.cashEur).toBe(250);
@@ -81,13 +83,14 @@ describe("computeTotals", () => {
           marketValueEur: "1250",
           unrealizedPnlEur: "250",
         }),
-      ]
+      ],
+      {}
     );
     expect(t.unrealizedPnlPct).toBeCloseTo(25, 6);
   });
 
   it("ne divise pas par zéro sur un compte vide", () => {
-    const t = computeTotals([account({ id: "a1" })], []);
+    const t = computeTotals([account({ id: "a1" })], [], {});
     expect(t.unrealizedPnlPct).toBeNull();
     expect(t.totalValueEur).toBe(0);
   });
@@ -110,7 +113,8 @@ describe("computeTotals", () => {
           accountType: "CTO",
           marketValueEur: "10000",
         }),
-      ]
+      ],
+      {}
     );
     expect(t.positionsValueEur).toBe(20_000);
     expect(t.positionCount).toBe(2);
@@ -128,8 +132,18 @@ describe("computeTotals", () => {
   it("ajoute une fois la poche d'enveloppe que personne ne porte", () => {
     const t = computeTotals(
       [
-        account({ id: "a1", envelopeType: "CTO", cashEur: "0", cashAttributed: false }),
-        account({ id: "a2", envelopeType: "CTO", cashEur: "0", cashAttributed: false }),
+        account({
+          id: "a1",
+          envelopeType: "CTO",
+          cashEur: "0",
+          cashAttribution: "ENVELOPE_LEVEL",
+        }),
+        account({
+          id: "a2",
+          envelopeType: "CTO",
+          cashEur: "0",
+          cashAttribution: "ENVELOPE_LEVEL",
+        }),
       ],
       [position({ assetId: "p1", marketValueEur: "1000" })],
       { CTO: "5000" }
@@ -155,9 +169,58 @@ describe("computeTotals", () => {
     expect(t.cashEur).toBe(5000);
   });
 
+  /*
+    Le découvert d'enveloppe : mesure de référence du chantier.
+
+    Deux CTO et une poche de −1 200 €. Le service la jetait (`lte(0)`) alors
+    qu'avec un seul compte elle entrait dans son `cashEur` : le même
+    découvert déplaçait le total de la page de 1 200 € selon le nombre de
+    comptes déclarés.
+  */
+  it("compte une poche négative, et l'annonce", () => {
+    const t = computeTotals(
+      [
+        account({
+          id: "a1",
+          envelopeType: "CTO",
+          cashEur: "0",
+          cashAttribution: "ENVELOPE_LEVEL",
+        }),
+        account({
+          id: "a2",
+          envelopeType: "CTO",
+          cashEur: "0",
+          cashAttribution: "ENVELOPE_LEVEL",
+        }),
+      ],
+      [],
+      { CTO: "-1200" }
+    );
+    expect(t.cashEur).toBe(-1200);
+    expect(t.totalValueEur).toBe(-1200);
+    expect(t.hasUnattributedCash).toBe(true);
+  });
+
+  /*
+    Le bandeau se décide poche par poche, jamais sur leur somme.
+
+    +5 000 € sur le CTO et −5 000 € sur le PEA somment à zéro : deux montants
+    bien réels sont entrés dans le total sans appartenir à aucun compte, et
+    un garde posé sur `unattributedCashEur > 0` les aurait tous deux tus.
+  */
+  it("s'allume sur deux poches opposées dont la somme est nulle", () => {
+    const t = computeTotals(
+      [account({ id: "a1", envelopeType: "CTO", cashEur: "0" })],
+      [],
+      { CTO: "5000", PEA: "-5000" }
+    );
+    expect(t.unattributedCashEur).toBe(0);
+    expect(t.hasUnattributedCash).toBe(true);
+  });
+
   it("n'allume rien quand toute la poche est imputée", () => {
     const t = computeTotals(
-      [account({ id: "a1", cashEur: "300", cashAttributed: true })],
+      [account({ id: "a1", cashEur: "300", cashAttribution: "ATTRIBUTED" })],
       [],
       {}
     );
@@ -180,7 +243,7 @@ describe("splitByEnvelope", () => {
       accounts,
       positions,
       {},
-      computeTotals(accounts, positions)
+      computeTotals(accounts, positions, {})
     );
     expect(split.map((s) => s.envelopeType)).toEqual(["PEA", "CTO"]);
     expect(split[0]!.valueEur).toBe(750);
@@ -201,7 +264,7 @@ describe("splitByEnvelope", () => {
       accounts,
       positions,
       {},
-      computeTotals(accounts, positions)
+      computeTotals(accounts, positions, {})
     );
     expect(split).toHaveLength(1);
     expect(split[0]!.accountCount).toBe(2);
@@ -213,7 +276,7 @@ describe("splitByEnvelope", () => {
       account({ id: "a1", envelopeType: "CTO", envelopeLabel: "Compte-Titres" }),
       account({ id: "a2", envelopeType: "PEA" }),
     ];
-    const split = splitByEnvelope(accounts, [], {}, computeTotals(accounts, []));
+    const split = splitByEnvelope(accounts, [], {}, computeTotals(accounts, [], {}));
     expect(split[0]!.envelopeType).toBe("PEA");
   });
 });
@@ -341,7 +404,8 @@ describe("computeAllocation", () => {
     ];
     const totals = computeTotals(
       [account({ id: "a1", cashEur: "150" })],
-      positions
+      positions,
+      {}
     );
     const slices = computeAllocation(positions, totals, label);
     // EQUITY 600, ETF 200, CASH 150 — deux lignes de même catégorie fusionnent.
@@ -352,13 +416,13 @@ describe("computeAllocation", () => {
 
   it("omet les liquidités nulles", () => {
     const positions = [position({ assetId: "p1", marketValueEur: "100" })];
-    const totals = computeTotals([account({ id: "a1" })], positions);
+    const totals = computeTotals([account({ id: "a1" })], positions, {});
     const slices = computeAllocation(positions, totals, label);
     expect(slices.some((s) => s.key === "CASH")).toBe(false);
   });
 
   it("ne renvoie rien plutôt qu'un camembert vide", () => {
-    const totals = computeTotals([], []);
+    const totals = computeTotals([], [], {});
     expect(computeAllocation([], totals, label)).toEqual([]);
   });
 });
@@ -371,7 +435,8 @@ describe("computeKeyIndicators", () => {
     ];
     const totals = computeTotals(
       [account({ id: "a1", cashEur: "200" })],
-      positions
+      positions,
+      {}
     );
     const k = computeKeyIndicators(positions, totals);
     // 600 / 1 000 : la poche de cash dilue bien l'exposition.
@@ -385,7 +450,7 @@ describe("computeKeyIndicators", () => {
       position({ assetId: "p3", marketValueEur: "100" }),
       position({ assetId: "p4", marketValueEur: "100" }),
     ];
-    const totals = computeTotals([account({ id: "a1" })], positions);
+    const totals = computeTotals([account({ id: "a1" })], positions, {});
     const k = computeKeyIndicators(positions, totals);
     expect(k.positionCount).toBe(4);
     expect(k.averageWeightPct).toBeCloseTo(25, 6);
@@ -396,17 +461,46 @@ describe("computeKeyIndicators", () => {
       position({ assetId: "p1", name: "Gros", marketValueEur: "700" }),
       position({ assetId: "p2", name: "Petit", marketValueEur: "300" }),
     ];
-    const totals = computeTotals([account({ id: "a1" })], positions);
+    const totals = computeTotals([account({ id: "a1" })], positions, {});
     const k = computeKeyIndicators(positions, totals);
     expect(k.largestPositionName).toBe("Gros");
     expect(k.largestPositionPct).toBeCloseTo(70, 6);
   });
 
   it("reste défini sur un portefeuille vide", () => {
-    const k = computeKeyIndicators([], computeTotals([], []));
+    const k = computeKeyIndicators([], computeTotals([], [], {}));
     expect(k.positionCount).toBe(0);
     expect(k.averageWeightPct).toBeNull();
     expect(k.equityExposurePct).toBeNull();
     expect(k.largestPositionPct).toBeNull();
+  });
+});
+
+describe("cashAttributionNotice", () => {
+  it("ne dit rien quand il y a un montant à afficher", () => {
+    expect(cashAttributionNotice("ATTRIBUTED")).toBeNull();
+  });
+
+  /*
+    Les deux mentions doivent rester distinctes.
+
+    Elles n'en faisaient qu'une — « non ventilées » — et cette phrase, servie
+    au PEA-PME, accusait d'un échec de ventilation un compte dont l'enveloppe
+    n'a aucune poche à ventiler. Un seul texte pour deux situations, c'était
+    en dire une fausse à chaque fois qu'on disait l'autre.
+  */
+  it("distingue « partagée entre comptes » de « pas de poche du tout »", () => {
+    const partagee = cashAttributionNotice("ENVELOPE_LEVEL")!;
+    const nonSuivie = cashAttributionNotice("NOT_TRACKED")!;
+    expect(partagee.short).not.toBe(nonSuivie.short);
+    expect(partagee.title).not.toBe(nonSuivie.title);
+  });
+
+  it("ne parle pas de ventilation là où il n'y a rien à ventiler", () => {
+    const nonSuivie = cashAttributionNotice("NOT_TRACKED")!;
+    expect(nonSuivie.short).not.toMatch(/ventil/i);
+    expect(nonSuivie.title).not.toMatch(/ventil/i);
+    // Inconnu, pas nul : le texte doit le dire, c'est toute la nuance.
+    expect(nonSuivie.title).toMatch(/inconnu/i);
   });
 });

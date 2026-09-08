@@ -57,6 +57,47 @@ export function isSingleAccountEnvelope(value: string): boolean {
 }
 
 /**
+ * Ce que le compte porte comme espèces, et pourquoi il n'en porte pas.
+ *
+ * Un booléen n'y suffisait pas. `cashAttributed: false` disait à la fois
+ * « une poche existe, on ne sait pas laquelle de ces cartes la détient » et
+ * « aucune poche n'est tenue pour cette enveloppe » — deux situations que
+ * l'écran ne peut pas annoncer de la même façon, et qu'il annonçait pourtant
+ * toutes deux comme un échec de ventilation. Un PEA-PME sans un euro nulle
+ * part affichait « espèces non ventilées » pendant que le bandeau de la page,
+ * lui, restait muet : deux moitiés du même écran se contredisaient.
+ *
+ * C'est la doctrine du dépôt appliquée à la trésorerie : UNKNOWN ≠ ZERO.
+ *
+ * Défini ici et non dans `fiscal-service` : le type traverse l'API jusqu'à
+ * l'écran, et `overview.ts` — pur, sans Prisma — doit pouvoir le nommer sans
+ * importer le service qui en dépend.
+ */
+export type CashAttribution =
+  /**
+   * La poche de l'enveloppe est celle de ce compte, et `cashEur` la porte au
+   * centime. Couvre aussi le solde nul : l'enveloppe est suivie, elle ne
+   * porte rien, et zéro est alors un fait.
+   */
+  | "ATTRIBUTED"
+  /**
+   * Une poche non nulle existe et plusieurs comptes se partagent l'enveloppe.
+   * Son montant est connu à la maille enveloppe — il ressort dans
+   * `unattributedCashByEnvelope` — et inconnu à la maille compte. `cashEur`
+   * vaut zéro ici sans que ce zéro soit un fait : c'est l'absence de réponse.
+   */
+  | "ENVELOPE_LEVEL"
+  /**
+   * Aucune poche n'est tenue pour cette enveloppe : `EnvelopeCash` ne connaît
+   * que `CTO`, `PEA` et `AV`, jamais `PEA_PME`.
+   *
+   * Ce n'est pas « il n'y a pas d'espèces » — un PEA-PME réel a bien un compte
+   * espèces. C'est « nous ne le suivons pas », et l'écran doit le dire ainsi
+   * plutôt que d'afficher un 0,00 € qui passerait pour un relevé.
+   */
+  | "NOT_TRACKED";
+
+/**
  * Enveloppe fiscale (`Asset.accountType`) que porte un compte de ce type.
  *
  * PEA et PEA-PME partagent la valeur `PEA` : `accountType` décrit la **famille
