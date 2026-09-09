@@ -299,6 +299,8 @@ function ContributionHistory({ accountId }: { accountId: string }) {
  * `peaWithdrawalTax` est une fonction pure sans accès Prisma : la simulation
  * n'a donc pas à faire d'aller-retour serveur, et le résultat suit la saisie
  * immédiatement.
+ *
+ * Il ne s'affiche que si l'assiette est complète — voir ci-dessous.
  */
 function WithdrawalSimulator({ account }: { account: AccountRow }) {
   const [amount, setAmount] = useState("");
@@ -312,6 +314,51 @@ function WithdrawalSimulator({ account }: { account: AccountRow }) {
       isMatured: account.maturity.isMatured,
     });
   }, [amount, account]);
+
+  /*
+    Pas de simulation sur une assiette amputée.
+
+    `liquidationValueEur` vaut titres + espèces imputées. Hors `ATTRIBUTED`,
+    la part espèces vaut zéro sans que personne ne l'ait relevée : l'assiette
+    est alors un minorant, et les deux sorties du simulateur sont fausses,
+    pas seulement incomplètes.
+
+    Mesuré sur 20 000 € de titres, 5 000 € d'espèces non suivies et 22 000 €
+    de versements : le gain réel est de +3 000 €, le calcul en trouve −2 000 €,
+    donc un gain imposable ramené à 0 et un impôt nul. Et un retrait de
+    22 000 €, que la trésorerie couvre, est refusé par « Montant supérieur à
+    la valeur du plan » (`pea.ts`).
+
+    Contrairement à ce qu'affirmait le commentaire de D31 sur
+    `liquidationValueEur`, ce cas atteint bien le PEA et le PEA-PME : leur
+    unicité par personne écarte `ENVELOPE_LEVEL`, pas `NOT_TRACKED`.
+
+    Rien n'autorise à deviner la poche manquante. On dit ce qui manque et
+    comment le rendre calculable.
+  */
+  const assietteIncomplete = cashAttributionNotice(account.cashAttribution);
+  if (assietteIncomplete) {
+    return (
+      <div
+        className="mt-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/20 p-2.5"
+        data-testid="securities-withdrawal-simulator"
+        data-cash-attribution={account.cashAttribution}
+      >
+        <p className="text-meta">Simuler un retrait (€)</p>
+        <p
+          className="mt-1.5 text-[11px] text-[var(--warning)]"
+          data-testid="securities-withdrawal-unavailable"
+        >
+          Simulation indisponible : les espèces de ce plan sont{" "}
+          {assietteIncomplete.short}. Le calcul partirait des seuls titres
+          ({formatCurrency(account.marketValueEur, "EUR")}), une assiette
+          incomplète : il sous-estimerait le gain imposable et refuserait un
+          retrait que la trésorerie couvre. Déclarez la poche d&apos;espèces de
+          l&apos;enveloppe pour l&apos;activer.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -834,6 +881,14 @@ export function SecuritiesTab({ className }: { className?: string }) {
                       <p className="text-sm font-semibold tabular-nums">
                         {formatCurrency(a.liquidationValueEur, "EUR")}
                       </p>
+                      {/* Le même minorant que celui qui coupe la simulation :
+                          hors `ATTRIBUTED`, ce montant ne contient aucune
+                          espèce, et rien ne le disait. */}
+                      {a.cashAttribution !== "ATTRIBUTED" && (
+                        <p className="text-[10px] text-[var(--muted-foreground)]">
+                          titres seuls
+                        </p>
+                      )}
                       <p
                         className={cn(
                           "text-[11px] tabular-nums",

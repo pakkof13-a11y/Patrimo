@@ -44,6 +44,20 @@ describe("invalidatePortfolioView", () => {
     }
   });
 
+  /*
+    La dérive s'est rejouée à l'identique sur la page Titres : le panneau de
+    trésorerie d'enveloppe appelait bien cette fonction après une saisie, mais
+    la clé que lit cette page — `securities` — n'était pas de la liste. Porter
+    une poche CTO de 0 à 5 000 € laissait le total de tête, le camembert, les
+    parts par enveloppe et le bandeau sur leurs valeurs d'avant.
+  */
+  it("couvre la page Titres, dont la poche d'enveloppe entre dans le total", () => {
+    const { qc, invalidateQueries } = faux();
+    invalidatePortfolioView(qc);
+    const cles = invalidateQueries.mock.calls.map((c) => c[0].queryKey[0]);
+    expect(cles).toContain("securities");
+  });
+
   it("invalide chaque clé déclarée, sans en sauter", () => {
     const { qc, invalidateQueries } = faux();
     invalidatePortfolioView(qc);

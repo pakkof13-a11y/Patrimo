@@ -18,6 +18,14 @@ import type { QueryClient } from "@tanstack/react-query";
  * `portfolio-history` reste de la liste : la requête existe encore et d'autres
  * écrans peuvent la lire. L'invalider ne coûte rien, l'omettre coûterait un
  * écran figé de plus.
+ *
+ * `securities` y est entrée pour la même raison, et la dérive s'était rejouée
+ * à l'identique : le panneau de trésorerie d'enveloppe appelait bien cette
+ * fonction après une saisie, mais la clé que lit la page Titres n'y figurait
+ * pas. Porter une poche CTO de 0 à 5 000 € laissait donc le total de tête, le
+ * camembert, les parts par enveloppe et le bandeau sur leurs anciennes
+ * valeurs — la poche entre pourtant dans le total par
+ * `getExplicitCashTotalEur`.
  */
 export const PORTFOLIO_VIEW_QUERY_KEYS = [
   ["holdings"],
@@ -25,6 +33,7 @@ export const PORTFOLIO_VIEW_QUERY_KEYS = [
   ["portfolio-history"],
   ["transactions"],
   ["platforms"],
+  ["securities"],
 ] as const;
 
 /**

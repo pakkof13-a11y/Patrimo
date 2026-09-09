@@ -65,13 +65,19 @@ export async function GET() {
               niveau de l'enveloppe » et « pas de poche pour cette enveloppe »
               ne s'affichent pas de la même façon. Voir `CashAttribution`.
 
-              Le repli `ATTRIBUTED` suit la convention des `?? "0.00"`
-              voisins : il ne décrit pas un état métier mais un compte lu par
-              `listAccounts` et absent du bundle fiscal — deux requêtes, un
-              compte supprimé entre les deux. Annoncer « non ventilé » sur ce
-              cas allumerait un signalement pour une ligne qui n'existe plus.
+              Le repli est `NOT_TRACKED`, et c'est le seul défensible : on ne
+              sait rien de ce compte, et `ATTRIBUTED` aurait affirmé que son
+              `cashEur` à 0,00 € est un relevé. La carte l'aurait affiché
+              comme un solde réel, avec sa part « 0,0 % du compte », et
+              `computeTotals` aurait plié ce zéro fabriqué dans le total de la
+              page — l'inverse exact de la doctrine que tout ce module
+              applique. `NOT_TRACKED` affiche « non suivies ».
+
+              Le cas reste théorique : les deux lectures partent du même
+              `Promise.all` sur la même base. Mais un repli n'a pas à parier
+              sur sa propre improbabilité.
             */
-            cashAttribution: f?.cashAttribution ?? "ATTRIBUTED",
+            cashAttribution: f?.cashAttribution ?? "NOT_TRACKED",
             liquidationValueEur: f?.liquidationValueEur.toFixed(2) ?? "0.00",
 
             contributionsEur: f?.contributionsEur.toFixed(2) ?? "0.00",

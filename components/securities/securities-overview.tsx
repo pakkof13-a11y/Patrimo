@@ -18,19 +18,23 @@ import { AllocationCard } from "@/components/dashboard/terminal-panels";
 import { PendingBackend } from "@/components/ui/pending-backend";
 import { assetCategoryLabel } from "@/app/lib/assets/categories";
 import {
+  allocationNotice,
   buildAccountView,
   cashAttributionNotice,
   computeAllocation,
   computeKeyIndicators,
   computeTotals,
+  isOverviewEmpty,
   num,
   positionWeightPct,
   splitByEnvelope,
+  unattributedPockets,
   type AccountView,
   type SecuritiesAccount,
   type SecuritiesPosition,
   type UnattributedCash,
 } from "@/app/lib/securities/overview";
+import { securitiesEnvelopeLabel } from "@/app/lib/securities/constants";
 import {
   formatCurrency,
   formatDate,
@@ -41,8 +45,15 @@ import {
 type SecuritiesResponse = {
   accounts: SecuritiesAccount[];
   positions: SecuritiesPosition[];
-  /** Poches d'enveloppe qu'aucun compte ne porte — comptées une fois au total. */
-  unattributedCashByEnvelope?: UnattributedCash;
+  /**
+   * Poches d'enveloppe qu'aucun compte ne porte — comptées une fois au total.
+   *
+   * Obligatoire, et c'est le point : la route l'émet toujours. Le rendre
+   * facultatif faisait retomber la page dans le défaut d'avant D30 — poches
+   * absentes du total, bandeau muet, aucun état d'erreur — dès qu'une réponse
+   * en cache d'avant le déploiement passait par là.
+   */
+  unattributedCashByEnvelope: UnattributedCash;
 };
 
 /** Prélèvements sociaux sur les gains — taux en vigueur, source unique. */
@@ -214,6 +225,12 @@ export function SecuritiesOverview({
     () => computeTotals(accounts, positions, unattributedCash),
     [accounts, positions, unattributedCash]
   );
+
+  /* Une ligne par poche, nommée — voir `unattributedPockets`. */
+  const pochesNonImputees = useMemo(
+    () => unattributedPockets(unattributedCash, securitiesEnvelopeLabel),
+    [unattributedCash]
+  );
   const envelopes = useMemo(
     () => splitByEnvelope(accounts, positions, unattributedCash, totals),
     [accounts, positions, unattributedCash, totals]
@@ -236,6 +253,19 @@ export function SecuritiesOverview({
   const allocation = useMemo(
     () => computeAllocation(positions, totals, assetCategoryLabel),
     [positions, totals]
+  );
+  /*
+    Ce que l'anneau ne dessine pas.
+
+    L'anneau répartit le brut long ; l'exposition actions, deux pavés plus
+    loin, se rapporte à la valeur totale, découvert déduit. Sans cette phrase,
+    l'écran posait « 100 % » et « 113,6 % » côte à côte sans dire qu'ils ne
+    comptent pas la même chose. Elle porte les trois nombres qui referment
+    l'écart, et le pavé des indicateurs nomme désormais le sien.
+  */
+  const noticeAnneau = useMemo(
+    () => allocationNotice(totals, (v) => formatCurrency(v, "EUR")),
+    [totals]
   );
   const indicators = useMemo(
     () => computeKeyIndicators(positions, totals),
@@ -281,7 +311,8 @@ export function SecuritiesOverview({
     );
   }
 
-  if (accounts.length === 0) {
+  /* L'état vide ne vaut que si rien n'est connu — voir `isOverviewEmpty`. */
+  if (isOverviewEmpty(accounts, positions, totals)) {
     return (
       <section
         className="panel p-[var(--pad-card)]"
@@ -389,13 +420,26 @@ export function SecuritiesOverview({
           </p>
         </KpiCard>
 
-        {envelopes.slice(0, 2).map((e) => (
+        {/*
+          Toutes les enveloppes, sans troncature.
+
+          `splitByEnvelope` partitionne le total de la page : chaque composante
+          entre dans exactement une rangée. En tronquer la liste à deux faisait
+          disparaître une enveloppe entière de la bande, sans mention, alors que
+          les parts affichées continuaient de se rapporter au total complet. Un
+          PEA-PME en produit une troisième, et les lignes non rattachées une
+          quatrième.
+
+          Le libellé passe par `securitiesEnvelopeLabel` : le code brut rendait
+          « PEA_PME », souligné compris. Il garde « PEA », et rend
+          « Compte-titres » là où l'ancien commentaire craignait
+          « Compte-Titres Ordinaire ».
+        */}
+        {envelopes.map((e) => (
           <KpiCard
             key={e.envelopeType}
             testId={`skpi-envelope-${e.envelopeType.toLowerCase()}`}
-            /* Sigle en tête de carte : « PEA » et « CTO » se lisent d'un
-               coup d'œil là où « Compte-Titres Ordinaire » remplit la ligne. */
-            label={e.envelopeType}
+            label={securitiesEnvelopeLabel(e.envelopeType)}
             value={formatCurrency(e.valueEur, "EUR")}
           >
             <p className="text-meta">
@@ -435,7 +479,12 @@ export function SecuritiesOverview({
               }))}
               baseCurrency="EUR"
               title="Répartition globale"
-              subtitle="Par classe d'actifs, liquidités comprises"
+              subtitle={
+                noticeAnneau
+                  ? "Par classe d'actifs, titres et liquidités créditrices"
+                  : "Par classe d'actifs, liquidités comprises"
+              }
+              footnote={noticeAnneau ?? undefined}
               showValues
               compact
               toneOf={categoryTone}
@@ -448,6 +497,7 @@ export function SecuritiesOverview({
             <KeyIndicatorsCard
               indicators={indicators}
               accountCount={totals.accountCount}
+              withoutAccountCount={totals.positionsWithoutAccountCount}
             />
           </div>
         </div>
@@ -494,21 +544,37 @@ export function SecuritiesOverview({
               )}
             </dl>
             {/*
-              Le montant, pas « une partie ». Il est connu au centime, et la
-              phrase d'avant promettait qu'il comptait « dans le total » alors
-              qu'il ne comptait nulle part.
+              Une ligne par poche, nommée. D31 avait remplacé « une partie » par
+              le montant ; restait la somme algébrique, qui s'annule : une poche
+              CTO de +5 000 € et une poche PEA de −5 000 € allumaient le drapeau
+              — il se décide poche par poche — pour annoncer « 0,00 € » tout en
+              affirmant que ce montant compte dans le total. Le bandeau se
+              contredisait, et 10 000 € de soldes réels n'étaient nommés nulle
+              part.
             */}
-            {totals.hasUnattributedCash && (
-              <p
+            {pochesNonImputees.length > 0 && (
+              <div
                 className="text-meta mt-[var(--space-3)]"
                 data-testid="securities-cash-warning"
               >
-                Liquidités tenues au niveau de l&apos;enveloppe :{" "}
-                {formatCurrency(totals.unattributedCashEur, "EUR")}. Elles
-                comptent une fois dans le total ci-dessus et n&apos;apparaissent
-                sur aucune carte de compte — plusieurs comptes se partagent
-                l&apos;enveloppe, ou aucun n&apos;est encore déclaré.
-              </p>
+                <p>
+                  Liquidités tenues au niveau de l&apos;enveloppe. Elles comptent
+                  une fois dans le total ci-dessus et n&apos;apparaissent sur
+                  aucune carte de compte — plusieurs comptes se partagent
+                  l&apos;enveloppe, ou aucun n&apos;est encore déclaré.
+                </p>
+                <dl className="num mt-[var(--space-2)] space-y-[var(--space-px)]">
+                  {pochesNonImputees.map((poche) => (
+                    <div
+                      key={poche.envelope}
+                      className="flex justify-between gap-[var(--space-2)]"
+                    >
+                      <dt>{poche.label}</dt>
+                      <dd>{formatCurrency(poche.montantEur, "EUR")}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
             )}
           </section>
 
@@ -579,9 +645,28 @@ function AccountCard({
       </header>
 
       <div className="grid grid-cols-3 gap-[var(--space-3)] px-[var(--pad-card)]">
+        {/*
+          Un total qui contient une inconnue n'est pas un total.
+
+          Hors `ATTRIBUTED`, la poche vaut « 0 » côté service sans que personne
+          ne l'ait relevée : cette tuile affichait alors la valeur des seuls
+          titres sous l'étiquette « Valeur totale ». Le tiret le dit, et le
+          rappel donne le morceau qui, lui, est connu — la carte reste utile.
+        */}
         <Metric
           label="Valeur totale"
-          value={formatCurrency(view.valueEur, "EUR")}
+          value={
+            view.valueEur == null ? (
+              <span title={cashNotice?.title}>—</span>
+            ) : (
+              formatCurrency(view.valueEur, "EUR")
+            )
+          }
+          hint={
+            view.valueEur == null
+                ? `Titres ${formatCurrency(view.positionsValueEur, "EUR")} · espèces ${cashNotice?.short ?? "inconnues"}`
+              : undefined
+          }
         />
         <Metric
           label="Investi"
@@ -602,31 +687,47 @@ function AccountCard({
       <div className="mt-[var(--space-4)] grid grid-cols-2 gap-[var(--space-3)] border-t border-[var(--border-subtle)] px-[var(--pad-card)] pt-[var(--space-3)]">
         {/* Un tiret, pas un 0,00 € : hors `ATTRIBUTED`, le compte ne porte
             aucun montant connu, et l'afficher à zéro le ferait passer pour
-            un relevé. L'infobulle dit lequel des deux cas c'est. */}
+            un relevé. Le tiret se décide maintenant sur `view.cashEur`, que
+            `buildAccountView` met à `null` dans ce cas — une poche
+            `ATTRIBUTED` réellement vide garde son 0,00 €, qui est un fait.
+            L'infobulle dit lequel des deux cas d'inconnue c'est. */}
         <Metric
           label="Liquidités"
           value={
-            cashNotice ? (
-              <span title={cashNotice.title}>—</span>
+            view.cashEur == null ? (
+              <span title={cashNotice?.title}>—</span>
             ) : (
               formatCurrency(view.cashEur, "EUR")
             )
           }
           hint={
-            cashNotice
-              ? cashNotice.short
+            view.cashEur == null
+              ? cashNotice?.short
               : view.cashSharePct != null
                 ? `${pct(view.cashSharePct, 1)} du compte`
                 : undefined
           }
         />
+        {/* Le pouvoir d'achat d'un compte-titres *est* sa trésorerie : il
+            hérite donc de son inconnue. Annoncer « 0,00 € » à qui a
+            peut-être 5 000 € en caisse, c'est lui interdire d'acheter sur
+            la foi d'un chiffre que personne n'a relevé. Le disponible d'un
+            PEA, lui, vient du plafond : il reste connu et s'affiche. */}
         <Metric
           label={view.investableLabel}
-          value={formatCurrency(view.investableEur, "EUR")}
+          value={
+            view.investableEur == null ? (
+              <span title={cashNotice?.title}>—</span>
+            ) : (
+              formatCurrency(view.investableEur, "EUR")
+            )
+          }
           hint={
             view.investableIsCapped
               ? "Marge restante sous le plafond réglementaire"
-              : undefined
+              : view.investableEur == null
+                ? cashNotice?.short
+                : undefined
           }
         />
       </div>
@@ -883,9 +984,12 @@ function CumulativePerformance() {
 function KeyIndicatorsCard({
   indicators,
   accountCount,
+  withoutAccountCount,
 }: {
   indicators: ReturnType<typeof computeKeyIndicators>;
   accountCount: number;
+  /** Lignes qu'aucun compte déclaré ne porte — comptées dans `positionCount`. */
+  withoutAccountCount: number;
 }) {
   return (
     <section
@@ -900,13 +1004,40 @@ function KeyIndicatorsCard({
           <div className="num mt-[var(--space-1)] text-[length:var(--text-lg)] font-medium text-[var(--foreground)]">
             {pct(indicators.equityExposurePct, 1)}
           </div>
+          {/*
+            Le rapport, écrit. C'est un levier : il passe 100 % quand un
+            découvert finance des titres, et il ne se lit qu'en connaissant
+            son dénominateur — la valeur totale, découvert déduit, quand
+            l'anneau voisin répartit le brut long. Les deux pourcentages ne
+            se contredisent plus dès lors que chacun dit ce qu'il rapporte à
+            quoi ; la notice sous l'anneau porte l'autre moitié.
+          */}
+          {indicators.equityExposurePct != null && (
+            <p className="text-meta mt-[var(--space-px)]">
+              {formatCurrency(indicators.equityValueEur, "EUR")} de titres sur
+              {" "}
+              {formatCurrency(indicators.exposureBaseEur, "EUR")} de valeur
+              totale
+            </p>
+          )}
           <ShareBar value={indicators.equityExposurePct} />
         </div>
 
+        {/*
+          Le numérateur compte toutes les lignes, rattachées ou non ; le
+          dénominateur ne compte que les comptes déclarés. « 12 lignes · sur
+          0 compte » se lisait comme une erreur. Le reste hors compte est dit
+          plutôt que laissé à deviner.
+        */}
         <Metric
           label="Nombre de lignes"
           value={String(indicators.positionCount)}
-          hint={`Sur ${accountCount} compte${accountCount > 1 ? "s" : ""}`}
+          hint={
+            `Sur ${accountCount} compte${accountCount > 1 ? "s" : ""}` +
+            (withoutAccountCount > 0
+              ? `, dont ${withoutAccountCount} hors compte`
+              : "")
+          }
         />
 
         <Metric

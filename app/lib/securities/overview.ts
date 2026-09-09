@@ -143,7 +143,29 @@ export type OverviewTotals = {
   totalValueEur: number;
   /** Valeur des seules lignes détenues, hors poche de liquidités. */
   positionsValueEur: number;
+  /**
+   * Somme algébrique des espèces : soldes de compte imputés et poches
+   * d'enveloppe, créditeurs comme débiteurs. C'est la grandeur qui entre dans
+   * `totalValueEur`, et c'est la bonne — un découvert diminue bien ce que vaut
+   * le portefeuille.
+   */
   cashEur: number;
+  /**
+   * Les espèces créditrices seules, et les débitrices seules.
+   *
+   * Un anneau de répartition ne peut pas porter de part négative : sa surface
+   * répartit ce qui existe. Il lui faut donc la partie créditrice, pendant que
+   * le découvert se dit en toutes lettres sous lui (doctrine D29, la même que
+   * les passifs du tableau de bord).
+   *
+   * Les distinguer répare aussi une soustraction muette : avec une poche PEA
+   * de +500 € et un CTO à −1 200 €, la somme algébrique vaut −700 € et la part
+   * « Liquidités » disparaissait de l'anneau — 500 € bien réels, effacés par un
+   * découvert qui n'a rien à voir avec eux.
+   */
+  cashPositiveEur: number;
+  /** Négatif ou nul. `cashPositiveEur + cashNegativeEur === cashEur`. */
+  cashNegativeEur: number;
   costBasisEur: number;
   unrealizedPnlEur: number;
   /** Rapporté au capital engagé, `null` si rien n'a été investi. */
@@ -209,6 +231,14 @@ export function computeTotals(
   const unattributedCashEur = sumUnattributedCash(unattributedCash);
   let positionsValueEur = 0;
   let cashEur = unattributedCashEur;
+  let cashPositiveEur = 0;
+  let cashNegativeEur = 0;
+  /** Range un solde d'espèces du bon côté — voir `cashPositiveEur`. */
+  const ventile = (montant: number) => {
+    if (montant > 0) cashPositiveEur += montant;
+    else cashNegativeEur += montant;
+  };
+  for (const montant of Object.values(unattributedCash)) ventile(num(montant));
   let costBasisEur = 0;
   let unrealizedPnlEur = 0;
   let contributionsEur = 0;
@@ -226,6 +256,7 @@ export function computeTotals(
     // Seules les espèces imputées à ce compte : la poche non imputable est
     // déjà entrée une fois, plus haut.
     cashEur += num(a.cashEur);
+    ventile(num(a.cashEur));
     contributionsEur += num(a.contributionsEur);
     withdrawalsEur += num(a.withdrawalsEur);
   }
@@ -236,6 +267,8 @@ export function computeTotals(
     totalValueEur: positionsValueEur + cashEur,
     positionsValueEur,
     cashEur,
+    cashPositiveEur,
+    cashNegativeEur,
     costBasisEur,
     unrealizedPnlEur,
     unrealizedPnlPct:
@@ -248,6 +281,68 @@ export function computeTotals(
     unattributedCashEur,
     hasUnattributedCash: hasAnyUnattributedCash(unattributedCash),
   };
+}
+
+/**
+ * L'aperçu n'a-t-il vraiment rien à montrer ?
+ *
+ * Le garde de la page testait `accounts.length === 0` seul, et masquait alors
+ * tout le portefeuille : la page monte l'aperçu en premier et ne déplie la
+ * gestion des comptes que sur demande, si bien que des lignes non rattachées —
+ * l'état ordinaire en cours de saisie — n'étaient visibles nulle part. Une
+ * poche d'enveloppe subissait le même sort, alors que le bandeau du résumé
+ * promet de couvrir le cas « aucun compte n'est encore déclaré ».
+ *
+ * Les trois conditions sont les trois sources de chiffres de la page. Aucune,
+ * et il n'y a effectivement rien à afficher.
+ */
+export function isOverviewEmpty(
+  accounts: SecuritiesAccount[],
+  positions: SecuritiesPosition[],
+  totals: OverviewTotals
+): boolean {
+  return (
+    accounts.length === 0 &&
+    positions.length === 0 &&
+    !totals.hasUnattributedCash
+  );
+}
+
+export type UnattributedPocket = {
+  envelope: string;
+  label: string;
+  montantEur: number;
+};
+
+/**
+ * Les poches non imputées, une par une, nommées et triées.
+ *
+ * Le bandeau du résumé affichait `totals.unattributedCashEur`, la somme
+ * algébrique. Avec une poche CTO de +5 000 € et une poche PEA de −5 000 €, le
+ * drapeau s'allume — `hasAnyUnattributedCash` se décide poche par poche — mais
+ * la somme vaut zéro : le bandeau annonçait « 0,00 € » tout en affirmant que
+ * ce montant comptait dans le total. Il se contredisait, et 10 000 € de soldes
+ * bien réels n'étaient nommés nulle part.
+ *
+ * L'API sert `unattributedCashByEnvelope` par enveloppe précisément pour qu'on
+ * puisse les nommer ; les ré-agréger défaisait ce travail.
+ *
+ * Les poches à zéro sont écartées : elles existent en base sans rien porter,
+ * et une ligne « PEA 0,00 € » ne dit rien à personne. C'est le même critère
+ * que le drapeau, au signe près — les deux restent donc d'accord.
+ */
+export function unattributedPockets(
+  cash: UnattributedCash,
+  labelOf: (envelope: string) => string
+): UnattributedPocket[] {
+  return Object.entries(cash)
+    .map(([envelope, montant]) => ({
+      envelope,
+      label: labelOf(envelope),
+      montantEur: num(montant),
+    }))
+    .filter((p) => p.montantEur !== 0)
+    .sort((a, b) => a.label.localeCompare(b.label, "fr"));
 }
 
 /* ── Répartition par enveloppe ────────────────────────────────────── */
@@ -359,19 +454,33 @@ export type AccountView = {
    */
   title: string;
   subtitle: string;
-  valueEur: number;
+  /**
+   * Titres + liquidités, `null` quand les liquidités sont l'inconnue.
+   *
+   * Hors `ATTRIBUTED`, `account.cashEur` vaut `"0"` sans que personne n'ait
+   * relevé zéro. L'additionner rendait une valeur de compte qui se présentait
+   * comme un total et n'en était pas un : sur un CTO dont la poche est tenue
+   * par l'enveloppe, la carte affichait les seuls titres sous l'étiquette
+   * « Valeur totale ». `null` force l'écran à le dire.
+   */
+  valueEur: number | null;
+  /** Les seuls titres. Toujours connue, elle : c'est ce qui reste à montrer. */
+  positionsValueEur: number;
   costBasisEur: number;
   unrealizedPnlEur: number;
   unrealizedPnlPct: number | null;
-  cashEur: number;
+  /** Liquidités du compte, `null` hors `ATTRIBUTED` — inconnu, pas zéro. */
+  cashEur: number | null;
   /** Part des liquidités dans la valeur du compte. */
   cashSharePct: number | null;
   /**
    * Ce qu'on peut encore engager. Sur un PEA, le plafond réglementaire borne
    * les versements : le disponible est la marge restante, pas le cash. Sur un
-   * compte-titres, rien ne plafonne — le pouvoir d'achat est le cash.
+   * compte-titres, rien ne plafonne — le pouvoir d'achat est le cash, donc
+   * `null` quand ce cash est inconnu : annoncer « 0,00 € » de pouvoir d'achat
+   * à qui a peut-être 5 000 € en caisse est un contresens.
    */
-  investableEur: number;
+  investableEur: number | null;
   investableLabel: string;
   /** true si `investableEur` vient du plafond et non de la trésorerie. */
   investableIsCapped: boolean;
@@ -384,8 +493,15 @@ export function buildAccountView(
   opts?: { topCount?: number }
 ): AccountView {
   const topCount = opts?.topCount ?? 5;
-  const value = num(account.marketValueEur) + num(account.cashEur);
-  const cash = num(account.cashEur);
+  const titres = num(account.marketValueEur);
+  /*
+    Le pivot de toute la carte : la poche est-elle relevée ?
+
+    C'est l'attribution qui tranche, jamais le montant. Un compte `ATTRIBUTED`
+    à poche vide vaut zéro euro, et ce zéro-là est un fait qui s'affiche.
+  */
+  const cash = account.cashAttribution === "ATTRIBUTED" ? num(account.cashEur) : null;
+  const value = cash == null ? null : titres + cash;
   const capped = account.room != null;
 
   const held = positions
@@ -398,12 +514,15 @@ export function buildAccountView(
     title: account.platformName || account.envelopeLabel,
     subtitle: account.envelopeLabel || account.envelopeType,
     valueEur: value,
+    positionsValueEur: titres,
     costBasisEur: num(account.costBasisEur),
     unrealizedPnlEur: num(account.unrealizedPnlEur),
     unrealizedPnlPct:
       account.unrealizedPnlPct != null ? num(account.unrealizedPnlPct) : null,
     cashEur: cash,
-    cashSharePct: value > 0 ? (cash / value) * 100 : null,
+    cashSharePct:
+      cash != null && value != null && value > 0 ? (cash / value) * 100 : null,
+    // Le plafond, lui, ne dépend pas de la poche : il reste connu.
     investableEur: capped
       ? Math.max(0, num(account.room!.remainingEur))
       : cash,
@@ -442,6 +561,19 @@ export type AllocationSlice = {
  * Le cash apparaît comme une part à part entière : une allocation qui
  * l'ignorerait afficherait « 100 % actions » sur un compte dont la moitié
  * dort en liquidités, ce qui est précisément l'information qu'on cherche.
+ *
+ * **Ce que l'anneau répartit, et ce qu'il ne répartit pas.** Il répartit le
+ * brut long — les titres et les espèces créditrices — et ses parts somment à
+ * 100 % de cette base. Un découvert n'y entre pas : une partition n'a pas de
+ * part négative, et l'y forcer donnerait un anneau plein étiqueté « 113,6 % ».
+ * Il se lit sous l'anneau, chiffré, avec la valeur nette qu'il produit :
+ * `allocationNotice` écrit cette phrase, et l'exposition actions, plus loin,
+ * nomme son propre dénominateur. Les deux pourcentages ne se contredisent
+ * plus, ils répondent à deux questions dont chacune dit laquelle.
+ *
+ * La part de liquidités part de `cashPositiveEur` et non de `cashEur` : la
+ * somme algébrique laissait un découvert d'une enveloppe effacer la trésorerie
+ * d'une autre.
  */
 export function computeAllocation(
   positions: SecuritiesPosition[],
@@ -458,11 +590,11 @@ export function computeAllocation(
     else byKey.set(key, { key, label: labelOf(key), valueEur: value, sharePct: 0 });
   }
 
-  if (totals.cashEur > 0) {
+  if (totals.cashPositiveEur > 0) {
     byKey.set("CASH", {
       key: "CASH",
       label: "Liquidités",
-      valueEur: totals.cashEur,
+      valueEur: totals.cashPositiveEur,
       sharePct: 0,
     });
   }
@@ -476,14 +608,62 @@ export function computeAllocation(
   return out;
 }
 
+/**
+ * La base de l'anneau : ce que ses parts somment.
+ *
+ * Titres plus espèces créditrices. Différente de `totalValueEur` dès qu'il
+ * existe un découvert, et c'est tout le sujet de `allocationNotice`.
+ */
+export function allocationBaseEur(totals: OverviewTotals): number {
+  return totals.positionsValueEur + totals.cashPositiveEur;
+}
+
+/**
+ * Ce que l'anneau ne peut pas dessiner, dit en toutes lettres.
+ *
+ * `null` quand il n'y a rien à signaler — sans découvert, la base de l'anneau
+ * est la valeur totale et les deux pourcentages de l'écran partagent déjà leur
+ * dénominateur.
+ *
+ * Sinon la phrase porte les trois nombres qui permettent de refaire le calcul
+ * à la main : le découvert, la base répartie, la valeur nette. C'est la
+ * doctrine des passifs du tableau de bord (D29), appliquée ici : hors de
+ * l'aire, sous les parts qu'elle explique.
+ */
+export function allocationNotice(
+  totals: OverviewTotals,
+  formatEur: (value: number) => string
+): string | null {
+  if (totals.cashNegativeEur >= 0) return null;
+  return (
+    `Découvert de ${formatEur(totals.cashNegativeEur)}, hors de l'anneau : ` +
+    `une part ne peut pas être négative. L'anneau répartit ` +
+    `${formatEur(allocationBaseEur(totals))} de titres et de liquidités ` +
+    `créditrices ; valeur totale, découvert déduit : ` +
+    `${formatEur(totals.totalValueEur)}.`
+  );
+}
+
 /* ── Indicateurs clés ─────────────────────────────────────────────── */
 
 /** Catégories considérées comme une exposition au risque actions. */
 const EQUITY_LIKE = new Set(["EQUITY", "ETF", "FUND", "REIT"]);
 
 export type KeyIndicators = {
-  /** Part des lignes actions/ETF/fonds dans la valeur totale des enveloppes. */
+  /**
+   * Part des lignes actions/ETF/fonds dans la valeur totale des enveloppes.
+   *
+   * Le dénominateur est `totalValueEur`, découvert déduit : c'est une mesure
+   * de levier, et elle passe légitimement 100 % quand un découvert finance des
+   * titres. L'anneau, lui, répartit le brut long. Deux dénominateurs, deux
+   * questions — d'où `equityValueEur` et `exposureBaseEur` ci-dessous, que
+   * l'écran affiche pour que le rapprochement se fasse sans deviner.
+   */
   equityExposurePct: number | null;
+  /** Numérateur de `equityExposurePct`. */
+  equityValueEur: number;
+  /** Dénominateur de `equityExposurePct` — `totals.totalValueEur`. */
+  exposureBaseEur: number;
   positionCount: number;
   /** 100 / nombre de lignes — repère de concentration, pas une moyenne pondérée. */
   averageWeightPct: number | null;
@@ -514,6 +694,8 @@ export function computeKeyIndicators(
 
   return {
     equityExposurePct: total > 0 ? (equity / total) * 100 : null,
+    equityValueEur: equity,
+    exposureBaseEur: total,
     positionCount: count,
     averageWeightPct: count > 0 ? 100 / count : null,
     largestPositionPct: total > 0 && largest > 0 ? (largest / total) * 100 : null,

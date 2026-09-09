@@ -1,15 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  allocationBaseEur,
+  allocationNotice,
   buildAccountView,
   cashAttributionNotice,
   computeAllocation,
   computeKeyIndicators,
   computeTotals,
+  isOverviewEmpty,
   positionWeightPct,
   splitByEnvelope,
+  unattributedPockets,
   type SecuritiesAccount,
   type SecuritiesPosition,
 } from "@/app/lib/securities/overview";
+import { securitiesEnvelopeLabel } from "@/app/lib/securities/constants";
 
 function account(p: Partial<SecuritiesAccount> & { id: string }): SecuritiesAccount {
   return {
@@ -502,5 +507,249 @@ describe("cashAttributionNotice", () => {
     expect(nonSuivie.title).not.toMatch(/ventil/i);
     // Inconnu, pas nul : le texte doit le dire, c'est toute la nuance.
     expect(nonSuivie.title).toMatch(/inconnu/i);
+  });
+});
+
+/* ── D37 ① — l'aperçu ne se tait que s'il n'a rien ──────────────── */
+
+describe("isOverviewEmpty", () => {
+  it("se tait quand il n'y a ni compte, ni ligne, ni poche", () => {
+    expect(isOverviewEmpty([], [], computeTotals([], [], {}))).toBe(true);
+  });
+
+  /*
+    Le cas d'arrivée : trois lignes CTO saisies, aucun compte déclaré.
+
+    La page monte l'aperçu en premier et ne déplie la gestion des comptes que
+    sur demande : un état vide ici, et ces lignes n'étaient visibles nulle
+    part sur l'écran d'arrivée.
+  */
+  it("montre l'aperçu sur des lignes que ne porte aucun compte déclaré", () => {
+    const positions = [
+      position({ assetId: "p1", securitiesAccountId: null, accountType: "CTO", marketValueEur: "1000" }),
+      position({ assetId: "p2", securitiesAccountId: null, accountType: "CTO", marketValueEur: "2000" }),
+      position({ assetId: "p3", securitiesAccountId: null, accountType: "CTO", marketValueEur: "3000" }),
+    ];
+    const totals = computeTotals([], positions, {});
+    expect(isOverviewEmpty([], positions, totals)).toBe(false);
+    // Et le total qu'il affichera n'est pas vide non plus.
+    expect(totals.totalValueEur).toBe(6000);
+  });
+
+  it("montre l'aperçu sur une poche d'enveloppe sans aucun compte", () => {
+    const totals = computeTotals([], [], { CTO: "5000" });
+    expect(isOverviewEmpty([], [], totals)).toBe(false);
+  });
+
+  /*
+    Une poche à zéro n'allume pas le drapeau et ne suffit pas à sortir de
+    l'état vide : il n'y a rien à montrer, et une carte vide vaut mieux
+    qu'un écran qui prétend porter quelque chose.
+  */
+  it("reste muet sur une poche déclarée à zéro", () => {
+    expect(isOverviewEmpty([], [], computeTotals([], [], { CTO: "0" }))).toBe(true);
+  });
+});
+
+/* ── D37 ② — le bandeau nomme chaque poche ──────────────────────── */
+
+describe("unattributedPockets", () => {
+  /*
+    La mesure du chantier : +5 000 € d'un côté, −5 000 € de l'autre.
+
+    La somme algébrique vaut zéro et le bandeau annonçait « 0,00 € » tout en
+    affirmant que ce montant comptait dans le total. Deux lignes, deux
+    montants, et 10 000 € qui cessent d'être invisibles.
+  */
+  it("rend une ligne par poche, deux poches opposées comprises", () => {
+    const poches = unattributedPockets(
+      { CTO: "5000", PEA: "-5000" },
+      securitiesEnvelopeLabel
+    );
+    // Triées sur le libellé : « Compte-titres » avant « PEA ».
+    expect(poches.map((p) => [p.label, p.montantEur])).toEqual([
+      ["Compte-titres", 5000],
+      ["PEA", -5000],
+    ]);
+    // Et la somme, elle, ne dit rien : c'est bien pour ça qu'on ne l'affiche plus.
+    expect(computeTotals([], [], { CTO: "5000", PEA: "-5000" }).unattributedCashEur).toBe(0);
+  });
+
+  it("nomme l'enveloppe plutôt que son code", () => {
+    const poches = unattributedPockets({ PEA_PME: "300" }, securitiesEnvelopeLabel);
+    expect(poches[0]!.label).toBe("PEA-PME");
+    expect(poches[0]!.envelope).toBe("PEA_PME");
+  });
+
+  it("écarte les poches sans montant, comme le drapeau", () => {
+    expect(unattributedPockets({ CTO: "0" }, securitiesEnvelopeLabel)).toEqual([]);
+    expect(computeTotals([], [], { CTO: "0" }).hasUnattributedCash).toBe(false);
+  });
+
+  it("trie sur le libellé, pas sur le code", () => {
+    const poches = unattributedPockets(
+      { PEA_PME: "1", CTO: "2", PEA: "3" },
+      securitiesEnvelopeLabel
+    );
+    expect(poches.map((p) => p.label)).toEqual(["Compte-titres", "PEA", "PEA-PME"]);
+  });
+});
+
+/* ── D37 ③ — ce qui dépend d'une poche inconnue n'est pas zéro ──── */
+
+describe("buildAccountView — trésorerie inconnue", () => {
+  /*
+    Hors `ATTRIBUTED`, `cashEur` vaut « 0 » côté service sans que personne ne
+    l'ait relevé. Trois grandeurs en dépendaient et l'affichaient comme un
+    fait : les liquidités, la valeur du compte, le pouvoir d'achat.
+  */
+  it("ne rend ni liquidités, ni valeur, ni pouvoir d'achat quand la poche n'est pas suivie", () => {
+    const v = buildAccountView(
+      account({
+        id: "a1",
+        envelopeType: "CTO",
+        marketValueEur: "20000",
+        cashEur: "0",
+        cashAttribution: "NOT_TRACKED",
+        room: null,
+      }),
+      []
+    );
+    expect(v.cashEur).toBeNull();
+    expect(v.valueEur).toBeNull();
+    expect(v.investableEur).toBeNull();
+    expect(v.cashSharePct).toBeNull();
+    // Les titres, eux, sont connus : la carte garde de quoi être utile.
+    expect(v.positionsValueEur).toBe(20000);
+  });
+
+  it("en dit autant d'une poche tenue au niveau de l'enveloppe", () => {
+    const v = buildAccountView(
+      account({ id: "a1", envelopeType: "CTO", cashAttribution: "ENVELOPE_LEVEL", room: null }),
+      []
+    );
+    expect(v.cashEur).toBeNull();
+    expect(v.investableEur).toBeNull();
+  });
+
+  /*
+    Le pivot est l'attribution, jamais le montant : une poche relevée à zéro
+    est un fait, et un fait s'affiche.
+  */
+  it("affiche bien un zéro relevé", () => {
+    const v = buildAccountView(
+      account({ id: "a1", envelopeType: "CTO", marketValueEur: "1000", cashEur: "0", cashAttribution: "ATTRIBUTED", room: null }),
+      []
+    );
+    expect(v.cashEur).toBe(0);
+    expect(v.valueEur).toBe(1000);
+    expect(v.investableEur).toBe(0);
+  });
+
+  /*
+    Le plafond d'un PEA ne dépend pas de la poche : il reste connu, et le
+    disponible avec lui.
+  */
+  it("garde le disponible d'un PEA plafonné, poche inconnue ou non", () => {
+    const v = buildAccountView(
+      account({
+        id: "a1",
+        cashAttribution: "NOT_TRACKED",
+        room: {
+          ownCapEur: "150000",
+          contributionsEur: "148750",
+          combinedContributionsEur: "148750",
+          remainingEur: "1250",
+          overCapEur: "0",
+          usedPct: "99.17",
+          isOverCap: false,
+          bindingCap: "OWN",
+        },
+      }),
+      []
+    );
+    expect(v.investableEur).toBe(1250);
+    expect(v.cashEur).toBeNull();
+  });
+});
+
+/* ── D37 ⑥ — l'anneau, le levier, et leurs deux dénominateurs ───── */
+
+describe("répartition et découvert", () => {
+  const avecDecouvert = () => {
+    const accounts = [
+      account({ id: "cto", envelopeType: "CTO", marketValueEur: "10000", cashEur: "-1200" }),
+    ];
+    const positions = [position({ assetId: "p1", securitiesAccountId: "cto", category: "EQUITY", marketValueEur: "10000" })];
+    return { accounts, positions, totals: computeTotals(accounts, positions, {}) };
+  };
+
+  it("sépare les espèces créditrices des débitrices sans toucher au total", () => {
+    const { totals } = avecDecouvert();
+    expect(totals.cashEur).toBe(-1200);
+    expect(totals.cashPositiveEur).toBe(0);
+    expect(totals.cashNegativeEur).toBe(-1200);
+    expect(totals.totalValueEur).toBe(8800);
+  });
+
+  /*
+    Le défaut que la somme algébrique cachait : une poche PEA créditrice de
+    500 € disparaissait de l'anneau parce qu'un CTO était à découvert de
+    1 200 € — deux enveloppes qui n'ont rien à voir l'une avec l'autre.
+  */
+  it("n'efface plus une trésorerie créditrice avec le découvert d'une autre enveloppe", () => {
+    const accounts = [account({ id: "cto", envelopeType: "CTO", marketValueEur: "10000", cashEur: "-1200" })];
+    const positions = [position({ assetId: "p1", securitiesAccountId: "cto", category: "EQUITY", marketValueEur: "10000" })];
+    const totals = computeTotals(accounts, positions, { PEA: "500" });
+    expect(totals.cashEur).toBe(-700);
+    expect(totals.cashPositiveEur).toBe(500);
+    const parts = computeAllocation(positions, totals, (c) => c);
+    const liquidites = parts.find((s) => s.key === "CASH");
+    expect(liquidites?.valueEur).toBe(500);
+  });
+
+  /*
+    Une partition n'a pas de part négative. L'anneau répartit donc le brut
+    long — ses parts somment à 100 % de cette base — et le découvert se lit
+    sous lui, chiffré : c'est la doctrine des passifs du tableau de bord.
+  */
+  it("ne dessine aucune part négative et somme bien à 100 %", () => {
+    const { positions, totals } = avecDecouvert();
+    const parts = computeAllocation(positions, totals, (c) => c);
+    expect(parts.every((s) => s.valueEur > 0)).toBe(true);
+    expect(parts.reduce((a, s) => a + s.sharePct, 0)).toBeCloseTo(100, 6);
+    expect(allocationBaseEur(totals)).toBe(10000);
+  });
+
+  it("écrit sous l'anneau les trois nombres qui referment l'écart", () => {
+    const { totals } = avecDecouvert();
+    const phrase = allocationNotice(totals, (v) => `${v}`)!;
+    expect(phrase).toContain("-1200");
+    expect(phrase).toContain("10000");
+    expect(phrase).toContain("8800");
+  });
+
+  it("ne dit rien quand il n'y a pas de découvert : les deux bases coïncident", () => {
+    const accounts = [account({ id: "a1", marketValueEur: "1000", cashEur: "200" })];
+    const positions = [position({ assetId: "p1", marketValueEur: "1000" })];
+    const totals = computeTotals(accounts, positions, {});
+    expect(allocationNotice(totals, (v) => `${v}`)).toBeNull();
+    expect(allocationBaseEur(totals)).toBe(totals.totalValueEur);
+  });
+
+  /*
+    L'exposition reste un levier, rapportée à la valeur nette : 113,6 % est
+    la bonne réponse à « combien de titres pour un euro de patrimoine ». Ce
+    qui manquait, c'est de dire à quoi elle se rapporte — d'où les deux
+    termes, que l'écran affiche.
+  */
+  it("expose ses deux termes pour que 113,6 % se rapproche de 100 %", () => {
+    const { positions, totals } = avecDecouvert();
+    const k = computeKeyIndicators(positions, totals);
+    expect(k.equityValueEur).toBe(10000);
+    expect(k.exposureBaseEur).toBe(8800);
+    expect(k.equityExposurePct).toBeCloseTo(113.636, 3);
+    // Le même numérateur sur la base de l'anneau donne bien les 100 % voisins.
+    expect((k.equityValueEur / allocationBaseEur(totals)) * 100).toBeCloseTo(100, 6);
   });
 });

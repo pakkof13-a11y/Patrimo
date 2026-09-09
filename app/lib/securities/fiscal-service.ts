@@ -74,12 +74,27 @@ export type AccountFiscalSummary = {
   /**
    * Titres + espèces imputées — l'assiette du calcul de retrait.
    *
-   * Complète sous `ATTRIBUTED` seulement. Sous `ENVELOPE_LEVEL` c'est un
-   * minorant : la poche existe mais n'est pas rattachable ici. Le cas ne
-   * concerne que le CTO — PEA et PEA-PME sont uniques par personne
-   * (`SINGLE_ACCOUNT_ENVELOPES`, index partiel en base), donc toujours
-   * `ATTRIBUTED` ou `NOT_TRACKED` — et le CTO ne fait l'objet d'aucune
-   * simulation de retrait.
+   * **Complète sous `ATTRIBUTED` seulement.** Dans les deux autres états la
+   * part espèces vaut zéro sans avoir été relevée, et ce montant est un
+   * minorant.
+   *
+   * Le commentaire précédent n'examinait qu'`ENVELOPE_LEVEL` pour conclure que
+   * le PEA était à l'abri. C'était faux d'une moitié. `ENVELOPE_LEVEL` ne
+   * concerne effectivement que le CTO — PEA et PEA-PME sont uniques par
+   * personne (`SINGLE_ACCOUNT_ENVELOPES`, index partiel en base) — mais
+   * `NOT_TRACKED`, lui, les atteint de plein fouet : c'est l'état de tout plan
+   * dont l'utilisateur n'a pas déclaré la poche d'espèces, et le simulateur de
+   * retrait s'y alimente.
+   *
+   * Mesuré : 20 000 € de titres, 5 000 € d'espèces non suivies, 22 000 € de
+   * versements. Gain réel +3 000 €, gain calculé −2 000 €, donc gain imposable
+   * ramené à 0 et impôt nul ; et un retrait de 22 000 € que la trésorerie
+   * couvre est refusé par « Montant supérieur à la valeur du plan »
+   * (`app/lib/securities/pea.ts`).
+   *
+   * Le calcul n'est donc pas seulement incomplet : il est faux. Ce qui l'entoure
+   * doit le savoir — `WithdrawalSimulator` masque la simulation hors
+   * `ATTRIBUTED` et dit pourquoi, plutôt que de rendre ces chiffres-là.
    */
   liquidationValueEur: Decimal;
   /** Valeur liquidative − versements. Négatif en cas de moins-value. */
