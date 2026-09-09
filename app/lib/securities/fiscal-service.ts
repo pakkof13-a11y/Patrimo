@@ -20,6 +20,7 @@ import { d } from "../money/decimal";
 import { prisma } from "../prisma";
 import { owned, wroteOne } from "../db/tenant-scope";
 import { getAssetValues } from "../portfolio/asset-values";
+import { convertToEurSync, getEurRates } from "../market/fx";
 import {
   securitiesEnvelopeLabel,
   type CashAttribution,
@@ -340,15 +341,38 @@ export async function getSecuritiesFiscalBundle(
   });
 
   const allAssetIds = accounts.flatMap((a) => a.assets.map((x) => x.id));
-  const [values, envelopeRows] = await Promise.all([
+  const [values, envelopeRows, rates] = await Promise.all([
     allAssetIds.length > 0
       ? getAssetValues(userId, allAssetIds)
       : Promise.resolve(new Map()),
     prisma.envelopeCash.findMany({ where: { userId } }),
+    getEurRates(),
   ]);
 
+  /*
+    La poche se convertit, elle ne se relabellise pas.
+
+    `EnvelopeCash` porte un `balance` **et** une `currency` — le panneau
+    laisse changer celle du CTO et de l'AV. Cette carte ne lisait que le
+    nominal : une poche CTO de 5 000 USD entrait pour 5 000 dans un `cashEur`
+    dont le nom dit l'unité, et de là dans la valeur liquidative du compte,
+    dans l'assiette d'une simulation de retrait, et — depuis que le bandeau
+    nomme chaque poche — à l'écran, en toutes lettres, suivie d'un « € ».
+
+    Les deux consommateurs de cette carte, `attributeCash` et
+    `unattributedEnvelopeCash`, décident sur les mêmes montants : convertir
+    ici les corrige tous les deux d'un coup, et aucun des deux n'a à
+    connaître les taux.
+
+    Une devise sans taux fait remonter `FxRateUnknownError`, et la route rend
+    son 500 : c'est le troisième état. Ni zéro — la poche existe —, ni le
+    nominal étiqueté euro, qui est le défaut qu'on ferme.
+  */
   const pockets = new Map<string, Decimal>(
-    envelopeRows.map((e) => [e.envelope, d(e.balance.toString())])
+    envelopeRows.map((e) => [
+      e.envelope,
+      d(convertToEurSync(e.balance.toString(), e.currency, rates)),
+    ])
   );
 
   const countByEnvelope = new Map<string, number>();

@@ -38,6 +38,13 @@ vi.mock("@/app/lib/portfolio/asset-values", () => ({
   getAssetValues: (...a: unknown[]) => getAssetValuesMock(...a),
 }));
 
+// Table de taux figée : les poches se convertissent avec leur devise, et
+// `convertToEurSync` reste l'implémentation réelle — seule la table l'est.
+vi.mock("@/app/lib/market/fx", async (importOriginal) => {
+  const reel = await importOriginal<typeof import("@/app/lib/market/fx")>();
+  return { ...reel, getEurRates: async () => ({ EUR: 1, USD: 1.25 }) };
+});
+
 const {
   getSecuritiesFiscalBundle,
   recordContribution,
@@ -85,7 +92,7 @@ describe("getSecuritiesFiscalBundle — sans compte", () => {
   it("rend quand même la poche d'enveloppe quand aucun compte n'est déclaré", async () => {
     accountFindMany.mockResolvedValue([]);
     envelopeCashFindMany.mockResolvedValue([
-      { envelope: "CTO", balance: { toString: () => "5000" } },
+      { envelope: "CTO", balance: { toString: () => "5000" }, currency: "EUR" },
     ]);
     const bundle = await getSecuritiesFiscalBundle(USER, NOW);
     expect(bundle.accounts).toEqual([]);
@@ -149,7 +156,7 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
   it("le PEA étant unique, sa poche lui est imputée intégralement", async () => {
     accountFindMany.mockResolvedValue([account()]);
     envelopeCashFindMany.mockResolvedValue([
-      { envelope: "PEA", balance: { toString: () => "4000" } },
+      { envelope: "PEA", balance: { toString: () => "4000" }, currency: "EUR" },
     ]);
     const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.cashEur.toNumber()).toBe(4_000);
@@ -162,7 +169,7 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
       account({ id: "cto-2", envelopeType: "CTO" }),
     ]);
     envelopeCashFindMany.mockResolvedValue([
-      { envelope: "CTO", balance: { toString: () => "9000" } },
+      { envelope: "CTO", balance: { toString: () => "9000" }, currency: "EUR" },
     ]);
     const bundle = await getSecuritiesFiscalBundle(USER, NOW);
     for (const s of bundle.accounts) {
@@ -196,7 +203,7 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
       account({ id: "cto-2", envelopeType: "CTO" }),
     ]);
     envelopeCashFindMany.mockResolvedValue([
-      { envelope: "CTO", balance: { toString: () => "-1200" } },
+      { envelope: "CTO", balance: { toString: () => "-1200" }, currency: "EUR" },
     ]);
     const bundle = await getSecuritiesFiscalBundle(USER, NOW);
     for (const s of bundle.accounts) expect(s.cashEur.toNumber()).toBe(0);
@@ -208,7 +215,7 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
       account({ id: "cto-1", envelopeType: "CTO" }),
     ]);
     envelopeCashFindMany.mockResolvedValue([
-      { envelope: "CTO", balance: { toString: () => "-1200" } },
+      { envelope: "CTO", balance: { toString: () => "-1200" }, currency: "EUR" },
     ]);
     const bundle = await getSecuritiesFiscalBundle(USER, NOW);
     expect(bundle.accounts[0]!.cashEur.toNumber()).toBe(-1_200);
@@ -224,7 +231,7 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
       account({ id: "cto-2", envelopeType: "CTO" }),
     ]);
     envelopeCashFindMany.mockResolvedValue([
-      { envelope: "CTO", balance: { toString: () => "0" } },
+      { envelope: "CTO", balance: { toString: () => "0" }, currency: "EUR" },
     ]);
     const bundle = await getSecuritiesFiscalBundle(USER, NOW);
     expect(bundle.unattributedCashByEnvelope).toEqual({});
@@ -236,12 +243,47 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
     dire à la carte « on ne sait pas lequel des comptes la détient » sur une
     enveloppe où aucune poche n'existe.
   */
+  /*
+    La poche porte une devise, et cette carte ne lisait que le nominal.
+
+    Un CTO de 5 000 USD entrait pour 5 000 dans un `cashEur` dont le nom dit
+    l'unité — puis dans la valeur liquidative, dans l'assiette d'un retrait,
+    et à l'écran suivi d'un « € ». À 1,25 USD pour un euro, la poche vaut
+    4 000 €.
+  */
+  it("convertit la poche avec sa propre devise", async () => {
+    accountFindMany.mockResolvedValue([account({ id: "cto-1", envelopeType: "CTO" })]);
+    envelopeCashFindMany.mockResolvedValue([
+      { envelope: "CTO", balance: { toString: () => "5000" }, currency: "USD" },
+    ]);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(s!.cashEur.toNumber()).toBe(4_000);
+    expect(s!.cashAttribution).toBe("ATTRIBUTED");
+  });
+
+  /*
+    Le même montant sur l'autre sortie : les deux consommateurs de la carte
+    des poches lisent la même valeur convertie, sans quoi le bandeau et la
+    carte de compte se contrediraient.
+  */
+  it("convertit aussi la poche que le bandeau annonce", async () => {
+    accountFindMany.mockResolvedValue([
+      account({ id: "cto-1", envelopeType: "CTO" }),
+      account({ id: "cto-2", envelopeType: "CTO" }),
+    ]);
+    envelopeCashFindMany.mockResolvedValue([
+      { envelope: "CTO", balance: { toString: () => "5000" }, currency: "USD" },
+    ]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(bundle.unattributedCashByEnvelope.CTO?.toNumber()).toBe(4_000);
+  });
+
   it("le PEA-PME n'a pas de poche dédiée : espèces non suivies", async () => {
     accountFindMany.mockResolvedValue([
       account({ id: "acc-pme", envelopeType: "PEA_PME" }),
     ]);
     envelopeCashFindMany.mockResolvedValue([
-      { envelope: "PEA", balance: { toString: () => "4000" } },
+      { envelope: "PEA", balance: { toString: () => "4000" }, currency: "EUR" },
     ]);
     const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.cashEur.toNumber()).toBe(0);
@@ -284,7 +326,7 @@ describe("getSecuritiesFiscalBundle — valeur liquidative et gain", () => {
       ])
     );
     envelopeCashFindMany.mockResolvedValue([
-      { envelope: "PEA", balance: { toString: () => "5000" } },
+      { envelope: "PEA", balance: { toString: () => "5000" }, currency: "EUR" },
     ]);
 
     const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);

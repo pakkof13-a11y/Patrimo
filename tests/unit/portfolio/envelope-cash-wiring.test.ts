@@ -348,16 +348,46 @@ describe("ce que la route refuse, et comment", () => {
 describe("l'ancre de la poche est lue avant toute écriture", () => {
   /*
     `updatedAt` est la seule date que cette table possède, et c'est sur elle
-    que l'ouverture se pose. Or l'`upsert` qui garantit l'existence de la ligne
-    passe par sa branche `update` quand elle est déjà là, et Prisma réécrit
-    `@updatedAt` à chaque mise à jour. Lire la date après lui la ramènerait au
-    présent : l'ouverture perdrait son ancre, et la poche tout son passé.
+    que l'ouverture se pose. Toute écriture de la ligne la ramène au présent :
+    lire l'ancre après l'une d'elles, c'est la perdre, et la poche perd tout
+    son passé avec.
 
-    Le test porte sur l'ordre des appels, seul fait qui rende la lecture sûre
-    quel que soit le comportement de Prisma sur un `update` vide.
+    La route lisait bien avant, mais appelait ensuite l'`upsert` sans
+    condition — donc un `update: {}` sur une ligne déjà là, et sur un chemin
+    qui pouvait finir en 400. Le remède ne cherche pas à savoir ce que Prisma
+    fait d'un `update` vide : il ne lui en demande plus.
   */
-  it("la lecture précède l'upsert", async () => {
+  it("ne touche pas à la ligne quand elle existe déjà", async () => {
     await PUT(requete({ envelope: "CTO", balance: "5200" }));
+    expect(getOrCreateEnvelopeCash).not.toHaveBeenCalled();
+  });
+
+  /*
+    Le refus arrive dans la transaction, bien après l'endroit où l'`upsert`
+    s'exécutait. Une requête rejetée ne doit rien laisser derrière elle.
+  */
+  it("ne touche à rien non plus quand la requête finit en 400", async () => {
+    findUnique.mockResolvedValue(ligne("5000", { currency: "EUR" }));
+    const res = await PUT(
+      requete({ envelope: "CTO", currency: "USD", balance: "9999" })
+    );
+    expect(res.status).toBe(400);
+    expect(getOrCreateEnvelopeCash).not.toHaveBeenCalled();
+  });
+
+  /*
+    La ligne manquante reste le cas de l'`upsert` : lui seul ferme la course
+    entre deux onglets sur le `@@unique([userId, envelope])`. La lecture le
+    précède quand même — l'ordre est ce qui rend l'ancre sûre.
+  */
+  it("crée la ligne absente, et la lecture le précède", async () => {
+    findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(ligne("5000"));
+
+    await PUT(requete({ envelope: "CTO", balance: "5200" }));
+
+    expect(getOrCreateEnvelopeCash).toHaveBeenCalledTimes(1);
     expect(findUnique.mock.invocationCallOrder[0]).toBeLessThan(
       getOrCreateEnvelopeCash.mock.invocationCallOrder[0]!
     );
@@ -366,8 +396,9 @@ describe("l'ancre de la poche est lue avant toute écriture", () => {
   it("l'ouverture porte cette date-là, pas celle relue après coup", async () => {
     const connuLe = new Date("2026-08-20T10:00:00.000Z");
     eventCount.mockResolvedValue(0);
-    // La ligne lue avant l'écriture porte l'ancre ; celle relue dans la
-    // transaction porte une date déjà réécrite par l'upsert.
+    // La ligne lue avant toute écriture porte l'ancre ; celle relue dans la
+    // transaction pourrait porter une date déjà réécrite. L'ouverture doit
+    // s'en tenir à la première.
     findUnique
       .mockResolvedValueOnce(ligne("5200", { updatedAt: connuLe }))
       .mockResolvedValue(ligne("5200", { updatedAt: new Date() }));
@@ -379,6 +410,94 @@ describe("l'ancre de la poche est lue avant toute écriture", () => {
     };
     expect(ouverture.data.occurredAt).toEqual(connuLe);
     expect(String(ouverture.data.amount)).toBe("5200");
+  });
+});
+
+/*
+  L'ouverture appartient à l'écriture de la ligne, pas à l'écart du jour.
+
+  Elle était enfermée dans `if (maj.count > 0 && affirmeUnSolde)`. Un
+  changement de devise seul écrit pourtant la ligne — donc réécrit son
+  `updatedAt` — sans rien affirmer : le solde y est reconstruit par
+  conversion, l'écart en euros est nul. La poche perdait sa seule ancre
+  sans qu'aucun événement ne la remplace.
+*/
+describe("la poche sans historique s'ouvre dès qu'on écrit sa ligne", () => {
+  /*
+    La mesure du chantier : AV du seed à 5 200 €, aucun événement, bascule
+    en USD. Un seul événement doit naître — l'ouverture — daté du dernier
+    instant où la poche a été connue, et non un apport de 6 500 aujourd'hui.
+  */
+  it("un changement de devise seul ouvre l'histoire au solde d'avant", async () => {
+    const connuLe = new Date("2026-08-20T10:00:00.000Z");
+    eventCount.mockResolvedValue(0);
+    findUnique.mockResolvedValue(
+      ligne("5200", { currency: "EUR", updatedAt: connuLe })
+    );
+
+    const res = await PUT(
+      requete({ envelope: "CTO", currency: "USD", balance: "5200" })
+    );
+    expect(res.status).toBe(200);
+
+    // La ligne bascule bien : 5 200 EUR → 6 500 USD, même valeur en euros.
+    const maj = updateMany.mock.calls[0]![0] as {
+      data: { balance: { toString(): string }; currency: string };
+    };
+    expect(String(maj.data.balance)).toBe("6500");
+    expect(maj.data.currency).toBe("USD");
+
+    // Un seul événement, et c'est l'ouverture : aucun constat, rien n'a bougé.
+    expect(eventCreate).toHaveBeenCalledTimes(1);
+    const ouverture = eventCreate.mock.calls[0]![0] as {
+      data: {
+        occurredAt: Date;
+        amount: unknown;
+        balanceAfter: unknown;
+        currency: string;
+      };
+    };
+    expect(ouverture.data.occurredAt).toEqual(connuLe);
+    /*
+      Le solde d'avant, dans la devise d'avant. `load.ts` convertit chaque
+      événement avec la sienne (`eur(e.amount, e.currency, rates)`) : la
+      valeur en euros de la poche est donc la même de part et d'autre de la
+      bascule, ce qu'une conversion ne fait ni gagner ni perdre.
+    */
+    expect(String(ouverture.data.amount)).toBe("5200");
+    expect(String(ouverture.data.balanceAfter)).toBe("5200");
+    expect(ouverture.data.currency).toBe("EUR");
+  });
+
+  /*
+    Le pendant : une poche qui a déjà un historique n'a rien à ouvrir. C'est
+    ce que vérifiaient déjà les deux contrôles de conversion, avec le
+    `eventCount` par défaut à 1 — dit ici explicitement.
+  */
+  it("n'ouvre rien quand la poche a déjà des événements", async () => {
+    eventCount.mockResolvedValue(1);
+    findUnique.mockResolvedValue(ligne("5200", { currency: "EUR" }));
+
+    await PUT(requete({ envelope: "CTO", currency: "USD", balance: "5200" }));
+
+    expect(eventCreate).not.toHaveBeenCalled();
+  });
+
+  /*
+    Et une ligne neuve n'a rien à ouvrir non plus : le constat qui suit porte
+    alors le solde entier, ce qui est exact.
+  */
+  it("n'ouvre rien sur une poche dont le solde d'avant est nul", async () => {
+    eventCount.mockResolvedValue(0);
+    findUnique.mockResolvedValue(ligne("0"));
+
+    await PUT(requete({ envelope: "CTO", balance: "5200" }));
+
+    expect(eventCreate).toHaveBeenCalledTimes(1);
+    const constat = eventCreate.mock.calls[0]![0] as {
+      data: { amount: unknown };
+    };
+    expect(String(constat.data.amount)).toBe("5200");
   });
 });
 

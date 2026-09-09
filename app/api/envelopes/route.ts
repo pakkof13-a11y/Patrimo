@@ -76,10 +76,29 @@ export async function PUT(req: Request) {
   });
   const connuLe = avantEcriture?.updatedAt ?? null;
 
-  // Garantit l'existence de la ligne (upsert, cf. pockets.ts) avant de la
-  // relire dans la transaction ci-dessous. Sa valeur de retour ne sert plus :
-  // l'état qui compte est celui lu *dans* la transaction, pas celui-ci.
-  await getOrCreateEnvelopeCash(userId, envelope);
+  /*
+    Garantit l'existence de la ligne — et **seulement** si elle manque.
+
+    L'appel était inconditionnel. Sur une ligne déjà là, son `upsert` passait
+    par la branche `update: {}` : une écriture qui ne change rien, sur une
+    table dont la seule date est un `@updatedAt`. Elle s'exécutait avant la
+    transaction, donc avant les gardes — une requête refusée en 400 (solde et
+    devise ensemble) l'avait déjà déclenchée.
+
+    Reste à savoir si Prisma réécrit `@updatedAt` sur un `update` vide. La
+    question ne se pose plus : on ne lui demande plus rien à vide. Le
+    `findUnique` ci-dessus la tranche pour nous et l'appel disparaît sur le
+    chemin courant — une requête de moins, pas une de plus.
+
+    L'`upsert` reste pour la création : c'est lui qui ferme la course entre
+    deux onglets sur le `@@unique([userId, envelope])` (cf. `pockets.ts`).
+    Le cas où la ligne naît entre ce `findUnique` et lui est précisément
+    celui qu'il sait absorber.
+
+    Sa valeur de retour ne sert pas : l'état qui compte est celui relu *dans*
+    la transaction.
+  */
+  if (!avantEcriture) await getOrCreateEnvelopeCash(userId, envelope);
   const f = presentFields(body, parsed.data as Record<string, unknown>) as typeof parsed.data;
 
   /*
@@ -178,17 +197,33 @@ export async function PUT(req: Request) {
         data: { balance, currency },
       });
 
-      if (maj.count > 0 && affirmeUnSolde) {
+      /*
+        Dès que la ligne est écrite — pas seulement quand un solde est affirmé.
+
+        Ce garde portait `&& affirmeUnSolde`, et l'ouverture était enfermée
+        avec le constat. Un changement de devise seul passe pourtant par ici :
+        le solde y est reconstruit par conversion, l'écart en euros est donc
+        nul et `affirmeUnSolde` faux — mais l'`updateMany` ci-dessus a bien
+        écrit la ligne, et réécrit son `@updatedAt` avec elle. La poche
+        perdait alors sa seule ancre sans qu'aucun événement ne la remplace :
+        `buildCashSleeve` la faisait démarrer aujourd'hui, et tout ce qu'elle
+        valait avant disparaissait de la courbe.
+
+        L'ouverture appartient donc à l'écriture de la ligne, pas à l'écart
+        du jour. Le constat, lui, reste conditionné : il n'y a rien à
+        constater quand rien n'a bougé.
+      */
+      if (maj.count > 0) {
         const priorEvents = await tx.envelopeCashEvent.count({
           where: { envelopeCashId: current.id },
         });
 
         /*
-          Premier constat jamais écrit pour cette poche, avec un solde
+          Premier événement jamais écrit pour cette poche, avec un solde
           antérieur non nul : la ligne portait déjà une valeur (seed, saisie
           d'avant ce journal) qu'aucun événement ne relate. Une ouverture la
           pose au dernier instant où elle a été connue — `updatedAt` de la
-          ligne, lu ici avant que l'écriture ci-dessus ne le réécrive, replié
+          ligne, lu avant que l'écriture ci-dessus ne le réécrive, replié
           sur `createdAt` s'il manquait. C'est exactement l'ancre que
           `buildCashSleeve` utilise déjà pour cette poche tant qu'aucun
           événement n'existe (`historical/components.ts`, branche
@@ -199,13 +234,20 @@ export async function PUT(req: Request) {
           solde est apparu, ni l'instant de la saisie, qui l'avancerait au
           présent.
 
-          Sans elle, l'écart du jour — souvent minime — resterait seul
-          événement, et tout ce que la poche valait avant deviendrait de la
-          performance de marché le jour de cette première saisie.
+          Elle porte le solde **d'avant**, dans la devise d'avant : c'est ce
+          qui était su à cette date, et `load.ts` convertit chaque événement
+          avec sa propre devise (`eur(e.amount, e.currency, rates)`). Une
+          bascule de devise laisse donc l'ouverture en euros et la valeur en
+          euros de la poche inchangée de part et d'autre — ce qu'une
+          conversion ne fait ni gagner ni perdre.
+
+          Sans elle, l'écart du jour — souvent minime, parfois nul — resterait
+          seul événement, et tout ce que la poche valait avant deviendrait un
+          apport du jour de cette première saisie.
 
           Un solde antérieur nul n'a rien à ouvrir : la ligne était neuve, et
-          l'écart écrit juste après porte alors le solde entier — c'est le cas
-          que couvre déjà « un premier solde sur une enveloppe vide entre
+          le constat écrit juste après porte alors le solde entier — c'est le
+          cas que couvre déjà « un premier solde sur une enveloppe vide entre
           entièrement en flux ».
         */
         if (priorEvents === 0 && !current.balance.eq(0)) {
@@ -221,17 +263,19 @@ export async function PUT(req: Request) {
           });
         }
 
-        await tx.envelopeCashEvent.create({
-          data: {
-            envelopeCashId: current.id,
-            userId,
-            // L'instant de la saisie : l'API n'en connaît aucun autre.
-            occurredAt: new Date(),
-            balanceAfter: balance,
-            amount: balance.minus(current.balance),
-            currency,
-          },
-        });
+        if (affirmeUnSolde) {
+          await tx.envelopeCashEvent.create({
+            data: {
+              envelopeCashId: current.id,
+              userId,
+              // L'instant de la saisie : l'API n'en connaît aucun autre.
+              occurredAt: new Date(),
+              balanceAfter: balance,
+              amount: balance.minus(current.balance),
+              currency,
+            },
+          });
+        }
       }
 
       return maj;

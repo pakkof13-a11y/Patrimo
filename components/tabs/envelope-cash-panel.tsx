@@ -37,7 +37,17 @@ export function EnvelopeCashPanel({
     queryFn: () =>
       fetchJson<{
         envelopes: Array<{
-          id: string;
+          /*
+            `null` tant que la poche n'existe pas en base.
+
+            Le GET a cessé de créer les trois lignes au passage — une lecture
+            qui écrivait, et dont la seule trace suffisait à déclarer un
+            patrimoine non vierge. `listEnvelopeCash` rend donc les trois
+            enveloppes avec `id: null` pour celles qui n'ont pas encore de
+            ligne ; ce type disait `string` et se trompait. Le champ n'est lu
+            nulle part ici, mais un type faux finit toujours par être cru.
+          */
+          id: string | null;
           envelope: string;
           balance: string;
           currency: string;

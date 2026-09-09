@@ -343,3 +343,69 @@ describe("performance du moteur", () => {
     expect(duree).toBeLessThan(4_000);
   });
 });
+
+/*
+  La mesure de D38, au niveau où elle se voit : la courbe.
+
+  Poche AV du seed, 5 200 €, aucun constat, `updatedAt` au 20 août. On la
+  bascule en USD le 9 septembre : le nominal devient 6 500 USD, sa valeur en
+  euros ne bouge pas, et `updateMany` réécrit `updatedAt` au 9.
+
+  L'écart en euros est nul, donc aucun constat n'est écrit — c'est voulu, un
+  changement d'unité n'est pas un mouvement. Restait que la ligne, elle, avait
+  bien été écrite : sans ouverture, la poche perdait son ancre du 20 août et
+  toute la courbe d'avant le 9 avec elle.
+*/
+describe("bascule de devise seule sur une poche sans constat", () => {
+  /** L'état d'avant D38 : la ligne réécrite, et rien pour l'ancrer. */
+  const sansOuverture = inputs({
+    cashAccounts: [enveloppe("env-av", 5_200, "2026-09-09T11:00:00Z")],
+  });
+
+  /** Ce que la route écrit désormais : une ouverture au solde d'avant. */
+  const avecOuverture = inputs({
+    cashAccounts: [enveloppe("env-av", 5_200, "2026-09-09T11:00:00Z")],
+    cashEvents: [constat("env-av", "2026-08-20T10:00:00Z", 5_200, 5_200)],
+  });
+
+  it("le défaut : la courbe d'avant le jour J est effacée", () => {
+    const e = new PortfolioValuationEngine(sansOuverture);
+    expect(cashAu(e, "2026-08-21")).toBe(0);
+    expect(cashAu(e, "2026-09-08")).toBe(0);
+  });
+
+  it("le défaut : le stock entier arrive en flux le jour de la bascule", () => {
+    const e = new PortfolioValuationEngine(sansOuverture);
+    const j = serie(e, "2026-09-09", "2026-09-09")[0]!;
+    expect(j.cash).toBeCloseTo(5_200, 6);
+    expect(j.flux).toBeCloseTo(5_200, 6);
+  });
+
+  it("avec l'ouverture : la courbe d'avant le jour J est intacte", () => {
+    const e = new PortfolioValuationEngine(avecOuverture);
+    expect(cashAu(e, "2026-08-20")).toBeCloseTo(5_200, 6);
+    expect(cashAu(e, "2026-08-21")).toBeCloseTo(5_200, 6);
+    expect(cashAu(e, "2026-09-08")).toBeCloseTo(5_200, 6);
+  });
+
+  it("avec l'ouverture : aucun flux le jour de la bascule", () => {
+    const e = new PortfolioValuationEngine(avecOuverture);
+    const j = serie(e, "2026-09-09", "2026-09-09")[0]!;
+    expect(j.cash).toBeCloseTo(5_200, 6);
+    // Changer d'unité ne fait entrer ni sortir un euro.
+    expect(j.flux).toBe(0);
+    // Et surtout pas de performance : la valeur n'a pas bougé non plus.
+    expect(j.perf).toBeCloseTo(0, 6);
+  });
+
+  /*
+    L'apport est daté du jour où la poche a été connue, pas du jour de la
+    bascule. C'est ce que dit l'ouverture, et c'est le seul instant que la
+    table possède.
+  */
+  it("l'apport reste daté du 20 août", () => {
+    const e = new PortfolioValuationEngine(avecOuverture);
+    const j = serie(e, "2026-08-20", "2026-08-20")[0]!;
+    expect(j.flux).toBeCloseTo(5_200, 6);
+  });
+});
