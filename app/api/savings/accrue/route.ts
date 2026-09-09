@@ -46,12 +46,35 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({
-      mode: "cron",
-      users: users.length,
-      periodsCredited: totalPeriods,
-      errors,
-    });
+    /*
+      Le statut dit ce que le corps disait déjà.
+
+      Les échecs étaient rapportés dans la réponse — mais avec un 200. Un
+      ordonnanceur ou une sonde qui juge sur le code voyait donc un job
+      perpétuellement vert pendant qu'aucun intérêt n'était crédité. Le corps
+      ne change pas ; c'est le statut qui cessait de le refléter.
+
+      500 quand tout a échoué : le job n'a rien fait, et il doit se voir.
+      207 quand une partie est passée : réessayer l'ensemble n'aurait pas de
+      sens, mais le succès n'est pas complet. 200 seulement si tout est
+      passé.
+    */
+    const status =
+      errors.length === 0
+        ? 200
+        : errors.length >= users.length
+          ? 500
+          : 207;
+
+    return NextResponse.json(
+      {
+        mode: "cron",
+        users: users.length,
+        periodsCredited: totalPeriods,
+        errors,
+      },
+      { status }
+    );
   }
 
   const userId = await requireUserId();

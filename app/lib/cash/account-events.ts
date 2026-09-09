@@ -24,7 +24,9 @@ export type SavingsAccountEventType =
   | "OPENING"
   | "DEPOSIT"
   | "WITHDRAWAL"
-  | "INTEREST";
+  | "INTEREST"
+  /** Le livret change de devise : même nominal, autre unité. */
+  | "REDENOMINATION";
 
 /** Delta signé → DEPOSIT si positif, WITHDRAWAL si négatif. Jamais appelé pour un delta nul. */
 function directionOf(delta: string): "DEPOSIT" | "WITHDRAWAL" {
@@ -122,10 +124,12 @@ export async function recordBankAccountBalanceChange(
   });
 }
 
+/** Cf. `recordBankAccountOpening` — même rôle, même raison de dater. */
 export async function recordSavingsAccountOpening(
   tx: Tx,
   savingsAccountId: string,
   balance: string,
+  currency = "EUR",
   occurredAt: Date = new Date()
 ) {
   await tx.savingsAccountEvent.create({
@@ -134,7 +138,30 @@ export async function recordSavingsAccountOpening(
       type: "OPENING",
       amount: balance,
       balanceAfter: balance,
+      currency,
       occurredAt,
+    },
+  });
+}
+
+/** Cf. `recordBankAccountRedenomination` — même fait, autre modèle. */
+export async function recordSavingsAccountRedenomination(
+  tx: Tx,
+  savingsAccountId: string,
+  balance: string,
+  from: string,
+  to: string,
+  occurredAt: Date = new Date()
+) {
+  await tx.savingsAccountEvent.create({
+    data: {
+      savingsAccountId,
+      type: "REDENOMINATION",
+      amount: "0",
+      balanceAfter: balance,
+      currency: to,
+      occurredAt,
+      notes: `${from} → ${to}`,
     },
   });
 }
@@ -145,6 +172,7 @@ export async function recordSavingsAccountBalanceChange(
   savingsAccountId: string,
   previousBalance: string,
   newBalance: string,
+  currency = "EUR",
   occurredAt: Date = new Date()
 ) {
   const delta = d(newBalance).minus(d(previousBalance));
@@ -155,6 +183,7 @@ export async function recordSavingsAccountBalanceChange(
       type: directionOf(delta.toString()),
       amount: delta.toString(),
       balanceAfter: newBalance,
+      currency,
       occurredAt,
     },
   });
@@ -172,6 +201,7 @@ export async function recordSavingsAccountInterest(
   interestAmount: string,
   balanceAfter: string,
   periodsCredited: number,
+  currency = "EUR",
   occurredAt: Date = new Date()
 ) {
   if (d(interestAmount).lte(0)) return;
@@ -181,6 +211,7 @@ export async function recordSavingsAccountInterest(
       type: "INTEREST",
       amount: interestAmount,
       balanceAfter,
+      currency,
       occurredAt,
       notes:
         periodsCredited > 1

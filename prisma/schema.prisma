@@ -925,10 +925,15 @@ model SavingsAccount {
 model SavingsAccountEvent {
   id               String   @id @default(cuid())
   savingsAccountId String
-  /// OPENING | DEPOSIT | WITHDRAWAL | INTEREST
+  /// OPENING | DEPOSIT | WITHDRAWAL | INTEREST | REDENOMINATION
   type             String
+  /// Delta signé. Nul sur REDENOMINATION : changer d'unité ne fait rien entrer.
   amount           Decimal  @db.Decimal(28, 12)
   balanceAfter     Decimal  @db.Decimal(28, 12)
+  /// Devise du fait, figée ici : le livret peut changer de devise ensuite.
+  /// Cf. BankAccountEvent.currency et EnvelopeCashEvent.currency — sans elle,
+  /// le chargeur reconvertissait tout le passé avec la devise du jour.
+  currency         String   @default("EUR")
   occurredAt       DateTime @default(now())
   notes            String?
   createdAt        DateTime @default(now())

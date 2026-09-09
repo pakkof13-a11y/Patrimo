@@ -346,7 +346,6 @@ export async function loadHistoricalInputs(
     })),
   ];
 
-  const savingsCurrencyById = new Map(savings.map((s) => [s.id, s.currency]));
 
   const cashEvents = [
     /*
@@ -369,15 +368,12 @@ export async function loadHistoricalInputs(
       balanceAfterEur: eur(e.balanceAfter, e.currency, rates),
       type: e.type,
     })),
+    // Même règle que les mouvements bancaires ci-dessus : la devise du fait.
     ...savingsEvents.map((e) => ({
       accountId: e.savingsAccountId,
       occurredAt: e.occurredAt,
-      amountEur: eur(e.amount, savingsCurrencyById.get(e.savingsAccountId), rates),
-      balanceAfterEur: eur(
-        e.balanceAfter,
-        savingsCurrencyById.get(e.savingsAccountId),
-        rates
-      ),
+      amountEur: eur(e.amount, e.currency, rates),
+      balanceAfterEur: eur(e.balanceAfter, e.currency, rates),
       type: e.type,
     })),
     /*

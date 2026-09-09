@@ -26,6 +26,11 @@ export async function GET(
       type: e.type,
       amount: e.amount.toString(),
       balanceAfter: e.balanceAfter.toString(),
+      /*
+        La devise du fait, pas celle du livret aujourd'hui : un livret passé
+        en dollars ne doit pas voir ses anciens montants réétiquetés.
+      */
+      currency: e.currency,
       occurredAt: e.occurredAt.toISOString(),
       notes: e.notes,
     })),

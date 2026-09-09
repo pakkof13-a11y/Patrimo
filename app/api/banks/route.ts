@@ -148,11 +148,14 @@ export async function PUT(req: Request) {
       L'ouverture appartient à l'écriture de la ligne, pas au seul changement
       de solde — même correction qu'en D38 sur les poches d'enveloppe.
 
-      Un compte sans aucun événement (créé avant ce journal, ou par le jeu de
-      démonstration) s'ancre sur `updatedAt`, que toute écriture ramène au
-      présent. Un simple changement de devise suffisait donc à effacer tout
-      son passé de la courbe. L'ouverture le pose au dernier instant où il a
-      été connu, dans la devise qu'il avait alors.
+      Un compte sans aucun événement s'ancre sur `updatedAt`, que toute
+      écriture ramène au présent. Un simple changement de devise suffisait
+      donc à effacer tout son passé de la courbe. L'ouverture le pose au
+      dernier instant où il a été connu, dans la devise qu'il avait alors.
+
+      Ce sont les lignes antérieures au journal, et elles seules : le jeu de
+      démonstration écrit bien une ouverture et quatorze mouvements par
+      compte (`prisma/seed-portfolio.ts`). D39 le laissait entendre, à tort.
     */
     const dejaJournalise = await tx.bankAccountEvent.count({
       where: { bankAccountId: id },

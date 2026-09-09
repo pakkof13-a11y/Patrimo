@@ -144,9 +144,10 @@ describe("l'état de départ est lu dans la transaction, et verrouillé", () => 
 
 describe("le changement de devise ne perd plus le passé du compte", () => {
   /*
-    La mesure du chantier. Compte à 5 200 €, aucun événement — c'est l'état
-    d'un compte créé avant ce journal, ou par le jeu de démonstration —,
-    `updatedAt` au 20 août. On bascule en USD, sans toucher au solde.
+    La mesure du chantier. Compte à 5 200 €, aucun événement — l'état d'un
+    compte antérieur au journal ; le jeu de démonstration, lui, écrit bien une
+    ouverture —, `updatedAt` au 20 août. On bascule en USD, sans toucher au
+    solde.
 
     Sans ouverture, l'`updateMany` ramenait `updatedAt` à aujourd'hui et
     `buildCashSleeve`, faute d'événement, faisait démarrer le compte du jour :
