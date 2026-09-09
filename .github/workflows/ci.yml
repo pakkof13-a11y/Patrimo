@@ -85,6 +85,23 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Le harnais de cascade `.input` (tools/input-cascade/) mesure un rendu
+      # réel : quatre de ses tests demandent un navigateur, et sautent sans lui.
+      # Ce job n'en installait aucun — ils sautaient donc à chaque passe. D33 a
+      # rendu ce saut bruyant, mais un saut annoncé ne garde rien : en l'état,
+      # ce harnais ne protégeait la cascade nulle part en intégration continue.
+      #
+      # Même flaveur que le job E2E, et délibérément : c'est le navigateur
+      # complet qu'ont employé les relevés Windows qui font référence. Le shell
+      # sans interface serait plus léger, mais comparer deux relevés pris sur
+      # deux binaires différents ferait porter au système une divergence qui
+      # viendrait peut-être du binaire.
+      #
+      # Placé après le typecheck : une erreur de types n'a pas à payer le
+      # téléchargement.
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
       - name: Unit tests
         run: npm test
 
