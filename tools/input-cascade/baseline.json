@@ -1333,6 +1333,232 @@
         "light.width": "600px",
         "dark.width": "600px"
       }
+    },
+    "linux": {
+      "input !h-7 w-auto !min-w-0 py-0 pl-1.5 pr-6 text-[11px] tabular-nums": {
+        "light.width": "159px",
+        "dark.width": "159px"
+      },
+      "input !h-7 w-auto !min-w-0 py-0 pl-2 pr-6 text-[11px]": {
+        "light.width": "161px",
+        "dark.width": "161px"
+      },
+      "input !h-7 w-auto py-0 text-[11px]": {
+        "light.width": "151.375px",
+        "dark.width": "151.375px"
+      },
+      "input flex w-full items-center justify-between gap-2 text-left text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input flex-1": {
+        "light.width": "173.375px",
+        "dark.width": "173.375px"
+      },
+      "input h-7 w-full min-w-[8rem] py-0 text-[11px]": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input h-7 w-full min-w-[9rem] py-0 text-[11px]": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input h-8 w-40": {
+        "light.width": "160px",
+        "dark.width": "160px"
+      },
+      "input min-h-[4rem] w-full": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input min-w-[13rem] flex-1": {
+        "light.width": "208px",
+        "dark.width": "208px"
+      },
+      "input min-w-[14rem] flex-1": {
+        "light.width": "224px",
+        "dark.width": "224px"
+      },
+      "input min-w-0 flex-1": {
+        "light.width": "173.375px",
+        "dark.width": "173.375px"
+      },
+      "input min-w-0 flex-1 text-xs": {
+        "light.width": "151.375px",
+        "dark.width": "151.375px"
+      },
+      "input mt-0.5 h-8 w-full text-xs": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input mt-1 flex w-full items-center justify-between gap-2 text-left text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input mt-1 w-24": {
+        "light.width": "96px",
+        "dark.width": "96px"
+      },
+      "input mt-1 w-36": {
+        "light.width": "144px",
+        "dark.width": "144px"
+      },
+      "input mt-1 w-36 tabular-nums": {
+        "light.width": "144px",
+        "dark.width": "144px"
+      },
+      "input mt-1 w-full": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input mt-1 w-full h-8 py-0 text-xs": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input mt-1 w-full sm:w-64": {
+        "light.width": "256px",
+        "dark.width": "256px"
+      },
+      "input mt-1 w-full text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input mt-1.5 w-full": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input mt-2 w-full": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-14 py-1 text-center text-xs font-semibold tabular-nums": {
+        "light.width": "56px",
+        "dark.width": "56px"
+      },
+      "input w-24 text-right text-xs": {
+        "light.width": "96px",
+        "dark.width": "96px"
+      },
+      "input w-28": {
+        "light.width": "112px",
+        "dark.width": "112px"
+      },
+      "input w-32 text-right": {
+        "light.width": "128px",
+        "dark.width": "128px"
+      },
+      "input w-32 text-xs": {
+        "light.width": "128px",
+        "dark.width": "128px"
+      },
+      "input w-36": {
+        "light.width": "144px",
+        "dark.width": "144px"
+      },
+      "input w-auto": {
+        "light.width": "173.375px",
+        "dark.width": "173.375px"
+      },
+      "input w-auto !min-w-[3.25rem] py-1 text-xs font-semibold tabular-nums": {
+        "light.width": "151.375px",
+        "dark.width": "151.375px"
+      },
+      "input w-auto font-semibold": {
+        "light.width": "173.375px",
+        "dark.width": "173.375px"
+      },
+      "input w-auto min-w-[6rem]": {
+        "light.width": "173.375px",
+        "dark.width": "173.375px"
+      },
+      "input w-auto min-w-0 max-w-full py-1.5 text-sm": {
+        "light.width": "160.375px",
+        "dark.width": "160.375px"
+      },
+      "input w-auto py-0.5 text-[10px]": {
+        "light.width": "138.375px",
+        "dark.width": "138.375px"
+      },
+      "input w-auto py-1.5 text-sm": {
+        "light.width": "160.375px",
+        "dark.width": "160.375px"
+      },
+      "input w-auto text-xs": {
+        "light.width": "151.375px",
+        "dark.width": "151.375px"
+      },
+      "input w-full": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full !h-7 py-0 text-[11px]": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full border-0 bg-transparent px-1 py-1 !shadow-none": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full border-red-200 bg-white py-1.5 dark:border-red-900/50 dark:bg-[var(--input-bg)]": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full font-mono text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full font-mono uppercase": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full h-7 py-0 text-xs": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full h-8 text-xs": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full min-w-[4.5rem] px-1.5 py-1 text-right text-xs tabular-nums": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full min-w-0 max-w-full py-1.5 text-sm sm:w-auto sm:min-w-[10rem]": {
+        "light.width": "160.375px",
+        "dark.width": "160.375px"
+      },
+      "input w-full min-w-0 py-1.5 pl-9 pr-9 text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full py-1.5": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full py-1.5 pl-8 pr-8 text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full py-1.5 pl-9 text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full py-1.5 text-right": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full py-1.5 text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full tabular-nums": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full uppercase": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      }
     }
   },
   "environments": {
@@ -1341,6 +1567,13 @@
       "platform": "win32",
       "arch": "x64",
       "recordedAt": "2026-09-09T09:56:19.205Z",
+      "note": "Police servie par Google Fonts via next/font, et non celle publiée par IBM. Sur un <input> vide, Google rend 149 px à 13 px là où @ibm/plex-sans@1.1.0 et @ibm/plex-sans-variable@0.2.0 rendent 153 px. L'écart est proportionnel à la taille (4 px à 13 px, 8 px à 26 px, 32 px à 104 px) et les chasses de glyphes sont identiques (78,000 px pour 0123456789). Prendre un fichier d'IBM ferait donc mesurer une largeur que l'application n'affiche jamais. Voir tools/input-cascade/fonts/README.md."
+    },
+    "linux": {
+      "engine": "149.0.7827.55",
+      "platform": "linux",
+      "arch": "x64",
+      "recordedAt": "2026-09-09T10:01:21.000Z",
       "note": "Police servie par Google Fonts via next/font, et non celle publiée par IBM. Sur un <input> vide, Google rend 149 px à 13 px là où @ibm/plex-sans@1.1.0 et @ibm/plex-sans-variable@0.2.0 rendent 153 px. L'écart est proportionnel à la taille (4 px à 13 px, 8 px à 26 px, 32 px à 104 px) et les chasses de glyphes sont identiques (78,000 px pour 0123456789). Prendre un fichier d'IBM ferait donc mesurer une largeur que l'application n'affiche jamais. Voir tools/input-cascade/fonts/README.md."
     }
   },

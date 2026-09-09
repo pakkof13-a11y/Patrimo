@@ -109,6 +109,17 @@ jobs:
 
       - name: Unit tests
         run: npm test
+        env:
+          # D35, temps 2. Sans cette variable, les tests du harnais de
+          # cascade sautent quand le navigateur manque — bruyamment depuis
+          # D33, mais ils sautent. Ici le navigateur est installé à l'étape
+          # précédente : s'il venait à manquer, ce serait une panne de la
+          # chaîne, pas une raison de ne rien vérifier.
+          #
+          # Ouvert seulement maintenant : exiger la mesure avant de savoir si
+          # elle converge aurait fait échouer la CI sur une découverte — la
+          # divergence Linux — plutôt que sur une régression.
+          INPUT_CASCADE_REQUIRE_BROWSER: "1"
 
       # Bloquant : deux erreurs (setState-in-effect, prefer-const) sont parties
       # en production pendant que cette étape était en continue-on-error.

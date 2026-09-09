@@ -1079,6 +1079,21 @@ export function missingPlatformWidths(
     "",
     JSON.stringify(after.widths![key], null, 2)
   );
+  if (env) {
+    /*
+      Les conditions vont avec les valeurs.
+
+      Adopter une plateforme depuis ce message sans elles obligerait à
+      reconstituer sa date d'enregistrement d'après l'horodatage du run — ce
+      qu'il a fallu faire pour Linux, faute de les avoir imprimées ici.
+    */
+    lines.push(
+      "",
+      `Et sous environments.${key} :`,
+      "",
+      JSON.stringify(env, null, 2)
+    );
+  }
   return lines.join("\n");
 }
 
