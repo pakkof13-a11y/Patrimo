@@ -134,3 +134,54 @@ describe("summarizeCash", () => {
     expect(s.weightedApyPct).toBeNull();
   });
 });
+
+/*
+  Le dépôt à terme suivait sa propre règle, c'est-à-dire aucune.
+
+  Les comptes courants et les livrets passaient par `retenu()` — pro écartés,
+  quote-part appliquée — pendant que la boucle des CAT sommait le principal
+  brut. L'en-tête de `/api/banks/summary` promettait pourtant des totaux
+  « patrimoine personnel » pour les trois.
+*/
+describe("summarizeCash — dépôts à terme", () => {
+  it("la mesure : un CAT professionnel de 100 000 € ne compte pas", () => {
+    const s = summarizeCash([], [], [
+      { principalBase: "100000", isPro: true },
+    ]);
+    expect(s.termDepositTotalBase.toNumber()).toBe(0);
+    expect(s.excluded.proCount).toBe(1);
+    expect(s.excluded.proTotalBase.toNumber()).toBe(100_000);
+  });
+
+  it("un CAT détenu à moitié compte pour sa part", () => {
+    const s = summarizeCash([], [], [
+      { principalBase: "80000", ownershipPct: "50" },
+    ]);
+    expect(s.termDepositTotalBase.toNumber()).toBe(40_000);
+    expect(s.excluded.sharedCount).toBe(1);
+    expect(s.excluded.sharedNotOwnedBase.toNumber()).toBe(40_000);
+  });
+
+  it("un CAT ordinaire compte entier", () => {
+    const s = summarizeCash([], [], [{ principalBase: "50000" }]);
+    expect(s.termDepositTotalBase.toNumber()).toBe(50_000);
+    expect(s.excluded.proCount).toBe(0);
+  });
+
+  /*
+    Les trois familles alimentent le même décompte : la notice sous le bandeau
+    parle de « produits », pas de « comptes », parce qu'un CAT n'en est pas un.
+  */
+  it("les exclusions des trois familles s'additionnent dans le même décompte", () => {
+    const s = summarizeCash(
+      [{ balanceBase: "1000", isPro: true }],
+      [{ displayBalanceBase: "2000", apyPercent: "3", isPro: true }],
+      [{ principalBase: "100000", isPro: true }]
+    );
+    expect(s.excluded.proCount).toBe(3);
+    expect(s.excluded.proTotalBase.toNumber()).toBe(103_000);
+    expect(s.checkingTotalBase.toNumber()).toBe(0);
+    expect(s.savingsTotalBase.toNumber()).toBe(0);
+    expect(s.termDepositTotalBase.toNumber()).toBe(0);
+  });
+});

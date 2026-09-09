@@ -50,7 +50,7 @@ export type SavingsRowForSummary = OwnershipInput & {
   apyPercent: string;
 };
 
-export type TermDepositRowForSummary = {
+export type TermDepositRowForSummary = OwnershipInput & {
   principalBase: string;
 };
 
@@ -115,9 +115,23 @@ export function summarizeCash(
     );
   }
 
+  /*
+    Le CAT suit la même règle que le compte courant et le livret.
+
+    Il ne la suivait pas : sa boucle sommait le principal brut pendant que
+    les deux autres passaient par `retenu()`. Un dépôt à terme professionnel
+    de 100 000 € entrait donc entier dans le bandeau, avec `excluded.proCount`
+    à zéro — en contradiction avec l'en-tête de la route qui promet des
+    totaux « patrimoine personnel ». Son type ne portait même pas les deux
+    champs, alors que `listTermDeposits` les sert.
+
+    Le modèle a bien les deux colonnes (`prisma/schema.prisma`) et la route
+    les persiste : il n'y avait aucune raison de l'exempter, seulement un
+    oubli au moment où la règle a été posée sur les deux autres.
+  */
   let termDepositTotal = zero();
   for (const t of termDeposits) {
-    termDepositTotal = termDepositTotal.plus(d(t.principalBase));
+    termDepositTotal = termDepositTotal.plus(retenu(t.principalBase, t));
   }
 
   return {

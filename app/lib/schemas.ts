@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TX_TYPES } from "./accounting/types";
 import { LIABILITY_CATEGORIES } from "./constants";
+import { ACCOUNT_CURRENCY_OPTIONS } from "./money/currencies";
 
 export const assetClasses = [
   "ACTIONS",
@@ -312,6 +313,28 @@ export const liabilitySchema = z.object({
 export type LiabilityForm = z.infer<typeof liabilitySchema>;
 
 /** Part détenue sur un compte joint, 0–100. Vide/null = compte individuel. */
+/**
+ * Devise d'un produit : uniquement celles que l'application sait convertir.
+ *
+ * `z.string().min(3).max(3)` acceptait n'importe quel trigramme. Un `"ZZZ"`
+ * écrit une fois en base fait ensuite lever `convertToEurSync` à **chaque**
+ * lecture de la liste : l'écran n'est pas dégradé, il est mort, et il le
+ * reste tant que la ligne existe. Le sélecteur de l'interface ne propose déjà
+ * que ces cinq codes ; le schéma dit maintenant la même chose.
+ *
+ * Ce sont aussi les cinq seules devises que `rateOf` sait replier quand le
+ * fournisseur de taux ne répond pas (`FALLBACK`, `app/lib/market/fx.ts`) :
+ * au-delà, la conversion dépendrait de la disponibilité d'un tiers.
+ */
+const accountCurrency = z
+  .string()
+  .transform((v) => v.toUpperCase())
+  .refine(
+    (v) => (ACCOUNT_CURRENCY_OPTIONS as readonly string[]).includes(v),
+    `Devise inconnue. Attendu : ${ACCOUNT_CURRENCY_OPTIONS.join(", ")}.`
+  )
+  .default("EUR");
+
 const ownershipPctField = z.preprocess(
   (v) => (v === "" || v == null ? null : Number(v)),
   z.number().min(0).max(100).nullable().optional()
@@ -374,7 +397,7 @@ export const termDepositSchema = z.object({
   bankName: z.string().optional().nullable(),
   principal: decimalString,
   ratePercent: decimalString,
-  currency: z.string().min(3).max(3).default("EUR"),
+  currency: accountCurrency,
   openedAt: z.string().min(1, "Date d'ouverture requise"),
   maturityDate: z.string().min(1, "Date d'échéance requise"),
   earlyWithdrawalPenaltyPct: decimalString.optional().nullable(),

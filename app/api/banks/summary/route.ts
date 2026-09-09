@@ -17,11 +17,14 @@ export const revalidate = 0;
  * un total stocké à part, qui pourrait diverger de ce que l'utilisateur voit
  * juste en dessous.
  *
- * Les totaux portent le **patrimoine personnel** : comptes professionnels
- * exclus, quote-part appliquée. Ce que la liste montre et que les totaux ne
- * comptent pas sort dans `excluded`, pour que l'écart soit nommé plutôt que
- * subi — c'est la seule façon de tenir la promesse du paragraphe précédent
- * tout en respectant `isPro`.
+ * Les trois totaux — comptes courants, livrets, dépôts à terme — portent le
+ * **patrimoine personnel** : produits professionnels exclus, quote-part
+ * appliquée. Les trois, sans exception : le dépôt à terme échappait à la
+ * règle alors que cette phrase le comptait déjà dedans.
+ *
+ * Ce que la liste montre et que les totaux ne comptent pas sort dans
+ * `excluded`, pour que l'écart soit nommé plutôt que subi — c'est la seule
+ * façon de tenir la promesse ci-dessus tout en respectant `isPro`.
  */
 export async function GET(req: Request) {
   const userId = await requireUserId();

@@ -48,6 +48,42 @@ export function presentFields<T extends Record<string, unknown>>(
   return out;
 }
 
+/**
+ * Le corps JSON d'une requête, ou `null` s'il est illisible.
+ *
+ * `req.json()` lève avant que `safeParse` n'ait rien à dire : la réponse est
+ * alors un 500 sans forme JSON, là où `validationErrorResponse` existe pour
+ * dire ce qui manque. Le remède a été posé route par route (D32, D39, D40) ;
+ * il vit ici à partir de maintenant.
+ *
+ * Le repli habituel — `.catch(() => ({}))` — suffit quand l'identifiant est
+ * dans le corps : `requireBodyId` refuse alors l'objet vide. Il ne suffit
+ * pas quand l'identifiant vient de l'URL et que le schéma est `.partial()` :
+ * un `{}` traverse tout, et la route répond 200 sans avoir rien écrit.
+ * Répondre « c'est fait » à une requête qu'on n'a pas su lire est le même
+ * mensonge qu'un `deleteMany` sans effet annoncé réussi.
+ *
+ * Un JSON valide qui n'est pas un objet — `"5"`, `[]`, `null` — est refusé
+ * pour la même raison : ce n'est pas une requête interprétable.
+ */
+export async function readJsonBody(
+  req: Request
+): Promise<Record<string, unknown> | null> {
+  const body = await req.json().catch(() => null);
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return null;
+  }
+  return body as Record<string, unknown>;
+}
+
+/** La réponse qui va avec `readJsonBody` quand il rend `null`. */
+export function unreadableBodyResponse() {
+  return NextResponse.json(
+    { error: "Corps de requête illisible" },
+    { status: 400 }
+  );
+}
+
 /** Parse body with Zod; on failure return a 400 NextResponse. */
 export function safeParseBody<T>(
   schema: ZodType<T>,

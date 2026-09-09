@@ -348,6 +348,10 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
     Les totaux ci-dessus portent le patrimoine personnel ; la liste affiche des
     soldes entiers. Les deux ont raison, et l'écart se nomme plutôt que de se
     deviner. `null` quand il n'y a rien à dire — c'est le cas courant.
+
+    « Produit » et non « compte » : les trois familles de la page passent
+    désormais par la règle, dépôts à terme compris, et un CAT n'est pas un
+    compte.
   */
   const exclusions = useMemo(() => {
     const e = summary?.excluded;
@@ -355,12 +359,12 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
     const morceaux: string[] = [];
     if (e.proCount > 0) {
       morceaux.push(
-        `${e.proCount} compte${e.proCount > 1 ? "s" : ""} professionnel${e.proCount > 1 ? "s" : ""} exclu${e.proCount > 1 ? "s" : ""} du patrimoine personnel (${formatCurrency(e.proTotalBase, summary.base)})`
+        `${e.proCount} produit${e.proCount > 1 ? "s" : ""} professionnel${e.proCount > 1 ? "s" : ""} exclu${e.proCount > 1 ? "s" : ""} du patrimoine personnel (${formatCurrency(e.proTotalBase, summary.base)})`
       );
     }
     if (e.sharedCount > 0) {
       morceaux.push(
-        `${e.sharedCount} compte${e.sharedCount > 1 ? "s" : ""} joint${e.sharedCount > 1 ? "s" : ""} compté${e.sharedCount > 1 ? "s" : ""} à la part détenue (${formatCurrency(e.sharedNotOwnedBase, summary.base)} laissés à l'autre détenteur)`
+        `${e.sharedCount} produit${e.sharedCount > 1 ? "s" : ""} détenu${e.sharedCount > 1 ? "s" : ""} en commun, compté${e.sharedCount > 1 ? "s" : ""} à la part détenue (${formatCurrency(e.sharedNotOwnedBase, summary.base)} laissés à l'autre détenteur)`
       );
     }
     if (morceaux.length === 0) return null;
@@ -550,11 +554,12 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
       {/*
         Ce que le bandeau ne compte pas, dit sous lui.
 
-        Les totaux portent le patrimoine personnel : un compte professionnel en
-        sort entièrement, un compte joint pour la part qui revient à l'autre
-        détenteur. La liste, elle, affiche les soldes entiers — c'est ce qu'ils
-        valent. Sans cette phrase, l'écart entre les deux serait un mystère,
-        exactement le défaut que l'en-tête de la route dit vouloir éviter.
+        Les totaux portent le patrimoine personnel : un produit professionnel
+        en sort entièrement — compte courant, livret ou dépôt à terme —, un
+        produit détenu en commun pour la part qui revient à l'autre détenteur.
+        La liste, elle, affiche les soldes entiers : c'est ce qu'ils valent.
+        Sans cette phrase, l'écart entre les deux serait un mystère, exactement
+        le défaut que l'en-tête de la route dit vouloir éviter.
       */}
       {exclusions && (
         <p
