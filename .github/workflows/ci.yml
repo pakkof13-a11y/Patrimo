@@ -2,12 +2,7 @@ name: CI
 
 on:
   push:
-    # TEMPORAIRE — D35. Branche ajoutée le temps d'obtenir le relevé Linux du
-    # harnais de cascade, et RETIRÉE avant de rendre. Un push repasse le scan
-    # de secrets en mode nominal — intervalle poussé — là où un
-    # workflow_dispatch scanne tout l'historique et échoue sur cinq constats
-    # connus (docs/ci-scan-secrets-superficiel.md).
-    branches: [main, master, develop, staging, feat/d35-ci-input-cascade]
+    branches: [main, master, develop, staging]
   pull_request:
     branches: [main, master, develop, staging]
   workflow_dispatch:
