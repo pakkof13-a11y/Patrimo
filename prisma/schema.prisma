@@ -852,11 +852,15 @@ model BankAccount {
 model BankAccountEvent {
   id            String   @id @default(cuid())
   bankAccountId String
-  /// OPENING | DEPOSIT | WITHDRAWAL
+  /// OPENING | DEPOSIT | WITHDRAWAL | REDENOMINATION
   type          String
-  /// Delta signé — positif pour un dépôt, négatif pour un retrait.
+  /// Delta signé — positif pour un dépôt, négatif pour un retrait. Nul sur REDENOMINATION.
   amount        Decimal  @db.Decimal(28, 12)
   balanceAfter  Decimal  @db.Decimal(28, 12)
+  /// Devise du fait, figée ici : le compte peut changer de devise ensuite.
+  /// Sans elle, le chargeur historique convertissait tout le passé d'un compte
+  /// avec sa devise du jour — cf. EnvelopeCashEvent.currency, même remède.
+  currency      String   @default("EUR")
   occurredAt    DateTime @default(now())
   notes         String?
   createdAt     DateTime @default(now())

@@ -346,19 +346,27 @@ export async function loadHistoricalInputs(
     })),
   ];
 
-  const bankCurrencyById = new Map(banks.map((b) => [b.id, b.currency]));
   const savingsCurrencyById = new Map(savings.map((s) => [s.id, s.currency]));
 
   const cashEvents = [
+    /*
+      La devise est celle figée sur l'événement, pas celle du compte.
+
+      Elle venait de `bankCurrencyById`, c'est-à-dire de la ligne *aujourd'hui* :
+      un compte passé de l'euro au dollar voyait toute son histoire reconvertie
+      avec le nouveau taux, et sa courbe des mois précédents changer de valeur
+      sans qu'aucun fait ne l'explique. Les constats d'enveloppe portaient déjà
+      leur devise pour cette raison exacte ; les mouvements bancaires aussi
+      désormais.
+
+      Les lignes écrites avant la colonne valent `EUR`, son défaut — ce qui est
+      le cas de toutes celles qu'un compte en euros a produites.
+    */
     ...bankEvents.map((e) => ({
       accountId: e.bankAccountId,
       occurredAt: e.occurredAt,
-      amountEur: eur(e.amount, bankCurrencyById.get(e.bankAccountId), rates),
-      balanceAfterEur: eur(
-        e.balanceAfter,
-        bankCurrencyById.get(e.bankAccountId),
-        rates
-      ),
+      amountEur: eur(e.amount, e.currency, rates),
+      balanceAfterEur: eur(e.balanceAfter, e.currency, rates),
       type: e.type,
     })),
     ...savingsEvents.map((e) => ({

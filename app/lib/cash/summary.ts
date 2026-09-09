@@ -7,8 +7,10 @@
  */
 
 import { d, zero, type Decimal } from "../money/decimal";
+import { personalShareOf, type OwnershipInput } from "./ownership";
 
 export type CashSummary = {
+  /** Ce qui entre réellement dans le patrimoine personnel — voir `excluded`. */
   checkingTotalBase: Decimal;
   savingsTotalBase: Decimal;
   termDepositTotalBase: Decimal;
@@ -20,40 +22,92 @@ export type CashSummary = {
    * sert à donner un ordre de grandeur, pas une valeur contractuelle.
    */
   projectedAnnualInterestBase: Decimal;
+  /**
+   * Ce que les totaux ci-dessus ne comptent pas, et pourquoi.
+   *
+   * Sans ça, le KPI de tête cesserait de correspondre à la liste juste en
+   * dessous sans que rien ne l'explique — le défaut que l'en-tête de la route
+   * dit vouloir éviter. L'écran nomme donc l'écart au lieu de le taire.
+   */
+  excluded: {
+    /** Comptes et livrets marqués professionnels. */
+    proCount: number;
+    /** Leur solde entier, en devise de base. */
+    proTotalBase: Decimal;
+    /** Comptes joints dont une part revient à quelqu'un d'autre. */
+    sharedCount: number;
+    /** La part qui ne revient pas au détenteur, en devise de base. */
+    sharedNotOwnedBase: Decimal;
+  };
 };
 
-export type CheckingRowForSummary = {
+export type CheckingRowForSummary = OwnershipInput & {
   balanceBase: string;
-  countsInNetWorth: boolean;
 };
 
-export type SavingsRowForSummary = {
+export type SavingsRowForSummary = OwnershipInput & {
   displayBalanceBase: string;
   apyPercent: string;
-  countsInNetWorth: boolean;
 };
 
 export type TermDepositRowForSummary = {
   principalBase: string;
 };
 
+/**
+ * Les totaux du bandeau, sur le seul patrimoine personnel.
+ *
+ * Le garde était `if (!countsInNetWorth) continue`, et `listBankAccounts`
+ * posait ce champ à `true` en dur : la branche ne pouvait plus se déclencher.
+ * Un compte professionnel entrait donc dans « Comptes courants », et un compte
+ * joint à 50 % y entrait pour le double de ce qu'il vaut à son détenteur —
+ * alors que la liste juste en dessous affiche déjà une puce « Pro — hors
+ * patrimoine personnel » sur le premier.
+ *
+ * La règle vient de `personalShareOf`, partagée avec `getExplicitCashTotalEur` :
+ * c'est ce qui garantit que ce bandeau et le patrimoine net répondent la même
+ * chose. Ce qui sort est compté à part et rendu dans `excluded`, pour que
+ * l'écran puisse le nommer plutôt que de laisser un écart inexpliqué.
+ *
+ * Le rendement moyen suit la même pondération : c'est le taux de ce qu'on
+ * détient, pas de ce qui passe sur le relevé.
+ */
 export function summarizeCash(
   checking: CheckingRowForSummary[],
   savings: SavingsRowForSummary[],
   termDeposits: TermDepositRowForSummary[]
 ): CashSummary {
+  let proCount = 0;
+  let proTotal = zero();
+  let sharedCount = 0;
+  let sharedNotOwned = zero();
+
+  /** Retient la part personnelle et note ce qui a été laissé de côté. */
+  const retenu = (montant: string, row: OwnershipInput) => {
+    const brut = d(montant);
+    if (row.isPro) {
+      proCount += 1;
+      proTotal = proTotal.plus(brut);
+      return zero();
+    }
+    const part = personalShareOf(row);
+    if (!part.eq(1)) {
+      sharedCount += 1;
+      sharedNotOwned = sharedNotOwned.plus(brut.times(d(1).minus(part)));
+    }
+    return brut.times(part);
+  };
+
   let checkingTotal = zero();
   for (const c of checking) {
-    if (!c.countsInNetWorth) continue;
-    checkingTotal = checkingTotal.plus(d(c.balanceBase));
+    checkingTotal = checkingTotal.plus(retenu(c.balanceBase, c));
   }
 
   let savingsTotal = zero();
   let apyWeightedSum = zero();
   let projectedInterest = zero();
   for (const s of savings) {
-    if (!s.countsInNetWorth) continue;
-    const balance = d(s.displayBalanceBase);
+    const balance = retenu(s.displayBalanceBase, s);
     savingsTotal = savingsTotal.plus(balance);
     apyWeightedSum = apyWeightedSum.plus(balance.times(d(s.apyPercent)));
     projectedInterest = projectedInterest.plus(
@@ -72,5 +126,11 @@ export function summarizeCash(
     termDepositTotalBase: termDepositTotal,
     weightedApyPct: savingsTotal.gt(0) ? apyWeightedSum.div(savingsTotal) : null,
     projectedAnnualInterestBase: projectedInterest,
+    excluded: {
+      proCount,
+      proTotalBase: proTotal,
+      sharedCount,
+      sharedNotOwnedBase: sharedNotOwned,
+    },
   };
 }

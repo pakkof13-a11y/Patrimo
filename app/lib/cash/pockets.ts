@@ -1,6 +1,7 @@
 import { prisma } from "../prisma";
 import { d, toFixed, zero, type Decimal } from "../money/decimal";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
+import { countsInPersonalNetWorth, personalAmountOf } from "./ownership";
 import { savingsDisplayBalance, type RateType, type PayoutFrequency } from "../money/savings";
 import {
   applyDueInterestForUser,
@@ -50,8 +51,23 @@ export async function getExplicitCashTotalEur(userId: string) {
     prisma.envelopeCash.findMany({ where: { userId } }),
   ]);
 
+  /*
+    La part personnelle, pas le solde du relevé.
+
+    Ce total sommait tous les comptes, professionnels compris et sans
+    quote-part, alors que le schéma déclare l'inverse sur les deux champs et
+    que l'écran le promet à l'utilisateur (« Exclure du patrimoine
+    personnel », « Vide = compte individuel, 100 % implicite »). Un compte pro
+    de 40 000 € et une moitié de compte joint entraient dans le patrimoine net
+    sans que rien ne les y autorise.
+
+    `personalShareOf` porte la règle, partagée avec le bandeau de l'onglet
+    Banques : les deux répondent désormais la même chose.
+  */
   for (const b of banks) {
-    total = total.plus(d(convertToEurSync(b.balance.toString(), b.currency, rates)));
+    total = total.plus(
+      personalAmountOf(convertToEurSync(b.balance.toString(), b.currency, rates), b)
+    );
   }
 
   for (const s of savings) {
@@ -70,7 +86,10 @@ export async function getExplicitCashTotalEur(userId: string) {
       rateType,
       freq
     );
-    total = total.plus(d(convertToEurSync(displayBalance, s.currency, rates)));
+    // Même règle que les comptes courants, ci-dessus.
+    total = total.plus(
+      personalAmountOf(convertToEurSync(displayBalance, s.currency, rates), s)
+    );
   }
 
   for (const e of envelopes) {
@@ -164,11 +183,19 @@ export async function listBankAccounts(userId: string, base = "EUR") {
       isPro: b.isPro,
       ownershipPct: b.ownershipPct?.toString() ?? null,
       /*
-        Conservé, et désormais toujours vrai : un solde saisi entre dans le
-        patrimoine, quel que soit son signe. Le champ reste au contrat pour ne
-        pas casser ses consommateurs, mais il ne sert plus à écarter personne.
+        Ce compte entre-t-il dans le patrimoine personnel ?
+
+        Le champ avait perdu son sens : il disait « solde non nul », puis plus
+        rien du tout — `true` en dur, et la branche que lisait `summarizeCash`
+        est devenue inatteignable. Il porte maintenant la seule question que
+        le schéma et l'écran posent : `isPro`. La liste affichait déjà « Pro —
+        hors patrimoine personnel » et le panneau « Inclus patrim. net : Non »
+        sur des comptes que les totaux comptaient quand même.
+
+        La quote-part ne passe pas par ici : elle réduit un montant, elle
+        n'exclut pas une ligne. C'est `personalShareOf` qui les compose.
       */
-      countsInNetWorth: true,
+      countsInNetWorth: countsInPersonalNetWorth(b),
       balanceBase: convertFromEurSync(
         convertToEurSync(bal, b.currency, rates),
         base,
@@ -191,7 +218,8 @@ export async function listSavingsAccounts(userId: string, base = "EUR") {
     const mapped = mapSavingsRowForApi(s);
     return {
       ...mapped,
-      countsInNetWorth: true,
+      // Même règle que les comptes courants — voir `listBankAccounts`.
+      countsInNetWorth: countsInPersonalNetWorth(mapped),
       displayBalanceBase: convertFromEurSync(
         convertToEurSync(mapped.displayBalance, s.currency, rates),
         base,

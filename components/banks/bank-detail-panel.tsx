@@ -157,6 +157,9 @@ const dateFr = (iso: string | null | undefined) =>
  * affiché au-dessus, ce qu'un journal éditable ne garantirait pas. Le panneau
  * n'en affiche que les derniers ; la fenêtre complète reste accessible.
  */
+/** Combien de mouvements l'aperçu du panneau affiche. */
+const APERCU = 4;
+
 function RecentHistory({
   kind,
   accountId,
@@ -168,14 +171,28 @@ function RecentHistory({
   currency: string;
   onOpenFull: () => void;
 }) {
+  /*
+    Quatre lignes demandées, quatre lignes servies.
+
+    Le panneau téléchargeait tout l'historique puis en gardait quatre par
+    `slice(0, 4)`. La borne appartient à la requête : l'index
+    `[bankAccountId, occurredAt]` est là pour ça, et le réseau n'a pas à
+    porter des milliers de mouvements pour en afficher quatre.
+
+    La clé porte la borne : sans elle, cette page de quatre et la fenêtre
+    complète se partageraient une entrée de cache, et l'une servirait à
+    l'autre.
+  */
   const q = useQuery({
-    queryKey: [kind, accountId, "events"],
+    queryKey: [kind, accountId, "events", APERCU],
     queryFn: () =>
-      fetchJson<{ events: AccountEvent[] }>(`/api/${kind}/${accountId}/events`),
+      fetchJson<{ events: AccountEvent[] }>(
+        `/api/${kind}/${accountId}/events?limit=${APERCU}`
+      ),
     staleTime: 30_000,
   });
 
-  const events = (q.data?.events ?? []).slice(0, 4);
+  const events = q.data?.events ?? [];
 
   return (
     <>
@@ -216,7 +233,9 @@ function RecentHistory({
                   )}
                 >
                   {amount > 0 ? "+" : ""}
-                  {formatCurrency(e.amount, currency)}
+                  {/* La devise du fait quand la route la sert, celle du compte
+                      sinon — cf. `AccountEvent.currency`. */}
+                  {formatCurrency(e.amount, e.currency ?? currency)}
                 </span>
               </li>
             );

@@ -62,11 +62,27 @@ export type TermDepositRow = {
 };
 
 export type BanksSummary = {
+  /** Devise dans laquelle la route a converti — celle demandée. */
+  base: string;
+  /** Patrimoine **personnel** : pro exclus, quote-part appliquée. */
   checkingTotalBase: string;
   savingsTotalBase: string;
   termDepositTotalBase: string;
   weightedApyPct: string | null;
   projectedAnnualInterestBase: string;
+  /**
+   * Ce que la liste montre et que les totaux ne comptent pas.
+   *
+   * Le bandeau doit rester rapprochable de la liste juste en dessous : sans
+   * cette mention, exclure un compte professionnel creuse un écart que rien
+   * n'explique.
+   */
+  excluded: {
+    proCount: number;
+    proTotalBase: string;
+    sharedCount: number;
+    sharedNotOwnedBase: string;
+  };
 };
 
 /**

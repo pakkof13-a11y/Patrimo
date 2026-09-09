@@ -99,9 +99,24 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
     queryFn: () => fetchJson<{ accounts: SavingsRow[] }>("/api/savings"),
     refetchInterval: 60_000,
   });
+  /*
+    La devise de restitution entre dans l'URL **et** dans la clé.
+
+    Le bandeau demandait `/api/banks/summary` sans `?base=` : la route
+    calculait en euros, et ces montants étaient ensuite formatés avec
+    `baseCurrency` — des euros présentés comme des dollars dès que
+    l'en-tête changeait de devise.
+
+    La clé doit la porter aussi. Sans elle, deux devises se partageraient une
+    seule entrée de cache : le premier chargement gagnerait, et changer de
+    devise ne redemanderait rien.
+  */
   const summaryQ = useQuery({
-    queryKey: ["banks-summary"],
-    queryFn: () => fetchJson<BanksSummary>("/api/banks/summary"),
+    queryKey: ["banks-summary", baseCurrency],
+    queryFn: () =>
+      fetchJson<BanksSummary>(
+        `/api/banks/summary?base=${encodeURIComponent(baseCurrency)}`
+      ),
   });
   const termDepositsQ = useQuery({
     queryKey: ["term-deposits"],
@@ -326,6 +341,32 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
     avec de quoi relancer.
   */
   const resumeIndisponible = !totauxConnus && !summaryLoading;
+
+  /*
+    La phrase qui rapproche le bandeau de la liste.
+
+    Les totaux ci-dessus portent le patrimoine personnel ; la liste affiche des
+    soldes entiers. Les deux ont raison, et l'écart se nomme plutôt que de se
+    deviner. `null` quand il n'y a rien à dire — c'est le cas courant.
+  */
+  const exclusions = useMemo(() => {
+    const e = summary?.excluded;
+    if (!e) return null;
+    const morceaux: string[] = [];
+    if (e.proCount > 0) {
+      morceaux.push(
+        `${e.proCount} compte${e.proCount > 1 ? "s" : ""} professionnel${e.proCount > 1 ? "s" : ""} exclu${e.proCount > 1 ? "s" : ""} du patrimoine personnel (${formatCurrency(e.proTotalBase, summary.base)})`
+      );
+    }
+    if (e.sharedCount > 0) {
+      morceaux.push(
+        `${e.sharedCount} compte${e.sharedCount > 1 ? "s" : ""} joint${e.sharedCount > 1 ? "s" : ""} compté${e.sharedCount > 1 ? "s" : ""} à la part détenue (${formatCurrency(e.sharedNotOwnedBase, summary.base)} laissés à l'autre détenteur)`
+      );
+    }
+    if (morceaux.length === 0) return null;
+    return `Totaux hors : ${morceaux.join(" · ")}. Les listes ci-dessous montrent les soldes entiers.`;
+  }, [summary]);
+
   const nbInstitutions = institutionCount(products);
   const accountCount = products.length;
 
@@ -505,6 +546,24 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
           secondary={`${accountCount} compte${accountCount > 1 ? "s" : ""}`}
         />
       </div>
+
+      {/*
+        Ce que le bandeau ne compte pas, dit sous lui.
+
+        Les totaux portent le patrimoine personnel : un compte professionnel en
+        sort entièrement, un compte joint pour la part qui revient à l'autre
+        détenteur. La liste, elle, affiche les soldes entiers — c'est ce qu'ils
+        valent. Sans cette phrase, l'écart entre les deux serait un mystère,
+        exactement le défaut que l'en-tête de la route dit vouloir éviter.
+      */}
+      {exclusions && (
+        <p
+          className="text-meta"
+          data-testid="banks-summary-excluded"
+        >
+          {exclusions}
+        </p>
+      )}
 
       {/* Liste + détail côte à côte — même grille que la page Portefeuille. */}
       <div className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)] xl:items-start">

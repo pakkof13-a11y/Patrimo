@@ -417,15 +417,30 @@ export type AccountEvent = {
   type: string;
   amount: string;
   balanceAfter: string;
+  /**
+   * Devise du fait, figée à l'écriture.
+   *
+   * Les montants étaient formatés avec la devise **courante** du compte : un
+   * compte passé en dollars affichait « $1 000,00 » sur une ouverture qui
+   * valait mille euros. Absente sur les routes qui ne la servent pas encore
+   * (livrets) — l'appelant retombe alors sur la devise du compte, ce qui est
+   * l'ancien comportement, pas une régression.
+   */
+  currency?: string;
   occurredAt: string;
   notes: string | null;
 };
+
+/** Ce que la fenêtre d'historique demande — la route plafonne à 200. */
+export const HISTORIQUE_COMPLET = 200;
 
 export const EVENT_LABELS: Record<string, string> = {
   OPENING: "Ouverture",
   DEPOSIT: "Dépôt",
   WITHDRAWAL: "Retrait",
   INTEREST: "Intérêts versés",
+  // Même nominal, autre unité : rien n'entre ni ne sort.
+  REDENOMINATION: "Changement de devise",
 };
 
 /**
@@ -446,10 +461,19 @@ export function AccountHistoryModal({
   currency: string;
   onClose: () => void;
 }) {
+  /*
+    Une page bornée, comme le panneau — la borne est en SQL, pas ici.
+
+    La requête n'en avait aucune : un compte corrigé chaque jour envoyait des
+    milliers de lignes à chaque ouverture. `truncated` dit s'il en reste de
+    plus anciennes, plutôt que de laisser croire que la liste est complète.
+  */
   const q = useQuery({
-    queryKey: [kind, accountId, "events"],
+    queryKey: [kind, accountId, "events", HISTORIQUE_COMPLET],
     queryFn: () =>
-      fetchJson<{ events: AccountEvent[] }>(`/api/${kind}/${accountId}/events`),
+      fetchJson<{ events: AccountEvent[]; truncated?: boolean }>(
+        `/api/${kind}/${accountId}/events?limit=${HISTORIQUE_COMPLET}`
+      ),
   });
   const events = q.data?.events ?? [];
 
@@ -499,16 +523,28 @@ export function AccountHistoryModal({
                       )}
                     >
                       {Number(e.amount) > 0 ? "+" : ""}
-                      {formatCurrency(e.amount, currency)}
+                      {/* La devise du fait, pas celle du compte aujourd'hui :
+                          une ouverture en euros reste en euros après un
+                          passage au dollar. Repli sur la devise du compte
+                          pour les routes qui ne la servent pas encore. */}
+                      {formatCurrency(e.amount, e.currency ?? currency)}
                     </td>
                     <td className="py-1.5 text-right tabular-nums">
-                      {formatCurrency(e.balanceAfter, currency)}
+                      {formatCurrency(e.balanceAfter, e.currency ?? currency)}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        )}
+        {q.data?.truncated && (
+          /* Une liste tronquée qui ne le dit pas se lit comme une liste
+             complète : le compte paraîtrait n'avoir jamais rien fait avant. */
+          <p className="text-meta mt-2" data-testid="account-history-truncated">
+            Seuls les {HISTORIQUE_COMPLET} mouvements les plus récents sont
+            affichés.
+          </p>
         )}
       </div>
     </Modal>

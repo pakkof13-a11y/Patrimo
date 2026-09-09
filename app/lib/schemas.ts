@@ -52,10 +52,37 @@ export const priceProviders = ["FINNHUB", "YAHOO", "COINGECKO", "MANUAL"] as con
 
 export const transactionTypes = TX_TYPES;
 
+/**
+ * Plafond des montants saisis — mille milliards.
+ *
+ * Toutes les colonnes monétaires sont des `Decimal(28, 12)` : seize chiffres
+ * avant la virgule, pas un de plus. Au-delà, Postgres rejette l'écriture par
+ * un dépassement `numeric` qu'aucune route n'attrape, et la saisie se termine
+ * en 500 muet plutôt qu'en message de validation.
+ *
+ * Mille milliards laisse une marge confortable au yen comme au patrimoine le
+ * plus improbable, tout en attrapant ce que ce garde vise réellement : un
+ * `1e30` collé par erreur, ou le résultat d'un import mal lu.
+ */
+const MONTANT_MAX = 1e12;
+
+/**
+ * Un montant décimal, en chaîne.
+ *
+ * Le refus ne portait que sur `NaN`. `Number("Infinity")` et `Number("1e30")`
+ * n'en sont pas : les deux passaient la validation, survivaient à
+ * `new Prisma.Decimal(...)`, et n'échouaient qu'au contact de la colonne.
+ * Sont désormais refusés : les non-nombres, les infinis, et tout ce qui sort
+ * de ±`MONTANT_MAX`.
+ */
 const decimalString = z
   .union([z.string(), z.number()])
   .transform((v) => String(v).trim().replace(",", "."))
-  .refine((v) => v === "" || !Number.isNaN(Number(v)), "Nombre invalide");
+  .refine((v) => {
+    if (v === "") return true;
+    const n = Number(v);
+    return Number.isFinite(n) && Math.abs(n) <= MONTANT_MAX;
+  }, "Nombre invalide ou hors limites");
 
 export const addAssetSchema = z.object({
   name: z.string().min(2, "Le nom doit contenir au moins 2 caractères"),
