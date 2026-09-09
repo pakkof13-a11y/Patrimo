@@ -35,6 +35,7 @@ import {
   type UnattributedCash,
 } from "@/app/lib/securities/overview";
 import { securitiesEnvelopeLabel } from "@/app/lib/securities/constants";
+import { UnknownAmount } from "./unknown-amount";
 import {
   formatCurrency,
   formatDate,
@@ -623,6 +624,23 @@ function AccountCard({
   const a = view.account;
   const cashNotice = cashAttributionNotice(a.cashAttribution);
 
+  /*
+    Le tiret des trois montants que la poche rend inconnus.
+
+    Écrit une fois : ils sont `null` exactement quand `cashNotice` existe,
+    et trois copies de la même bulle divergeraient à la première retouche.
+    L'élément sert de patron — React en instancie un par emplacement, chacun
+    avec son propre `useId` et son propre état d'ouverture.
+
+    Un `title` seul ne s'ouvrait qu'au survol d'une souris : ni le clavier,
+    ni le doigt, ni un lecteur d'écran n'atteignaient la raison du tiret.
+  */
+  const tiret = cashNotice && (
+    <UnknownAmount short={cashNotice.short} title={cashNotice.title}>
+      —
+    </UnknownAmount>
+  );
+
   return (
     <section
       className="panel flex flex-col"
@@ -656,11 +674,9 @@ function AccountCard({
         <Metric
           label="Valeur totale"
           value={
-            view.valueEur == null ? (
-              <span title={cashNotice?.title}>—</span>
-            ) : (
-              formatCurrency(view.valueEur, "EUR")
-            )
+            view.valueEur == null
+              ? tiret
+              : formatCurrency(view.valueEur, "EUR")
           }
           hint={
             view.valueEur == null
@@ -694,11 +710,9 @@ function AccountCard({
         <Metric
           label="Liquidités"
           value={
-            view.cashEur == null ? (
-              <span title={cashNotice?.title}>—</span>
-            ) : (
-              formatCurrency(view.cashEur, "EUR")
-            )
+            view.cashEur == null
+              ? tiret
+              : formatCurrency(view.cashEur, "EUR")
           }
           hint={
             view.cashEur == null
@@ -716,11 +730,9 @@ function AccountCard({
         <Metric
           label={view.investableLabel}
           value={
-            view.investableEur == null ? (
-              <span title={cashNotice?.title}>—</span>
-            ) : (
-              formatCurrency(view.investableEur, "EUR")
-            )
+            view.investableEur == null
+              ? tiret
+              : formatCurrency(view.investableEur, "EUR")
           }
           hint={
             view.investableIsCapped

@@ -21,9 +21,13 @@ import { d } from "@/app/lib/money/decimal";
 import {
   eligibleAccounts,
   SECURITIES_ENVELOPE_TYPES,
-  type CashAttribution,
 } from "@/app/lib/securities/constants";
-import { cashAttributionNotice } from "@/app/lib/securities/overview";
+import {
+  cashAttributionNotice,
+  type SecuritiesAccount,
+  type SecuritiesRoom,
+} from "@/app/lib/securities/overview";
+import { UnknownAmount } from "./unknown-amount";
 import {
   PEA_INCOME_TAX_RATE,
   PEA_SOCIAL_CHARGES_RATE,
@@ -32,48 +36,24 @@ import {
 import { ratePct } from "@/app/lib/tax/rates";
 import { EnvelopeCashPanel } from "@/components/tabs/envelope-cash-panel";
 
-type RoomRow = {
-  ownCapEur: string;
-  contributionsEur: string;
-  combinedContributionsEur: string;
-  remainingEur: string;
-  overCapEur: string;
-  usedPct: string;
-  isOverCap: boolean;
-  bindingCap: "OWN" | "COMBINED";
-};
+/*
+  Une seule description de ce que sert `GET /api/securities`.
 
-type AccountRow = {
-  id: string;
-  envelopeType: string;
-  envelopeLabel: string;
-  platformId: string;
-  platformName: string;
-  platformLogoUrl: string | null;
-  openDate: string;
+  Cet onglet et la vue d'ensemble redéclaraient les mêmes vingt-trois champs
+  chacun de son côté. Deux copies d'un contrat que ni l'une ni l'autre ne
+  possède : la route peut en changer sans qu'aucune ne bronche, et elles
+  peuvent diverger l'une de l'autre sans qu'une ligne rouge n'apparaisse.
+  C'est déjà arrivé — `cashAttribution` a mis un chantier à traverser les
+  deux fichiers.
+
+  `SecuritiesAccount` et `SecuritiesRoom` vivent dans le module, à côté des
+  fonctions qui les lisent. Cet onglet y ajoute les deux champs qu'il est
+  seul à afficher : le formulaire d'édition les modifie, la vue d'ensemble
+  ne les montre pas.
+*/
+type AccountRow = SecuritiesAccount & {
   iban: string | null;
   notes: string | null;
-  positionCount: number;
-  marketValueEur: string;
-  costBasisEur: string;
-  unrealizedPnlEur: string;
-  unrealizedPnlPct: string | null;
-  cashEur: string;
-  /** Voir `CashAttribution` : hors `ATTRIBUTED`, `cashEur` vaut zéro et ce
-      zéro n'est pas un relevé. */
-  cashAttribution: CashAttribution;
-  liquidationValueEur: string;
-  contributionsEur: string;
-  withdrawalsEur: string;
-  gainEur: string;
-  maturity: {
-    maturityDate: string;
-    isMatured: boolean;
-    ageYears: number;
-    daysToMaturity: number;
-  } | null;
-  room: RoomRow | null;
-  taxStatusLabel: string | null;
 };
 
 type PositionRow = {
@@ -125,7 +105,7 @@ const emptyForm = {
  * limitée à 75 000 € l'est par le plafond commun, pas par le sien, et sans
  * cette phrase le chiffre paraît faux.
  */
-function ContributionGauge({ room }: { room: RoomRow }) {
+function ContributionGauge({ room }: { room: SecuritiesRoom }) {
   const pct = num(room.usedPct);
   const alert = room.isOverCap || pct >= 95;
   // La barre mesure le plafond qui borne réellement. Quand c'est le plafond
@@ -852,6 +832,14 @@ export function SecuritiesTab({ className }: { className?: string }) {
           <div className="mt-3 grid gap-2 lg:grid-cols-2">
             {accounts.map((a) => {
               const isOpen = openAccountId === a.id;
+              /*
+                En tête de tour, comme dans `AccountCard` de la vue
+                d'ensemble. Cet appel-ci était enfermé dans une fonction
+                anonyme appelée sur place au milieu du JSX : le même calcul
+                que l'autre appelant, écrit d'une seconde façon, et relu
+                deux fois plus lentement pour rien.
+              */
+              const cashNotice = cashAttributionNotice(a.cashAttribution);
               return (
                 <div
                   key={a.id}
@@ -939,29 +927,27 @@ export function SecuritiesTab({ className }: { className?: string }) {
                     <span className="text-[var(--muted-foreground)]">
                       Espèces
                     </span>
+                    {/*
+                      Trois états, pas deux. « non ventilées » s'affichait aussi
+                      sur un PEA-PME, qui n'a aucune poche à ventiler — le
+                      drapeau disait « pas imputé » là où la vérité est « pas
+                      suivi ». Le libellé vient de `cashAttributionNotice`,
+                      partagé avec la vue d'ensemble : un seul texte pour un
+                      seul état.
+                    */}
                     <span className="tabular-nums">
-                      {(() => {
-                        /*
-                          Trois états, pas deux. « non ventilées » s'affichait
-                          aussi sur un PEA-PME, qui n'a aucune poche à ventiler
-                          — le drapeau disait « pas imputé » là où la vérité
-                          est « pas suivi ». Le libellé vient maintenant de
-                          `cashAttributionNotice`, partagé avec la vue
-                          d'ensemble : un seul texte pour un seul état.
-                        */
-                        const notice = cashAttributionNotice(a.cashAttribution);
-                        if (!notice) return formatCurrency(a.cashEur, "EUR");
-                        return (
-                          <span
-                            className="text-[var(--muted-foreground)]"
-                            title={notice.title}
-                            data-testid="securities-cash-unattributed"
-                            data-cash-attribution={a.cashAttribution}
-                          >
-                            {notice.short}
-                          </span>
-                        );
-                      })()}
+                      {cashNotice ? (
+                        <UnknownAmount
+                          short={cashNotice.short}
+                          title={cashNotice.title}
+                          testId="securities-cash-unattributed"
+                          data-cash-attribution={a.cashAttribution}
+                        >
+                          {cashNotice.short}
+                        </UnknownAmount>
+                      ) : (
+                        formatCurrency(a.cashEur, "EUR")
+                      )}
                     </span>
                   </div>
 

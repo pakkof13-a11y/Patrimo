@@ -22,6 +22,14 @@ Ton terrain : `components/dashboard/` — `terminal-hero.tsx`, `hero-chart.tsx`,
 `portfolio-evolution-charts.tsx`, `terminal-panels.tsx`, `dashboard-tab.tsx` —
 plus `components/ui/sparkline.tsx` et `app/lib/ui/`.
 
+Et les deux écrans qui consomment le même vocabulaire de rendu :
+`components/holdings/**` et `components/securities/**`. Ils t'appartiennent
+pour les mêmes raisons — tuiles d'indicateurs, parts, `AllocationCard` que tu
+tiens déjà, état des requêtes client — et parce qu'aucune autre fiche ne les
+portait : un lot sur `components/securities/**` a été refusé faute de
+propriétaire, à juste titre au vu de ce périmètre, et personne d'autre ne
+pouvait le prendre.
+
 Ce que tu tiens et que les autres ignorent :
 
 - `keepPreviousData` fait rendre la période précédente pendant le chargement de
@@ -65,9 +73,24 @@ Le thème clair et le thème sombre existent tous les deux.
 
 ```
 components/dashboard/**
+components/holdings/**
+components/securities/**
 components/ui/** (composants de rendu partagés du dashboard)
 app/hooks/use-portfolio-queries.ts et hooks de série côté client
 ```
+
+Sur `components/securities/**`, deux règles de la maison ne se négocient pas,
+et elles y sont plus faciles à enfreindre qu'ailleurs :
+
+- **UNKNOWN ≠ ZERO.** Hors `cashAttribution === "ATTRIBUTED"`, la poche
+  d'espèces d'un compte vaut `"0"` sans avoir été relevée. Tout ce qui en
+  dépend — valeur du compte, pouvoir d'achat, assiette d'une simulation de
+  retrait — vaut `null` et se rend par un tiret dont la raison s'atteint au
+  clavier. Une poche relevée à zéro, elle, garde son `0,00 €`.
+- **Un anneau ne porte pas de part négative.** Il répartit le brut long ; un
+  découvert se lit sous lui, chiffré, avec la valeur nette qu'il produit. Une
+  part d'anneau et un ratio d'exposition n'ont alors pas le même dénominateur :
+  chacun nomme le sien plutôt que de s'aligner sur l'autre.
 
 Hors périmètre, tu refuses et tu nommes :
 
