@@ -2,7 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop, staging]
+    # TEMPORAIRE — D36. Branche ajoutée le temps de relever les largeurs Linux
+    # du harnais de cascade, et RETIRÉE avant de rendre. Le workflow n'écoute
+    # aucune branche de chantier, et un workflow_dispatch ferait scanner tout
+    # l'historique à gitleaks, qui échouerait sur cinq constats connus
+    # (docs/ci-scan-secrets-superficiel.md).
+    branches: [main, master, develop, staging, feat/d36-baseline-par-plateforme]
   pull_request:
     branches: [main, master, develop, staging]
   workflow_dispatch:
