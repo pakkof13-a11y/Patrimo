@@ -104,12 +104,22 @@ export async function compileCss(): Promise<string> {
 const MEASURED = [
   "fontSize",
   "lineHeight",
-  "width",
   "paddingTop",
   "paddingRight",
   "paddingBottom",
   "paddingLeft",
 ] as const;
+
+/**
+ * La largeur, relevée à part — elle dépend de la plateforme.
+ *
+ * Tout le reste de ce relevé est commun : mêmes tailles de police, mêmes
+ * interlignes, mêmes remplissages, même peau, sur Windows comme sur Linux.
+ * Seule la largeur d'un champ qui n'en déclare pas diverge, parce que Chrome
+ * la calcule sur la largeur moyenne de caractère et que les deux systèmes ne
+ * l'arrondissent pas pareil. Voir `tools/input-cascade/fonts/README.md`.
+ */
+const WIDTH = "width";
 
 /**
  * La « peau » : ce qui ne doit jamais bouger, dans aucun des quatre états.
@@ -162,6 +172,22 @@ export type FontReport = {
   unresolved: Array<{ classes: string; resolved: string }>;
 };
 
+/**
+ * Sous quelle clé ranger les largeurs d'une plateforme.
+ *
+ * Le système seul — `win32`, `linux`, `darwin` — et non le couple
+ * système/architecture. La cause établie est le moteur de texte du système,
+ * pas le processeur : DirectWrite d'un côté, FreeType de l'autre. Découper
+ * plus fin multiplierait les entrées à tenir sans preuve qu'elles diffèrent.
+ *
+ * Si une architecture divergeait un jour, elle échouerait contre l'entrée de
+ * sa plateforme, avec le détail de l'écart — exactement comme Linux a
+ * divergé de Windows. C'est ainsi qu'on l'apprendrait.
+ */
+export function platformKey(platform: string): string {
+  return platform;
+}
+
 /** Les conditions de la prise. Consignées, jamais comparées. */
 export type EnvironmentReport = {
   engine: string;
@@ -173,13 +199,27 @@ export type EnvironmentReport = {
 };
 
 export type Snapshot = {
-  /** Géométrie et typographie, une entrée par combinaison de classes. */
+  /**
+   * Typographie et remplissages, une entrée par combinaison de classes.
+   *
+   * Commun à toutes les plateformes, et vérifié comme tel : ces valeurs sont
+   * comparées partout, sans distinction de système.
+   */
   combinations: Array<{ classes: string; count: number; computed: Measurement }>;
-  /** Peau du champ témoin, par palette et par état (`light.hover`…). */
+  /** Peau du champ témoin, par palette et par état (`light.hover`…). Commune. */
   skin: Record<string, Measurement>;
-  /** Facultatifs : une référence enregistrée avant D34 n'en porte pas. */
+  /**
+   * Largeurs, **par plateforme** : `widths.win32[classes]['light.width']`.
+   *
+   * Une mesure ne remplit que l'entrée de sa propre plateforme ;
+   * `capture.mts` fusionne au lieu d'écraser, sans quoi enregistrer depuis
+   * Windows effacerait le relevé Linux.
+   */
+  widths?: Record<string, Record<string, Measurement>>;
+  /** Conditions de prise, par plateforme, dans la même clé que `widths`. */
+  environments?: Record<string, EnvironmentReport>;
+  /** Facultatif : une référence enregistrée avant D34 n'en porte pas. */
   fonts?: FontReport;
-  environment?: EnvironmentReport;
 };
 
 /* ── 4. Le navigateur ────────────────────────────────────────────────── */
@@ -699,6 +739,19 @@ async function collectFontReport(
     { n: combinations.length }
   );
 
+  /*
+    La police physique se lit **avant** la substitution qui suit.
+
+    Elle était lue après, et la valeur rendue dépendait alors du moment où le
+    navigateur relayait : le témoin pouvait encore porter la police de
+    substitution. Constaté — `platformFonts` a rendu `Times New Roman` là où
+    la même mesure rendait `IBM Plex Sans` la veille, sans qu'une ligne de ce
+    fichier ait changé entre les deux.
+
+    Lire dans l'état nominal supprime la question au lieu de la temporiser.
+  */
+  const platformFonts = await platformFontsOf(page, "#font-witness");
+
   const substitue = await page.evaluate(
     ({ n }) => {
       const root = document.documentElement;
@@ -727,7 +780,7 @@ async function collectFontReport(
     file: path.basename(FONT_FILE),
     sha256,
     loaded,
-    platformFonts: await platformFontsOf(page, "#font-witness"),
+    platformFonts,
     fontDependent: lignes.filter((l) => l.dependent).length,
     unresolved: unresolvedFields(lignes, FONT_FAMILY),
   };
@@ -750,9 +803,13 @@ export async function measure(): Promise<Snapshot> {
     browser = await chromium.launch({ executablePath });
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
+    // Une mesure ne parle que de la plateforme qui l'exécute.
+    const key = platformKey(process.platform);
     const snapshot: Snapshot = {
       combinations: combinations.map((c) => ({ ...c, computed: {} })),
       skin: {} as Snapshot["skin"],
+      widths: { [key]: {} },
+      environments: {},
     };
 
     for (const theme of THEMES) {
@@ -797,11 +854,22 @@ export async function measure(): Promise<Snapshot> {
           }
           return rows;
         },
-        { props: [...MEASURED], n: combinations.length }
+        { props: [...MEASURED, WIDTH], n: combinations.length }
       );
+      /*
+        Un seul passage dans le navigateur, deux destinations : le commun va
+        dans `computed`, comparé partout ; la largeur va dans la carte de sa
+        plateforme, comparée seulement à sa semblable.
+      */
       computed.forEach((row, i) => {
+        const classes = snapshot.combinations[i].classes;
         for (const [k, v] of Object.entries(row)) {
-          snapshot.combinations[i].computed[`${theme}.${k}`] = v;
+          if (k === WIDTH) {
+            const carte = (snapshot.widths![key][classes] ??= {});
+            carte[`${theme}.${k}`] = v;
+          } else {
+            snapshot.combinations[i].computed[`${theme}.${k}`] = v;
+          }
         }
       });
 
@@ -843,12 +911,14 @@ export async function measure(): Promise<Snapshot> {
       }
     }
 
-    snapshot.environment = {
-      engine: browser.version(),
-      platform: process.platform,
-      arch: process.arch,
-      recordedAt: new Date().toISOString(),
-      note: FONT_NOTE,
+    snapshot.environments = {
+      [key]: {
+        engine: browser.version(),
+        platform: process.platform,
+        arch: process.arch,
+        recordedAt: new Date().toISOString(),
+        note: FONT_NOTE,
+      },
     };
 
     return snapshot;
@@ -922,7 +992,94 @@ export function diff(before: Snapshot, after: Snapshot): Difference[] {
       count: a.count,
     });
   }
+
+  /*
+    Les largeurs, contre celles de la même plateforme.
+
+    `after` n'en porte qu'une : celle du système qui vient de mesurer. Les
+    comparer à celles d'un autre système n'aurait pas de sens — c'est
+    exactement ce que faisait la référence unique, et ce qui a fait échouer la
+    CI Linux sur cinq combinaisons alors que le moteur, la police et le CSS
+    étaient les mêmes.
+
+    Plateforme absente de la référence : on ne compare rien ici, et
+    `missingPlatformWidths` le dit bien mieux qu'une avalanche de différences.
+  */
+  const key = Object.keys(after.widths ?? {})[0];
+  const attendues = key ? before.widths?.[key] : undefined;
+  const obtenues = key ? after.widths?.[key] : undefined;
+  if (attendues && obtenues) {
+    const countOf = new Map(after.combinations.map((c) => [c.classes, c.count]));
+    for (const classes of new Set([
+      ...Object.keys(attendues),
+      ...Object.keys(obtenues),
+    ])) {
+      const b = attendues[classes] ?? {};
+      const a = obtenues[classes] ?? {};
+      for (const prop of new Set([...Object.keys(b), ...Object.keys(a)])) {
+        if (b[prop] !== a[prop]) {
+          out.push({
+            scope: classes,
+            property: prop,
+            before: b[prop] ?? "—",
+            after: a[prop] ?? "—",
+            count: countOf.get(classes) ?? 1,
+          });
+        }
+      }
+    }
+  }
+
   return out;
+}
+
+/**
+ * La référence connaît-elle les largeurs de la plateforme qui mesure ?
+ *
+ * `null` si oui. Sinon un message, et le test échoue dessus : il ne saute
+ * pas, et il ne compare pas aux largeurs d'un autre système. Une plateforme
+ * non enregistrée est une plateforme dont personne n'a relu les valeurs, et
+ * l'inventer serait la faute que tout cet arc a passé son temps à fermer.
+ *
+ * Le message porte les largeurs mesurées, prêtes à être relues puis
+ * enregistrées. C'est ce qui rend une plateforme adoptable sans y lancer
+ * `input:baseline` — la CI, par exemple, où on ne veut surtout pas qu'un
+ * enregistrement se produise.
+ */
+export function missingPlatformWidths(
+  before: Snapshot,
+  after: Snapshot
+): string | null {
+  const key = Object.keys(after.widths ?? {})[0];
+  if (!key) {
+    return "La mesure n'a produit aucune largeur — le harnais lui-même est en cause.";
+  }
+  if (before.widths?.[key]) return null;
+
+  const connues = Object.keys(before.widths ?? {});
+  const env = after.environments?.[key];
+  const lines = [
+    `La référence ne connaît pas les largeurs de la plateforme « ${key} ».`,
+    "",
+    connues.length
+      ? `Plateformes enregistrées : ${connues.join(", ")}.`
+      : "Aucune plateforme n'est enregistrée dans la référence.",
+  ];
+  if (env) {
+    lines.push(`Mesuré ici sous ${env.platform}/${env.arch}, moteur ${env.engine}.`);
+  }
+  lines.push(
+    "",
+    "Le test échoue plutôt que de sauter, et plutôt que de comparer aux",
+    "largeurs d'un autre système : les deux reviendraient à valider ce que",
+    "personne n'a relu.",
+    "",
+    `Largeurs mesurées, à relire avant de les enregistrer sous widths.${key}`,
+    "dans tools/input-cascade/baseline.json :",
+    "",
+    JSON.stringify(after.widths![key], null, 2)
+  );
+  return lines.join("\n");
 }
 
 export function formatDiff(differences: Difference[]): string {
@@ -947,34 +1104,38 @@ export function formatDiff(differences: Difference[]): string {
 }
 
 /**
- * Les conditions de la référence contre celles de la mesure.
+ * Sous quelles conditions la référence a été prise, et sous lesquelles on
+ * mesure.
  *
- * Ajouté au message d'échec : un écart de moteur ou de plateforme explique
- * souvent vingt-trois lignes de différences, et se lit alors en une.
+ * Ajouté au message d'échec. Nomme **toujours** la plateforme dont les
+ * largeurs servent de référence : c'est elle que le lecteur doit avoir en
+ * tête avant de lire le moindre écart de largeur. Et signale un écart de
+ * moteur, qui explique souvent vingt lignes de différences et se lit alors
+ * en une.
  */
-export function formatEnvironment(
-  before?: EnvironmentReport,
-  after?: EnvironmentReport
-): string {
-  if (!before) return "\n\nRéférence enregistrée sans métadonnées d'environnement.";
-  if (!after) return "";
-  const lignes: string[] = [];
-  if (before.engine !== after.engine) {
-    lignes.push(`  moteur      référence ${before.engine} · ici ${after.engine}`);
-  }
-  if (before.platform !== after.platform || before.arch !== after.arch) {
+export function formatEnvironment(before: Snapshot, after: Snapshot): string {
+  const key = Object.keys(after.widths ?? {})[0];
+  if (!key) return "";
+  const b = before.environments?.[key];
+  const a = after.environments?.[key];
+
+  const lignes = [`  largeurs comparées à la plateforme « ${key} »`];
+  if (!b) {
     lignes.push(
-      `  plateforme  référence ${before.platform}/${before.arch} · ici ${after.platform}/${after.arch}`
+      "  référence sans conditions de prise pour cette plateforme"
     );
+  } else {
+    lignes.push(`  référence enregistrée le ${b.recordedAt}, moteur ${b.engine}`);
+    if (a && b.engine !== a.engine) {
+      lignes.push(`  moteur ici ${a.engine} — différent de la référence`);
+    }
+    if (a && (b.platform !== a.platform || b.arch !== a.arch)) {
+      lignes.push(
+        `  système référence ${b.platform}/${b.arch} · ici ${a.platform}/${a.arch}`
+      );
+    }
   }
-  if (lignes.length === 0) return "";
-  return [
-    "",
-    "",
-    "Conditions de prise différentes :",
-    ...lignes,
-    `  référence enregistrée le ${before.recordedAt}`,
-  ].join("\n");
+  return ["", "", "Conditions de prise :", ...lignes].join("\n");
 }
 
 export const BASELINE_PATH = path.join(import.meta.dirname, "baseline.json");

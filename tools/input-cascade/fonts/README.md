@@ -64,6 +64,67 @@ l'empreinte ci-dessus, consignée aussi dans `baseline.json`, qui permettra de
 s'en apercevoir. Le fond du problème — l'application sert une police que
 personne n'a figée — dépasse ce harnais et fait l'objet d'un ticket séparé.
 
+## Fixer la police n'a pas suffi : les largeurs restent par plateforme
+
+Une fois cette police embarquée, deux postes Windows se sont accordés au
+pixel. Le coureur Linux de l'intégration continue, lui, diverge — sur 5 des 56
+combinaisons, 7 occurrences.
+
+Ce qui rend le constat solide, c'est tout ce qui **ne** varie **pas** : même
+Chromium 149.0.7827.55 des deux côtés, cette même fixture vérifiée chargée et
+réellement employée, même CSS compilé par la même chaîne. La seule variable
+restante est le système.
+
+| combinaison | taille | Windows | Linux | écart |
+| --- | --- | --- | --- | --- |
+| `input w-auto font-semibold` | 13 px / 600 | 175,375 | 173,375 | −2 |
+| `input w-auto py-1.5 text-sm` | 12 px | 154,375 | 160,375 | +6 |
+| `input w-auto min-w-0 max-w-full py-1.5 text-sm` | 12 px | 154,375 | 160,375 | +6 |
+| `input w-auto py-0.5 text-[10px]` | 10 px | 133,375 | 138,375 | +5 |
+| `input w-full … sm:w-auto sm:min-w-[10rem]` | 12 px | 160 | 160,375 | +0,375 |
+
+L'écart n'est ni uniforme ni monotone : 13 px en graisse 400 et 11 px aux deux
+graisses s'accordent exactement, tandis que 10, 12 et 13 px en graisse 600
+divergent — dont un dans l'autre sens. Ce n'est donc pas un facteur d'échelle
+mais un arrondi par taille.
+
+Hypothèse, et elle n'est pas mesurée : les deux systèmes n'emploient pas le
+même moteur de texte — DirectWrite d'un côté, FreeType de l'autre — et la
+largeur moyenne de caractère que Chrome lit pour dimensionner un champ sans
+largeur déclarée n'y est pas arrondie pareil.
+
+### Pourquoi ce n'est pas de la cosmétique
+
+Le cinquième cas le prouve. `input w-full min-w-0 max-w-full py-1.5 text-sm
+sm:w-auto sm:min-w-[10rem]` porte un plancher de 10 rem, soit 160 px.
+
+- Sous Windows, la largeur intrinsèque vaut 154,375 px : **le plancher gagne**,
+  le champ mesure 160 px pile.
+- Sous Linux, elle atteint 160,375 px : **elle déborde le plancher**, qui ne
+  contraint plus rien.
+
+Le même champ change de régime de mise en page selon le système. Ce n'est pas
+un demi-pixel de rendu, c'est la règle CSS qui décide de la largeur qui n'est
+plus la même — exactement le sujet que ce harnais surveille.
+
+### La conséquence dans `baseline.json`
+
+Les largeurs sont donc rangées **par plateforme**, sous `widths.<système>`.
+Tout le reste — tailles de police, interlignes, remplissages, peau du champ,
+`outlineStyle` — reste commun et se compare partout : ces valeurs passent
+déjà sur les deux systèmes, et les partitionner masquerait une vraie
+régression derrière une différence de plateforme.
+
+La clé est le système seul, pas le couple système/architecture : la cause
+établie est le moteur de texte, pas le processeur.
+
+Et quand la plateforme courante n'a pas d'entrée, le test **échoue en le
+disant** — il ne saute pas, et il ne compare pas aux largeurs d'un autre
+système. Son message porte les largeurs mesurées, à relire avant de les
+enregistrer : c'est ce qui rend une plateforme adoptable sans y lancer
+`input:baseline`, et notamment depuis la CI, où l'on ne veut surtout pas
+qu'un enregistrement se produise.
+
 ## Licence
 
 SIL Open Font License 1.1, texte complet dans `LICENSE-OFL.txt`.

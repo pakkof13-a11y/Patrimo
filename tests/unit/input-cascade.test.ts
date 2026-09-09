@@ -7,6 +7,7 @@ import {
   formatDiff,
   formatEnvironment,
   measure,
+  missingPlatformWidths,
   readBaseline,
 } from "../../tools/input-cascade/harness.mjs";
 
@@ -82,11 +83,25 @@ describe("cascade .input", () => {
       if (!chromiumOuSaut(ctx)) return;
       const reference = readBaseline();
       const mesure = await measure();
+
+      /*
+        La plateforme d'abord.
+
+        Les largeurs sont rangées par système : sans entrée pour celui qui
+        mesure, les comparer reviendrait à les confronter à celles d'un autre
+        — c'est ce que faisait la référence unique, et ce qui a fait échouer
+        la CI Linux sur cinq combinaisons à moteur, police et CSS identiques.
+
+        Le test échoue alors, il ne saute pas : une plateforme non enregistrée
+        est une plateforme dont personne n'a relu les valeurs.
+      */
+      const manque = missingPlatformWidths(reference, mesure);
+      expect(manque, manque ?? "").toBeNull();
+
       const differences = diff(reference, mesure);
       expect(
         differences,
-        formatDiff(differences) +
-          formatEnvironment(reference.environment, mesure.environment)
+        formatDiff(differences) + formatEnvironment(reference, mesure)
       ).toEqual([]);
     },
     60_000

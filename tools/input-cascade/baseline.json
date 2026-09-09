@@ -6,14 +6,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "15.4px",
-        "light.width": "159px",
         "light.paddingTop": "0px",
         "light.paddingRight": "24px",
         "light.paddingBottom": "0px",
         "light.paddingLeft": "6px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "15.4px",
-        "dark.width": "159px",
         "dark.paddingTop": "0px",
         "dark.paddingRight": "24px",
         "dark.paddingBottom": "0px",
@@ -26,14 +24,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "15.4px",
-        "light.width": "161px",
         "light.paddingTop": "0px",
         "light.paddingRight": "24px",
         "light.paddingBottom": "0px",
         "light.paddingLeft": "8px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "15.4px",
-        "dark.width": "161px",
         "dark.paddingTop": "0px",
         "dark.paddingRight": "24px",
         "dark.paddingBottom": "0px",
@@ -46,14 +42,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "15.4px",
-        "light.width": "151.375px",
         "light.paddingTop": "0px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "0px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "15.4px",
-        "dark.width": "151.375px",
         "dark.paddingTop": "0px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "0px",
@@ -66,14 +60,12 @@
       "computed": {
         "light.fontSize": "12px",
         "light.lineHeight": "17.1429px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "12px",
         "dark.lineHeight": "17.1429px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -86,14 +78,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "173.375px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "173.375px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -106,14 +96,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "15.4px",
-        "light.width": "600px",
         "light.paddingTop": "0px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "0px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "15.4px",
-        "dark.width": "600px",
         "dark.paddingTop": "0px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "0px",
@@ -126,14 +114,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "15.4px",
-        "light.width": "600px",
         "light.paddingTop": "0px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "0px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "15.4px",
-        "dark.width": "600px",
         "dark.paddingTop": "0px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "0px",
@@ -146,14 +132,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "160px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "160px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -166,14 +150,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -186,14 +168,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "208px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "208px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -206,14 +186,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "224px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "224px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -226,14 +204,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "173.375px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "173.375px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -246,14 +222,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "14.6667px",
-        "light.width": "151.375px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "14.6667px",
-        "dark.width": "151.375px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -266,14 +240,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "14.6667px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "14.6667px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -286,14 +258,12 @@
       "computed": {
         "light.fontSize": "12px",
         "light.lineHeight": "17.1429px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "12px",
         "dark.lineHeight": "17.1429px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -306,14 +276,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "96px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "96px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -326,14 +294,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "144px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "144px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -346,14 +312,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "144px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "144px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -366,14 +330,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -386,14 +348,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "14.6667px",
-        "light.width": "600px",
         "light.paddingTop": "0px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "0px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "14.6667px",
-        "dark.width": "600px",
         "dark.paddingTop": "0px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "0px",
@@ -406,14 +366,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "256px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "256px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -426,14 +384,12 @@
       "computed": {
         "light.fontSize": "12px",
         "light.lineHeight": "17.1429px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "12px",
         "dark.lineHeight": "17.1429px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -446,14 +402,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -466,14 +420,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -486,14 +438,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "14.6667px",
-        "light.width": "56px",
         "light.paddingTop": "4px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "4px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "14.6667px",
-        "dark.width": "56px",
         "dark.paddingTop": "4px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "4px",
@@ -506,14 +456,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "14.6667px",
-        "light.width": "96px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "14.6667px",
-        "dark.width": "96px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -526,14 +474,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "112px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "112px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -546,14 +492,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "128px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "128px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -566,14 +510,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "14.6667px",
-        "light.width": "128px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "14.6667px",
-        "dark.width": "128px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -586,14 +528,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "144px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "144px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -606,14 +546,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "173.375px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "173.375px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -626,14 +564,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "14.6667px",
-        "light.width": "151.375px",
         "light.paddingTop": "4px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "4px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "14.6667px",
-        "dark.width": "151.375px",
         "dark.paddingTop": "4px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "4px",
@@ -646,14 +582,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "175.375px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "175.375px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -666,14 +600,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "173.375px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "173.375px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -686,14 +618,12 @@
       "computed": {
         "light.fontSize": "12px",
         "light.lineHeight": "17.1429px",
-        "light.width": "154.375px",
         "light.paddingTop": "6px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "6px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "12px",
         "dark.lineHeight": "17.1429px",
-        "dark.width": "154.375px",
         "dark.paddingTop": "6px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "6px",
@@ -706,14 +636,12 @@
       "computed": {
         "light.fontSize": "10px",
         "light.lineHeight": "14px",
-        "light.width": "133.375px",
         "light.paddingTop": "2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "10px",
         "dark.lineHeight": "14px",
-        "dark.width": "133.375px",
         "dark.paddingTop": "2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "2px",
@@ -726,14 +654,12 @@
       "computed": {
         "light.fontSize": "12px",
         "light.lineHeight": "17.1429px",
-        "light.width": "154.375px",
         "light.paddingTop": "6px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "6px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "12px",
         "dark.lineHeight": "17.1429px",
-        "dark.width": "154.375px",
         "dark.paddingTop": "6px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "6px",
@@ -746,14 +672,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "14.6667px",
-        "light.width": "151.375px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "14.6667px",
-        "dark.width": "151.375px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -766,14 +690,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -786,14 +708,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "15.4px",
-        "light.width": "600px",
         "light.paddingTop": "0px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "0px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "15.4px",
-        "dark.width": "600px",
         "dark.paddingTop": "0px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "0px",
@@ -806,14 +726,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "600px",
         "light.paddingTop": "4px",
         "light.paddingRight": "4px",
         "light.paddingBottom": "4px",
         "light.paddingLeft": "4px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "600px",
         "dark.paddingTop": "4px",
         "dark.paddingRight": "4px",
         "dark.paddingBottom": "4px",
@@ -826,14 +744,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "600px",
         "light.paddingTop": "6px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "6px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "600px",
         "dark.paddingTop": "6px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "6px",
@@ -846,14 +762,12 @@
       "computed": {
         "light.fontSize": "12px",
         "light.lineHeight": "17.1429px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "12px",
         "dark.lineHeight": "17.1429px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -866,14 +780,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -886,14 +798,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "14.6667px",
-        "light.width": "600px",
         "light.paddingTop": "0px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "0px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "14.6667px",
-        "dark.width": "600px",
         "dark.paddingTop": "0px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "0px",
@@ -906,14 +816,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "14.6667px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "14.6667px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -926,14 +834,12 @@
       "computed": {
         "light.fontSize": "11px",
         "light.lineHeight": "14.6667px",
-        "light.width": "600px",
         "light.paddingTop": "4px",
         "light.paddingRight": "6px",
         "light.paddingBottom": "4px",
         "light.paddingLeft": "6px",
         "dark.fontSize": "11px",
         "dark.lineHeight": "14.6667px",
-        "dark.width": "600px",
         "dark.paddingTop": "4px",
         "dark.paddingRight": "6px",
         "dark.paddingBottom": "4px",
@@ -946,14 +852,12 @@
       "computed": {
         "light.fontSize": "12px",
         "light.lineHeight": "17.1429px",
-        "light.width": "160px",
         "light.paddingTop": "6px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "6px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "12px",
         "dark.lineHeight": "17.1429px",
-        "dark.width": "160px",
         "dark.paddingTop": "6px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "6px",
@@ -966,14 +870,12 @@
       "computed": {
         "light.fontSize": "12px",
         "light.lineHeight": "17.1429px",
-        "light.width": "600px",
         "light.paddingTop": "6px",
         "light.paddingRight": "36px",
         "light.paddingBottom": "6px",
         "light.paddingLeft": "36px",
         "dark.fontSize": "12px",
         "dark.lineHeight": "17.1429px",
-        "dark.width": "600px",
         "dark.paddingTop": "6px",
         "dark.paddingRight": "36px",
         "dark.paddingBottom": "6px",
@@ -986,14 +888,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "600px",
         "light.paddingTop": "6px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "6px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "600px",
         "dark.paddingTop": "6px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "6px",
@@ -1006,14 +906,12 @@
       "computed": {
         "light.fontSize": "12px",
         "light.lineHeight": "17.1429px",
-        "light.width": "600px",
         "light.paddingTop": "6px",
         "light.paddingRight": "32px",
         "light.paddingBottom": "6px",
         "light.paddingLeft": "32px",
         "dark.fontSize": "12px",
         "dark.lineHeight": "17.1429px",
-        "dark.width": "600px",
         "dark.paddingTop": "6px",
         "dark.paddingRight": "32px",
         "dark.paddingBottom": "6px",
@@ -1026,14 +924,12 @@
       "computed": {
         "light.fontSize": "12px",
         "light.lineHeight": "17.1429px",
-        "light.width": "600px",
         "light.paddingTop": "6px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "6px",
         "light.paddingLeft": "36px",
         "dark.fontSize": "12px",
         "dark.lineHeight": "17.1429px",
-        "dark.width": "600px",
         "dark.paddingTop": "6px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "6px",
@@ -1046,14 +942,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "600px",
         "light.paddingTop": "6px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "6px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "600px",
         "dark.paddingTop": "6px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "6px",
@@ -1066,14 +960,12 @@
       "computed": {
         "light.fontSize": "12px",
         "light.lineHeight": "17.1429px",
-        "light.width": "600px",
         "light.paddingTop": "6px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "6px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "12px",
         "dark.lineHeight": "17.1429px",
-        "dark.width": "600px",
         "dark.paddingTop": "6px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "6px",
@@ -1086,14 +978,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -1106,14 +996,12 @@
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
-        "light.width": "600px",
         "light.paddingTop": "7.2px",
         "light.paddingRight": "11.2px",
         "light.paddingBottom": "7.2px",
         "light.paddingLeft": "11.2px",
         "dark.fontSize": "13px",
         "dark.lineHeight": "18.2px",
-        "dark.width": "600px",
         "dark.paddingTop": "7.2px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "7.2px",
@@ -1219,6 +1107,243 @@
       "cursor": "not-allowed"
     }
   },
+  "widths": {
+    "win32": {
+      "input !h-7 w-auto !min-w-0 py-0 pl-1.5 pr-6 text-[11px] tabular-nums": {
+        "light.width": "159px",
+        "dark.width": "159px"
+      },
+      "input !h-7 w-auto !min-w-0 py-0 pl-2 pr-6 text-[11px]": {
+        "light.width": "161px",
+        "dark.width": "161px"
+      },
+      "input !h-7 w-auto py-0 text-[11px]": {
+        "light.width": "151.375px",
+        "dark.width": "151.375px"
+      },
+      "input flex w-full items-center justify-between gap-2 text-left text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input flex-1": {
+        "light.width": "173.375px",
+        "dark.width": "173.375px"
+      },
+      "input h-7 w-full min-w-[8rem] py-0 text-[11px]": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input h-7 w-full min-w-[9rem] py-0 text-[11px]": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input h-8 w-40": {
+        "light.width": "160px",
+        "dark.width": "160px"
+      },
+      "input min-h-[4rem] w-full": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input min-w-[13rem] flex-1": {
+        "light.width": "208px",
+        "dark.width": "208px"
+      },
+      "input min-w-[14rem] flex-1": {
+        "light.width": "224px",
+        "dark.width": "224px"
+      },
+      "input min-w-0 flex-1": {
+        "light.width": "173.375px",
+        "dark.width": "173.375px"
+      },
+      "input min-w-0 flex-1 text-xs": {
+        "light.width": "151.375px",
+        "dark.width": "151.375px"
+      },
+      "input mt-0.5 h-8 w-full text-xs": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input mt-1 flex w-full items-center justify-between gap-2 text-left text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input mt-1 w-24": {
+        "light.width": "96px",
+        "dark.width": "96px"
+      },
+      "input mt-1 w-36": {
+        "light.width": "144px",
+        "dark.width": "144px"
+      },
+      "input mt-1 w-36 tabular-nums": {
+        "light.width": "144px",
+        "dark.width": "144px"
+      },
+      "input mt-1 w-full": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input mt-1 w-full h-8 py-0 text-xs": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input mt-1 w-full sm:w-64": {
+        "light.width": "256px",
+        "dark.width": "256px"
+      },
+      "input mt-1 w-full text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input mt-1.5 w-full": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input mt-2 w-full": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-14 py-1 text-center text-xs font-semibold tabular-nums": {
+        "light.width": "56px",
+        "dark.width": "56px"
+      },
+      "input w-24 text-right text-xs": {
+        "light.width": "96px",
+        "dark.width": "96px"
+      },
+      "input w-28": {
+        "light.width": "112px",
+        "dark.width": "112px"
+      },
+      "input w-32 text-right": {
+        "light.width": "128px",
+        "dark.width": "128px"
+      },
+      "input w-32 text-xs": {
+        "light.width": "128px",
+        "dark.width": "128px"
+      },
+      "input w-36": {
+        "light.width": "144px",
+        "dark.width": "144px"
+      },
+      "input w-auto": {
+        "light.width": "173.375px",
+        "dark.width": "173.375px"
+      },
+      "input w-auto !min-w-[3.25rem] py-1 text-xs font-semibold tabular-nums": {
+        "light.width": "151.375px",
+        "dark.width": "151.375px"
+      },
+      "input w-auto font-semibold": {
+        "light.width": "175.375px",
+        "dark.width": "175.375px"
+      },
+      "input w-auto min-w-[6rem]": {
+        "light.width": "173.375px",
+        "dark.width": "173.375px"
+      },
+      "input w-auto min-w-0 max-w-full py-1.5 text-sm": {
+        "light.width": "154.375px",
+        "dark.width": "154.375px"
+      },
+      "input w-auto py-0.5 text-[10px]": {
+        "light.width": "133.375px",
+        "dark.width": "133.375px"
+      },
+      "input w-auto py-1.5 text-sm": {
+        "light.width": "154.375px",
+        "dark.width": "154.375px"
+      },
+      "input w-auto text-xs": {
+        "light.width": "151.375px",
+        "dark.width": "151.375px"
+      },
+      "input w-full": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full !h-7 py-0 text-[11px]": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full border-0 bg-transparent px-1 py-1 !shadow-none": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full border-red-200 bg-white py-1.5 dark:border-red-900/50 dark:bg-[var(--input-bg)]": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full font-mono text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full font-mono uppercase": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full h-7 py-0 text-xs": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full h-8 text-xs": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full min-w-[4.5rem] px-1.5 py-1 text-right text-xs tabular-nums": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full min-w-0 max-w-full py-1.5 text-sm sm:w-auto sm:min-w-[10rem]": {
+        "light.width": "160px",
+        "dark.width": "160px"
+      },
+      "input w-full min-w-0 py-1.5 pl-9 pr-9 text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full py-1.5": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full py-1.5 pl-8 pr-8 text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full py-1.5 pl-9 text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full py-1.5 text-right": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full py-1.5 text-sm": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full tabular-nums": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
+      "input w-full uppercase": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      }
+    }
+  },
+  "environments": {
+    "win32": {
+      "engine": "149.0.7827.55",
+      "platform": "win32",
+      "arch": "x64",
+      "recordedAt": "2026-09-09T09:56:19.205Z",
+      "note": "Police servie par Google Fonts via next/font, et non celle publiée par IBM. Sur un <input> vide, Google rend 149 px à 13 px là où @ibm/plex-sans@1.1.0 et @ibm/plex-sans-variable@0.2.0 rendent 153 px. L'écart est proportionnel à la taille (4 px à 13 px, 8 px à 26 px, 32 px à 104 px) et les chasses de glyphes sont identiques (78,000 px pour 0123456789). Prendre un fichier d'IBM ferait donc mesurer une largeur que l'application n'affiche jamais. Voir tools/input-cascade/fonts/README.md."
+    }
+  },
   "fonts": {
     "declared": "IBM Plex Sans",
     "monoPlaceholder": "IBM Plex Mono absente du harnais",
@@ -1233,12 +1358,5 @@
     ],
     "fontDependent": 15,
     "unresolved": []
-  },
-  "environment": {
-    "engine": "149.0.7827.55",
-    "platform": "win32",
-    "arch": "x64",
-    "recordedAt": "2026-09-08T21:56:47.723Z",
-    "note": "Police servie par Google Fonts via next/font, et non celle publiée par IBM. Sur un <input> vide, Google rend 149 px à 13 px là où @ibm/plex-sans@1.1.0 et @ibm/plex-sans-variable@0.2.0 rendent 153 px. L'écart est proportionnel à la taille (4 px à 13 px, 8 px à 26 px, 32 px à 104 px) et les chasses de glyphes sont identiques (78,000 px pour 0123456789). Prendre un fichier d'IBM ferait donc mesurer une largeur que l'application n'affiche jamais. Voir tools/input-cascade/fonts/README.md."
   }
 }
