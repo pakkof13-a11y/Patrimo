@@ -16,10 +16,18 @@
  * Les UC dont on connaît réellement le nombre de parts et la valeur liquidative
  * peuvent être saisies par le journal habituel : rien n'interdit une quantité
  * différente de 1, ce service n'est qu'un raccourci de saisie.
+ *
+ * ## L'unité de ce « montant »
+ *
+ * La saisie est **en euros** des deux côtés (`amountEur`, `valueEur`). Les deux
+ * champs écrits, eux, sont dans la **devise de l'actif** : voir `writeFx`, qui
+ * porte la conversion et le taux persisté avec elle.
  */
 
 import { Prisma } from "../prisma-client/client";
 import { prisma } from "../prisma";
+import { convertFromEurSync, FxRateUnknownError, getEurRates } from "../market/fx";
+import { d, toFixed } from "../money/decimal";
 import { createTransaction } from "../transactions/service";
 import { assetClassForKind, isStructured } from "./constants";
 
@@ -78,6 +86,95 @@ function dec(raw?: string | null): Prisma.Decimal | null {
   return new Prisma.Decimal(normalized);
 }
 
+/**
+ * Table de taux d'une écriture en euros.
+ *
+ * `writeFx` n'y touche pas — un euro vaut un euro — et elle n'existe que pour
+ * éviter de rendre `rates` nullable sur un chemin où rien ne se convertit.
+ * Surtout : elle ne doit **jamais** partir vers `getHoldings`, qui valorise
+ * tous les actifs de l'utilisateur et lèverait sur le premier en devise.
+ */
+const RATES_EUR_ONLY: Record<string, number> = { EUR: 1 };
+
+type WriteFx = {
+  /** Un montant saisi en euros, exprimé dans la devise de l'actif. */
+  toNative: (amountEur: Prisma.Decimal) => Prisma.Decimal;
+  /** `Transaction.fxRateToEur` : ce que vaut une unité de devise en euros. */
+  fxRateToEur: string;
+};
+
+/**
+ * Conversion de la saisie vers la devise de l'actif, et le taux qui l'accompagne.
+ *
+ * ## Le défaut corrigé
+ *
+ * Ce fichier reçoit des euros et écrivait des euros dans deux champs qui n'en
+ * attendent pas. `getHoldings` lit `manualPrice` comme un prix **dans
+ * `asset.currency`** puis le convertit (`portfolio/service.ts:338-340`), et le
+ * rejeu convertit `unitPrice` par `fxRateToEur` (`accounting/ledger.ts`). Un
+ * montant euro posé là subissait donc un change qu'il ne demandait pas.
+ *
+ * Mesuré sur un contrat en dollars, 10 000 € saisis au taux 1,08 : coût de
+ * revient 9 259,26 €, valeur 9 259,26 €, plus-value nulle. Les deux côtés
+ * fautifs du même écart — 740,74 € de position manquante qu'aucune plus-value
+ * ne trahissait. Ne corriger que la réévaluation aurait fabriqué exactement
+ * +740,74 € de gain.
+ *
+ * ## Un seul relevé de taux par écriture
+ *
+ * `rates` est **passé**, jamais rechargé. `fxRateToEur()` de `market/fx` ferait
+ * un second `getEurRates()` : deux appels de part et d'autre de l'expiration du
+ * cache (une heure) rendent deux taux, la saisie serait convertie par l'un et
+ * relue par l'autre. 0,1 % de mouvement EUR/USD vaut 10 € sur 10 000 €, qui
+ * s'afficheraient en plus-value le jour même de la saisie.
+ *
+ * Le taux vient de `convertFromEurSync(1, …, rates)` et non de `rates[cur]` lu
+ * en direct : `rateOf` est le seul juge de ce qu'est un taux fondé — taux
+ * servi, table déclarée, ou rien — et deux lectures indépendantes de la même
+ * table peuvent en juger différemment (valeur nulle, négative ou non finie
+ * d'un fournisseur bavard). Une seule porte, donc, pour la conversion et pour
+ * le taux persisté.
+ *
+ * ## Devise hors des cinq couvertes
+ *
+ * `LifeInsuranceInputError`, que les routes traduisent en 400 — pas un 500.
+ * C'est déjà le code que `resolveFx` produit pour la même condition sur la
+ * même écriture (`AccountingError("FX_RATE_UNKNOWN")`), et `clientErrorStatus`
+ * ne connaît que 400 et 500 : un 500 annoncerait une panne là où la saisie est
+ * simplement hors du périmètre couvert.
+ */
+function writeFx(currency: string, rates: Record<string, number>): WriteFx {
+  const cur = (currency || "EUR").toUpperCase();
+  if (cur === "EUR") {
+    return { toNative: (amountEur) => amountEur, fxRateToEur: "1" };
+  }
+
+  const refuse = () =>
+    new LifeInsuranceInputError(
+      `Taux EUR→${cur} indisponible : aucune source ne le fonde. La saisie en ` +
+        "euros ne peut pas être convertie dans la devise du support — rien " +
+        "n'a été enregistré."
+    );
+
+  let oneEurInNative: string;
+  try {
+    oneEurInNative = convertFromEurSync(1, cur, rates);
+  } catch (e) {
+    if (e instanceof FxRateUnknownError) throw refuse();
+    throw e;
+  }
+  const rate = d(oneEurInNative);
+  // `rateOf` garantit un taux strictement positif ; on ne divise pas par sa
+  // parole seule — un zéro écrirait un `fxRateToEur` infini en base.
+  if (rate.lte(0)) throw refuse();
+
+  return {
+    toNative: (amountEur) =>
+      new Prisma.Decimal(convertFromEurSync(amountEur.toString(), cur, rates)),
+    fxRateToEur: toFixed(d(1).div(rate), 10),
+  };
+}
+
 export type CreateSupportResult = {
   assetId: string;
   supportId: string;
@@ -128,8 +225,38 @@ export async function createSupport(
   // passé d'argent qui n'y était pas. Sous-estimer la durée de détention est
   // moins grave que fabriquer un historique.
   const occurredAt = parseOptionalDate(input.investedAt) ?? new Date();
+  // La devise de l'actif se décide ici, et c'est celle du contrat **à cet
+  // instant**. Partout ailleurs c'est `asset.currency` qui fait foi : un
+  // contrat peut changer de devise après coup, un actif déjà créé non.
   const currency = (contract.currency || "EUR").toUpperCase();
   const structured = isStructured(input.kind);
+  const entryFees = dec(input.entryFeesEur) ?? new Prisma.Decimal(0);
+
+  /*
+    Conversion **avant** `prisma.$transaction`, pour deux raisons : aucun appel
+    sortant à l'intérieur d'une transaction interactive, qui tiendrait la
+    connexion ouverte le temps du réseau ; et une devise sans taux fondé doit
+    faire échouer la saisie sans avoir rien écrit — ni actif, ni fiche, ni
+    versement.
+
+    Aucun appel du tout pour un contrat en euros : il n'y a rien à convertir,
+    et `resolveFx` fait le même retour immédiat côté transactions.
+  */
+  const rates = currency === "EUR" ? RATES_EUR_ONLY : await getEurRates();
+  const fx = writeFx(currency, rates);
+  const amountNative = fx.toNative(amount);
+  /*
+    Les frais suivent le montant, sinon le journal les lit en devise :
+    `accounting/ledger.ts` fait `feesEur = fees × fxRateToEur`, et 50 € partis
+    tels quels dans une transaction en dollars revenaient à 46,30 €. Mesuré
+    après conversion : 54 USD × 0,9259259259 = 50,00000000 €.
+
+    Conséquence assumée sur l'invariant : le CUMP capitalise les frais
+    d'acquisition (`accounting/cump.ts`), donc un support fraîchement saisi
+    affiche **−frais** de plus-value latente, jamais zéro dès que les frais ne
+    sont pas nuls. C'est la règle du prix de revient, pas un écart de change.
+  */
+  const feesNative = fx.toNative(entryFees);
 
   return prisma.$transaction(async (tx) => {
     const asset = await tx.asset.create({
@@ -144,7 +271,11 @@ export async function createSupport(
         // Aucune cotation publique pour une UC ou un structuré : la valeur est
         // celle du relevé, saisie puis réévaluée à la main.
         priceProvider: "MANUAL",
-        manualPrice: amount,
+        // Prix **unitaire dans la devise de l'actif** — aucune division ici :
+        // `quantity` vaut 1 par construction sur ce chemin, et aucune quantité
+        // n'y est saisissable. Le diviseur n'a de sens qu'à la réévaluation,
+        // où la quantité vient du journal et peut valoir 0,6 après un rachat.
+        manualPrice: amountNative,
         acquisitionDate: occurredAt,
         notes: input.notes?.trim() || null,
       },
@@ -163,6 +294,10 @@ export async function createSupport(
         // structuré : les conserver sur une UC laisserait des barrières
         // orphelines qu'un affichage finirait par prendre au sérieux.
         underlying: structured ? input.underlying?.trim() || null : null,
+        // `amount`, la saisie en euros — jamais `amountNative`. Ce champ est
+        // relu comme un montant en euros par `coupon-schedule.ts` : le repli
+        // sur le montant converti annoncerait « 10 800 € » de nominal pour un
+        // structuré de 10 000 € dans un contrat en dollars.
         nominalEur: structured ? dec(input.nominalEur) ?? amount : null,
         strikeLevel: structured ? dec(input.strikeLevel) : null,
         couponRatePct: structured ? dec(input.couponRatePct) : null,
@@ -195,10 +330,20 @@ export async function createSupport(
         platformId,
         assetId: asset.id,
         quantity: "1",
-        unitPrice: amount.toString(),
-        fees: (dec(input.entryFeesEur) ?? new Prisma.Decimal(0)).toString(),
+        unitPrice: amountNative.toString(),
+        fees: feesNative.toString(),
         currency,
-        fxRateToEur: "1",
+        /*
+          Le taux vivant, plus « 1 ».
+
+          `resolveFx` ne force le taux historique que sur les revenus : un
+          ACHAT en devise portant un taux fourni le garde tel quel. Un « 1 »
+          était donc conservé jusqu'en base pour une devise étrangère — un
+          dollar valant un euro, écrit comme un fait. Le taux transmis ici est
+          celui qui a converti le montant deux lignes plus haut, tiré du même
+          relevé : le journal et la valorisation retombent sur le même euro.
+        */
+        fxRateToEur: fx.fxRateToEur,
         occurredAt: occurredAt.toISOString(),
         // Le versement provient du contrat, pas d'un compte espèces suivi ici :
         // exiger une trésorerie disponible bloquerait une saisie légitime.
@@ -257,6 +402,11 @@ async function ensurePlatform(userId: string, insurer: string): Promise<string> 
  *
  * Seul le prix bouge. La quantité et le prix de revient viennent du journal et
  * restent intacts, sinon la plus-value se dissoudrait à chaque mise à jour.
+ *
+ * **`totalValueEur` est en euros, `manualPrice` est en devise de l'actif** :
+ * la conversion passe par `writeFx`, exactement comme à la création. Écrire
+ * l'euro tel quel sur un contrat en dollars sous-évaluait la position de
+ * 740,74 € pour 10 000 € de relevé.
  */
 export async function revalueSupport(
   userId: string,
@@ -270,9 +420,26 @@ export async function revalueSupport(
 
   const asset = await prisma.asset.findFirst({
     where: { id: assetId, userId, accountType: "AV" },
-    select: { id: true },
+    // `currency` : celle de l'**actif**, jamais celle du contrat. Le contrat
+    // peut avoir changé de devise depuis la création du support ; le prix
+    // stocké, lui, reste relu dans la devise de l'actif par `getHoldings`.
+    select: { id: true, currency: true },
   });
   if (!asset) throw new LifeInsuranceInputError("Support introuvable");
+
+  /*
+    Un seul relevé de taux pour l'écriture entière.
+
+    Il convertit la saisie et il alimente les positions lues juste après.
+    `getHoldings` l'accepte en troisième argument précisément pour ça : le
+    laisser charger le sien autoriserait la quantité, le prix relu et le
+    montant écrit à venir de deux relevés différents.
+
+    Résolu avant `getHoldings` : une devise que rien ne fonde doit échouer sans
+    avoir payé les cinq allers-retours du calcul de positions.
+  */
+  const rates = await getEurRates();
+  const fx = writeFx(asset.currency || "EUR", rates);
 
   /*
     La quantité détenue, celle que le moteur de position calcule.
@@ -299,7 +466,7 @@ export async function revalueSupport(
     paie à chaque affichage.
   */
   const { getHoldings } = await import("../portfolio/service");
-  const holdings = await getHoldings(userId, "EUR");
+  const holdings = await getHoldings(userId, "EUR", rates);
   const holding = holdings.find((h) => h.assetId === assetId);
   const quantity = new Prisma.Decimal(holding?.quantity ?? 0);
 
@@ -311,9 +478,12 @@ export async function revalueSupport(
     );
   }
 
+  // Saisie en euros → devise de l'actif, puis division par la quantité : les
+  // deux règles s'appliquent dans cet ordre, et `quantité × manualPrice`
+  // reconverti retombe sur le montant du relevé.
   await prisma.asset.update({
     where: { id: asset.id },
-    data: { manualPrice: total.div(quantity) },
+    data: { manualPrice: fx.toNative(total).div(quantity) },
   });
 
   // Le cache de cotation prime sur `manualPrice` dans le calcul des positions

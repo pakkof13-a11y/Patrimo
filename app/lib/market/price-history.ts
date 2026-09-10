@@ -743,11 +743,19 @@ export async function getAssetPriceHistory(
     to: to.toISOString(),
     extendedToFirstBuy,
   };
-  const endPrice = asset.priceQuote
-    ? Number(asset.priceQuote.priceEur.toString())
-    : asset.manualPrice
-      ? Number(asset.manualPrice.toString())
-      : 0;
+  // `PriceQuote.priceEur` est déjà en euros ; `Asset.manualPrice`, lui, est
+  // exprimé dans `asset.currency` (cf. portfolio/service.ts, asset-values.ts,
+  // historical/load.ts, market/providers/manual.ts). Un seul relevé de taux
+  // pour cet appel, seulement si la conversion est nécessaire.
+  let endPrice = 0;
+  if (asset.priceQuote) {
+    endPrice = Number(asset.priceQuote.priceEur.toString());
+  } else if (asset.manualPrice) {
+    const rates = await getEurRates();
+    endPrice = Number(
+      convertToEurSync(asset.manualPrice.toString(), asset.currency || "EUR", rates)
+    );
+  }
 
   const native = asset.priceQuote?.nativeCurrency || asset.currency || "EUR";
   const isCrypto =

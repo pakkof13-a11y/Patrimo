@@ -2,9 +2,10 @@
  * Séries de performance des contrats d'assurance-vie.
  *
  * Le calcul réutilise la machinerie déjà en place pour le P&L par classe :
- * rejeu du ledger pour les quantités jour par jour, cache de clôtures pour les
- * cours. Rien n'est recalculé ici — une seconde chaîne de valorisation
- * finirait par diverger de la première, et c'est déjà arrivé sur ce dépôt.
+ * rejeu du ledger pour les quantités **et le coût de revient** jour par jour,
+ * cache de clôtures pour les cours. Rien n'est recalculé ici — une seconde
+ * chaîne de valorisation finirait par diverger de la première, et c'est déjà
+ * arrivé sur ce dépôt.
  *
  * Ce que ce module ajoute est le découpage : les supports d'assurance-vie sont
  * regroupés **par contrat**, puis convertis en série pondérée par le temps
@@ -13,11 +14,12 @@
 
 import { prisma } from "../prisma";
 import { parisDayKey } from "../dates/paris";
+import { shiftDays } from "../dates/day-window";
 import { getDailyCloses } from "../market/daily-closes";
 import { valueHeldAtDay } from "../market/daily-valuation";
 import {
+  buildDailyAssetStates,
   buildDailyFlows,
-  buildDailyQuantities,
   type DayKey,
 } from "../portfolio/class-history";
 import { enumerateDays } from "../portfolio/class-pnl-service";
@@ -47,11 +49,25 @@ export type ContractSeries = {
    * ce qui reviendrait à affirmer qu'ils n'ont rien rapporté. Le taux de
    * couverture dit à l'écran quelle part de l'épargne la courbe décrit
    * réellement — et `0` veut dire qu'il n'y a pas de courbe à montrer.
+   *
+   * Le dénominateur mêle deux grandeurs de nature différente : la valeur de
+   * marché des supports couverts et le coût de revient des autres. C'est
+   * assumé — les seconds n'ont aucune valeur connue à cette date, et c'est
+   * précisément ce que ce ratio annonce.
    */
   coveragePct: number;
   /** Encours couvert par des cours, en euros, au dernier jour de la fenêtre. */
   coveredValueEur: number;
-  /** Encours sans historique, valorisé au montant investi. */
+  /**
+   * Encours sans historique, au **coût de revient** des supports encore
+   * détenus au dernier jour de la fenêtre (CUMP × quantité restante).
+   *
+   * C'est le montant investi restant, et non une valeur : un fonds euro de
+   * 10 000 € versés qui affiche 10 900 € au relevé entre ici pour 10 000 €.
+   * Faute d'historique, sa valeur à cette date est inconnue, et l'inventer
+   * serait pire que l'assumer. Une position soldée en sort — elle n'a plus
+   * rien à couvrir, quel qu'ait été le produit de son rachat.
+   */
   uncoveredValueEur: number;
 };
 
@@ -112,18 +128,43 @@ export async function getLifeInsurancePerformance(
   // ans de plat avant l'ouverture du contrat ne renseigne sur rien.
   let fromDay = requested && requested > firstDay ? requested : firstDay;
 
-  const span = enumerateDays(fromDay, toDay);
-  const days = span.length > MAX_DAYS ? span.slice(span.length - MAX_DAYS) : span;
+  /*
+    Le plafond de profondeur se pose sur la borne **basse**, jamais sur la
+    série déjà énumérée.
+
+    `enumerateDays` s'arrête de lui-même au bout de 1 900 jours, en comptant
+    depuis le début : « tout l'historique » d'un contrat ouvert en 2018 rendait
+    une fenêtre qui s'achevait en 2023, soit une courbe arrêtée trois ans avant
+    aujourd'hui — et, depuis que l'encours hors mesure se lit au dernier jour,
+    un stock relevé à cette date-là. Le `slice` de la queue qui suivait n'y
+    changeait rien : la queue manquait déjà. On recule donc d'au plus 1 900
+    jours **depuis le dernier jour** : la série finit toujours au jour, quitte à
+    commencer plus tard que demandé.
+  */
+  const earliestDay = shiftDays(
+    new Date(`${toDay}T12:00:00Z`),
+    -(MAX_DAYS - 1)
+  );
+  if (fromDay < earliestDay) fromDay = earliestDay;
+
+  const days = enumerateDays(fromDay, toDay);
   if (days.length === 0) return emptyResult(range, toDay);
   fromDay = days[0]!;
 
   const ledgerTxs = txRows.map(mapDbTx);
-  const quantities = buildDailyQuantities(ledgerTxs, days);
+  /*
+    Un seul rejeu du journal pour les deux grandeurs qu'on en tire : la
+    quantité détenue chaque jour, qui porte la courbe, et le coût de revient
+    des positions encore détenues, qui porte l'encours hors mesure — un stock,
+    cf. plus bas.
+  */
+  const states = buildDailyAssetStates(ledgerTxs, days);
   const flows = buildDailyFlows(ledgerTxs);
 
   const heldAssetIds = new Set<string>();
   for (const day of days) {
-    for (const [assetId, qty] of Object.entries(quantities.get(day) ?? {})) {
+    const qtyOfDay = states.get(day)?.quantityByAsset ?? {};
+    for (const [assetId, qty] of Object.entries(qtyOfDay)) {
       if (qty !== 0 && avAssetIds.has(assetId)) heldAssetIds.add(assetId);
     }
   }
@@ -148,7 +189,8 @@ export async function getLifeInsurancePerformance(
   /**
    * Un support n'entre dans la courbe que s'il a un historique. Les autres —
    * fonds en euros valorisés à la main, UC sans cotation — sont comptés à part,
-   * au montant investi, pour dire quelle part de l'épargne échappe à la mesure.
+   * à leur coût de revient, pour dire quelle part de l'épargne échappe à la
+   * mesure.
    */
   const covered = new Set(
     [...heldAssetIds].filter((id) => (closes.get(id)?.size ?? 0) > 0)
@@ -168,7 +210,10 @@ export async function getLifeInsurancePerformance(
      * position n'avait bougé.
      */
     incompleteDays: Set<DayKey>;
-    /** Cumul des flux des supports sans historique — leur montant investi. */
+    /**
+     * Coût de revient des supports sans historique **encore détenus** au
+     * dernier jour de la fenêtre — leur montant investi restant.
+     */
     uncoveredBookValue: number;
   };
   const nouveauSeau = (): Bucket => ({
@@ -189,9 +234,9 @@ export async function getLifeInsurancePerformance(
     `key !== null`, rien ne compensait : 10 000 € de support orphelin
     ressortaient à 20 000 € au consolidé.
 
-    Le total est désormais **dérivé** des seaux, plus bas. C'est ce qui règle
-    aussi le plafonnement de l'encours non couvert : il se fait part par part
-    avant la somme, et non sur la somme.
+    Le total est désormais **dérivé** des seaux, plus bas : chaque grandeur s'y
+    compose comme elle doit se composer, et le consolidé reste la somme de ce
+    que les parties publient.
   */
   const buckets = new Map<string | null, Bucket>();
   const bucketFor = (key: string | null): Bucket => {
@@ -204,7 +249,7 @@ export async function getLifeInsurancePerformance(
   };
 
   for (const day of days) {
-    const qtyByAsset = quantities.get(day) ?? {};
+    const qtyByAsset = states.get(day)?.quantityByAsset ?? {};
     const flowsOfDay = flows.get(day)?.netFlowByAsset ?? {};
 
     // Chaque seau doit avoir un point par jour, même nul : sans cela, un
@@ -248,46 +293,39 @@ export async function getLifeInsurancePerformance(
     }
   }
 
-  /*
-    Encours sans historique, au montant investi.
-
-    Il se cumule depuis **la première opération**, et non sur la seule fenêtre
-    affichée : un fonds euro versé il y a trois ans ne produit aucun flux ce
-    mois-ci, et le compter sur la fenêtre ferait passer la couverture pour
-    100 % alors que la courbe ignore la moitié de l'épargne.
-  */
-  const uncoveredByAsset = new Map<string, number>();
-  for (const [day, entry] of flows) {
-    if (day > toDay) continue;
-    for (const [assetId, flow] of Object.entries(entry.netFlowByAsset)) {
-      if (!avAssetIds.has(assetId) || covered.has(assetId) || flow === 0) {
-        continue;
-      }
-      uncoveredByAsset.set(
-        assetId,
-        (uncoveredByAsset.get(assetId) ?? 0) + flow
-      );
-    }
-  }
+  const lastDay = days[days.length - 1]!;
 
   /*
-    Plafonné **support par support**, avant d'entrer dans le seau du contrat.
+    Encours sans historique : le **coût de revient** des supports encore
+    détenus, et non une somme de flux.
 
-    Un support sans historique déjà soldé — acheté 10 000, racheté 15 000 — a
-    des flux nets de −5 000 € et un montant investi de zéro : il n'a plus rien
-    à couvrir, et il n'a pas de créance sur ses voisins. Le laisser entrer
-    négatif dans le seau retranchait son solde à l'encours non couvert des
-    autres supports du **même contrat** : le défaut que le plafonnement plus
-    bas corrige entre contrats, un cran plus bas seulement. Un contrat gardant
-    un fonds euro de 50 000 € et un support soldé n'annonçait que 45 000 €
-    d'encours hors mesure, donc une couverture surestimée.
+    C'est un stock, et il se lit dans le ledger — `costBasisByAsset` au dernier
+    jour, soit CUMP × quantité restante. Les flux nets, eux, embarquent le
+    résultat **réalisé** des parts rachetées : les deux coïncident tant qu'il
+    n'y a pas de rachat, et divergent dès le premier, exactement du réalisé. Un
+    support versé 10 000 dont 40 % sont rachetés pour 4 400 annonçait 5 600 au
+    lieu de 6 000 ; rachetés 3 600, 6 400 au lieu de 6 000 ; soldé à 9 500, il
+    gardait 500 € à couvrir **à vie**, pour une position qui n'existe plus.
 
-    Le seau ne reçoit ainsi que des parts positives, et chaque niveau
-    d'agrégation reste la somme de ce que le niveau inférieur publie.
+    Rien à plafonner ici : un coût de revient n'est pas négatif, et une
+    position soldée n'en a plus — le ledger l'a effacée. Reposer un
+    `Math.max(0, …)` ne protégerait plus de rien et masquerait un défaut de
+    rejeu au lieu de le montrer.
+
+    La profondeur ne dépend pas de la fenêtre affichée : le rejeu applique
+    toutes les écritures jusqu'au jour, dans la fenêtre ou avant elle. Un fonds
+    euro versé il y a trois ans, sans un mouvement depuis, est donc bien là —
+    le compter sur les seuls flux de la fenêtre ferait passer la couverture
+    pour 100 % alors que la courbe ignore la moitié de l'épargne.
   */
-  for (const [assetId, montant] of uncoveredByAsset) {
+  const stateOfLastDay = states.get(lastDay);
+  const costOfLastDay = stateOfLastDay?.costBasisByAsset ?? {};
+  for (const [assetId, qty] of Object.entries(
+    stateOfLastDay?.quantityByAsset ?? {}
+  )) {
+    if (qty === 0 || !avAssetIds.has(assetId) || covered.has(assetId)) continue;
     const b = bucketFor(contractByAsset.get(assetId) ?? null);
-    b.uncoveredBookValue += Math.max(0, montant);
+    b.uncoveredBookValue += costOfLastDay[assetId] ?? 0;
   }
 
   /*
@@ -298,14 +336,12 @@ export async function getLifeInsurancePerformance(
     - les **valeurs** et les **flux** s'additionnent jour par jour ;
     - un jour **incomplet** chez un seul contrat rend le total incomplet ce
       jour-là : il manque une pièce, le total ne peut pas être publié ;
-    - l'**encours non couvert** est plafonné part par part, puis sommé.
-      L'ordre compte : `Math.max(0, Σ)` laissait un support déjà soldé — flux
-      nets négatifs, acheté 10 000 puis racheté 15 000 — retrancher 5 000 € à
-      l'encours non couvert des autres contrats, et donc surestimer la
-      couverture du total. `Σ Math.max(0, …)` fait du total la somme de ses
-      parties, ce qu'un total doit être. Le plafond est déjà posé au niveau du
-      support ; le reposer ici garde `toSeries(null, total)` identique en forme
-      à `toSeries(key, b)`, quoi qu'un seau reçoive plus tard.
+    - l'**encours non couvert** s'additionne tel quel. C'est une somme de coûts
+      de revient de positions détenues : chaque part est positive ou nulle par
+      construction, donc le total est la somme de ses parties sans qu'aucun
+      plafond n'ait à le rattraper. Le `Math.max(0, …)` qui traînait ici
+      corrigeait un défaut de la source — des flux nets négatifs sur un support
+      soldé — que le coût de revient n'a plus.
   */
   const total = nouveauSeau();
   for (const day of days) {
@@ -320,16 +356,14 @@ export async function getLifeInsurancePerformance(
     if (flux !== 0) total.netFlows.set(day, flux);
   }
   for (const b of buckets.values()) {
-    total.uncoveredBookValue += Math.max(0, b.uncoveredBookValue);
+    total.uncoveredBookValue += b.uncoveredBookValue;
   }
-
-  const lastDay = days[days.length - 1]!;
 
   const toSeries = (key: string | null, b: Bucket): ContractSeries => {
     const coveredValueEur = b.incompleteDays.has(lastDay)
       ? 0
       : (b.values.get(lastDay) ?? 0);
-    const uncoveredValueEur = Math.max(0, b.uncoveredBookValue);
+    const uncoveredValueEur = b.uncoveredBookValue;
     const base = coveredValueEur + uncoveredValueEur;
     const coveragePct = base > 0 ? (coveredValueEur / base) * 100 : 0;
 

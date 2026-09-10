@@ -19,6 +19,7 @@ const assetFindFirst = vi.fn();
 const assetUpdate = vi.fn();
 const quoteDeleteMany = vi.fn();
 const getHoldings = vi.fn();
+const getEurRates = vi.fn();
 
 vi.mock("@/app/lib/prisma", () => ({
   prisma: {
@@ -38,6 +39,21 @@ vi.mock("@/app/lib/portfolio/service", () => ({
   getHoldings: (...a: unknown[]) => getHoldings(...a),
 }));
 
+/*
+  Seul `getEurRates` est remplacé : la conversion reste celle de production.
+
+  Elle est nécessaire depuis que la réévaluation convertit la saisie en euros
+  vers la devise de l'actif — sans ce mock, un test unitaire appellerait le
+  fournisseur de taux, et le relevé servi ne serait pas celui qu'il mesure.
+*/
+vi.mock("@/app/lib/market/fx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/app/lib/market/fx")>();
+  return {
+    ...actual,
+    getEurRates: (...a: unknown[]) => getEurRates(...a),
+  };
+});
+
 import {
   LifeInsuranceInputError,
   revalueSupport,
@@ -53,11 +69,17 @@ function writtenPrice(): string {
   return String(assetUpdate.mock.calls[0]![0].data.manualPrice);
 }
 
+/** Le relevé de taux servi à l'écriture : 1 EUR = X devise. */
+const RATES: Record<string, number> = { EUR: 1, USD: 1.08 };
+
 beforeEach(() => {
-  assetFindFirst.mockReset().mockResolvedValue({ id: "a1" });
+  // `currency` est lu depuis l'actif, jamais depuis le contrat : c'est l'actif
+  // qui porte la devise dans laquelle `manualPrice` sera relu.
+  assetFindFirst.mockReset().mockResolvedValue({ id: "a1", currency: "EUR" });
   assetUpdate.mockReset().mockResolvedValue({});
   quoteDeleteMany.mockReset().mockResolvedValue({ count: 1 });
   getHoldings.mockReset().mockResolvedValue(position("1"));
+  getEurRates.mockReset().mockResolvedValue(RATES);
 });
 
 describe("revalueSupport", () => {
@@ -170,6 +192,65 @@ describe("revalueSupport", () => {
     expect(assetUpdate).not.toHaveBeenCalled();
     expect(quoteDeleteMany).not.toHaveBeenCalled();
     // Et la position n'est même pas chargée : la propriété se vérifie d'abord.
+    expect(getHoldings).not.toHaveBeenCalled();
+  });
+
+  /*
+    L'unité du champ écrit.
+
+    La saisie est en euros, `manualPrice` est un prix **dans la devise de
+    l'actif** : `getHoldings` le convertit par `convertToEurSync(prix,
+    asset.currency)`. Écrire l'euro tel quel sur un support en dollars
+    sous-évaluait la position de 740,74 € pour 10 000 € de relevé — et la
+    conversion s'applique **avant** la division par la quantité.
+  */
+  it("convertit le relevé dans la devise de l'actif", async () => {
+    assetFindFirst.mockResolvedValue({ id: "a1", currency: "USD" });
+
+    await revalueSupport("u1", "a1", "10000");
+
+    // 10 000 € × 1,08, quantité 1.
+    expect(writtenPrice()).toBe("10800");
+  });
+
+  it("convertit puis divise, dans cet ordre, après un rachat partiel", async () => {
+    assetFindFirst.mockResolvedValue({ id: "a1", currency: "USD" });
+    getHoldings.mockResolvedValue(position("0.6"));
+
+    await revalueSupport("u1", "a1", "10000");
+
+    // 10 800 USD pour 0,6 part → 18 000 USD la part.
+    expect(writtenPrice()).toBe("18000");
+    // Ce qui compte : quantité × prix, reconverti, retombe sur le relevé.
+    expect((0.6 * Number(writtenPrice())) / 1.08).toBeCloseTo(10_000, 9);
+  });
+
+  /*
+    Un seul relevé de taux par écriture.
+
+    Le taux qui convertit la saisie et celui qui valorise les positions lues
+    juste après doivent être le même objet. Deux appels de part et d'autre du
+    TTL d'une heure divergent, et 0,1 % de mouvement EUR/USD vaut 10 € sur
+    10 000 € — qui s'afficheraient en plus-value le jour de la saisie.
+  */
+  it("prête son relevé de taux à getHoldings", async () => {
+    await revalueSupport("u1", "a1", "10000");
+
+    expect(getEurRates).toHaveBeenCalledTimes(1);
+    expect(getHoldings.mock.calls[0]).toEqual(["u1", "EUR", RATES]);
+    // Identité, pas égalité structurelle : c'est bien le même objet.
+    expect(getHoldings.mock.calls[0]![2]).toBe(RATES);
+  });
+
+  it("refuse une devise que rien ne fonde, avant même de lire les positions", async () => {
+    // Hors des cinq devises couvertes : aucun taux ne fonde la conversion.
+    assetFindFirst.mockResolvedValue({ id: "a1", currency: "SEK" });
+
+    await expect(revalueSupport("u1", "a1", "10000")).rejects.toThrow(
+      LifeInsuranceInputError
+    );
+    // Aucun prix écrit — et pas un centime de calcul de positions dépensé.
+    expect(assetUpdate).not.toHaveBeenCalled();
     expect(getHoldings).not.toHaveBeenCalled();
   });
 

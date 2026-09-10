@@ -717,7 +717,7 @@ function SupportRow({
                 : ""
             }
             aria-label={`Valorisation totale de ${support.name}`}
-            title="Encours total du support, tel qu'il figure au relevé"
+            title="Encours total du support, à saisir en euros"
             data-testid="support-value"
             onBlur={(e) => {
               const v = e.target.value.trim();

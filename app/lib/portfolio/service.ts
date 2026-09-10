@@ -1729,10 +1729,30 @@ export async function getAssetDetail(
 
   // Qtés par assetId via ledger (avant merge UI)
   const ledger = await loadLedgerForUser(userId);
+  /*
+    Le prix retenu, dans le même ordre que `getHoldings` : la cotation, puis le
+    prix manuel, puis rien.
+
+    `manualPrice` est un prix **en devise de l'actif** — c'est ce que
+    `getHoldings` (`:338-340`), `getPlatformCashBalances` (`:697-700`),
+    `asset-values.ts` et `historical/load.ts` en font tous. Il était lu ici
+    comme des euros : un support d'AV en dollars valorisé 10 000 € annonçait
+    10 800 € dans ses tranches de détention, pendant que le tableau Positions
+    de la même ligne montrait 10 000 €.
+
+    La branche cotation, elle, n'est pas convertie : `PriceQuote.priceEur` est
+    déjà en euros, et la reconvertir diviserait deux fois.
+  */
   const priceEur = asset.priceQuote
     ? d(asset.priceQuote.priceEur.toString())
     : asset.manualPrice
-      ? d(asset.manualPrice.toString())
+      ? d(
+          convertToEurSync(
+            asset.manualPrice.toString(),
+            asset.currency || "EUR",
+            fx
+          )
+        )
       : zero();
 
   const custodySlices = siblingAssets.map((s) => {

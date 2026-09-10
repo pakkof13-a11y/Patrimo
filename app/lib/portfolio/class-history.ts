@@ -47,7 +47,7 @@
 import { parisDayKey } from "../dates/paris";
 import { toEur } from "../accounting/fx";
 import { applyTransaction, createEmptyLedger } from "../accounting/ledger";
-import type { LedgerTx } from "../accounting/types";
+import type { LedgerTx, Position } from "../accounting/types";
 import { d, zero, type Decimal } from "../money/decimal";
 
 /** Jour civil Europe/Paris, format `YYYY-MM-DD`. */
@@ -279,23 +279,51 @@ export function marketValueOfPositions(
 }
 
 /**
- * Rejoue le journal jour par jour et relève, à chaque clôture, la quantité
- * détenue par actif (toutes plateformes confondues).
+ * État d'un actif à la clôture d'une journée, tel que le rejeu du journal le
+ * laisse — plateformes agrégées.
+ */
+export type DailyAssetState = {
+  /** Quantité détenue en fin de journée, par actif (actifs soldés omis). */
+  quantityByAsset: Record<string, number>;
+  /**
+   * Coût de revient **restant** des positions détenues (CUMP × quantité), en
+   * EUR, par actif.
+   *
+   * C'est un **stock**, pas un cumul de flux : un rachat partiel en libère la
+   * fraction correspondante au prix de revient moyen, quel qu'ait été son
+   * produit, et une position soldée retombe à zéro. Une somme de flux nets y
+   * mêlerait le résultat **réalisé** des parts sorties — un support acheté
+   * 10 000 puis racheté 9 500 garderait 500 € de coût de revient à vie.
+   */
+  costBasisByAsset: Record<string, number>;
+};
+
+/**
+ * Rejoue le journal jour par jour et relève, à chaque clôture, l'état des
+ * positions par actif.
  *
  * Le rejeu est la seule source de vérité pour l'état des positions : il porte
- * les splits, les transferts entre plateformes et les ventes bornées. Le
- * reconstruire depuis une simple somme de quantités signées serait faux dès le
- * premier split.
+ * les splits, les transferts entre plateformes, les ventes bornées et le
+ * coût de revient CUMP. Le reconstruire depuis une simple somme de quantités
+ * signées serait faux dès le premier split ; depuis une somme de flux nets,
+ * faux dès le premier rachat partiel.
  *
  * `days` doit être trié et couvrir la fenêtre voulue ; les transactions
  * antérieures au premier jour sont appliquées d'abord, pour que la fenêtre
  * démarre sur l'état réel du portefeuille et non sur un portefeuille vide.
+ * Une position ouverte bien avant la fenêtre — et jamais retouchée depuis —
+ * est donc présente à chacun de ses jours.
+ *
+ * `snapshot` décide de ce qu'on relève de l'état à chaque clôture. Les
+ * appelants qui n'ont besoin que des quantités ne paient pas l'agrégation du
+ * coût de revient : ce rejeu sert aussi le tableau de bord, sur 1 900 jours.
  */
-export function buildDailyQuantities(
+function replayDaily<T>(
   txs: LedgerTx[],
-  days: DayKey[]
-): Map<DayKey, Record<string, number>> {
-  const out = new Map<DayKey, Record<string, number>>();
+  days: DayKey[],
+  snapshot: (positions: Iterable<Position>) => T
+): Map<DayKey, T> {
+  const out = new Map<DayKey, T>();
   if (days.length === 0) return out;
 
   const sorted = [...txs].sort((a, b) => {
@@ -324,15 +352,52 @@ export function buildDailyQuantities(
       cursor += 1;
     }
 
-    // Positions agrégées par actif : le P&L par classe ignore la plateforme.
-    const byAsset = new Map<string, Decimal>();
-    for (const pos of state.positions.values()) {
-      addTo(byAsset, pos.assetId, pos.quantity);
-    }
-    out.set(day, toRecord(byAsset));
+    out.set(day, snapshot(state.positions.values()));
   }
 
   return out;
+}
+
+/**
+ * Quantité détenue par actif, à la clôture de chaque jour.
+ *
+ * Les positions sont agrégées par actif : le P&L par classe, comme la courbe
+ * d'assurance-vie, ignore la plateforme.
+ */
+export function buildDailyQuantities(
+  txs: LedgerTx[],
+  days: DayKey[]
+): Map<DayKey, Record<string, number>> {
+  return replayDaily(txs, days, (positions) => {
+    const byAsset = new Map<string, Decimal>();
+    for (const pos of positions) addTo(byAsset, pos.assetId, pos.quantity);
+    return toRecord(byAsset);
+  });
+}
+
+/**
+ * Quantité **et** coût de revient par actif, à la clôture de chaque jour.
+ *
+ * Même rejeu que `buildDailyQuantities`, un relevé plus large : le coût de
+ * revient sert à valoriser au « montant investi » les positions qu'aucun cours
+ * ne permet de valoriser au marché.
+ */
+export function buildDailyAssetStates(
+  txs: LedgerTx[],
+  days: DayKey[]
+): Map<DayKey, DailyAssetState> {
+  return replayDaily(txs, days, (positions) => {
+    const qtyByAsset = new Map<string, Decimal>();
+    const costByAsset = new Map<string, Decimal>();
+    for (const pos of positions) {
+      addTo(qtyByAsset, pos.assetId, pos.quantity);
+      addTo(costByAsset, pos.assetId, pos.costBasisEur);
+    }
+    return {
+      quantityByAsset: toRecord(qtyByAsset),
+      costBasisByAsset: toRecord(costByAsset),
+    };
+  });
 }
 
 /**
