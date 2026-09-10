@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { ZodError, ZodType } from "zod";
+import { BASE_CURRENCY_OPTIONS } from "../money/currencies";
 
 /** Message humain à partir d’un ZodError (champs + form). */
 export function formatZodErrorMessage(error: ZodError): string {
@@ -46,6 +47,50 @@ export function presentFields<T extends Record<string, unknown>>(
     }
   }
   return out;
+}
+
+/**
+ * La devise de restitution demandée, validée.
+ *
+ * Elle partait du query string droit dans `convertFromEurSync`, qui lève sur
+ * tout code sans taux : `?base=ZZZ` rendait un 500 sans corps là où la demande
+ * est simplement invalide. Le remède a été écrit trois fois (D39, D41) ; il
+ * vit ici.
+ *
+ * Rend la devise en majuscules, ou une réponse 400 toute faite.
+ */
+const attendues = BASE_CURRENCY_OPTIONS.join(", ");
+
+export function requestedBase(
+  req: Request
+): { base: string } | { error: NextResponse } {
+  const demande = new URL(req.url).searchParams.get("base");
+  const base = (demande || "EUR").toUpperCase();
+  if (!(BASE_CURRENCY_OPTIONS as readonly string[]).includes(base)) {
+    return {
+      error: NextResponse.json(
+        {
+          error: `Devise de restitution inconnue : ${base}. Attendu : ${attendues}.`,
+        },
+        { status: 400 }
+      ),
+    };
+  }
+  return { base };
+}
+
+/**
+ * Une conversion impossible sur une ligne déjà en base — pas la faute de
+ * l'appelant, dont la devise vient d'être validée. 503 le dit et nomme la
+ * devise fautive ; un 500 nu laissait l'écran mort sans un mot.
+ */
+export function fxUnavailableResponse(currency: string) {
+  return NextResponse.json(
+    {
+      error: `Taux de change indisponible pour ${currency}. Le total sera exact dès que le taux sera connu.`,
+    },
+    { status: 503 }
+  );
 }
 
 /**

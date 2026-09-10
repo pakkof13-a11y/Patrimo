@@ -3,8 +3,11 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { listBankAccounts, listSavingsAccounts } from "@/app/lib/cash/pockets";
 import { listTermDeposits } from "@/app/lib/cash/term-deposits-list";
 import { summarizeCash } from "@/app/lib/cash/summary";
-import { BASE_CURRENCY_OPTIONS } from "@/app/lib/money/currencies";
 import { FxRateUnknownError } from "@/app/lib/market/fx";
+import {
+  fxUnavailableResponse,
+  requestedBase,
+} from "@/app/lib/api/validation";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -42,19 +45,12 @@ export async function GET(req: Request) {
     appelle, c'est tout le bandeau qui disparaissait.
 
     La liste est celle du sélecteur de devise de l'en-tête : ce que l'écran
-    propose est exactement ce que la route accepte.
+    propose est exactement ce que la route accepte. Le garde vit dans
+    `api/validation` depuis que quatre routes le portaient.
   */
-  const demande = new URL(req.url).searchParams.get("base");
-  const base = (demande || "EUR").toUpperCase();
-  if (!(BASE_CURRENCY_OPTIONS as readonly string[]).includes(base)) {
-    return NextResponse.json(
-      {
-        error: `Devise de restitution inconnue : ${base}. Attendu : ${BASE_CURRENCY_OPTIONS.join(
-)}.`,
-      },
-      { status: 400 }
-    );
-  }
+  const demande = requestedBase(req);
+  if ("error" in demande) return demande.error;
+  const base = demande.base;
 
   try {
     const [checking, savings, termDeposits] = await Promise.all([
@@ -91,14 +87,7 @@ export async function GET(req: Request) {
       stockée hors des cinq connues. 503 le dit, et nomme laquelle ; un 500 nu
       laissait le bandeau vide sans un mot.
     */
-    if (e instanceof FxRateUnknownError) {
-      return NextResponse.json(
-        {
-          error: `Taux de change indisponible pour ${e.currency}. Le total sera exact dès que le taux sera connu.`,
-        },
-        { status: 503 }
-      );
-    }
+    if (e instanceof FxRateUnknownError) return fxUnavailableResponse(e.currency);
     throw e;
   }
 }

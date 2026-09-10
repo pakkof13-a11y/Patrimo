@@ -4,7 +4,9 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { termDepositSchema } from "@/app/lib/schemas";
 import {
+  fxUnavailableResponse,
   readJsonBody,
+  requestedBase,
   unreadableBodyResponse,
   validationErrorResponse,
 } from "@/app/lib/api/validation";
@@ -16,7 +18,6 @@ import {
   validateRatePercent,
   validateTermDepositDates,
 } from "@/app/lib/cash/term-deposit-service";
-import { BASE_CURRENCY_OPTIONS } from "@/app/lib/money/currencies";
 import { FxRateUnknownError } from "@/app/lib/market/fx";
 import { ensureBankPlatform } from "@/app/lib/platforms/ensure-bank-platform";
 
@@ -25,43 +26,25 @@ export async function GET(req: Request) {
   if (!userId) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 401 });
 
   /*
-    La devise de restitution est validée, pas seulement lue — même remède
-    qu'`app/api/banks/summary` (D39).
+    La devise de restitution est validée, pas seulement lue.
 
     Elle partait telle quelle vers `convertFromEurSync`, qui lève sur tout
     code sans taux : `?base=ZZZ` rendait un 500 sans corps là où la demande
-    est simplement invalide.
+    est simplement invalide. Quatre routes portaient ce garde recopié ; il
+    vit dans `api/validation`.
+
+    Le 503 couvre une ligne déjà en base qu'on ne sait pas convertir : elle ne
+    peut plus être écrite — le schéma s'y oppose depuis D41 — mais rien
+    n'efface celles d'avant.
   */
-  const demande = new URL(req.url).searchParams.get("base");
-  const base = (demande || "EUR").toUpperCase();
-  if (!(BASE_CURRENCY_OPTIONS as readonly string[]).includes(base)) {
-    return NextResponse.json(
-      {
-        error: `Devise de restitution inconnue : ${base}. Attendu : ${BASE_CURRENCY_OPTIONS.join(", ")}.`,
-      },
-      { status: 400 }
-    );
-  }
+  const demande = requestedBase(req);
+  if ("error" in demande) return demande.error;
 
   try {
-    const termDeposits = await listTermDeposits(userId, base);
+    const termDeposits = await listTermDeposits(userId, demande.base);
     return NextResponse.json({ termDeposits });
   } catch (e) {
-    /*
-      Une devise de dépôt sans taux n'est pas une faute de l'appelant : la
-      base vient d'être validée, et c'est une ligne déjà en place qui ne peut
-      pas être convertie. Elle ne peut plus être écrite — le schéma s'y
-      oppose désormais — mais rien n'efface celles d'avant, et un 500 nu
-      laissait l'onglet mort sans un mot.
-    */
-    if (e instanceof FxRateUnknownError) {
-      return NextResponse.json(
-        {
-          error: `Taux de change indisponible pour ${e.currency}. Corrigez la devise du dépôt concerné.`,
-        },
-        { status: 503 }
-      );
-    }
+    if (e instanceof FxRateUnknownError) return fxUnavailableResponse(e.currency);
     throw e;
   }
 }

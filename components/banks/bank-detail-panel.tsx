@@ -199,6 +199,19 @@ function RecentHistory({
       <SectionTitle>Historique récent</SectionTitle>
       {q.isPending ? (
         <p className="text-meta py-[var(--space-2)]">Chargement…</p>
+      ) : q.isError ? (
+        /* Cf. `AccountHistoryModal` : un échec n'est pas un compte vide. */
+        <div className="py-[var(--space-2)]" data-testid="bank-panel-history-error">
+          <p className="text-meta">Historique indisponible.</p>
+          <button
+            type="button"
+            className="mt-[var(--space-1)] text-[length:var(--text-2xs)] font-medium text-[var(--primary)]"
+            onClick={() => void q.refetch()}
+            data-testid="bank-panel-history-retry"
+          >
+            Réessayer
+          </button>
+        </div>
       ) : events.length === 0 ? (
         <p className="text-meta py-[var(--space-2)]">
           Aucun mouvement enregistré.
@@ -931,6 +944,18 @@ function TermDepositBody({
           label="Principal"
           value={formatCurrency(row.principal, row.currency)}
         />
+        {/*
+          La contre-valeur ne s'affiche que si le produit n'est pas déjà dans
+          la devise de l'en-tête — sinon elle répéterait la ligne au-dessus.
+
+          Cette garde était juste, son contenu ne l'était pas :
+          `/api/term-deposits` était appelé sans `?base=`, donc
+          `principalBase` valait des euros, affichés sous une étiquette qui
+          annonçait la devise de l'en-tête. Un CAT en euros consulté avec
+          l'en-tête en dollars affichait « Contre-valeur (USD) » suivi du
+          principal en euros. La requête porte maintenant la devise, et les
+          deux se rejoignent.
+        */}
         {row.currency !== baseCurrency && (
           <Fact
             label={`Contre-valeur (${baseCurrency})`}

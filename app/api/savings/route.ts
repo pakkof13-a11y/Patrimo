@@ -4,10 +4,13 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { savingsAccountSchema, savingsAccountUpdateSchema } from "@/app/lib/schemas";
 import {
+  fxUnavailableResponse,
   presentFields,
+  requestedBase,
   requireBodyId,
   validationErrorResponse,
 } from "@/app/lib/api/validation";
+import { FxRateUnknownError } from "@/app/lib/market/fx";
 import { listSavingsAccounts } from "@/app/lib/cash/pockets";
 import { applyDueInterestForUser } from "@/app/lib/money/savings-accrual";
 import { findOrCreatePlatform } from "@/app/lib/platforms/upsert";
@@ -43,11 +46,29 @@ async function ensureBankPlatform(userId: string, bankName: string | null | unde
   }
 }
 
-export async function GET() {
+/**
+ * Les montants sont convertis dans la devise demandée.
+ *
+ * Cette route n'acceptait aucun `base` : elle rendait des `balanceBase` en
+ * euros que l'écran étiquetait ensuite avec la devise de l'en-tête. Le bandeau
+ * de synthèse, lui, a été corrigé en D39 — d'où deux chiffres contradictoires
+ * l'un au-dessus de l'autre : 10 800 $ en tête, « 10 000,00 $ » sur la ligne
+ * d'établissement juste en dessous, pour le même compte de 10 000 €.
+ */
+export async function GET(req: Request) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 401 });
-  const accounts = await listSavingsAccounts(userId);
-  return NextResponse.json({ accounts });
+
+  const demande = requestedBase(req);
+  if ("error" in demande) return demande.error;
+
+  try {
+    const accounts = await listSavingsAccounts(userId, demande.base);
+    return NextResponse.json({ accounts });
+  } catch (e) {
+    if (e instanceof FxRateUnknownError) return fxUnavailableResponse(e.currency);
+    throw e;
+  }
 }
 
 export async function POST(req: Request) {

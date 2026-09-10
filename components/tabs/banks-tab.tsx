@@ -90,38 +90,46 @@ type ViewId = (typeof VIEWS)[number]["id"];
 export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
   const qc = useQueryClient();
 
+  /*
+    Les quatre requêtes de la page portent la même devise, dans l'URL **et**
+    dans la clé de cache.
+
+    Trois d'entre elles ne l'envoyaient pas : elles rendaient des
+    `balanceBase` en euros, que la liste étiquetait ensuite avec la devise de
+    l'en-tête. D39 avait corrigé la quatrième — le bandeau de synthèse — et
+    créé une contradiction visible : 10 800 $ en tête, « 10 000,00 $ » sur la
+    ligne d'établissement juste en dessous, pour le même compte de 10 000 €.
+    Avant, les deux étaient faux dans le même sens et se rapprochaient.
+
+    La clé doit la porter aussi : sans elle, deux devises se partageraient une
+    entrée de cache et changer de devise ne redemanderait rien. Les
+    invalidations de `refresh()` restent des préfixes, elles couvrent donc
+    toutes les devises déjà en cache.
+  */
+  const devise = encodeURIComponent(baseCurrency);
+
   const banksQ = useQuery({
-    queryKey: ["banks"],
-    queryFn: () => fetchJson<{ accounts: BankAccountRow[] }>("/api/banks"),
+    queryKey: ["banks", baseCurrency],
+    queryFn: () =>
+      fetchJson<{ accounts: BankAccountRow[] }>(`/api/banks?base=${devise}`),
   });
   const savingsQ = useQuery({
-    queryKey: ["savings"],
-    queryFn: () => fetchJson<{ accounts: SavingsRow[] }>("/api/savings"),
+    queryKey: ["savings", baseCurrency],
+    queryFn: () =>
+      fetchJson<{ accounts: SavingsRow[] }>(`/api/savings?base=${devise}`),
     refetchInterval: 60_000,
   });
-  /*
-    La devise de restitution entre dans l'URL **et** dans la clé.
-
-    Le bandeau demandait `/api/banks/summary` sans `?base=` : la route
-    calculait en euros, et ces montants étaient ensuite formatés avec
-    `baseCurrency` — des euros présentés comme des dollars dès que
-    l'en-tête changeait de devise.
-
-    La clé doit la porter aussi. Sans elle, deux devises se partageraient une
-    seule entrée de cache : le premier chargement gagnerait, et changer de
-    devise ne redemanderait rien.
-  */
   const summaryQ = useQuery({
     queryKey: ["banks-summary", baseCurrency],
     queryFn: () =>
-      fetchJson<BanksSummary>(
-        `/api/banks/summary?base=${encodeURIComponent(baseCurrency)}`
-      ),
+      fetchJson<BanksSummary>(`/api/banks/summary?base=${devise}`),
   });
   const termDepositsQ = useQuery({
-    queryKey: ["term-deposits"],
+    queryKey: ["term-deposits", baseCurrency],
     queryFn: () =>
-      fetchJson<{ termDeposits: TermDepositRow[] }>("/api/term-deposits"),
+      fetchJson<{ termDeposits: TermDepositRow[] }>(
+        `/api/term-deposits?base=${devise}`
+      ),
   });
 
   const banks = useMemo(() => banksQ.data?.accounts ?? [], [banksQ.data]);

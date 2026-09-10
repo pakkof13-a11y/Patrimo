@@ -422,9 +422,9 @@ export type AccountEvent = {
    *
    * Les montants étaient formatés avec la devise **courante** du compte : un
    * compte passé en dollars affichait « $1 000,00 » sur une ouverture qui
-   * valait mille euros. Absente sur les routes qui ne la servent pas encore
-   * (livrets) — l'appelant retombe alors sur la devise du compte, ce qui est
-   * l'ancien comportement, pas une régression.
+   * valait mille euros. Les deux routes d'historique la servent depuis D41 ;
+   * elle reste facultative au type parce que rien ne garantit qu'une réponse
+   * déjà en cache la porte.
    */
   currency?: string;
   occurredAt: string;
@@ -482,6 +482,30 @@ export function AccountHistoryModal({
       <div data-testid="account-history-modal">
         {q.isLoading ? (
           <p className="text-meta">Chargement…</p>
+        ) : q.isError ? (
+          /*
+            Un échec de chargement n'est pas un compte sans histoire.
+
+            La branche vide se déclenchait sur `events.length === 0`, et
+            `events` retombe sur `[]` quand la requête échoue : une route en
+            panne annonçait donc « Aucun mouvement enregistré » à quelqu'un
+            dont le compte a des années de relevés. UNKNOWN ≠ ZERO, ici comme
+            sur les montants.
+          */
+          <div data-testid="account-history-error">
+            <p className="text-meta">
+              Historique indisponible. Le compte n&apos;est pas vide pour
+              autant — la liste n&apos;a pas pu être chargée.
+            </p>
+            <button
+              type="button"
+              className="mt-2 text-[11px] font-medium text-[var(--primary)]"
+              onClick={() => void q.refetch()}
+              data-testid="account-history-retry"
+            >
+              Réessayer
+            </button>
+          </div>
         ) : events.length === 0 ? (
           <p className="text-meta">Aucun mouvement enregistré.</p>
         ) : (
