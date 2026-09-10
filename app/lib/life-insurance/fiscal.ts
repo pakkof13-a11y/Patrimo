@@ -19,6 +19,8 @@
  * consomme ces entrées + la quote-part de gains du rachat, sans Prisma.
  */
 
+import { parisDayKey } from "@/app/lib/dates/paris";
+
 /** Seuil d'antériorité ouvrant abattement et taux réduit. */
 export const ANTERIORITY_YEARS = 8;
 
@@ -56,19 +58,48 @@ export function annualAllowanceEur(household: TaxHousehold): number {
 }
 
 /**
- * Nombre de mois pleins entre deux dates.
+ * Nombre de mois pleins entre deux dates, lues comme **jours civils
+ * Europe/Paris**.
  *
  * Compté en mois calendaires plutôt qu'en jours divisés : l'antériorité
  * s'apprécie de date à date, et un contrat ouvert le 31 janvier a huit ans le
  * 31 janvier, sans qu'une année bissextile ne décale le seuil d'un jour.
+ *
+ * Pourquoi Paris et pas le fuseau du lecteur ni UTC :
+ *
+ * - Les accesseurs locaux (`getFullYear`…) répondaient dans le fuseau du
+ *   lecteur, alors que la date d'ouverture est stockée à minuit **UTC**
+ *   (`<input type="date">` → `new Date("2017-09-27")`). À l'ouest de
+ *   Greenwich, cette date se lisait le 26 septembre : `hasAnteriority`
+ *   basculait un jour trop tôt, et la branche « PFU 7,5 % » avec elle.
+ * - UTC répare ce côté-là mais laisse l'autre : `now` est un instant, et son
+ *   jour civil **en France** — celui du fait générateur, la date de l'opération
+ *   chez l'assureur — commence à 22 h ou 23 h UTC la veille. Entre minuit et
+ *   deux heures du matin, heure de Paris, le jour anniversaire des huit ans
+ *   était encore « la veille » pour UTC.
+ *
+ * Passer les deux bornes par `parisDayKey` règle les deux cas : la date
+ * stockée à 00:00Z tombe le même jour civil à Paris (01 h ou 02 h), et l'instant
+ * courant tombe dans le bon jour. C'est la même règle que le reste du
+ * portefeuille (`app/lib/dates/paris.ts`) ; `startOfUtcDay` de
+ * `coupon-dates.ts` sert à *décoder* des dates stockées, pas à situer « now ».
  */
 export function fullMonthsBetween(from: Date, to: Date): number {
-  let months =
-    (to.getFullYear() - from.getFullYear()) * 12 +
-    (to.getMonth() - from.getMonth());
+  const f = parisYmd(from);
+  const t = parisYmd(to);
+  let months = (t.y - f.y) * 12 + (t.m - f.m);
   // Le mois n'est révolu que si le jour est atteint.
-  if (to.getDate() < from.getDate()) months -= 1;
+  if (t.d < f.d) months -= 1;
   return months;
+}
+
+function parisYmd(date: Date): { y: number; m: number; d: number } {
+  const key = parisDayKey(date);
+  return {
+    y: Number(key.slice(0, 4)),
+    m: Number(key.slice(5, 7)),
+    d: Number(key.slice(8, 10)),
+  };
 }
 
 export type ContractAge = {

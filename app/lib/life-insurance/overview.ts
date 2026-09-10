@@ -17,6 +17,7 @@
  */
 
 import { isStructured } from "./constants";
+import { contractAge } from "./fiscal";
 
 /* ── Entrées ──────────────────────────────────────────────────────── */
 
@@ -304,7 +305,13 @@ export function buildContractView(
     euroSharePct: euro?.sharePct ?? (valueEur > 0 ? 0 : null),
     supports,
     ageYears,
-    isMature: ageYears == null ? null : ageYears >= 8,
+    // Un seul verdict d'antériorité dans le module : celui de `contractAge`,
+    // de date à date en jour civil Paris. `ageYears` (365,25 j) reste un
+    // affichage ; il ne décide plus du régime.
+    isMature:
+      policy.openDate && Number.isFinite(Date.parse(policy.openDate))
+        ? contractAge(new Date(policy.openDate), now).hasAnteriority
+        : null,
     sharePct: totalValueEur > 0 ? (valueEur / totalValueEur) * 100 : null,
   };
 }

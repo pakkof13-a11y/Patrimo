@@ -70,7 +70,12 @@ function contrat(
   id: string,
   insurer: string,
   cashEuro: string,
-  products: Array<{ id: string; name: string; currentValue: string }> = []
+  products: Array<{
+    id: string;
+    name: string;
+    currentValue: string;
+    currency?: string;
+  }> = []
 ) {
   return {
     id,
@@ -78,7 +83,17 @@ function contrat(
     cashEuro: dec(cashEuro),
     currency: "EUR",
     openDate: new Date("2015-03-01"),
-    products: products.map((p) => ({ ...p, currentValue: dec(p.currentValue) })),
+    /*
+      `LifeInsuranceProduct.currency` est un `String @default("EUR")` non
+      nullable : une ligne sans devise n'existe pas. Ces fabriques la
+      passaient sous silence, ce qui décrivait une ligne impossible — et
+      empêchait de voir que la migration ignorait ce champ.
+    */
+    products: products.map((p) => ({
+      ...p,
+      currentValue: dec(p.currentValue),
+      currency: p.currency ?? "EUR",
+    })),
   };
 }
 
@@ -131,6 +146,7 @@ describe("un support homonyme n'est pas revendiqué par le mauvais contrat", () 
     // Aviva n'a rien au journal : son support est à reprendre.
     expect(aviva.duplicates).toHaveLength(0);
     expect(aviva.toMigrate).toEqual([
+      // `toMigrate` est un compte rendu d audit : il ne porte pas la devise.
       { name: "Amundi World", valueEur: "10000" },
     ]);
 

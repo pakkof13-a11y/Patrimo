@@ -235,10 +235,25 @@ async function ensurePlatform(userId: string, insurer: string): Promise<string> 
  * Réévalue un support à la valeur **totale** du relevé.
  *
  * Le relevé d'assurance-vie annonce un encours par support, pas un prix
- * unitaire. On divise donc par la quantité du journal pour retrouver le prix
+ * unitaire. On divise donc par la quantité détenue pour retrouver le prix
  * qu'attend `manualPrice` : écrire le total tel quel multiplierait la position
  * par sa quantité — un fonds euro de 25 000 parts passerait de 25 500 € à
  * 637 millions.
+ *
+ * **La quantité vient de `getHoldings`, jamais d'une somme de transactions.**
+ * L'ancien diviseur était
+ * `transaction.aggregate({ _sum: { quantity: true } })`, qui additionne les
+ * quantités de *tous* les types. Or `createTransaction` exige une quantité
+ * positive pour une VENTE comme pour un ACHAT, et le moteur de position la
+ * retranche (`accounting/cump.ts`) : l'agrégat additionnait donc ce que le
+ * moteur soustrait. Un `SPLIT`, dont le ratio est stocké en quantité, la
+ * corrompait de la même façon.
+ *
+ * Mesuré : position de 1, rachat partiel de 0,4 saisi en VENTE. Quantité
+ * détenue 0,6, agrégat 1,4. Un relevé à 10 000 € écrivait donc
+ * `manualPrice = 7 142,86`, et la position valait ensuite
+ * `0,6 × 7 142,86 = 4 285,71 €` — le contraire du seul but de cette fonction,
+ * qui est que la position vaille exactement le montant du relevé.
  *
  * Seul le prix bouge. La quantité et le prix de revient viennent du journal et
  * restent intacts, sinon la plus-value se dissoudrait à chaque mise à jour.
@@ -259,11 +274,34 @@ export async function revalueSupport(
   });
   if (!asset) throw new LifeInsuranceInputError("Support introuvable");
 
-  const agg = await prisma.transaction.aggregate({
-    where: { userId, assetId },
-    _sum: { quantity: true },
-  });
-  const quantity = agg._sum.quantity ?? new Prisma.Decimal(0);
+  /*
+    La quantité détenue, celle que le moteur de position calcule.
+
+    `getHoldings` applique la même règle que la valorisation qui suivra la
+    réévaluation : c'est la seule façon que `quantité × manualPrice` retombe
+    sur le montant du relevé. `listSupports` lit déjà cette même source.
+
+    Import dynamique par symétrie avec `listSupports` et `migrate-to-ledger`,
+    qui lisent la même source. Ce n'est **pas** une parade à un cycle : rien
+    dans `portfolio/service` ne remonte jusqu'ici — sa seule attache à cette
+    poche est `patrimony-metrics` → `life-insurance/reconcile`, qui n'importe
+    rien — et `performance-service` l'importe statiquement sans dommage. Ce
+    n'est pas non plus une économie de chargement : `transactions/service`,
+    importé en tête de ce fichier, importe déjà `portfolio/service` pour
+    `loadLedgerForUser`.
+
+    Coût réel de cet appel, à compter comme tel : les taux de change (un
+    `fetch` borné à 2,5 s, servi par cache et repli), deux requêtes indexées
+    d'empreinte du journal, un scan des transactions si le cache de journal
+    est froid, puis les actifs avec leurs quatre relations. Cinq allers-retours
+    là où l'agrégat n'en faisait qu'un — acceptable sur une écriture déclenchée
+    à la main, et c'est déjà ce que l'écran qui porte le bouton (`listSupports`)
+    paie à chaque affichage.
+  */
+  const { getHoldings } = await import("../portfolio/service");
+  const holdings = await getHoldings(userId, "EUR");
+  const holding = holdings.find((h) => h.assetId === assetId);
+  const quantity = new Prisma.Decimal(holding?.quantity ?? 0);
 
   // Position soldée : aucune quantité à valoriser, et diviser par zéro
   // écrirait un prix infini.

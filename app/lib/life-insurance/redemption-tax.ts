@@ -366,6 +366,16 @@ export function gainsInPartialRedemption(input: {
   capitalInRedemptionEur: string;
   gainRatio: number;
   latentGainEur: string;
+  /**
+   * Le montant réellement rachetable, plafonné à l'encours.
+   *
+   * Il était calculé en interne et jamais rendu : la fonction plafonnait les
+   * gains, répondait `ok: true`, et l'appelant continuait avec sa saisie
+   * d'origine. Un rachat de 200 000 € sur une position de 100 000 € affichait
+   * donc « net perçu 195 060 € » pour un contrat qui n'en détient que la
+   * moitié. L'appelant doit calculer son impôt et son net sur **ce** montant.
+   */
+  cappedRedemptionEur: string;
 } {
   const redemption = parseMoney(input.redemptionEur);
   const value = parseMoney(input.positionValueEur);
@@ -378,6 +388,7 @@ export function gainsInPartialRedemption(input: {
       capitalInRedemptionEur: "0",
       gainRatio: 0,
       latentGainEur: "0",
+      cappedRedemptionEur: "0",
     };
   }
   if (redemption < 0 || value < 0 || cost < 0) {
@@ -388,6 +399,7 @@ export function gainsInPartialRedemption(input: {
       capitalInRedemptionEur: "0",
       gainRatio: 0,
       latentGainEur: "0",
+      cappedRedemptionEur: "0",
     };
   }
 
@@ -401,11 +413,40 @@ export function gainsInPartialRedemption(input: {
     : Math.min(cappedRedemption, cappedRedemption * gainRatio);
   const capital = Math.max(0, Math.min(redemption, cappedRedemption) - gains);
 
+  /*
+    Un rachat supérieur à l'encours est refusé, pas rogné en silence.
+
+    Le plafonnement existait déjà pour les gains — `cappedRedemption` — mais la
+    fonction répondait `ok: true` sans dire qu'elle avait coupé. Le panneau
+    calculait alors l'impôt et le net sur le montant saisi, et annonçait un net
+    perçu supérieur à ce que le contrat détient : 195 060 € sur une position de
+    100 000 €.
+
+    `ok: false` avec une raison affichable est la seule sortie honnête : on ne
+    peut pas racheter ce qui n'est pas là, et décider que l'utilisateur voulait
+    dire « tout » serait une correction de saisie que rien ne fonde. Le montant
+    plafonné part quand même dans la réponse, pour que l'écran puisse le
+    proposer.
+  */
+  if (redemption > value + MONEY_EPS) {
+    return {
+      ok: false,
+      error:
+        `Rachat supérieur à l'encours du support (${formatMoney(roundMoney(value))} €)`,
+      gainsInRedemptionEur: "0",
+      capitalInRedemptionEur: "0",
+      gainRatio,
+      latentGainEur: formatMoney(roundMoney(latentGain)),
+      cappedRedemptionEur: formatMoney(roundMoney(value)),
+    };
+  }
+
   return {
     ok: true,
     gainsInRedemptionEur: formatMoney(roundMoney(gains)),
     capitalInRedemptionEur: formatMoney(roundMoney(capital)),
     gainRatio,
     latentGainEur: formatMoney(roundMoney(latentGain)),
+    cappedRedemptionEur: formatMoney(roundMoney(cappedRedemption)),
   };
 }

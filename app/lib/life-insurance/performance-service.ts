@@ -171,21 +171,37 @@ export async function getLifeInsurancePerformance(
     /** Cumul des flux des supports sans historique — leur montant investi. */
     uncoveredBookValue: number;
   };
+  const nouveauSeau = (): Bucket => ({
+    values: new Map(),
+    netFlows: new Map(),
+    incompleteDays: new Set(),
+    uncoveredBookValue: 0,
+  });
+
+  /*
+    Un seau par contrat, et **pas** de seau pour le total.
+
+    Le total était obtenu par `bucketFor(null)`, alors que `null` est aussi la
+    clé d'un support sans contrat — le cas que `overview.ts` modélise sous
+    `unattachedSupportCount`. Pour un tel support, `bucketFor(key)` rendait
+    l'objet total lui-même, et les trois paires d'additions qui suivaient
+    ajoutaient deux fois le même montant au même seau. `byContract` filtrant
+    `key !== null`, rien ne compensait : 10 000 € de support orphelin
+    ressortaient à 20 000 € au consolidé.
+
+    Le total est désormais **dérivé** des seaux, plus bas. C'est ce qui règle
+    aussi le plafonnement de l'encours non couvert : il se fait part par part
+    avant la somme, et non sur la somme.
+  */
   const buckets = new Map<string | null, Bucket>();
   const bucketFor = (key: string | null): Bucket => {
     let b = buckets.get(key);
     if (!b) {
-      b = {
-        values: new Map(),
-        netFlows: new Map(),
-        incompleteDays: new Set(),
-        uncoveredBookValue: 0,
-      };
+      b = nouveauSeau();
       buckets.set(key, b);
     }
     return b;
   };
-  const total = bucketFor(null);
 
   for (const day of days) {
     const qtyByAsset = quantities.get(day) ?? {};
@@ -217,21 +233,18 @@ export async function getLifeInsurancePerformance(
 
       const valuation = valueHeldAtDay(held, closes, day);
       if (!valuation.complete) {
-        // Le contrat *et* le total sont amputés ce jour-là : ni l'un ni l'autre
-        // ne peut publier un montant.
+        // Le contrat est amputé ce jour-là et ne peut publier aucun montant.
+        // Le total héritera de ce jour incomplet à la dérivation.
         b.incompleteDays.add(day);
-        total.incompleteDays.add(day);
         continue;
       }
       b.values.set(day, (b.values.get(day) ?? 0) + valuation.valueEur);
-      total.values.set(day, (total.values.get(day) ?? 0) + valuation.valueEur);
     }
 
     for (const [assetId, flow] of Object.entries(flowsOfDay)) {
       if (!covered.has(assetId) || flow === 0) continue;
       const b = bucketFor(contractByAsset.get(assetId) ?? null);
       b.netFlows.set(day, (b.netFlows.get(day) ?? 0) + flow);
-      total.netFlows.set(day, (total.netFlows.get(day) ?? 0) + flow);
     }
   }
 
@@ -243,16 +256,71 @@ export async function getLifeInsurancePerformance(
     mois-ci, et le compter sur la fenêtre ferait passer la couverture pour
     100 % alors que la courbe ignore la moitié de l'épargne.
   */
+  const uncoveredByAsset = new Map<string, number>();
   for (const [day, entry] of flows) {
     if (day > toDay) continue;
     for (const [assetId, flow] of Object.entries(entry.netFlowByAsset)) {
       if (!avAssetIds.has(assetId) || covered.has(assetId) || flow === 0) {
         continue;
       }
-      const b = bucketFor(contractByAsset.get(assetId) ?? null);
-      b.uncoveredBookValue += flow;
-      total.uncoveredBookValue += flow;
+      uncoveredByAsset.set(
+        assetId,
+        (uncoveredByAsset.get(assetId) ?? 0) + flow
+      );
     }
+  }
+
+  /*
+    Plafonné **support par support**, avant d'entrer dans le seau du contrat.
+
+    Un support sans historique déjà soldé — acheté 10 000, racheté 15 000 — a
+    des flux nets de −5 000 € et un montant investi de zéro : il n'a plus rien
+    à couvrir, et il n'a pas de créance sur ses voisins. Le laisser entrer
+    négatif dans le seau retranchait son solde à l'encours non couvert des
+    autres supports du **même contrat** : le défaut que le plafonnement plus
+    bas corrige entre contrats, un cran plus bas seulement. Un contrat gardant
+    un fonds euro de 50 000 € et un support soldé n'annonçait que 45 000 €
+    d'encours hors mesure, donc une couverture surestimée.
+
+    Le seau ne reçoit ainsi que des parts positives, et chaque niveau
+    d'agrégation reste la somme de ce que le niveau inférieur publie.
+  */
+  for (const [assetId, montant] of uncoveredByAsset) {
+    const b = bucketFor(contractByAsset.get(assetId) ?? null);
+    b.uncoveredBookValue += Math.max(0, montant);
+  }
+
+  /*
+    Le total, dérivé des seaux — jamais accumulé en parallèle.
+
+    Chaque grandeur se compose comme elle doit se composer :
+
+    - les **valeurs** et les **flux** s'additionnent jour par jour ;
+    - un jour **incomplet** chez un seul contrat rend le total incomplet ce
+      jour-là : il manque une pièce, le total ne peut pas être publié ;
+    - l'**encours non couvert** est plafonné part par part, puis sommé.
+      L'ordre compte : `Math.max(0, Σ)` laissait un support déjà soldé — flux
+      nets négatifs, acheté 10 000 puis racheté 15 000 — retrancher 5 000 € à
+      l'encours non couvert des autres contrats, et donc surestimer la
+      couverture du total. `Σ Math.max(0, …)` fait du total la somme de ses
+      parties, ce qu'un total doit être. Le plafond est déjà posé au niveau du
+      support ; le reposer ici garde `toSeries(null, total)` identique en forme
+      à `toSeries(key, b)`, quoi qu'un seau reçoive plus tard.
+  */
+  const total = nouveauSeau();
+  for (const day of days) {
+    let valeur = 0;
+    let flux = 0;
+    for (const b of buckets.values()) {
+      if (b.incompleteDays.has(day)) total.incompleteDays.add(day);
+      valeur += b.values.get(day) ?? 0;
+      flux += b.netFlows.get(day) ?? 0;
+    }
+    total.values.set(day, valeur);
+    if (flux !== 0) total.netFlows.set(day, flux);
+  }
+  for (const b of buckets.values()) {
+    total.uncoveredBookValue += Math.max(0, b.uncoveredBookValue);
   }
 
   const lastDay = days[days.length - 1]!;

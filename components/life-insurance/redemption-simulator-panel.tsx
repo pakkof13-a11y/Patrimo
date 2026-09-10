@@ -153,6 +153,15 @@ export function RedemptionSimulatorPanel({
   const redemptionN = money(redemption);
 
   const splitGains = useMemo(() => {
+    // Le plafond se vérifie d'abord, quelle que soit l'origine des gains :
+    // une quote-part saisie à la main ne rend pas rachetable ce qui n'est pas
+    // là. Sans ce passage, l'override rouvrait la porte que ④ a fermée.
+    const r = gainsInPartialRedemption({
+      redemptionEur: redemptionN || 0,
+      positionValueEur: position.value,
+      costBasisEur: position.cost,
+    });
+    if (!r.ok) return { ...r, fromOverride: false };
     if (gainsOverride.trim() !== "") {
       const gains = Math.min(Math.max(0, money(gainsOverride)), redemptionN);
       return {
@@ -160,15 +169,11 @@ export function RedemptionSimulatorPanel({
         gainsInRedemptionEur: String(gains),
         capitalInRedemptionEur: String(Math.max(0, redemptionN - gains)),
         gainRatio: redemptionN > 0 ? gains / redemptionN : 0,
-        latentGainEur: String(Math.max(0, position.value - position.cost)),
+        latentGainEur: r.latentGainEur,
+        cappedRedemptionEur: r.cappedRedemptionEur,
         fromOverride: true,
       };
     }
-    const r = gainsInPartialRedemption({
-      redemptionEur: redemptionN || 0,
-      positionValueEur: position.value,
-      costBasisEur: position.cost,
-    });
     return { ...r, fromOverride: false };
   }, [gainsOverride, redemptionN, position.value, position.cost]);
 
@@ -317,6 +322,35 @@ export function RedemptionSimulatorPanel({
           </span>
         </label>
       </div>
+
+      {/*
+        Le refus se lit, il ne se devine pas.
+
+        `gainsInPartialRedemption` plafonnait les gains à l'encours et rendait
+        quand même `ok: true` : le panneau calculait ensuite l'impôt sur le
+        montant saisi et annonçait « net perçu 195 060 € » pour une position de
+        100 000 €. Le refus est explicite désormais, et cette phrase dit
+        pourquoi le résultat n'apparaît pas — sans elle, le bloc disparaîtrait
+        sans un mot.
+      */}
+      {!splitGains.ok && splitGains.error && redemptionN > 0 && (
+        <p
+          className="mt-3 text-[11px] text-[var(--warning)]"
+          data-testid="sim-redemption-error"
+        >
+          {splitGains.error}
+          {/*
+            Les autres refus (montant illisible, négatif) rendent
+            `cappedRedemptionEur: "0"` : ce zéro est un vide, pas un plafond.
+            On ne l'affiche que s'il désigne un encours réel. Et « encours
+            connu » plutôt que « maximum » : la valeur de rachat que paiera
+            l'assureur — frais de sortie, pénalité, valeur liquidative du jour —
+            n'est pas dans l'application.
+          */}
+          {money(splitGains.cappedRedemptionEur) > 0 &&
+            ` — encours connu : ${formatCurrency(splitGains.cappedRedemptionEur, "EUR")}.`}
+        </p>
+      )}
 
       {policy && (
         <div

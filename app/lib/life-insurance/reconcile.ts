@@ -84,8 +84,20 @@ export function isEuroFundName(raw: string): boolean {
 export type TableSupport = {
   id: string;
   name: string;
-  /** Valorisation saisie à la main, en devise du support. */
+  /**
+   * Valorisation saisie à la main, **dans la devise ci-dessous** — le nom du
+   * champ ment depuis l'origine et reste tel quel pour ne pas remuer ses six
+   * appelants dans le même lot.
+   */
   valueEur: string;
+  /**
+   * Devise de ce montant.
+   *
+   * Elle était jetée au chargement, et la migration écrivait la devise du
+   * *contrat* avec un taux de 1 : un produit à 10 000 USD dans un contrat en
+   * euros devenait une position de 10 000 €.
+   */
+  currency: string;
 };
 
 /** Position issue du journal de transactions (source de vérité). */

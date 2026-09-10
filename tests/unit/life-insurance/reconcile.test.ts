@@ -74,8 +74,18 @@ describe("reconcileSupports", () => {
     // « Amundi MSCI World » côté journal désignent la même ligne, comptée deux
     // fois dans le patrimoine net.
     const table: TableSupport[] = [
-      { id: "p1", name: "UC Amundi MSCI World", valueEur: "28500" },
-      { id: "p2", name: "UC Carmignac Patrimoine", valueEur: "8400" },
+      {
+        id: "p1",
+        name: "UC Amundi MSCI World",
+        valueEur: "28500",
+        currency: "EUR",
+      },
+      {
+        id: "p2",
+        name: "UC Carmignac Patrimoine",
+        valueEur: "8400",
+        currency: "EUR",
+      },
     ];
 
     const { duplicates, tableOnly, ledgerOnly } = reconcileSupports(
@@ -95,8 +105,8 @@ describe("reconcileSupports", () => {
     // « consommer » deux fois la même position : sinon on croirait devoir
     // supprimer deux lignes là où le journal n'en porte qu'une.
     const table: TableSupport[] = [
-      { id: "p1", name: "UC Amundi MSCI World", valueEur: "28500" },
-      { id: "p2", name: "ETF Amundi MSCI World", valueEur: "1000" },
+      { id: "p1", name: "UC Amundi MSCI World", valueEur: "28500", currency: "EUR" },
+      { id: "p2", name: "ETF Amundi MSCI World", valueEur: "1000", currency: "EUR" },
     ];
 
     const { duplicates, tableOnly } = reconcileSupports(table, ledger);
@@ -107,7 +117,7 @@ describe("reconcileSupports", () => {
 
   it("classe tout en tableOnly quand le journal est vide", () => {
     const table: TableSupport[] = [
-      { id: "p1", name: "Fonds euro Generali", valueEur: "5000" },
+      { id: "p1", name: "Fonds euro Generali", valueEur: "5000", currency: "EUR" },
     ];
     const { duplicates, tableOnly, ledgerOnly } = reconcileSupports(table, []);
     expect(duplicates).toEqual([]);
@@ -126,9 +136,9 @@ describe("reconcileSupports", () => {
     // Invariant : aucune valeur ne doit ni disparaître ni être comptée deux
     // fois par le rapprochement lui-même.
     const table: TableSupport[] = [
-      { id: "p1", name: "UC Amundi MSCI World", valueEur: "28500" },
-      { id: "p2", name: "UC Carmignac Patrimoine", valueEur: "8400" },
-      { id: "p3", name: "Fonds euro Generali", valueEur: "5000" },
+      { id: "p1", name: "UC Amundi MSCI World", valueEur: "28500", currency: "EUR" },
+      { id: "p2", name: "UC Carmignac Patrimoine", valueEur: "8400", currency: "EUR" },
+      { id: "p3", name: "Fonds euro Generali", valueEur: "5000", currency: "EUR" },
     ];
     const r = reconcileSupports(table, ledger);
 
@@ -137,7 +147,7 @@ describe("reconcileSupports", () => {
   });
 
   it("ignore un libellé vide plutôt que de l'apparier au hasard", () => {
-    const table: TableSupport[] = [{ id: "p1", name: "   ", valueEur: "100" }];
+    const table: TableSupport[] = [{ id: "p1", name: "   ", valueEur: "100", currency: "EUR" }];
     const { duplicates, tableOnly } = reconcileSupports(table, ledger);
     expect(duplicates).toEqual([]);
     expect(tableOnly).toHaveLength(1);
