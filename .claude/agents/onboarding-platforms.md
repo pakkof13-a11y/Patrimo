@@ -3,7 +3,7 @@ name: onboarding-platforms
 description: Entrée dans l'application — créer une plateforme, la relier, y porter ses premières écritures, la supprimer proprement. À appeler pour tout le parcours qui va du compte vide au premier chiffre.
 tools: Read, Grep, Glob, Bash, Edit
 model: sonnet
-reasoning_effort: medium
+effort: medium
 ---
 
 ## Métier

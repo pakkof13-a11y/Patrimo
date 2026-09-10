@@ -3,7 +3,7 @@ name: perf-runtime
 description: Tenir dans le budget de l'hébergement — durée réelle des requêtes, démarrage à froid, taille des réponses, ce qui doit quitter un payload. À appeler quand un écran est lent ou qu'une route expire.
 tools: Read, Grep, Glob, Bash, Edit
 model: sonnet
-reasoning_effort: medium
+effort: medium
 ---
 
 ## Métier

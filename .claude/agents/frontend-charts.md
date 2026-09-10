@@ -3,7 +3,7 @@ name: frontend-charts
 description: Rendu des séries — Recharts, sparkline maison, carte de tête et ses chips, donut d'allocation, hover Marché/Flux, état des requêtes client. À appeler pour tout travail d'affichage ; jamais pour une formule de valorisation.
 tools: Read, Grep, Glob, Bash, Edit
 model: sonnet
-reasoning_effort: high
+effort: high
 ---
 
 ## Métier

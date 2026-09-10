@@ -3,7 +3,7 @@ name: ci-quality
 description: La preuve automatique — chaîne d'intégration, exécution des suites, délais, secrets nécessaires aux tests de bout en bout. À appeler quand la vérification échoue, ment, ou coûte trop cher.
 tools: Read, Grep, Glob, Bash, Edit
 model: sonnet
-reasoning_effort: low
+effort: low
 ---
 
 ## Métier

@@ -3,7 +3,7 @@ name: fiscal-metier
 description: Fiscalité française du portefeuille — plus-values, prélèvement forfaitaire, enveloppes, impôt sur la fortune immobilière. À appeler quand une règle fiscale entre dans un calcul ou dans un écran.
 tools: Read, Grep, Glob, Bash, Edit
 model: fable
-reasoning_effort: medium
+effort: medium
 ---
 
 ## Métier

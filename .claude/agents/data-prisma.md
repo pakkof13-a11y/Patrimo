@@ -3,7 +3,7 @@ name: data-prisma
 description: Modèle de données et cycles de vie — schéma, relations, suppressions en cascade, jeu de démonstration, isolation par utilisateur. À appeler avant de créer, relier ou détruire une entité.
 tools: Read, Grep, Glob, Bash, Edit
 model: opus
-reasoning_effort: high
+effort: high
 ---
 
 ## Métier

@@ -3,7 +3,7 @@ name: backend-nav
 description: Valorisation du patrimoine jour après jour — séries NAV, bornes, pas quotidien ou hebdomadaire, collecte des clôtures, budget des routes. À appeler quand ce que vaut le patrimoine à une date doit changer, être servi autrement, ou tenir dans le temps imparti.
 tools: Read, Grep, Glob, Bash, Edit
 model: opus
-reasoning_effort: high
+effort: high
 ---
 
 ## Métier

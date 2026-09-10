@@ -3,7 +3,7 @@ name: security-auth
 description: Identité et autorisation — session, propriété des données, secrets, accès des tâches planifiées. À appeler avant d'exposer, de déplacer ou de protéger quoi que ce soit qui distingue un utilisateur d'un autre.
 tools: Read, Grep, Glob, Bash, Edit
 model: fable
-reasoning_effort: high
+effort: high
 ---
 
 ## Métier

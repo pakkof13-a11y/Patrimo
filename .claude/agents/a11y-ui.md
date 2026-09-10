@@ -3,7 +3,7 @@ name: a11y-ui
 description: Lisibilité et usage au clavier — focus, contrastes, états vides, tailles et densité des tuiles. À appeler quand un écran se lit mal, se pilote mal, ou ne dit pas ce qu'il montre.
 tools: Read, Grep, Glob, Bash, Edit
 model: sonnet
-reasoning_effort: low
+effort: low
 ---
 
 ## Métier
