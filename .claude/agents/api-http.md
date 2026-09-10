@@ -3,7 +3,7 @@ name: api-http
 description: Surface HTTP de l'application — verbes, statuts, forme des requêtes et des réponses, coût d'un appel. À appeler quand une route naît, change de contrat, ou répond mal.
 tools: Read, Grep, Glob, Bash, Edit
 model: sonnet
-reasoning_effort: high
+effort: high
 ---
 
 ## Métier

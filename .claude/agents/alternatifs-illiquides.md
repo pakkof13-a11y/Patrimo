@@ -3,7 +3,7 @@ name: alternatifs-illiquides
 description: Actifs sans cotation continue — capital-investissement, financement participatif, métaux, biens tangibles, pierre. À appeler quand une valeur ne vient pas d'un marché mais d'une expertise.
 tools: Read, Grep, Glob, Bash, Edit
 model: sonnet
-reasoning_effort: medium
+effort: medium
 ---
 
 ## Métier

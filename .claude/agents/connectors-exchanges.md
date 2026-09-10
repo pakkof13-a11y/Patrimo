@@ -3,7 +3,7 @@ name: connectors-exchanges
 description: Connecteurs CEX/brokers (Kraken, Binance, Coinbase, IBKR…) — auth API, mapping fills → journal. À appeler quand un compte plateforme doit se synchroniser tout seul vers les écritures du dépôt.
 tools: Read, Grep, Glob, Bash, Edit
 model: opus
-reasoning_effort: high
+effort: high
 ---
 
 ## Métier

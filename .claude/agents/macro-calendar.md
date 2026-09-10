@@ -3,7 +3,7 @@ name: macro-calendar
 description: Calendrier économique, résultats d'entreprises et actualités — fenêtres à venir / publiées, heure de Paris contre UTC, mapping des fournisseurs (Finnhub, ff_calendar). À appeler pour tout ce qui date un événement de marché.
 tools: Read, Grep, Glob, Bash, Edit
 model: sonnet
-reasoning_effort: high
+effort: high
 ---
 
 ## Métier
