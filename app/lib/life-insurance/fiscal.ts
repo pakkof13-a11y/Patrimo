@@ -83,6 +83,13 @@ export function annualAllowanceEur(household: TaxHousehold): number {
  * courant tombe dans le bon jour. C'est la même règle que le reste du
  * portefeuille (`app/lib/dates/paris.ts`) ; `startOfUtcDay` de
  * `coupon-dates.ts` sert à *décoder* des dates stockées, pas à situer « now ».
+ *
+ * Rend `NaN` si l'une des bornes est illisible — comme l'arithmétique sur
+ * `getFullYear()` le faisait avant le passage au jour civil Paris. `NaN` ne
+ * franchit aucun seuil : `NaN >= 96` est faux. Le passage par `parisDayKey`
+ * avait perdu cette propriété : la clé vide qu'il rend sur une date invalide
+ * se lisait `Number("".slice(0, 4)) === 0`, et « pas une date » valait alors
+ * l'an 0 — 24 321 mois d'antériorité, PFU à 7,5 % et abattement de 4 600 €.
  */
 export function fullMonthsBetween(from: Date, to: Date): number {
   const f = parisYmd(from);
@@ -93,8 +100,12 @@ export function fullMonthsBetween(from: Date, to: Date): number {
   return months;
 }
 
+const INVALID_YMD = { y: NaN, m: NaN, d: NaN } as const;
+
 function parisYmd(date: Date): { y: number; m: number; d: number } {
   const key = parisDayKey(date);
+  // `parisDayKey` rend "" sur une date invalide ; `Number("")` vaut 0, pas NaN.
+  if (key === "") return INVALID_YMD;
   return {
     y: Number(key.slice(0, 4)),
     m: Number(key.slice(5, 7)),
@@ -118,9 +129,18 @@ export type ContractAge = {
  * Une date d'ouverture future rend un âge nul plutôt qu'un négatif : elle
  * relève d'une saisie erronée, et propager un nombre négatif ferait apparaître
  * l'antériorité comme « acquise dans -3 mois » dans l'interface.
+ *
+ * Une date illisible rend le même âge nul, et donc **pas** d'antériorité. Le
+ * garde vit ici et non seulement dans `fullMonthsBetween` : celle-ci rend
+ * `NaN`, réponse honnête pour une arithmétique sans opérande, mais un verdict
+ * fiscal ne se propage pas en `NaN` — `Math.max(0, NaN)` est `NaN`, et
+ * `monthsToAnteriority` s'afficherait « dans NaN mois ». L'appelant qui ne
+ * vérifie pas la lisibilité de la date (le simulateur de rachat ne teste que
+ * sa présence) doit obtenir le régime le moins favorable, pas le plus.
  */
 export function contractAge(openDate: Date, now: Date = new Date()): ContractAge {
-  const months = Math.max(0, fullMonthsBetween(openDate, now));
+  const raw = fullMonthsBetween(openDate, now);
+  const months = Number.isFinite(raw) ? Math.max(0, raw) : 0;
   const threshold = ANTERIORITY_YEARS * 12;
   return {
     months,

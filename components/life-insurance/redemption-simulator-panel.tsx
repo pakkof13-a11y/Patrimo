@@ -43,14 +43,19 @@ function Row({
   value,
   emphasize,
   muted,
+  "data-testid": testId,
 }: {
   label: string;
   value: string;
   emphasize?: boolean;
   muted?: boolean;
+  "data-testid"?: string;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 text-xs">
+    <div
+      className="flex items-baseline justify-between gap-3 text-xs"
+      data-testid={testId}
+    >
       <span className={cn(muted && "text-[var(--muted-foreground)]")}>
         {label}
       </span>
@@ -377,12 +382,19 @@ export function RedemptionSimulatorPanel({
               label="Prix de revient"
               value={formatCurrency(String(position.cost), "EUR")}
             />
+            {/*
+              `gainsInPartialRedemption` rend `latentGainEur` sur toutes ses
+              branches — y compris un refus (rachat > encours) — précisément
+              pour que l'écran puisse encore l'afficher : la position porte
+              bien 20 000 € de plus-value latente même quand le montant saisi
+              est refusé. Le gater sur `ok` remplaçait cette valeur connue par
+              un zéro affirmé, à côté du bandeau d'erreur qui dit pourtant le
+              contraire.
+            */}
             <Row
               label="Gain latent"
-              value={formatCurrency(
-                splitGains.ok ? splitGains.latentGainEur : "0",
-                "EUR"
-              )}
+              value={formatCurrency(splitGains.latentGainEur, "EUR")}
+              data-testid="sim-latent-gain"
             />
             <Row
               label="Encours tous contrats"

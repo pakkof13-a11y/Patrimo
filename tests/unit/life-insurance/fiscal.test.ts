@@ -33,6 +33,21 @@ describe("fullMonthsBetween", () => {
   it("rend un nombre négatif pour un ordre inversé", () => {
     expect(fullMonthsBetween(at("2026-01-01"), at("2025-01-01"))).toBe(-12);
   });
+
+  it("rend NaN sur une date illisible — jamais un nombre", () => {
+    /*
+      Régression du passage au jour civil Paris : `parisDayKey` rend "" sur une
+      date invalide, et `Number("".slice(0, 4))` vaut 0, pas NaN. « pas une
+      date » se lisait alors l'an 0 : 24 321 mois pleins, antériorité acquise.
+    */
+    const r = fullMonthsBetween(new Date("pas une date"), at("2026-07-26"));
+    expect(Number.isNaN(r)).toBe(true);
+    expect(r >= ANTERIORITY_YEARS * 12).toBe(false);
+    // Symétrique : un « now » illisible ne fabrique pas d'âge non plus.
+    expect(
+      Number.isNaN(fullMonthsBetween(at("2018-01-01"), new Date("foo")))
+    ).toBe(true);
+  });
 });
 
 describe("contractAge", () => {
@@ -57,6 +72,30 @@ describe("contractAge", () => {
     expect(age.years).toBe(0);
     expect(age.hasAnteriority).toBe(false);
     expect(age.monthsToAnteriority).toBe(ANTERIORITY_YEARS * 12);
+  });
+
+  it("une date d'ouverture illisible vaut âge nul, jamais l'antériorité", () => {
+    /*
+      La mesure du lot précédent : « pas une date » rendait 24 321 mois,
+      `hasAnteriority: true`, donc PFU 7,5 % et abattement de 4 600 € dans le
+      simulateur, qui ne teste que la présence de la date, pas sa lisibilité.
+      Le régime le moins favorable est le seul admissible sur une donnée
+      qu'on ne sait pas lire.
+    */
+    const age = contractAge(new Date("foo"), at("2026-07-26"));
+    expect(age.months).toBe(0);
+    expect(age.years).toBe(0);
+    expect(age.hasAnteriority).toBe(false);
+    expect(age.monthsToAnteriority).toBe(ANTERIORITY_YEARS * 12);
+    // Aucun NaN ne fuit vers l'interface.
+    expect(Number.isNaN(age.months)).toBe(false);
+    expect(Number.isNaN(age.monthsToAnteriority)).toBe(false);
+  });
+
+  it("un « now » illisible ne fabrique pas d'antériorité non plus", () => {
+    const age = contractAge(at("2010-01-01"), new Date("foo"));
+    expect(age.hasAnteriority).toBe(false);
+    expect(age.months).toBe(0);
   });
 });
 

@@ -72,6 +72,61 @@ describe("gainsInPartialRedemption — plafond", () => {
     const r = gainsInPartialRedemption({ redemptionEur: "200000", ...position });
     expect(Number(r.latentGainEur)).toBeCloseTo(20_000, 2);
   });
+
+  /*
+    Le gain latent est une propriété de la position (valeur − revient), pas
+    de la saisie. Les deux autres refus le rendaient à « 0 » : une saisie
+    négative sur une position à 20 000 € de plus-value réaffichait « Gain
+    latent 0 € » — le défaut corrigé sur la branche « > encours », par une
+    autre porte. Même logique pour le ratio et le plafond : ils ne dépendent
+    que de la position.
+  */
+  it("une saisie négative refuse le rachat sans effacer le gain latent", () => {
+    const r = gainsInPartialRedemption({ redemptionEur: "-1", ...position });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/négatifs/i);
+    expect(Number(r.latentGainEur)).toBeCloseTo(20_000, 2);
+    expect(r.gainRatio).toBeCloseTo(0.2, 6);
+    // Le maximum rachetable est l'encours, comme sur un refus pour dépassement.
+    expect(r.cappedRedemptionEur).toBe("100000");
+    // Ce qui dépend de la saisie, lui, reste vide.
+    expect(r.gainsInRedemptionEur).toBe("0");
+    expect(r.capitalInRedemptionEur).toBe("0");
+  });
+
+  it("une saisie illisible refuse le rachat sans effacer le gain latent", () => {
+    const r = gainsInPartialRedemption({ redemptionEur: "abc", ...position });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/invalides/i);
+    expect(Number(r.latentGainEur)).toBeCloseTo(20_000, 2);
+    expect(r.gainRatio).toBeCloseTo(0.2, 6);
+    expect(r.cappedRedemptionEur).toBe("100000");
+    expect(r.gainsInRedemptionEur).toBe("0");
+  });
+
+  it("une position illisible est le seul cas où le gain latent est inconnu", () => {
+    const r = gainsInPartialRedemption({
+      redemptionEur: "1000",
+      positionValueEur: "abc",
+      costBasisEur: "80000",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.latentGainEur).toBe("0");
+    expect(r.gainRatio).toBe(0);
+    expect(r.cappedRedemptionEur).toBe("0");
+  });
+
+  it("une moins-value latente rend un gain latent nul sur refus, pas négatif", () => {
+    const r = gainsInPartialRedemption({
+      redemptionEur: "-1",
+      positionValueEur: "70000",
+      costBasisEur: "80000",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.latentGainEur).toBe("0");
+    expect(r.gainRatio).toBe(0);
+    expect(r.cappedRedemptionEur).toBe("70000");
+  });
 });
 
 /* ── ⑥ le jour calendaire, heure de Paris ──────────────────────────── */
@@ -162,23 +217,42 @@ describe("assetClassForSupport — déduite du kind", () => {
     "Fonds euro Spirica",
     "Fonds en euros",
     "Sécurité Euro",
-    "Euro Exclusif",
+    "Eurocroissance",
   ])("« %s » est un fonds euro pour les deux règles", (nom) => {
     expect(isEuroFundName(nom)).toBe(true);
     expect(assetClassForSupport(nom)).toBe(assetClassForKind("FONDS_EURO"));
   });
 
-  it.each(["Amundi MSCI World", "Euro Stoxx 50", "Eurostoxx"])(
-    "« %s » reste une UC",
-    (nom) => {
-      expect(isEuroFundName(nom)).toBe(false);
-      expect(assetClassForSupport(nom)).toBe(assetClassForKind("UC"));
-    }
-  );
+  /*
+    La règle unique doit aussi être étroite. La première unification avait
+    propagé la plus large des deux règles (`\beuro(s)?\b`) à la classe d'actif :
+    « Amundi Euro Equity » — une UC actions — repartait en OBLIGATIONS là où
+    elle tombait en AUTRE auparavant. « Euro Exclusif » figurait ici parmi les
+    fonds euro : c'est une marque, pas une dénomination, et la règle ne la
+    devine plus — il part en UC, reclassable, et non en capital garanti.
+  */
+  it.each([
+    "Amundi MSCI World",
+    "Euro Stoxx 50",
+    "Eurostoxx",
+    "Amundi Euro Equity",
+    "BNP Euro Small Cap",
+    "Lyxor Euro Value",
+    "Euro Exclusif",
+  ])("« %s » reste une UC, classée AUTRE", (nom) => {
+    expect(isEuroFundName(nom)).toBe(false);
+    expect(assetClassForSupport(nom)).toBe(assetClassForKind("UC"));
+    expect(assetClassForSupport(nom)).toBe("AUTRE");
+  });
 
   it("les deux règles ne peuvent plus diverger", () => {
     // La classe se déduit du kind : il n'y a plus deux verdicts à accorder.
-    for (const nom of ["Sécurité Euro", "Amundi World", "Fonds euro"]) {
+    for (const nom of [
+      "Sécurité Euro",
+      "Amundi World",
+      "Fonds euro",
+      "Amundi Euro Equity",
+    ]) {
       const kind = isEuroFundName(nom) ? "FONDS_EURO" : "UC";
       expect(assetClassForSupport(nom)).toBe(assetClassForKind(kind));
     }

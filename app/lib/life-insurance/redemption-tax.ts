@@ -380,15 +380,41 @@ export function gainsInPartialRedemption(input: {
   const redemption = parseMoney(input.redemptionEur);
   const value = parseMoney(input.positionValueEur);
   const cost = parseMoney(input.costBasisEur);
+
+  /*
+    Le gain latent, son ratio et le plafond de rachat sont des propriétés de la
+    **position** — `value − cost`, `latent / value`, `value` — pas de la saisie.
+    Ils étaient rendus à « 0 » sur un rachat illisible ou négatif : une saisie
+    de « -1 » sur une position à 20 000 € de plus-value réaffichait « Gain
+    latent 0 € », le défaut que la branche « rachat > encours » avait déjà
+    cessé de produire. Ils ne sont inconnus que si la position l'est.
+  */
+  const positionKnown =
+    value !== null && cost !== null && value >= 0 && cost >= 0;
+  const latentGain =
+    positionKnown ? Math.max(0, (value as number) - (cost as number)) : 0;
+  const gainRatio =
+    positionKnown && (value as number) > MONEY_EPS
+      ? latentGain / (value as number)
+      : 0;
+  const positionFacts = {
+    gainRatio,
+    latentGainEur: formatMoney(roundMoney(latentGain)),
+    // Le maximum rachetable : l'encours lui-même, comme sur un refus pour
+    // dépassement. "0" quand la position est inconnue — l'appelant ne
+    // l'affiche pas comme plafond (il ne le montre que s'il est > 0).
+    cappedRedemptionEur: positionKnown
+      ? formatMoney(roundMoney(value as number))
+      : "0",
+  };
+
   if (redemption === null || value === null || cost === null) {
     return {
       ok: false,
       error: "Montants invalides",
       gainsInRedemptionEur: "0",
       capitalInRedemptionEur: "0",
-      gainRatio: 0,
-      latentGainEur: "0",
-      cappedRedemptionEur: "0",
+      ...positionFacts,
     };
   }
   if (redemption < 0 || value < 0 || cost < 0) {
@@ -397,14 +423,9 @@ export function gainsInPartialRedemption(input: {
       error: "Les montants ne peuvent pas être négatifs",
       gainsInRedemptionEur: "0",
       capitalInRedemptionEur: "0",
-      gainRatio: 0,
-      latentGainEur: "0",
-      cappedRedemptionEur: "0",
+      ...positionFacts,
     };
   }
-
-  const latentGain = Math.max(0, value - cost);
-  const gainRatio = value > MONEY_EPS ? latentGain / value : 0;
   const cappedRedemption = Math.min(redemption, value > MONEY_EPS ? value : redemption);
   // Rachat total (ou ≥ valeur) : tout le gain latent. Sinon proportionnel.
   const fullExit = value <= MONEY_EPS || redemption >= value - MONEY_EPS;

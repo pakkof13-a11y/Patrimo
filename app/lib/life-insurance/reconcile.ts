@@ -38,19 +38,28 @@
 const WRAPPER_PREFIXES = ["uc", "etf", "support", "fonds", "part", "parts"];
 
 /**
- * Normalise un libellé de support pour la comparaison.
- *
- * Accents retirés, ponctuation réduite à des espaces, préfixes d'habillage
- * ôtés. Le résultat n'est jamais affiché : il ne sert qu'à comparer.
+ * Pliage d'un libellé : accents retirés, casse abaissée, ponctuation réduite à
+ * des espaces. **Sans** retrait des préfixes d'habillage — c'est la forme que
+ * lit `isEuroFundName`, qui a besoin de voir le mot « fonds ».
  */
-export function normalizeSupportName(raw: string): string {
-  const base = raw
+function foldSupportName(raw: string): string {
+  return raw
     .normalize("NFD")
     // Diacritiques : « Sécurité » et « Securite » doivent se rapprocher.
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+/**
+ * Normalise un libellé de support pour la comparaison.
+ *
+ * Accents retirés, ponctuation réduite à des espaces, préfixes d'habillage
+ * ôtés. Le résultat n'est jamais affiché : il ne sert qu'à comparer.
+ */
+export function normalizeSupportName(raw: string): string {
+  const base = foldSupportName(raw);
 
   // Plusieurs préfixes peuvent s'empiler (« UC ETF World »), d'où la boucle
   // plutôt qu'un seul retrait.
@@ -69,16 +78,47 @@ export function normalizeSupportName(raw: string): string {
  * « Fonds euro X ». Ce sont les mêmes euros saisis deux fois. Sans cette
  * détection, une migration créerait deux positions et doublerait le fonds euro
  * au patrimoine.
+ *
+ * C'est la **seule** règle « fonds euro » du module : le `kind` d'un support
+ * repris, sa classe d'actif (`assetClassForSupport`), le repli de
+ * `euroFundAlreadyTaken` et celui de `isFondsEuroHolding` en dépendent tous.
+ * Elle est étroite à dessein. La version précédente acceptait tout libellé
+ * contenant le mot « euro » hors « Euro Stoxx » : « Amundi Euro Equity »,
+ * « BNP Euro Small Cap », « Lyxor Euro Value » — des UC actions — repartaient
+ * en `FONDS_EURO`, classées `OBLIGATIONS` dans la répartition.
+ *
+ * Elle lit le libellé **plié**, pas normalisé : `normalizeSupportName` ôte
+ * « fonds » en tête, et la règle ne verrait plus que « euro spirica ».
  */
 export function isEuroFundName(raw: string): boolean {
-  const n = normalizeSupportName(raw);
-  // « fonds euro », « fonds en euros », « euro spirica », « securite euro »…
-  // Le préfixe « fonds » ayant pu être retiré par la normalisation, on teste le
-  // mot « euro » comme mot entier plutôt qu'une sous-chaîne : « eurostoxx » ou
-  // « euro stoxx 50 » est un support actions, pas un fonds euro.
-  if (/\beuro(s)?\s+stoxx\b/.test(n) || /\beurostoxx\b/.test(n)) return false;
-  return /\beuro(s)?\b/.test(n);
+  const n = foldSupportName(raw);
+  // « Euro Stoxx 50 » est un indice actions : un libellé « Fonds Euro Stoxx »
+  // désignerait le tracker, pas le fonds à capital garanti.
+  if (/\beuros? stoxx\b/.test(n) || /\beurostoxx\b/.test(n)) return false;
+  return EURO_FUND_PATTERNS.some((re) => re.test(n));
 }
+
+/**
+ * Dénominations génériques du fonds en euros.
+ *
+ * - « fonds euro », « fonds en euros » ;
+ * - « eurocroissance » / « euro-croissance » (même mot, la ponctuation
+ *   devenant un espace au pliage) ;
+ * - « sécurité euro ».
+ *
+ * C'est un plancher volontaire. Les dénominations de marque (« Netissima »,
+ * « Eurossima », « Euro Exclusif », « Suravenir Rendement », « Euro
+ * Allocation Long Terme »…) ne se devinent pas d'un nom : les reconnaître
+ * relève d'une carte tenue à jour, pas d'une expression régulière. Un support
+ * mal reconnu ici devient une UC, ce que l'utilisateur peut reclasser ; un
+ * support reconnu à tort devient un capital « garanti » et une poche
+ * obligataire, ce qu'il ne verra pas.
+ */
+const EURO_FUND_PATTERNS: readonly RegExp[] = [
+  /\bfonds (en )?euros?\b/,
+  /\beuro ?croissance\b/,
+  /\bsecurite euros?\b/,
+];
 
 /** Support tel que saisi dans la table AV dédiée. */
 export type TableSupport = {

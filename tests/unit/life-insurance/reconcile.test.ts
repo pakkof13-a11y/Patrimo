@@ -12,7 +12,15 @@ describe("isEuroFundName", () => {
     expect(isEuroFundName("Fonds euro Spirica")).toBe(true);
     expect(isEuroFundName("Fonds euro Generali")).toBe(true);
     expect(isEuroFundName("Fonds en euros")).toBe(true);
+    expect(isEuroFundName("Fonds en euro")).toBe(true);
     expect(isEuroFundName("Sécurité Euro")).toBe(true);
+    expect(isEuroFundName("Eurocroissance")).toBe(true);
+    expect(isEuroFundName("Fonds Euro-Croissance")).toBe(true);
+    // Le préfixe d'habillage « UC » ne masque pas le mot « fonds » : la règle
+    // lit le libellé plié, pas la clé de rapprochement.
+    expect(isEuroFundName("UC Fonds euro Spirica")).toBe(true);
+    // Le libellé que la migration forge elle-même pour le champ `cashEuro`.
+    expect(isEuroFundName("Fonds euro Generali Vie")).toBe(true);
   });
 
   it("ne prend pas un support actions pour un fonds euro", () => {
@@ -21,9 +29,35 @@ describe("isEuroFundName", () => {
     // solderait à tort le champ du contrat.
     expect(isEuroFundName("Amundi Euro Stoxx 50")).toBe(false);
     expect(isEuroFundName("UC EuroStoxx")).toBe(false);
+    expect(isEuroFundName("Fonds Euro Stoxx 50")).toBe(false);
     expect(isEuroFundName("UC Amundi MSCI World")).toBe(false);
     expect(isEuroFundName("UC Carmignac Patrimoine")).toBe(false);
     expect(isEuroFundName("ETF World tracker")).toBe(false);
+  });
+
+  it("le mot « euro » seul ne fait pas un fonds en euros", () => {
+    /*
+      Régression du lot précédent : `\beuro(s)?\b` avec la seule exclusion
+      « Euro Stoxx » rangeait ces UC actions en FONDS_EURO, donc en
+      OBLIGATIONS dans la répartition. « Euro » y désigne une zone
+      géographique, pas un capital garanti.
+    */
+    expect(isEuroFundName("Amundi Euro Equity")).toBe(false);
+    expect(isEuroFundName("BNP Euro Small Cap")).toBe(false);
+    expect(isEuroFundName("Lyxor Euro Value")).toBe(false);
+    expect(isEuroFundName("Amundi Label Actions Euro")).toBe(false);
+    expect(isEuroFundName("Euro Spirica")).toBe(false);
+  });
+
+  it("une dénomination de marque n'est pas devinée", () => {
+    // Ce sont bien des fonds en euros dans la vie réelle. Les reconnaître
+    // demande une carte de marques, pas une règle sur le nom : tant qu'elle
+    // n'existe pas, ils partent en UC — reclassables — plutôt qu'en capital
+    // garanti par erreur. Le test verrouille que la règle ne les devine pas.
+    expect(isEuroFundName("Euro Exclusif")).toBe(false);
+    expect(isEuroFundName("Netissima")).toBe(false);
+    expect(isEuroFundName("Suravenir Rendement")).toBe(false);
+    expect(isEuroFundName("Euro Allocation Long Terme")).toBe(false);
   });
 });
 
