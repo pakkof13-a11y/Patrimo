@@ -3,7 +3,7 @@ name: crypto-onchain
 description: Crypto au comptant, finance décentralisée, jetons non fongibles et synchronisation de portefeuilles. À appeler pour tout ce qui lit une chaîne ou un agrégateur on-chain.
 tools: Read, Grep, Glob, Bash, Edit
 model: opus
-reasoning_effort: high
+effort: high
 ---
 
 ## Métier

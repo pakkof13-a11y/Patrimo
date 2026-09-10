@@ -3,7 +3,7 @@ name: market-data
 description: Cours et données de fournisseurs — actions, crypto, change, logos, caches et limites d'appel. À appeler quand un prix entre dans l'application ou qu'un fournisseur se comporte mal.
 tools: Read, Grep, Glob, Bash, Edit
 model: sonnet
-reasoning_effort: medium
+effort: medium
 ---
 
 ## Métier

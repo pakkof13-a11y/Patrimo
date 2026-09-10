@@ -3,7 +3,7 @@ name: qa-nav
 description: Filet de sécurité après chaque chantier — prouver que l'écran correspond au moteur, débusquer les assertions mortes, écrire les tests qui manquaient. À appeler après une modification pour vérifier qu'elle tient.
 tools: Read, Grep, Glob, Bash, Edit
 model: sonnet
-reasoning_effort: medium
+effort: medium
 ---
 
 ## Métier

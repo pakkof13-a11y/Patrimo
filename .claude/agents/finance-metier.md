@@ -3,7 +3,7 @@ name: finance-metier
 description: Vérité des grandeurs patrimoniales — ce qu'un chiffre veut dire, ce qu'il contient, ce qu'il ne peut pas dire. À appeler avant d'écrire ou de modifier quoi que ce soit qui produit un montant.
 tools: Read, Grep, Glob, Bash
 model: fable
-reasoning_effort: high
+effort: high
 ---
 
 ## Métier
