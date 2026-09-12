@@ -113,6 +113,21 @@ export const num = (v: string | number | null | undefined): number => {
 };
 
 /**
+ * Taux d'occupation saisi, ou `null` si **rien** n'a été saisi.
+ *
+ * Un test de vérité JS (`p.occupancyRatePct ? … : null`) confond « absent » et
+ * « zéro » : un bien déclaré vacant à `0` retombait sur le défaut
+ * `effectiveOccupancyPct(null) → 100` et se valorisait comme loué toute
+ * l'année. Seuls `null`, `undefined` et une chaîne vide valent « non saisi » —
+ * un `0` explicite est une information, pas une absence.
+ */
+function occupancyInput(v: string | number | null | undefined): number | null {
+  if (v == null) return null;
+  if (typeof v === "string" && v.trim() === "") return null;
+  return num(v);
+}
+
+/**
  * Fraction d'année louée retenue pour un bien, dans `[0, 1]`.
  *
  * Le bornage vient de `effectiveOccupancyPct` : loyer encaissé et rendement
@@ -121,7 +136,7 @@ export const num = (v: string | number | null | undefined): number => {
  * décuplé à côté d'un rendement calculé à 100 %.
  */
 function occupancyFactor(p: PropertyInput): number {
-  return effectiveOccupancyPct(p.occupancyRatePct ? num(p.occupancyRatePct) : null) / 100;
+  return effectiveOccupancyPct(occupancyInput(p.occupancyRatePct)) / 100;
 }
 
 function statusOf(p: PropertyInput): PropertyStatus {

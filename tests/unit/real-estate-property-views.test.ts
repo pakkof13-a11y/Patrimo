@@ -149,6 +149,34 @@ describe("vue consolidée d'un bien", () => {
     expect(abusif.grossYieldPct).toBe(plein.grossYieldPct);
   });
 
+  it("un taux d'occupation de 0 neutralise le loyer au lieu de valoir 100 %", () => {
+    /*
+      `p.occupancyRatePct ? num(...) : null` traitait tout zéro *falsy* comme
+      une absence de saisie et retombait sur le défaut « loué toute l'année » :
+      un bien déclaré vacant à 0 % encaissait douze mois de loyer.
+
+      Trois écritures du même fait — `"0"`, `0`, et l'absence — doivent se lire
+      pour ce qu'elles sont : les deux premières à 0 %, la dernière à 100 %.
+    */
+    const cashFlow = (occupancyRatePct: PropertyInput["occupancyRatePct"]) =>
+      buildPropertyView(
+        property({
+          assetId: "a",
+          monthlyRentEur: "1000",
+          monthlyChargesEur: "0",
+          annualPropertyTaxEur: null,
+          occupancyRatePct,
+        }),
+        holding()
+      ).monthlyCashFlowEur;
+
+    expect(cashFlow("0")).toBe(0);
+    // Un 0 numérique — la base rend un Decimal, pas toujours une chaîne.
+    expect(cashFlow(0 as unknown as string)).toBe(0);
+    // Non saisi : le défaut documenté reste « loué toute l'année ».
+    expect(cashFlow(null)).toBeCloseTo(1_000, 6);
+  });
+
   it("borne un taux d'occupation négatif à zéro", () => {
     const v = buildPropertyView(
       property({
