@@ -121,7 +121,9 @@ describe("avenant de mensualité", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
-  it("lit « 1 234,56 » sans le transformer en NaN", async () => {
+  // `decimalString` ne remplace que la virgule décimale : « 1234,56 » est lu,
+  // un séparateur de milliers (« 1 234,56 ») resterait un NaN refusé en 400.
+  it("lit « 1234,56 » (virgule décimale) sans le transformer en NaN", async () => {
     const res = await POST(
       requete({
         action: "payment_change",
