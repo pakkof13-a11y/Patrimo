@@ -11,6 +11,7 @@
  */
 
 import {
+  effectiveOccupancyPct,
   grossRentalYieldPct,
   isRentalUsage,
   netRentalYieldPct,
@@ -111,6 +112,18 @@ export const num = (v: string | number | null | undefined): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
+/**
+ * Fraction d'année louée retenue pour un bien, dans `[0, 1]`.
+ *
+ * Le bornage vient de `effectiveOccupancyPct` : loyer encaissé et rendement
+ * brut du même bien doivent s'appuyer sur le même taux, sinon une saisie à
+ * `1000` — que la validation de la route laisse passer — donne un cash-flow
+ * décuplé à côté d'un rendement calculé à 100 %.
+ */
+function occupancyFactor(p: PropertyInput): number {
+  return effectiveOccupancyPct(p.occupancyRatePct ? num(p.occupancyRatePct) : null) / 100;
+}
+
 function statusOf(p: PropertyInput): PropertyStatus {
   const usage = (p.usage ?? "").toUpperCase();
   if (usage.includes("PRINCIPAL")) return "PRIMARY";
@@ -160,7 +173,7 @@ export function buildPropertyView(
     déduite — elle n'est pas connue ici, et un cash-flow « avant crédit »
     annoncé comme net serait le chiffre le plus trompeur de l'écran.
   */
-  const occupancy = p.occupancyRatePct ? num(p.occupancyRatePct) / 100 : 1;
+  const occupancy = occupancyFactor(p);
   const rent = num(p.monthlyRentEur);
   const monthlyCashFlowEur =
     isRental && rent > 0
@@ -275,7 +288,7 @@ export function computeRealEstateTotals(
   for (const v of views) {
     const p = byId.get(v.assetId);
     if (!p || !v.isRental) continue;
-    const occupancy = p.occupancyRatePct ? num(p.occupancyRatePct) / 100 : 1;
+    const occupancy = occupancyFactor(p);
     annualRentEur += num(p.monthlyRentEur) * occupancy * 12;
     annualChargesEur += num(p.monthlyChargesEur) * 12 + v.annualFiscalBurdenEur;
   }

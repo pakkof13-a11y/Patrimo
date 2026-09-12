@@ -27,7 +27,17 @@ export const dynamic = "force-dynamic";
  *
  * Repose les drapeaux de conflit au passage : la détection de double compte
  * dépend de l'ensemble des positions, elle n'a de sens qu'en lot.
+ *
+ * maxDuration : deux boucles séquentielles (`recordValuation` puis
+ * `recordEvent`), une écriture par position, sans plafond posé jusqu'ici — le
+ * défaut Hobby (10 s) coupe avant la fin dès que le compte a plusieurs
+ * positions. Même plafond que les autres routes de sync/refresh du dépôt
+ * (`wallets/zerion/sync`, `import/commit`, `cron/collect-intraday`,
+ * `portfolio/daily-nav`) : 60 s, le maximum réellement permis par le plan
+ * (300 s est réservé au plan Pro, piste fermée ailleurs dans ce dépôt).
  */
+export const maxDuration = 60;
+
 export async function POST() {
   const userId = await requireUserId();
   if (!userId) {

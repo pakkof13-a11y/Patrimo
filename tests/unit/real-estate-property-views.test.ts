@@ -115,6 +115,54 @@ describe("vue consolidée d'un bien", () => {
     );
     expect(v.monthlyCashFlowEur).toBeCloseTo(500, 6);
   });
+
+  it("borne le taux d'occupation à 100 % dans le cash-flow comme dans le rendement", () => {
+    /*
+      Rien dans la validation de la route n'empêche un `1000` : le cash-flow
+      s'en trouvait multiplié par dix (10 000 € pour un loyer de 1 000 €)
+      pendant que `grossYieldPct`, borné dans `constants.ts`, restait calculé à
+      100 %. Les deux grandeurs du même bien doivent lire le même taux.
+    */
+    const abusif = buildPropertyView(
+      property({
+        assetId: "a",
+        monthlyRentEur: "1000",
+        monthlyChargesEur: "0",
+        annualPropertyTaxEur: null,
+        occupancyRatePct: "1000",
+      }),
+      holding()
+    );
+    const plein = buildPropertyView(
+      property({
+        assetId: "a",
+        monthlyRentEur: "1000",
+        monthlyChargesEur: "0",
+        annualPropertyTaxEur: null,
+        occupancyRatePct: "100",
+      }),
+      holding()
+    );
+
+    expect(abusif.monthlyCashFlowEur).toBeCloseTo(1_000, 6);
+    expect(abusif.monthlyCashFlowEur).toBe(plein.monthlyCashFlowEur);
+    expect(abusif.grossYieldPct).toBe(plein.grossYieldPct);
+  });
+
+  it("borne un taux d'occupation négatif à zéro", () => {
+    const v = buildPropertyView(
+      property({
+        assetId: "a",
+        monthlyRentEur: "1000",
+        monthlyChargesEur: "0",
+        annualPropertyTaxEur: null,
+        occupancyRatePct: "-50",
+      }),
+      holding()
+    );
+    // Aucun loyer encaissé, mais les charges restent dues (ici nulles).
+    expect(v.monthlyCashFlowEur).toBeCloseTo(0, 6);
+  });
 });
 
 describe("agrégats du parc", () => {
@@ -186,6 +234,27 @@ describe("agrégats du parc", () => {
     const slices = splitByStatus(views());
     expect(slices.map((s) => s.status)).toEqual(["RENTED"]);
     expect(slices[0]!.sharePct).toBeCloseTo(100, 6);
+  });
+
+  it("borne le taux d'occupation dans le loyer annuel du parc", () => {
+    /*
+      Un `1000` saisi donnait 120 000 € de loyers annuels pour un loyer réel de
+      1 000 €/mois. Le plafond à 100 % ramène l'agrégat sur la vraie assiette.
+    */
+    const props = [
+      property({
+        assetId: "a",
+        monthlyRentEur: "1000",
+        monthlyChargesEur: "0",
+        annualPropertyTaxEur: null,
+        occupancyRatePct: "1000",
+      }),
+    ];
+    const t = computeRealEstateTotals(
+      buildPropertyViews(props, new Map([["a", holding()]])),
+      props
+    );
+    expect(t.annualRentEur).toBeCloseTo(12_000, 6);
   });
 
   it("tolère un parc vide", () => {

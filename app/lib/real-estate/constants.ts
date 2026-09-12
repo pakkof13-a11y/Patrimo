@@ -302,6 +302,27 @@ export function formatOwnershipShare(quantity: number | string): string {
 }
 
 /**
+ * Taux d'occupation effectivement retenu pour un calcul, en %.
+ *
+ * Absent, le bien est considéré loué toute l'année (100 %) plutôt que décoté
+ * d'un chiffre inventé. Présent, il est borné à `[0, 100]` : un taux
+ * d'occupation est une fraction d'année, et rien dans la validation de saisie
+ * n'empêche un `1000` qui multiplierait loyer encaissé et cash-flow par dix.
+ *
+ * Une seule implémentation du bornage, partagée par tout ce qui applique un
+ * taux d'occupation — sans quoi le rendement brut se calcule à 100 % pendant
+ * que le cash-flow du même bien se calcule à 1 000 %.
+ */
+export function effectiveOccupancyPct(
+  occupancyRatePct: number | null | undefined
+): number {
+  if (occupancyRatePct == null) return 100;
+  const pct = Number(occupancyRatePct);
+  if (!Number.isFinite(pct)) return 100;
+  return Math.min(100, Math.max(0, pct));
+}
+
+/**
  * Rendement locatif brut : loyers annuels rapportés à la valeur du bien.
  *
  * Calculé sur le bien **entier** — loyer et valeur sont tous deux exprimés à
@@ -325,11 +346,7 @@ export function grossRentalYieldPct(input: {
   if (rent <= 0) return null;
   // Le taux d'occupation ne s'applique qu'en saisonnier ; absent, on considère
   // le bien loué toute l'année plutôt que d'inventer une décote.
-  const occupancy =
-    input.occupancyRatePct == null ? 100 : Number(input.occupancyRatePct);
-  const effective = Number.isFinite(occupancy)
-    ? Math.min(100, Math.max(0, occupancy))
-    : 100;
+  const effective = effectiveOccupancyPct(input.occupancyRatePct);
   return ((rent * 12 * (effective / 100)) / value) * 100;
 }
 
@@ -386,11 +403,7 @@ export function netRentalYieldPct(input: {
   if (!Number.isFinite(rent) || !Number.isFinite(cost) || cost <= 0) return null;
   if (rent <= 0) return null;
 
-  const occupancy =
-    input.occupancyRatePct == null ? 100 : Number(input.occupancyRatePct);
-  const effective = Number.isFinite(occupancy)
-    ? Math.min(100, Math.max(0, occupancy))
-    : 100;
+  const effective = effectiveOccupancyPct(input.occupancyRatePct);
 
   const annualRent = rent * 12 * (effective / 100);
   const annualCharges = Number(input.monthlyChargesEur ?? 0) * 12;
