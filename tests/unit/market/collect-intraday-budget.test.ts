@@ -123,3 +123,56 @@ describe("POST /api/cron/collect-intraday — budget et progression", () => {
     expect(collectIntraday).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * `?mode=short` — entretien court, dix jours calendaires.
+ *
+ * Ne doit jamais déclencher le backfill profond (première transaction, cap
+ * 6 ans) : c'est le chemin bon marché pour combler un trou de clôtures
+ * récent sans attendre un passage complet.
+ */
+describe("POST /api/cron/collect-intraday?mode=short — entretien court", () => {
+  const requeteCourte = () =>
+    new Request("https://exemple.test/api/cron/collect-intraday?mode=short", {
+      method: "POST",
+    });
+
+  beforeEach(() => {
+    collectDailyForAssets.mockResolvedValue({
+      assetsConsidered: 3,
+      assetsStale: 1,
+      assetsFilled: 1,
+      closesWritten: 4,
+      errors: [],
+      day: "2026-09-12",
+    });
+  });
+
+  it("appelle l'entretien court avec lookbackDays: 10, jamais le backfill profond", async () => {
+    await POST(requeteCourte());
+
+    expect(backfill).not.toHaveBeenCalled();
+    expect(collectDailyForAssets).toHaveBeenCalledTimes(1);
+    const opts = collectDailyForAssets.mock.calls[0]![0] as {
+      lookbackDays: number;
+      userId: string;
+    };
+    expect(opts.lookbackDays).toBe(10);
+    expect(opts.userId).toBe("u1");
+  });
+
+  it("rend un rapport complet et lance quand même l'intraday", async () => {
+    const body = (await (await POST(requeteCourte())).json()) as {
+      progress: { needsMoreRuns: boolean; remainingAssets: number; stoppedBy: string };
+      intradaySkipped: string | null;
+    };
+
+    expect(collectIntraday).toHaveBeenCalledTimes(1);
+    expect(body.intradaySkipped).toBeNull();
+    expect(body.progress).toEqual({
+      needsMoreRuns: false,
+      remainingAssets: 0,
+      stoppedBy: "completion",
+    });
+  });
+});

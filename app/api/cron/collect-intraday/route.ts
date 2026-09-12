@@ -107,6 +107,21 @@ function intervalOf(req: Request) {
 }
 
 /**
+ * Jours de recul de l'entretien court, quand `?mode=short` est demandé.
+ *
+ * Un backfill profond (première transaction, cap 6 ans) reste coûteux même
+ * séquentialisé : utile pour amorcer un compte, pas pour combler un trou
+ * récent (ex. 7-11 septembre 2026). Ce mode appelle directement l'entretien
+ * court de `collectDailyClosesForAssets`, borné à dix jours civils — un POST
+ * rapide et bon marché, sans toucher au backfill profond.
+ */
+const SHORT_MODE_LOOKBACK_DAYS = 10;
+
+function isShortMode(req: Request): boolean {
+  return new URL(req.url).searchParams.get("mode") === "short";
+}
+
+/**
  * Les deux entretiens d'un passage.
  *
  * ## Le backfill d'abord
@@ -140,6 +155,13 @@ async function collectAll(opts: {
   userId?: string;
   /** Horloge injectable — les tests n'ont pas à dormir 45 secondes. */
   clock?: () => number;
+  /**
+   * `mode=short` : saute le backfill profond (première transaction, cap 6
+   * ans) et n'entretient que les dix derniers jours civils, via
+   * `collectDailyClosesForAssets`. Bon marché, utile pour combler un trou de
+   * clôtures récent sans attendre un passage complet.
+   */
+  shortMode?: boolean;
 }) {
   const clock = opts.clock ?? Date.now;
   const budget = { deadlineAt: clock() + WORK_BUDGET_MS, clock };
@@ -148,6 +170,29 @@ async function collectAll(opts: {
   // champs de progression à leur valeur neutre — rien de tronqué, rien à
   // relancer. Le type commun évite qu'une branche muette passe pour complète.
   let daily: BackfillDailyClosesReport;
+  if (opts.shortMode) {
+    const r = await collectDailyClosesForAssets({
+      ...(opts.userId ? { userId: opts.userId } : {}),
+      lookbackDays: SHORT_MODE_LOOKBACK_DAYS,
+    });
+    daily = {
+      ...r,
+      assetsFromFirstTx: 0,
+      assetsRemaining: 0,
+      stoppedForBudget: false,
+    };
+    const progress = {
+      needsMoreRuns: false,
+      remainingAssets: 0,
+      stoppedBy: "completion" as const,
+    };
+    const intraday = await collectIntradayBars({
+      interval: opts.interval,
+      ...(opts.userId ? { userId: opts.userId } : {}),
+    });
+    return { progress, intraday, intradaySkipped: null, daily };
+  }
+
   try {
     // T-04 : depuis le premier achat par ticker, pas seulement 365 jours.
     // `collectDailyClosesForAssets` reste l'entretien court ; le backfill
@@ -221,15 +266,19 @@ export async function GET(req: Request) {
   }
   return NextResponse.json({
     mode: "cron",
-    ...(await collectAll({ interval: intervalOf(req) })),
+    ...(await collectAll({ interval: intervalOf(req), shortMode: isShortMode(req) })),
   });
 }
 
 export async function POST(req: Request) {
   const interval = intervalOf(req);
+  const shortMode = isShortMode(req);
 
   if (isCronRequest(req)) {
-    return NextResponse.json({ mode: "cron", ...(await collectAll({ interval })) });
+    return NextResponse.json({
+      mode: "cron",
+      ...(await collectAll({ interval, shortMode })),
+    });
   }
 
   const userId = await requireUserId();
@@ -239,6 +288,6 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     mode: "user",
-    ...(await collectAll({ interval, userId })),
+    ...(await collectAll({ interval, userId, shortMode })),
   });
 }

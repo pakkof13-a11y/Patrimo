@@ -274,6 +274,31 @@ describe("backfillDailyClosesFromFirstTx — fumée", () => {
     const where = (assetFindMany.mock.calls[0][0] as { where: { OR: unknown[] } }).where;
     expect(JSON.stringify(where.OR)).toContain("OBLIGATIONS");
   });
+
+  /*
+    Mesuré (preview Hobby) : un plancher à 30 ans chargeait 4 000 à 6 500
+    clôtures en mémoire par actif quand la première transaction remontait très
+    loin. `historyFloorDay` / `MAX_HISTORY_YEARS` ne lit de toute façon jamais
+    au-delà de six ans : demander plus au fournisseur ne sert donc à rien et
+    coûte de la mémoire. `from` doit être clampé à `MAINTENANT − 6 ans`, jamais
+    à `MAINTENANT − 30 ans`.
+  */
+  it("une première transaction vieille de plus de 6 ans est clampée à 6 ans, pas 30", async () => {
+    groupByTx.mockResolvedValue([
+      { assetId: "a1", _min: { occurredAt: new Date("2010-01-01T10:00:00Z") } },
+    ]);
+
+    await backfillDailyClosesFromFirstTx({ now: MAINTENANT });
+
+    const [, , , opts] = getHistory.mock.calls[0] as [
+      string,
+      string,
+      string,
+      { from: Date },
+    ];
+    // MAINTENANT = 2026-09-04 → cap 6 ans = 2020-09-04.
+    expect(opts.from.toISOString().slice(0, 10)).toBe("2020-09-04");
+  });
 });
 
 /**
@@ -395,7 +420,12 @@ describe("cron collect-intraday — le backfill passe avant l'intraday", () => {
     join(__dirname, "..", "..", "..", "app/api/cron/collect-intraday/route.ts"),
     "utf8"
   );
-  const corps = source.slice(source.indexOf("async function collectAll"));
+  // Le corps de `collectAll` porte aussi la branche `mode=short`, qui saute
+  // délibérément le backfill profond (elle appelle `collectIntradayBars`
+  // sans jamais appeler `backfillDailyClosesFromFirstTx` : voir
+  // `collect-intraday-budget.test.ts`). Le contrôle d'ordre ne porte donc que
+  // sur le chemin profond par défaut, à partir de son `try {`.
+  const corps = source.slice(source.indexOf("try {", source.indexOf("async function collectAll")));
 
   it("appelle backfillDailyClosesFromFirstTx avant collectIntradayBars", () => {
     const backfill = corps.indexOf("backfillDailyClosesFromFirstTx(");

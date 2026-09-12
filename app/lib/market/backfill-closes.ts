@@ -15,6 +15,7 @@
 
 import { prisma } from "../prisma";
 import { parisDayKey } from "../dates/paris";
+import { MAX_HISTORY_YEARS } from "../portfolio/historical/history-window";
 import {
   fillDailyCloses,
   type DailyCloseCollectionReport,
@@ -39,7 +40,18 @@ const FALLBACK_LOOKBACK_DAYS = DAILY_LOOKBACK_DAYS;
  */
 export const FIRST_CLOSE_GRACE_DAYS = 10;
 
-const FETCH_CONCURRENCY = 4;
+/**
+ * Traitement strictement séquentiel : un actif à la fois.
+ *
+ * Mesuré (preview Hobby) : 4 000 à 6 500 clôtures chargées en mémoire par
+ * actif backfillé depuis la première transaction ; à 4 (`FETCH_CONCURRENCY`
+ * précédent), jusqu'à 4× ce volume tenu simultanément en mémoire → 504 à 60 s
+ * puis 500 OOM. Une seule série en mémoire à la fois, combinée au cap de
+ * fenêtre à `MAX_HISTORY_YEARS`, ramène ce volume à un ordre gérable. Le
+ * budget existant (`outOfBudget`) reste le seul mécanisme de reprise : pas de
+ * curseur à inventer.
+ */
+const FETCH_CONCURRENCY = 1;
 
 export type BackfillDailyClosesReport = DailyCloseCollectionReport & {
   day: string;
@@ -206,6 +218,15 @@ export async function assetsNeedingHistoryBackfill(
   return stale;
 }
 
+/**
+ * Plancher de recherche : jamais avant `aujourd'hui − MAX_HISTORY_YEARS`.
+ *
+ * Un historique au-delà de ce cap n'est de toute façon jamais lu
+ * (`history-window.ts::historyFloorDay`) — le collecter gonflerait la mémoire
+ * du backfill (mesuré : 4 000 à 6 500 lignes par actif avec un plancher à 30
+ * ans) sans jamais être servi. `MAX_HISTORY_YEARS` reste l'unique source de
+ * cette profondeur ; ce module ne la redéfinit pas, il l'importe.
+ */
 function fromDateForAsset(
   firstTxDay: string | undefined,
   fallbackFromDay: string,
@@ -213,7 +234,7 @@ function fromDateForAsset(
 ): Date {
   const day = firstTxDay ?? fallbackFromDay;
   const floor = new Date(now.getTime());
-  floor.setUTCFullYear(floor.getUTCFullYear() - 30);
+  floor.setUTCFullYear(floor.getUTCFullYear() - MAX_HISTORY_YEARS);
   const from = new Date(`${day}T00:00:00Z`);
   return from < floor ? floor : from;
 }
