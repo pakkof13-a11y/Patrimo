@@ -88,8 +88,14 @@ describe("refresh absent", () => {
 
     expect(getAssetPriceHistory).not.toHaveBeenCalled();
     expect(closes.get("a1")?.size).toBe(2);
-    expect(coverage.covered).toEqual(["a1"]);
-    expect(coverage.missing).toEqual(["a2"]);
+    /*
+      « couvert » ne veut plus dire « au moins un point existe dans la
+      fenêtre » : la dernière clôture connue d'a1 (6 janvier) laisse tout le
+      reste du mois (des dizaines de jours ouvrés) manquant jusqu'au 31. Ce
+      n'est pas une couverture, même si le cache n'est pas vide.
+    */
+    expect(coverage.covered).toEqual([]);
+    expect(coverage.missing).toEqual(["a1", "a2"]);
   });
 
   it("sans données, rend une couverture vide plutôt que d'aller en chercher", async () => {
@@ -150,7 +156,12 @@ describe("refresh explicite", () => {
       { refresh: true }
     );
 
-    expect(coverage.covered).toEqual(["a1"]);
+    /*
+      a1 n'a qu'un point au 5 janvier : il manque tout le reste du mois
+      jusqu'au 31 (jours ouvrés), donc « couvert » ne s'applique plus,
+      fournisseur en échec ou pas — ce n'est pas ce que ce test vérifie.
+    */
+    expect(coverage.covered).toEqual([]);
   });
 });
 

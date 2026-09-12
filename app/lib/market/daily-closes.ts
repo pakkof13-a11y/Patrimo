@@ -19,6 +19,7 @@ import { toFixed } from "../money/decimal";
 import type { DailyCloseIndex, DayKey } from "../portfolio/class-history";
 import { getAssetPriceHistory } from "./price-history";
 import type { PriceHistoryRange } from "./price-history-types";
+import { sessionGap } from "./last-close-as-of";
 
 /**
  * Fraîcheur exigée du cache pour le jour courant. En deçà, on ne redemande
@@ -31,9 +32,16 @@ const REFRESH_AFTER_MS = 6 * 60 * 60 * 1000;
 const FETCH_CONCURRENCY = 4;
 
 export type DailyCloseCoverage = {
-  /** Actifs pour lesquels au moins une clôture est connue. */
+  /**
+   * Actifs sans aucun jour ouvré manquant récent : la dernière clôture
+   * connue (dans la fenêtre) ne laisse aucune séance de bourse passée entre
+   * elle et `toDay`. Ce n'est pas « au moins un close existe dans la
+   * fenêtre » — un actif dont il ne manque que le week-end (vendredi →
+   * samedi/dimanche) reste couvert, un actif à qui il manque un mardi ou un
+   * mercredi ne l'est pas, même s'il a un point plus ancien dans la fenêtre.
+   */
   covered: string[];
-  /** Actifs sans aucune clôture, malgré une tentative de remplissage. */
+  /** Actifs avec un jour ouvré manquant récent, malgré une tentative de remplissage. */
   missing: string[];
 };
 
@@ -70,10 +78,21 @@ export async function readDailyCloses(
 /**
  * Décide quels actifs méritent un appel fournisseur.
  *
- * Un actif est rafraîchi s'il n'a aucune clôture dans la fenêtre, ou si sa
- * dernière clôture connue est plus ancienne que la fin de fenêtre demandée et
- * que le cache n'a pas été touché récemment. On évite ainsi de retélécharger
- * un historique complet à chaque affichage tout en gardant le jour courant à jour.
+ * Stale ne veut pas dire « il existe un close dans la fenêtre » : un actif
+ * dont la dernière clôture est un lundi et dont `toDay` est un jeudi a trois
+ * jours ouvrés manquants (mar/mer/jeu), même si un close existe quelque part
+ * dans la fenêtre demandée. On compte donc les séances de bourse (lun–ven)
+ * entre la dernière clôture connue et `toDay` via `sessionGap` — le week-end
+ * seul (vendredi → samedi/dimanche) ne compte pour aucune séance manquante.
+ *
+ * Le throttle de fraîcheur (`REFRESH_AFTER_MS`) ne protège plus que le cas où
+ * seule la séance de `toDay` lui-même manque (le jour en cours, pas encore
+ * clôturé côté fournisseur) : `fillDailyCloses` peut y réécrire `fetchedAt`
+ * sans avoir rapporté de nouveau jour, ce qui figeait auparavant le gate
+ * indéfiniment dès qu'au moins un jour ouvré passé manquait aussi. Dès que
+ * plus d'une séance manque (au moins un jour ouvré déjà clos, pas seulement
+ * `toDay`), l'actif est stale indépendamment du throttle : un rattrapage de
+ * jours ouvrés manquants ne doit jamais rester bloqué six heures.
  */
 export async function assetsNeedingFetch(
   assetIds: string[],
@@ -97,6 +116,19 @@ export async function assetsNeedingFetch(
       continue;
     }
     if (seen.day >= toDay) continue;
+
+    const missingSessions = sessionGap(seen.day, toDay);
+    if (missingSessions === 0) continue; // week-end seul entre la dernière clôture et `toDay`.
+    if (missingSessions > 1) {
+      // Au moins un jour ouvré déjà clos manque, pas seulement `toDay` :
+      // rattrapage obligatoire, throttle ignoré.
+      stale.push(assetId);
+      continue;
+    }
+
+    // Une seule séance manquante : celle de `toDay`, encore en cours côté
+    // fournisseur. Le throttle protège ce cas contre un rappel à chaque
+    // affichage tant que rien de neuf n'est attendu.
     const fetchedAt = seen.fetchedAt?.getTime() ?? 0;
     if (now.getTime() - fetchedAt > REFRESH_AFTER_MS) stale.push(assetId);
   }
@@ -353,7 +385,16 @@ export async function getDailyCloses(
   const covered: string[] = [];
   const missing: string[] = [];
   for (const assetId of unique) {
-    if ((closes.get(assetId)?.size ?? 0) > 0) covered.push(assetId);
+    const series = closes.get(assetId);
+    let maxDay: DayKey | null = null;
+    if (series) {
+      for (const day of series.keys()) {
+        if (!maxDay || day > maxDay) maxDay = day;
+      }
+    }
+    // Couvert = aucun jour ouvré manquant entre la dernière clôture connue
+    // (dans la fenêtre) et `toDay` — pas « au moins un point existe ».
+    if (maxDay && sessionGap(maxDay, toDay) === 0) covered.push(assetId);
     else missing.push(assetId);
   }
 
