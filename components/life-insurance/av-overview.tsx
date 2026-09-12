@@ -451,7 +451,11 @@ export function AvOverview({ className }: { className?: string }) {
           value={pctLabel(total?.performancePct ?? null)}
           secondary={range.toUpperCase()}
           tone={
-            (total?.performancePct ?? 0) >= 0 ? "positive" : "negative"
+            total?.performancePct == null
+              ? undefined
+              : total.performancePct >= 0
+                ? "positive"
+                : "negative"
           }
           loading={performanceQ.isLoading}
         />

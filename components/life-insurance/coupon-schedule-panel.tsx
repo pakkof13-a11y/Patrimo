@@ -22,6 +22,21 @@ type PendingCoupon = {
 type Choice = "pending" | "paid" | "unpaid";
 
 /**
+ * Normalise une saisie de montant « à la française » avant envoi à l'API.
+ *
+ * L'API valide `amountEur` avec `/^\d+([.,]\d+)?$/` : un espace — normal ou
+ * insécable, celui que `formatCurrency` utilise comme séparateur de
+ * milliers — fait échouer cette regex, et donc **tout le lot** de décisions
+ * groupées (le body entier est un seul schéma Zod). `null` : nettoyé mais
+ * invalide (vide ou mal formé) ; l'appelant décide quoi en faire.
+ */
+function normalizeCouponAmount(raw: string): string | null {
+  const cleaned = raw.replace(/\s/g, "").trim();
+  if (cleaned === "" || !/^\d+([.,]\d+)?$/.test(cleaned)) return null;
+  return cleaned;
+}
+
+/**
  * Constatations de coupon à trancher.
  *
  * ## Pourquoi trois états et non une case à cocher
@@ -58,14 +73,33 @@ export function CouponSchedulePanel({ className }: { className?: string }) {
     [pending, choices]
   );
 
+  // Lignes « versé » dont le montant (saisi ou théorique) ne passe pas la
+  // validation de l'API : identifiées une à une, plutôt qu'un échec de lot
+  // silencieux qui ne dit pas laquelle est en cause.
+  const invalidPaidRows = useMemo(
+    () =>
+      decided
+        .filter((p) => choices[p.note] === "paid")
+        .filter(
+          (p) => normalizeCouponAmount(amounts[p.note] ?? p.amountEur) == null
+        ),
+    [decided, choices, amounts]
+  );
+  const invalidPaidNotes = useMemo(
+    () => new Set(invalidPaidRows.map((p) => p.note)),
+    [invalidPaidRows]
+  );
+
   const paidTotal = useMemo(
     () =>
       decided
         .filter((p) => choices[p.note] === "paid")
-        .reduce(
-          (sum, p) => sum + Number(amounts[p.note] ?? p.amountEur ?? 0),
-          0
-        ),
+        .reduce((sum, p) => {
+          const normalized = normalizeCouponAmount(
+            amounts[p.note] ?? p.amountEur
+          );
+          return sum + (normalized != null ? Number(normalized.replace(",", ".")) : 0);
+        }, 0),
     [decided, choices, amounts]
   );
 
@@ -85,7 +119,9 @@ export function CouponSchedulePanel({ className }: { className?: string }) {
             observedOn: p.observedOn,
             paid: choices[p.note] === "paid",
             amountEur:
-              choices[p.note] === "paid" ? (amounts[p.note] ?? null) : null,
+              choices[p.note] === "paid"
+                ? normalizeCouponAmount(amounts[p.note] ?? p.amountEur)
+                : null,
           })),
         }),
       }),
@@ -135,7 +171,11 @@ export function CouponSchedulePanel({ className }: { className?: string }) {
         <button
           type="button"
           className="btn btn-primary text-[11px]"
-          disabled={decided.length === 0 || settle.isPending}
+          disabled={
+            decided.length === 0 ||
+            settle.isPending ||
+            invalidPaidRows.length > 0
+          }
           onClick={() => settle.mutate()}
           data-testid="coupon-settle"
         >
@@ -149,6 +189,19 @@ export function CouponSchedulePanel({ className }: { className?: string }) {
         </button>
       </div>
 
+      {invalidPaidRows.length > 0 && (
+        <p
+          className="mt-1.5 text-[11px] text-[var(--danger)]"
+          role="alert"
+          data-testid="coupon-amount-error"
+        >
+          Montant invalide pour {invalidPaidRows.length} ligne
+          {invalidPaidRows.length > 1 ? "s" : ""} :{" "}
+          {invalidPaidRows.map((p) => p.supportName).join(", ")} — un nombre
+          est attendu (virgule décimale acceptée, sans espace).
+        </p>
+      )}
+
       <ul className="mt-2.5 divide-y divide-[var(--border)]">
         {pending.map((p) => {
           const choice = choices[p.note] ?? "pending";
@@ -161,7 +214,11 @@ export function CouponSchedulePanel({ className }: { className?: string }) {
               <span className="tabular-nums text-[var(--muted-foreground)]">
                 {new Date(p.observedOn).toLocaleDateString("fr-FR")}
               </span>
-              <span className="min-w-0 flex-1 truncate" title={p.supportName}>
+              <span
+                className="min-w-0 flex-1 truncate"
+                aria-label={p.supportName}
+                title={p.supportName}
+              >
                 {p.supportName}
                 {p.underlying ? (
                   <span className="text-[var(--muted-foreground)]">
@@ -173,26 +230,53 @@ export function CouponSchedulePanel({ className }: { className?: string }) {
 
               {p.couponBarrierPct && (
                 <span
-                  className="text-meta shrink-0"
-                  title="Le coupon n'est versé que si le sous-jacent est au-dessus de cette barrière"
+                  className="group relative text-meta shrink-0"
+                  tabIndex={0}
+                  aria-label={`barrière ${p.couponBarrierPct} % — le coupon n'est versé que si le sous-jacent est au-dessus de cette barrière`}
                 >
                   barrière {p.couponBarrierPct} %
+                  <span
+                    className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1.5 w-48 -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-left text-[length:var(--text-2xs)] font-normal leading-snug text-[var(--foreground-secondary)] opacity-0 shadow-lg transition group-hover:opacity-100 group-focus:opacity-100 motion-reduce:transition-none"
+                    role="tooltip"
+                  >
+                    Le coupon n&apos;est versé que si le sous-jacent est
+                    au-dessus de cette barrière
+                  </span>
                 </span>
               )}
               {p.couponMemory && (
                 <span
-                  className="shrink-0 rounded bg-stone-500/10 px-1.5 py-0.5 text-[10px] font-medium text-stone-700 dark:text-stone-300"
-                  title="Un coupon non versé se rattrape à une constatation ultérieure favorable"
+                  className="group relative shrink-0 rounded bg-stone-500/10 px-1.5 py-0.5 text-[10px] font-medium text-stone-700 dark:text-stone-300"
+                  tabIndex={0}
+                  aria-label="mémoire — un coupon non versé se rattrape à une constatation ultérieure favorable"
                 >
                   mémoire
+                  <span
+                    className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1.5 w-48 -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-left text-[length:var(--text-2xs)] font-normal leading-snug text-[var(--foreground-secondary)] opacity-0 shadow-lg transition group-hover:opacity-100 group-focus:opacity-100 motion-reduce:transition-none"
+                    role="tooltip"
+                  >
+                    Un coupon non versé se rattrape à une constatation
+                    ultérieure favorable
+                  </span>
                 </span>
               )}
 
               {choice === "paid" ? (
                 <input
+                  // Classe statique volontairement inchangée : le harnais
+                  // `tests/unit/input-cascade.test.ts` relève les combinaisons
+                  // `className="…input…"` telles qu'écrites dans le dépôt.
+                  // L'état invalide passe par `style` (jetons couleur), jamais
+                  // par une classe supplémentaire ici.
                   className="input w-24 text-right text-xs"
+                  style={
+                    invalidPaidNotes.has(p.note)
+                      ? { borderColor: "var(--danger)", color: "var(--danger)" }
+                      : undefined
+                  }
                   inputMode="decimal"
                   aria-label={`Montant reçu pour ${p.supportName}`}
+                  aria-invalid={invalidPaidNotes.has(p.note)}
                   data-testid="coupon-amount"
                   value={amounts[p.note] ?? p.amountEur}
                   onChange={(e) =>

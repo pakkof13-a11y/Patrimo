@@ -34,7 +34,10 @@ export type SimulatorSupport = {
 
 function money(v: string | number | null | undefined): number {
   if (v == null || v === "") return 0;
-  const n = Number(String(v).replace(",", "."));
+  // `\s` couvre aussi l'espace insécable (U+00A0) et l'espace fine insécable
+  // (U+202F) : formatCurrency les utilise comme séparateur de milliers en
+  // fr-FR, et un montant copié depuis l'affichage doit rester saisissable.
+  const n = Number(String(v).replace(/\s/g, "").replace(",", "."));
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -166,7 +169,13 @@ export function RedemptionSimulatorPanel({
       positionValueEur: position.value,
       costBasisEur: position.cost,
     });
-    if (!r.ok) return { ...r, fromOverride: false };
+    // Position à 0 = encours inconnu (contrat sans support rattaché au
+    // journal), pas un vrai plafond dépassé : `gainsInPartialRedemption`
+    // refuse alors tout rachat > 0, ce qui fermait la porte à l'override —
+    // précisément le cas pour lequel il existe (cf. commentaire
+    // `policySupports` plus haut). Seul un encours réellement connu et
+    // dépassé continue d'invalider l'override.
+    if (!r.ok && position.value > 0) return { ...r, fromOverride: false };
     if (gainsOverride.trim() !== "") {
       const gains = Math.min(Math.max(0, money(gainsOverride)), redemptionN);
       return {
@@ -209,6 +218,21 @@ export function RedemptionSimulatorPanel({
     taxHousehold,
     allowanceUsed,
   ]);
+
+  // Message du bloc Résultat quand aucun calcul n'aboutit. Le refus détaillé
+  // de `splitGains` (montant, encours) a déjà son propre bandeau juste
+  // au-dessus : le répéter ici sous une forme plus vague ("Calcul
+  // impossible.") le contredirait sans rien ajouter. On ne retombe sur un
+  // message générique que si aucune raison plus précise n'existe déjà.
+  const resultMessage =
+    !tax || !tax.ok
+      ? (tax?.error ??
+        (redemptionN <= 0
+          ? "Saisissez un montant de rachat."
+          : splitGains.ok
+            ? "Calcul impossible."
+            : null))
+      : null;
 
   const allowanceCap = annualAllowanceEur(taxHousehold);
   const premiumsAllN =
@@ -338,9 +362,10 @@ export function RedemptionSimulatorPanel({
         pourquoi le résultat n'apparaît pas — sans elle, le bloc disparaîtrait
         sans un mot.
       */}
-      {!splitGains.ok && splitGains.error && redemptionN > 0 && (
+      {policy && !splitGains.ok && splitGains.error && redemptionN > 0 && (
         <p
           className="mt-3 text-[11px] text-[var(--warning)]"
+          role="alert"
           data-testid="sim-redemption-error"
         >
           {splitGains.error}
@@ -422,12 +447,9 @@ export function RedemptionSimulatorPanel({
           <div className="space-y-1.5 rounded-[var(--radius-md)] border border-[var(--border)] p-3">
             <p className="mb-2 text-xs font-semibold">Résultat</p>
             {!tax || !tax.ok ? (
-              <p className="text-meta">
-                {tax?.error ||
-                  (redemptionN <= 0
-                    ? "Saisissez un montant de rachat."
-                    : "Calcul impossible.")}
-              </p>
+              resultMessage ? (
+                <p className="text-meta">{resultMessage}</p>
+              ) : null
             ) : (
               <>
                 <Row
