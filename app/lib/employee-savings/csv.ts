@@ -4,6 +4,7 @@
  */
 
 import type { CreateEmployeeSavingsInput } from "./service";
+import { normalizeHeader, parseCsv } from "../import/csv-parse";
 import { FUND_CATEGORIES as EMPLOYEE_SAVINGS_FUND_CATEGORIES } from "./fund-category";
 import {
   EMPLOYEE_SAVINGS_PLAN_TYPES,
@@ -19,46 +20,6 @@ PEE;Amundi;FCPE Actions Monde;FR0010123456;12.5;28.40;EUR;ABONDEMENT;2021-06-15;
 PEE;Amundi;FCPE Monétaire;FR0010654321;50;10.12;EUR;PARTICIPATION;2022-07-01;480;MONETARY;;;
 PER;Natixis Interépargne;FCPE Diversifié;;100;15;EUR;VOLUNTARY;2023-01-10;1400;DIVERSIFIED;;RETIREMENT;PER entreprise
 `;
-
-function detectDelimiter(headerLine: string): string {
-  if (headerLine.includes(";")) return ";";
-  if (headerLine.includes("\t")) return "\t";
-  return ",";
-}
-
-function splitCsvLine(line: string, delim: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-    if (ch === delim && !inQuotes) {
-      out.push(cur.trim());
-      cur = "";
-      continue;
-    }
-    cur += ch;
-  }
-  out.push(cur.trim());
-  return out;
-}
-
-function normHeader(h: string): string {
-  return h
-    .trim()
-    .toLowerCase()
-    .replace(/^\ufeff/, "")
-    .replace(/\s+/g, "_");
-}
 
 const ALIASES: Record<string, string> = {
   plan_type: "plan_type",
@@ -141,68 +102,86 @@ function mapUnlockMode(raw: string, planType: string): string {
   return planType === "PEE" ? "DATE" : "RETIREMENT";
 }
 
+/**
+ * Lit un fichier d'épargne salariale.
+ *
+ * Le découpage, la détection du séparateur, les en-têtes homonymes et les
+ * lignes qu'Excel a recollées en une seule cellule sont l'affaire de
+ * `app/lib/import/csv-parse.ts` — le même parseur que tous les autres imports.
+ * Ce fichier ne garde que ce qui lui est propre : la correspondance des
+ * colonnes et la traduction des valeurs en champs métier.
+ */
 export function parseEmployeeSavingsCsv(text: string): {
   rows: CreateEmployeeSavingsInput[];
   errors: Array<{ line: number; message: string }>;
   delimiter: string;
 } {
-  const lines = text
-    .replace(/^\ufeff/, "")
+  // Les commentaires restent hors du parseur : sans en-tête ni colonnes, ils
+  // ressortiraient en lignes de données vides, donc en erreurs de lecture.
+  const withoutComments = text
     .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith("#"));
+    .filter((l) => !l.trim().startsWith("#"))
+    .join("\n");
 
-  if (lines.length < 2) {
-    return { rows: [], errors: [{ line: 0, message: "Fichier vide ou sans données" }], delimiter: ";" };
+  const parsed = parseCsv(withoutComments);
+  if (parsed.headers.length === 0 || parsed.rows.length === 0) {
+    return {
+      rows: [],
+      errors: [{ line: 0, message: "Fichier vide ou sans données" }],
+      delimiter: parsed.delimiter || ";",
+    };
   }
 
-  const delim = detectDelimiter(lines[0]);
-  const headers = splitCsvLine(lines[0], delim).map(normHeader);
-  const colIndex = new Map<string, number>();
-  headers.forEach((h, i) => {
-    const key = ALIASES[h] || h;
-    if (!colIndex.has(key)) colIndex.set(key, i);
-  });
+  // Le parseur partagé rend les en-têtes tels qu'écrits (dédoublonnés) et
+  // indexe chaque ligne par ces en-têtes ; la normalisation et les alias se
+  // font donc ici, et le premier en-tête d'une clé l'emporte.
+  const headerForKey = new Map<string, string>();
+  for (const h of parsed.headers) {
+    const norm = normalizeHeader(h);
+    const key = ALIASES[norm] || norm;
+    if (!headerForKey.has(key)) headerForKey.set(key, h);
+  }
 
-  const get = (cells: string[], key: string) => {
-    const i = colIndex.get(key);
-    if (i == null) return "";
-    return cells[i] ?? "";
+  const get = (row: Record<string, string>, key: string): string => {
+    const header = headerForKey.get(key);
+    if (header === undefined) return "";
+    return (row[header] ?? "").trim();
   };
 
   const rows: CreateEmployeeSavingsInput[] = [];
   const errors: Array<{ line: number; message: string }> = [];
 
-  for (let li = 1; li < lines.length; li++) {
-    const cells = splitCsvLine(lines[li], delim);
-    const manager = get(cells, "manager");
-    const fundName = get(cells, "fund_name");
+  parsed.rows.forEach((row, i) => {
+    // Numérotation relative à l'en-tête : ligne 1 = en-têtes, 2 = 1re donnée.
+    const line = i + 2;
+    const manager = get(row, "manager");
+    const fundName = get(row, "fund_name");
     if (!manager && !fundName) {
-      errors.push({ line: li + 1, message: "Ligne vide ignorée" });
-      continue;
+      errors.push({ line, message: "Ligne vide ignorée" });
+      return;
     }
     if (!manager || !fundName) {
-      errors.push({ line: li + 1, message: "manager et fund_name requis" });
-      continue;
+      errors.push({ line, message: "manager et fund_name requis" });
+      return;
     }
-    const planType = mapPlan(get(cells, "plan_type") || "PEE");
+    const planType = mapPlan(get(row, "plan_type") || "PEE");
     rows.push({
       planType,
       manager,
       fundName,
-      isin: get(cells, "isin") || null,
-      units: get(cells, "units") || "0",
-      nav: get(cells, "nav") || "0",
-      currency: get(cells, "currency") || "EUR",
-      sourceType: mapSource(get(cells, "source_type") || "VOLUNTARY"),
-      contributionDate: get(cells, "contribution_date") || null,
-      contributedAmount: get(cells, "contributed_amount") || null,
-      fundCategory: mapFundCategory(get(cells, "fund_category")),
-      unlockDate: get(cells, "unlock_date") || null,
-      unlockMode: mapUnlockMode(get(cells, "unlock_mode"), planType),
-      notes: get(cells, "notes") || null,
+      isin: get(row, "isin") || null,
+      units: get(row, "units") || "0",
+      nav: get(row, "nav") || "0",
+      currency: get(row, "currency") || "EUR",
+      sourceType: mapSource(get(row, "source_type") || "VOLUNTARY"),
+      contributionDate: get(row, "contribution_date") || null,
+      contributedAmount: get(row, "contributed_amount") || null,
+      fundCategory: mapFundCategory(get(row, "fund_category")),
+      unlockDate: get(row, "unlock_date") || null,
+      unlockMode: mapUnlockMode(get(row, "unlock_mode"), planType),
+      notes: get(row, "notes") || null,
     });
-  }
+  });
 
-  return { rows, errors, delimiter: delim };
+  return { rows, errors, delimiter: parsed.delimiter };
 }

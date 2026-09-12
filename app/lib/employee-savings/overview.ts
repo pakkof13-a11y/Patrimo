@@ -21,7 +21,8 @@ import {
   resolveFundCategory,
   type FundCategory,
 } from "./fund-category";
-import { shiftMonths } from "../dates/day-window";
+import { dayKeyUtc, shiftMonths } from "../dates/day-window";
+import { parseNumber } from "../import/normalize";
 import { PLAN_TYPE_LABELS, SOURCE_TYPE_LABELS } from "./types";
 
 /** Ligne telle que rendue par l'API. */
@@ -44,10 +45,23 @@ export type OverviewLine = {
   unlockLabel: string;
 };
 
+/** Écriture déjà canonique (`-12.5`, `1e-12`) : aucune ambiguïté à lever. */
+const CANONICAL_NUMBER = /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/;
+
+/**
+ * Montant de l'API → nombre.
+ *
+ * Les séparateurs sont lus par `parseNumber`, le parseur d'import partagé :
+ * le `.replace(",", ".")` d'avant ne remplaçait que la première virgule, si
+ * bien qu'un « 1.234,56 » saisi à la main devenait `NaN` puis zéro — un
+ * versement effacé de l'agrégat, sans trace.
+ */
 export function num(v: string | number | null | undefined): number {
   if (v == null) return 0;
-  const n = Number(String(v).replace(",", "."));
-  return Number.isFinite(n) ? n : 0;
+  const s = String(v).trim();
+  if (!s) return 0;
+  if (CANONICAL_NUMBER.test(s)) return Number(s);
+  return parseNumber(s) ?? 0;
 }
 
 function has(v: string | number | null | undefined): boolean {
@@ -222,7 +236,11 @@ export function groupIntoPlans(
     else groups.set(key, [l]);
   }
 
-  const year = now.getFullYear();
+  // Année civile et jours comptés en UTC, comme `app/lib/dates/day-window.ts`
+  // et `logic.ts` : les dates de versement sont des jours civils stockés à
+  // minuit UTC, et les relire en heure locale rangeait un versement du
+  // 1er janvier dans l'année précédente à l'ouest de Greenwich.
+  const year = now.getUTCFullYear();
   const today = now.getTime();
 
   const plans: PlanView[] = [];
@@ -244,7 +262,7 @@ export function groupIntoPlans(
         contributed += amount;
         withContribution += 1;
         const t = l.contributionDate ? Date.parse(l.contributionDate) : NaN;
-        if (Number.isFinite(t) && new Date(t).getFullYear() === year) {
+        if (Number.isFinite(t) && new Date(t).getUTCFullYear() === year) {
           contributedThisYear += amount;
         }
       }
@@ -316,7 +334,7 @@ export function buildContributionSeries(
     if (!has(l.contributedAmount) || !l.contributionDate) continue;
     const t = Date.parse(l.contributionDate);
     if (!Number.isFinite(t)) continue;
-    const day = new Date(t).toISOString().slice(0, 10);
+    const day = dayKeyUtc(new Date(t));
     byDay.set(day, (byDay.get(day) ?? 0) + num(l.contributedAmount));
   }
 
@@ -368,7 +386,6 @@ export function sliceSeries(
 }
 
 export function rangeStartDay(range: EsRange, now: Date): string | null {
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
   switch (range) {
     case "1m":
       return shiftMonths(now, -1);
@@ -383,7 +400,7 @@ export function rangeStartDay(range: EsRange, now: Date): string | null {
     case "all":
       return null;
     default:
-      return iso(now);
+      return dayKeyUtc(now);
   }
 }
 

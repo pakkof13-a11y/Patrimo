@@ -15,14 +15,23 @@ import {
 /** PEE default lock period in years */
 export const PEE_LOCK_YEARS = 5;
 
+/**
+ * Tout ce fichier compte les jours en UTC — même base que
+ * `app/lib/dates/day-window.ts`, dont dépend la fenêtre des séries.
+ *
+ * Les dates de versement et de déblocage sont des jours civils stockés à
+ * minuit UTC. Les relire avec les getters locaux les décalait d'un jour sur un
+ * serveur à l'ouest de Greenwich : un lot débloqué le 1er janvier 2027 se
+ * rangeait dans le millésime 2026 et devenait disponible la veille.
+ */
 export function addYears(date: Date, years: number): Date {
   const d = new Date(date.getTime());
-  d.setFullYear(d.getFullYear() + years);
+  d.setUTCFullYear(d.getUTCFullYear() + years);
   return d;
 }
 
 export function startOfDay(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
 /**
@@ -90,6 +99,7 @@ export function resolveUnlock(input: {
     unlockMode: "DATE",
     liquidityStatus: available ? "AVAILABLE" : "BLOCKED",
     unlockLabel: unlockDay.toLocaleDateString("fr-FR", {
+      timeZone: "UTC",
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -141,7 +151,7 @@ export function buildUnlockTimeline(
       retirementCount += 1;
       continue;
     }
-    const y = String(line.unlockDate.getFullYear());
+    const y = String(line.unlockDate.getUTCFullYear());
     const cur = byYear.get(y) || { amount: 0, count: 0 };
     cur.amount += v;
     cur.count += 1;
