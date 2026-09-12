@@ -30,7 +30,7 @@
  * - av  : Asset AV + envelopeCash AV — pas lifeInsurance
  * - immo : immobilier au sens de `classifyHolding` — enveloppe, classe **ou**
  *   fiche immobilière rattachée (une SCPI mal étiquetée `ACTIONS` en est)
- * - cash : bankAccount + savingsAccount seulement (hors envelopeCash)
+ * - cash : bankAccount + savingsAccount + termDeposit (hors envelopeCash)
  * - es : employeeSavingsLine (parts × VL)
  * - trading : Trading* ouverts, marge ± P&L, convertis depuis quoteCurrency
  * - crypto : Asset CRYPTO
@@ -74,6 +74,7 @@ import {
   type FuturesDirection,
   type FuturesPositionInput,
 } from "../crypto/futures";
+import { personalAmountOf } from "../cash/ownership";
 import { allocatePercents } from "../ui/allocate-percents";
 import { classifyHolding } from "./patrimony-metrics";
 import { getHoldings, loadHoldingClassificationFlags } from "./service";
@@ -225,6 +226,19 @@ export type AllocationByVenueInput = {
   envelopeCash: readonly VenueEnvelopeInput[];
   bankAccounts: readonly { balanceEur: DecimalInput }[];
   savingsAccounts: readonly { balanceEur: DecimalInput }[];
+  /**
+   * Dépôts à terme (CAT) — la troisième poche de l'onglet Banques.
+   *
+   * Elle manquait. L'onglet Banques affiche son total depuis
+   * `summarizeCash().termDepositTotalBase`, mais aucune des trois vues
+   * patrimoniales ne lisait `prisma.termDeposit` : un CAT de 100 000 € était
+   * visible dans sa liste et absent du donut, dont il faussait au passage les
+   * dix pourcentages puisqu'il manquait aussi au total.
+   *
+   * Le principal est déjà réduit à la part personnelle et converti en euros au
+   * chargement, comme les deux autres poches.
+   */
+  termDeposits: readonly { principalEur: DecimalInput }[];
   employeeSavings: readonly { valueEur: DecimalInput }[];
   liabilities: readonly VenueLiabilityInput[];
   metals: readonly VenueMetalInput[];
@@ -488,6 +502,16 @@ export function computeAllocationByVenue(
   for (const s of input.savingsAccounts) {
     venues.cash = venues.cash.plus(d(s.balanceEur));
   }
+  /*
+    Le CAT dort au même endroit que le livret qui l'a financé.
+
+    Son immobilisation jusqu'à l'échéance est une contrainte de liquidité, pas
+    un lieu de détention : elle a sa place dans les indicateurs de liquidité,
+    pas dans un donut qui répond « où est l'argent ».
+  */
+  for (const t of input.termDeposits) {
+    venues.cash = venues.cash.plus(d(t.principalEur));
+  }
 
   for (const e of input.employeeSavings) {
     venues.es = venues.es.plus(d(e.valueEur));
@@ -571,6 +595,7 @@ export async function allocationByVenue(
     envelopes,
     banks,
     savings,
+    termDeposits,
     esLines,
     liabilities,
     metals,
@@ -584,6 +609,7 @@ export async function allocationByVenue(
     prisma.envelopeCash.findMany({ where: { userId } }),
     prisma.bankAccount.findMany({ where: { userId } }),
     prisma.savingsAccount.findMany({ where: { userId } }),
+    prisma.termDeposit.findMany({ where: { userId } }),
     prisma.employeeSavingsLine.findMany({ where: { userId } }),
     prisma.liability.findMany({ where: { userId } }),
     prisma.preciousMetalPosition.findMany({ where: { userId } }),
@@ -665,6 +691,15 @@ export async function allocationByVenue(
       balanceEur: eur(decStr(b.balance), b.currency),
     })),
     savingsAccounts: savingsEur,
+    /*
+      Part personnelle, puis euros — le même ordre que
+      `getExplicitCashTotalEur`, pour que le donut et la tuile de patrimoine
+      net portent le même CAT. Un dépôt professionnel ou détenu à moitié ne
+      pèse pas plus ici que là-bas.
+    */
+    termDeposits: termDeposits.map((t) => ({
+      principalEur: eur(personalAmountOf(t.principal, t).toString(), t.currency),
+    })),
     employeeSavings: esLines.map((r) => ({
       valueEur: eur(
         d(r.units.toString()).times(d(r.nav.toString())),

@@ -24,6 +24,7 @@ function baseInput(
     envelopeCash: [],
     bankAccounts: [],
     savingsAccounts: [],
+    termDeposits: [],
     employeeSavings: [],
     liabilities: [],
     metals: [],

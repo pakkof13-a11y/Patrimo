@@ -8,19 +8,24 @@ import {
   tangibleToInvestment,
 } from "@/app/lib/alternatives/consolidated";
 
+const EUR_RATES = { EUR: 1 };
+
 describe("consolidation de la poche alternative", () => {
   it("valorise un lot de métaux au prix de revient, frais compris", () => {
-    const i = metalToInvestment({
-      id: "m1",
-      denomination: "Lingot 100 g",
-      metal: "GOLD",
-      format: "PHYSICAL",
-      quantity: "2",
-      purchasePriceUnit: "2800",
-      acquisitionFees: "200",
-      currentValue: "6450",
-      currency: "EUR",
-    });
+    const i = metalToInvestment(
+      {
+        id: "m1",
+        denomination: "Lingot 100 g",
+        metal: "GOLD",
+        format: "PHYSICAL",
+        quantity: "2",
+        purchasePriceUnit: "2800",
+        acquisitionFees: "200",
+        currentValue: "6450",
+        currency: "EUR",
+      },
+      EUR_RATES
+    );
 
     expect(i.investedEur).toBeCloseTo(5800, 6);
     expect(i.valueEur).toBeCloseTo(6450, 6);
@@ -35,26 +40,32 @@ describe("consolidation de la poche alternative", () => {
       repli appliqué par le service ferait afficher un TVPI et un P&L calculés
       sur deux bases différentes.
     */
-    const called = peToInvestment({
-      id: "p1",
-      companyName: "Club Deal",
-      peType: "DIRECT",
-      currentNav: "12300",
-      calledCapital: "10000",
-      investedTotal: "9000",
-      currency: "EUR",
-    });
+    const called = peToInvestment(
+      {
+        id: "p1",
+        companyName: "Club Deal",
+        peType: "DIRECT",
+        currentNav: "12300",
+        calledCapital: "10000",
+        investedTotal: "9000",
+        currency: "EUR",
+      },
+      EUR_RATES
+    );
     expect(called.investedEur).toBeCloseTo(10_000, 6);
 
-    const derived = peToInvestment({
-      id: "p2",
-      companyName: "Startup",
-      peType: "DIRECT",
-      currentNav: "8200",
-      calledCapital: "0",
-      investedTotal: "6500",
-      currency: "EUR",
-    });
+    const derived = peToInvestment(
+      {
+        id: "p2",
+        companyName: "Startup",
+        peType: "DIRECT",
+        currentNav: "8200",
+        calledCapital: "0",
+        investedTotal: "6500",
+        currency: "EUR",
+      },
+      EUR_RATES
+    );
     expect(derived.investedEur).toBeCloseTo(6500, 6);
   });
 
@@ -64,17 +75,20 @@ describe("consolidation de la poche alternative", () => {
       afficherait −100 % sur chaque prêt soldé. Ce sont les intérêts perçus
       qui font le résultat.
     */
-    const repaid = crowdlendingToInvestment({
-      id: "c1",
-      projectName: "Projet X",
-      platform: "October",
-      capitalInvested: "5000",
-      effectiveRemainingCapital: "0",
-      interestReceivedToDate: "410",
-      annualYieldPercent: "8.2",
-      status: "REPAID",
-      currency: "EUR",
-    });
+    const repaid = crowdlendingToInvestment(
+      {
+        id: "c1",
+        projectName: "Projet X",
+        platform: "October",
+        capitalInvested: "5000",
+        effectiveRemainingCapital: "0",
+        interestReceivedToDate: "410",
+        annualYieldPercent: "8.2",
+        status: "REPAID",
+        currency: "EUR",
+      },
+      EUR_RATES
+    );
 
     expect(repaid.valueEur).toBeCloseTo(0, 6);
     expect(repaid.pnlEur).toBeCloseTo(410, 6);
@@ -83,17 +97,20 @@ describe("consolidation de la poche alternative", () => {
   });
 
   it("un prêt en défaut porte la perte du capital, nette des intérêts perçus", () => {
-    const defaulted = crowdlendingToInvestment({
-      id: "c2",
-      projectName: "Projet Y",
-      platform: "Lendopolis",
-      capitalInvested: "2000",
-      effectiveRemainingCapital: "2000",
-      interestReceivedToDate: "150",
-      annualYieldPercent: "9.1",
-      status: "DEFAULT",
-      currency: "EUR",
-    });
+    const defaulted = crowdlendingToInvestment(
+      {
+        id: "c2",
+        projectName: "Projet Y",
+        platform: "Lendopolis",
+        capitalInvested: "2000",
+        effectiveRemainingCapital: "2000",
+        interestReceivedToDate: "150",
+        annualYieldPercent: "9.1",
+        status: "DEFAULT",
+        currency: "EUR",
+      },
+      EUR_RATES
+    );
 
     expect(defaulted.pnlEur).toBeCloseTo(-1850, 6);
     expect(defaulted.statusIsAlert).toBe(true);
@@ -101,96 +118,131 @@ describe("consolidation de la poche alternative", () => {
   });
 
   it("signale un prêt en retard sans l'effacer de l'encours", () => {
-    const late = crowdlendingToInvestment({
-      id: "c3",
-      projectName: "Projet Z",
-      platform: "Enerfip",
-      capitalInvested: "1900",
-      effectiveRemainingCapital: "1900",
-      interestReceivedToDate: "0",
-      annualYieldPercent: "7.5",
-      status: "LATE",
-      currency: "EUR",
-    });
+    const late = crowdlendingToInvestment(
+      {
+        id: "c3",
+        projectName: "Projet Z",
+        platform: "Enerfip",
+        capitalInvested: "1900",
+        effectiveRemainingCapital: "1900",
+        interestReceivedToDate: "0",
+        annualYieldPercent: "7.5",
+        status: "LATE",
+        currency: "EUR",
+      },
+      EUR_RATES
+    );
     expect(late.valueEur).toBeCloseTo(1900, 6);
     expect(late.statusIsAlert).toBe(true);
   });
 
   it("un tangible se lit prix d'achat contre estimation", () => {
-    const t = tangibleToInvestment({
-      id: "t1",
-      brandOrArtist: "Rolex",
-      modelName: "Submariner",
-      category: "WATCHES",
-      yearOrVintage: "2019",
-      purchasePrice: "11500",
-      acquisitionFees: "500",
-      estimatedValue: "15500",
-      currency: "EUR",
-    });
+    const t = tangibleToInvestment(
+      {
+        id: "t1",
+        brandOrArtist: "Rolex",
+        modelName: "Submariner",
+        category: "WATCHES",
+        yearOrVintage: "2019",
+        purchasePrice: "11500",
+        acquisitionFees: "500",
+        estimatedValue: "15500",
+        currency: "EUR",
+      },
+      EUR_RATES
+    );
     expect(t.investedEur).toBeCloseTo(12_000, 6);
     expect(t.pnlEur).toBeCloseTo(3500, 6);
     expect(t.name).toBe("Rolex Submariner");
   });
 
   it("classe les positions du plus gros encours au plus petit", () => {
-    const list = buildConsolidatedInvestments({
-      metals: [
-        {
-          id: "m",
-          denomination: "Or",
-          metal: "GOLD",
-          format: "PHYSICAL",
-          quantity: "1",
-          purchasePriceUnit: "5800",
-          acquisitionFees: "0",
-          currentValue: "6450",
-          currency: "EUR",
-        },
-      ],
-      privateEquity: [
-        {
-          id: "p",
-          companyName: "Club Deal",
-          peType: "DIRECT",
-          currentNav: "12300",
-          calledCapital: "10000",
-          investedTotal: "10000",
-          currency: "EUR",
-        },
-      ],
-    });
+    const list = buildConsolidatedInvestments(
+      {
+        metals: [
+          {
+            id: "m",
+            denomination: "Or",
+            metal: "GOLD",
+            format: "PHYSICAL",
+            quantity: "1",
+            purchasePriceUnit: "5800",
+            acquisitionFees: "0",
+            currentValue: "6450",
+            currency: "EUR",
+          },
+        ],
+        privateEquity: [
+          {
+            id: "p",
+            companyName: "Club Deal",
+            peType: "DIRECT",
+            currentNav: "12300",
+            calledCapital: "10000",
+            investedTotal: "10000",
+            currency: "EUR",
+          },
+        ],
+      },
+      EUR_RATES
+    );
 
     expect(list.map((i) => i.name)).toEqual(["Club Deal", "Or"]);
   });
 
+  it("convertit une ligne en devise étrangère au lieu de l'assigner telle quelle", () => {
+    const list = buildConsolidatedInvestments(
+      {
+        privateEquity: [
+          {
+            id: "p-usd",
+            companyName: "US Fund",
+            peType: "DIRECT",
+            currentNav: "100000",
+            calledCapital: "100000",
+            investedTotal: "100000",
+            currency: "USD",
+          },
+        ],
+      },
+      { EUR: 1, USD: 1.1 }
+    );
+
+    // 1 EUR = 1,1 USD → 100 000 USD ≈ 90 909,09 EUR, jamais 100 000 EUR.
+    expect(list[0]!.valueEur).toBeCloseTo(90_909.09, 1);
+    expect(list[0]!.valueEur).not.toBeCloseTo(100_000, 1);
+  });
+
   it("répartit la poche par famille sans inventer de catégorie vide", () => {
-    const list = buildConsolidatedInvestments({
-      metals: [
-        {
-          id: "m",
-          denomination: "Or",
-          metal: "GOLD",
-          format: "PHYSICAL",
-          quantity: "1",
-          purchasePriceUnit: "5000",
-          acquisitionFees: "0",
-          currentValue: "6000",
-          currency: "EUR",
-        },
-      ],
-      tangibles: [
-        {
-          id: "t",
-          brandOrArtist: "A",
-          modelName: "B",
-          category: "ART",
-          purchasePrice: "3000",
-          estimatedValue: "4000",
-          currency: "EUR",
-        },
-      ],
-    });
+    const list = buildConsolidatedInvestments(
+      {
+        metals: [
+          {
+            id: "m",
+            denomination: "Or",
+            metal: "GOLD",
+            format: "PHYSICAL",
+            quantity: "1",
+            purchasePriceUnit: "5000",
+            acquisitionFees: "0",
+            currentValue: "6000",
+            currency: "EUR",
+          },
+        ],
+        tangibles: [
+          {
+            id: "t",
+            brandOrArtist: "A",
+            modelName: "B",
+            category: "ART",
+            purchasePrice: "3000",
+            estimatedValue: "4000",
+            currency: "EUR",
+          },
+        ],
+      },
+      EUR_RATES
+    );
 
     const totals = computeAlternativesTotals(list);
     expect(totals.valueEur).toBeCloseTo(10_000, 6);

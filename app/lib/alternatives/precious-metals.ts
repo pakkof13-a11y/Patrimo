@@ -17,6 +17,7 @@
 import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "@/app/lib/prisma";
 import { d, type Decimal, type DecimalInput } from "@/app/lib/money/decimal";
+import { parseNumber } from "@/app/lib/import/normalize";
 import {
   metalValueEur,
   premiumPct,
@@ -45,13 +46,12 @@ import {
   type MetalTaxRegime,
 } from "@/app/lib/precious-metals/tax";
 import type { PreciousMetalDto, PreciousMetalsSummary } from "./types";
+import { decFromInput } from "./parse-decimal";
 
 export class PreciousMetalInputError extends Error {}
 
 function dec(value: DecimalInput | null | undefined, fallback = "0"): Prisma.Decimal {
-  const raw = String(value ?? fallback).trim().replace(",", ".");
-  const parsed = Number(raw);
-  return new Prisma.Decimal(Number.isFinite(parsed) && raw !== "" ? raw : fallback);
+  return decFromInput(value, fallback);
 }
 
 /** Poids affiché → grammes. */
@@ -402,7 +402,7 @@ export async function createPreciousMetalSale(
   userId: string,
   input: PreciousMetalSaleInput
 ) {
-  const quantity = d(String(input.quantity).replace(",", "."));
+  const quantity = d(parseNumber(String(input.quantity)) ?? 0);
   if (!quantity.isFinite() || quantity.lte(0)) {
     throw new PreciousMetalInputError("La quantité cédée doit être positive.");
   }

@@ -83,8 +83,17 @@ export type EmployeeSavingsLineDto = {
   unlockDate: string | null;
   unlockMode: EmployeeSavingsUnlockMode;
   notes: string | null;
-  /** units × nav */
+  /** units × nav, **dans la devise du support** (`currency`). */
   marketValue: string;
+  /**
+   * La même valeur en euros — ce que les totaux additionnent.
+   *
+   * Sans elle, `summarizeLines` sommait des montants de devises différentes :
+   * un FCPE à 10 000 CHF pesait 10 000 € dans l'épargne salariale. Les deux
+   * champs coexistent parce que la liste affiche la devise du support et que
+   * les agrégats n'en connaissent qu'une.
+   */
+  marketValueEur: string;
   liquidityStatus: LiquidityStatus;
   unlockLabel: string;
 };

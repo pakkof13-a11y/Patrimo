@@ -46,6 +46,7 @@ import { prisma } from "../prisma";
 import { owned } from "../db/tenant-scope";
 import { d, toFixed } from "../money/decimal";
 import { toEurAmount } from "../market/fx";
+import { parseNumber } from "../import/normalize";
 import {
   applyEarlyRepayment,
   estimateRemainingInterest,
@@ -76,6 +77,27 @@ export type LiabilityEventType =
  * annule l'ensemble.
  */
 class LiabilityStateChanged extends Error {}
+
+/**
+ * Un montant saisi devient un nombre, ou rien du tout.
+ *
+ * Les trois mutations lisaient leur montant par `String(x || "0")
+ * .replace(",", ".")`. Deux défauts dans une seule ligne : toute saisie
+ * illisible — vide, `null`, clé absente — devenait un zéro, et le parsing ne
+ * connaissait qu'une virgule (« 1 234,56 » sortait en « 1 234.56 »).
+ *
+ * Le parsing est désormais celui de l'import (`parseNumber` : virgule ou point
+ * décimal, séparateurs de milliers, symboles monétaires), et l'échec lève —
+ * les routes le rendent en 400. Un taux qu'on ne sait pas lire n'est pas 0 %.
+ */
+function parseAmountOrThrow(
+  raw: string | number | null | undefined,
+  message: string
+): string {
+  const n = parseNumber(raw == null ? null : String(raw));
+  if (n == null) throw new Error(message);
+  return String(n);
+}
 
 /**
  * Apply all due monthly debits for one liability (idempotent via lastPaymentAppliedAt).
@@ -346,7 +368,7 @@ export async function recordEarlyRepayment(opts: {
   const total = opts.kind === "TOTAL";
   const amount = total
     ? liability.remainingAmount.toString()
-    : String(opts.amount || "0").replace(",", ".");
+    : parseAmountOrThrow(opts.amount, "Montant de remboursement invalide");
   if (!total && d(amount).lte(0)) throw new Error("Montant de remboursement invalide");
 
   const { remaining, debited } = applyEarlyRepayment(
@@ -415,7 +437,10 @@ export async function changeMonthlyPayment(opts: {
   });
   if (!liability) throw new Error("Passif introuvable");
 
-  const newPayment = String(opts.monthlyPayment || "0").replace(",", ".");
+  const newPayment = parseAmountOrThrow(
+    opts.monthlyPayment,
+    "Nouvelle mensualité invalide"
+  );
   if (d(newPayment).lte(0)) throw new Error("Nouvelle mensualité invalide");
 
   const eventDate = opts.eventDate
@@ -473,7 +498,10 @@ export async function changeInterestRate(opts: {
   });
   if (!liability) throw new Error("Passif introuvable");
 
-  const newRate = String(opts.interestRate || "0").replace(",", ".");
+  const newRate = parseAmountOrThrow(
+    opts.interestRate,
+    "Taux d'intérêt invalide"
+  );
   if (d(newRate).lt(0)) throw new Error("Taux d'intérêt invalide");
 
   const eventDate = opts.eventDate

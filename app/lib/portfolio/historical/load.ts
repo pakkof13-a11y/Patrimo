@@ -20,6 +20,7 @@ import {
   type LastCloseAsOf,
 } from "../../market/last-close-as-of";
 import { parisDayKey } from "../../dates/paris";
+import { personalAmountOf } from "../../cash/ownership";
 import { remainingAmountAt } from "../../liabilities/amortization";
 import { isNonOwnedStatus } from "../../crypto/nft-taxonomy";
 import {
@@ -63,6 +64,7 @@ export async function loadHistoricalInputs(
     bankEvents,
     savings,
     savingsEvents,
+    termDeposits,
     envelopes,
     envelopeCashEvents,
     metals,
@@ -102,6 +104,19 @@ export async function loadHistoricalInputs(
       where: { savingsAccount: { userId } },
       orderBy: { occurredAt: "asc" },
     }),
+    /*
+      Dépôts à terme — la poche que la courbe ignorait.
+
+      Le patrimoine net les compte (`getExplicitCashTotalEur`) et l'onglet
+      Banques les affiche ; la courbe s'arrêtait à leur porte. Son dernier
+      point était donc inférieur à la tuile du montant des CAT, un écart que
+      rien n'expliquait et que `e2e/coherence-totaux` a vocation à interdire.
+
+      Le CAT n'a pas de table d'événements : son principal est un fait unique,
+      daté, qui ne varie pas jusqu'à l'échéance. Il entre donc comme un compte
+      sans mouvement — une valeur, une date de connaissance.
+    */
+    prisma.termDeposit.findMany({ where: { userId } }),
     prisma.envelopeCash.findMany({ where: { userId } }),
     /*
       Constats de trésorerie d'enveloppe.
@@ -337,6 +352,33 @@ export async function loadHistoricalInputs(
       // ce que la carte du dashboard additionne, donc ce que la courbe doit
       // rejoindre aujourd'hui.
       currentEur: eur(displayBalanceOf(s), s.currency, rates),
+    })),
+    /*
+      Le CAT entre comme un compte sans mouvement.
+
+      `balanceEur` est le principal réduit à la part personnelle, comme le fait
+      `getExplicitCashTotalEur` : c'est la condition pour que le dernier point
+      et la tuile de patrimoine net portent le même chiffre.
+
+      L'ancre est `updatedAt`, pas `openedAt`. La date d'ouverture serait plus
+      flatteuse — le CAT apparaîtrait à sa place dans l'histoire — mais elle
+      appliquerait au passé un principal qui peut avoir été corrigé depuis, et
+      c'est exactement ce que l'ancre des comptes bancaires ci-dessus refuse.
+      Sur une ligne jamais retouchée, les deux dates coïncident de fait.
+
+      Les intérêts d'un CAT ne sont pas portés : ils ne sont ni capitalisés ni
+      versés en base, aucun champ ne les constate, et les inventer ferait
+      monter la courbe d'un montant que personne n'a observé.
+    */
+    ...termDeposits.map((t) => ({
+      id: t.id,
+      balanceEur: eur(
+        personalAmountOf(t.principal, t).toString(),
+        t.currency,
+        rates
+      ),
+      createdAt: t.createdAt,
+      knownAt: t.updatedAt,
     })),
     ...envelopes.map((e) => ({
       id: e.id,

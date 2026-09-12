@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@/app/lib/prisma-client/client";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
-import { liabilitySchema, liabilityUpdateSchema } from "@/app/lib/schemas";
+import {
+  liabilityEarlyRepaymentSchema,
+  liabilityPaymentChangeSchema,
+  liabilityRateChangeSchema,
+  liabilitySchema,
+  liabilityUpdateSchema,
+} from "@/app/lib/schemas";
 import { clientErrorMessage } from "@/app/lib/api/error-response";
 import {
   presentFields,
@@ -36,14 +42,29 @@ export async function POST(req: Request) {
   const body = await req.json();
 
   // Lifecycle actions on existing credit
+  /*
+    Les avenants sont validés **avant** d'atteindre le service.
+
+    Ils y arrivaient par `String(body.interestRate ?? body.rate ?? "")`, et le
+    service repliait l'illisible sur `"0"` : un corps sans taux — champ vide du
+    formulaire, clé mal orthographiée — enregistrait un avenant à 0 % et
+    écrasait le taux réel du crédit. La 400 rendue ici remplace cet
+    écrasement ; rien n'est écrit quand le montant manque.
+  */
   const action = body?.action as string | undefined;
   if (action === "early_repayment") {
+    const kind = body?.kind === "TOTAL" ? "TOTAL" : "PARTIAL";
+    const parsed = liabilityEarlyRepaymentSchema.safeParse({
+      kind,
+      amount: body?.amount ?? undefined,
+    });
+    if (!parsed.success) return validationErrorResponse(parsed.error);
     try {
       const liability = await recordEarlyRepayment({
         userId,
         liabilityId: String(body.liabilityId || body.id || ""),
-        kind: body.kind === "TOTAL" ? "TOTAL" : "PARTIAL",
-        amount: body.amount != null ? String(body.amount) : undefined,
+        kind,
+        amount: parsed.data.amount,
         eventDate: body.eventDate ? String(body.eventDate) : undefined,
         notes: body.notes ? String(body.notes) : undefined,
       });
@@ -55,11 +76,15 @@ export async function POST(req: Request) {
   }
 
   if (action === "payment_change") {
+    const parsed = liabilityPaymentChangeSchema.safeParse({
+      monthlyPayment: body?.monthlyPayment,
+    });
+    if (!parsed.success) return validationErrorResponse(parsed.error);
     try {
       const liability = await changeMonthlyPayment({
         userId,
         liabilityId: String(body.liabilityId || body.id || ""),
-        monthlyPayment: String(body.monthlyPayment || ""),
+        monthlyPayment: parsed.data.monthlyPayment,
         eventDate: body.eventDate ? String(body.eventDate) : undefined,
         notes: body.notes ? String(body.notes) : undefined,
       });
@@ -71,11 +96,15 @@ export async function POST(req: Request) {
   }
 
   if (action === "rate_change") {
+    const parsed = liabilityRateChangeSchema.safeParse({
+      interestRate: body?.interestRate ?? body?.rate,
+    });
+    if (!parsed.success) return validationErrorResponse(parsed.error);
     try {
       const liability = await changeInterestRate({
         userId,
         liabilityId: String(body.liabilityId || body.id || ""),
-        interestRate: String(body.interestRate ?? body.rate ?? ""),
+        interestRate: parsed.data.interestRate,
         eventDate: body.eventDate ? String(body.eventDate) : undefined,
         notes: body.notes ? String(body.notes) : undefined,
       });

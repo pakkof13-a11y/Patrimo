@@ -13,7 +13,13 @@
  */
 
 import { prisma } from "@/app/lib/prisma";
-import { d, zero, type Decimal } from "@/app/lib/money/decimal";
+import {
+  d,
+  zero,
+  type Decimal,
+  type DecimalInput,
+} from "@/app/lib/money/decimal";
+import { convertToEurSync, getEurRates } from "@/app/lib/market/fx";
 import { getHoldings } from "@/app/lib/portfolio/service";
 import {
   isFurnishedUsage,
@@ -130,7 +136,7 @@ const PRIMARY_RESIDENCE_USAGE = "RESIDENCE_PRINCIPALE";
 export async function loadPropertyTaxRows(
   userId: string
 ): Promise<PropertyTaxRow[]> {
-  const [details, holdings] = await Promise.all([
+  const [details, holdings, rates] = await Promise.all([
     prisma.realEstateDetail.findMany({
       where: { asset: { is: { userId } } },
       include: {
@@ -151,6 +157,9 @@ export async function loadPropertyTaxRows(
                 startDate: true,
                 endDate: true,
                 lastPaymentAppliedAt: true,
+                // La devise vient avec le solde : un crédit en CHF pèse sur
+                // l'assiette IFI pour sa contre-valeur en euros, pas à parité.
+                currency: true,
               },
             },
           },
@@ -159,16 +168,23 @@ export async function loadPropertyTaxRows(
       orderBy: { createdAt: "desc" },
     }),
     getHoldings(userId),
+    getEurRates(),
   ]);
 
   const byAsset = new Map(holdings.map((h) => [h.assetId, h]));
+
+  // Même conversion que `allocationByVenue` — `eur(remainingAmountAt(l),
+  // l.currency)` — pour que la dette déduite de l'IFI et la dette du donut
+  // soient le même nombre.
+  const eur = (amount: DecimalInput, currency: string | null | undefined) =>
+    d(convertToEurSync(amount, currency || "EUR", rates));
 
   return details.map((detail) => {
     const holding = byAsset.get(detail.assetId);
 
     let debt = zero();
     for (const l of detail.asset.liabilities) {
-      debt = debt.plus(d(remainingAmountAt(l)));
+      debt = debt.plus(eur(remainingAmountAt(l), l.currency));
     }
 
     return {

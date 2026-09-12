@@ -40,7 +40,16 @@ export type OverviewLine = {
   contributedAmount?: string | null;
   unlockDate: string | null;
   unlockMode: string;
+  /** `parts × VL`, dans la devise du support (`currency`). */
   marketValue: string;
+  /**
+   * La même valeur en euros — **la seule que ce fichier additionne**.
+   *
+   * Tous les agrégats sommaient `marketValue`, qui est libellé dans la devise
+   * du support : un FCPE en francs suisses entrait dans l'encours pour son
+   * nombre, et faussait du même coup les parts de la répartition.
+   */
+  marketValueEur: string;
   liquidityStatus: "AVAILABLE" | "BLOCKED";
   unlockLabel: string;
 };
@@ -98,7 +107,7 @@ export function computeTotals(lines: OverviewLine[]): OverviewTotals {
   let withContribution = 0;
 
   for (const l of lines) {
-    const v = num(l.marketValue);
+    const v = num(l.marketValueEur);
     totalValue += v;
     if (l.liquidityStatus === "AVAILABLE") availableValue += v;
     if (has(l.contributedAmount)) {
@@ -154,7 +163,7 @@ export function computeAllocation(lines: OverviewLine[]): CategorySlice[] {
 
   for (const l of lines) {
     const { category, source } = resolveFundCategory(l);
-    const value = num(l.marketValue);
+    const value = num(l.marketValueEur);
     const cur = acc.get(category) ?? {
       value: 0,
       lineCount: 0,
@@ -254,7 +263,7 @@ export function groupIntoPlans(
     let nextUnlock: number | null = null;
 
     for (const l of group) {
-      const v = num(l.marketValue);
+      const v = num(l.marketValueEur);
       value += v;
       if (l.liquidityStatus === "AVAILABLE") availableValue += v;
       if (has(l.contributedAmount)) {
@@ -435,10 +444,10 @@ export function nextUnlock(
     if (!Number.isFinite(t) || t <= today) continue;
     if (best == null || t < best) {
       best = t;
-      amount = num(l.marketValue);
+      amount = num(l.marketValueEur);
       lineCount = 1;
     } else if (t === best) {
-      amount += num(l.marketValue);
+      amount += num(l.marketValueEur);
       lineCount += 1;
     }
   }

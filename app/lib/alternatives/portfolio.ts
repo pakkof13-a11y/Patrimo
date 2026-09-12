@@ -7,6 +7,7 @@
  */
 
 import { prisma } from "@/app/lib/prisma";
+import { Prisma } from "@/app/lib/prisma-client/client";
 import { d, zero } from "@/app/lib/money/decimal";
 import { convertToEurSync, getEurRates } from "@/app/lib/market/fx";
 import {
@@ -16,7 +17,8 @@ import {
 } from "./types";
 import { listPreciousMetals } from "./precious-metals";
 import { listPrivateEquity } from "./private-equity";
-import { listCrowdlending } from "./crowdlending";
+import { listCrowdlending, effectiveRemainingCapital } from "./crowdlending";
+import type { ClStatus } from "./types";
 import { listTangibles } from "./tangibles";
 import { buildConsolidatedInvestments } from "./consolidated";
 
@@ -36,7 +38,8 @@ type Delegate = {
     Array<{
       currentValue?: { toString(): string };
       currentNav?: { toString(): string };
-      capitalInvested?: { toString(): string };
+      capitalInvested?: Prisma.Decimal;
+      remainingCapital?: Prisma.Decimal;
       estimatedValue?: { toString(): string };
       currency?: string;
       status?: string;
@@ -70,7 +73,8 @@ async function findRows(
   Array<{
     currentValue?: { toString(): string };
     currentNav?: { toString(): string };
-    capitalInvested?: { toString(): string };
+    capitalInvested?: Prisma.Decimal;
+    remainingCapital?: Prisma.Decimal;
     estimatedValue?: { toString(): string };
     currency?: string;
     status?: string;
@@ -100,7 +104,12 @@ export async function getAlternativesPortfolioSlice(
     }),
     findRows("crowdlendingPosition", {
       where: { userId },
-      select: { capitalInvested: true, currency: true, status: true },
+      select: {
+        capitalInvested: true,
+        remainingCapital: true,
+        currency: true,
+        status: true,
+      },
     }),
     findRows("tangibleAsset", {
       where: { userId },
@@ -123,9 +132,18 @@ export async function getAlternativesPortfolioSlice(
     fx
   );
   const clActive = cl.filter((c) => c.status === "ACTIVE" || c.status === "LATE");
+  /*
+    Le patrimoine net porte l'encours restant, pas le capital initial : un
+    prêt partiellement remboursé qui compterait encore son capital investi
+    en entier, en plus du cash déjà revenu, se compterait deux fois.
+  */
   const crowdlendingEur = sumFieldEur(
     clActive.map((c) => ({
-      value: c.capitalInvested?.toString() ?? "0",
+      value: effectiveRemainingCapital(
+        c.capitalInvested ?? new Prisma.Decimal(0),
+        c.remainingCapital ?? new Prisma.Decimal(0),
+        (c.status as ClStatus) || "ACTIVE"
+      ).toString(),
       currency: c.currency || "EUR",
     })),
     fx
@@ -178,12 +196,16 @@ export async function getAlternativesPortfolioSlice(
 export async function getAlternativesDashboardBundle(
   userId: string
 ): Promise<AlternativesDashboardPayload> {
+  // Un seul jeu de taux pour la tranche agrégée et la liste consolidée : les
+  // deux doivent convertir chaque ligne étrangère au même taux, sinon leurs
+  // totaux divergeraient sans raison.
+  const fx = await getEurRates();
   const [metals, pe, cl, tangibles, summary] = await Promise.all([
     listPreciousMetals(userId),
     listPrivateEquity(userId),
     listCrowdlending(userId),
     listTangibles(userId),
-    getAlternativesPortfolioSlice(userId),
+    getAlternativesPortfolioSlice(userId, fx),
   ]);
 
   return {
@@ -197,12 +219,18 @@ export async function getAlternativesDashboardBundle(
       Les quatre listes étaient déjà chargées pour en tirer les summaries, puis
       jetées. Les consolider ici ne coûte aucune requête de plus et donne à la
       vue d'ensemble sa liste unique sans quatre appels réseau supplémentaires.
+      Chaque ligne peut être dans une devise étrangère (métal stocké à
+      l'étranger, part libellée en USD…) : `fx` la convertit en EUR au lieu de
+      l'assigner telle quelle.
     */
-    investments: buildConsolidatedInvestments({
-      metals: metals.lines,
-      privateEquity: pe.lines,
-      crowdlending: cl.lines,
-      tangibles: tangibles.lines,
-    }),
+    investments: buildConsolidatedInvestments(
+      {
+        metals: metals.lines,
+        privateEquity: pe.lines,
+        crowdlending: cl.lines,
+        tangibles: tangibles.lines,
+      },
+      fx
+    ),
   };
 }

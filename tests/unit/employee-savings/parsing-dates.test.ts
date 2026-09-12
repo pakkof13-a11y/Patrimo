@@ -175,6 +175,7 @@ describe("jour civil : une seule base, UTC", () => {
       unlockDate: null,
       unlockMode: "DATE",
       marketValue: "1000",
+      marketValueEur: "1000",
       liquidityStatus: "BLOCKED",
       unlockLabel: "n/a",
       ...over,

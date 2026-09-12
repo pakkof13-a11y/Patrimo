@@ -2,11 +2,10 @@ import { Prisma } from "@/app/lib/prisma-client/client";
 import { prisma } from "@/app/lib/prisma";
 import type { PeType, PrivateEquityDto, PrivateEquitySummary } from "./types";
 import { PE_TYPES } from "./types";
+import { decFromInput } from "./parse-decimal";
 
 function dec(v: string | number | undefined | null, fallback = "0"): Prisma.Decimal {
-  const s = String(v ?? fallback).trim().replace(",", ".");
-  const n = Number(s);
-  return new Prisma.Decimal(Number.isFinite(n) ? s : fallback);
+  return decFromInput(v, fallback);
 }
 
 function n(v: string | number): number {

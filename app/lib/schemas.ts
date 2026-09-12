@@ -312,6 +312,44 @@ export const liabilitySchema = z.object({
 
 export type LiabilityForm = z.infer<typeof liabilitySchema>;
 
+/**
+ * Un montant décimal **obligatoire**.
+ *
+ * `decimalString` laisse passer la chaîne vide : à la création, un champ non
+ * rempli vaut « non renseigné ». Sur un avenant, il ne peut pas valoir ça.
+ * `String(opts.interestRate || "0")` transformait l'absence en zéro, et
+ * l'avenant écrasait le taux réel du crédit par 0 % — sans erreur, sans trace.
+ * Le refus ici rend une 400 au lieu d'un écrasement silencieux.
+ */
+const requiredDecimalString = decimalString.refine(
+  (v) => v !== "" && Number.isFinite(Number(v)),
+  "Valeur numérique requise"
+);
+
+/** Avenant de taux : le nouveau taux est le seul champ qui ne peut manquer. */
+export const liabilityRateChangeSchema = z.object({
+  interestRate: requiredDecimalString,
+});
+
+/** Avenant de mensualité : idem, le montant ne peut être ni vide ni illisible. */
+export const liabilityPaymentChangeSchema = z.object({
+  monthlyPayment: requiredDecimalString,
+});
+
+/**
+ * Remboursement anticipé : le montant n'est requis que pour un partiel.
+ * Un solde total prend le capital restant dû, il n'a pas de montant à saisir.
+ */
+export const liabilityEarlyRepaymentSchema = z
+  .object({
+    kind: z.enum(["PARTIAL", "TOTAL"]),
+    amount: requiredDecimalString.optional(),
+  })
+  .refine((v) => v.kind === "TOTAL" || v.amount != null, {
+    message: "Montant de remboursement requis",
+    path: ["amount"],
+  });
+
 /** Part détenue sur un compte joint, 0–100. Vide/null = compte individuel. */
 /**
  * Devise d'un produit : uniquement celles que l'application sait convertir.

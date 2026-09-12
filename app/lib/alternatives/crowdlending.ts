@@ -11,11 +11,10 @@ import {
   type CrowdlendingDto,
   type CrowdlendingSummary,
 } from "./types";
+import { decFromInput } from "./parse-decimal";
 
 function dec(v: string | number | undefined | null, fallback = "0"): Prisma.Decimal {
-  const s = String(v ?? fallback).trim().replace(",", ".");
-  const n = Number(s);
-  return new Prisma.Decimal(Number.isFinite(n) ? s : fallback);
+  return decFromInput(v, fallback);
 }
 
 function n(v: string | number): number {

@@ -3,6 +3,12 @@
  */
 
 import {
+  d as dec,
+  zero as decZero,
+  type Decimal,
+  type DecimalInput,
+} from "../money/decimal";
+import {
   type EmployeeSavingsPlanType,
   type EmployeeSavingsUnlockMode,
   type LiquidityStatus,
@@ -107,11 +113,40 @@ export function resolveUnlock(input: {
   };
 }
 
+/**
+ * `parts × VL`, **dans la devise de la ligne** — jamais en euros.
+ *
+ * L'unité manquait au contrat, et le défaut suivait : `mapLine` lisait
+ * `row.currency` pour le rendre à l'écran mais ne convertissait rien, puis
+ * `summarizeLines` additionnait les valeurs de toutes les lignes. Un FCPE
+ * libellé en francs suisses entrait donc dans le total pour son nombre, pas
+ * pour ce qu'il vaut : 10 000 CHF pesaient 10 000 € dans l'épargne salariale
+ * du patrimoine.
+ *
+ * La conversion appartient à l'appelant, qui seul dispose des taux —
+ * `mapLine` la fait, comme `getEmployeeSavingsTotalsEur` la faisait déjà de
+ * son côté. Cette fonction reste ce qu'elle est : un produit, sans devise.
+ */
+export function marketValueOf(units: DecimalInput, nav: DecimalInput): Decimal {
+  try {
+    const u = dec(String(units));
+    const n = dec(String(nav));
+    if (!u.isFinite() || !n.isFinite()) return decZero();
+    return u.times(n);
+  } catch {
+    return decZero();
+  }
+}
+
+/**
+ * Le même produit en `number`, pour la frise de déblocage qui compte en flottant.
+ *
+ * Les montants qui entrent dans un total patrimonial passent par
+ * `marketValueOf` : le détour par un double perdrait les chiffres au-delà du
+ * 17e sur des colonnes `Decimal(28, 12)`.
+ */
 export function marketValue(units: number | string, nav: number | string): number {
-  const u = Number(units);
-  const n = Number(nav);
-  if (!Number.isFinite(u) || !Number.isFinite(n)) return 0;
-  return u * n;
+  return marketValueOf(units, nav).toNumber();
 }
 
 export function planLabel(planType: string): string {

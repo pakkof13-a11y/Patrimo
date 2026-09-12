@@ -3,7 +3,7 @@ import { prisma } from "@/app/lib/prisma";
 import {
   addYears,
   buildUnlockTimeline,
-  marketValue,
+  marketValueOf,
   PEE_LOCK_YEARS,
   planLabel,
   resolveUnlock,
@@ -11,6 +11,8 @@ import {
 } from "./logic";
 import { isFundCategory } from "./fund-category";
 import { parseNumber } from "@/app/lib/import/normalize";
+import { d, toFixed } from "@/app/lib/money/decimal";
+import { convertToEurSync, getEurRates } from "@/app/lib/market/fx";
 import type {
   EmployeeSavingsLineDto,
   EmployeeSavingsPlanType,
@@ -78,7 +80,7 @@ function mapLine(row: {
   unlockDate: Date | null;
   unlockMode: string;
   notes: string | null;
-}): EmployeeSavingsLineDto {
+}, rates: Record<string, number>): EmployeeSavingsLineDto {
   const unlock = resolveUnlock({
     planType: row.planType,
     unlockMode: row.unlockMode,
@@ -87,7 +89,22 @@ function mapLine(row: {
   });
   const units = row.units.toString();
   const nav = row.nav.toString();
-  const mv = marketValue(units, nav);
+  const mv = marketValueOf(units, nav);
+  /*
+    La devise de la ligne était lue et rendue, jamais appliquée.
+
+    `marketValue` est un produit sans devise ; l'agrégat qui le sommait
+    (`summarizeLines`) traitait donc un FCPE en CHF comme un montant en euros.
+    La conversion est celle du reste du dépôt — `convertToEurSync(mv,
+    r.currency)`, exactement comme `getEmployeeSavingsTotalsEur` dans
+    `portfolio/service.ts` — et elle a lieu ici, seul endroit qui dispose des
+    taux.
+
+    Les deux champs sont publiés : `marketValue` reste la valeur dans la devise
+    du support (c'est ce que la liste affiche, avec son symbole), `marketValueEur`
+    est ce que les totaux additionnent. Un seul des deux pouvait être juste.
+  */
+  const mvEur = d(convertToEurSync(mv, row.currency || "EUR", rates));
 
   return {
     id: row.id,
@@ -108,7 +125,8 @@ function mapLine(row: {
     unlockDate: unlock.unlockDate ? toIsoDate(unlock.unlockDate) : toIsoDate(row.unlockDate),
     unlockMode: unlock.unlockMode,
     notes: row.notes,
-    marketValue: mv.toFixed(2),
+    marketValue: toFixed(mv, 2),
+    marketValueEur: toFixed(mvEur, 2),
     liquidityStatus: unlock.liquidityStatus,
     unlockLabel: unlock.unlockLabel,
   };
@@ -118,11 +136,14 @@ export async function listEmployeeSavings(userId: string): Promise<{
   lines: EmployeeSavingsLineDto[];
   summary: EmployeeSavingsSummary;
 }> {
-  const rows = await prisma.employeeSavingsLine.findMany({
-    where: { userId },
-    orderBy: [{ planType: "asc" }, { manager: "asc" }, { fundName: "asc" }],
-  });
-  const lines = rows.map(mapLine);
+  const [rows, rates] = await Promise.all([
+    prisma.employeeSavingsLine.findMany({
+      where: { userId },
+      orderBy: [{ planType: "asc" }, { manager: "asc" }, { fundName: "asc" }],
+    }),
+    getEurRates(),
+  ]);
+  const lines = rows.map((row) => mapLine(row, rates));
   return { lines, summary: summarizeLines(lines) };
 }
 
@@ -142,7 +163,9 @@ export function summarizeLines(lines: EmployeeSavingsLineDto[]): EmployeeSavings
   }> = [];
 
   for (const l of lines) {
-    const v = Number(l.marketValue) || 0;
+    // Les euros, pas la devise du support : additionner `marketValue` mêlait
+    // des CHF à des euros dans un total présenté en euros.
+    const v = Number(l.marketValueEur) || 0;
     total += v;
     if (l.liquidityStatus === "AVAILABLE") available += v;
     else blocked += v;
@@ -339,7 +362,7 @@ export async function createEmployeeSavingsLine(userId: string, input: CreateEmp
   const row = await prisma.employeeSavingsLine.create({
     data: { userId, ...data },
   });
-  return mapLine(row);
+  return mapLine(row, await getEurRates());
 }
 
 export async function updateEmployeeSavingsLine(
@@ -383,7 +406,7 @@ export async function updateEmployeeSavingsLine(
   if (write.count === 0) throw new Error("Ligne introuvable");
   const row = await prisma.employeeSavingsLine.findFirst({ where: { id, userId } });
   if (!row) throw new Error("Ligne introuvable");
-  return mapLine(row);
+  return mapLine(row, await getEurRates());
 }
 
 export async function deleteEmployeeSavingsLine(userId: string, id: string) {

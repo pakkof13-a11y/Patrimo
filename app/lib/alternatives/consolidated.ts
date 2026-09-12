@@ -13,8 +13,17 @@
  * détail. Aucun indicateur n'est inventé : quand une grandeur n'a pas de sens
  * pour une famille, elle vaut `null` et l'écran affiche un tiret.
  *
- * Module **pur** : ni Prisma, ni React, ni réseau.
+ * Chaque ligne peut porter une devise étrangère (métal stocké à l'étranger,
+ * part d'un fonds libellé en USD…) : `valueEur`/`investedEur` sont convertis
+ * au taux courant (`rates`, fourni par l'appelant — cf.
+ * `app/lib/alternatives/portfolio.ts`), jamais assignés tels quels depuis le
+ * montant natif. Un montant déjà en EUR traverse la conversion sans effet.
+ *
+ * Module **pur** : ni Prisma, ni React, ni appel réseau — la résolution des
+ * taux (réseau) reste entièrement à la charge de l'appelant.
  */
+
+import { convertToEurSync } from "@/app/lib/market/fx";
 
 export type AlternativeCategory =
   | "METAL"
@@ -72,6 +81,13 @@ const num = (v: string | number | null | undefined): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
+/** Montant natif → EUR au taux courant. Un montant déjà en EUR ressort inchangé. */
+const eur = (
+  amount: number,
+  currency: string,
+  rates: Record<string, number>
+): number => Number(convertToEurSync(amount, currency || "EUR", rates));
+
 const pnlOf = (valueEur: number, investedEur: number) => ({
   pnlEur: valueEur - investedEur,
   pnlPct: investedEur > 0 ? ((valueEur - investedEur) / investedEur) * 100 : null,
@@ -92,11 +108,17 @@ type MetalRow = {
   storageLocation?: string | null;
 };
 
-export function metalToInvestment(m: MetalRow): AlternativeInvestment {
-  // Prix de revient du lot : quantité × PRU, frais d'acquisition compris.
-  const investedEur =
+export function metalToInvestment(
+  m: MetalRow,
+  rates: Record<string, number>
+): AlternativeInvestment {
+  const currency = m.currency || "EUR";
+  // Prix de revient du lot : quantité × PRU, frais d'acquisition compris —
+  // dans la devise native du lot, convertie en EUR ensuite comme la valeur.
+  const investedNative =
     num(m.quantity) * num(m.purchasePriceUnit) + num(m.acquisitionFees);
-  const valueEur = num(m.currentValue);
+  const investedEur = eur(investedNative, currency, rates);
+  const valueEur = eur(num(m.currentValue), currency, rates);
   return {
     id: m.id,
     category: "METAL",
@@ -124,7 +146,11 @@ type PeRow = {
   currency: string;
 };
 
-export function peToInvestment(p: PeRow): AlternativeInvestment {
+export function peToInvestment(
+  p: PeRow,
+  rates: Record<string, number>
+): AlternativeInvestment {
+  const currency = p.currency || "EUR";
   /*
     Capital appelé, avec repli sur `parts × PRU`.
 
@@ -133,8 +159,9 @@ export function peToInvestment(p: PeRow): AlternativeInvestment {
     un TVPI et un P&L calculés sur deux bases différentes.
   */
   const called = num(p.calledCapital);
-  const investedEur = called > 0 ? called : num(p.investedTotal);
-  const valueEur = num(p.currentNav);
+  const investedNative = called > 0 ? called : num(p.investedTotal);
+  const investedEur = eur(investedNative, currency, rates);
+  const valueEur = eur(num(p.currentNav), currency, rates);
   return {
     id: p.id,
     category: "PRIVATE_EQUITY",
@@ -146,7 +173,7 @@ export function peToInvestment(p: PeRow): AlternativeInvestment {
     ...pnlOf(valueEur, investedEur),
     status: "En cours",
     statusIsAlert: false,
-    currency: p.currency || "EUR",
+    currency,
   };
 }
 
@@ -169,7 +196,11 @@ const CL_STATUS_LABEL: Record<string, string> = {
   DEFAULT: "Défaut",
 };
 
-export function crowdlendingToInvestment(c: ClRow): AlternativeInvestment {
+export function crowdlendingToInvestment(
+  c: ClRow,
+  rates: Record<string, number>
+): AlternativeInvestment {
+  const currency = c.currency || "EUR";
   /*
     Un prêt ne « vaut » pas comme un actif : ce qu'on détient est le capital
     restant dû. Un prêt soldé vaut zéro sans être une perte — son capital est
@@ -177,9 +208,9 @@ export function crowdlendingToInvestment(c: ClRow): AlternativeInvestment {
     sur les **intérêts perçus**, pas sur l'écart valeur/capital, qui
     afficherait −100 % sur chaque prêt remboursé.
   */
-  const valueEur = num(c.effectiveRemainingCapital);
-  const investedEur = num(c.capitalInvested);
-  const interests = num(c.interestReceivedToDate);
+  const valueEur = eur(num(c.effectiveRemainingCapital), currency, rates);
+  const investedEur = eur(num(c.capitalInvested), currency, rates);
+  const interests = eur(num(c.interestReceivedToDate), currency, rates);
   const isClosed = c.status === "REPAID" || c.status === "DEFAULT";
 
   const pnlEur = c.status === "DEFAULT" ? interests - investedEur : interests;
@@ -198,7 +229,7 @@ export function crowdlendingToInvestment(c: ClRow): AlternativeInvestment {
     pnlPct: investedEur > 0 ? (pnlEur / investedEur) * 100 : null,
     status: CL_STATUS_LABEL[c.status] ?? c.status,
     statusIsAlert: c.status === "LATE" || c.status === "DEFAULT",
-    currency: c.currency || "EUR",
+    currency,
   };
 }
 
@@ -215,9 +246,14 @@ type TangibleRow = {
   storageLocation?: string | null;
 };
 
-export function tangibleToInvestment(t: TangibleRow): AlternativeInvestment {
-  const investedEur = num(t.purchasePrice) + num(t.acquisitionFees);
-  const valueEur = num(t.estimatedValue);
+export function tangibleToInvestment(
+  t: TangibleRow,
+  rates: Record<string, number>
+): AlternativeInvestment {
+  const currency = t.currency || "EUR";
+  const investedNative = num(t.purchasePrice) + num(t.acquisitionFees);
+  const investedEur = eur(investedNative, currency, rates);
+  const valueEur = eur(num(t.estimatedValue), currency, rates);
   return {
     id: t.id,
     category: "TANGIBLE",
@@ -229,7 +265,7 @@ export function tangibleToInvestment(t: TangibleRow): AlternativeInvestment {
     ...pnlOf(valueEur, investedEur),
     status: "Détenu",
     statusIsAlert: false,
-    currency: t.currency || "EUR",
+    currency,
   };
 }
 
@@ -250,13 +286,14 @@ export type AlternativesSources = {
  * liste sous le curseur.
  */
 export function buildConsolidatedInvestments(
-  sources: AlternativesSources
+  sources: AlternativesSources,
+  rates: Record<string, number>
 ): AlternativeInvestment[] {
   const out: AlternativeInvestment[] = [
-    ...(sources.metals ?? []).map(metalToInvestment),
-    ...(sources.privateEquity ?? []).map(peToInvestment),
-    ...(sources.crowdlending ?? []).map(crowdlendingToInvestment),
-    ...(sources.tangibles ?? []).map(tangibleToInvestment),
+    ...(sources.metals ?? []).map((m) => metalToInvestment(m, rates)),
+    ...(sources.privateEquity ?? []).map((p) => peToInvestment(p, rates)),
+    ...(sources.crowdlending ?? []).map((c) => crowdlendingToInvestment(c, rates)),
+    ...(sources.tangibles ?? []).map((t) => tangibleToInvestment(t, rates)),
   ];
 
   return out.sort((a, b) => {

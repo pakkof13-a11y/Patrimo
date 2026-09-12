@@ -3,10 +3,7 @@ import { d, toFixed, zero, type Decimal } from "../money/decimal";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
 import { countsInPersonalNetWorth, personalAmountOf } from "./ownership";
 import { savingsDisplayBalance, type RateType, type PayoutFrequency } from "../money/savings";
-import {
-  applyDueInterestForUser,
-  mapSavingsRowForApi,
-} from "../money/savings-accrual";
+import { mapSavingsRowForApi } from "../money/savings-accrual";
 import { normalizePlatformSearch } from "../platforms/presets";
 
 /**
@@ -45,9 +42,10 @@ export async function getExplicitCashTotalEur(userId: string) {
   const rates = await getEurRates();
   let total = zero();
 
-  const [banks, savings, envelopes] = await Promise.all([
+  const [banks, savings, termDeposits, envelopes] = await Promise.all([
     prisma.bankAccount.findMany({ where: { userId } }),
     prisma.savingsAccount.findMany({ where: { userId } }),
+    prisma.termDeposit.findMany({ where: { userId } }),
     prisma.envelopeCash.findMany({ where: { userId } }),
   ]);
 
@@ -89,6 +87,26 @@ export async function getExplicitCashTotalEur(userId: string) {
     // Même règle que les comptes courants, ci-dessus.
     total = total.plus(
       personalAmountOf(convertToEurSync(displayBalance, s.currency, rates), s)
+    );
+  }
+
+  /*
+    Les dépôts à terme, troisième poche de l'onglet Banques.
+
+    Ce total n'en lisait aucun. L'onglet Banques affiche pourtant leur somme
+    (`summarizeCash().termDepositTotalBase`, servie par `listTermDeposits`) :
+    un CAT de 100 000 € était donc listé, totalisé dans son bandeau, et absent
+    du patrimoine net — l'argent existait sur un écran et pas sur l'autre.
+
+    Même source et même règle que les deux poches au-dessus : la table, la part
+    personnelle, puis la conversion. Aucun filtre sur l'échéance : un CAT échu
+    que l'utilisateur n'a pas encore soldé reste compté ici comme il l'est dans
+    sa liste — les deux écrans doivent répondre la même chose, et décider
+    autrement du sort d'un CAT arrivé à terme ne se fait pas ici.
+  */
+  for (const t of termDeposits) {
+    total = total.plus(
+      personalAmountOf(convertToEurSync(t.principal.toString(), t.currency, rates), t)
     );
   }
 
@@ -205,10 +223,27 @@ export async function listBankAccounts(userId: string, base = "EUR") {
   });
 }
 
+/**
+ * Liste des livrets, intérêts courus **projetés** — rien n'est écrit.
+ *
+ * Cette fonction créditait les intérêts dus avant de répondre : « daily
+ * automation trigger ». Un GET de l'onglet Banques matérialisait donc des
+ * périodes d'intérêts, avançait `lastPayoutAt` et écrivait un événement
+ * `INTEREST` par livret. Le même défaut que `listLiabilities` portait sur les
+ * crédits (cf. l'en-tête de `liabilities/service.ts`) : le patrimoine net
+ * changeait selon qu'on avait ouvert cet écran ou non, et l'automatisation
+ * quotidienne dépendait d'une visite d'utilisateur.
+ *
+ * `mapSavingsRowForApi` projette déjà le solde intérêts courus compris
+ * (`savingsDisplayBalance`) : la valeur affichée est la même, sans écriture.
+ *
+ * Les intérêts se matérialisent aux moments d'écriture explicites, qui
+ * existaient déjà : le cron `/api/savings/accrue` et le PUT de
+ * `/api/savings`, qui crédite avant de journaliser un écart de solde.
+ *
+ * `tests/unit/cash/livrets-lecture-pure.test.ts` garde la propriété.
+ */
 export async function listSavingsAccounts(userId: string, base = "EUR") {
-  // Credit any due interest before listing (daily automation trigger)
-  await applyDueInterestForUser(userId);
-
   const rates = await getEurRates();
   const rows = await prisma.savingsAccount.findMany({
     where: { userId },

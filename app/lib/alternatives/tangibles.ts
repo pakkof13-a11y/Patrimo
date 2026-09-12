@@ -50,13 +50,12 @@ import type {
   TangibleOwnership,
   TangibleTaxPreview,
 } from "./types";
+import { decFromInput, intFromInput } from "./parse-decimal";
 
 export class TangibleInputError extends Error {}
 
 function dec(value: DecimalInput | null | undefined, fallback = "0"): Prisma.Decimal {
-  const raw = String(value ?? fallback).trim().replace(",", ".");
-  const parsed = Number(raw);
-  return new Prisma.Decimal(Number.isFinite(parsed) && raw !== "" ? raw : fallback);
+  return decFromInput(value, fallback);
 }
 
 /** Decimal optionnel : `null` reste `null`, il ne devient pas zéro. */
@@ -68,11 +67,7 @@ function optDec(value: DecimalInput | null | undefined): Prisma.Decimal | null {
 }
 
 function optInt(value: number | string | null | undefined): number | null {
-  if (value === null || value === undefined || String(value).trim() === "") {
-    return null;
-  }
-  const parsed = Number(String(value).replace(",", "."));
-  return Number.isFinite(parsed) ? Math.round(parsed) : null;
+  return intFromInput(value);
 }
 
 function optText(value: string | null | undefined): string | null {
