@@ -544,6 +544,7 @@ function SupportForm({
                 <span
                   className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1.5 w-56 -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-left text-[length:var(--text-2xs)] font-normal leading-snug text-[var(--foreground-secondary)] opacity-0 shadow-lg transition group-hover:opacity-100 group-focus:opacity-100 motion-reduce:transition-none"
                   role="tooltip"
+                  aria-hidden="true"
                 >
                   Les coupons non versés se rattrapent lors d&apos;une
                   constatation favorable
