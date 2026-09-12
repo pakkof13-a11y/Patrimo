@@ -7,6 +7,7 @@ import {
   type TaxHousehold,
 } from "@/app/lib/life-insurance/fiscal";
 import {
+  clampGainsOverride,
   computeRedemptionTax,
   gainsInPartialRedemption,
   PFU_OUTSTANDING_THRESHOLD_EUR,
@@ -177,19 +178,37 @@ export function RedemptionSimulatorPanel({
     // dépassé continue d'invalider l'override.
     if (!r.ok && position.value > 0) return { ...r, fromOverride: false };
     if (gainsOverride.trim() !== "") {
-      const gains = Math.min(Math.max(0, money(gainsOverride)), redemptionN);
+      // Deux plafonds : le rachat, et le gain latent du contrat — une saisie
+      // de 50 000 sur 20 000 € de plus-value ne rend pas imposable ce que la
+      // position ne porte pas. Encours inconnu (position à 0) : seul le
+      // rachat borne, le gain latent « 0 » n'y est pas un fait.
+      const clamp = clampGainsOverride({
+        overrideEur: gainsOverride,
+        redemptionEur: redemptionN,
+        latentGainEur: position.value > 0 ? r.latentGainEur : null,
+      });
+      const gains = money(clamp.gainsEur);
       return {
         ok: true as const,
-        gainsInRedemptionEur: String(gains),
+        gainsInRedemptionEur: clamp.gainsEur,
         capitalInRedemptionEur: String(Math.max(0, redemptionN - gains)),
         gainRatio: redemptionN > 0 ? gains / redemptionN : 0,
         latentGainEur: r.latentGainEur,
+        latentPnlEur: r.latentPnlEur,
         cappedRedemptionEur: r.cappedRedemptionEur,
         fromOverride: true,
+        overrideClamp: clamp,
       };
     }
     return { ...r, fromOverride: false };
   }, [gainsOverride, redemptionN, position.value, position.cost]);
+
+  const overrideClamp =
+    "overrideClamp" in splitGains &&
+    splitGains.overrideClamp &&
+    splitGains.overrideClamp.clampedBy !== "none"
+      ? splitGains.overrideClamp
+      : null;
 
   const hasAnteriority = policy?.openDate
     ? contractAge(new Date(policy.openDate)).hasAnteriority
@@ -408,19 +427,52 @@ export function RedemptionSimulatorPanel({
               value={formatCurrency(String(position.cost), "EUR")}
             />
             {/*
-              `gainsInPartialRedemption` rend `latentGainEur` sur toutes ses
+              `gainsInPartialRedemption` rend ces deux valeurs sur toutes ses
               branches — y compris un refus (rachat > encours) — précisément
-              pour que l'écran puisse encore l'afficher : la position porte
+              pour que l'écran puisse encore les afficher : la position porte
               bien 20 000 € de plus-value latente même quand le montant saisi
               est refusé. Le gater sur `ok` remplaçait cette valeur connue par
               un zéro affirmé, à côté du bandeau d'erreur qui dit pourtant le
               contraire.
+
+              Deux lignes, pas une. « Gain latent » affichait `latentGainEur`,
+              qui vaut max(0, valeur − revient) : en moins-value, « 0 € » ici et
+              « −10 000 € » sur la vue contrat, pour la même position. La
+              première ligne est la plus-value signée, le nombre des autres
+              écrans ; la seconde est ce qu'un rachat peut au plus imposer, et
+              son libellé dit qu'elle est une assiette, pas un P&L.
             */}
             <Row
-              label="Gain latent"
+              label="Plus-value latente"
+              value={formatCurrency(splitGains.latentPnlEur, "EUR")}
+              data-testid="sim-latent-pnl"
+            />
+            <Row
+              label="Assiette imposable (rachat)"
               value={formatCurrency(splitGains.latentGainEur, "EUR")}
               data-testid="sim-latent-gain"
             />
+            {/*
+              Le plafonnement d'une quote-part saisie se lit, il ne se devine
+              pas : « 50 000 » retenu à 20 000 sans un mot laissait l'utilisateur
+              relire son impôt sans comprendre pourquoi. Il est dit ici, sous
+              l'assiette qui l'explique, avec la borne qui a joué.
+            */}
+            {overrideClamp && (
+              <p
+                className="text-[11px] text-[var(--warning)]"
+                role="status"
+                data-testid="sim-gains-override-clamped"
+              >
+                Quote-part saisie{" "}
+                {formatCurrency(overrideClamp.requestedEur, "EUR")} ramenée à{" "}
+                {formatCurrency(overrideClamp.gainsEur, "EUR")} :{" "}
+                {overrideClamp.clampedBy === "latentGain"
+                  ? "la position ne porte pas plus de gain latent"
+                  : "un rachat ne contient pas plus de gains que son montant"}{" "}
+                ({formatCurrency(overrideClamp.capEur, "EUR")}).
+              </p>
+            )}
             <Row
               label="Encours tous contrats"
               value={formatCurrency(totalOutstandingEur, "EUR")}

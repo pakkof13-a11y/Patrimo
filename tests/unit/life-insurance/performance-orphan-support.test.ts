@@ -26,6 +26,22 @@ vi.mock("@/app/lib/market/daily-closes", () => ({
   getDailyCloses: (...a: unknown[]) => getDailyCloses(...a),
 }));
 
+const getHoldings = vi.fn();
+
+/*
+  Mock partiel : `mapDbTx` reste celui de production.
+
+  `getHoldings` porte la valorisation actuelle des supports hors mesure, base
+  du taux de couverture. Aucune position rendue ici : les encours mesurés dans
+  ce fichier sont des coûts de revient, sur lesquels la valorisation retombe
+  faute de prix.
+*/
+vi.mock("@/app/lib/portfolio/service", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/app/lib/portfolio/service")>();
+  return { ...actual, getHoldings: (...a: unknown[]) => getHoldings(...a) };
+});
+
 const { getLifeInsurancePerformance } = await import(
   "@/app/lib/life-insurance/performance-service"
 );
@@ -69,6 +85,7 @@ beforeEach(() => {
   assetFindMany.mockReset();
   txFindMany.mockReset();
   getDailyCloses.mockReset();
+  getHoldings.mockReset().mockResolvedValue([]);
 });
 
 describe("support orphelin dans le consolidé", () => {

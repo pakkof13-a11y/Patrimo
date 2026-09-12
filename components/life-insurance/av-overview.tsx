@@ -386,6 +386,16 @@ export function AvOverview({ className }: { className?: string }) {
   }, [openView, transactions]);
 
   const total = performanceQ.data?.total;
+  /*
+    Défense en profondeur pour le texte de repli d'`AvPerformanceCard` : le
+    total peut se retrouver sans point publiable (un jour incomplet chez un
+    seul contrat suffit à amputer l'agrégat) alors qu'un contrat pris seul a
+    bien un historique. La carte ne doit alors jamais affirmer qu'« aucun
+    support de l'enveloppe » n'a de cours.
+  */
+  const hasContractCoverage = (performanceQ.data?.byContract ?? []).some(
+    (c) => c.points.length > 0
+  );
   const taxHousehold: TaxHousehold = policiesQ.data?.taxHousehold ?? "SINGLE";
   const matureCount = views.filter((v) => v.isMature === true).length;
   const loading = policiesQ.isLoading || supportsQ.isLoading;
@@ -401,8 +411,30 @@ export function AvOverview({ className }: { className?: string }) {
     [policies]
   );
 
+  /*
+    La sparkline dessine ce que la tuile affiche au-dessus : `totals.totalValueEur`,
+    l'encours réel complet (supports cotés + fonds euro / supports non couverts
+    valorisés à la main). `total.points[].valueEur` ne porte, lui, que la valeur
+    des supports COUVERTS par un historique de clôtures (voir `performance.ts`) —
+    sur un contrat où le fonds euro domine, la courbe se traçait à une échelle
+    bien inférieure au chiffre juste au-dessus, sous une même zone visuelle.
+
+    Il n'existe pas d'historique jour par jour pour les supports non couverts
+    (pas de clôtures) : impossible de reconstruire une vraie série de leur
+    valeur passée. On applique donc un DÉCALAGE CONSTANT — `total.uncoveredValueEur`,
+    la seule grandeur que la série expose pour ces supports (leur coût de
+    revient, faute de mieux) — à chaque point de la série couverte avant de
+    tracer. Ça préserve la FORME du mouvement réel des supports cotés tout en
+    ramenant l'échelle de la courbe à l'ordre de grandeur de l'encours total.
+    Le dernier point, après décalage, reste donc proche de `totals.totalValueEur`
+    — à l'écart de valorisation près si le fonds euro a été réévalué depuis le
+    dernier coût de revient connu (le décalage est un coût, pas une valeur de
+    marché à cette date).
+  */
+  const uncoveredOffset = Number(total?.uncoveredValueEur ?? 0);
+  const sparkOffset = Number.isFinite(uncoveredOffset) ? uncoveredOffset : 0;
   const sparkPoints = (total?.points ?? [])
-    .map((p) => Number(p.valueEur))
+    .map((p) => Number(p.valueEur) + sparkOffset)
     .filter((n) => Number.isFinite(n));
 
   return (
@@ -512,6 +544,7 @@ export function AvOverview({ className }: { className?: string }) {
               onRangeChange={setRange}
               performancePct={total?.performancePct ?? null}
               coveragePct={total?.coveragePct ?? 0}
+              hasContractCoverage={hasContractCoverage}
               loading={performanceQ.isLoading}
             />
           )}

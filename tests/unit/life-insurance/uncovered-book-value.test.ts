@@ -34,6 +34,23 @@ vi.mock("@/app/lib/market/daily-closes", () => ({
   getDailyCloses: (...a: unknown[]) => getDailyCloses(...a),
 }));
 
+const getHoldings = vi.fn();
+
+/*
+  Mock partiel : `mapDbTx` reste celui de production, le rejeu mesuré ici en
+  dépend.
+
+  `getHoldings` est la source de la **valorisation actuelle** des supports hors
+  mesure, celle du taux de couverture (cf. `coverage-current-value.test.ts`).
+  Il ne rend rien ici : ce fichier mesure le coût de revient, et l'absence de
+  position fait retomber la valorisation sur ce même coût — jamais sur zéro.
+*/
+vi.mock("@/app/lib/portfolio/service", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/app/lib/portfolio/service")>();
+  return { ...actual, getHoldings: (...a: unknown[]) => getHoldings(...a) };
+});
+
 const { getLifeInsurancePerformance } = await import(
   "@/app/lib/life-insurance/performance-service"
 );
@@ -115,6 +132,7 @@ beforeEach(() => {
   assetFindMany.mockReset();
   txFindMany.mockReset();
   getDailyCloses.mockReset();
+  getHoldings.mockReset().mockResolvedValue([]);
 });
 
 describe("encours non couvert = coût de revient des supports détenus", () => {
@@ -169,6 +187,20 @@ describe("encours non couvert = coût de revient des supports détenus", () => {
   it("sans rachat, les deux lectures coïncident", async () => {
     const { total } = await encoursHorsMesure([versement()]);
     expect(total).toBeCloseTo(10_000, 6);
+  });
+
+  /*
+    Le coût de revient reste publié : c'est le montant investi hors mesure, et
+    il répond à une autre question que « combien cela vaut-il aujourd'hui ».
+    Sans aucun prix connu, les deux réponses coïncident — une valeur inconnue
+    ne vaut jamais zéro.
+  */
+  it("sans prix connu, la valorisation retombe sur le coût de revient", async () => {
+    scene([versement(), rachat("0.4", "3600")]);
+    const r = await getLifeInsurancePerformance("u1", "all", JOUR);
+
+    expect(r.total.uncoveredCurrentValueEur).toBeCloseTo(6_000, 6);
+    expect(r.total.uncoveredCurrentValueEur).toBe(r.total.uncoveredValueEur);
   });
 });
 

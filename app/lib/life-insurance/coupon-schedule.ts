@@ -24,14 +24,24 @@
  * constatation : elle ne peut donc pas savoir si le coupon est tombé. Le montant
  * proposé est celui qui **serait** versé, à l'utilisateur de confirmer ce qu'il
  * a réellement reçu. Décider à sa place inventerait des revenus.
+ *
+ * ## L'unité de ce montant
+ *
+ * Tout ce qui traverse ce module est en **euros** : `nominalEur` porté par la
+ * fiche du support, le montant proposé, le montant saisi. La transaction
+ * écrite, elle, est dans la devise de l'actif — d'où la conversion par
+ * `writeFx`, la même qu'à la création et à la réévaluation d'un support.
  */
 
+import { Prisma } from "../prisma-client/client";
 import { prisma } from "../prisma";
 import { d } from "../money/decimal";
+import { getEurRates } from "../market/fx";
 import { dateKey } from "../liabilities/amortization";
 import { createTransaction } from "../transactions/service";
 import { couponObservationDates } from "./coupon-dates";
 import { periodicCouponEur } from "./constants";
+import { RATES_EUR_ONLY, writeFx } from "./support-service";
 
 /** Marqueur porté par les notes — reconnaît une échéance déjà tranchée. */
 export const COUPON_NOTE_PREFIX = "[coupon:";
@@ -167,6 +177,26 @@ export async function settleCoupons(
     errors: [],
   };
 
+  /*
+    Un seul relevé de taux pour la passe entière, chargé à la première écriture
+    qui en a besoin.
+
+    La condition posée en D44② est qu'une écriture convertisse son montant et
+    fixe son `fxRateToEur` depuis le **même** objet `rates` : deux appels de
+    part et d'autre du TTL d'une heure rendent deux taux, et l'écart s'affiche
+    en plus-value le jour même de la saisie. Un relevé unique pour le lot la
+    respecte plus strictement encore qu'un relevé par coupon.
+
+    Rien n'est demandé pour un support en euros, ni pour un lot entièrement
+    en euros : `RATES_EUR_ONLY` suffit, et `writeFx` n'y touche pas.
+  */
+  let rates: Record<string, number> | null = null;
+  const ratesFor = async (currency: string): Promise<Record<string, number>> => {
+    if (currency === "EUR") return RATES_EUR_ONLY;
+    if (!rates) rates = await getEurRates();
+    return rates;
+  };
+
   for (const decision of decisions) {
     const support = await prisma.lifeInsuranceSupport.findFirst({
       where: { assetId: decision.assetId, asset: { is: { userId } } },
@@ -234,16 +264,42 @@ export async function settleCoupons(
       continue;
     }
 
+    /*
+      Le montant est en euros, la transaction est en devise de l'actif.
+
+      Même défaut qu'en D44② sur `createSupport`, à l'autre bout du même
+      journal : `cashAmount` partait tel quel avec `fxRateToEur: "1"`, et
+      `resolveFx` lit ce « 1 » comme un taux non fourni sur un revenu — il
+      impose alors le taux historique de la date de constatation. 800 €
+      annoncés à l'écran étaient donc écrits 800 USD, puis relus 740,74 €.
+      Mesuré après conversion, au taux 1,08 : 864 USD × 0,9259259259 =
+      800,00 €.
+
+      La conversion précède l'écriture, et une devise que rien ne fonde
+      (`LifeInsuranceInputError` levée par `writeFx`) refuse l'échéance avant
+      que le journal n'ait été touché : pas de coupon écrit à un taux inventé,
+      pas de curseur avancé sur une échéance non réglée, et le lot continue.
+      Elle part dans `errors` comme n'importe quel rejet du journal — jamais en
+      exception non rattrapée, donc jamais en 500.
+    */
+    const currency = (support.asset.currency || "EUR").toUpperCase();
+
     try {
+      const fx = writeFx(currency, await ratesFor(currency));
+      const amountNative = fx.toNative(new Prisma.Decimal(amount.toFixed(2)));
+
       await createTransaction({
         userId,
         type: "COUPON",
         platformId: support.asset.platformId,
         assetId: decision.assetId,
-        cashAmount: amount.toFixed(2),
+        cashAmount: amountNative.toFixed(2),
         fees: "0",
-        currency: support.asset.currency || "EUR",
-        fxRateToEur: "1",
+        currency,
+        // Le taux qui a converti le montant deux lignes plus haut, tiré du
+        // même relevé : `resolveFx` le garde tel quel puisqu'il ne vaut plus
+        // « 1 », et `grossAmountEur` retombe sur le montant saisi.
+        fxRateToEur: fx.fxRateToEur,
         occurredAt: due.toISOString(),
         allowNegativeCash: true,
         notes: `${note} ${support.asset.name}`,

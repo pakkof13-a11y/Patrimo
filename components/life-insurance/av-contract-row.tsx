@@ -19,6 +19,7 @@ import { Sparkline } from "@/components/ui/sparkline";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import type { ContractView } from "@/app/lib/life-insurance/overview";
 import type { PerformancePoint } from "@/app/lib/life-insurance/performance";
+import { contractAge } from "@/app/lib/life-insurance/fiscal";
 
 type ContractSeries = {
   points?: PerformancePoint[];
@@ -140,6 +141,21 @@ export function AvContractRow({
 
   const opened = dateFr(view.policy.openDate);
 
+  /*
+    Années pleines depuis l'ouverture, dérivées de la MÊME fonction que le
+    badge d'antériorité (`view.isMature`, calculé via `contractAge` dans
+    `overview.ts`) — jamais du calcul flottant ms/365,25 j (`view.ageYears`),
+    qui arrondit et peut afficher un verdict contraire à celui du badge juste
+    à côté la veille d'un anniversaire (ex. ouvert le 15/01/2018, lu le
+    14/01/2026 : mois pleins → 7 ans révolus, `−8 ans` ; l'arrondi flottant
+    aurait dit « 8 ans »).
+  */
+  const openDate = view.policy.openDate ? new Date(view.policy.openDate) : null;
+  const ageWholeYears =
+    openDate && Number.isFinite(openDate.getTime())
+      ? Math.floor(contractAge(openDate).months / 12)
+      : null;
+
   return (
     <li>
       <button
@@ -177,12 +193,9 @@ export function AvContractRow({
                   {view.isMature ? "+8 ans" : "−8 ans"}
                 </Chip>
               )}
-              {view.ageYears != null && (
-                <Chip title="Ancienneté fiscale du contrat">
-                  {view.ageYears.toLocaleString("fr-FR", {
-                    maximumFractionDigits: 1,
-                  })}{" "}
-                  ans
+              {ageWholeYears != null && (
+                <Chip title="Ancienneté fiscale du contrat, en années pleines">
+                  {ageWholeYears} ans
                 </Chip>
               )}
               <Chip title="Supports rattachés à ce contrat">

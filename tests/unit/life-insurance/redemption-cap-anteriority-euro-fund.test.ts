@@ -3,7 +3,10 @@ import { fullMonthsBetween, contractAge } from "@/app/lib/life-insurance/fiscal"
 import { assetClassForSupport } from "@/app/lib/life-insurance/migrate-to-ledger";
 import { isEuroFundName } from "@/app/lib/life-insurance/reconcile";
 import { assetClassForKind } from "@/app/lib/life-insurance/constants";
-import { gainsInPartialRedemption } from "@/app/lib/life-insurance/redemption-tax";
+import {
+  clampGainsOverride,
+  gainsInPartialRedemption,
+} from "@/app/lib/life-insurance/redemption-tax";
 
 /**
  * Trois règles pures de l'assurance-vie : le plafond d'un rachat, le jour
@@ -126,6 +129,147 @@ describe("gainsInPartialRedemption — plafond", () => {
     expect(r.latentGainEur).toBe("0");
     expect(r.gainRatio).toBe(0);
     expect(r.cappedRedemptionEur).toBe("70000");
+  });
+
+  /*
+    Le libellé du refus ne nomme plus « le support » : la fonction reçoit une
+    valeur qui peut être la somme de plusieurs supports (périmètre « Tout le
+    contrat »), et désigner un support unique qui n'existe pas était trompeur
+    — pas faux en montant, faux en objet.
+  */
+  it("le refus pour dépassement parle d'encours disponible, pas de support", () => {
+    const r = gainsInPartialRedemption({ redemptionEur: "200000", ...position });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("Rachat supérieur à l'encours disponible (100000 €)");
+    expect(r.error).not.toMatch(/support/i);
+  });
+});
+
+/* ── deux lignes : P&L signé et assiette imposable ─────────────────── */
+
+describe("gainsInPartialRedemption — plus-value signée vs assiette", () => {
+  /*
+    La mesure. Position à 90 000 € pour 100 000 € de revient : « Gain latent »
+    affichait 0 € (max(0, …)) là où la vue contrat dit −10 000 €, pour la même
+    position. Les deux nombres sont rendus, sous deux noms.
+  */
+  it("en moins-value : P&L −10 000, assiette 0 — jamais négative", () => {
+    const r = gainsInPartialRedemption({
+      redemptionEur: "5000",
+      positionValueEur: "90000",
+      costBasisEur: "100000",
+    });
+    expect(r.ok).toBe(true);
+    expect(r.latentPnlEur).toBe("-10000");
+    expect(r.latentGainEur).toBe("0");
+    expect(r.gainsInRedemptionEur).toBe("0");
+  });
+
+  it("en plus-value : les deux lignes coïncident", () => {
+    const r = gainsInPartialRedemption({
+      redemptionEur: "5000",
+      positionValueEur: "100000",
+      costBasisEur: "80000",
+    });
+    expect(r.latentPnlEur).toBe("20000");
+    expect(r.latentGainEur).toBe("20000");
+  });
+
+  it("le P&L signé survit à un refus, comme l'assiette", () => {
+    const r = gainsInPartialRedemption({
+      redemptionEur: "-1",
+      positionValueEur: "90000",
+      costBasisEur: "100000",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.latentPnlEur).toBe("-10000");
+    expect(r.latentGainEur).toBe("0");
+  });
+
+  it("position inconnue : P&L « 0 », pas un négatif inventé", () => {
+    const r = gainsInPartialRedemption({
+      redemptionEur: "1000",
+      positionValueEur: "abc",
+      costBasisEur: "100000",
+    });
+    expect(r.latentPnlEur).toBe("0");
+  });
+});
+
+/* ── ⑤ le plafond d'une quote-part saisie à la main ────────────────── */
+
+describe("clampGainsOverride — borné au gain latent, et dit lequel", () => {
+  /*
+    La mesure. Position à 100 000 € (revient 80 000 → 20 000 € de gain
+    latent), rachat de 60 000 €, quote-part saisie « 50 000 ».
+
+    Avant : le panneau bornait au seul rachat, 50 000 passait, et l'impôt
+    portait sur 30 000 € de gains que le contrat ne détient pas — 7 410 € de
+    trop (PS 17,2 % + PFU 7,5 % sur 30 000).
+  */
+  it("retient 20 000 (le gain latent), pas 50 000", () => {
+    const c = clampGainsOverride({
+      overrideEur: "50000",
+      redemptionEur: 60000,
+      latentGainEur: "20000",
+    });
+    expect(c.gainsEur).toBe("20000");
+    expect(c.requestedEur).toBe("50000");
+    expect(c.clampedBy).toBe("latentGain");
+    expect(c.capEur).toBe("20000");
+  });
+
+  it("borne au rachat quand c'est lui le plus bas, et le nomme", () => {
+    // Rachat 10 000 sur 20 000 de gain latent : la saisie 15 000 dépasse le
+    // retrait lui-même.
+    const c = clampGainsOverride({
+      overrideEur: "15000",
+      redemptionEur: "10000",
+      latentGainEur: "20000",
+    });
+    expect(c.gainsEur).toBe("10000");
+    expect(c.clampedBy).toBe("redemption");
+    expect(c.capEur).toBe("10000");
+  });
+
+  it("laisse passer une saisie sous les deux bornes, sans signal", () => {
+    const c = clampGainsOverride({
+      overrideEur: "5000",
+      redemptionEur: "60000",
+      latentGainEur: "20000",
+    });
+    expect(c.gainsEur).toBe("5000");
+    expect(c.clampedBy).toBe("none");
+    expect(c.capEur).toBe("0");
+  });
+
+  it("encours inconnu (null) : seul le rachat borne — c'est le cas de l'override", () => {
+    // Contrat sans support rattaché : le gain latent n'est pas « 0 », il est
+    // inconnu. Le borner à 0 fermerait la saisie manuelle là où elle sert.
+    const c = clampGainsOverride({
+      overrideEur: "5000",
+      redemptionEur: "10000",
+      latentGainEur: null,
+    });
+    expect(c.gainsEur).toBe("5000");
+    expect(c.clampedBy).toBe("none");
+  });
+
+  it("un gain latent connu et nul borne bien à 0", () => {
+    const c = clampGainsOverride({
+      overrideEur: "5000",
+      redemptionEur: "10000",
+      latentGainEur: "0",
+    });
+    expect(c.gainsEur).toBe("0");
+    expect(c.clampedBy).toBe("latentGain");
+  });
+
+  it("une saisie négative ou illisible vaut 0, sans signal de plafond", () => {
+    expect(clampGainsOverride({ overrideEur: "-3", redemptionEur: 10, latentGainEur: 5 }).gainsEur).toBe("0");
+    const c = clampGainsOverride({ overrideEur: "abc", redemptionEur: 10, latentGainEur: 5 });
+    expect(c.gainsEur).toBe("0");
+    expect(c.clampedBy).toBe("none");
   });
 });
 

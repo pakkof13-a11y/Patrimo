@@ -50,13 +50,29 @@ export type ContractSeries = {
    * couverture dit à l'écran quelle part de l'épargne la courbe décrit
    * réellement — et `0` veut dire qu'il n'y a pas de courbe à montrer.
    *
-   * Le dénominateur mêle deux grandeurs de nature différente : la valeur de
-   * marché des supports couverts et le coût de revient des autres. C'est
-   * assumé — les seconds n'ont aucune valeur connue à cette date, et c'est
-   * précisément ce que ce ratio annonce.
+   * ## Le dénominateur est un encours, pas un mélange
+   *
+   * Il additionne la valeur de marché des supports couverts et la
+   * **valorisation actuelle** des autres — celle que ces supports affichent
+   * partout ailleurs à l'écran (`listSupports.currentValueEur`), donc leur
+   * relevé saisi à la main. Le coût de revient y figurait à leur place, ce qui
+   * faisait deux grandeurs de nature différente sous une même somme : un fonds
+   * euro de 10 000 € versés valant 10 900 € au relevé rendait
+   * 20 000 / 30 000 = 66,67 % de couverture pour un encours réel de 30 900 €,
+   * soit 64,72 %. Le ratio surestimait donc la part décrite par la courbe —
+   * d'autant plus que le hors-mesure a capitalisé.
+   *
+   * Ce que le ratio annonce reste inchangé : la part de l'épargne dont la
+   * courbe décrit l'évolution. Ce qui change est que sa base est l'épargne
+   * telle qu'elle vaut aujourd'hui.
    */
   coveragePct: number;
-  /** Encours couvert par des cours, en euros, au dernier jour de la fenêtre. */
+  /**
+   * Encours couvert par des cours, en euros, au dernier jour **publiable**.
+   *
+   * Pour un contrat, le dernier jour de la fenêtre, ou `0` s'il y est amputé.
+   * Pour le total, le dernier jour complet du total — voir la dérivation.
+   */
   coveredValueEur: number;
   /**
    * Encours sans historique, au **coût de revient** des supports encore
@@ -67,8 +83,25 @@ export type ContractSeries = {
    * Faute d'historique, sa valeur à cette date est inconnue, et l'inventer
    * serait pire que l'assumer. Une position soldée en sort — elle n'a plus
    * rien à couvrir, quel qu'ait été le produit de son rachat.
+   *
+   * Ce montant **ne sert plus de dénominateur** à `coveragePct` : il dit ce qui
+   * a été investi hors mesure, pas ce que cela vaut. Les deux réponses sont
+   * publiées côte à côte.
    */
   uncoveredValueEur: number;
+  /**
+   * Encours sans historique à sa **valorisation actuelle**, en euros.
+   *
+   * La même valeur que l'écran des supports affiche pour ces lignes : quantité
+   * détenue × prix relu par `getHoldings` (relevé manuel, cotation, change).
+   * Le fonds euro de l'exemple ci-dessus entre ici pour 10 900 €, et pour
+   * 10 000 € dans `uncoveredValueEur`.
+   *
+   * Sans aucun prix, `getHoldings` retombe de lui-même sur le coût de revient :
+   * les deux grandeurs coïncident alors, et aucune position ne vaut zéro faute
+   * de cours. Une valeur inconnue n'est jamais nulle.
+   */
+  uncoveredCurrentValueEur: number;
 };
 
 export type LifeInsurancePerformance = {
@@ -215,12 +248,19 @@ export async function getLifeInsurancePerformance(
      * dernier jour de la fenêtre — leur montant investi restant.
      */
     uncoveredBookValue: number;
+    /**
+     * Valorisation **actuelle** de ces mêmes supports — ce qu'ils valent, et
+     * non ce qu'ils ont coûté. C'est la base du taux de couverture : la courbe
+     * décrit une part de l'encours du jour, pas une part des versements.
+     */
+    uncoveredCurrentValue: number;
   };
   const nouveauSeau = (): Bucket => ({
     values: new Map(),
     netFlows: new Map(),
     incompleteDays: new Set(),
     uncoveredBookValue: 0,
+    uncoveredCurrentValue: 0,
   });
 
   /*
@@ -320,12 +360,53 @@ export async function getLifeInsurancePerformance(
   */
   const stateOfLastDay = states.get(lastDay);
   const costOfLastDay = stateOfLastDay?.costBasisByAsset ?? {};
+  /** Supports hors mesure encore détenus, et le seau qui les porte. */
+  const uncoveredHeld: Array<{ assetId: string; bucket: Bucket }> = [];
   for (const [assetId, qty] of Object.entries(
     stateOfLastDay?.quantityByAsset ?? {}
   )) {
     if (qty === 0 || !avAssetIds.has(assetId) || covered.has(assetId)) continue;
     const b = bucketFor(contractByAsset.get(assetId) ?? null);
     b.uncoveredBookValue += costOfLastDay[assetId] ?? 0;
+    uncoveredHeld.push({ assetId, bucket: b });
+  }
+
+  /*
+    Ce que ces supports **valent**, pour le seul taux de couverture.
+
+    La source est `getHoldings`, celle que `listSupports` expose déjà sous
+    `currentValueEur` : quantité détenue × prix relu — relevé manuel, cotation,
+    conversion de devise. Recalculer cette chaîne ici en ferait une seconde,
+    qui finirait par annoncer un encours différent de celui que la liste des
+    supports affiche à trois centimètres de la courbe.
+
+    Import dynamique, comme `listSupports` et `revalueSupport`, et **jamais
+    appelé** quand aucun support hors mesure n'est détenu : c'est le cas d'un
+    contrat entièrement en UC cotées, qui ne doit pas payer les allers-retours
+    du moteur de positions pour un dénominateur vide.
+
+    Cet appel demande les taux de change du jour (`getEurRates`, borné et servi
+    par cache). Il ne collecte aucune cotation et n'écrit rien — la règle T-04
+    porte sur les collecteurs, et le même écran paie déjà cet appel pour sa
+    liste de supports.
+
+    Une position absente du moteur de positions retombe sur son coût de
+    revient : c'est le montant investi, connu et non nul, et non un zéro qui
+    ferait passer la couverture pour totale.
+  */
+  if (uncoveredHeld.length > 0) {
+    const { getHoldings } = await import("../portfolio/service");
+    const holdings = await getHoldings(userId, "EUR");
+    const valueByAsset = new Map(
+      holdings.map((h) => [h.assetId, Number(h.marketValueEur)])
+    );
+    for (const { assetId, bucket } of uncoveredHeld) {
+      const valeur = valueByAsset.get(assetId);
+      bucket.uncoveredCurrentValue +=
+        valeur != null && Number.isFinite(valeur)
+          ? valeur
+          : (costOfLastDay[assetId] ?? 0);
+    }
   }
 
   /*
@@ -335,7 +416,9 @@ export async function getLifeInsurancePerformance(
 
     - les **valeurs** et les **flux** s'additionnent jour par jour ;
     - un jour **incomplet** chez un seul contrat rend le total incomplet ce
-      jour-là : il manque une pièce, le total ne peut pas être publié ;
+      jour-là : il manque une pièce, le total ne peut pas être publié **à cette
+      date**. Ce n'est pas dire qu'il n'a pas de valeur : il en a une au dernier
+      jour complet, et c'est celle-là qu'il publie (voir `dernierJourPubliable`) ;
     - l'**encours non couvert** s'additionne tel quel. C'est une somme de coûts
       de revient de positions détenues : chaque part est positive ou nulle par
       construction, donc le total est la somme de ses parties sans qu'aucun
@@ -357,19 +440,68 @@ export async function getLifeInsurancePerformance(
   }
   for (const b of buckets.values()) {
     total.uncoveredBookValue += b.uncoveredBookValue;
+    total.uncoveredCurrentValue += b.uncoveredCurrentValue;
   }
 
-  const toSeries = (key: string | null, b: Bucket): ContractSeries => {
-    const coveredValueEur = b.incompleteDays.has(lastDay)
-      ? 0
-      : (b.values.get(lastDay) ?? 0);
+  /**
+   * Dernier jour de la fenêtre que ce seau peut publier — `null` s'il n'en a
+   * aucun.
+   *
+   * Le total le cherche en remontant. Un seul contrat troué rend le consolidé
+   * incomplet ce jour-là, et si ce jour était le dernier de la fenêtre, le
+   * total tombait à `0 €` avec une série vide — pendant qu'un autre contrat
+   * avait un historique parfaitement complet et connu, 20 000 € qu'il suffisait
+   * de lire à la veille. Un jour amputé n'est pas une valeur nulle : le total
+   * publie la valeur de son dernier jour complet, et la courbe s'arrête là
+   * plutôt que de continuer sur des jours dont il manque une pièce.
+   *
+   * Aucun jour complet du tout : le comportement d'avant, `0` et pas de
+   * courbe. Il n'y a alors rien à publier, et ce n'est pas un repli.
+   *
+   * ## Ce qui rend un dernier jour incomplet
+   *
+   * `closeAtOrBefore` reportant toute clôture antérieure, un support n'est
+   * amputé un jour donné que s'il est détenu **avant sa première clôture
+   * connue**. Comme le cache ne rend que les clôtures de la fenêtre, dont la
+   * borne haute est le dernier jour, ce cas se situe aujourd'hui en tête de
+   * fenêtre plutôt qu'en queue. La règle posée ici est donc celle de la
+   * dérivation elle-même — le consolidé ne vaut jamais zéro parce qu'une de
+   * ses parties est muette — et non le rattrapage d'un écran observé.
+   */
+  const dernierJourPubliable = (b: Bucket): DayKey | null => {
+    for (let i = days.length - 1; i >= 0; i--) {
+      const day = days[i]!;
+      if (!b.incompleteDays.has(day)) return day;
+    }
+    return null;
+  };
+
+  /**
+   * `refDay` : le jour dont la valeur et la couverture sont publiées.
+   *
+   * Chaque **contrat** garde sa règle propre — le dernier jour de la fenêtre,
+   * ou rien s'il y est amputé. Seule la dérivation du total remonte au dernier
+   * jour complet : un contrat troué aujourd'hui doit le dire, et il le dit en
+   * ne publiant pas ; c'est le consolidé, lui, qui a autre chose à publier.
+   */
+  const toSeries = (
+    key: string | null,
+    b: Bucket,
+    refDay: DayKey | null
+  ): ContractSeries => {
+    const coveredValueEur = refDay == null ? 0 : (b.values.get(refDay) ?? 0);
     const uncoveredValueEur = b.uncoveredBookValue;
-    const base = coveredValueEur + uncoveredValueEur;
+    const uncoveredCurrentValueEur = b.uncoveredCurrentValue;
+    // Un encours contre un encours : valeur de marché des supports couverts,
+    // valorisation actuelle des autres. Le coût de revient reste publié, il
+    // n'entre simplement plus dans ce ratio.
+    const base = coveredValueEur + uncoveredCurrentValueEur;
     const coveragePct = base > 0 ? (coveredValueEur / base) * 100 : 0;
 
-    // Aucune couverture : il n'y a pas de courbe plate à montrer, il n'y a pas
-    // de courbe. Rendre une série à 0 % laisserait croire à un contrat inerte.
-    if (coveredValueEur <= 0) {
+    // Aucun jour publiable, ou aucune couverture : il n'y a pas de courbe
+    // plate à montrer, il n'y a pas de courbe. Rendre une série à 0 %
+    // laisserait croire à un contrat inerte.
+    if (refDay == null || coveredValueEur <= 0) {
       return {
         lifeInsuranceId: key,
         points: [],
@@ -378,14 +510,17 @@ export async function getLifeInsurancePerformance(
         coveragePct: 0,
         coveredValueEur: 0,
         uncoveredValueEur,
+        uncoveredCurrentValueEur,
       };
     }
 
     const points = buildPerformanceSeries(
       days
         // Un jour incomplet n'a pas de valeur publiable : il sort de la série
-        // plutôt que d'y entrer amputé.
-        .filter((day) => !b.incompleteDays.has(day))
+        // plutôt que d'y entrer amputé. La série s'arrête au jour publié :
+        // au-delà, il n'y a que des jours amputés — les prolonger ferait
+        // finir la courbe sur une valeur que le total ne reconnaît pas.
+        .filter((day) => day <= refDay && !b.incompleteDays.has(day))
         .map((day) => ({
           day,
           valueEur: b.values.get(day) ?? 0,
@@ -406,6 +541,7 @@ export async function getLifeInsurancePerformance(
       coveragePct,
       coveredValueEur,
       uncoveredValueEur,
+      uncoveredCurrentValueEur,
     };
   };
 
@@ -413,10 +549,12 @@ export async function getLifeInsurancePerformance(
     range,
     fromDay,
     toDay,
-    total: toSeries(null, total),
+    total: toSeries(null, total, dernierJourPubliable(total)),
     byContract: [...buckets.entries()]
       .filter(([key]) => key !== null)
-      .map(([key, b]) => toSeries(key, b)),
+      .map(([key, b]) =>
+        toSeries(key, b, b.incompleteDays.has(lastDay) ? null : lastDay)
+      ),
   };
 }
 
@@ -433,6 +571,7 @@ function emptyResult(range: PerfRange, toDay: DayKey): LifeInsurancePerformance 
       coveragePct: 0,
       coveredValueEur: 0,
       uncoveredValueEur: 0,
+      uncoveredCurrentValueEur: 0,
     },
     byContract: [],
   };

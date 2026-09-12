@@ -93,10 +93,13 @@ function dec(raw?: string | null): Prisma.Decimal | null {
  * éviter de rendre `rates` nullable sur un chemin où rien ne se convertit.
  * Surtout : elle ne doit **jamais** partir vers `getHoldings`, qui valorise
  * tous les actifs de l'utilisateur et lèverait sur le premier en devise.
+ *
+ * Exportée pour `coupon-schedule.ts`, qui écrit lui aussi une saisie en euros
+ * dans une transaction en devise.
  */
-const RATES_EUR_ONLY: Record<string, number> = { EUR: 1 };
+export const RATES_EUR_ONLY: Record<string, number> = { EUR: 1 };
 
-type WriteFx = {
+export type WriteFx = {
   /** Un montant saisi en euros, exprimé dans la devise de l'actif. */
   toNative: (amountEur: Prisma.Decimal) => Prisma.Decimal;
   /** `Transaction.fxRateToEur` : ce que vaut une unité de devise en euros. */
@@ -142,8 +145,16 @@ type WriteFx = {
  * même écriture (`AccountingError("FX_RATE_UNKNOWN")`), et `clientErrorStatus`
  * ne connaît que 400 et 500 : un 500 annoncerait une panne là où la saisie est
  * simplement hors du périmètre couvert.
+ *
+ * ## Un seul endroit, deux appelants
+ *
+ * `coupon-schedule.ts` porte le même défaut sur la même écriture — un montant
+ * de coupon saisi en euros, posé dans une transaction en devise. Il importe
+ * cette fonction plutôt que d'en recopier une jumelle : deux copies auraient
+ * fini par arrondir le taux différemment, et c'est exactement l'écart qui
+ * s'affiche en plus-value.
  */
-function writeFx(currency: string, rates: Record<string, number>): WriteFx {
+export function writeFx(currency: string, rates: Record<string, number>): WriteFx {
   const cur = (currency || "EUR").toUpperCase();
   if (cur === "EUR") {
     return { toNative: (amountEur) => amountEur, fxRateToEur: "1" };
