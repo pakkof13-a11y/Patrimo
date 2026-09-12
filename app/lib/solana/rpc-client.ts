@@ -201,6 +201,13 @@ export async function rpcGetBalance(address: string): Promise<number> {
 
 /**
  * Token accounts — séquentiel (Tokenkeg puis Token-2022), pas en parallèle.
+ *
+ * Un échec RPC après épuisement des retries lève `SolanaRpcError` et n'est pas
+ * rattrapé ici : une liste vide signifierait « ce wallet ne détient aucun
+ * SPL », alors que la vérité est « on n'a pas pu lire ». Le repli précédent
+ * faisait disparaître tous les tokens du snapshot (SOL seul), y compris dans
+ * la réconciliation ledger. L'appelant (`fetchWalletBalanceSnapshot`) laisse
+ * remonter, et la route wallet traduit le code en 429 / 502.
  */
 export async function rpcGetTokenAccountsByOwner(address: string) {
   const conn = getSolanaConnection();
@@ -214,14 +221,14 @@ export async function rpcGetTokenAccountsByOwner(address: string) {
 
   const classic = await withRpcRetry("getTokenAccountsByOwner(SPL)", () =>
     conn.getParsedTokenAccountsByOwner(pk, { programId: TOKEN_PROGRAM }, COMMITMENT)
-  ).catch(() => ({ value: [] as never[] }));
+  );
 
   // Petite pause avant le 2e programme
   await sleep(Math.min(400, minIntervalMs()));
 
   const t22 = await withRpcRetry("getTokenAccountsByOwner(Token2022)", () =>
     conn.getParsedTokenAccountsByOwner(pk, { programId: TOKEN_2022 }, COMMITMENT)
-  ).catch(() => ({ value: [] as never[] }));
+  );
 
   return [...(classic.value || []), ...(t22.value || [])];
 }

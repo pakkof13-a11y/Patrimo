@@ -10,7 +10,7 @@
 
 import { prisma } from "../prisma";
 import { d } from "../money/decimal";
-import type { FuturesImportRow } from "./futures-csv";
+import { parseFuturesTimestamp, type FuturesImportRow } from "./futures-csv";
 import type { FuturesImportExchange } from "./futures-constants";
 import { realizedNetPnl } from "./futures";
 
@@ -59,9 +59,14 @@ export async function applyFuturesImport(
           })
         : null;
 
-      const closedAt = row.closedAt ? new Date(row.closedAt) : null;
-      const openedAt =
-        closedAt && !Number.isNaN(closedAt.getTime()) ? closedAt : new Date();
+      /*
+        `new Date(row.closedAt)` lisait un epoch millisecondes en chaîne comme
+        une date invalide (repli sur « maintenant ») et une chaîne sans fuseau
+        en heure locale du serveur. `parseFuturesTimestamp` tranche les deux et
+        ne rend que des instants réellement lus, ou null.
+      */
+      const closedAt = parseFuturesTimestamp(row.closedAt);
+      const openedAt = closedAt ?? new Date();
 
       const data = {
         exchange,
@@ -85,8 +90,7 @@ export async function applyFuturesImport(
         commissionPaid: row.commissionPaid ?? null,
         isOpen: !isClosed,
         openedAt,
-        closedAt:
-          isClosed && closedAt && !Number.isNaN(closedAt.getTime()) ? closedAt : null,
+        closedAt: isClosed ? closedAt : null,
       };
 
       const existing = await prisma.tradingPosition.findUnique({

@@ -19,6 +19,7 @@
 
 import { d } from "@/app/lib/money/decimal";
 import { normalizeHeader, parseCsv } from "@/app/lib/import/csv-parse";
+import { parseDate } from "@/app/lib/import/normalize";
 import type { FuturesImportExchange } from "./futures-constants";
 
 export type FuturesImportRow = {
@@ -33,6 +34,7 @@ export type FuturesImportRow = {
   realizedPnl: string | null;
   fundingPaid: string | null;
   commissionPaid: string | null;
+  /** Instant de clôture en ISO 8601 UTC (`…Z`), déjà désambiguïsé. */
   closedAt: string | null;
 };
 
@@ -77,6 +79,60 @@ function toNumberString(raw: string | null): string | null {
   if (!cleaned) return null;
   const n = d(cleaned);
   return n.isFinite() ? n.toString() : null;
+}
+
+/** Fuseau explicite en fin de chaîne : « Z », « +02:00 », « UTC », « GMT ». */
+const EXPLICIT_ZONE = /(?:[zZ]|[+-]\d{2}:?\d{2}|\s(?:UTC|GMT))\s*$/;
+
+/** « 2024-03-15 », « 2024-03-15 12:30:45 », « 2024-03-15T12:30 » — sans fuseau. */
+const NAIVE_ISO =
+  /^(\d{4}-\d{2}-\d{2})(?:[ T,]\s*(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?)?$/;
+
+/**
+ * Horodatage d'un relevé futures → instant. Deux pièges propres à ces exports :
+ *
+ *  - Binance et Bybit datent souvent en **epoch millisecondes** transmis comme
+ *    chaîne (« 1710505845000 ») : `new Date("1710505845000")` ne parse pas, et
+ *    le repli datait le trade d'aujourd'hui — un trade de 2024 entrait en 2026.
+ *    `parseDate` sait déjà lire un epoch secondes ou millisecondes.
+ *  - « 2024-03-15 12:30:45 » n'a pas de fuseau : le moteur le lit en heure
+ *    locale du serveur. Les trois exchanges horodatent en UTC (la colonne
+ *    Binance s'appelle même `Date(UTC)`) → on ancre explicitement en UTC,
+ *    sinon le fuseau du serveur déplace le trade d'un jour.
+ *
+ * Renvoie `null` quand la date n'est pas lisible : pas de date inventée.
+ */
+export function parseFuturesTimestamp(
+  raw: string | null | undefined
+): Date | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  // Epoch secondes ou millisecondes donné comme chaîne.
+  if (/^\d{10,13}$/.test(s)) return parseDate(s);
+
+  // Fuseau explicite : la chaîne se suffit à elle-même.
+  if (EXPLICIT_ZONE.test(s)) return parseDate(s);
+
+  const iso = s.match(NAIVE_ISO);
+  if (iso) {
+    const [, day, hour, min, sec] = iso;
+    // Date seule : `new Date("2024-03-15")` est déjà minuit UTC.
+    if (!hour) return parseDate(day!);
+    return parseDate(
+      `${day}T${hour.padStart(2, "0")}:${min}:${sec ?? "00"}Z`
+    );
+  }
+
+  /*
+    Autres formats sans fuseau (JJ/MM/AAAA hh:mm, « 15 Mar 2024 »…) :
+    `parseDate` construit ces cadrans en heure locale. On réancre le même
+    cadran en UTC plutôt que de réécrire ces formats ici.
+  */
+  const wall = parseDate(s);
+  if (!wall) return null;
+  return new Date(wall.getTime() - wall.getTimezoneOffset() * 60_000);
 }
 
 /**
@@ -196,7 +252,9 @@ export function parseFuturesCsv(
       realizedPnl: toNumberString(pick(raw, aliasMap, cols.pnl)),
       fundingPaid: toNumberString(pick(raw, aliasMap, cols.funding)),
       commissionPaid: toNumberString(pick(raw, aliasMap, cols.commission)),
-      closedAt: pick(raw, aliasMap, cols.closedAt),
+      closedAt:
+        parseFuturesTimestamp(pick(raw, aliasMap, cols.closedAt))?.toISOString() ??
+        null,
     });
   });
 

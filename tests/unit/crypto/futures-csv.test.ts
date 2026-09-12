@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseFuturesCsv } from "@/app/lib/crypto/futures-csv";
+import {
+  parseFuturesCsv,
+  parseFuturesTimestamp,
+} from "@/app/lib/crypto/futures-csv";
 
 describe("parseFuturesCsv — Binance", () => {
   it("reconnaît un export de trade history clôturé", () => {
@@ -77,6 +80,23 @@ describe("parseFuturesCsv — tolérance aux lignes incomplètes", () => {
     expect(res.errors.length).toBeGreaterThan(0);
   });
 
+  it("date un trade daté en epoch millisecondes sur son année réelle, pas aujourd'hui", () => {
+    // 1710505845000 = 2024-03-15T12:30:45Z
+    const csv =
+      "Order Id,Date,Symbol,Side,Quantity,Price,Closing Price\n" +
+      "888,1710505845000,BTCUSDT,BUY,0.5,60000,66000\n";
+    const res = parseFuturesCsv(csv, "BINANCE");
+    expect(res.rows[0]?.closedAt).toBe("2024-03-15T12:30:45.000Z");
+  });
+
+  it("ancre en UTC une date sans fuseau, quel que soit le fuseau du serveur", () => {
+    const csv =
+      "Order No,Contracts,Direction,Qty,Avg Entry Price,Avg Exit Price,Closed Time\n" +
+      "abc,ETHUSDT,Short,1,3000,2800,2024-03-15 12:30:45\n";
+    const res = parseFuturesCsv(csv, "BYBIT");
+    expect(res.rows[0]?.closedAt).toBe("2024-03-15T12:30:45.000Z");
+  });
+
   it("accepte les nombres au format français (virgule décimale)", () => {
     const csv =
       "Date,Symbol,Side,Quantity,Price,OrderId,Realized Profit\n" +
@@ -86,5 +106,47 @@ describe("parseFuturesCsv — tolérance aux lignes incomplètes", () => {
     expect(res.rows[0]?.sizeContracts).toBe("1.5");
     expect(res.rows[0]?.entryPrice).toBe("60000.5");
     expect(res.rows[0]?.realizedPnl).toBe("250.75");
+  });
+});
+
+describe("parseFuturesTimestamp", () => {
+  it("lit un epoch millisecondes donné en chaîne (2024, pas l'année courante)", () => {
+    const d = parseFuturesTimestamp("1710505845000");
+    expect(d?.getUTCFullYear()).toBe(2024);
+    expect(d?.toISOString()).toBe("2024-03-15T12:30:45.000Z");
+  });
+
+  it("lit un epoch secondes donné en chaîne", () => {
+    expect(parseFuturesTimestamp("1710505845")?.toISOString()).toBe(
+      "2024-03-15T12:30:45.000Z"
+    );
+  });
+
+  it("respecte un fuseau explicite au lieu de le réécrire", () => {
+    expect(parseFuturesTimestamp("2024-03-15T12:30:45+02:00")?.toISOString()).toBe(
+      "2024-03-15T10:30:45.000Z"
+    );
+    expect(parseFuturesTimestamp("2024-03-15 12:30:45 UTC")?.toISOString()).toBe(
+      "2024-03-15T12:30:45.000Z"
+    );
+  });
+
+  it("ancre en UTC une date seule et une date-heure sans fuseau", () => {
+    expect(parseFuturesTimestamp("2024-03-15")?.toISOString()).toBe(
+      "2024-03-15T00:00:00.000Z"
+    );
+    expect(parseFuturesTimestamp("2024-03-15 09:05")?.toISOString()).toBe(
+      "2024-03-15T09:05:00.000Z"
+    );
+    // JJ/MM/AAAA (export FR) : même cadran, ancré UTC
+    expect(parseFuturesTimestamp("15/03/2024 09:05:00")?.toISOString()).toBe(
+      "2024-03-15T09:05:00.000Z"
+    );
+  });
+
+  it("ne fabrique aucune date quand la valeur est illisible", () => {
+    expect(parseFuturesTimestamp("")).toBeNull();
+    expect(parseFuturesTimestamp(null)).toBeNull();
+    expect(parseFuturesTimestamp("clôturé")).toBeNull();
   });
 });
