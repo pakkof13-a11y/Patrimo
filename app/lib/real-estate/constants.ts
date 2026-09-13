@@ -453,3 +453,23 @@ export const RISK_TYPES = {
 } as const;
 
 export type RiskTypeKey = keyof typeof RISK_TYPES;
+
+/**
+ * Décide si un déclenchement d'estimation DVF peut s'écrire directement.
+ *
+ * Le garde-fou qui protège une valeur saisie (voir `valuation.ts`) ne vit pas
+ * seulement côté serveur : l'appelant doit encore choisir le bon `apply`. Un
+ * écran qui forcerait toujours `apply: true` — y compris sur un bien en mode
+ * manuel — contournerait la protection tout en continuant d'afficher "valeur
+ * saisie, non écrasée". Cette fonction centralise la décision : un bien
+ * manuel ne reçoit qu'une proposition (`apply: false`, rien n'est écrit).
+ *
+ * Vit ici (module sans aucun import) et pas dans `valuation.ts` : ce fichier
+ * importe `prisma` au niveau module — un composant client qui l'importerait
+ * pour cette seule fonction pure embarquerait tout le graphe serveur (Prisma,
+ * `node:module`) dans le bundle navigateur. C'est exactement ce qui a fait
+ * échouer le build (`app/[[...slug]]/layout.tsx`, chunk client).
+ */
+export function canApplyDvfEstimateDirectly(valuationMode: string): boolean {
+  return valuationMode === "DVF_AUTO";
+}
