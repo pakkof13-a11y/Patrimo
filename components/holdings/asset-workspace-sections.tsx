@@ -349,12 +349,26 @@ function Overview({
         <Row
           label="Cours actuel"
           value={
-            asset.priceQuote
-              ? formatUnitPrice(
+            asset.priceQuote ? (
+              <>
+                {formatUnitPrice(
                   num(asset.priceQuote.priceNative),
                   asset.priceQuote.nativeCurrency
-                )
-              : "—"
+                )}
+                {/*
+                  Même garde que la colonne « Cours » du tableau : un cours
+                  périmé affiché sans indication se lit comme une clôture du
+                  jour, ce qu'il n'est pas.
+                */}
+                {asset.priceQuote.status === "STALE" && (
+                  <span className="ml-1 block text-[10px] font-normal tracking-wide text-amber-500">
+                    cours périmé
+                  </span>
+                )}
+              </>
+            ) : (
+              "—"
+            )
           }
         />
         <Row
@@ -466,9 +480,18 @@ function Overview({
         <Row
           label="Cours mis à jour"
           value={
-            asset.priceQuote
-              ? formatRelativeUpdate(asset.priceQuote.lastUpdatedAt)
-              : "—"
+            asset.priceQuote ? (
+              <>
+                {formatRelativeUpdate(asset.priceQuote.lastUpdatedAt)}
+                {asset.priceQuote.status === "STALE" && (
+                  <span className="ml-1 block text-[10px] font-normal tracking-wide text-amber-500">
+                    prix périmé
+                  </span>
+                )}
+              </>
+            ) : (
+              "—"
+            )
           }
         />
         <Row

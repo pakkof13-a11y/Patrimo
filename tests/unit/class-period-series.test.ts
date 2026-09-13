@@ -29,6 +29,10 @@ describe("buildClassPeriodSeries", () => {
     expect(actions.pnl).toBe(20);
     // 20 € gagnés sur 1 000 € engagés.
     expect(actions.pct).toBeCloseTo(2, 6);
+    // `value` est un niveau — la valeur de marché elle-même, jamais remise à
+    // zéro. C'est cette série que trace la vignette de l'en-tête de groupe,
+    // pas `cumulative`.
+    expect(actions.value).toEqual([1000, 1050, 1020]);
   });
 
   it("ne compte pas un versement comme un gain", () => {
@@ -46,6 +50,10 @@ describe("buildClassPeriodSeries", () => {
     expect(crypto.cumulative).toEqual([0, 0, 0]);
     expect(crypto.pnl).toBe(0);
     expect(crypto.pct).toBe(0);
+    // `value`, lui, suit bien le versement — c'est un niveau de valeur de
+    // marché, pas une performance : la vignette de l'en-tête de groupe est
+    // censée bouger avec un apport, exactement comme `totalMarketValue`.
+    expect(crypto.value).toEqual([1000, 2000, 2000]);
   });
 
   it("rapporte le gain au capital engagé, apport de mi-période compris", () => {
@@ -90,6 +98,7 @@ describe("buildClassPeriodSeries", () => {
     const immo = series.get("IMMOBILIER")!;
     expect(immo.cumulative).toEqual([0, 0, 0]);
     expect(immo.pct).toBe(0);
+    expect(immo.value).toEqual([300000, 300000, 300000]);
   });
 
   it("ignore une classe absente de toute la fenêtre", () => {

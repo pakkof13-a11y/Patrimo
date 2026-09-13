@@ -1330,20 +1330,31 @@ export function HoldingsSection({
       }
     }
 
-    /*
-      Performance de la période, et non valeur de marché : la courbe montait
-      d'un cran le jour d'un achat, si bien qu'un versement s'y lisait comme un
-      gain. Le P&L cumulé neutralise les flux — la ligne ne bouge que sous
-      l'effet des cours, et son point d'arrivée est le chiffre affiché à côté.
-    */
     const performance = buildClassPeriodSeries(points);
 
+    /*
+      La vignette de l'en-tête de groupe trace `perf.value` — la valeur de
+      marché de la classe, jour par jour — et non `perf.cumulative` (le P&L
+      cumulé, qui part toujours de 0). Les lignes d'actifs qu'un groupe coiffe
+      tracent, elles, une valeur de niveau (voir la colonne « Valeur ») : une
+      performance cumulée et un niveau de valeur ne partagent pas la même
+      échelle visuelle, et la courbe de catégorie se lisait comme « plus
+      basse » que ses propres lignes pour cette seule raison — même fenêtre,
+      même absence d'axe partagé, mais pas la même grandeur.
+
+      `periodPnl` / `periodPct`, eux, restent lus depuis `perf.pnl` / `perf.pct`
+      (le P&L cumulé de la fenêtre) : c'est un chiffre de performance à 30
+      jours, affiché à côté de la vignette mais plus à son point d'arrivée
+      littéral — comme la colonne « Variation » d'une ligne d'actif, qui ne
+      prétend pas non plus être l'arrivée de sa propre vignette de tendance
+      (prix bruts).
+    */
     const values = new Map<string, number[]>();
     const periodPnl = new Map<string, number>();
     const periodPct = new Map<string, number | null>();
     for (const [rawClass, perf] of performance) {
       const cls = parseAssetClass(rawClass);
-      values.set(cls, perf.cumulative);
+      values.set(cls, perf.value);
       periodPnl.set(cls, perf.pnl);
       periodPct.set(cls, perf.pct);
     }

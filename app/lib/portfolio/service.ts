@@ -1,5 +1,5 @@
 import { prisma } from "../prisma";
-import { d, max, toFixed, zero } from "../money/decimal";
+import { d, max, toFixed, zero, type Decimal } from "../money/decimal";
 import {
   replayTransactions,
   totalRealizedPnl,
@@ -37,6 +37,7 @@ import { asAccountType } from "../types/account-type";
 import { remainingAmountAt } from "../liabilities/amortization";
 import {
   allocationAssetClass,
+  classifyHolding,
   computePatrimonyMetrics,
   formatPatrimonyPocketTable,
   serializePatrimonyMetrics,
@@ -914,13 +915,48 @@ export async function loadHoldingClassificationFlags(userId: string): Promise<{
   };
 }
 
-export async function getLiabilitiesTotalEur(
+export type LiabilityTotalsEur = {
+  /** Tous les passifs de l'utilisateur, capital dû projeté à aujourd'hui. */
+  totalEur: Decimal;
+  /**
+   * La part adossée à un bien de la poche `immobilier`.
+   *
+   * L'attribution suit le lien `Liability.assetId` et la classification de
+   * l'actif pointé (`classifyHolding`), pas `Liability.category` : un libellé
+   * « IMMOBILIER » posé sur un prêt sans bien ne dit pas quel bien il porte, et
+   * l'« Immobilier net » a besoin de le savoir pour ne retrancher que ce qui
+   * pèse sur ces biens-là.
+   *
+   * Un prêt immobilier non rattaché reste donc hors de cette part : il pèse sur
+   * le patrimoine net, sans rendre l'immobilier plus endetté qu'on ne peut le
+   * démontrer. C'est ce que fait déjà la page Immobilier, qui somme les prêts
+   * de chaque bien (`real-estate/property-views.ts`) — les deux écrans lisent
+   * enfin la même dette.
+   */
+  realEstateBackedEur: Decimal;
+};
+
+export async function getLiabilityTotalsEur(
   userId: string,
   rates?: Record<string, number>
-) {
+): Promise<LiabilityTotalsEur> {
   const fx = rates ?? (await getEurRates());
-  const items = await prisma.liability.findMany({ where: { userId } });
+  const items = await prisma.liability.findMany({
+    where: { userId },
+    include: {
+      asset: {
+        select: {
+          id: true,
+          assetClass: true,
+          accountType: true,
+          realEstate: { select: { assetId: true } },
+          indirectRealEstate: { select: { assetId: true } },
+        },
+      },
+    },
+  });
   let total = zero();
+  let realEstateBacked = zero();
   for (const l of items) {
     /*
       Capital dû à aujourd'hui, mensualités en retard comprises.
@@ -932,9 +968,22 @@ export async function getLiabilitiesTotalEur(
       livrets quelques lignes plus haut dans le cash.
     */
     const remaining = remainingAmountAt(l);
-    total = total.plus(d(convertToEurSync(remaining, l.currency, fx)));
+    const eur = d(convertToEurSync(remaining, l.currency, fx));
+    total = total.plus(eur);
+
+    const a = l.asset;
+    if (!a) continue;
+    const pocket = classifyHolding({
+      id: a.id,
+      assetClass: a.assetClass,
+      accountType: a.accountType,
+      marketValueEur: 0,
+      hasRealEstateDetail: a.realEstate != null,
+      hasIndirectRealEstateDetail: a.indirectRealEstate != null,
+    });
+    if (pocket === "immobilier") realEstateBacked = realEstateBacked.plus(eur);
   }
-  return total;
+  return { totalEur: total, realEstateBackedEur: realEstateBacked };
 }
 
 /** Single-pass summary — no double ledger/holdings loads */
@@ -953,7 +1002,7 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
   const [
     holdings,
     platforms,
-    liabilitiesEur,
+    liabilities,
     explicitCash,
     alternatives,
     es,
@@ -962,7 +1011,7 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
   ] = await Promise.all([
       getHoldings(userId, base, rates),
       getPlatformCashBalances(userId, base, rates, ledger),
-      getLiabilitiesTotalEur(userId, rates),
+      getLiabilityTotalsEur(userId, rates),
       getExplicitCashTotalEur(userId),
       /*
         Pas de rattrapage : ce `.catch` rendait un compartiment entièrement à
@@ -1022,7 +1071,21 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     cash: { total: cash },
     alternatives: alternativesEur,
     employeeSavings: { total: es.totalEur, esLiquid: es.esLiquidEur },
-    liabilities: liabilitiesEur,
+    /*
+      Les passifs **et** leur part immobilière.
+
+      `net` retranche toujours le total : rien n'a changé de ce côté. Ce qui
+      s'ajoute est l'attribution, sans laquelle « Immobilier net » ne pouvait
+      être reconstitué que par `immobilier − passifs` — c'est-à-dire en faisant
+      porter aux biens toute dette du patrimoine. Mesuré sur le compte de
+      démonstration (2026-09-13) : 6 200 € de crédit auto retranchés de
+      l'immobilier, quand la page Immobilier annonçait 515 363,34 € d'equity et
+      le tableau de bord 509 163,34 € pour la même poche.
+    */
+    liabilities: {
+      total: liabilities.totalEur,
+      realEstateBacked: liabilities.realEstateBackedEur,
+    },
   });
   if (process.env.PATRIMONY_METRICS_DEBUG === "1") {
     console.info(formatPatrimonyPocketTable(metrics));
@@ -1062,6 +1125,24 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     totalEmployeeSavingsBase: toBase(employeeSavingsEur),
     totalRealEstateEur: toFixed(realEstateEur, 8),
     totalRealEstateBase: toBase(realEstateEur),
+    /*
+      Immobilier net, servi plutôt que recomposé.
+
+      Un consommateur qui veut « Immobilier net » n'a plus à soustraire
+      `totalLiabilitiesEur` de la valeur des biens : cette soustraction fait
+      porter aux biens les dettes qui ne les financent pas (crédit auto,
+      consommation). Les deux champs ci-dessous portent la dette réellement
+      adossée et le net qui en découle — même grandeur que l'« Equity » de la
+      page Immobilier.
+
+      `totalRealEstateEur` reste la valeur **brute** : rien n'est retiré au
+      champ existant, pour que les totaux déjà en place (brut, allocation) ne
+      changent pas de définition.
+    */
+    realEstateLiabilitiesEur: toFixed(metrics.liabilitiesRealEstate, 8),
+    realEstateLiabilitiesBase: toBase(metrics.liabilitiesRealEstate),
+    totalRealEstateNetEur: toFixed(metrics.immobilierNet, 8),
+    totalRealEstateNetBase: toBase(metrics.immobilierNet),
     totalLifeInsuranceEur: toFixed(lifeInsuranceEur, 8),
     totalLifeInsuranceBase: toBase(lifeInsuranceEur),
     /** Listed du contrat : ACTIONS + OBLIGATIONS + CRYPTO, hors IMMO/AV. */
@@ -1106,7 +1187,7 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     portfolioPlusCashEur: toFixed(totalAssets, 8),
     totalGrossAssetsEur: toFixed(totalAssets, 8),
     totalGrossAssetsBase: toBase(totalAssets),
-    totalLiabilitiesEur: toFixed(liabilitiesEur, 8),
+    totalLiabilitiesEur: toFixed(liabilities.totalEur, 8),
     netWorthEur: toFixed(netWorth, 8),
     unrealizedPnlEur: toFixed(unrealized, 8),
     realizedPnlEur: toFixed(realized, 8),
@@ -1115,7 +1196,7 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     totalMarketValueBase: toBase(marketValue),
     totalCostBasisBase: toBase(costBasis),
     totalCashBase: toBase(cash),
-    totalLiabilitiesBase: toBase(liabilitiesEur),
+    totalLiabilitiesBase: toBase(liabilities.totalEur),
     netWorthBase: toBase(netWorth),
     unrealizedPnlBase: toBase(unrealized),
     realizedPnlBase: toBase(realized),
