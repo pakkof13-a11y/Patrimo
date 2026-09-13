@@ -6,7 +6,11 @@ import { d, type Decimal } from "@/app/lib/money/decimal";
 import { convertToEurSync, getEurRates } from "@/app/lib/market/fx";
 import { listTradingAccounts } from "@/app/lib/trading/account-service";
 import { computeTradingAnalytics } from "@/app/lib/trading/analytics";
-import { toFuturesView, type FuturesDirection } from "@/app/lib/crypto/futures";
+import {
+  deductibleCostsOf,
+  toFuturesView,
+  type FuturesDirection,
+} from "@/app/lib/crypto/futures";
 import {
   compareTradingTax,
   computeTradingYear,
@@ -87,8 +91,21 @@ export async function GET(req: Request) {
       }))
     );
 
-    // Résultat par exercice, frais de financement et commissions déduits —
-    // ils diminuent bien le résultat imposable.
+    /*
+      Résultat par exercice, frais de financement et commissions déduits —
+      ils diminuent bien le résultat imposable.
+
+      Les frais passent par `deductibleCostsOf`, la même définition que
+      `realizedNetPnl` et `closedNetPnl` : funding **signé** (positif = payé,
+      négatif = perçu) plus commission en valeur absolue (cf. le bloc
+      « Convention de signe » de `app/lib/crypto/futures.ts`). Sommer le
+      funding signé ici pendant que l'écran en prenait la valeur absolue
+      écartait l'assiette imposable du net affiché de 2 × funding.
+
+      Un total de frais négatif est possible et correct : un funding perçu
+      supérieur aux commissions augmente le résultat de l'exercice —
+      `computeTradingYear` soustrait ce total tel quel.
+    */
     type YearBucket = ReturnType<typeof emptyBucket>;
     const byYear = new Map<number, YearBucket>();
 
@@ -99,9 +116,14 @@ export async function GET(req: Request) {
       const bucket = byYear.get(closedYear) ?? emptyBucket();
       if (pnl.gt(0)) bucket.gains = bucket.gains.plus(pnl);
       else if (pnl.lt(0)) bucket.losses = bucket.losses.plus(pnl.abs());
-      bucket.fees = bucket.fees
-        .plus(d(p.fundingPaid?.toString() ?? "0"))
-        .plus(d(p.commissionPaid?.toString() ?? "0"));
+      bucket.fees = bucket.fees.plus(
+        deductibleCostsOf({
+          fundingPaid: p.fundingPaid ? d(p.fundingPaid.toString()) : null,
+          commissionPaid: p.commissionPaid
+            ? d(p.commissionPaid.toString())
+            : null,
+        })
+      );
       byYear.set(closedYear, bucket);
     }
 

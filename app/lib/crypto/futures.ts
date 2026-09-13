@@ -143,6 +143,13 @@ export function isLiquidationAlert(distancePct: number | null): boolean {
   return distancePct != null && distancePct < LIQUIDATION_ALERT_DISTANCE_PCT;
 }
 
+/**
+ * L'alerte se déclenche sur l'**ampleur** du funding, payé comme perçu : c'est
+ * un flux qui pèse sur la marge dans les deux sens. L'`abs()` est donc
+ * volontaire ici, et ne contredit pas la convention signée de `fundingPaid`
+ * (cf. bloc « Convention de signe » plus bas) : on mesure un poids, pas un
+ * résultat.
+ */
 export function isFundingAlert(
   fundingPaid: Decimal | null,
   marginUsed: Decimal | null
@@ -286,16 +293,60 @@ export function summarizeFutures(positions: FuturesPositionInput[]): FuturesSumm
   };
 }
 
-/** P&L net d'une position clôturée : réalisé, funding et commissions inclus. */
+/**
+ * ═══ Convention de signe de `fundingPaid` / `commissionPaid` ══════════════
+ *
+ * **Source de vérité du dépôt.** Les trois lecteurs de ces deux colonnes
+ * (`realizedNetPnl` ici, `closedNetPnl` dans `trading/positions-view.ts`,
+ * bucket fiscal de `app/api/trading/route.ts`) doivent tous passer par
+ * `deductibleCostsOf`, et l'import CSV (`futures-csv.ts`) normalise le signe
+ * de l'exchange vers cette convention. Cf. aussi `prisma/schema.prisma`,
+ * modèle `TradingPosition`.
+ *
+ * - `fundingPaid` est **signé** : **positif = funding payé** (une charge),
+ *   **négatif = funding perçu** (un produit). Un perpétuel fait circuler le
+ *   funding dans les deux sens selon le sens de la position et le signe du
+ *   taux — le prendre en valeur absolue transformait un encaissement réel en
+ *   charge, et le même fait économique devenait un produit à l'écran et une
+ *   charge au fiscal (écart de 2 × funding).
+ * - `commissionPaid` est **toujours ≥ 0** : une commission n'est jamais
+ *   encaissée. L'`abs()` reste donc appliqué à elle seule, comme garde-fou —
+ *   les lignes importées avant cette normalisation et l'API de saisie
+ *   manuelle (`decimalString`, qui accepte un négatif) peuvent encore porter
+ *   une commission négative, qui est un signe de cash-flow, pas un produit.
+ *
+ * Funding et commission ne sont **pas** de la variation de marché : ils ne se
+ * mêlent jamais au P&L latent ni au `realizedPnl` stocké (brut, cf. FIN-03) —
+ * ils sont déduits une seule fois, à la lecture, par la formule ci-dessous.
+ */
+
+/**
+ * Coûts déductibles d'une position : funding signé + commission (≥ 0).
+ *
+ * Une seule définition pour les trois lecteurs — l'écran et le fiscal doivent
+ * retenir le même montant. Un résultat **négatif** est possible et légitime :
+ * un funding perçu supérieur aux commissions est un produit net.
+ */
+export function deductibleCostsOf(input: {
+  fundingPaid: Decimal | null;
+  commissionPaid: Decimal | null;
+}): Decimal {
+  const funding = input.fundingPaid ?? d(0);
+  const commission = input.commissionPaid ?? d(0);
+  return funding.plus(commission.abs());
+}
+
+/**
+ * P&L net d'une position clôturée : réalisé moins les coûts déductibles.
+ *
+ * `net = realized − fundingPaid(signé) − |commissionPaid|`, cf. la convention
+ * de signe documentée juste au-dessus.
+ */
 export function realizedNetPnl(input: {
   realizedPnl: Decimal | null;
   fundingPaid: Decimal | null;
   commissionPaid: Decimal | null;
 }): Decimal {
   const realized = input.realizedPnl ?? d(0);
-  // Funding et commission sont des coûts : ils réduisent toujours le net,
-  // qu'ils soient stockés en valeur positive (montant payé) ou déjà signés.
-  const funding = input.fundingPaid ?? d(0);
-  const commission = input.commissionPaid ?? d(0);
-  return realized.minus(funding.abs()).minus(commission.abs());
+  return realized.minus(deductibleCostsOf(input));
 }

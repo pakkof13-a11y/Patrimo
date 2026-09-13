@@ -2466,8 +2466,27 @@ model TradingPosition {
   /// l'écran est recalculée, ce champ ne fait que la doubler si disponible.
   liquidationPrice Decimal? @db.Decimal(20, 8)
 
-  marginUsed     Decimal? @db.Decimal(20, 2)
-  fundingPaid    Decimal? @db.Decimal(20, 2)
+  marginUsed Decimal? @db.Decimal(20, 2)
+
+  /// Funding cumulé, **signé** : positif = funding **payé** (charge), négatif
+  /// = funding **perçu** (produit). Un perpétuel fait circuler le funding dans
+  /// les deux sens selon le sens de la position et le signe du taux ; le
+  /// prendre en valeur absolue à la lecture faisait d'un encaissement une
+  /// charge. L'import CSV retourne le signe des exports (négatif = débit chez
+  /// Binance, Bybit, OKX) pour se ranger à cette convention —
+  /// `app/lib/crypto/futures-csv.ts`.
+  ///
+  /// Convention et formule de référence : bloc « Convention de signe » de
+  /// `app/lib/crypto/futures.ts`. `net = realizedPnl − fundingPaid −
+  /// |commissionPaid|`, appliqué à l'identique par `realizedNetPnl`,
+  /// `closedNetPnl` (`app/lib/trading/positions-view.ts`) et le bucket fiscal
+  /// de `app/api/trading/route.ts`.
+  fundingPaid Decimal? @db.Decimal(20, 2)
+
+  /// Commissions cumulées, **toujours ≥ 0** : une commission n'est jamais
+  /// encaissée. Un négatif éventuel (lignes importées avant la normalisation,
+  /// saisie manuelle) n'est qu'un signe de cash-flow — les lecteurs en
+  /// prennent la valeur absolue.
   commissionPaid Decimal? @db.Decimal(20, 2)
 
   unrealizedPnl Decimal? @db.Decimal(20, 2)

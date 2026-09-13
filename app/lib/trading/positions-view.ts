@@ -165,11 +165,23 @@ export const MARK_FRESHNESS_LABEL: Record<MarkFreshness, string> = {
 
 /**
  * P&L net d'une position close : réalisé, funding et commissions déduits.
- * Miroir de `realizedNetPnl` du moteur, appliqué aux chaînes du payload.
+ *
+ * `net = realized − fundingPaid(signé) − |commissionPaid|`. Miroir exact de
+ * `realizedNetPnl` / `deductibleCostsOf` du moteur (`app/lib/crypto/futures.ts`,
+ * bloc « Convention de signe » — source de vérité), appliqué aux chaînes du
+ * payload : ce module est lu côté client et n'embarque pas Decimal.
+ *
+ * `fundingPaid` est **signé** — positif = payé (charge), négatif = perçu
+ * (produit) : un `Math.abs()` ici faisait d'un funding encaissé une charge,
+ * tandis que le bucket fiscal de `app/api/trading/route.ts` le sommait signé.
+ * Le même fait économique donnait alors deux montants nets écartés de
+ * 2 × funding. `commissionPaid` garde son `abs()` : une commission n'est jamais
+ * encaissée, et un négatif n'y est qu'un signe de cash-flow (lignes importées
+ * avant normalisation, saisie manuelle).
  */
 export function closedNetPnl(row: TradingPositionRow): number {
   const realized = num(row.realizedPnl);
-  const funding = Math.abs(num(row.fundingPaid));
+  const funding = num(row.fundingPaid);
   const commission = Math.abs(num(row.commissionPaid));
   return realized - funding - commission;
 }

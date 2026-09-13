@@ -32,7 +32,13 @@ export type FuturesImportRow = {
   exitPrice: string | null;
   leverage: string | null;
   realizedPnl: string | null;
+  /**
+   * Funding **déjà normalisé** à la convention du dépôt : positif = payé
+   * (charge), négatif = perçu (produit) — l'inverse du signe brut des exports
+   * (cf. `FEE_SIGN_CONVENTION`).
+   */
   fundingPaid: string | null;
+  /** Commission normalisée en valeur absolue : un frais n'est jamais encaissé. */
   commissionPaid: string | null;
   /** Instant de clôture en ISO 8601 UTC (`…Z`), déjà désambiguïsé. */
   closedAt: string | null;
@@ -79,6 +85,67 @@ function toNumberString(raw: string | null): string | null {
   if (!cleaned) return null;
   const n = d(cleaned);
   return n.isFinite() ? n.toString() : null;
+}
+
+/**
+ * Sens du signe des colonnes de frais, par exchange.
+ *
+ * `CASH_FLOW` : l'export raisonne en **mouvement de compte** — un montant
+ * négatif est un débit (frais payé), un positif un crédit (funding perçu).
+ * C'est le cas des trois exports couverts ici :
+ *
+ *  - **Binance** (`Funding Fee`, `Commission`) : lignes d'income history, où
+ *    un débit est négatif. Preuve dans le dépôt : la fixture
+ *    `tests/unit/crypto/futures-csv.test.ts` porte `Funding Fee = −5` et
+ *    `Commission = −3` sur un trade gagnant (`Realized Profit = 3000`) — une
+ *    commission ne peut pas être un encaissement, donc « négatif = payé ».
+ *  - **Bybit** (`Funding`, `Fee Paid`) : mêmes signes négatifs pour un frais
+ *    prélevé dans les relevés de contrat du dépôt
+ *    (`tests/fixtures/import/passe2/bybit-contract.csv`).
+ *  - **OKX** (`fundingFee`, `fee`) : frais rapportés en négatif, même logique
+ *    de cash-flow.
+ *
+ * La convention de stockage d'Aurea est l'inverse pour le funding (positif =
+ * payé, cf. le bloc « Convention de signe » de `app/lib/crypto/futures.ts`) :
+ * l'import **retourne donc le signe**, une fois, ici. Sans cette normalisation,
+ * un funding payé (exporté négatif) serait relu comme un funding perçu.
+ *
+ * Table explicite plutôt que règle implicite : si un exchange change de
+ * convention, la correction tient en une ligne, avec la preuve à côté.
+ */
+type FeeSignConvention = "CASH_FLOW";
+
+const FEE_SIGN_CONVENTION: Record<FuturesImportExchange, FeeSignConvention> = {
+  BINANCE: "CASH_FLOW",
+  BYBIT: "CASH_FLOW",
+  OKX: "CASH_FLOW",
+};
+
+/**
+ * Funding brut de l'exchange → convention Aurea (positif = payé).
+ *
+ * `null` reste `null` : une colonne funding absente du relevé n'est pas un
+ * funding nul, c'est une information que l'export ne donne pas.
+ */
+function normalizeFundingSign(
+  raw: string | null,
+  exchange: FuturesImportExchange
+): string | null {
+  if (raw == null) return null;
+  return FEE_SIGN_CONVENTION[exchange] === "CASH_FLOW"
+    ? d(raw).neg().toString()
+    : raw;
+}
+
+/**
+ * Commission brute → valeur absolue.
+ *
+ * Une commission est toujours une charge : son signe dans l'export ne porte
+ * qu'un sens de cash-flow, aucune information économique à préserver.
+ */
+function normalizeCommission(raw: string | null): string | null {
+  if (raw == null) return null;
+  return d(raw).abs().toString();
 }
 
 /** Fuseau explicite en fin de chaîne : « Z », « +02:00 », « UTC », « GMT ». */
@@ -250,8 +317,19 @@ export function parseFuturesCsv(
       exitPrice: toNumberString(pick(raw, aliasMap, cols.exit)),
       leverage: toNumberString(pick(raw, aliasMap, cols.leverage)),
       realizedPnl: toNumberString(pick(raw, aliasMap, cols.pnl)),
-      fundingPaid: toNumberString(pick(raw, aliasMap, cols.funding)),
-      commissionPaid: toNumberString(pick(raw, aliasMap, cols.commission)),
+      /*
+        Signes normalisés ici, une seule fois : la base stocke la convention
+        Aurea (funding positif = payé, commission ≥ 0), pas le signe brut de
+        l'exchange, que les trois lecteurs auraient alors dû réinterpréter
+        chacun à leur façon — c'est exactement la divergence corrigée.
+      */
+      fundingPaid: normalizeFundingSign(
+        toNumberString(pick(raw, aliasMap, cols.funding)),
+        exchange
+      ),
+      commissionPaid: normalizeCommission(
+        toNumberString(pick(raw, aliasMap, cols.commission))
+      ),
       closedAt:
         parseFuturesTimestamp(pick(raw, aliasMap, cols.closedAt))?.toISOString() ??
         null,

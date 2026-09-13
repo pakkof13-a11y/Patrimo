@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { d } from "@/app/lib/money/decimal";
 import {
+  deductibleCostsOf,
   distanceToLiquidationPct,
   estimatedLiquidationPrice,
   isFundingAlert,
@@ -12,6 +13,13 @@ import {
   unrealizedPnl,
   type FuturesPositionInput,
 } from "@/app/lib/crypto/futures";
+import {
+  buildPositionViews,
+  closedNetPnl,
+  computeTradingOverview,
+} from "@/app/lib/trading/positions-view";
+import { computeTradingYear } from "@/app/lib/trading/tax";
+import type { TradingPositionRow } from "@/components/trading/types";
 
 function pos(over: Partial<FuturesPositionInput> = {}): FuturesPositionInput {
   return {
@@ -213,8 +221,8 @@ describe("summarizeFutures", () => {
   });
 });
 
-describe("realizedNetPnl", () => {
-  it("retranche funding et commission du P&L réalisé", () => {
+describe("realizedNetPnl — convention de signe du funding", () => {
+  it("retranche un funding payé (positif) et la commission du P&L réalisé", () => {
     const net = realizedNetPnl({
       realizedPnl: d(1_000),
       fundingPaid: d(50),
@@ -223,14 +231,148 @@ describe("realizedNetPnl", () => {
     expect(net.toFixed(2)).toBe("930.00");
   });
 
-  it("traite un funding négatif (perçu) comme un coût malgré le signe", () => {
-    // Un funding stocké en négatif (convention "reçu") doit tout de même se
-    // retrancher — jamais s'ajouter par accident de signe.
+  it("ajoute un funding perçu (négatif) au lieu de le retrancher", () => {
+    /*
+      `fundingPaid` est signé : négatif = funding **perçu**, un produit. Le
+      prendre en valeur absolue (ancien comportement) transformait un
+      encaissement de 50 en charge de 50 — 100 d'écart sur le même fait
+      économique, et un désaccord avec le bucket fiscal qui, lui, sommait le
+      funding signé.
+    */
     const net = realizedNetPnl({
       realizedPnl: d(1_000),
       fundingPaid: d(-50),
       commissionPaid: d(0),
     });
-    expect(net.toFixed(2)).toBe("950.00");
+    expect(net.toFixed(2)).toBe("1050.00");
+  });
+
+  it("retranche la commission même stockée en négatif : un frais n'est jamais encaissé", () => {
+    // Signe de cash-flow d'un export ou d'une saisie manuelle : aucune
+    // information économique à préserver, contrairement au funding.
+    const net = realizedNetPnl({
+      realizedPnl: d(1_000),
+      fundingPaid: d(0),
+      commissionPaid: d(-20),
+    });
+    expect(net.toFixed(2)).toBe("980.00");
+  });
+
+  it("rend un coût déductible négatif quand le funding perçu dépasse les commissions", () => {
+    const costs = deductibleCostsOf({
+      fundingPaid: d("-10.00"),
+      commissionPaid: d("4.00"),
+    });
+    // Produit net de 6 : ni écrasé à 0, ni lissé.
+    expect(costs.toFixed(2)).toBe("-6.00");
+  });
+
+  it("traite un funding ou une commission absents comme 0, pas comme une erreur", () => {
+    expect(
+      realizedNetPnl({
+        realizedPnl: d(500),
+        fundingPaid: null,
+        commissionPaid: null,
+      }).toFixed(2)
+    ).toBe("500.00");
+  });
+});
+
+describe("golden TRA/CRY — l'écran et le fiscal retiennent le même net", () => {
+  /*
+    Position mesurée par finance-metier : SOL/USD-PERP, funding stocké −4,10 €
+    (donc **perçu**, nouvelle convention) et commission 6,20 €. Avant
+    convergence, le net affiché valait 312,50 − 4,10 − 6,20 = 302,20 (funding
+    pris en valeur absolue) pendant que l'assiette fiscale valait
+    312,50 − (−4,10 + 6,20) = 310,40 : 8,20 d'écart, soit exactement 2 × le
+    funding, sur un seul et même fait économique.
+  */
+  const REALIZED = "312.50";
+  const FUNDING = "-4.10";
+  const COMMISSION = "6.20";
+  /** 312,50 + 4,10 − 6,20 */
+  const EXPECTED_NET = "310.40";
+
+  function solRow(): TradingPositionRow {
+    return {
+      id: "sol-1",
+      tradingAccountId: null,
+      underlyingType: "CRYPTO",
+      exchange: "BYBIT",
+      instrument: "SOL/USD-PERP",
+      contractType: "PERPETUAL",
+      direction: "SHORT",
+      leverage: "3",
+      sizeContracts: "25",
+      entryPrice: "168.30",
+      markPrice: "162.45",
+      markPriceUpdatedAt: "2026-05-01T00:00:00.000Z",
+      expiryDate: null,
+      fundingPaid: FUNDING,
+      commissionPaid: COMMISSION,
+      unrealizedPnl: null,
+      realizedPnl: REALIZED,
+      isOpen: false,
+      openedAt: "2026-04-20T00:00:00.000Z",
+      closedAt: "2026-05-02T00:00:00.000Z",
+      stopLoss: null,
+      takeProfit: null,
+      tickValue: null,
+      marginType: "USDT_M",
+      baseCurrency: "SOL",
+      quoteCurrency: "USD",
+      subAccountLabel: null,
+      exchangeTradeId: null,
+      notes: null,
+      liquidationPriceReported: null,
+      derived: {
+        notionalEur: "4207.50",
+        marginUsedEur: "1402.50",
+        liquidationPriceEstimated: "223.36",
+        distanceToLiquidationPct: 37.5,
+        unrealizedPnlEur: null,
+        signedNotionalEur: "-4207.50",
+        liquidationAlert: false,
+        fundingAlert: false,
+      },
+    };
+  }
+
+  /** Reproduit l'arithmétique du bucket fiscal de `app/api/trading/route.ts`. */
+  function fiscalNet(): string {
+    const pnl = d(REALIZED);
+    const fees = deductibleCostsOf({
+      fundingPaid: d(FUNDING),
+      commissionPaid: d(COMMISSION),
+    });
+    const year = computeTradingYear({
+      year: 2026,
+      grossGainsEur: pnl.gt(0) ? pnl : d(0),
+      grossLossesEur: pnl.lt(0) ? pnl.abs() : d(0),
+      feesEur: fees,
+    });
+    return year.netBeforeCarryEur.toFixed(2);
+  }
+
+  it("le moteur, l'écran et l'assiette fiscale donnent le même montant", () => {
+    const moteur = realizedNetPnl({
+      realizedPnl: d(REALIZED),
+      fundingPaid: d(FUNDING),
+      commissionPaid: d(COMMISSION),
+    }).toFixed(2);
+    const ecran = closedNetPnl(solRow()).toFixed(2);
+    const fiscal = fiscalNet();
+
+    expect(moteur).toBe(EXPECTED_NET);
+    expect(ecran).toBe(EXPECTED_NET);
+    expect(fiscal).toBe(EXPECTED_NET);
+    // Plus aucun écart de 2 × funding entre la lecture d'écran et le fiscal.
+    expect(Number(ecran) - Number(fiscal)).toBe(0);
+  });
+
+  it("la synthèse d'écran retient ce même net pour la position close", () => {
+    const overview = computeTradingOverview(buildPositionViews([solRow()]));
+    expect(overview.closedCount).toBe(1);
+    expect(overview.realizedPnlEur.toFixed(2)).toBe(EXPECTED_NET);
   });
 });

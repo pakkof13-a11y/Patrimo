@@ -19,6 +19,37 @@ describe("parseFuturesCsv — Binance", () => {
     expect(r.exitPrice).toBe("66000");
     expect(r.realizedPnl).toBe("3000");
     expect(r.exchangeTradeId).toBeTruthy();
+    /*
+      Binance exporte ses frais en cash-flow : « Funding Fee −5 » et
+      « Commission −3 » sur ce trade gagnant sont deux **débits** (une
+      commission ne peut pas être un encaissement). La convention de stockage
+      d'Aurea est l'inverse pour le funding — positif = payé (cf. bloc
+      « Convention de signe » de `app/lib/crypto/futures.ts`) : l'import
+      retourne donc le signe une fois pour toutes, ici.
+    */
+    expect(r.fundingPaid).toBe("5");
+    expect(r.commissionPaid).toBe("3");
+  });
+
+  it("stocke un funding perçu (exporté positif) en négatif, sans le confondre avec un coût", () => {
+    // Funding Fee +7 chez Binance = crédit du compte, donc funding perçu.
+    const csv =
+      "Order Id,Date,Symbol,Side,Quantity,Price,Closing Price,Leverage,Realized Profit,Funding Fee,Commission\n" +
+      "889,2025-06-01,BTCUSDT,BUY,0.5,60000,66000,10,3000,7,-3\n";
+    const r = parseFuturesCsv(csv, "BINANCE").rows[0];
+    expect(r?.fundingPaid).toBe("-7");
+    // Une commission reste une charge : valeur absolue, jamais un produit.
+    expect(r?.commissionPaid).toBe("3");
+  });
+
+  it("ne fabrique pas un funding nul quand le relevé n'a pas la colonne", () => {
+    const csv =
+      "Order Id,Date,Symbol,Side,Quantity,Price,Closing Price,Leverage\n" +
+      "890,2025-06-01,BTCUSDT,BUY,0.5,60000,66000,10\n";
+    const r = parseFuturesCsv(csv, "BINANCE").rows[0];
+    // UNKNOWN ≠ ZERO : l'absence de colonne n'est pas un funding de 0.
+    expect(r?.fundingPaid).toBeNull();
+    expect(r?.commissionPaid).toBeNull();
   });
 
   it("reconnaît SELL comme SHORT", () => {

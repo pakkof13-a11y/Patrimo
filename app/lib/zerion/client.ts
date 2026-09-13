@@ -126,6 +126,12 @@ export type ZerionPortfolio = {
    */
   historyTruncated?: boolean;
   historyPageCount?: number;
+  /**
+   * Message d'échec de la lecture d'historique (soldes lus quand même).
+   * Un historique vide parce que Zerion a échoué ne se lit pas comme un
+   * historique vide constaté : l'appelant doit pouvoir le dire.
+   */
+  historyError?: string | null;
 };
 
 /** Message UI si historique Zerion plafonné (8×100). */
@@ -191,6 +197,25 @@ async function zerionGet<T>(
     );
   }
   return (await res.json()) as T;
+}
+
+/**
+ * Quantité d'une position/jambe Zerion, ou `null` si le payload ne la donne
+ * pas. `quantity.float` / `quantity.numeric` sont déjà à l'échelle du token
+ * (Zerion applique les décimales). Le repli `?? 0` faisait passer une
+ * quantité ABSENTE pour un solde nul : un zéro affiché là où il n'a pas été
+ * lu. Absente → position écartée et déclarée ; `0` réellement rendu reste
+ * un zéro constaté.
+ */
+function readZerionQuantity(q?: {
+  float?: number;
+  numeric?: string;
+} | null): number | null {
+  if (typeof q?.float === "number" && Number.isFinite(q.float)) return q.float;
+  const numeric = q?.numeric;
+  if (numeric == null || String(numeric).trim() === "") return null;
+  const n = Number(numeric);
+  return Number.isFinite(n) ? n : null;
 }
 
 type PositionsResponse = {
@@ -313,11 +338,15 @@ export async function fetchZerionPositions(
     if (a.flags?.is_trash) continue;
     if (a.flags?.displayable === false) continue;
 
-    const amount =
-      typeof a.quantity?.float === "number"
-        ? a.quantity.float
-        : Number(a.quantity?.numeric ?? 0);
-    if (!Number.isFinite(amount) || amount <= 0) continue;
+    const amount = readZerionQuantity(a.quantity);
+    if (amount == null) {
+      console.warn(
+        "[zerion] positions : quantité absente du payload — position écartée, aucun solde supposé",
+        { positionId: row.id ?? null, name: a.name ?? null }
+      );
+      continue;
+    }
+    if (amount <= 0) continue;
     // Dust ultra-faible (spam) — garder si valeur USD significative
     const usd =
       typeof a.value === "number" && Number.isFinite(a.value) ? a.value : null;
@@ -417,11 +446,15 @@ export async function fetchZerionDefiPositions(
     if (a.flags?.is_trash) continue;
     if (a.flags?.displayable === false) continue;
 
-    const amount =
-      typeof a.quantity?.float === "number"
-        ? a.quantity.float
-        : Number(a.quantity?.numeric ?? 0);
-    if (!Number.isFinite(amount) || amount <= 0) continue;
+    const amount = readZerionQuantity(a.quantity);
+    if (amount == null) {
+      console.warn(
+        "[zerion] positions DeFi : quantité absente du payload — position écartée, aucun solde supposé",
+        { positionId: row.id ?? null, name: a.name ?? null }
+      );
+      continue;
+    }
+    if (amount <= 0) continue;
 
     const usd =
       typeof a.value === "number" && Number.isFinite(a.value) ? a.value : null;
@@ -504,11 +537,15 @@ function mapZerionTxRow(
       .relationships?.chain?.data?.id || null;
   const transfers: ZerionTransferLeg[] = [];
   for (const tr of a?.transfers || []) {
-    const amount =
-      typeof tr.quantity?.float === "number"
-        ? tr.quantity.float
-        : Number(tr.quantity?.numeric ?? 0);
-    if (!Number.isFinite(amount) || amount <= 0) continue;
+    const amount = readZerionQuantity(tr.quantity);
+    if (amount == null) {
+      console.warn(
+        "[zerion] transactions : quantité de jambe absente du payload — jambe écartée, aucun montant supposé",
+        { hash: a?.hash ?? row.id ?? null, ticker: tr.fungible_info?.symbol ?? null }
+      );
+      continue;
+    }
+    if (amount <= 0) continue;
     const dirRaw = (tr.direction || "").toLowerCase();
     const direction: ZerionTransferLeg["direction"] =
       dirRaw === "in" || dirRaw === "out" ? dirRaw : "unknown";
@@ -681,6 +718,7 @@ export async function fetchZerionPortfolio(
   let transactions: ZerionTxItem[] = [];
   let historyTruncated = false;
   let historyPageCount = 0;
+  let historyError: string | null = null;
   try {
     // Historique profond (pagination) — critique pour dater les positions
     const txResult = await fetchZerionTransactions(address, apiKey, {
@@ -692,10 +730,12 @@ export async function fetchZerionPortfolio(
     historyTruncated = txResult.truncated;
     historyPageCount = txResult.pageCount;
   } catch (e) {
-    console.warn(
-      "[zerion] transactions",
-      e instanceof Error ? e.message : e
-    );
+    // Les soldes, eux, ont été lus : on rend la lecture partielle en le disant.
+    historyError =
+      e instanceof Error
+        ? `Historique Zerion indisponible : ${e.message}`
+        : "Historique Zerion indisponible";
+    console.warn("[zerion] transactions", historyError);
   }
 
   return {
@@ -706,5 +746,6 @@ export async function fetchZerionPortfolio(
     fetchedAt: formatParisDateTime(new Date()) || "",
     historyTruncated,
     historyPageCount,
+    historyError,
   };
 }
