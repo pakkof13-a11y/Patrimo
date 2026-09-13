@@ -48,6 +48,7 @@ describe("consolidation de la poche alternative", () => {
         currentNav: "12300",
         calledCapital: "10000",
         investedTotal: "9000",
+        distributionsReceived: "0",
         currency: "EUR",
       },
       EUR_RATES
@@ -62,11 +63,38 @@ describe("consolidation de la poche alternative", () => {
         currentNav: "8200",
         calledCapital: "0",
         investedTotal: "6500",
+        distributionsReceived: "0",
         currency: "EUR",
       },
       EUR_RATES
     );
     expect(derived.investedEur).toBeCloseTo(6500, 6);
+  });
+
+  it("private equity : le P&L consolidé inclut les distributions déjà perçues", () => {
+    /*
+      NAV en baisse (2000 < investi 10000) mais des distributions déjà versées
+      qui dépassent la moins-value latente : le total doit rejoindre un calcul
+      manuel Δ = (nav − investi) + distributions, pas seulement nav − investi
+      (qui, seul, resterait négatif et ferait passer une sortie de cash pour
+      une perte).
+    */
+    const i = peToInvestment(
+      {
+        id: "p3",
+        companyName: "Fonds mature",
+        peType: "DIRECT",
+        currentNav: "2000",
+        calledCapital: "10000",
+        investedTotal: "10000",
+        distributionsReceived: "9000",
+        currency: "EUR",
+      },
+      EUR_RATES
+    );
+    // (2000 - 10000) + 9000 = 1000
+    expect(i.pnlEur).toBeCloseTo(1000, 6);
+    expect(i.pnlPct).toBeCloseTo((1000 / 10_000) * 100, 6);
   });
 
   it("un prêt remboursé ne se lit pas comme une perte de 100 %", () => {
@@ -180,6 +208,7 @@ describe("consolidation de la poche alternative", () => {
             currentNav: "12300",
             calledCapital: "10000",
             investedTotal: "10000",
+            distributionsReceived: "0",
             currency: "EUR",
           },
         ],
@@ -201,6 +230,7 @@ describe("consolidation de la poche alternative", () => {
             currentNav: "100000",
             calledCapital: "100000",
             investedTotal: "100000",
+            distributionsReceived: "0",
             currency: "USD",
           },
         ],

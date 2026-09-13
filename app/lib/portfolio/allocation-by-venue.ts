@@ -76,6 +76,9 @@ import {
 } from "../crypto/futures";
 import { personalAmountOf } from "../cash/ownership";
 import { allocatePercents } from "../ui/allocate-percents";
+import { effectiveRemainingCapital } from "../alternatives/crowdlending";
+import { type ClStatus } from "../alternatives/types";
+import { Prisma } from "../prisma-client/client";
 import { classifyHolding } from "./patrimony-metrics";
 import { getHoldings, loadHoldingClassificationFlags } from "./service";
 
@@ -207,7 +210,20 @@ export type VenueMetalInput = {
 
 export type VenueCrowdlendingInput = {
   status: string;
+  /**
+   * Capital investi initial, converti en euros. Sert uniquement de repli
+   * dans `effectiveRemainingCapital` — jamais sommé tel quel : un prêt
+   * partiellement remboursé compterait deux fois (capital initial + cash
+   * déjà revenu), cf. FIN-04.
+   */
   capitalInvestedEur: DecimalInput;
+  /**
+   * Capital restant dû, converti en euros. C'est cette valeur — pas
+   * `capitalInvestedEur` — qui alimente le donut, alignée sur la même clé
+   * que le sélecteur Compte (`alternatives/portfolio.ts`) et la courbe
+   * historique.
+   */
+  remainingCapitalEur: DecimalInput;
 };
 
 export type VenueTradingPositionInput = {
@@ -562,7 +578,19 @@ export function computeAllocationByVenue(
     const status = String(c.status || "").toUpperCase();
     if (status === "REPAID") continue;
     if (status === "ACTIVE" || status === "LATE") {
-      venues.alt = venues.alt.plus(d(c.capitalInvestedEur));
+      /*
+        Même clé que le sélecteur Compte/`alternatives/portfolio.ts` et la
+        courbe historique : le capital RESTANT dû, pas le capital investi
+        initial. FIN-04 — sinon un prêt partiellement remboursé pèse encore
+        son montant initial ici pendant que Brut/Net comptent l'encours.
+      */
+      venues.alt = venues.alt.plus(
+        crowdlendingEffectiveRemainingCapital(
+          c.capitalInvestedEur,
+          c.remainingCapitalEur,
+          status
+        )
+      );
     }
   }
 
@@ -614,6 +642,29 @@ export function computeAllocationByVenue(
 
 function decStr(v: { toString(): string } | null | undefined): string {
   return v?.toString() ?? "0";
+}
+
+/**
+ * Enveloppe `effectiveRemainingCapital` (`../alternatives/crowdlending`)
+ * pour le donut par venue — même clé que le sélecteur Compte, FIN-04.
+ *
+ * `capitalInvestedEur`/`remainingCapitalEur` arrivent déjà convertis en
+ * euros (comme toutes les autres manches de ce fichier) : la fonction ne
+ * fait que sélectionner l'une des deux valeurs déjà euro, jamais une
+ * conversion ou un calcul supplémentaire, donc réutiliser la version
+ * `Prisma.Decimal` d'origine reste sûr ici.
+ */
+function crowdlendingEffectiveRemainingCapital(
+  capitalInvestedEur: DecimalInput,
+  remainingCapitalEur: DecimalInput,
+  status: string
+): Decimal {
+  const effective = effectiveRemainingCapital(
+    new Prisma.Decimal(d(capitalInvestedEur).toString()),
+    new Prisma.Decimal(d(remainingCapitalEur).toString()),
+    status as ClStatus
+  );
+  return d(effective.toString());
 }
 
 /**
@@ -766,6 +817,7 @@ export async function allocationByVenue(
     crowdlending: cl.map((c) => ({
       status: c.status,
       capitalInvestedEur: eur(decStr(c.capitalInvested), c.currency),
+      remainingCapitalEur: eur(decStr(c.remainingCapital), c.currency),
     })),
     tangibles: tangibles.map((t) => ({
       estimatedValueEur: eur(decStr(t.estimatedValue), t.currency),

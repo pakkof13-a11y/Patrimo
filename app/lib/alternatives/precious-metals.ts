@@ -478,12 +478,22 @@ async function decrementLot(userId: string, positionId: string, quantity: Decima
   const unitValue = lotQuantity.gt(0)
     ? d(lot.currentValue.toString()).div(lotQuantity)
     : d(0);
+  // Même part (`share`) que celle imputée à la cession (voir
+  // `createPreciousMetalSale` : costBasis = quantity × prix + fees × share).
+  // Sans ce retrait, les frais restent au montant plein sur le lot restant et
+  // se retrouvent recomptés dans son coût (`mapRow`) en plus de la part déjà
+  // facturée à la cession — double comptage. Sur une vente du solde complet,
+  // `share = 1` et les frais retombent exactement à 0, jamais un résidu.
+  const share = lotQuantity.gt(0) ? quantity.div(lotQuantity) : d(0);
+  const fees = d(lot.acquisitionFees.toString());
+  const feesKept = fees.times(d(1).minus(share));
 
   await prisma.preciousMetalPosition.updateMany({
     where: { id: positionId, userId },
     data: {
       quantity: new Prisma.Decimal(kept.toString()),
       currentValue: new Prisma.Decimal(unitValue.times(kept).toString()),
+      acquisitionFees: new Prisma.Decimal(feesKept.toString()),
     },
   });
 }
