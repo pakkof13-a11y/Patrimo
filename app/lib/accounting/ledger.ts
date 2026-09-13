@@ -216,10 +216,17 @@ export function applyTransaction(
       break;
     }
     case "TRANSFERT_CASH": {
-      if (!tx.toPlatformId) {
-        throw new AccountingError("TO_PLATFORM_REQUIRED", "Plateforme de destination requise");
-      }
-      if (tx.toPlatformId === tx.platformId) {
+      /*
+        `toPlatformId: null` = « sortie » : la plateforme de destination a été
+        force-supprimée après ce transfert (voir `app/api/platforms/route.ts`
+        DELETE force). Le débit sur `platformId` reste l'unique vérité — il a
+        bel et bien quitté cette plateforme, peu importe où il est allé — et on
+        n'audit plus aucun crédit puisqu'on ne sait plus où le porter.
+        Le formulaire de saisie (schemas.ts) interdit ce couple à la création :
+        seul le force-delete produit un `toPlatformId` nul sur ces types.
+      */
+      const isExit = !tx.toPlatformId;
+      if (!isExit && tx.toPlatformId === tx.platformId) {
         throw new AccountingError("SAME_PLATFORM", "Les plateformes source et destination doivent différer");
       }
       const amountEur = toEur(cashAmountOriginal(tx), tx.fxRateToEur);
@@ -232,22 +239,29 @@ export function applyTransaction(
         throw new AccountingError("INSUFFICIENT_CASH", "Cash insuffisant pour le transfert");
       }
       setCash(state, tx.platformId, newCash);
-      addCash(state, tx.toPlatformId, amountEur);
+      if (!isExit) addCash(state, tx.toPlatformId as string, amountEur);
       state.totalFeesPaidEur = state.totalFeesPaidEur.plus(feesEur);
       break;
     }
     case "TRANSFERT_TITRE": {
       const assetId = requireAsset(tx);
-      if (!tx.toPlatformId) {
-        throw new AccountingError("TO_PLATFORM_REQUIRED", "Plateforme de destination requise");
-      }
-      if (tx.toPlatformId === tx.platformId) {
+      // Voir le commentaire équivalent sur TRANSFERT_CASH ci-dessus : même
+      // sémantique de « sortie » quand la destination a été force-supprimée.
+      const isExit = !tx.toPlatformId;
+      if (!isExit && tx.toPlatformId === tx.platformId) {
         throw new AccountingError("SAME_PLATFORM", "Les plateformes source et destination doivent différer");
       }
       const qty = d(tx.quantity ?? 0);
       const { remaining, moved } = applyTransferOut(getPos(state, assetId, tx.platformId), qty);
       setPos(state, assetId, tx.platformId, remaining);
-      setPos(state, assetId, tx.toPlatformId, applyTransferIn(getPos(state, assetId, tx.toPlatformId), moved));
+      if (!isExit) {
+        setPos(
+          state,
+          assetId,
+          tx.toPlatformId as string,
+          applyTransferIn(getPos(state, assetId, tx.toPlatformId as string), moved)
+        );
+      }
       // No cash impact for title transfers
       break;
     }

@@ -211,7 +211,14 @@ export function PreferencesPanel({
         transactionsDeleted: number;
         assetsDeleted: number;
         platformsDeleted?: number;
-      }>("/api/preferences/clear-data", { method: "DELETE" }),
+      }>("/api/preferences/clear-data", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        // Le serveur exige ce mot exact dans le corps — la modale seule ne
+        // suffit pas à protéger la route (voir app/api/preferences/clear-data).
+        // On transmet tel quel le mot que l'utilisateur a saisi dans le champ.
+        body: JSON.stringify({ confirm: confirmText }),
+      }),
     onSuccess: async (data) => {
       toast.success(
         data.message ||
