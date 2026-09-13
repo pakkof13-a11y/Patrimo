@@ -23,7 +23,21 @@ test.describe("API santé", () => {
     const portfolio = await request.get("/api/portfolio?base=EUR");
     expect(portfolio.ok()).toBeTruthy();
     const p = await portfolio.json();
-    expect(Array.isArray(p.history)).toBeTruthy();
+    expect(p.summary).toBeTruthy();
+
+    /*
+      `history[]` n'existe plus sur `GET /api/portfolio` : la route rejouait
+      le moteur sur toute la profondeur lisible pour la produire, et c'est ce
+      rejeu qui la faisait tomber en 504 en préproduction (cf. commentaire de
+      `app/api/portfolio/route.ts`). La série vit désormais dans
+      `GET /api/portfolio/daily-nav`, et c'est elle qui porte le contrôle
+      équivalent : un tableau de points non vide.
+    */
+    const dailyNav = await request.get("/api/portfolio/daily-nav?scope=net");
+    expect(dailyNav.ok()).toBeTruthy();
+    const d = await dailyNav.json();
+    expect(Array.isArray(d.points)).toBeTruthy();
+    expect(d.points.length).toBeGreaterThan(0);
 
     const tx = await request.get("/api/transactions");
     expect(tx.ok()).toBeTruthy();
