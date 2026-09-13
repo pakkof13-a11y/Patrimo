@@ -14,7 +14,7 @@ let platformFindFirstMock: MockFn;
 let assetCountMock: MockFn;
 
 vi.mock("@/app/lib/prisma", () => {
-  const client = {
+  const client: Record<string, unknown> = {
     platform: {
       findFirst: (...a: unknown[]) => platformFindFirstMock(...a),
     },
@@ -25,6 +25,12 @@ vi.mock("@/app/lib/prisma", () => {
     transaction: {
       findMany: vi.fn().mockResolvedValue([]),
     },
+    // IMP-11/IMP-04 : `commit.ts` enveloppe désormais résolution d'Asset +
+    // création de Transaction (par ligne) dans une transaction interactive.
+    // Ce faux client n'isole rien (pas de vraie base) : il rejoue simplement
+    // le callback avec lui-même comme `tx`, ce qui suffit puisque les autres
+    // méthodes mockées ci-dessus sont les mêmes quel que soit le client reçu.
+    $transaction: (fn: (tx: unknown) => unknown) => fn(client),
   };
   return { prisma: client };
 });

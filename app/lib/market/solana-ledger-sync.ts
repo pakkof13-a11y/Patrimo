@@ -12,7 +12,11 @@ import { d, toFixed } from "@/app/lib/money/decimal";
 import { positionKey } from "@/app/lib/accounting/types";
 import { loadLedgerForUser } from "@/app/lib/portfolio/service";
 import { createTransaction } from "@/app/lib/transactions/service";
-import { fxRateToEur } from "@/app/lib/market/fx";
+import {
+  fxRateToEur,
+  fxRatesToEurRange,
+  type FxRangeResult,
+} from "@/app/lib/market/fx";
 import {
   fetchSolanaMintPricesUsd,
   resolveCoingeckoId,
@@ -23,6 +27,41 @@ import { toOccurredAtIso } from "@/app/lib/solana/datetime";
 import { resolveSolanaMintMetas } from "@/app/lib/solana/token-meta";
 
 export const WALLET_SYNC_NOTE_TAG = "[wallet-sync:solana]";
+
+/**
+ * Jours civils de repli pour trouver le dernier fixing BCE ≤ jour demandé.
+ *
+ * La BCE ne publie ni le week-end ni les jours fériés ; le plus long trou
+ * constaté est Pâques (4 jours). Même valeur et même raison que
+ * `app/lib/import/commit.ts::resolveRowFxRate`.
+ */
+const FX_LOOKBACK_DAYS = 7;
+
+/** Jour civil (YYYY-MM-DD) décalé de `deltaDays`, en UTC — jamais une approximation en 365 jours. */
+function shiftDay(day: string, deltaDays: number): string {
+  const dt = new Date(`${day}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Taux USD→EUR du jour `day` dans une série pré-résolue, ou `null`.
+ *
+ * Remonte au plus `FX_LOOKBACK_DAYS` jours pour attraper le dernier fixing
+ * BCE. Ne fabrique jamais de taux : série absente, fournisseur injoignable ou
+ * trou plus long rendent `null`, et l'appelant refuse alors d'écrire.
+ */
+function fxRateOnDay(
+  range: FxRangeResult | null,
+  day: string
+): string | null {
+  if (!range || range.status !== "ok") return null;
+  for (let back = 0; back <= FX_LOOKBACK_DAYS; back++) {
+    const rate = range.byDay.get(shiftDay(day, -back));
+    if (rate) return rate;
+  }
+  return null;
+}
 
 /**
  * Première activité on-chain par mint (et "__any__" / "native") pour dater
@@ -144,6 +183,8 @@ export type SolanaLedgerSyncResult = {
     valueEurApprox: number | null;
   }>;
   skipped: number;
+  /** Lignes refusées faute de taux BCE démontré à leur date on-chain. */
+  skippedFxUnknown: number;
 };
 
 type TargetHolding = {
@@ -411,8 +452,33 @@ export async function writeSolanaSnapshotToLedger(
   const firstBlockByMint = await loadFirstOnchainBlockTimes(platformId);
   const walletEarliest = firstBlockByMint.get("__any__") ?? null;
 
+  /*
+    Pré-résolution FX : un seul appel Frankfurter couvrant [1re activité
+    on-chain du wallet … aujourd'hui], jamais un par ligne — le wallet peut
+    avoir plusieurs années d'historique et 40 positions, et la route de sync a
+    un budget de délai (même contrainte que `app/lib/import/commit.ts`).
+
+    Sert à valoriser les écritures datées d'un blockTime passé (1er fill) au
+    taux BCE de CE jour-là. Les valorisations « à maintenant » (cotation
+    PriceQuote, manualPrice, valueEurApprox) gardent `fxUsdToEur` ci-dessus :
+    ce sont des prix du jour, leur taux correct est celui du jour.
+  */
+  let fxUsdRange: FxRangeResult | null = null;
+  {
+    const today = new Date().toISOString().slice(0, 10);
+    const earliestDay = walletEarliest
+      ? walletEarliest.toISOString().slice(0, 10)
+      : today;
+    const fromDay = shiftDay(
+      earliestDay < today ? earliestDay : today,
+      -FX_LOOKBACK_DAYS
+    );
+    fxUsdRange = await fxRatesToEurRange("USD", fromDay, today);
+  }
+
   let txsCreated = 0;
   let skipped = 0;
+  let skippedFxUnknown = 0;
   const holdings: SolanaLedgerSyncResult["holdings"] = [];
 
   // Ledger une fois au début ; recréé après chaque tx via invalidate + reload
@@ -456,16 +522,10 @@ export async function writeSolanaSnapshotToLedger(
       continue;
     }
 
-    const unitUsd =
-      t.priceUsd != null && Number.isFinite(t.priceUsd) ? t.priceUsd : null;
-    const unitEur =
-      unitUsd != null
-        ? toFixed(d(unitUsd).times(d(fxUsdToEur)), 12)
-        : null;
-
     const note = `${WALLET_SYNC_NOTE_TAG} ${t.isNative ? "native" : t.tokenAddress || t.symbol} target=${toFixed(targetQty, 12)}`;
 
     // Date : 1er fill → blockTime on-chain du mint (ou earliest wallet), pas « now »
+    // Résolue AVANT le prix : c'est elle qui désigne le taux de change à utiliser.
     const isFirstFill = currentQty.lte("0.00000001");
     const mintKey = t.isNative
       ? "native"
@@ -478,6 +538,50 @@ export async function writeSolanaSnapshotToLedger(
       isFirstFill && hist
         ? toOccurredAtIso(hist)!
         : new Date().toISOString();
+
+    /*
+      Prix unitaire de l'écriture : converti au taux BCE du jour de
+      `occurredAt`, pas du jour de la sync. Pour un ajustement daté de
+      maintenant les deux coïncident ; pour un 1er fill daté d'un blockTime
+      ancien, l'écart valait toute la dérive EUR/USD depuis cette date.
+
+      ATTENTION : `t.priceUsd` reste le prix SPOT du jour (RPC/CoinGecko, cf.
+      `app/lib/solana/wallet-balances.ts`), pas le prix au blockTime. Le taux
+      est désormais celui de la date de l'écriture, le prix non — ce prix de
+      revient reste donc une approximation de réconciliation, pas un coût
+      historique constaté. Le corriger demande une source de prix historique
+      par mint, hors de ce correctif.
+    */
+    const fxAtEvent = fxRateOnDay(fxUsdRange, occurredAt.slice(0, 10));
+    const unitUsd =
+      t.priceUsd != null && Number.isFinite(t.priceUsd) ? t.priceUsd : null;
+    if (unitUsd != null && fxAtEvent == null) {
+      /*
+        Taux de cette date non démontré : aucune écriture. Ni conversion au
+        taux du jour, ni `fxRateToEur: "1"` — une absence de taux ne devient
+        pas un taux.
+
+        La position est tout de même déclarée dans `holdings` : elle existe
+        on-chain, et l'en retirer la ferait liquider par la boucle « close
+        zero-onchain » plus bas. Un taux manquant ne vend rien.
+      */
+      skippedFxUnknown += 1;
+      skipped += 1;
+      holdings.push({
+        assetId,
+        symbol: t.symbol,
+        quantity: toFixed(targetQty, 12),
+        valueEurApprox:
+          t.valueUsd != null
+            ? Number(d(t.valueUsd).times(d(fxUsdToEur)).toFixed(2))
+            : null,
+      });
+      continue;
+    }
+    const unitEur =
+      unitUsd != null
+        ? toFixed(d(unitUsd).times(d(fxAtEvent!)), 12)
+        : null;
 
     // allowNegativeCash: le replay du journal peut déjà contenir des RETRAIT
     // sans APPORT — sans ce flag, createTransaction échoue AVANT d’écrire
@@ -640,5 +744,6 @@ export async function writeSolanaSnapshotToLedger(
     txsCreated,
     holdings,
     skipped,
+    skippedFxUnknown,
   };
 }
