@@ -352,6 +352,74 @@ export async function DELETE(req: Request) {
         })
       ).map((a) => a.id);
 
+      /*
+        JOU-03 — un TRANSFERT_CASH/TRANSFERT_TITRE est une ligne UNIQUE qui
+        porte à la fois le débit de la plateforme source et le crédit de la
+        destination. La supprimer purement et simplement (ancien comportement,
+        via le OR platformId/toPlatformId ci-dessous) efface aussi le débit :
+        au rejeu, la plateforme qui RESTE retrouve un cash/une quantité
+        qu'elle n'a plus — un montant fantôme qu'aucune suppression n'a le
+        droit de créer.
+
+        Deux cas, selon que `id` (la plateforme force-supprimée) est la
+        source ou la destination du transfert :
+
+        1) `id` est la DESTINATION (platformId = survivante, toPlatformId =
+           id) : on convertit la ligne en écriture à un seul côté — même
+           type, `toPlatformId: null` — que le moteur (`ledger.ts`) sait
+           désormais lire comme une « sortie » : le débit sur la plateforme
+           survivante reste appliqué, aucun crédit n'est recherché nulle
+           part. Rien n'est inventé : c'est exactement le débit qui avait
+           déjà été calculé et vécu par l'utilisateur.
+           Exception : si le titre transféré appartient à un actif dont la
+           plateforme « home » est `id` elle-même (assetIds), cet actif est
+           de toute façon supprimé juste après (Asset.platform Restrict) —
+           la ligne suit alors le sort normal de l'actif, pas de conversion.
+
+        2) `id` est la SOURCE (platformId = id, toPlatformId = survivante) :
+           pour TRANSFERT_CASH, le montant crédité est un chiffre EUR fixe
+           déjà stocké sur la ligne (`cashAmountOriginal` / `fxRateToEur`),
+           indépendant de tout rejeu de `id` — on peut donc convertir la
+           ligne en simple APPORT sur la plateforme survivante (platformId ←
+           toPlatformId, toPlatformId: null) sans rien deviner.
+           Pour TRANSFERT_TITRE en revanche, la quantité créditée dépend du
+           PRU en cours sur `id` au moment du transfert — une valeur qui
+           n'est stockée nulle part sur la ligne et se recalcule au rejeu à
+           partir de l'historique de `id`. Or cet historique va disparaître
+           avec `id`. Le préserver donnerait un PRU inventé (0, ou un résidu
+           incohérent) ; le supprimer ferait disparaître une
+           quantité que la plateforme survivante a réellement reçue — les
+           deux violent la doctrine « UNKNOWN ≠ ZERO ≠ ERROR ». Faute d'un
+           type d'écriture à sens unique portant un PRU explicite (absent du
+           modèle actuel, et hors périmètre d'une migration de schéma pour
+           ce ticket), on REFUSE le force-delete tant qu'une telle ligne
+           existe, plutôt que de trancher silencieusement une perte de
+           valeur : voir le 409 `TRANSFER_TITRE_SOURCE_UNRESOLVED` ci-dessous.
+      */
+      const unresolvableIncomingTitre = await prisma.transaction.findMany({
+        where: {
+          userId,
+          type: "TRANSFERT_TITRE",
+          platformId: id,
+          toPlatformId: { not: null },
+          NOT: { toPlatformId: id },
+          ...(assetIds.length > 0
+            ? { assetId: { notIn: assetIds } }
+            : {}),
+        },
+        select: { id: true, assetId: true, toPlatformId: true },
+      });
+      if (unresolvableIncomingTitre.length > 0) {
+        return NextResponse.json(
+          {
+            error: `« ${existing.name} » est la source de ${unresolvableIncomingTitre.length} transfert(s) de titres vers une autre plateforme encore active. Le prix de revient transféré ne peut pas être reconstitué une fois « ${existing.name} » supprimée. Détachez ou traitez ces transferts avant de continuer (par ex. en supprimant aussi la plateforme destinataire, ou en convertissant la ligne manuellement).`,
+            code: "TRANSFER_TITRE_SOURCE_UNRESOLVED",
+            transactionIds: unresolvableIncomingTitre.map((t) => t.id),
+          },
+          { status: 409 }
+        );
+      }
+
       let deletedTxs = 0;
       await prisma.$transaction(
         async (tx) => {
@@ -364,7 +432,47 @@ export async function DELETE(req: Request) {
             });
           }
 
+          // 1) Sorties : `id` était la destination d'un transfert dont la
+          // source survit — on convertit en écriture à un seul côté plutôt
+          // que de la laisser tomber dans le OR de suppression ci-dessous.
+          await tx.transaction.updateMany({
+            where: {
+              userId,
+              toPlatformId: id,
+              platformId: { not: id },
+              ...(assetIds.length > 0
+                ? { NOT: { assetId: { in: assetIds } } }
+                : {}),
+            },
+            data: { toPlatformId: null },
+          });
+
+          // 2) Entrées cash : `id` était la source d'un TRANSFERT_CASH dont
+          // la destination survit — converties en APPORT sur cette
+          // destination (montant EUR déjà figé sur la ligne, indépendant de
+          // l'historique de `id`).
+          const incomingCash = await tx.transaction.findMany({
+            where: {
+              userId,
+              type: "TRANSFERT_CASH",
+              platformId: id,
+              toPlatformId: { not: null },
+            },
+            select: { id: true, toPlatformId: true },
+          });
+          for (const row of incomingCash) {
+            await tx.transaction.update({
+              where: { id: row.id },
+              data: {
+                type: "APPORT",
+                platformId: row.toPlatformId as string,
+                toPlatformId: null,
+              },
+            });
+          }
+
           // Txs liées à la plateforme OU aux actifs « home » de la plateforme
+          // (les lignes converties ci-dessus n'y correspondent plus).
           const delTx = await tx.transaction.deleteMany({
             where: {
               userId,
