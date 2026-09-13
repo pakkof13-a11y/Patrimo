@@ -13,7 +13,7 @@
  */
 
 import { parisDayKey } from "../../dates/paris";
-import { enumerateDays } from "./timeline";
+import { enumerateDays, previousDay } from "./timeline";
 import type { DayKey } from "./types";
 
 export const MAX_HISTORY_YEARS = 6;
@@ -47,11 +47,33 @@ export function historyFloorDay(now: Date = new Date()): DayKey {
  * cette règle **n'a pas été mesuré** — la machine où ce commit est écrit n'a
  * pas de base. Si le mur subsiste après ce changement, il est ailleurs, dans le
  * jeu de données, et il ne faut pas couper un jour de plus pour le cacher.
+ *
+ * « Veille » se calcule dans le calendrier **Paris**, jamais en retirant
+ * vingt-quatre heures d'horloge. L'implémentation précédente décrémentait le
+ * jour UTC de `now` puis relisait le jour parisien de l'instant obtenu ; un
+ * jour UTC dure toujours 24 h, un jour civil Paris 23 h ou 25 h aux deux
+ * bascules d'heure. Mesuré par balayage au quart d'heure (2026-09-13) sur les
+ * deux transitions 2026, deux fenêtres d'une heure divergeaient :
+ *
+ * - avance du 29/03 (le 29 ne dure que 23 h) : entre 00 h 00 et 01 h 00 Paris
+ *   le 30/03, `now − 24 h` retombait dans le 28 → clôture rendue `2026-03-28`
+ *   au lieu de `2026-03-29`, soit un jour de courbe purement et simplement
+ *   effacé ;
+ * - recul du 25/10 (le 25 dure 25 h) : entre 23 h 00 et 24 h 00 Paris le
+ *   25/10, `now − 24 h` restait *dans le 25* → clôture rendue `2026-10-25`,
+ *   c'est-à-dire la **journée en cours** — l'inverse exact de la règle que
+ *   cette fonction porte.
+ *
+ * `parisDayKey` lit le jour civil dans le fuseau (DST-aware), `previousDay`
+ * recule d'un jour dans ce même calendrier de clés : aucun décalage n'est
+ * recodé ici.
  */
 export function lastCloseDay(now: Date = new Date()): DayKey {
-  const veille = new Date(now.getTime());
-  veille.setUTCDate(veille.getUTCDate() - 1);
-  return parisDayKey(veille);
+  const jour = parisDayKey(now);
+  // `parisDayKey` rend "" sur une date invalide ; on propage ce vide plutôt
+  // que de fabriquer une clé absurde à partir de NaN.
+  if (jour === "") return "";
+  return previousDay(jour);
 }
 
 /**

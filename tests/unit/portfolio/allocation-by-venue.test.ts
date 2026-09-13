@@ -163,11 +163,12 @@ describe("trading — marge ± P&L, jamais le notionnel", () => {
       quoteCurrency: "USD",
     };
     const equity = tradingEquityOf(position);
+    expect(equity).not.toBeNull();
     const pnl = unrealizedPnl("LONG", d("0.42"), d("61200"), d("63480"));
-    expect(equity.toFixed(2)).toBe(d("5140.80").plus(pnl).toFixed(2));
+    expect(equity!.toFixed(2)).toBe(d("5140.80").plus(pnl).toFixed(2));
 
     const notionnel = notionalOf(d("0.42"), d("61200"));
-    expect(equity.eq(notionnel)).toBe(false);
+    expect(equity!.eq(notionnel)).toBe(false);
 
     const result = computeAllocationByVenue(
       baseInput({
@@ -181,10 +182,10 @@ describe("trading — marge ± P&L, jamais le notionnel", () => {
         ],
         // La manche reçoit désormais une equity **déjà en euros** — la
         // conversion se fait au chargement, comme pour toutes les autres.
-        tradingPositions: [{ equityEur: equity }],
+        tradingPositions: [{ equityEur: equity! }],
       })
     );
-    expect(amountOf(result, "trading")).toBeCloseTo(equity.toNumber(), 6);
+    expect(amountOf(result, "trading")).toBeCloseTo(equity!.toNumber(), 6);
     expect(result.slices.some((s) => Math.abs(s.amount - 54648) < 1)).toBe(
       false
     );
@@ -201,7 +202,9 @@ describe("trading — marge ± P&L, jamais le notionnel", () => {
       marginUsed: "2000",
       quoteCurrency: "USD",
     };
-    expect(tradingEquityOf(closed).toNumber()).toBe(0);
+    const closedEquity = tradingEquityOf(closed);
+    expect(closedEquity).not.toBeNull();
+    expect(closedEquity!.toNumber()).toBe(0);
 
     const result = computeAllocationByVenue(
       baseInput({
@@ -213,7 +216,7 @@ describe("trading — marge ± P&L, jamais le notionnel", () => {
             marketValueEur: "12050",
           }),
         ],
-        tradingPositions: [{ equityEur: tradingEquityOf(closed) }],
+        tradingPositions: [{ equityEur: closedEquity! }],
       })
     );
     expect(result.slices.find((s) => s.key === "trading")).toBeUndefined();
@@ -231,9 +234,27 @@ describe("trading — marge ± P&L, jamais le notionnel", () => {
       quoteCurrency: "USD",
     };
     const equity = tradingEquityOf(position);
+    expect(equity).not.toBeNull();
     const margin = requiredMargin(notionalOf(d(1), d(60000)), d(10));
-    expect(equity.toFixed(2)).toBe(margin.toFixed(2));
-    expect(equity.toFixed(2)).toBe("6000.00");
+    expect(equity!.toFixed(2)).toBe(margin!.toFixed(2));
+    expect(equity!.toFixed(2)).toBe("6000.00");
+  });
+
+  it("rend null — jamais la formule linéaire — pour un contrat COIN-M sans valeur de contrat (TRA-03)", () => {
+    const position = {
+      isOpen: true,
+      direction: "LONG" as const,
+      leverage: "10",
+      sizeContracts: "1",
+      entryPrice: "60000",
+      markPrice: "60000",
+      marginUsed: null,
+      quoteCurrency: "USD",
+      marginType: "COIN_M",
+      contractValue: null,
+    };
+    expect(tradingEquityOf(position)).toBeNull();
+    expect(tradingEquityEur(position, { USD: 1.08 })).toBeNull();
   });
 });
 
@@ -395,6 +416,46 @@ describe("mapping D14.0 — enveloppes, or papier, REPAID, cash", () => {
     );
     const expected = 145.5 * 28.4 + 320 * 12.1 + 88.2 * 42.75 + 55 * 18.9;
     expect(amountOf(result, "es")).toBeCloseTo(expected, 6);
+  });
+});
+
+/**
+ * CR-liq — un découvert ne doit pas effacer la venue qui le porte.
+ *
+ * `amount.gt(0)` masquait toute la venue « Liquidités » dès que la somme de
+ * ses comptes tombait à zéro ou en dessous : un compte à −6 000 € et un
+ * livret à +5 000 € (−1 000 € au total) faisait disparaître les 5 000 € du
+ * livret avec le découvert. Négatif ≠ absent.
+ */
+describe("CR-liq — un découvert n'efface pas la venue", () => {
+  it("laisse la venue visible, à sa vraie valeur négative", () => {
+    const result = computeAllocationByVenue(
+      baseInput({
+        bankAccounts: [{ balanceEur: "-6000" }],
+        savingsAccounts: [{ balanceEur: "5000" }],
+      })
+    );
+    const cash = result.slices.find((s) => s.key === "cash");
+    expect(cash).toBeDefined();
+    expect(cash?.amount).toBe(-1000);
+  });
+
+  it("avant la correction, ce même cas aurait fait disparaître la venue", () => {
+    // Non-régression : documente le comportement que corrige CR-liq — sans
+    // la correction, `amount.gt(0)` aurait exclu la venue (−1000 n'est pas
+    // > 0), ce que ce test interdit désormais.
+    const result = computeAllocationByVenue(
+      baseInput({
+        bankAccounts: [{ balanceEur: "-6000" }],
+        savingsAccounts: [{ balanceEur: "5000" }],
+      })
+    );
+    expect(result.slices.some((s) => s.key === "cash")).toBe(true);
+  });
+
+  it("une venue jamais alimentée — exactement zéro — reste absente", () => {
+    const result = computeAllocationByVenue(baseInput({}));
+    expect(result.slices.some((s) => s.key === "cash")).toBe(false);
   });
 });
 
@@ -637,13 +698,14 @@ describe("D29 — equity de trading ramenée en euros", () => {
 
   it("convertit l'equity depuis la devise de cotation", () => {
     const brut = tradingEquityOf(position);
-    expect(brut.toFixed(2)).toBe("6000.00");
+    expect(brut).not.toBeNull();
+    expect(brut!.toFixed(2)).toBe("6000.00");
 
     const eur = tradingEquityEur(position, RATES);
     expect(eur).not.toBeNull();
     // 6 000 USD à 1,08 USD pour un euro : 5 555,56 €, pas 6 000 €.
     expect(eur!.toFixed(2)).toBe("5555.56");
-    expect(eur!.lt(brut)).toBe(true);
+    expect(eur!.lt(brut!)).toBe(true);
   });
 
   it("laisse un montant déjà en euros intact", () => {

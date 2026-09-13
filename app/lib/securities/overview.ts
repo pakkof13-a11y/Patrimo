@@ -14,16 +14,24 @@ import {
   securitiesEnvelopeLabel,
   type CashAttribution,
 } from "./constants";
+import type {
+  PeaContributionBaseStatus,
+  PeaPlanStatus,
+  PeaRoomBlockReason,
+} from "./pea";
 
 export type SecuritiesRoom = {
   ownCapEur: string;
   contributionsEur: string;
   combinedContributionsEur: string;
+  /** `"0.00"` dès que `blockedReason` est renseigné — voir `PeaContributionRoom`. */
   remainingEur: string;
   overCapEur: string;
   usedPct: string;
   isOverCap: boolean;
   bindingCap: "OWN" | "COMBINED";
+  /** Plan clos ou d'état indéterminé : plus aucun versement possible. */
+  blockedReason: PeaRoomBlockReason | null;
 };
 
 export type SecuritiesAccount = {
@@ -44,14 +52,27 @@ export type SecuritiesAccount = {
       zéro n'est pas un relevé. */
   cashAttribution: CashAttribution;
   liquidationValueEur: string;
+  /** Versements bruts — la grandeur du plafond. */
   contributionsEur: string;
   withdrawalsEur: string;
-  gainEur: string;
+  /**
+   * Versements restant dans le plan après la quote-part emportée par les
+   * retraits — l'assiette du gain. `null` : inconnue, pas nulle. Voir
+   * `peaContributionBase`.
+   */
+  remainingContributionsEur: string | null;
+  contributionBaseStatus: PeaContributionBaseStatus;
+  /** `null` avec `remainingContributionsEur`. */
+  gainEur: string | null;
   maturity: {
     maturityDate: string;
+    /** Vrai sur un plan ouvert de 5 ans ou plus — jamais sur `CLOSED`/`UNKNOWN`. */
     isMatured: boolean;
     ageYears: number;
+    /** `0` sans signification hors `RUNNING` : lire `planStatus` d'abord. */
     daysToMaturity: number;
+    planStatus: PeaPlanStatus;
+    closedAt: string | null;
   } | null;
   room: SecuritiesRoom | null;
   taxStatusLabel: string | null;
@@ -131,6 +152,79 @@ export function cashAttributionNotice(
       title:
         "Aucune poche d'espèces n'est tenue pour cette enveloppe. Le montant " +
         "est inconnu, pas nul.",
+    };
+  }
+  return null;
+}
+
+/**
+ * Ce que l'écran doit dire de l'assiette de versements d'un plan.
+ *
+ * `EXACT` n'appelle aucune phrase. `PRORATA` en appelle une : l'assiette est
+ * une estimation — la quote-part de versements emportée par chaque retrait a
+ * été répartie au prorata, faute de valeur liquidative au jour du retrait —
+ * et un montant d'impôt calculé dessus doit se lire comme tel. `UNKNOWN` en
+ * appelle une autre : rien n'est calculé, et le simulateur ne s'affiche pas.
+ */
+export function contributionBaseNotice(
+  status: PeaContributionBaseStatus
+): { short: string; title: string } | null {
+  if (status === "PRORATA") {
+    return {
+      short: "assiette estimée après retraits",
+      title:
+        "Un retrait partiel emporte une part des versements. Cette part est " +
+        "répartie au prorata de la valeur du plan reconstituée (valeur " +
+        "actuelle + retraits), faute de valeur liquidative au jour de chaque " +
+        "retrait. Le gain et l'impôt simulés sont une estimation.",
+    };
+  }
+  if (status === "UNKNOWN") {
+    return {
+      short: "assiette inconnue",
+      title:
+        "L'assiette de versements ne peut pas être établie : un retrait est " +
+        "daté avant l'ouverture du plan ou avant le premier versement, ou " +
+        "porte sur un compte-titres, auquel la règle du PEA ne s'applique " +
+        "pas. Aucun gain n'est calculé — inconnu, pas nul.",
+    };
+  }
+  return null;
+}
+
+/**
+ * Ce que l'écran doit dire d'un plan qui ne reçoit plus de versement.
+ *
+ * `RUNNING` et `MATURED` n'appellent rien : la place est celle du plafond, et
+ * le compte à rebours ou l'exonération se lisent dans `maturity`. `CLOSED` et
+ * `UNKNOWN` appellent chacun une phrase, la même partout où l'état s'affiche
+ * (jauge, badge d'antériorité, carte de statut, simulateur) : un plan clos ne
+ * doit pas être annoncé « 0 € de versement encore possible » comme s'il était
+ * simplement plein, ni un plan indéterminé présumé ouvert.
+ */
+export function planStatusNotice(
+  status: PeaPlanStatus
+): { short: string; title: string } | null {
+  if (status === "CLOSED") {
+    return {
+      short: "plan présumé clos",
+      title:
+        "Un retrait est enregistré avant les 5 ans du plan : la loi le " +
+        "clôture (art. L221-32 CMF), sauf motif d'exception — création ou " +
+        "reprise d'entreprise, licenciement, invalidité, retraite anticipée, " +
+        "liquidation judiciaire — que ce journal ne porte pas. Dans tous les " +
+        "cas, plus aucun versement n'est possible après ce retrait.",
+    };
+  }
+  if (status === "UNKNOWN") {
+    return {
+      short: "état du plan indéterminé",
+      title:
+        "Le journal ne permet pas d'établir que le plan est encore ouvert : " +
+        "un retrait est daté avant l'ouverture, après aujourd'hui ou sans " +
+        "date lisible, ou un versement est daté après un retrait qui aurait " +
+        "dû clôturer le plan. Aucune place de versement n'est offerte sur " +
+        "une présomption.",
     };
   }
   return null;

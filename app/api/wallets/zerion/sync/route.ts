@@ -141,6 +141,10 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
+  // Le patch (adresse / clé API saisies) n'est calculé qu'ici ; il n'est
+  // persisté qu'après confirmation que fetchZerionPortfolio réussit
+  // (cf. plus bas) — une adresse/clé invalide (401, format) ne doit jamais
+  // écraser une valeur valide déjà en base.
   const patch: Record<string, string | null> = {};
   if (address !== (platform.walletAddress || "").trim()) {
     patch.walletAddress = address;
@@ -149,18 +153,22 @@ export async function POST(req: Request) {
     const k = String(apiKeyIn).trim();
     if (k !== (platformApiKey || "")) patch.walletApiKey = k;
   }
-  if (Object.keys(patch).length > 0) {
-    await prisma.platform.update({
-      where: { id: platform.id },
-      data: patch as never,
-    });
-  }
 
   try {
     const portfolio = await fetchZerionPortfolio(address, apiKey, {
       chainId: chain?.zerionChainId ?? null,
       allChains,
     });
+
+    // fetchZerionPortfolio a réussi : l'adresse/clé fournies sont donc
+    // valides (auth OK) — on peut maintenant les persister sans risque
+    // d'écraser une valeur valide par une valeur qui aurait échoué.
+    if (Object.keys(patch).length > 0) {
+      await prisma.platform.update({
+        where: { id: platform.id },
+        data: patch as never,
+      });
+    }
 
     let ledger = null;
     let history = null;

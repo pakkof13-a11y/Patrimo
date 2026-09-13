@@ -77,7 +77,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
 
 const eventSchema = z.object({
   eventType: z.enum(EVENT_TYPE_KEYS),
-  eventDate: z.string().min(1, "Date d'événement requise"),
+  eventDate: z
+    .string()
+    .min(1, "Date d'événement requise")
+    .refine((v) => !Number.isNaN(new Date(v).getTime()), "Date d'événement invalide"),
   chainId: z.string().trim().max(40).nullable().optional(),
   txHash: z.string().trim().max(120).nullable().optional(),
   symbol: z.string().trim().max(24).nullable().optional(),
@@ -160,34 +163,45 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       );
     }
 
-    if (input.eventType === "CLAIM_REWARD") {
-      if (!input.symbol || !input.quantity) {
-        return NextResponse.json(
-          {
-            error:
-              "Une réclamation doit préciser le jeton et la quantité réclamée",
-          },
-          { status: 400 }
-        );
-      }
-      await claimReward(id, input.symbol, input.quantity, {
-        rewardType: input.rewardType,
-      });
+    if (input.eventType === "CLAIM_REWARD" && (!input.symbol || !input.quantity)) {
+      return NextResponse.json(
+        {
+          error:
+            "Une réclamation doit préciser le jeton et la quantité réclamée",
+        },
+        { status: 400 }
+      );
     }
 
-    const event = await recordEvent(id, {
-      eventType: input.eventType,
-      eventDate: input.eventDate,
-      chainId: input.chainId,
-      txHash: input.txHash,
-      symbol: input.symbol,
-      fromAddress: input.fromAddress,
-      toAddress: input.toAddress,
-      quantity: input.quantity,
-      amountEur: input.amountEur,
-      feesEur: input.feesEur,
-      relatedProtocol: input.relatedProtocol,
-      sourceProvider: input.sourceProvider,
+    // CLAIM_REWARD décrémente `DefiReward` avant que l'événement ne soit
+    // journalisé : les deux doivent commettre ensemble, sinon un rejet tardif
+    // (date invalide, etc.) laisserait l'accru décrémenté sans aucune trace.
+    const event = await prisma.$transaction(async (tx) => {
+      if (input.eventType === "CLAIM_REWARD" && input.symbol && input.quantity) {
+        await claimReward(id, input.symbol, input.quantity, {
+          rewardType: input.rewardType,
+          tx,
+        });
+      }
+
+      return recordEvent(
+        id,
+        {
+          eventType: input.eventType,
+          eventDate: input.eventDate,
+          chainId: input.chainId,
+          txHash: input.txHash,
+          symbol: input.symbol,
+          fromAddress: input.fromAddress,
+          toAddress: input.toAddress,
+          quantity: input.quantity,
+          amountEur: input.amountEur,
+          feesEur: input.feesEur,
+          relatedProtocol: input.relatedProtocol,
+          sourceProvider: input.sourceProvider,
+        },
+        tx
+      );
     });
 
     return NextResponse.json(event, { status: event.created ? 201 : 200 });

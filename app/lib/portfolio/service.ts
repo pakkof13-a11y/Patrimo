@@ -2,7 +2,6 @@ import { prisma } from "../prisma";
 import { d, max, toFixed, zero } from "../money/decimal";
 import {
   replayTransactions,
-  totalCostBasis,
   totalRealizedPnl,
 } from "../accounting";
 import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
@@ -44,7 +43,11 @@ import {
   type ClassifiableHolding,
 } from "./patrimony-metrics";
 import { resolveUnlock } from "../employee-savings/logic";
-import { isNonOwnedStatus } from "../crypto/nft-taxonomy";
+import {
+  collectIgnoredAssetIds,
+  isIgnoredInPortfolio,
+  loadIgnoredAssetIds,
+} from "./ignored-assets";
 import {
   asBaseAmount,
   asEurAmount,
@@ -315,15 +318,14 @@ export async function getHoldings(
     if (pos.quantity.lte(0)) continue;
     const asset = assetMap.get(pos.assetId);
     if (!asset) continue;
-    // Position DeFi explicitement exclue du patrimoine : ses écritures restent
-    // au journal (l'historique et la fiscalité en dépendent), mais elle ne pèse
-    // plus dans aucun total. Une position *fermée* n'a pas besoin de ce test —
-    // son dénouement l'a ramenée à zéro, elle est déjà écartée plus haut.
-    if (asset.defiPosition?.isIgnoredInPortfolio) continue;
-    // Même règle pour les NFT — plus le cas d'un NFT emprunté, présent au
-    // journal mais qui n'appartient pas à l'utilisateur.
-    if (asset.nftItem?.isIgnoredInPortfolio) continue;
-    if (asset.nftItem && isNonOwnedStatus(asset.nftItem.status)) continue;
+    // Position DeFi/NFT explicitement exclue du patrimoine (ou NFT emprunté,
+    // détenu sans être possédé) : ses écritures restent au journal —
+    // l'historique et la fiscalité en dépendent — mais elle ne pèse plus dans
+    // aucun total. Une position *fermée* n'a pas besoin de ce test : son
+    // dénouement l'a ramenée à zéro, elle est déjà écartée plus haut.
+    // Le prédicat est partagé (`ignored-assets.ts`) avec le résumé par
+    // plateforme, la courbe et le réalisé : une seule définition du périmètre.
+    if (isIgnoredInPortfolio(asset)) continue;
 
     const platform =
       platformMap.get(pos.platformId) ||
@@ -663,6 +665,11 @@ export async function getPlatformCashBalances(
           accountType: true,
           manualPrice: true,
           priceQuote: { select: { priceEur: true } },
+          // Mêmes relations que `getHoldings` (`:242-246`) : sans elles, ce
+          // résumé par plateforme ne peut pas savoir qu'une position
+          // DeFi/NFT a été écartée du patrimoine, et la compte quand même.
+          defiPosition: { select: { isIgnoredInPortfolio: true } },
+          nftItem: { select: { isIgnoredInPortfolio: true, status: true } },
         },
       }),
       getBankPocketCashByNameEur(userId, fx),
@@ -686,6 +693,11 @@ export async function getPlatformCashBalances(
   }
 
   const accountTypeByAsset = new Map<string, string>();
+  // Même règle de périmètre que `getHoldings:322-326` : une position
+  // DeFi/NFT écartée du patrimoine (ou un NFT emprunté, non possédé) ne pèse
+  // dans aucune somme par plateforme — sinon ce résumé contredirait le total
+  // global, qui l'exclut déjà.
+  const ignoredAssetIds = collectIgnoredAssetIds(assetQuotes);
   for (const a of assetQuotes) {
     accountTypeByAsset.set(a.id, a.accountType || "AUTRE");
   }
@@ -719,6 +731,7 @@ export async function getPlatformCashBalances(
   >();
   for (const pos of led.positions.values()) {
     if (pos.quantity.lte(0)) continue;
+    if (ignoredAssetIds.has(pos.assetId)) continue;
     const platformId = pos.platformId;
     openPositionCountByPlatform.set(
       platformId,
@@ -937,8 +950,16 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
   const { getExplicitCashTotalEur } = await import("../cash/pockets");
   const { getAlternativesPortfolioSlice } = await import("../alternatives/portfolio");
 
-  const [holdings, platforms, liabilitiesEur, explicitCash, alternatives, es, flags] =
-    await Promise.all([
+  const [
+    holdings,
+    platforms,
+    liabilitiesEur,
+    explicitCash,
+    alternatives,
+    es,
+    flags,
+    ignoredAssetIds,
+  ] = await Promise.all([
       getHoldings(userId, base, rates),
       getPlatformCashBalances(userId, base, rates, ledger),
       getLiabilitiesTotalEur(userId, rates),
@@ -955,10 +976,28 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
       getAlternativesPortfolioSlice(userId, rates),
       getEmployeeSavingsTotalsEur(userId, rates),
       loadHoldingClassificationFlags(userId),
+      /*
+        FIN-01 : le périmètre d'exclusion, chargé pour lui-même.
+
+        `holdings` ne peut pas le fournir : une ligne soldée (quantité nulle)
+        n'y figure plus, et c'est précisément celle qui porte du réalisé. Sans
+        cette lecture, le réalisé d'une position ignorée puis revendue resterait
+        dans `totalReturn`.
+      */
+      loadIgnoredAssetIds(userId),
     ]);
 
   const marketValue = holdings.reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
-  const costBasis = totalCostBasis(ledger);
+  /*
+    FIN-01 : `costBasis` doit couvrir exactement le même périmètre que
+    `marketValue`, celui de `holdings` (positions non ignorées, `getHoldings`
+    l'a déjà filtré à `:322-326`). `totalCostBasis(ledger)` sommait le journal
+    brut, DeFi/NFT écartés compris — le coût d'une position ignorée restait
+    dans `costBasis` alors que sa valeur de marché en était sortie, ce qui
+    sous-évaluait `unrealizedPnlEur` du coût de positions qui ne pèsent plus
+    nulle part ailleurs dans ce résumé.
+  */
+  const costBasis = holdings.reduce((acc, h) => acc.plus(d(h.costBasisEur)), zero());
   const cash = explicitCash.totalEur;
   /*
     Ni `?.` ni `?? 0` : la promesse rend une tranche complète ou échoue. Ce
@@ -992,7 +1031,14 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
   const realEstateEur = metrics.pockets.immobilier;
   const lifeInsuranceEur = metrics.pockets.av;
   const employeeSavingsEur = metrics.pockets.employeeSavings;
-  const realized = totalRealizedPnl(ledger);
+  /*
+    FIN-01 : une ligne ignorée sort partout — MV, coût, latent *et* réalisé.
+    `totalRealizedPnl(ledger)` sommait tous les lots : le gain réalisé d'une
+    position DeFi/NFT écartée du patrimoine restait dans `totalReturn` alors que
+    sa valeur de marché et son coût en étaient déjà sortis. Le total recyclait
+    une ligne « hors patrimoine ».
+  */
+  const realized = totalRealizedPnl(ledger, ignoredAssetIds);
   const unrealized = marketValue.minus(costBasis);
   const cashIncome = ledger.cashIncomeEur;
   const totalReturn = unrealized.plus(realized).plus(cashIncome);

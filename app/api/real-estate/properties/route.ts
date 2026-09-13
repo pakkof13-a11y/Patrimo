@@ -101,6 +101,7 @@ export async function GET() {
                 id: true,
                 name: true,
                 remainingAmount: true,
+                interestRate: true,
                 monthlyPayment: true,
                 paymentDay: true,
                 startDate: true,

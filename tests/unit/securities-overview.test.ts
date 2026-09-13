@@ -34,6 +34,8 @@ function account(p: Partial<SecuritiesAccount> & { id: string }): SecuritiesAcco
     liquidationValueEur: "0",
     contributionsEur: "0",
     withdrawalsEur: "0",
+    remainingContributionsEur: "0",
+    contributionBaseStatus: "EXACT",
     gainEur: "0",
     maturity: null,
     room: null,
@@ -318,6 +320,7 @@ describe("buildAccountView", () => {
           usedPct: "99.17",
           isOverCap: false,
           bindingCap: "OWN",
+          blockedReason: null,
         },
       }),
       []
@@ -352,6 +355,7 @@ describe("buildAccountView", () => {
           usedPct: "101.33",
           isOverCap: true,
           bindingCap: "OWN",
+          blockedReason: null,
         },
       }),
       []
@@ -664,6 +668,7 @@ describe("buildAccountView — trésorerie inconnue", () => {
           usedPct: "99.17",
           isOverCap: false,
           bindingCap: "OWN",
+          blockedReason: null,
         },
       }),
       []

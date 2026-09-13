@@ -381,7 +381,7 @@ const ownershipPctField = z.preprocess(
 export const bankAccountSchema = z.object({
   bankName: z.string().min(1, "Banque requise"),
   balance: decimalString.default("0"),
-  currency: z.string().min(3).max(3).default("EUR"),
+  currency: accountCurrency,
   isPro: z.boolean().default(false),
   ownershipPct: ownershipPctField,
   notes: z.string().optional().nullable(),
@@ -423,7 +423,7 @@ export const savingsAccountSchema = z.object({
     (v) => (v === "" || v == null ? null : Number(v)),
     z.number().int().min(1).max(12).nullable().optional()
   ),
-  currency: z.string().min(3).max(3).default("EUR"),
+  currency: accountCurrency,
   isPro: z.boolean().default(false),
   ownershipPct: ownershipPctField,
   notes: z.string().optional().nullable(),
@@ -492,7 +492,16 @@ export const employeeSavingsLineSchema = z.object({
   isin: z.string().optional().nullable(),
   units: decimalString.default("0"),
   nav: decimalString.default("0"),
-  currency: z.string().min(3).max(3).default("EUR"),
+  /*
+    Devise libre à l'écriture, 500 à la lecture pour tout le module.
+    `z.string().min(3).max(3)` acceptait n'importe quel trigramme ("SEK"),
+    stocké tel quel ; chaque lecture de la liste levait ensuite en tentant de
+    la convertir en euros (`convertToEurSync`) — pas seulement pour cette
+    ligne, pour tout `GET /api/employee-savings`. Même liste blanche que les
+    autres comptes (`accountCurrency` ci-dessus), pas une quatrième liste de
+    devises.
+  */
+  currency: accountCurrency,
   sourceType: z.enum(employeeSavingsSources).default("VOLUNTARY"),
   contributionDate: z.string().optional().nullable(),
   /** Montant versé — facultatif, et distinct de zéro quand il manque. */

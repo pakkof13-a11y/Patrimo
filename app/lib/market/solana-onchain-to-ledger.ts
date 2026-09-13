@@ -303,16 +303,59 @@ export async function writeOnchainTxsToLedger(
     repairSolanaAssetTickers(userId, platformId),
   ]);
 
-  const rows = await prisma.blockchainOnchainTx.findMany({
-    where: {
-      userId,
-      platformId,
-      status: "success",
-      ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
-    },
-    orderBy: [{ blockTime: "asc" }, { createdAt: "asc" }],
-    take: limit,
+  /*
+    Curseur de progression = « déjà au journal ». Reprendre toujours les
+    `limit` lignes les plus anciennes (status=success, blockTime asc) sans
+    exclure celles déjà journalisées laissait toute ligne au-delà de la
+    `limit`-ième jamais parcourue : arrêt silencieux de la journalisation.
+    On exclut donc les signatures déjà journalisées en amont, et on pagine
+    (borné) pour que les lignes durablement ignorées — sans blockTime, sans
+    transfert — ne saturent pas non plus le lot.
+  */
+  const journalized = await prisma.transaction.findMany({
+    where: { userId, platformId, notes: { contains: ONCHAIN_NOTE_PREFIX } },
+    select: { notes: true },
   });
+  const journalizedSigs = new Set<string>();
+  for (const j of journalized) {
+    const sig = extractOnchainSignature(j.notes);
+    if (sig) journalizedSigs.add(sig);
+  }
+
+  type OnchainRow = Awaited<
+    ReturnType<typeof prisma.blockchainOnchainTx.findMany>
+  >[number];
+  const rows: OnchainRow[] = [];
+  const pageSize = Math.max(1, limit);
+  const maxPages = 10;
+  let cursorId: string | null = null;
+  for (let page = 0; page < maxPages && rows.length < limit; page += 1) {
+    const batch: OnchainRow[] = await prisma.blockchainOnchainTx.findMany({
+      where: {
+        userId,
+        platformId,
+        status: "success",
+        blockTime: { not: null },
+        ...(journalizedSigs.size > 0
+          ? { signature: { notIn: [...journalizedSigs] } }
+          : {}),
+        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+      },
+      orderBy: [{ blockTime: "asc" }, { id: "asc" }],
+      take: pageSize,
+      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+    });
+    if (batch.length === 0) break;
+    for (const row of batch) {
+      if (rows.length >= limit) break;
+      if (journalizedSigs.has(row.signature)) continue;
+      if (row.type === "FAILED") continue;
+      if (parseTransfers(row.transfers).length === 0) continue;
+      rows.push(row);
+    }
+    if (batch.length < pageSize) break;
+    cursorId = batch[batch.length - 1]!.id;
+  }
 
   // Pré-résoudre tous les mints du batch
   const allMints: string[] = [];

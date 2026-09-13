@@ -26,6 +26,7 @@ import {
   computeTotals,
   isOverviewEmpty,
   num,
+  planStatusNotice,
   positionWeightPct,
   splitByEnvelope,
   unattributedPockets,
@@ -913,6 +914,47 @@ function FiscalStatusCard({
 
   const m = account.maturity;
   const months = Math.max(0, Math.round(m.daysToMaturity / 30.44));
+
+  /*
+    Plan clos ou indéterminé : ni compte à rebours ni régime d'exonération.
+    `daysToMaturity` vaut 0 dans ces états et afficherait « 0 mois », le
+    contraire de ce qui se passe — un plan clos ne mûrit plus (TIT-06).
+  */
+  const planNotice = planStatusNotice(m.planStatus);
+  if (planNotice) {
+    return (
+      <section
+        className="panel p-[var(--pad-card)]"
+        data-testid="securities-fiscal"
+        data-plan-status={m.planStatus}
+      >
+        <h3 className="text-label">Statut fiscal</h3>
+        <p className="mt-[var(--space-3)] flex items-center gap-[var(--space-2)] text-[length:var(--text-sm)]">
+          <ShieldCheck
+            className="h-3.5 w-3.5 shrink-0 text-[var(--negative)]"
+            aria-hidden
+          />
+          <span className="min-w-0 text-[var(--foreground-secondary)]">
+            {account.envelopeLabel} ouvert le{" "}
+            <span className="num">{formatDate(account.openDate)}</span>
+            {m.closedAt && (
+              <>
+                , retrait avant 5 ans le{" "}
+                <span className="num">{formatDate(m.closedAt)}</span>
+              </>
+            )}
+          </span>
+        </p>
+        <p
+          className="mt-[var(--space-3)] text-[length:var(--text-sm)] font-medium text-[var(--foreground)]"
+          data-testid="securities-plan-status"
+        >
+          {account.taxStatusLabel}
+        </p>
+        <p className="text-meta mt-[var(--space-2)]">{planNotice.title}</p>
+      </section>
+    );
+  }
 
   return (
     <section className="panel p-[var(--pad-card)]" data-testid="securities-fiscal">

@@ -100,7 +100,7 @@ export async function fetchWalletBalanceSnapshot(
     isNative: true,
   };
 
-  const tokens = tokensRaw.map((t) => {
+  const priced = tokensRaw.map((t) => {
     const mint = t.tokenAddress || "";
     const p = prices.get(mint) ?? prices.get(mint.toLowerCase()) ?? null;
     const bal = Number(t.balance);
@@ -116,12 +116,33 @@ export async function fetchWalletBalanceSnapshot(
     };
   });
 
+  /*
+    Un compte token à 1 unité / 0 décimale, sans cotation, est un NFT
+    (standard Metaplex : supply 1, decimals 0) ou un spam de même forme —
+    pas un actif comptant. Publié ici, il devenait un `Asset` CRYPTO sans
+    fiche NFT, jamais coté, donc jamais clôturé : la courbe « Évolution »
+    perdait tous ses points dès son entrée (un jour n'entre dans la série
+    que si toutes les lignes détenues sont valorisables). Les NFT sont lus
+    par le module NFT (`nft-wallet-sync`, Magic Eden) ; le snapshot comptant
+    les déclare sans les publier. Un token de cette forme mais coté reste
+    comptant : la cotation prime sur la forme.
+  */
+  const tokens = priced.filter((t) => !isNftShapedHolding(t));
+  const nftLikeCount = priced.length - tokens.length;
+
   tokens.sort((a, b) => (b.valueUsd ?? 0) - (a.valueUsd ?? 0));
 
   const parts = [native.valueUsd, ...tokens.map((t) => t.valueUsd)].filter(
     (v): v is number => v != null && Number.isFinite(v)
   );
   const total = parts.length > 0 ? parts.reduce((a, b) => a + b, 0) : null;
+
+  const baseNotice =
+    "Source RPC Solana natif (@solana/web3.js). Prix USD via CoinGecko quand disponibles. Pas d’indexeur Solscan.";
+  const nftNotice =
+    nftLikeCount > 0
+      ? ` ${nftLikeCount} compte(s) token à 1 unité sans décimale ni cotation (NFT ou spam) exclu(s) du comptant — lus par la synchronisation NFT.`
+      : "";
 
   return {
     address: addr,
@@ -130,9 +151,13 @@ export async function fetchWalletBalanceSnapshot(
     tokens,
     fetchedAt: new Date().toISOString(),
     source: "solana-rpc",
-    notice:
-      "Source RPC Solana natif (@solana/web3.js). Prix USD via CoinGecko quand disponibles. Pas d’indexeur Solscan.",
+    notice: baseNotice + nftNotice,
   };
+}
+
+/** NFT Metaplex / spam de même forme : 1 unité, 0 décimale, aucune cotation. */
+function isNftShapedHolding(t: SolanaTokenHolding): boolean {
+  return t.decimals === 0 && Number(t.balance) === 1 && t.priceUsd == null;
 }
 
 function shortMint(mint: string): string {

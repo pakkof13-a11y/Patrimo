@@ -101,6 +101,49 @@ describe("needsHistoryBackfill — couverture depuis le premier achat", () => {
       })
     ).toBe(true);
   });
+
+  /*
+    MAR-01/MAR-02 — régression.
+
+    `fromDateForAsset` (le fetch réel) clampe déjà `firstTxDay` au plancher
+    `MAX_HISTORY_YEARS` avant d'interroger le fournisseur : aucune clôture
+    antérieure à `now − 6 ans` n'entre donc jamais en base. Si
+    `needsHistoryBackfill` compare `minDay` à une borne dérivée du
+    `firstTxDay` *non clampé*, la comparaison porte sur une couverture que le
+    fetch ne peut structurellement jamais atteindre : un actif acheté il y a
+    plus de six ans, déjà couvert depuis le plancher clampé, serait signalé
+    « stale » à chaque passage, indéfiniment.
+  */
+  it("un premier achat vieux de plus de 6 ans, couvert depuis le plancher clampé → no-op", () => {
+    // now = 2026-09-04 → plancher à 6 ans = 2020-09-04.
+    expect(
+      needsHistoryBackfill({
+        firstTxDay: "2010-01-01",
+        fallbackFromDay: fallback,
+        toDay,
+        minDay: "2020-09-04",
+        maxDay: toDay,
+        fetchedAt: now,
+        now,
+      })
+    ).toBe(false);
+  });
+
+  it("un premier achat vieux de plus de 6 ans, avec un vrai trou après le plancher clampé → fetch", () => {
+    // Le plancher clampé est 2020-09-04 ; la couverture ne démarre qu'en 2021 :
+    // un trou réel subsiste entre le plancher et le premier jour connu.
+    expect(
+      needsHistoryBackfill({
+        firstTxDay: "2010-01-01",
+        fallbackFromDay: fallback,
+        toDay,
+        minDay: "2021-01-04",
+        maxDay: toDay,
+        fetchedAt: now,
+        now,
+      })
+    ).toBe(true);
+  });
 });
 
 const assetFindMany = vi.fn();
@@ -298,6 +341,53 @@ describe("backfillDailyClosesFromFirstTx — fumée", () => {
     ];
     // MAINTENANT = 2026-09-04 → cap 6 ans = 2020-09-04.
     expect(opts.from.toISOString().slice(0, 10)).toBe("2020-09-04");
+  });
+
+  /*
+    MAR-01/MAR-02 — bout en bout.
+
+    Un actif dont le premier achat remonte à plus de 6 ans, déjà couvert
+    depuis le plancher clampé jusqu'à aujourd'hui, ne doit plus jamais
+    redéclencher de fetch : sans le correctif, `needsHistoryBackfill`
+    comparait la couverture réelle (bornée au plancher clampé) à une borne
+    calculée sur le `firstTxDay` non clampé, jamais satisfiable.
+  */
+  it("un actif ancien déjà couvert depuis le plancher clampé n'est plus jamais stale", async () => {
+    groupByTx.mockResolvedValue([
+      { assetId: "a1", _min: { occurredAt: new Date("2010-01-01T10:00:00Z") } },
+    ]);
+    groupByCloses.mockResolvedValue([
+      {
+        assetId: "a1",
+        // 2020-09-04 = MAINTENANT (2026-09-04) − 6 ans, le plancher clampé.
+        _min: { day: "2020-09-04" },
+        _max: { day: "2026-09-04", fetchedAt: MAINTENANT },
+      },
+    ]);
+
+    const r = await backfillDailyClosesFromFirstTx({ now: MAINTENANT });
+
+    expect(r.assetsStale).toBe(0);
+    expect(getHistory).not.toHaveBeenCalled();
+  });
+
+  it("un actif ancien avec un vrai trou récent reste stale", async () => {
+    groupByTx.mockResolvedValue([
+      { assetId: "a1", _min: { occurredAt: new Date("2010-01-01T10:00:00Z") } },
+    ]);
+    groupByCloses.mockResolvedValue([
+      {
+        assetId: "a1",
+        _min: { day: "2020-09-04" },
+        // Trou : la couverture s'arrête il y a plus de 6 h, `toDay` non atteint.
+        _max: { day: "2026-08-20", fetchedAt: new Date("2026-08-20T09:00:00Z") },
+      },
+    ]);
+
+    const r = await backfillDailyClosesFromFirstTx({ now: MAINTENANT });
+
+    expect(r.assetsStale).toBe(1);
+    expect(getHistory).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -303,8 +303,26 @@ export function platformCashAfter(state: LedgerState, platformId: string) {
   return state.cashByPlatform.get(platformId) ?? zero();
 }
 
-export function totalRealizedPnl(state: LedgerState): Decimal {
-  return state.realizedLots.reduce((acc, lot) => acc.plus(lot.realizedPnlEur), zero());
+/**
+ * Réalisé total du journal.
+ *
+ * `excludeAssetIds` : même périmètre et même doctrine que `totalCostBasis`
+ * ci-dessous. Une ligne écartée du patrimoine sort de *tous* les termes du P&L
+ * — valeur de marché, coût, latent et réalisé. Sans ce filtre, le réalisé d'une
+ * position DeFi/NFT ignorée continuait d'alimenter `totalReturn`, qui recyclait
+ * ainsi une ligne dont la valeur et le coût avaient déjà été retirés : un gain
+ * sans contrepartie au bilan.
+ */
+export function totalRealizedPnl(
+  state: LedgerState,
+  excludeAssetIds?: ReadonlySet<string>
+): Decimal {
+  let t = zero();
+  for (const lot of state.realizedLots) {
+    if (excludeAssetIds?.has(lot.assetId)) continue;
+    t = t.plus(lot.realizedPnlEur);
+  }
+  return t;
 }
 
 export function totalCash(state: LedgerState): Decimal {
@@ -313,9 +331,25 @@ export function totalCash(state: LedgerState): Decimal {
   return t;
 }
 
-export function totalCostBasis(state: LedgerState): Decimal {
+/**
+ * Coût total du journal.
+ *
+ * `excludeAssetIds` restreint la somme au périmètre patrimonial — une position
+ * DeFi/NFT marquée `isIgnoredInPortfolio` (ou un NFT emprunté) reste au
+ * journal pour l'historique et la fiscalité, mais ne doit peser dans aucun
+ * total affiché : sans ce filtre, `costBasis` couvrirait un périmètre plus
+ * large que `marketValue`, qui l'exclut déjà (`getHoldings`), et sous-évaluerait
+ * le P&L latent du coût de positions qui ne comptent plus nulle part ailleurs.
+ */
+export function totalCostBasis(
+  state: LedgerState,
+  excludeAssetIds?: ReadonlySet<string>
+): Decimal {
   let t = zero();
-  for (const p of state.positions.values()) t = t.plus(p.costBasisEur);
+  for (const p of state.positions.values()) {
+    if (excludeAssetIds?.has(p.assetId)) continue;
+    t = t.plus(p.costBasisEur);
+  }
   return t;
 }
 

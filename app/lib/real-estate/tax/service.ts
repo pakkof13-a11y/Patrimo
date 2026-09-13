@@ -152,6 +152,7 @@ export async function loadPropertyTaxRows(
               // sinon l'assiette IFI dépendrait de l'ordre de navigation.
               select: {
                 remainingAmount: true,
+                interestRate: true,
                 monthlyPayment: true,
                 paymentDay: true,
                 startDate: true,

@@ -26,16 +26,22 @@ function pos(over: Partial<FuturesPositionInput> = {}): FuturesPositionInput {
     marginUsed: over.marginUsed ?? null,
     fundingPaid: over.fundingPaid ?? null,
     commissionPaid: over.commissionPaid ?? null,
+    marginType: over.marginType ?? null,
+    contractValue: over.contractValue ?? null,
   };
 }
 
 describe("requiredMargin", () => {
   it("divise le notionnel par le levier", () => {
-    expect(requiredMargin(d(60_000), d(10)).toFixed(2)).toBe("6000.00");
+    expect(requiredMargin(d(60_000), d(10))!.toFixed(2)).toBe("6000.00");
   });
 
   it("renvoie 0 pour un levier nul plutôt que de diviser par zéro", () => {
-    expect(requiredMargin(d(60_000), d(0)).toFixed(2)).toBe("0.00");
+    expect(requiredMargin(d(60_000), d(0))!.toFixed(2)).toBe("0.00");
+  });
+
+  it("renvoie null (UNKNOWN) quand le notionnel est inconnu — TRA-03", () => {
+    expect(requiredMargin(null, d(10))).toBeNull();
   });
 });
 
@@ -122,20 +128,20 @@ describe("toFuturesView", () => {
     const v = toFuturesView(
       pos({ leverage: d(10), sizeContracts: d(1), entryPrice: d(60_000), markPrice: d(66_000) })
     );
-    expect(v.notionalUsd.toFixed(2)).toBe("60000.00");
-    expect(v.marginUsed.toFixed(2)).toBe("6000.00");
-    expect(v.unrealizedPnlEur.toFixed(2)).toBe("6000.00");
-    expect(v.signedNotional.toFixed(2)).toBe("60000.00");
+    expect(v.notionalUsd!.toFixed(2)).toBe("60000.00");
+    expect(v.marginUsed!.toFixed(2)).toBe("6000.00");
+    expect(v.unrealizedPnlEur!.toFixed(2)).toBe("6000.00");
+    expect(v.signedNotional!.toFixed(2)).toBe("60000.00");
   });
 
   it("signe l'exposition négativement pour un SHORT", () => {
     const v = toFuturesView(pos({ direction: "SHORT" }));
-    expect(v.signedNotional.lt(0)).toBe(true);
+    expect(v.signedNotional!.lt(0)).toBe(true);
   });
 
   it("utilise la marge déclarée plutôt que la marge calculée quand elle est fournie", () => {
     const v = toFuturesView(pos({ marginUsed: d(9_999) }));
-    expect(v.marginUsed.toFixed(2)).toBe("9999.00");
+    expect(v.marginUsed!.toFixed(2)).toBe("9999.00");
   });
 
   it("déclenche l'alerte de liquidation quand le marché s'approche du seuil", () => {
@@ -144,6 +150,29 @@ describe("toFuturesView", () => {
       pos({ leverage: d(10), entryPrice: d(60_000), markPrice: d(55_000) })
     );
     expect(v.liquidationAlert).toBe(true);
+  });
+
+  it("rend le notionnel et le P&L null pour un contrat COIN-M sans valeur de contrat — TRA-03", () => {
+    const v = toFuturesView(
+      pos({ marginType: "COIN_M", contractValue: null, marginUsed: null })
+    );
+    expect(v.notionalUsd).toBeNull();
+    expect(v.marginUsed).toBeNull();
+    expect(v.unrealizedPnlEur).toBeNull();
+    expect(v.signedNotional).toBeNull();
+  });
+
+  it("calcule le notionnel COIN-M depuis la valeur de contrat quand elle est connue", () => {
+    const v = toFuturesView(
+      pos({
+        marginType: "COIN_M",
+        contractValue: d(100),
+        sizeContracts: d(50),
+        marginUsed: null,
+      })
+    );
+    // 50 contrats × 100 USD = 5 000 USD de notionnel, pas 50 × 60 000.
+    expect(v.notionalUsd!.toFixed(2)).toBe("5000.00");
   });
 });
 
@@ -171,6 +200,16 @@ describe("summarizeFutures", () => {
       pos({ id: "b", leverage: d(3), entryPrice: d(60_000), markPrice: d(60_000) }), // loin
     ]);
     expect(s.liquidationAlerts).toBe(1);
+  });
+
+  it("écarte les positions COIN-M sans valeur de contrat de l'exposition et du P&L — TRA-03", () => {
+    const s = summarizeFutures([
+      pos({ id: "a", direction: "LONG", sizeContracts: d(1), entryPrice: d(60_000), markPrice: d(60_000) }),
+      pos({ id: "b", marginType: "COIN_M", contractValue: null, marginUsed: null }),
+    ]);
+    // La position b est UNKNOWN : elle ne doit ni gonfler ni fausser l'exposition nette.
+    expect(s.netExposureEur.toFixed(2)).toBe("60000.00");
+    expect(s.unvaluedCount).toBe(1);
   });
 });
 

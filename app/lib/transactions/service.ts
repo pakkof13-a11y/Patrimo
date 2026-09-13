@@ -474,6 +474,12 @@ export async function createTransaction(
   ].includes(input.type);
   const allowNeg = Boolean(input.allowNegativeCash) || positionOnly;
 
+  // Publication différée : `nextState` n'est reporté dans l'état partagé du
+  // lot qu'après le succès de l'insert Prisma (voir plus bas) — sinon une
+  // ligne suivante du même lot validerait contre une tx fantôme jamais
+  // persistée si CET insert échoue.
+  let nextState: LedgerState | undefined;
+
   if (prismaClient) {
     // Dans une transaction interactive (ex. SL/TP, market/triggers.ts) : lecture
     // fraîche via `tx` obligatoire pour les garanties d'isolation — ne pas
@@ -488,12 +494,7 @@ export async function createTransaction(
     // Chemin normal : réutilise le ledger déjà calculé/caché par
     // loadLedgerForUser (fingerprint) au lieu d'un findMany + replay complet.
     const ledgerState = opts?.ledgerState ?? (await loadLedgerForUser(input.userId));
-    const nextState = validateLedgerIncremental(ledgerState, newTx, allowNeg);
-    if (opts?.ledgerState) {
-      // Lot (import CSV) : reporter la tx validée dans l'état partagé pour
-      // que la ligne suivante la voie sans repasser par la DB.
-      Object.assign(opts.ledgerState, nextState);
-    }
+    nextState = validateLedgerIncremental(ledgerState, newTx, allowNeg);
   }
 
   const amounts = computeNetCashImpactEur(newTx);
@@ -510,6 +511,15 @@ export async function createTransaction(
       }),
     },
   });
+
+  if (opts?.ledgerState && nextState) {
+    // Lot (import CSV) : l'insert a réussi — reporter la tx validée dans
+    // l'état partagé pour que la ligne suivante la voie sans repasser par la
+    // DB. Publication volontairement après le `create` (pas de `finally`) :
+    // un insert en échec ne doit jamais laisser de tx fantôme dans l'état
+    // partagé (cache process-local, voir loadLedgerForUser/ledger-cache.ts).
+    Object.assign(opts.ledgerState, nextState);
+  }
 
   if (!opts?.skipInvalidate) {
     const { invalidateLedgerCache } = await import("../portfolio/ledger-cache");

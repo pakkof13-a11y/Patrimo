@@ -12,6 +12,24 @@
  * dossier. Une famille ajoutée à la remise à zéro sans l'être ici produirait
  * un compte vidé qui refuserait d'afficher son cockpit, et l'inverse un compte
  * qui l'afficherait en possédant encore des données.
+ *
+ * Correction (chantier CR-vide) : `termDeposits`, `preciousMetalSales`,
+ * `securitiesAccounts` et `defiStrategies` manquaient — `resetUserData` les
+ * supprime déjà (dépôts à terme, cessions de métaux, comptes-titres, marchés
+ * DeFi déclaratifs), mais rien ici ne les recensait. Un compte dont la seule
+ * donnée était par exemple un compte-titres PEA ouvert sans versement encore
+ * saisi était donc déclaré vierge. `trading` couvre désormais aussi
+ * `TradingAccount` (solde déclaratif), pas seulement `TradingPosition`, pour
+ * la même raison.
+ *
+ * Restent volontairement hors de ce recensement les tables purement
+ * techniques que `resetUserData` nettoie aussi mais qui ne portent aucune
+ * donnée patrimoniale par elles-mêmes : `PortfolioSnapshot` (cache dérivé),
+ * `NftCollection`/`NftAsset`/`NftSyncCursor` et `DefiProtocolRef`/
+ * `DefiMarketRef`/`DefiSyncCursor` (identités et curseurs de synchronisation
+ * — une détention NFT ou DeFi réelle reste un `Asset`, déjà couvert par
+ * `assets` ci-dessous). Les y ajouter ferait dépendre le cockpit de résidus
+ * de synchronisation plutôt que d'un patrimoine réel.
  */
 
 import { prisma } from "@/app/lib/prisma";
@@ -33,14 +51,27 @@ export type PatrimonyPresence = {
   alternatives: boolean;
   realEstate: boolean;
   /**
-   * Positions à levier.
+   * Positions à levier **et** comptes de trading déclaratifs (solde saisi,
+   * même sans position ouverte).
    *
-   * Rattachées à `User` et non à `Asset` — un contrat n'est pas un actif
-   * détenu — elles échappaient au recensement : un compte dont c'était la
+   * Rattachés à `User` et non à `Asset` — un contrat n'est pas un actif
+   * détenu — ils échappaient au recensement : un compte dont c'était la
    * seule activité était présenté comme vierge, et le cockpit d'accueil
-   * s'affichait par-dessus des positions bien réelles.
+   * s'affichait par-dessus des positions ou des soldes bien réels.
    */
   trading: boolean;
+  /** Dépôt à terme (CAT) — rattaché à `User`, jamais à un `Asset`. */
+  termDeposits: boolean;
+  /**
+   * Cession de métal précieux. Distincte de `alternatives.metals` : une
+   * position peut avoir été entièrement cédée (donc absente) tout en
+   * laissant une cession déclarée — la vente reste une donnée patrimoniale.
+   */
+  preciousMetalSales: boolean;
+  /** Compte-titres (PEA/PEA-PME/CTO) ouvert, même sans versement saisi. */
+  securitiesAccounts: boolean;
+  /** Regroupement DeFi déclaratif — peut exister avant toute position. */
+  defiStrategies: boolean;
 };
 
 /**
@@ -81,7 +112,7 @@ const some = async (fn: () => Promise<number>): Promise<boolean> => {
 /**
  * Interroge toutes les familles en parallèle.
  *
- * Onze requêtes `count` indexées sur `userId`, lancées ensemble : c'est le prix
+ * Vingt requêtes `count` indexées sur `userId`, lancées ensemble : c'est le prix
  * d'une réponse juste, et elle n'est demandée qu'une fois au chargement de
  * l'application. Chaque `count` s'arrête au premier enregistrement trouvé
  * (`take: 1` via `findFirst`) plutôt que de dénombrer une table entière.
@@ -111,7 +142,12 @@ export async function loadPatrimonyPresence(
     crowdlending,
     tangibles,
     realEstate,
-    trading,
+    tradingPositions,
+    tradingAccounts,
+    termDeposits,
+    preciousMetalSales,
+    securitiesAccounts,
+    defiStrategies,
   ] = await Promise.all([
     exists((a) => prisma.transaction.findFirst(a)),
     exists((a) => prisma.asset.findFirst(a)),
@@ -163,6 +199,11 @@ export async function loadPatrimonyPresence(
         : 0
     ),
     exists((a) => prisma.tradingPosition.findFirst(a)),
+    exists((a) => prisma.tradingAccount.findFirst(a)),
+    exists((a) => prisma.termDeposit.findFirst(a)),
+    exists((a) => prisma.preciousMetalSale.findFirst(a)),
+    exists((a) => prisma.securitiesAccount.findFirst(a)),
+    exists((a) => prisma.defiStrategy.findFirst(a)),
   ]);
 
   return {
@@ -177,7 +218,11 @@ export async function loadPatrimonyPresence(
     employeeSavings,
     alternatives: metals || privateEquity || crowdlending || tangibles,
     realEstate,
-    trading,
+    trading: tradingPositions || tradingAccounts,
+    termDeposits,
+    preciousMetalSales,
+    securitiesAccounts,
+    defiStrategies,
   };
 }
 

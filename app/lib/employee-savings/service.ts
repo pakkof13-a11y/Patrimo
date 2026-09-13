@@ -12,7 +12,13 @@ import {
 import { isFundCategory } from "./fund-category";
 import { parseNumber } from "@/app/lib/import/normalize";
 import { d, toFixed } from "@/app/lib/money/decimal";
+import { ACCOUNT_CURRENCY_OPTIONS } from "@/app/lib/money/currencies";
 import { convertToEurSync, getEurRates } from "@/app/lib/market/fx";
+import {
+  EMPLOYEE_SAVINGS_PLAN_TYPES,
+  EMPLOYEE_SAVINGS_SOURCES,
+  EMPLOYEE_SAVINGS_UNLOCK_MODES,
+} from "./types";
 import type {
   EmployeeSavingsLineDto,
   EmployeeSavingsPlanType,
@@ -45,8 +51,24 @@ function toDecimal(v: string | number | null | undefined): Prisma.Decimal | null
   return n === null ? null : new Prisma.Decimal(n);
 }
 
-function dec(v: string | number | undefined | null, fallback = "0"): Prisma.Decimal {
-  return toDecimal(v) ?? new Prisma.Decimal(fallback);
+/**
+ * Décimal requis (`units`, `nav`) : jamais un repli silencieux à 0.
+ *
+ * Ces deux champs portent la position elle-même — `marketValue` en dépend
+ * entièrement. `dec(v, "0")` répondait "0" aussi bien à une cellule vide qu'à
+ * une valeur illisible ("abc", "12,5 parts") : la ligne s'affichait quand
+ * même, avec une valorisation fausse et sans qu'aucune erreur ne le signale.
+ * Même refus que `optionalDec` pour la valeur vide, plus le cas nouveau —
+ * une valeur présente que `parseNumber` ne sait pas lire. Un "0" saisi tel
+ * quel reste un 0 accepté.
+ */
+function requiredDec(v: string | number | undefined | null, field: string): Prisma.Decimal {
+  const parsed = toDecimal(v);
+  if (parsed !== null) return parsed;
+  const raw = v === null || v === undefined ? "" : String(v).trim();
+  throw new Error(
+    raw ? `${field} : valeur illisible (${raw})` : `${field} : valeur manquante`
+  );
 }
 
 /**
@@ -321,14 +343,30 @@ function normalizeCreate(input: CreateEmployeeSavingsInput) {
     unlockDate = null;
   }
 
+  /*
+    Devise libre à l'écriture, 500 à la lecture pour tout le module.
+    `(input.currency || "EUR").toUpperCase().slice(0,3)` acceptait n'importe
+    quel trigramme ("SEK", "ZZZ") : la ligne s'écrivait, et chaque lecture du
+    module levait ensuite `FxRateUnknownError` — pas seulement pour cette
+    ligne, pour la liste entière (`convertToEurSync` dans `mapLine`). Même
+    liste blanche que les autres comptes (`accountCurrency`,
+    `app/lib/schemas.ts`), refusée ici avant l'écriture.
+  */
+  const currency = (input.currency ? String(input.currency).trim() : "EUR").toUpperCase();
+  if (!(ACCOUNT_CURRENCY_OPTIONS as readonly string[]).includes(currency)) {
+    throw new Error(
+      `currency : devise inconnue (${currency}). Attendu : ${ACCOUNT_CURRENCY_OPTIONS.join(", ")}.`
+    );
+  }
+
   return {
     planType,
     manager: String(input.manager || "").trim(),
     fundName: String(input.fundName || "").trim(),
     isin: input.isin ? String(input.isin).trim().toUpperCase() || null : null,
-    units: dec(input.units, "0"),
-    nav: dec(input.nav, "0"),
-    currency: (input.currency || "EUR").toUpperCase().slice(0, 3),
+    units: requiredDec(input.units, "units"),
+    nav: requiredDec(input.nav, "nav"),
+    currency,
     sourceType: String(input.sourceType || "VOLUNTARY").toUpperCase(),
     contributionDate,
     contributedAmount: optionalDec(input.contributedAmount),
@@ -354,6 +392,23 @@ function prepareCreate(input: CreateEmployeeSavingsInput) {
   const data = normalizeCreate(input);
   if (!data.manager) throw new Error("Gestionnaire requis");
   if (!data.fundName) throw new Error("Nom du fonds requis");
+  /*
+    Le CSV passe par `mapPlan`/`mapSource` (csv.ts), qui refusent déjà une
+    valeur non vide et non reconnue. Cette même garde, ici, protège le chemin
+    JSON direct : un appelant qui construit `CreateEmployeeSavingsInput` sans
+    passer par le schéma Zod de la route ne doit pas pouvoir écrire un
+    planType/sourceType/unlockMode hors des valeurs que le reste du module
+    sait interpréter.
+  */
+  if (!(EMPLOYEE_SAVINGS_PLAN_TYPES as readonly string[]).includes(data.planType)) {
+    throw new Error(`plan_type : valeur non reconnue (${data.planType})`);
+  }
+  if (!(EMPLOYEE_SAVINGS_SOURCES as readonly string[]).includes(data.sourceType)) {
+    throw new Error(`source_type : valeur non reconnue (${data.sourceType})`);
+  }
+  if (!(EMPLOYEE_SAVINGS_UNLOCK_MODES as readonly string[]).includes(data.unlockMode)) {
+    throw new Error(`unlock_mode : valeur non reconnue (${data.unlockMode})`);
+  }
   return data;
 }
 

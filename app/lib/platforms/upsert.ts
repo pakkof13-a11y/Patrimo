@@ -159,7 +159,22 @@ export async function findOrCreatePlatform(
 
 /**
  * Fusionne `sourceId` → `targetId` (même user).
- * Déplace actifs + transactions, puis supprime la source.
+ * Déplace actifs + transactions + comptes-titres, puis supprime la source.
+ *
+ * Ce que cette fonction NE déplace PAS (documenté, pas oublié) :
+ * `DefiSyncCursor` / `NftSyncCursor` — leur `scopeKey` est dérivé de
+ * `platformId` (cf. schema.prisma) : les réassigner exigerait de recalculer
+ * cette clé ET de choisir quel curseur gagne si la cible en a déjà un pour le
+ * même provider (contrainte `@@unique([userId, provider, scopeKey])`). C'est
+ * une décision de synchro, pas de fusion — hors périmètre de ce lot.
+ * `BlockchainOnchainTx` — `@@unique([platformId, signature])` : un déplacement
+ * aveugle peut heurter cette contrainte si la même signature existe déjà sous
+ * la cible (ex. wallet importé deux fois). Ces trois modèles restent en
+ * Cascade sur `Platform` : ils sont supprimés avec la source (perte de
+ * métadonnées de synchro/historique on-chain, pas de données patrimoniales
+ * utilisateur — Asset/Transaction/SecuritiesAccount, elles, sont préservées).
+ * Qui doit trancher une politique de fusion pour ces deux modèles :
+ * connectors-exchanges (curseurs de synchro) / crypto-onchain (historique on-chain).
  */
 export async function mergePlatforms(
   userId: string,
@@ -168,6 +183,7 @@ export async function mergePlatforms(
 ): Promise<{
   assetsMoved: number;
   transactionsMoved: number;
+  securitiesAccountsMoved: number;
   deletedSourceId: string;
 }> {
   if (sourceId === targetId) {
@@ -180,6 +196,41 @@ export async function mergePlatforms(
   ]);
   if (!source) throw new Error("Plateforme source introuvable");
   if (!target) throw new Error("Plateforme cible introuvable");
+
+  // JOU-01 : un TRANSFERT_CASH / TRANSFERT_TITRE déjà présent entre A et B
+  // (peu importe le sens) se retrouverait, une fois la fusion faite, avec
+  // platformId === toPlatformId === targetId. Le moteur de rejeu
+  // (app/lib/accounting/ledger.ts) refuse ce cas via `AccountingError
+  // "SAME_PLATFORM"` pour ces deux types — la fusion casserait alors tout
+  // rejeu du journal de l'utilisateur (dashboard, positions, futures
+  // écritures). Option la moins destructive : refuser la fusion et nommer les
+  // transactions en cause, plutôt que les supprimer ou les réinterpréter
+  // silencieusement (aucune règle métier existante ne dit ce que devient un
+  // « transfert vers soi-même »).
+  const intraMergeTransfers = await prisma.transaction.findMany({
+    where: {
+      userId,
+      type: { in: ["TRANSFERT_CASH", "TRANSFERT_TITRE"] },
+      OR: [
+        { platformId: sourceId, toPlatformId: targetId },
+        { platformId: targetId, toPlatformId: sourceId },
+      ],
+    },
+    select: { id: true, type: true, occurredAt: true },
+    orderBy: { occurredAt: "asc" },
+    take: 20,
+  });
+  if (intraMergeTransfers.length > 0) {
+    const names = intraMergeTransfers
+      .map(
+        (t) =>
+          `${t.type} du ${t.occurredAt.toISOString().slice(0, 10)} (#${t.id})`
+      )
+      .join(", ");
+    throw new Error(
+      `Fusion impossible : ${intraMergeTransfers.length} transfert(s) existent déjà entre ces deux plateformes et deviendraient invalides après fusion — supprimez ou modifiez d'abord : ${names}`
+    );
+  }
 
   const result = await prisma.$transaction(async (tx) => {
     const assets = await tx.asset.updateMany({
@@ -194,10 +245,18 @@ export async function mergePlatforms(
       where: { userId, toPlatformId: sourceId },
       data: { toPlatformId: targetId },
     });
+    // PRI-01/PLA-03 : SecuritiesAccount.platformId est en onDelete: Restrict —
+    // sans ce déplacement, platform.delete(source) échoue en P2003 dès qu'un
+    // PEA/PEA_PME/CTO est rattaché à la plateforme source.
+    const securitiesAccounts = await tx.securitiesAccount.updateMany({
+      where: { userId, platformId: sourceId },
+      data: { platformId: targetId },
+    });
     await tx.platform.delete({ where: { id: sourceId } });
     return {
       assetsMoved: assets.count,
       transactionsMoved: txsFrom.count + txsTo.count,
+      securitiesAccountsMoved: securitiesAccounts.count,
       deletedSourceId: sourceId,
     };
   });

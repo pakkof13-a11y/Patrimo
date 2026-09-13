@@ -9,12 +9,28 @@
  * encore de courbe », « Aucune opération enregistrée » — sans jamais rien
  * inventer.
  *
- * Le cockpit (`EmptyPatrimonyCockpit`) intercepte le compte réellement vierge
- * en amont, dans `portfolio-app.tsx` : si `DashboardTab` est monté, une
- * plateforme, une transaction ou une position existe déjà. Masquer aussi la
- * carte de tête et le journal en maturité « setup » — le cas d'un compte qui
- * vient de créer sa première plateforme, sans encore de transaction — ne
- * laissait donc plus rien à l'écran.
+ * `maturity` (et les `blocks` qui en découlent) ne reflètent que trois
+ * compteurs locaux — plateformes, transactions, positions calculées
+ * (`resolveDashboardMaturity`, `app/lib/dashboard/maturity.ts`). Le cockpit
+ * (`EmptyPatrimonyCockpit`) décide lui de monter `DashboardTab` sur la foi de
+ * l'état serveur réel (`getPatrimonyState`/`isEmpty`,
+ * `app/lib/portfolio/patrimony-state.ts`), qui couvre bien plus de familles :
+ * un passif, un contrat d'assurance-vie, un dépôt à terme, une cession de
+ * métal précieux, un compte-titres ou un compte de trading suffisent à lever
+ * `isEmpty` côté serveur sans faire bouger le moindre des trois compteurs
+ * locaux.
+ *
+ * Concrètement : `DashboardTab` peut être monté (le serveur sait que le
+ * compte n'est pas vierge) alors que `maturity` vaut ici « empty » (les trois
+ * compteurs locaux, eux, sont à zéro) — CR-vide : un compte dont la seule
+ * donnée est un prêt ou une assurance-vie. Traiter « empty » comme une preuve
+ * de vacuité et masquer la carte de tête et le journal reproduirait
+ * exactement le bug que le cockpit corrige déjà en amont : un écran
+ * entièrement blanc sur un compte qui ne l'est pas. Ce fichier ne peut pas
+ * consulter l'état serveur (il ne reçoit que `maturity`/`blocks`, calculés
+ * localement) ; il traite donc « empty » comme « setup » — la carte de tête
+ * et le journal restent affichés dans les deux cas, puisqu'aucun des deux ne
+ * prouve un compte réellement vierge une fois que `DashboardTab` est monté.
  */
 
 import type {
@@ -33,6 +49,7 @@ export function resolveDashboardContentVisibility(
   maturity: DashboardMaturity,
   blocks: DashboardBlockVisibility
 ): DashboardContentVisibility {
-  const showFloor = blocks.showEvolutionChart || maturity === "setup";
+  const showFloor =
+    blocks.showEvolutionChart || maturity === "setup" || maturity === "empty";
   return { showHeroCard: showFloor, showJournal: showFloor };
 }
