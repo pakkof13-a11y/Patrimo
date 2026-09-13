@@ -511,7 +511,128 @@ describe("getSecuritiesFiscalBundle — maturité", () => {
     ]);
     const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.maturity!.isMatured).toBe(false);
+    expect(s!.maturity!.planStatus).toBe("RUNNING");
     expect(s!.taxStatusLabel).toMatch(/12,8/);
+  });
+});
+
+describe("getSecuritiesFiscalBundle — clôture anticipée (TIT-06)", () => {
+  /*
+    Le cas de l'audit : PEA ouvert 2024-01-01, DEPOSIT 10 000, WITHDRAWAL
+    5 000 en 2025. Avant : room.remainingEur = 140 000, maturité en cours vers
+    2029. Le retrait avant 5 ans clôture le plan (art. L221-32 CMF) : plus
+    aucun versement, plus de maturité qui progresse.
+  */
+  it("un retrait avant maturité clôture le plan : place nulle, statut CLOSED", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        openDate: new Date("2024-01-01T00:00:00Z"),
+        contributions: [
+          contribution("DEPOSIT", "10000", "2024-02-01T00:00:00Z"),
+          contribution("WITHDRAWAL", "5000", "2025-03-15T00:00:00Z"),
+        ],
+      }),
+    ]);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+
+    expect(s!.maturity!.planStatus).toBe("CLOSED");
+    expect(s!.maturity!.closedAt?.toISOString()).toBe("2025-03-15T00:00:00.000Z");
+    expect(s!.maturity!.isMatured).toBe(false);
+    expect(s!.maturity!.daysToMaturity).toBe(0);
+
+    expect(s!.room!.remainingEur.toNumber()).toBe(0);
+    expect(s!.room!.blockedReason).toBe("PLAN_CLOSED");
+    // Le plafond reste sur le brut : les 10 000 € versés sont toujours là.
+    expect(s!.room!.contributionsEur.toNumber()).toBe(10_000);
+
+    expect(s!.taxStatusLabel).toMatch(/clos/i);
+    expect(s!.taxStatusLabel).not.toMatch(/exonéré/i);
+  });
+
+  it("un retrait après maturité laisse le plan mûr, ouvert et avec sa place", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        // Ouvert 2019-03-01 : mûr le 2024-03-01. Retrait en 2025, après.
+        contributions: [
+          contribution("DEPOSIT", "10000", "2019-04-01T00:00:00Z"),
+          contribution("WITHDRAWAL", "5000", "2025-01-10T00:00:00Z"),
+        ],
+      }),
+    ]);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+
+    expect(s!.maturity!.planStatus).toBe("MATURED");
+    expect(s!.maturity!.isMatured).toBe(true);
+    expect(s!.maturity!.closedAt).toBeNull();
+    expect(s!.room!.remainingEur.toNumber()).toBe(140_000);
+    expect(s!.room!.blockedReason).toBeNull();
+    expect(s!.taxStatusLabel).toMatch(/IR exonéré/);
+  });
+
+  it("un plan jamais touché par un retrait est inchangé", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        openDate: new Date("2024-01-01T00:00:00Z"),
+        contributions: [contribution("DEPOSIT", "10000", "2024-02-01T00:00:00Z")],
+      }),
+    ]);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+
+    expect(s!.maturity!.planStatus).toBe("RUNNING");
+    expect(s!.maturity!.isMatured).toBe(false);
+    expect(s!.maturity!.daysToMaturity).toBeGreaterThan(0);
+    expect(s!.room!.remainingEur.toNumber()).toBe(140_000);
+    expect(s!.room!.blockedReason).toBeNull();
+  });
+
+  it("un retrait illisible rend l'état indéterminé, jamais ouvert par défaut", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        openDate: new Date("2024-01-01T00:00:00Z"),
+        contributions: [
+          contribution("DEPOSIT", "10000", "2024-02-01T00:00:00Z"),
+          // Retrait daté avant l'ouverture : le journal se contredit.
+          contribution("WITHDRAWAL", "5000", "2023-06-01T00:00:00Z"),
+        ],
+      }),
+    ]);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+
+    expect(s!.maturity!.planStatus).toBe("UNKNOWN");
+    expect(s!.maturity!.isMatured).toBe(false);
+    expect(s!.room!.remainingEur.toNumber()).toBe(0);
+    expect(s!.room!.blockedReason).toBe("PLAN_STATUS_UNKNOWN");
+    expect(s!.taxStatusLabel).toMatch(/indéterminé/i);
+  });
+
+  it("les versements d'un PEA clos continuent de peser sur le plafond commun du PEA-PME", async () => {
+    // Lecture prudente, documentée dans `peaContributionRoom` : la clôture
+    // du PEA ne libère pas de place sur le PEA-PME.
+    accountFindMany.mockResolvedValue([
+      account({
+        id: "acc-pea",
+        envelopeType: "PEA",
+        openDate: new Date("2024-01-01T00:00:00Z"),
+        contributions: [
+          contribution("DEPOSIT", "150000", "2024-02-01T00:00:00Z"),
+          contribution("WITHDRAWAL", "1000", "2025-03-15T00:00:00Z"),
+        ],
+      }),
+      account({
+        id: "acc-pme",
+        envelopeType: "PEA_PME",
+        openDate: new Date("2024-01-01T00:00:00Z"),
+        contributions: [],
+      }),
+    ]);
+    const { accounts: summaries } = await getSecuritiesFiscalBundle(USER, NOW);
+    const pea = summaries.find((s) => s.accountId === "acc-pea")!;
+    const pme = summaries.find((s) => s.accountId === "acc-pme")!;
+
+    expect(pea.room!.blockedReason).toBe("PLAN_CLOSED");
+    expect(pme.maturity!.planStatus).toBe("RUNNING");
+    expect(pme.room!.blockedReason).toBeNull();
+    expect(pme.room!.remainingEur.toNumber()).toBe(75_000);
   });
 });
 

@@ -7,6 +7,7 @@ import { resolveAssetLogo } from "../assets/logos";
 import { assetReuseByTickerWhere } from "../assets/reuse";
 import { detailRequirementError } from "../assets/envelope-requirements";
 import { resolveCoingeckoId } from "../market/providers/coingecko";
+import { fxRatesToEurRange, type FxRangeResult } from "../market/fx";
 import { findOrCreatePlatform } from "../platforms/upsert";
 import { resolvePlatformLogo } from "../platforms/presets";
 import type { ImportDraftRow } from "./map-rows";
@@ -281,6 +282,63 @@ async function resolveRowPlatformId(
   return platform.id;
 }
 
+/** Jour civil (YYYY-MM-DD) décalé de `deltaDays`, en UTC — jamais une approximation en 365 jours. */
+function shiftDay(day: string, deltaDays: number): string {
+  const dt = new Date(`${day}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Taux de change à persister pour CETTE ligne d'import.
+ *
+ * EUR : "1", sans appel. Toute autre devise : cherche dans la série
+ * pré-résolue pour le lot (`fxByCurrency`, un appel Frankfurter par devise,
+ * jamais par ligne) le dernier jour de fixing BCE ≤ jour de la ligne, en
+ * remontant au plus 7 jours civils (couvre les week-ends et jours fériés
+ * BCE — le plus long trou constaté est Pâques, 4 jours).
+ *
+ * Ne fabrique jamais de taux : date manquante, devise hors série, plage
+ * indisponible ou trou de plus de 7 jours rejettent la ligne (l'appelant
+ * capture l'erreur et l'ajoute à `errors[]`).
+ */
+function resolveRowFxRate(
+  row: ImportDraftRow,
+  fxByCurrency: Map<string, FxRangeResult>
+): string {
+  const cur = (row.currency || "EUR").toUpperCase();
+  if (cur === "EUR") return "1";
+
+  const day = row.occurredAt ? row.occurredAt.slice(0, 10) : null;
+  if (!day) {
+    throw new Error(
+      `Devise ${cur} : date de l'opération manquante — ligne non importée, aucun taux n'a été supposé. Saisissez cette opération manuellement avec son taux de change.`
+    );
+  }
+
+  const range = fxByCurrency.get(cur);
+  if (!range || range.status === "unsupported") {
+    throw new Error(
+      `Devise ${cur} : aucune série de taux BCE (Frankfurter) — ligne non importée, aucun taux n'a été supposé. Saisissez cette opération manuellement avec son taux de change.`
+    );
+  }
+  if (range.status === "unavailable") {
+    throw new Error(
+      `Fournisseur de taux (Frankfurter/BCE) injoignable — ligne non importée, aucun taux n'a été supposé. Relancez l'import plus tard.`
+    );
+  }
+
+  for (let back = 0; back <= 7; back++) {
+    const candidate = shiftDay(day, -back);
+    const rate = range.byDay.get(candidate);
+    if (rate) return rate;
+  }
+
+  throw new Error(
+    `Taux ${cur}→EUR du ${day} introuvable dans la série BCE (Frankfurter) — ligne non importée, aucun taux n'a été supposé. Saisissez cette opération manuellement avec son taux de change.`
+  );
+}
+
 function draftToInput(platformId: string, row: ImportDraftRow) {
   return {
     platformId,
@@ -496,6 +554,34 @@ export async function commitImportRows(params: {
     return da - db;
   });
 
+  /*
+    Pré-résolution FX du lot : un seul appel Frankfurter par devise étrangère
+    présente dans `toImport`, jamais un par ligne — cf. `maxDuration = 60` sur
+    la route commit, budget que dépasserait un relevé de plusieurs centaines
+    de lignes en appels séquentiels.
+  */
+  const fxByCurrency = new Map<string, FxRangeResult>();
+  {
+    const daysByCurrency = new Map<string, { min: string; max: string }>();
+    for (const row of toImport) {
+      const cur = (row.currency || "EUR").toUpperCase();
+      if (cur === "EUR") continue;
+      const day = row.occurredAt ? row.occurredAt.slice(0, 10) : null;
+      if (!day) continue; // rejeté ligne par ligne dans resolveRowFxRate
+      const bounds = daysByCurrency.get(cur);
+      if (!bounds) {
+        daysByCurrency.set(cur, { min: day, max: day });
+      } else {
+        if (day < bounds.min) bounds.min = day;
+        if (day > bounds.max) bounds.max = day;
+      }
+    }
+    for (const [cur, bounds] of daysByCurrency) {
+      const fromDay = shiftDay(bounds.min, -7);
+      fxByCurrency.set(cur, await fxRatesToEurRange(cur, fromDay, bounds.max));
+    }
+  }
+
   let created = 0;
   let duplicates = analysis.strictSkipped.length;
   if (requireDecision) {
@@ -537,6 +623,8 @@ export async function commitImportRows(params: {
         continue;
       }
 
+      const rowFxRateToEur = resolveRowFxRate(row, fxByCurrency);
+
       const assetId = await resolveOrCreateAsset(
         userId,
         rowPlatformId,
@@ -555,7 +643,7 @@ export async function commitImportRows(params: {
           cashAmount: row.cashAmount || undefined,
           fees: row.fees || "0",
           currency: row.currency || "EUR",
-          fxRateToEur: "1",
+          fxRateToEur: rowFxRateToEur,
           occurredAt: row.occurredAt || new Date().toISOString(),
           notes: row.notes
             ? `[Import CSV L${row.line}] ${row.notes}`

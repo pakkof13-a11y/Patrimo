@@ -1,7 +1,7 @@
 import YahooFinance from "yahoo-finance2";
 import type { AssetMeta, MarketDataProvider, PriceQuoteResult } from "../types";
 import { d, toFixed } from "../../money/decimal";
-import { toYahooSymbol, guessQuoteCurrency } from "../symbol";
+import { toYahooSymbol, guessQuoteCurrency, normalizeQuoteCurrency } from "../symbol";
 import { toEurAmount } from "../fx";
 import { withTimeout } from "../../utils/with-timeout";
 
@@ -58,10 +58,11 @@ export const yahooProvider: MarketDataProvider = {
         };
       }
 
-      const nativeCurrency = (
-        quote.currency || guessQuoteCurrency(symbol, asset.assetClass)
-      ).toUpperCase();
-      const priceNative = d(rawPrice);
+      const rawCurrency =
+        quote.currency || guessQuoteCurrency(symbol, asset.assetClass);
+      const { currency: nativeCurrency, divisor } =
+        normalizeQuoteCurrency(rawCurrency);
+      const priceNative = d(rawPrice).div(divisor);
       const priceEur = await toEurAmount(priceNative, nativeCurrency);
 
       return {

@@ -31,10 +31,11 @@ import {
   peaContributionBase,
   peaContributionRoom,
   peaMaturityStatus,
-  peaTaxStatusLabel,
+  peaPlanStatusLabel,
   type PeaContributionBaseStatus,
   type PeaContributionRoom,
   type PeaMaturityStatus,
+  type PeaMovement,
 } from "./pea";
 
 export const CONTRIBUTION_TYPES = ["DEPOSIT", "WITHDRAWAL"] as const;
@@ -54,9 +55,17 @@ export type AccountFiscalSummary = {
   envelopeLabel: string;
   openDate: Date;
 
-  /** Absent sur un compte-titres : la règle des 5 ans ne le concerne pas. */
+  /**
+   * Absent sur un compte-titres : la règle des 5 ans ne le concerne pas.
+   *
+   * Porte `planStatus` : un retrait enregistré avant maturité rend le plan
+   * `CLOSED` — plus de compte à rebours, plus de versement (TIT-06).
+   */
   maturity: PeaMaturityStatus | null;
-  /** Absent sur un compte-titres : aucun plafond de versement. */
+  /**
+   * Absent sur un compte-titres : aucun plafond de versement. Place nulle,
+   * avec `blockedReason`, sur un plan clos ou d'état indéterminé.
+   */
   room: PeaContributionRoom | null;
   /** Absent sur un compte-titres, dont l'imposition relève de `fiscal-year.ts`. */
   taxStatusLabel: string | null;
@@ -445,7 +454,21 @@ export async function getSecuritiesFiscalBundle(
     const liquidationValue = positionsValue.plus(cashEur);
 
     const totalsForAccount = contributionsByAccount.get(a.id)!;
-    const maturity = isPea ? peaMaturityStatus(a.openDate, at) : null;
+    const movements: PeaMovement[] = a.contributions.map((c) => ({
+      type: c.type === "WITHDRAWAL" ? "WITHDRAWAL" : "DEPOSIT",
+      amountEur: d(c.amountEur.toString()),
+      occurredAt: c.occurredAt,
+    }));
+
+    /*
+      La maturité lit le journal, pas seulement la date d'ouverture : un
+      retrait avant 5 ans clôture le plan, et la date seule continuait
+      d'annoncer un compte à rebours et une place de versement sur un plan
+      clos (TIT-06). `planStatus` en sort et borne la place ci-dessous.
+    */
+    const maturity = isPea
+      ? peaMaturityStatus(a.openDate, at, movements)
+      : null;
 
     /*
       L'assiette du gain n'est plus `deposits` brut : après un retrait
@@ -459,11 +482,7 @@ export async function getSecuritiesFiscalBundle(
       openDate: a.openDate,
       at,
       liquidationValueEur: liquidationValue,
-      movements: a.contributions.map((c) => ({
-        type: c.type === "WITHDRAWAL" ? "WITHDRAWAL" : "DEPOSIT",
-        amountEur: d(c.amountEur.toString()),
-        occurredAt: c.occurredAt,
-      })),
+      movements,
     });
 
     return {
@@ -472,14 +491,15 @@ export async function getSecuritiesFiscalBundle(
       envelopeLabel: securitiesEnvelopeLabel(envelopeType),
       openDate: a.openDate,
       maturity,
-      room: isPea
+      room: maturity
         ? peaContributionRoom({
             envelopeType,
             peaContributionsEur: totals.PEA,
             peaPmeContributionsEur: totals.PEA_PME,
+            planStatus: maturity.planStatus,
           })
         : null,
-      taxStatusLabel: maturity ? peaTaxStatusLabel(maturity.isMatured) : null,
+      taxStatusLabel: maturity ? peaPlanStatusLabel(maturity) : null,
       contributionsEur: totalsForAccount.deposits,
       withdrawalsEur: totalsForAccount.withdrawals,
       remainingContributionsEur: base?.remainingContributionsEur ?? null,

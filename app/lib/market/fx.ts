@@ -266,6 +266,60 @@ export async function fxRateToEurOnDate(
   return null;
 }
 
+/**
+ * Résultat d'une résolution de série FX historique sur une plage de dates.
+ *
+ * Distingue « le fournisseur n'a pas répondu » (`unavailable` — réseau,
+ * délai, 429, 5xx : peut-être vrai demain) de « la série n'existe pas »
+ * (`unsupported` — 404 ou devise absente de la réponse : ne changera pas en
+ * réessayant). Les deux se traitent différemment côté appelant.
+ */
+export type FxRangeResult =
+  | { status: "ok"; byDay: Map<string, string> }
+  | { status: "unavailable" }
+  | { status: "unsupported" };
+
+/**
+ * Taux historiques `from`→EUR pour chaque jour de fixing BCE dans `[fromDay,
+ * toDay]`, en un seul appel Frankfurter — jamais un par ligne d'un lot
+ * d'import (cf. `app/lib/import/commit.ts`, budget `maxDuration = 60`).
+ *
+ * Aucun repli sur `getEurRates()`/`FALLBACK` : même doctrine que
+ * `fxRateToEurOnDate` ci-dessus — un taux du jour ne doit jamais se
+ * substituer silencieusement à un taux historique introuvable.
+ */
+export async function fxRatesToEurRange(
+  from: string,
+  fromDay: string,
+  toDay: string
+): Promise<FxRangeResult> {
+  const cur = from.toUpperCase();
+  try {
+    const res = await fetch(
+      `https://api.frankfurter.app/${fromDay}..${toDay}?from=EUR&to=${encodeURIComponent(cur)}`,
+      { cache: "no-store", signal: AbortSignal.timeout(5000) }
+    );
+    if (res.status === 404) return { status: "unsupported" };
+    if (!res.ok) return { status: "unavailable" };
+
+    const data = (await res.json()) as {
+      rates?: Record<string, Record<string, number>>;
+    };
+    const byDay = new Map<string, string>();
+    for (const [day, rates] of Object.entries(data.rates ?? {})) {
+      const rate = rates?.[cur];
+      if (rate && rate > 0) {
+        byDay.set(day, toFixed(d(1).div(rate), 10));
+      }
+    }
+    if (byDay.size === 0) return { status: "unsupported" };
+    return { status: "ok", byDay };
+  } catch {
+    // Réseau, délai dépassé, réponse illisible : rien n'est démontré.
+    return { status: "unavailable" };
+  }
+}
+
 export async function convertAmount(
   amount: DecimalInput,
   from: string,

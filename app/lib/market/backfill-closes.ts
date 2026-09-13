@@ -15,7 +15,7 @@
 
 import { prisma } from "../prisma";
 import { parisDayKey } from "../dates/paris";
-import { MAX_HISTORY_YEARS } from "../portfolio/historical/history-window";
+import { capEarliestDay } from "../portfolio/historical/history-window";
 import {
   fillDailyCloses,
   type DailyCloseCollectionReport,
@@ -155,6 +155,26 @@ export async function firstTransactionDayByAsset(
 }
 
 /**
+ * Point de départ effectif d'un actif, jamais avant `historyFloorDay`.
+ *
+ * Unique source de ce clamp pour ce module : `needsHistoryBackfill` (ce qui
+ * *décide* qu'un backfill est nécessaire) et `fromDateForAsset` (ce qui borne
+ * le *fetch réel*) doivent partir du même jour, sinon la décision porte sur
+ * une couverture que le fetch ne peut structurellement jamais atteindre —
+ * l'actif resterait « stale » indéfiniment (MAR-01/MAR-02). `capEarliestDay`
+ * est la même fonction que celle qui borne les séries lues côté Financier ;
+ * ce module ne redéfinit pas une troisième version du plafond.
+ */
+function clampedFromDay(
+  firstTxDay: string | undefined,
+  fallbackFromDay: string,
+  now: Date
+): string {
+  const day = firstTxDay ?? fallbackFromDay;
+  return capEarliestDay(day, now) ?? day;
+}
+
+/**
  * Un actif mérite un fetch s'il n'a pas de clôture près du premier achat,
  * ou si la fin de fenêtre n'est plus à jour (même règle que l'entretien).
  */
@@ -168,7 +188,7 @@ export function needsHistoryBackfill(opts: {
   now: Date;
   freshnessMs?: number;
 }): boolean {
-  const fromDay = opts.firstTxDay ?? opts.fallbackFromDay;
+  const fromDay = clampedFromDay(opts.firstTxDay, opts.fallbackFromDay, opts.now);
   const freshAfter = opts.freshnessMs ?? 6 * 60 * 60 * 1000;
 
   if (!opts.minDay || !opts.maxDay) return true;
@@ -225,18 +245,19 @@ export async function assetsNeedingHistoryBackfill(
  * (`history-window.ts::historyFloorDay`) — le collecter gonflerait la mémoire
  * du backfill (mesuré : 4 000 à 6 500 lignes par actif avec un plancher à 30
  * ans) sans jamais être servi. `MAX_HISTORY_YEARS` reste l'unique source de
- * cette profondeur ; ce module ne la redéfinit pas, il l'importe.
+ * cette profondeur ; ce module ne la redéfinit pas, il l'importe — via
+ * `clampedFromDay`, le même clamp que celui utilisé pour *décider* qu'un
+ * backfill est nécessaire (`needsHistoryBackfill`). Un fetch borné à ce
+ * plancher et une décision fondée sur un plancher différent ne pourraient
+ * jamais converger : c'était le bug MAR-01/MAR-02.
  */
 function fromDateForAsset(
   firstTxDay: string | undefined,
   fallbackFromDay: string,
   now: Date
 ): Date {
-  const day = firstTxDay ?? fallbackFromDay;
-  const floor = new Date(now.getTime());
-  floor.setUTCFullYear(floor.getUTCFullYear() - MAX_HISTORY_YEARS);
-  const from = new Date(`${day}T00:00:00Z`);
-  return from < floor ? floor : from;
+  const day = clampedFromDay(firstTxDay, fallbackFromDay, now);
+  return new Date(`${day}T00:00:00Z`);
 }
 
 /**
