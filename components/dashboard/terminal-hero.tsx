@@ -137,6 +137,8 @@ export function TerminalHero({
   onRangeChange,
   firstHistoryDate,
   servedNavFrom,
+  navError,
+  onRetryNav,
 }: {
   netWorth: number | null;
   /** Somme des actifs, sans déduction des passifs. */
@@ -183,6 +185,19 @@ export function TerminalHero({
    * jamais la borne demandée ni une réponse 1A encore en vol.
    */
   servedNavFrom?: string;
+  /**
+   * `dailyNavQ.isError` côté tableau de bord — jamais `values.length === 0`.
+   *
+   * Sans cette distinction, un échec réseau et une fenêtre réellement sans
+   * historique produisaient le même graphique vide et le même silence sous le
+   * chiffre : « Pas encore de courbe » (cf. plus bas) affirmerait qu'il n'y a
+   * rien à voir, alors que la requête a simplement échoué et n'a rien pu
+   * charger. UNKNOWN ≠ ERROR, même règle que `mainError` dans
+   * `portfolio-evolution-panel.tsx`.
+   */
+  navError?: boolean;
+  /** Rejoue `dailyNavQ` — bouton « Réessayer » de l'état d'échec ci-dessous. */
+  onRetryNav?: () => void;
 }) {
   /*
     Financier a quitté l'écran (D19) : la carte, le chip et tout ce qui les
@@ -832,6 +847,35 @@ export function TerminalHero({
                 tooltip={tooltip}
                 ariaLabel={`Courbe du patrimoine ${HERO_NAV_SCOPE_LABEL[mode]} — flèches gauche et droite pour parcourir les points, Échap pour revenir à aujourd'hui`}
               />
+            ) : navError ? (
+              /*
+                UNKNOWN ≠ ERROR : la requête a échoué, elle n'a pas répondu
+                « rien à valoriser ». Une branche distincte de celle du bas
+                (jamais le même texte générique), avec l'action qui peut
+                réellement changer l'issue — rejouer `dailyNavQ`.
+              */
+              <div
+                className="flex h-full flex-col items-end justify-center gap-[var(--space-1)] text-right"
+                data-testid="hero-nav-error"
+              >
+                <p className="text-[length:var(--text-xs)] text-[var(--danger)]">
+                  Échec du chargement de l&apos;historique
+                </p>
+                {onRetryNav && (
+                  <button
+                    type="button"
+                    onClick={onRetryNav}
+                    data-testid="hero-nav-retry"
+                    className={cn(
+                      "rounded-[var(--radius-sm)] bg-[var(--muted)]/70 px-[var(--space-2)] py-[var(--space-1)]",
+                      "text-[length:var(--text-2xs)] font-medium text-[var(--foreground)] transition",
+                      "hover:bg-[var(--muted)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                    )}
+                  >
+                    Réessayer
+                  </button>
+                )}
+              </div>
             ) : (
               <div className="flex h-full items-center justify-end text-[length:var(--text-xs)] text-[var(--foreground-faint)]">
                 Pas encore de courbe

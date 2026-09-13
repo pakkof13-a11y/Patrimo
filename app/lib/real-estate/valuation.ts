@@ -278,6 +278,23 @@ export async function ensureGeocoded(
 }
 
 /**
+ * Décide si un déclenchement d'estimation DVF peut s'écrire directement.
+ *
+ * Le garde-fou qui protège une valeur saisie (voir l'en-tête du module) ne
+ * vit pas seulement dans `revalueFromDvf` : l'appelant doit encore choisir le
+ * bon `apply`. Un écran qui forcerait toujours `apply: true` — y compris sur
+ * un bien en mode manuel — contournerait la protection tout en continuant
+ * d'afficher "valeur saisie, non écrasée". Cette fonction centralise la
+ * décision : un bien manuel ne reçoit qu'une proposition (`apply: false`,
+ * rien n'est écrit) ; l'adopter reste un geste séparé de l'utilisateur
+ * (ressaisir la valeur proposée, ou repasser le bien en estimation
+ * automatique).
+ */
+export function canApplyDvfEstimateDirectly(valuationMode: string): boolean {
+  return valuationMode === "DVF_AUTO";
+}
+
+/**
  * Réévalue un bien depuis DVF.
  *
  * Ne fait rien en mode manuel — c'est l'engagement central. `force` permet à

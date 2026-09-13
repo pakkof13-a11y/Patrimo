@@ -896,6 +896,8 @@ export function DashboardTab({
           onRangeChange={changeRange}
           firstHistoryDate={firstHistoryDate}
           servedNavFrom={servedNavFrom}
+          navError={dailyNavQ.isError}
+          onRetryNav={() => void dailyNavQ.refetch()}
         />
       )}
 
