@@ -106,6 +106,13 @@ const PAIRS: [string, string, number, string][] = [
   ["--chart-negative", "--surface", 3, "courbe baisse / carte"],
   ["--chart-gold", "--surface", 3, "courbe or / carte"],
   ["--chart-cyan", "--surface", 3, "courbe cyan / carte"],
+  // Puce de filtre (.term-chip-label) : nomme la catégorie du filtre — de
+  // l'information, pas une décoration — sur le fond réellement employé
+  // (`--surface-sunken`, pas `--surface`).
+  ["--foreground-secondary", "--surface-sunken", 4.5, "libellé de puce / puce"],
+  // « Effacer ce filtre » / raccourcis du menu de puce : lien de texte
+  // courant sur le fond réel du menu (`--surface-raised`).
+  ["--foreground-secondary", "--surface-raised", 4.5, "lien menu de puce / menu"],
 ];
 
 describe("design system — contraste des tokens", () => {

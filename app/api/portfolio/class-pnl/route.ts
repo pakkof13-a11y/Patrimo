@@ -31,7 +31,10 @@ export async function GET(req: Request) {
 
   try {
     const series = await getClassPnlSeries(userId, fromDay, toDay);
-    return NextResponse.json({ range, fromDay, toDay, ...series });
+    return NextResponse.json(
+      { range, fromDay, toDay, ...series },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (e) {
     console.error("[class-pnl]", e);
     return NextResponse.json(

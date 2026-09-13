@@ -2,9 +2,10 @@
 
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Trash2, UserPlus, Users } from "lucide-react";
+import { KeyRound, RadioTower, Trash2, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/app/lib/utils";
 import { fetchJson } from "@/app/lib/api-client";
 
 type AdminUser = {
@@ -15,6 +16,67 @@ type AdminUser = {
   role: string;
   createdAt: string;
 };
+
+type CollectionStatusView =
+  | { status: "never" }
+  | { status: "ok" | "ko"; at: string; message?: string };
+
+/**
+ * Bandeau « dernière collecte » (NOTIF-01).
+ *
+ * Un échec de `GET /api/cron/collect-intraday` ne se voyait nulle part —
+ * cette lecture affiche le seul état conservé (écrasé à chaque passage),
+ * pas un historique. Pas de redesign : une ligne dans le bandeau admin déjà
+ * existant.
+ */
+function CollectionStatusRow() {
+  const statusQ = useQuery({
+    queryKey: ["admin-collection-status"],
+    queryFn: () =>
+      fetchJson<{ collectIntraday: CollectionStatusView }>(
+        "/api/admin/collection-status"
+      ),
+    staleTime: 15_000,
+  });
+
+  const s = statusQ.data?.collectIntraday;
+  const label = (() => {
+    if (statusQ.isLoading) return "…";
+    if (!s || s.status === "never") return "jamais lancée";
+    const at = new Date(s.at).toLocaleString("fr-FR", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    if (s.status === "ok") return `ok à ${at}`;
+    return `échec à ${at}${s.message ? ` (${s.message})` : ""}`;
+  })();
+
+  return (
+    <div
+      className="mb-3 flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-2 py-1.5 text-[11px]"
+      data-testid="admin-collection-status"
+    >
+      <RadioTower className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+      <span className="text-slate-500 dark:text-slate-400">
+        Dernière collecte (intraday/clôtures) :
+      </span>
+      <span
+        className={cn(
+          "font-medium",
+          s?.status === "ko"
+            ? "text-rose-600 dark:text-rose-400"
+            : s?.status === "ok"
+              ? "text-emerald-600 dark:text-emerald-400"
+              : "text-slate-500 dark:text-slate-400"
+        )}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
 
 export function AdminUsersPanel() {
   const qc = useQueryClient();
@@ -114,6 +176,8 @@ export function AdminUsersPanel() {
         SuperUser — création de comptes, liste et réinitialisation des mots de
         passe. Les données de chaque utilisateur sont isolées.
       </p>
+
+      <CollectionStatusRow />
 
       <form onSubmit={handleCreate} className="mb-3 space-y-2 rounded-lg border border-[var(--border)] p-2">
         <div className="flex items-center gap-1 text-[11px] font-medium text-slate-600 dark:text-slate-300">

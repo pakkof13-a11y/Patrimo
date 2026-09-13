@@ -70,11 +70,14 @@ export async function GET(req: Request) {
     */
     const bundle = await getPortfolioBundle(userId, base);
 
-    return NextResponse.json({
-      summary: bundle.summary,
-      allocation: bundle.allocation,
-      baseCurrency: base,
-    });
+    return NextResponse.json(
+      {
+        summary: bundle.summary,
+        allocation: bundle.allocation,
+        baseCurrency: base,
+      },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (e) {
     console.error("GET /api/portfolio", e);
     return NextResponse.json(
@@ -103,5 +106,8 @@ export async function PATCH(req: Request) {
     where: { id: userId },
     data: { baseCurrency },
   });
-  return NextResponse.json({ baseCurrency });
+  return NextResponse.json(
+    { baseCurrency },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }

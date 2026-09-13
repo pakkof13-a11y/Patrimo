@@ -13,6 +13,10 @@ import {
 } from "@/app/lib/market/backfill-closes";
 import { parseBarInterval } from "@/app/lib/market/price-history-types";
 import { readCronCredential } from "@/app/lib/auth/cron-credential";
+import {
+  COLLECT_INTRADAY_JOB,
+  recordCollectionRun,
+} from "@/app/lib/ops/collection-status";
 
 /**
  * Collecte planifiée des données de marché.
@@ -260,14 +264,32 @@ async function collectAll(opts: {
   return { progress, intraday, intradaySkipped: null, daily };
 }
 
+/*
+  NOTIF-01 : un échec ici (fournisseur muet, timeout, exception non prévue
+  par `collectAll`) ne remontait nulle part — seule la réponse HTTP du
+  passage cron le portait, et rien ne la lit. `recordCollectionRun` pose la
+  seule trace consultable (bandeau admin, `/api/admin/collection-status`) ;
+  elle ne change ni le statut ni la forme déjà rendus par cette route.
+*/
 export async function GET(req: Request) {
   if (!isCronRequest(req)) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   }
-  return NextResponse.json({
-    mode: "cron",
-    ...(await collectAll({ interval: intervalOf(req), shortMode: isShortMode(req) })),
-  });
+  try {
+    const result = await collectAll({
+      interval: intervalOf(req),
+      shortMode: isShortMode(req),
+    });
+    await recordCollectionRun(COLLECT_INTRADAY_JOB, "ok");
+    return NextResponse.json({ mode: "cron", ...result });
+  } catch (e) {
+    await recordCollectionRun(
+      COLLECT_INTRADAY_JOB,
+      "ko",
+      e instanceof Error ? e.message : "Échec de la collecte"
+    );
+    return NextResponse.json({ error: "Échec de la collecte" }, { status: 500 });
+  }
 }
 
 export async function POST(req: Request) {
@@ -275,10 +297,21 @@ export async function POST(req: Request) {
   const shortMode = isShortMode(req);
 
   if (isCronRequest(req)) {
-    return NextResponse.json({
-      mode: "cron",
-      ...(await collectAll({ interval, shortMode })),
-    });
+    try {
+      const result = await collectAll({ interval, shortMode });
+      await recordCollectionRun(COLLECT_INTRADAY_JOB, "ok");
+      return NextResponse.json({ mode: "cron", ...result });
+    } catch (e) {
+      await recordCollectionRun(
+        COLLECT_INTRADAY_JOB,
+        "ko",
+        e instanceof Error ? e.message : "Échec de la collecte"
+      );
+      return NextResponse.json(
+        { error: "Échec de la collecte" },
+        { status: 500 }
+      );
+    }
   }
 
   const userId = await requireUserId();
