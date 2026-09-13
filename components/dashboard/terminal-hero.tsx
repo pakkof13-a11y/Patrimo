@@ -636,131 +636,158 @@ export function TerminalHero({
             sortie, sous le curseur.
           */}
           {/*
-            Hauteur réservée pour deux lignes, et non pour une.
+            Une ligne, jamais deux ni trois — par construction, pas par pari.
 
-            Le survol n'est pas le seul à faire varier cette ligne : les
-            pastilles Marché/Flux ne sont montées que lorsque `heroAttribution`
-            aboutit, et leur arrivée la replie en deux lignes. Mesuré à la
-            largeur des tests : la ligne passe de 12 à 32 pixels entre 3M — où
-            l'attribution est indisponible — et YTD, où elle l'est, et la carte
-            entière suivait de 248 à 268. Un chip changeait donc la taille du
-            bloc, ce que le test « changer de période ne fait pas sauter la
-            carte » interdit à juste titre : tout ce qui est en dessous
-            sursautait à chaque clic.
+            Une réservation en `min-h` calibrée sur une capture d'écran (2rem,
+            pour « au plus deux lignes ») tenait tant que les montants
+            restaient courts. Le décor de démo porte de vrais tickers (LVMH,
+            AAPL, BTC…) valorisés en direct : le nombre de chiffres de
+            `attribution.market`/`.flow` varie avec le marché du jour, et
+            `flex-wrap` pouvait replier la ligne sur trois lignes dès qu'une
+            période cumulait un montant long et les deux pastilles — au-delà
+            des deux lignes réservées, d'où le saut mesuré en CI. Recalibrer la
+            constante (3rem, 4rem…) n'aurait fait que déplacer le seuil où un
+            cours plus extrême la refait sauter.
 
-            Réserver le cas le plus haut plutôt que masquer les pastilles : les
-            cacher aurait stabilisé la carte en taisant une information vraie,
-            et afficher « 0 € » à leur place aurait été un mensonge. Ici on ne
-            montre rien de plus, on garde seulement la place.
+            `flex-nowrap` retire la variable : quel que soit le nombre de
+            chiffres, la ligne tient sur une seule ligne de texte — sa hauteur
+            est alors celle, fixe, d'une ligne à `leading-none`, imposée par le
+            navigateur et non par une constante choisie ici. Si son contenu
+            dépasse la largeur de la carte, `overflow-x-auto` la rend
+            défilable plutôt que de la replier ou de la tronquer : rien n'est
+            perdu, seul le mode de lecture change.
+
+            Le conteneur reste monté même quand `windowChange` est absent — un
+            espace invisible (`&nbsp;`) y maintient la même ligne, la même
+            police, donc la même hauteur, sans jamais inventer de valeur ni
+            deviner un pixel.
           */}
-          <div className="mt-[var(--space-2)] min-h-[2rem]">
-            {windowChange && (
-              <p
-                className={cn(
-                  "flex flex-wrap items-baseline gap-[var(--space-2)] text-[length:var(--text-sm)] leading-none",
-                  /*
-                    Cachée pendant le survol, mais jamais démontée.
+          <div className="mt-[var(--space-2)]">
+            <p
+              className={cn(
+                "flex flex-nowrap items-baseline gap-[var(--space-2)] overflow-x-auto",
+                "text-[length:var(--text-sm)] leading-none",
+                /*
+                  Cachée pendant le survol, mais jamais démontée.
 
-                    La démonter faisait disparaître sa hauteur — et cette ligne
-                    se replie en plusieurs lignes dès que la carte est étroite.
-                    Mesuré à 1 280 px : la carte passait de 347 à 188 pixels au
-                    premier survol, le graphique remontait de 166 pixels sous un
-                    curseur immobile, le navigateur émettait `pointerleave`, et
-                    le survol se perdait aussitôt — pour recommencer. Le
-                    `min-height` d'une ligne que j'avais posé ne réservait que
-                    le cas où la ligne ne se replie pas.
+                  La démonter faisait disparaître sa hauteur — et cette ligne
+                  se replie en plusieurs lignes dès que la carte est étroite.
+                  Mesuré à 1 280 px : la carte passait de 347 à 188 pixels au
+                  premier survol, le graphique remontait de 166 pixels sous un
+                  curseur immobile, le navigateur émettait `pointerleave`, et
+                  le survol se perdait aussitôt — pour recommencer. Le
+                  `min-height` d'une ligne que j'avais posé ne réservait que
+                  le cas où la ligne ne se replie pas.
 
-                    `invisible` conserve exactement la boîte, quel que soit le
-                    nombre de lignes : la carte ne bouge plus d'un pixel, et il
-                    n'y a plus de hauteur à deviner.
-                  */
-                  active && "invisible"
-                )}
-                aria-hidden={active ? true : undefined}
-                data-testid="hero-window-change"
-                data-direction={windowChange.abs >= 0 ? "up" : "down"}
-              >
-                <span
-                  className={cn(
-                    "num font-medium",
-                    windowChange.abs >= 0 ? "val-positive" : "val-negative"
-                  )}
-                  data-testid="hero-window-change-abs"
-                >
-                  {formatSignedAmount(windowChange.abs, (v) => money(v))}
-                </span>
-                <span className="text-[var(--foreground-faint)]">·</span>
-                <span
-                  className={cn(
-                    "num",
-                    windowChange.pct === null
-                      ? "text-[var(--foreground-faint)]"
-                      : windowChange.abs >= 0
-                        ? "val-positive"
-                        : "val-negative"
-                  )}
-                  data-testid="hero-window-change-pct"
-                >
-                  {/*
-                    Une fenêtre partie de zéro n'a pas de pourcentage — ni petit
-                    ni grand : aucun. « n/a » le dit ; « +100 % » l'inventerait.
-                  */}
-                  {windowChange.pct === null
-                    ? "n/a"
-                    : formatSignedPct(windowChange.pct)}
-                </span>
-                <span
-                  className="text-[var(--foreground-secondary)]"
-                  data-testid="hero-window-label"
-                >
-                  {periodLabel}
-                </span>
-
-                {/*
-                  D'où vient cette variation.
-
-                  Sur la même ligne, à droite du libellé de période : les trois
-                  chiffres décrivent le même écart et se lisent d'un seul
-                  regard. Les poser sur une ligne à part ferait grandir la
-                  carte pour une information qui tient ici.
-
-                  Le flux ne prend pas la couleur du marché : un apport de
-                  50 k€ n'est ni une bonne ni une mauvaise nouvelle, c'est un
-                  déplacement d'argent. Le teinter en vert le ferait lire comme
-                  une réussite.
-                */}
-                {attribution && (
-                  <>
-                    <span className="text-[var(--foreground-faint)]">·</span>
-                    <span
-                      className={cn(
-                        "num rounded-[var(--radius-sm)] px-[var(--space-1)]",
-                        "bg-[var(--surface-sunken)]",
-                        attribution.market >= 0
+                  `invisible` conserve exactement la boîte, quel que soit le
+                  nombre de lignes : la carte ne bouge plus d'un pixel, et il
+                  n'y a plus de hauteur à deviner. Absente de `windowChange`,
+                  la ligne est invisible pour la même raison : rien à annoncer,
+                  mais la place reste due.
+                */
+                (active || !windowChange) && "invisible"
+              )}
+              aria-hidden={active || !windowChange ? true : undefined}
+              data-testid="hero-window-change"
+              data-direction={
+                windowChange
+                  ? windowChange.abs >= 0
+                    ? "up"
+                    : "down"
+                  : undefined
+              }
+            >
+              {windowChange ? (
+                <>
+                  <span
+                    className={cn(
+                      "num font-medium",
+                      windowChange.abs >= 0 ? "val-positive" : "val-negative"
+                    )}
+                    data-testid="hero-window-change-abs"
+                  >
+                    {formatSignedAmount(windowChange.abs, (v) => money(v))}
+                  </span>
+                  <span className="text-[var(--foreground-faint)]">·</span>
+                  <span
+                    className={cn(
+                      "num",
+                      windowChange.pct === null
+                        ? "text-[var(--foreground-faint)]"
+                        : windowChange.abs >= 0
                           ? "val-positive"
                           : "val-negative"
-                      )}
-                      data-testid="hero-pill-market"
-                      title="Ce que la valeur des actifs a produit, capital investi retiré"
-                    >
-                      Performance{" "}
-                      {formatSignedAmount(attribution.market, (v) => money(v))}
-                    </span>
-                    <span
-                      className={cn(
-                        "num rounded-[var(--radius-sm)] px-[var(--space-1)]",
-                        "bg-[var(--surface-sunken)] text-[var(--primary-text)]"
-                      )}
-                      data-testid="hero-pill-flow"
-                      title="Capital entré ou sorti du périmètre sur la période — achats, ventes, versements sur les poches, emprunts"
-                    >
-                      Capital investi{" "}
-                      {formatSignedAmount(attribution.flow, (v) => money(v))}
-                    </span>
-                  </>
-                )}
-              </p>
-            )}
+                    )}
+                    data-testid="hero-window-change-pct"
+                  >
+                    {/*
+                      Une fenêtre partie de zéro n'a pas de pourcentage — ni
+                      petit ni grand : aucun. « n/a » le dit ; « +100 % »
+                      l'inventerait.
+                    */}
+                    {windowChange.pct === null
+                      ? "n/a"
+                      : formatSignedPct(windowChange.pct)}
+                  </span>
+                  <span
+                    className="text-[var(--foreground-secondary)]"
+                    data-testid="hero-window-label"
+                  >
+                    {periodLabel}
+                  </span>
+
+                  {/*
+                    D'où vient cette variation.
+
+                    Sur la même ligne, à droite du libellé de période : les
+                    trois chiffres décrivent le même écart et se lisent d'un
+                    seul regard. Les poser sur une ligne à part ferait grandir
+                    la carte pour une information qui tient ici.
+
+                    Le flux ne prend pas la couleur du marché : un apport de
+                    50 k€ n'est ni une bonne ni une mauvaise nouvelle, c'est un
+                    déplacement d'argent. Le teinter en vert le ferait lire
+                    comme une réussite.
+                  */}
+                  {attribution && (
+                    <>
+                      <span className="text-[var(--foreground-faint)]">
+                        ·
+                      </span>
+                      <span
+                        className={cn(
+                          "num rounded-[var(--radius-sm)] px-[var(--space-1)]",
+                          "bg-[var(--surface-sunken)]",
+                          attribution.market >= 0
+                            ? "val-positive"
+                            : "val-negative"
+                        )}
+                        data-testid="hero-pill-market"
+                        title="Ce que la valeur des actifs a produit, capital investi retiré"
+                      >
+                        Performance{" "}
+                        {formatSignedAmount(attribution.market, (v) =>
+                          money(v)
+                        )}
+                      </span>
+                      <span
+                        className={cn(
+                          "num rounded-[var(--radius-sm)] px-[var(--space-1)]",
+                          "bg-[var(--surface-sunken)] text-[var(--primary-text)]"
+                        )}
+                        data-testid="hero-pill-flow"
+                        title="Capital entré ou sorti du périmètre sur la période — achats, ventes, versements sur les poches, emprunts"
+                      >
+                        Capital investi{" "}
+                        {formatSignedAmount(attribution.flow, (v) => money(v))}
+                      </span>
+                    </>
+                  )}
+                </>
+              ) : (
+                <span aria-hidden="true">&nbsp;</span>
+              )}
+            </p>
           </div>
 
           {/*
