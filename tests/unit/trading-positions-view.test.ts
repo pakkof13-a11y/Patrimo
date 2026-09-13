@@ -118,10 +118,23 @@ describe("direction et P&L", () => {
     expect(o.closedCount).toBe(1);
   });
 
-  it("le net d'une position close déduit funding et commissions quel que soit leur signe", () => {
+  it("le net d'une position close ajoute un funding perçu et retranche la commission", () => {
+    /*
+      `fundingPaid` est signé (cf. bloc « Convention de signe » de
+      `app/lib/crypto/futures.ts`) : −30 est un funding **perçu**, un produit.
+      500 + 30 − 10 = 520. L'ancien `Math.abs()` rendait 460 — il traitait
+      l'encaissement comme une charge et divergeait du bucket fiscal de
+      `app/api/trading/route.ts`, qui sommait ce même funding signé.
+    */
     expect(
       closedNetPnl(pos({ realizedPnl: "500", fundingPaid: "-30", commissionPaid: "10" }))
-    ).toBe(460);
+    ).toBe(520);
+  });
+
+  it("retranche une commission même stockée en négatif : un frais n'est jamais encaissé", () => {
+    expect(
+      closedNetPnl(pos({ realizedPnl: "500", fundingPaid: "0", commissionPaid: "-10" }))
+    ).toBe(490);
   });
 });
 

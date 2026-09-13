@@ -2,6 +2,7 @@
  * Snapshot soldes wallet — getBalance + getTokenAccountsByOwner (jsonParsed).
  */
 
+import Decimal from "decimal.js";
 import {
   fetchCoingeckoSimplePrices,
   fetchSolanaMintPricesUsd,
@@ -18,6 +19,13 @@ import {
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 
+type ParsedTokenAmount = {
+  uiAmount?: number | null;
+  uiAmountString?: string;
+  decimals?: number;
+  amount?: string;
+};
+
 type ParsedTokenAccount = {
   pubkey: { toBase58(): string };
   account: {
@@ -25,12 +33,7 @@ type ParsedTokenAccount = {
       parsed?: {
         info?: {
           mint?: string;
-          tokenAmount?: {
-            uiAmount?: number | null;
-            uiAmountString?: string;
-            decimals?: number;
-            amount?: string;
-          };
+          tokenAmount?: ParsedTokenAmount;
         };
       };
     };
@@ -49,18 +52,55 @@ export async function fetchWalletBalanceSnapshot(
   const lamports = await rpcGetBalance(addr);
   const tokenAccounts = await rpcGetTokenAccountsByOwner(addr);
 
-  const solBal = (typeof lamports === "number" ? lamports : 0) / 1e9;
+  /*
+    `rpcGetBalance` lève après épuisement des retries : un lamports non
+    numérique serait une réponse hors contrat du RPC. Le replier sur `0`
+    affichait « ce wallet ne détient pas de SOL » là où la vérité est
+    « le solde natif n'a pas pu être lu » — une absence ne se convertit
+    pas en zéro.
+  */
+  if (typeof lamports !== "number" || !Number.isFinite(lamports)) {
+    throw new SolanaRpcError(
+      "RPC Solana : getBalance n'a pas renvoyé de lamports lisibles — solde natif indisponible (et non nul)",
+      "RPC_UNAVAILABLE"
+    );
+  }
+  const solBal = lamports / 1e9;
   const tokensRaw: SolanaTokenHolding[] = [];
+  let unresolvedDecimals = 0;
 
   for (const ta of tokenAccounts as ParsedTokenAccount[]) {
     const info = ta.account?.data?.parsed?.info;
     const mint = info?.mint;
     const taAmt = info?.tokenAmount;
     if (!mint || !taAmt) continue;
-    const ui =
-      taAmt.uiAmountString ??
-      (taAmt.uiAmount != null ? String(taAmt.uiAmount) : null);
-    if (!ui) continue;
+
+    /*
+      Les décimales appartiennent au mint : sans elles, un montant est
+      illisible et aucune convention ne le rend lisible. Les supposer
+      nulles traitait 1 USDC (6 décimales) comme 1 000 000 — un chiffre
+      faux, muet, qui part ensuite au patrimoine. Décimales ABSENTES du
+      payload = ligne écartée et déclarée (notice + log). Un `0`
+      réellement rendu par le RPC reste un `0` : c'est la valeur légitime
+      des NFT Metaplex et des spams de même forme, dont la détection plus
+      bas dépend.
+    */
+    const decRaw = taAmt.decimals;
+    if (typeof decRaw !== "number" || !Number.isInteger(decRaw) || decRaw < 0) {
+      unresolvedDecimals += 1;
+      console.warn(
+        "[solana-rpc] getTokenAccountsByOwner : décimales absentes du compte token — ligne écartée, aucune quantité supposée",
+        {
+          mint,
+          tokenAccount: safeTokenAccountPubkey(ta),
+          rawAmount: taAmt.amount ?? null,
+        }
+      );
+      continue;
+    }
+
+    const ui = resolveUiBalance(taAmt, decRaw);
+    if (ui == null) continue;
     const n = Number(ui);
     if (!Number.isFinite(n) || n === 0) continue;
     const known = lookupWellKnownMint(mint);
@@ -69,7 +109,7 @@ export async function fetchWalletBalanceSnapshot(
       symbol: known?.symbol ?? shortMint(mint),
       name: known?.name ?? mint,
       balance: ui,
-      decimals: typeof taAmt.decimals === "number" ? taAmt.decimals : 0,
+      decimals: decRaw,
       priceUsd: null,
       valueUsd: null,
       icon: known?.logoUrl ?? null,
@@ -82,10 +122,11 @@ export async function fetchWalletBalanceSnapshot(
     .filter(Boolean) as string[];
 
   // Métadonnées tickers (Jupiter + well-known) + prix en parallèle
-  const [metaByMint, prices] = await Promise.all([
+  const [metaByMint, priceRead] = await Promise.all([
     resolveSolanaMintMetas(mintList, { concurrency: 4 }),
     loadPrices(mintList),
   ]);
+  const prices = priceRead.map;
   const solPrice = prices.get("native") ?? null;
 
   const native: SolanaTokenHolding = {
@@ -143,6 +184,15 @@ export async function fetchWalletBalanceSnapshot(
     nftLikeCount > 0
       ? ` ${nftLikeCount} compte(s) token à 1 unité sans décimale ni cotation (NFT ou spam) exclu(s) du comptant — lus par la synchronisation NFT.`
       : "";
+  const decimalsNotice =
+    unresolvedDecimals > 0
+      ? ` ${unresolvedDecimals} compte(s) token écarté(s) : décimales absentes du RPC Solana, quantité illisible (indisponible, pas nulle).`
+      : "";
+  // Prix indisponibles ≠ actifs sans valeur : le total n'est alors qu'une
+  // somme partielle, et cela doit se lire à l'écran.
+  const priceNotice = priceRead.sourceUnavailable
+    ? " Prix CoinGecko indisponibles lors de cette lecture : les valorisations manquantes sont inconnues, pas nulles — le total est partiel."
+    : "";
 
   return {
     address: addr,
@@ -151,8 +201,42 @@ export async function fetchWalletBalanceSnapshot(
     tokens,
     fetchedAt: new Date().toISOString(),
     source: "solana-rpc",
-    notice: baseNotice + nftNotice,
+    notice: baseNotice + nftNotice + decimalsNotice + priceNotice,
   };
+}
+
+/** Pubkey du compte token pour le log — jamais bloquante. */
+function safeTokenAccountPubkey(ta: ParsedTokenAccount): string | null {
+  try {
+    return ta.pubkey?.toBase58?.() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Quantité en unité entière d'un compte token.
+ *
+ * `uiAmountString` / `uiAmount` sont déjà à l'échelle du mint. À défaut, on
+ * recompose depuis `amount` (unités de base) et les décimales connues, avec
+ * Decimal.js — un supply à 9+ décimales dépasse la précision d'un double.
+ * Rien de lisible → `null` : la ligne est écartée, pas mise à zéro.
+ */
+function resolveUiBalance(
+  taAmt: ParsedTokenAmount,
+  decimals: number
+): string | null {
+  const direct =
+    taAmt.uiAmountString ??
+    (taAmt.uiAmount != null ? String(taAmt.uiAmount) : null);
+  if (direct != null && direct !== "" && Number.isFinite(Number(direct))) {
+    return direct;
+  }
+  const raw = taAmt.amount;
+  if (raw == null || !/^-?\d+$/.test(String(raw).trim())) return null;
+  return new Decimal(String(raw).trim())
+    .div(new Decimal(10).pow(decimals))
+    .toFixed();
 }
 
 /** NFT Metaplex / spam de même forme : 1 unité, 0 décimale, aucune cotation. */
@@ -165,8 +249,18 @@ function shortMint(mint: string): string {
   return `${mint.slice(0, 4)}…`;
 }
 
-async function loadPrices(mints: string[]): Promise<Map<string, number>> {
+/**
+ * Prix USD connus + indication d'indisponibilité du fournisseur.
+ *
+ * Un prix manquant parce que le token n'est pas coté et un prix manquant
+ * parce que CoinGecko n'a pas répondu ne se lisent pas pareil : le second
+ * doit se dire, sinon le total passe pour complet.
+ */
+type PriceRead = { map: Map<string, number>; sourceUnavailable: boolean };
+
+async function loadPrices(mints: string[]): Promise<PriceRead> {
   const map = new Map<string, number>();
+  let sourceUnavailable = false;
   try {
     const data = await fetchCoingeckoSimplePrices(
       ["solana", "usd-coin", "tether"],
@@ -179,8 +273,13 @@ async function loadPrices(mints: string[]): Promise<Map<string, number>> {
     if (data.tether?.usd != null) {
       map.set(USDT_MINT, data.tether.usd as number);
     }
-  } catch {
-    /* non bloquant */
+  } catch (e) {
+    // Non bloquant pour les quantités (elles sont lues, elles), mais déclaré.
+    sourceUnavailable = true;
+    console.warn(
+      "[coingecko] simple/price indisponible — valorisations Solana inconnues (non nulles)",
+      e instanceof Error ? e.message : e
+    );
   }
 
   const need = mints.filter(
@@ -190,9 +289,13 @@ async function loadPrices(mints: string[]): Promise<Map<string, number>> {
     try {
       const mintPrices = await fetchSolanaMintPricesUsd(need);
       for (const [k, v] of mintPrices) map.set(k, v);
-    } catch {
-      /* non bloquant */
+    } catch (e) {
+      sourceUnavailable = true;
+      console.warn(
+        "[coingecko] prix par mint Solana indisponibles — valorisations inconnues (non nulles)",
+        e instanceof Error ? e.message : e
+      );
     }
   }
-  return map;
+  return { map, sourceUnavailable };
 }
