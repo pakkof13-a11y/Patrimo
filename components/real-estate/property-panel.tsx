@@ -15,6 +15,7 @@ import {
   VIEW_TYPES,
   WINDOW_QUALITIES,
   formatOwnershipShare,
+  canApplyDvfEstimateDirectly,
   grossRentalYieldPct,
   hasCommitment,
   isDvfEstimable,
@@ -22,7 +23,6 @@ import {
   isRentalUsage,
   isSecondaryResidenceUsage,
 } from "@/app/lib/real-estate/constants";
-import { canApplyDvfEstimateDirectly } from "@/app/lib/real-estate/valuation";
 import {
   netRentalYieldPct,
   totalAnnualFiscalBurden,
