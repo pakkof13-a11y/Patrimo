@@ -22,7 +22,7 @@ import {
 import { parisDayKey } from "../../dates/paris";
 import { personalAmountOf } from "../../cash/ownership";
 import { remainingAmountAt } from "../../liabilities/amortization";
-import { isNonOwnedStatus } from "../../crypto/nft-taxonomy";
+import { collectIgnoredAssetIds } from "../ignored-assets";
 import {
   savingsDisplayBalance,
   type PayoutFrequency,
@@ -162,16 +162,7 @@ export async function loadHistoricalInputs(
     rétroactivité est retenue ici parce qu'elle est ce que fait déjà le moteur
     du jour, et parce qu'un dernier point faux était le défaut à corriger.
   */
-  const excludedAssetIds = new Set(
-    assets
-      .filter(
-        (a) =>
-          a.defiPosition?.isIgnoredInPortfolio ||
-          a.nftItem?.isIgnoredInPortfolio ||
-          (a.nftItem != null && isNonOwnedStatus(a.nftItem.status))
-      )
-      .map((a) => a.id)
-  );
+  const excludedAssetIds = collectIgnoredAssetIds(assets);
 
   const assetClassById = new Map<string, string>();
   /**

@@ -24,6 +24,7 @@ import {
 } from "@/app/lib/securities/constants";
 import {
   cashAttributionNotice,
+  contributionBaseNotice,
   type SecuritiesAccount,
   type SecuritiesRoom,
 } from "@/app/lib/securities/overview";
@@ -285,15 +286,25 @@ function ContributionHistory({ accountId }: { accountId: string }) {
 function WithdrawalSimulator({ account }: { account: AccountRow }) {
   const [amount, setAmount] = useState("");
 
+  /*
+    L'assiette est `remainingContributionsEur`, pas `contributionsEur` : les
+    versements bruts servent au plafond, mais après un retrait partiel une
+    part en est déjà sortie du plan (BOI-RPPM-RCM-40-50-50). Les laisser dans
+    l'assiette sous-estimait le gain de chaque retrait suivant — jusqu'à un
+    impôt nul là où il ne l'est pas (TIT-01).
+  */
   const result = useMemo(() => {
     if (!amount.trim() || !account.maturity) return null;
+    if (account.remainingContributionsEur === null) return null;
     return peaWithdrawalTax({
       liquidationValueEur: d(account.liquidationValueEur),
-      contributionsEur: d(account.contributionsEur),
+      contributionsEur: d(account.remainingContributionsEur),
       withdrawalAmountEur: d(amount.replace(",", ".")),
       isMatured: account.maturity.isMatured,
     });
   }, [amount, account]);
+
+  const baseNotice = contributionBaseNotice(account.contributionBaseStatus);
 
   /*
     Pas de simulation sur une assiette amputée.
@@ -340,11 +351,49 @@ function WithdrawalSimulator({ account }: { account: AccountRow }) {
     );
   }
 
+  /*
+    Pas de simulation sur une assiette inconnue. `remainingContributionsEur`
+    est `null` quand un retrait enregistré ne peut pas être réparti — daté
+    avant l'ouverture ou le premier versement, ou hors PEA. Partir des
+    versements bruts, ou de zéro, rendrait un impôt calculé sur une hypothèse.
+  */
+  if (account.remainingContributionsEur === null) {
+    return (
+      <div
+        className="mt-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/20 p-2.5"
+        data-testid="securities-withdrawal-simulator"
+        data-contribution-base={account.contributionBaseStatus}
+      >
+        <p className="text-meta">Simuler un retrait (€)</p>
+        <p
+          className="mt-1.5 text-[11px] text-[var(--warning)]"
+          data-testid="securities-withdrawal-unavailable"
+        >
+          Simulation indisponible : {baseNotice?.title ?? "assiette inconnue."}{" "}
+          Vérifiez les dates des retraits enregistrés.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div
       className="mt-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/20 p-2.5"
       data-testid="securities-withdrawal-simulator"
+      data-contribution-base={account.contributionBaseStatus}
     >
+      {baseNotice && (
+        <p
+          className="mb-1.5 text-[11px] text-[var(--muted-foreground)]"
+          data-testid="securities-withdrawal-base-notice"
+        >
+          Assiette de versements :{" "}
+          {formatCurrency(account.remainingContributionsEur, "EUR")} —{" "}
+          <UnknownAmount short={baseNotice.short} title={baseNotice.title}>
+            {baseNotice.short}
+          </UnknownAmount>
+        </p>
+      )}
       <label className="text-meta block">
         Simuler un retrait (€)
         <input

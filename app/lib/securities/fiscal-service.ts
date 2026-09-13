@@ -28,9 +28,11 @@ import {
 } from "./constants";
 import { SecuritiesInputError } from "./account-service";
 import {
+  peaContributionBase,
   peaContributionRoom,
   peaMaturityStatus,
   peaTaxStatusLabel,
+  type PeaContributionBaseStatus,
   type PeaContributionRoom,
   type PeaMaturityStatus,
 } from "./pea";
@@ -59,10 +61,25 @@ export type AccountFiscalSummary = {
   /** Absent sur un compte-titres, dont l'imposition relève de `fiscal-year.ts`. */
   taxStatusLabel: string | null;
 
-  /** Somme des versements déclarés — bruts, les retraits ne les réduisent pas. */
+  /**
+   * Somme des versements déclarés — bruts, les retraits ne les réduisent pas.
+   * C'est la grandeur du **plafond**, pas celle du gain : voir
+   * `remainingContributionsEur`.
+   */
   contributionsEur: Decimal;
-  /** Somme des retraits déclarés, pour information. */
+  /** Somme des retraits déclarés. */
   withdrawalsEur: Decimal;
+  /**
+   * Versements encore dans le plan — l'assiette du gain et du simulateur de
+   * retrait. Un retrait partiel emporte une quote-part de versements
+   * (BOI-RPPM-RCM-40-50-50) ; `peaContributionBase` la répartit au prorata,
+   * faute de valeur liquidative historique en base.
+   *
+   * `null` quand une donnée manque ou se contredit (`contributionBaseStatus`
+   * = `UNKNOWN`) : ce n'est pas zéro, et rien ne doit le lire comme tel.
+   */
+  remainingContributionsEur: Decimal | null;
+  contributionBaseStatus: PeaContributionBaseStatus;
 
   positionsValueEur: Decimal;
   cashEur: Decimal;
@@ -98,8 +115,12 @@ export type AccountFiscalSummary = {
    * `ATTRIBUTED` et dit pourquoi, plutôt que de rendre ces chiffres-là.
    */
   liquidationValueEur: Decimal;
-  /** Valeur liquidative − versements. Négatif en cas de moins-value. */
-  gainEur: Decimal;
+  /**
+   * Valeur liquidative − versements **restants**. Négatif en cas de
+   * moins-value. `null` avec `remainingContributionsEur` : pas de gain
+   * calculé sur une assiette inconnue.
+   */
+  gainEur: Decimal | null;
 };
 
 // ─── Versements ───────────────────────────────────────────────────────────────
@@ -328,7 +349,9 @@ export async function getSecuritiesFiscalBundle(
       envelopeType: true,
       openDate: true,
       assets: { select: { id: true } },
-      contributions: { select: { type: true, amountEur: true } },
+      contributions: {
+        select: { type: true, amountEur: true, occurredAt: true },
+      },
     },
     /*
       `envelopeType` croissant trie les valeurs stockées `CTO | PEA | PEA_PME`,
@@ -404,7 +427,7 @@ export async function getSecuritiesFiscalBundle(
       totals.PEA_PME = totals.PEA_PME.plus(deposits);
   }
 
-  const summaries = accounts.map((a) => {
+  const summaries = accounts.map((a): AccountFiscalSummary => {
     const envelopeType = a.envelopeType as SecuritiesEnvelopeType;
     const isPea = envelopeType !== "CTO";
 
@@ -424,6 +447,25 @@ export async function getSecuritiesFiscalBundle(
     const totalsForAccount = contributionsByAccount.get(a.id)!;
     const maturity = isPea ? peaMaturityStatus(a.openDate, at) : null;
 
+    /*
+      L'assiette du gain n'est plus `deposits` brut : après un retrait
+      partiel, une quote-part de versements est déjà sortie du plan. La
+      laisser dans l'assiette sous-estimait le gain et l'impôt de chaque
+      retrait suivant — mesuré à −6 200 € de prélèvements sociaux sur le cas
+      de l'audit (TIT-01). Le plafond, lui, reste sur le brut.
+    */
+    const base = peaContributionBase({
+      envelopeType,
+      openDate: a.openDate,
+      at,
+      liquidationValueEur: liquidationValue,
+      movements: a.contributions.map((c) => ({
+        type: c.type === "WITHDRAWAL" ? "WITHDRAWAL" : "DEPOSIT",
+        amountEur: d(c.amountEur.toString()),
+        occurredAt: c.occurredAt,
+      })),
+    });
+
     return {
       accountId: a.id,
       envelopeType,
@@ -440,11 +482,13 @@ export async function getSecuritiesFiscalBundle(
       taxStatusLabel: maturity ? peaTaxStatusLabel(maturity.isMatured) : null,
       contributionsEur: totalsForAccount.deposits,
       withdrawalsEur: totalsForAccount.withdrawals,
+      remainingContributionsEur: base?.remainingContributionsEur ?? null,
+      contributionBaseStatus: base?.status ?? "UNKNOWN",
       positionsValueEur: positionsValue,
       cashEur,
       cashAttribution,
       liquidationValueEur: liquidationValue,
-      gainEur: liquidationValue.minus(totalsForAccount.deposits),
+      gainEur: base?.gainEur ?? null,
     };
   });
 

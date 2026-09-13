@@ -65,8 +65,18 @@ function account(over: Record<string, unknown> = {}) {
   };
 }
 
-function contribution(type: string, amount: string) {
-  return { type, amountEur: { toString: () => amount } };
+// Daté après l'ouverture du compte de `account()` et avant `NOW` : un
+// mouvement ordinaire, que la répartition des retraits n'a pas à refuser.
+function contribution(
+  type: string,
+  amount: string,
+  occurredAt = "2020-06-01T00:00:00Z"
+) {
+  return {
+    type,
+    amountEur: { toString: () => amount },
+    occurredAt: new Date(occurredAt),
+  };
 }
 
 beforeEach(() => {
@@ -115,6 +125,132 @@ describe("getSecuritiesFiscalBundle — versements", () => {
     // Un retrait ne restaure pas de place sous le plafond.
     expect(s!.contributionsEur.toNumber()).toBe(15_000);
     expect(s!.withdrawalsEur.toNumber()).toBe(3_000);
+  });
+});
+
+describe("getSecuritiesFiscalBundle — assiette après retraits (TIT-01)", () => {
+  /*
+    Le cas de l'audit. PEA mûr, 100 000 € versés, plan monté à 150 000 €,
+    retrait de 50 000 € : il reste 100 000 € de titres. Avant : gain = VL −
+    versements bruts = 0, donc impôt nul sur tout retrait suivant. Doctrine
+    (BOI-RPPM-RCM-40-50-50) : le retrait a emporté 50 000 × 100 000 / 150 000
+    = 33 333,33 € de versements ; il en reste 66 666,67 €, et 33 333,33 € de
+    gain.
+  */
+  it("un retrait réduit l'assiette de versements au prorata, et le gain ressort", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        assets: [{ id: "a1" }],
+        contributions: [
+          contribution("DEPOSIT", "100000", "2019-03-01T00:00:00Z"),
+          contribution("WITHDRAWAL", "50000", "2025-01-15T00:00:00Z"),
+        ],
+      }),
+    ]);
+    getAssetValuesMock.mockResolvedValue(
+      new Map([["a1", { marketValueEur: d(100_000) }]])
+    );
+
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+    // Le plafond reste sur le brut.
+    expect(s!.contributionsEur.toNumber()).toBe(100_000);
+    expect(s!.contributionBaseStatus).toBe("PRORATA");
+    expect(s!.remainingContributionsEur!.toNumber()).toBeCloseTo(66_666.67, 2);
+    expect(s!.gainEur!.toNumber()).toBeCloseTo(33_333.33, 2);
+  });
+
+  it("sans retrait, l'assiette est exacte et vaut les versements", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        assets: [{ id: "a1" }],
+        contributions: [contribution("DEPOSIT", "50000")],
+      }),
+    ]);
+    getAssetValuesMock.mockResolvedValue(
+      new Map([["a1", { marketValueEur: d(60_000) }]])
+    );
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(s!.contributionBaseStatus).toBe("EXACT");
+    expect(s!.remainingContributionsEur!.toNumber()).toBe(50_000);
+    expect(s!.gainEur!.toNumber()).toBe(10_000);
+  });
+
+  it("deux retraits successifs valent un seul retrait de leur somme", async () => {
+    const withValues = async (contributions: unknown[]) => {
+      accountFindMany.mockResolvedValue([
+        account({ assets: [{ id: "a1" }], contributions }),
+      ]);
+      getAssetValuesMock.mockResolvedValue(
+        new Map([["a1", { marketValueEur: d(100_000) }]])
+      );
+      const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+      return s!;
+    };
+
+    const deux = await withValues([
+      contribution("DEPOSIT", "100000", "2019-03-01T00:00:00Z"),
+      contribution("WITHDRAWAL", "25000", "2024-01-15T00:00:00Z"),
+      contribution("WITHDRAWAL", "25000", "2025-01-15T00:00:00Z"),
+    ]);
+    const un = await withValues([
+      contribution("DEPOSIT", "100000", "2019-03-01T00:00:00Z"),
+      contribution("WITHDRAWAL", "50000", "2025-01-15T00:00:00Z"),
+    ]);
+
+    expect(deux.remainingContributionsEur!.toString()).toBe(
+      un.remainingContributionsEur!.toString()
+    );
+    expect(deux.gainEur!.toString()).toBe(un.gainEur!.toString());
+    // Et l'assiette ne descend jamais sous zéro, ni le gain ne change de signe.
+    expect(deux.remainingContributionsEur!.gte(0)).toBe(true);
+    expect(deux.gainEur!.gt(0)).toBe(true);
+  });
+
+  /*
+    UNKNOWN, pas zéro. Un retrait daté avant l'ouverture du plan n'a pas pu
+    emporter de versements : la donnée est illisible, et l'ancien calcul —
+    versements bruts, ou pire zéro — donnerait un impôt sur une hypothèse.
+  */
+  it("un retrait daté avant l'ouverture rend l'assiette et le gain inconnus", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        assets: [{ id: "a1" }],
+        contributions: [
+          contribution("DEPOSIT", "100000", "2019-03-01T00:00:00Z"),
+          contribution("WITHDRAWAL", "50000", "2018-01-15T00:00:00Z"),
+        ],
+      }),
+    ]);
+    getAssetValuesMock.mockResolvedValue(
+      new Map([["a1", { marketValueEur: d(100_000) }]])
+    );
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(s!.contributionBaseStatus).toBe("UNKNOWN");
+    expect(s!.remainingContributionsEur).toBeNull();
+    expect(s!.gainEur).toBeNull();
+    // Les bruts, eux, restent lisibles : le plafond n'en dépend pas.
+    expect(s!.contributionsEur.toNumber()).toBe(100_000);
+    expect(s!.withdrawalsEur.toNumber()).toBe(50_000);
+  });
+
+  it("un compte-titres avec retrait : la règle du PEA ne s'y applique pas → inconnu", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        id: "acc-cto",
+        envelopeType: "CTO",
+        assets: [{ id: "a1" }],
+        contributions: [
+          contribution("DEPOSIT", "10000"),
+          contribution("WITHDRAWAL", "1000", "2021-01-01T00:00:00Z"),
+        ],
+      }),
+    ]);
+    getAssetValuesMock.mockResolvedValue(
+      new Map([["a1", { marketValueEur: d(12_000) }]])
+    );
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(s!.contributionBaseStatus).toBe("UNKNOWN");
+    expect(s!.gainEur).toBeNull();
   });
 });
 
@@ -332,7 +468,7 @@ describe("getSecuritiesFiscalBundle — valeur liquidative et gain", () => {
     const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.positionsValueEur.toNumber()).toBe(55_000);
     expect(s!.liquidationValueEur.toNumber()).toBe(60_000);
-    expect(s!.gainEur.toNumber()).toBe(10_000);
+    expect(s!.gainEur!.toNumber()).toBe(10_000);
   });
 
   it("une moins-value ressort en gain négatif", async () => {
@@ -346,7 +482,7 @@ describe("getSecuritiesFiscalBundle — valeur liquidative et gain", () => {
       new Map([["a1", { marketValueEur: d(38_000) }]])
     );
     const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
-    expect(s!.gainEur.toNumber()).toBe(-12_000);
+    expect(s!.gainEur!.toNumber()).toBe(-12_000);
   });
 
   it("une position sans valorisation au journal est ignorée, pas comptée à zéro faussement", async () => {

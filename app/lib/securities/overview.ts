@@ -14,6 +14,7 @@ import {
   securitiesEnvelopeLabel,
   type CashAttribution,
 } from "./constants";
+import type { PeaContributionBaseStatus } from "./pea";
 
 export type SecuritiesRoom = {
   ownCapEur: string;
@@ -44,9 +45,18 @@ export type SecuritiesAccount = {
       zéro n'est pas un relevé. */
   cashAttribution: CashAttribution;
   liquidationValueEur: string;
+  /** Versements bruts — la grandeur du plafond. */
   contributionsEur: string;
   withdrawalsEur: string;
-  gainEur: string;
+  /**
+   * Versements restant dans le plan après la quote-part emportée par les
+   * retraits — l'assiette du gain. `null` : inconnue, pas nulle. Voir
+   * `peaContributionBase`.
+   */
+  remainingContributionsEur: string | null;
+  contributionBaseStatus: PeaContributionBaseStatus;
+  /** `null` avec `remainingContributionsEur`. */
+  gainEur: string | null;
   maturity: {
     maturityDate: string;
     isMatured: boolean;
@@ -131,6 +141,41 @@ export function cashAttributionNotice(
       title:
         "Aucune poche d'espèces n'est tenue pour cette enveloppe. Le montant " +
         "est inconnu, pas nul.",
+    };
+  }
+  return null;
+}
+
+/**
+ * Ce que l'écran doit dire de l'assiette de versements d'un plan.
+ *
+ * `EXACT` n'appelle aucune phrase. `PRORATA` en appelle une : l'assiette est
+ * une estimation — la quote-part de versements emportée par chaque retrait a
+ * été répartie au prorata, faute de valeur liquidative au jour du retrait —
+ * et un montant d'impôt calculé dessus doit se lire comme tel. `UNKNOWN` en
+ * appelle une autre : rien n'est calculé, et le simulateur ne s'affiche pas.
+ */
+export function contributionBaseNotice(
+  status: PeaContributionBaseStatus
+): { short: string; title: string } | null {
+  if (status === "PRORATA") {
+    return {
+      short: "assiette estimée après retraits",
+      title:
+        "Un retrait partiel emporte une part des versements. Cette part est " +
+        "répartie au prorata de la valeur du plan reconstituée (valeur " +
+        "actuelle + retraits), faute de valeur liquidative au jour de chaque " +
+        "retrait. Le gain et l'impôt simulés sont une estimation.",
+    };
+  }
+  if (status === "UNKNOWN") {
+    return {
+      short: "assiette inconnue",
+      title:
+        "L'assiette de versements ne peut pas être établie : un retrait est " +
+        "daté avant l'ouverture du plan ou avant le premier versement, ou " +
+        "porte sur un compte-titres, auquel la règle du PEA ne s'applique " +
+        "pas. Aucun gain n'est calculé — inconnu, pas nul.",
     };
   }
   return null;

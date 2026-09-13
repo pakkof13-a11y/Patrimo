@@ -244,6 +244,143 @@ export function peaContributionRoom(input: {
   };
 }
 
+// ─── Assiette de versements après retraits ────────────────────────────────────
+
+export type PeaMovement = {
+  type: "DEPOSIT" | "WITHDRAWAL";
+  amountEur: Decimal;
+  occurredAt: Date;
+};
+
+/**
+ * Comment l'assiette de versements a été obtenue.
+ *
+ * - `EXACT` : aucun retrait, l'assiette est la somme des versements.
+ * - `PRORATA` : au moins un retrait antérieur ; la quote-part de versements
+ *   qu'il a emportée est répartie au prorata (voir `peaContributionBase`).
+ * - `UNKNOWN` : une donnée manque ou se contredit ; aucune assiette n'est
+ *   rendue, et rien ne remplace ce vide par un zéro.
+ */
+export type PeaContributionBaseStatus = "EXACT" | "PRORATA" | "UNKNOWN";
+
+export type PeaContributionBase = {
+  status: Exclude<PeaContributionBaseStatus, "UNKNOWN">;
+  /** Versements bruts — ce que le plafond consomme, retraits ou non. */
+  grossContributionsEur: Decimal;
+  withdrawalsEur: Decimal;
+  /** Quote-part de versements sortie du plan avec les retraits. */
+  withdrawnContributionsEur: Decimal;
+  /** Versements encore dans le plan : l'assiette du gain. `0 ≤ … ≤ bruts`. */
+  remainingContributionsEur: Decimal;
+  /** Valeur liquidative − versements restants. Négatif en cas de moins-value. */
+  gainEur: Decimal;
+};
+
+/**
+ * Assiette de versements restant dans le plan après les retraits déjà
+ * enregistrés (BOI-RPPM-RCM-40-50-50).
+ *
+ * La doctrine veut qu'un retrait partiel `w` emporte une quote-part de
+ * versements `w × R / VL`, où `VL` est la valeur liquidative du plan **au jour
+ * du retrait**, et que l'assiette `R` diminue d'autant. Le journal
+ * `SecuritiesAccountContribution` n'a pas cette valeur historique : il ne porte
+ * que le type, le montant et la date de chaque mouvement.
+ *
+ * Choix retenu (décision utilisateur, lot B / TIT-01) : la seule
+ * reconstitution qui n'invente pas de mouvement de marché est `VL₀ = V + W` —
+ * la valeur actuelle du plan augmentée de tout ce qui en est sorti, soit ce
+ * qu'il vaudrait si rien n'en était sorti. Chaque retrait `wᵢ` emporte alors
+ * `wᵢ × D / (V + W)` de versements, d'où en forme close :
+ *
+ *     restants = D − W × D / (V + W) = D × V / (V + W)
+ *     gain     = V − restants        = V × (V + W − D) / (V + W)
+ *
+ * Propriétés : `0 ≤ restants ≤ D` ; le résultat ne dépend pas de l'ordre des
+ * retraits (deux retraits de `w` valent un retrait de `2w`) ; le signe du gain
+ * est celui de `V + W − D` et ne bascule pas d'un retrait à l'autre ; sans
+ * retrait, `restants = D` exactement. Sans mouvement de marché entre le retrait
+ * et aujourd'hui, `VL₀` est la vraie valeur au jour du retrait et la formule
+ * est celle de la doctrine à l'euro près. Avec mouvement de marché, c'est une
+ * estimation : `status` le dit (`PRORATA`) et l'écran doit le répéter.
+ *
+ * L'option « forfait 17,2 % sur tout le retrait » a été refusée : elle n'est
+ * ni implémentée ni proposée.
+ *
+ * `null` — UNKNOWN — dès qu'une donnée manque ou se contredit, sans jamais
+ * remplacer par zéro :
+ * - compte-titres ordinaire avec un retrait : la règle du PEA ne s'y applique
+ *   pas, et aucune autre ne dit ce qu'un retrait emporte ;
+ * - montant non fini, ou date invalide ;
+ * - retrait daté avant l'ouverture du plan, avant le premier versement, ou
+ *   après la date d'évaluation : il n'a pas pu emporter de versements ;
+ * - `V + W ≤ 0` avec un retrait : la proportion n'a pas de sens.
+ */
+export function peaContributionBase(input: {
+  envelopeType: SecuritiesEnvelopeType;
+  openDate: Date;
+  at: Date;
+  /** Valeur liquidative actuelle de l'enveloppe entière : titres + espèces. */
+  liquidationValueEur: Decimal;
+  movements: ReadonlyArray<PeaMovement>;
+}): PeaContributionBase | null {
+  const { liquidationValueEur: value, movements } = input;
+  if (!value.isFinite()) return null;
+  if (Number.isNaN(input.openDate.getTime()) || Number.isNaN(input.at.getTime())) {
+    return null;
+  }
+
+  let deposits = d(0);
+  let withdrawals = d(0);
+  let firstDeposit: Date | null = null;
+  for (const m of movements) {
+    if (!m.amountEur.isFinite() || Number.isNaN(m.occurredAt.getTime())) {
+      return null;
+    }
+    if (m.type === "WITHDRAWAL") {
+      withdrawals = withdrawals.plus(m.amountEur);
+    } else {
+      deposits = deposits.plus(m.amountEur);
+      if (!firstDeposit || m.occurredAt < firstDeposit) firstDeposit = m.occurredAt;
+    }
+  }
+
+  if (withdrawals.isZero()) {
+    return {
+      status: "EXACT",
+      grossContributionsEur: deposits,
+      withdrawalsEur: withdrawals,
+      withdrawnContributionsEur: d(0),
+      remainingContributionsEur: deposits,
+      gainEur: value.minus(deposits),
+    };
+  }
+
+  // À partir d'ici, au moins un retrait : la règle du PEA, et elle seule.
+  if (input.envelopeType === "CTO") return null;
+  if (!firstDeposit) return null;
+  for (const m of movements) {
+    if (m.type !== "WITHDRAWAL") continue;
+    if (m.occurredAt < input.openDate) return null;
+    if (m.occurredAt < firstDeposit) return null;
+    if (m.occurredAt > input.at) return null;
+  }
+
+  const reconstituted = value.plus(withdrawals);
+  if (reconstituted.lte(0)) return null;
+
+  const withdrawn = withdrawals.times(deposits).div(reconstituted);
+  const remaining = deposits.minus(withdrawn);
+
+  return {
+    status: "PRORATA",
+    grossContributionsEur: deposits,
+    withdrawalsEur: withdrawals,
+    withdrawnContributionsEur: withdrawn,
+    remainingContributionsEur: remaining,
+    gainEur: value.minus(remaining),
+  };
+}
+
 // ─── Retrait ──────────────────────────────────────────────────────────────────
 
 export type PeaWithdrawalTax = {
@@ -284,7 +421,12 @@ export type PeaWithdrawalTax = {
 export function peaWithdrawalTax(input: {
   /** Valeur liquidative de l'enveloppe entière : titres + espèces. */
   liquidationValueEur: Decimal;
-  /** Versements cumulés bruts. */
+  /**
+   * Versements **restant dans le plan** — `remainingContributionsEur` de
+   * `peaContributionBase`, pas les versements bruts : après un retrait
+   * partiel, une part des versements est déjà sortie et ne peut plus venir
+   * en déduction du gain.
+   */
   contributionsEur: Decimal;
   withdrawalAmountEur: Decimal;
   isMatured: boolean;

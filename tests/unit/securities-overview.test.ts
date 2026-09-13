@@ -34,6 +34,8 @@ function account(p: Partial<SecuritiesAccount> & { id: string }): SecuritiesAcco
     liquidationValueEur: "0",
     contributionsEur: "0",
     withdrawalsEur: "0",
+    remainingContributionsEur: "0",
+    contributionBaseStatus: "EXACT",
     gainEur: "0",
     maturity: null,
     room: null,

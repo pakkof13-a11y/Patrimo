@@ -764,7 +764,7 @@ export class PortfolioValuationEngine {
 
     const out: PortfolioValuationPoint[] = [];
     let previousGross: Decimal | null = null;
-    const realized = new RealizedPnlAccumulator();
+    const realized = new RealizedPnlAccumulator(this.inputs.excludedAssetIds);
 
     for (const day of days) {
       while (cursor < this.sortedTxs.length) {
@@ -1286,7 +1286,15 @@ export class PortfolioValuationEngine {
         latent du coût de positions déjà exclues de `securities`/`crypto`/…
       */
       positionsCostBasis: totalCostBasis(state, this.inputs.excludedAssetIds).toNumber(),
-      realizedPnl: (realizedPnlEur ?? totalRealizedPnl(state)).toNumber(),
+      /*
+        Même périmètre pour le réalisé : une ligne écartée du patrimoine sort de
+        tous les termes du P&L, pas seulement du coût. Le cumul fourni par
+        l'appelant applique le même filtre (`RealizedPnlAccumulator`), les deux
+        chemins donnent donc le même chiffre.
+      */
+      realizedPnl: (
+        realizedPnlEur ?? totalRealizedPnl(state, this.inputs.excludedAssetIds)
+      ).toNumber(),
       ledgerCashIncome: state.cashIncomeEur.toNumber(),
       status,
       estimatedComponents: [...estimated].sort(),
@@ -1334,7 +1342,7 @@ export class PortfolioValuationEngine {
     const out: Array<PortfolioValuationPoint & { at: Date }> = [];
     let previousGross: Decimal | null = null;
     let previousDay: DayKey | null = null;
-    const realized = new RealizedPnlAccumulator();
+    const realized = new RealizedPnlAccumulator(this.inputs.excludedAssetIds);
 
     for (const at of instants) {
       const day = parisDayKey(at);
@@ -1409,16 +1417,23 @@ export class PortfolioValuationEngine {
  * différence entre trois millions d'additions et mille.
  *
  * Le résultat est celui de `totalRealizedPnl` — mêmes lots, même champ, même
- * ordre.
+ * ordre, et depuis FIN-01 le même périmètre : `excludeAssetIds` écarte ici les
+ * mêmes lignes hors patrimoine. Sans ce filtre, la porte du cumul incrémental
+ * réintroduisait dans la courbe le réalisé qu'on venait de retirer du point
+ * isolé — le même trou par un autre chemin.
  */
 class RealizedPnlAccumulator {
   private index = 0;
   private total: Decimal = zero();
 
+  constructor(private readonly excludeAssetIds?: ReadonlySet<string>) {}
+
   /** Cumul à l'état courant, lots apparus depuis le dernier appel compris. */
   through(state: LedgerState): Decimal {
     for (; this.index < state.realizedLots.length; this.index++) {
-      this.total = this.total.plus(state.realizedLots[this.index]!.realizedPnlEur);
+      const lot = state.realizedLots[this.index]!;
+      if (this.excludeAssetIds?.has(lot.assetId)) continue;
+      this.total = this.total.plus(lot.realizedPnlEur);
     }
     return this.total;
   }

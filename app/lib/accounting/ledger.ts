@@ -303,8 +303,26 @@ export function platformCashAfter(state: LedgerState, platformId: string) {
   return state.cashByPlatform.get(platformId) ?? zero();
 }
 
-export function totalRealizedPnl(state: LedgerState): Decimal {
-  return state.realizedLots.reduce((acc, lot) => acc.plus(lot.realizedPnlEur), zero());
+/**
+ * Réalisé total du journal.
+ *
+ * `excludeAssetIds` : même périmètre et même doctrine que `totalCostBasis`
+ * ci-dessous. Une ligne écartée du patrimoine sort de *tous* les termes du P&L
+ * — valeur de marché, coût, latent et réalisé. Sans ce filtre, le réalisé d'une
+ * position DeFi/NFT ignorée continuait d'alimenter `totalReturn`, qui recyclait
+ * ainsi une ligne dont la valeur et le coût avaient déjà été retirés : un gain
+ * sans contrepartie au bilan.
+ */
+export function totalRealizedPnl(
+  state: LedgerState,
+  excludeAssetIds?: ReadonlySet<string>
+): Decimal {
+  let t = zero();
+  for (const lot of state.realizedLots) {
+    if (excludeAssetIds?.has(lot.assetId)) continue;
+    t = t.plus(lot.realizedPnlEur);
+  }
+  return t;
 }
 
 export function totalCash(state: LedgerState): Decimal {

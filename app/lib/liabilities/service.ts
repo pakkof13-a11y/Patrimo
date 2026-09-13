@@ -57,16 +57,10 @@ import {
   startOfUtcDay,
 } from "./amortization";
 
-export const LIABILITY_EVENT_TYPES = {
-  MONTHLY_DEBIT: "MONTHLY_DEBIT",
-  EARLY_REPAYMENT_PARTIAL: "EARLY_REPAYMENT_PARTIAL",
-  EARLY_REPAYMENT_TOTAL: "EARLY_REPAYMENT_TOTAL",
-  PAYMENT_CHANGE: "PAYMENT_CHANGE",
-  RATE_CHANGE: "RATE_CHANGE",
-} as const;
-
-export type LiabilityEventType =
-  (typeof LIABILITY_EVENT_TYPES)[keyof typeof LIABILITY_EVENT_TYPES];
+import { LIABILITY_EVENT_TYPES } from "./event-types";
+import { sealPaymentBaseline } from "./payment-baseline";
+export { LIABILITY_EVENT_TYPES };
+export type { LiabilityEventType } from "./event-types";
 
 /**
  * La dette a changé entre sa lecture et l'écriture de sa matérialisation.
@@ -109,9 +103,24 @@ export async function applyDuePaymentsForLiability(
   liabilityId: string,
   now: Date = new Date()
 ) {
-  const liability = await prisma.liability.findFirst({
+  const found = await prisma.liability.findFirst({
     where: owned(liabilityId, userId),
   });
+  if (!found) return null;
+  if (!found.paymentDay || !found.monthlyPayment) return found;
+
+  /*
+    PAS-02 — une dette anterieure a PAS-01 n'a pas de `lastPaymentAppliedAt`, et
+    `duePaymentDates` lit cette absence comme « repartir de `startDate` ». La
+    projection ci-dessous aurait donc materialise, en une fois, toutes les
+    mensualites depuis l'origine du pret : des annees d'ecritures datees jamais
+    constatees, sur un solde deja a jour.
+
+    On pose d'abord la borne — `updatedAt`, la seule date a laquelle
+    `remainingAmount` soit connu vrai — puis on projette a partir d'elle. Seules
+    les echeances reellement dues depuis sont ecrites. Rien n'est reconstitue.
+  */
+  const liability = await sealPaymentBaseline(userId, found);
   if (!liability) return null;
   if (!liability.paymentDay || !liability.monthlyPayment) return liability;
 

@@ -18,8 +18,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *    à la valorisation (`:949`, `:1103`) — la courbe aurait porté le même
  *    écart que le résumé du jour.
  *
- * Le réalisé (`totalRealizedPnl`) n'est **pas** touché : décision produit
- * explicitement renvoyée, pas tranchée ici (cf. brief FIN-01).
+ * Le réalisé (`totalRealizedPnl`) a depuis été aligné sur le même périmètre —
+ * une ligne ignorée sort partout, sinon le P&L total recycle une ligne « hors
+ * patrimoine ». Mesuré à part, dans `fin-01-realized-scope.test.ts` et
+ * `fin-01-historical-cost-basis-excluded.test.ts`.
  */
 
 type Row = Record<string, unknown>;

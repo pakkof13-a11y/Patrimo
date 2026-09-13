@@ -7,11 +7,163 @@ import {
   PEA_INCOME_TAX_RATE,
   PEA_PME_CAP_EUR,
   PEA_SOCIAL_CHARGES_RATE,
+  peaContributionBase,
   peaContributionRoom,
   peaMaturityStatus,
   peaTaxStatusLabel,
   peaWithdrawalTax,
+  type PeaMovement,
 } from "@/app/lib/securities/pea";
+
+describe("peaContributionBase — assiette après retraits", () => {
+  const OPEN = new Date("2019-03-01T00:00:00Z");
+  const AT = new Date("2026-07-28T00:00:00Z");
+  const mv = (
+    type: PeaMovement["type"],
+    amount: number,
+    date = "2020-06-01T00:00:00Z"
+  ): PeaMovement => ({ type, amountEur: d(amount), occurredAt: new Date(date) });
+  const pea = (liquidationValue: number, movements: PeaMovement[]) =>
+    peaContributionBase({
+      envelopeType: "PEA",
+      openDate: OPEN,
+      at: AT,
+      liquidationValueEur: d(liquidationValue),
+      movements,
+    });
+
+  it("sans retrait : EXACT, assiette = versements", () => {
+    const r = pea(60_000, [mv("DEPOSIT", 50_000)])!;
+    expect(r.status).toBe("EXACT");
+    expect(r.remainingContributionsEur.toNumber()).toBe(50_000);
+    expect(r.withdrawnContributionsEur.toNumber()).toBe(0);
+    expect(r.gainEur.toNumber()).toBe(10_000);
+  });
+
+  // Cas de l'audit TIT-01, où la formule rejoint la doctrine à l'euro près :
+  // sans mouvement de marché, V + W est la valeur du plan au jour du retrait.
+  it("un retrait emporte sa quote-part de versements : 50 000 × 100 000 / 150 000", () => {
+    const r = pea(100_000, [
+      mv("DEPOSIT", 100_000, "2019-03-01T00:00:00Z"),
+      mv("WITHDRAWAL", 50_000, "2025-01-15T00:00:00Z"),
+    ])!;
+    expect(r.status).toBe("PRORATA");
+    expect(r.withdrawnContributionsEur.toNumber()).toBeCloseTo(33_333.33, 2);
+    expect(r.remainingContributionsEur.toNumber()).toBeCloseTo(66_666.67, 2);
+    expect(r.gainEur.toNumber()).toBeCloseTo(33_333.33, 2);
+    // Le brut n'a pas bougé : c'est lui que le plafond lit.
+    expect(r.grossContributionsEur.toNumber()).toBe(100_000);
+  });
+
+  it("l'ordre et le découpage des retraits ne changent rien", () => {
+    const a = pea(100_000, [
+      mv("DEPOSIT", 100_000, "2019-03-01T00:00:00Z"),
+      mv("WITHDRAWAL", 20_000, "2023-01-01T00:00:00Z"),
+      mv("WITHDRAWAL", 30_000, "2025-01-01T00:00:00Z"),
+    ])!;
+    const b = pea(100_000, [
+      mv("WITHDRAWAL", 50_000, "2025-01-01T00:00:00Z"),
+      mv("DEPOSIT", 100_000, "2019-03-01T00:00:00Z"),
+    ])!;
+    expect(a.remainingContributionsEur.toString()).toBe(
+      b.remainingContributionsEur.toString()
+    );
+  });
+
+  it("l'assiette reste entre 0 et les versements, quel que soit le retrait", () => {
+    // Plan quasi vidé : 100 000 versés, 149 000 retirés, 1 000 restant.
+    const r = pea(1_000, [
+      mv("DEPOSIT", 100_000, "2019-03-01T00:00:00Z"),
+      mv("WITHDRAWAL", 149_000, "2025-01-01T00:00:00Z"),
+    ])!;
+    expect(r.remainingContributionsEur.gte(0)).toBe(true);
+    expect(r.remainingContributionsEur.lte(100_000)).toBe(true);
+    // 1 000 × (1 000 + 149 000 − 100 000) / 150 000 = 333,33 de gain.
+    expect(r.gainEur.toNumber()).toBeCloseTo(333.33, 2);
+  });
+
+  it("une moins-value reste une moins-value après retrait", () => {
+    // 100 000 versés, 20 000 retirés, 60 000 restant : le plan a perdu.
+    const r = pea(60_000, [
+      mv("DEPOSIT", 100_000, "2019-03-01T00:00:00Z"),
+      mv("WITHDRAWAL", 20_000, "2025-01-01T00:00:00Z"),
+    ])!;
+    expect(r.gainEur.lt(0)).toBe(true);
+    expect(r.remainingContributionsEur.toNumber()).toBe(75_000);
+  });
+
+  describe("UNKNOWN — null, jamais zéro", () => {
+    const deposit = mv("DEPOSIT", 100_000, "2019-03-01T00:00:00Z");
+
+    it("retrait daté avant l'ouverture du plan", () => {
+      expect(
+        pea(100_000, [deposit, mv("WITHDRAWAL", 1_000, "2018-12-31T00:00:00Z")])
+      ).toBeNull();
+    });
+
+    it("retrait daté avant le premier versement", () => {
+      expect(
+        pea(100_000, [
+          mv("DEPOSIT", 100_000, "2020-01-01T00:00:00Z"),
+          mv("WITHDRAWAL", 1_000, "2019-06-01T00:00:00Z"),
+        ])
+      ).toBeNull();
+    });
+
+    it("retrait daté après la date d'évaluation", () => {
+      expect(
+        pea(100_000, [deposit, mv("WITHDRAWAL", 1_000, "2027-01-01T00:00:00Z")])
+      ).toBeNull();
+    });
+
+    it("retrait sans aucun versement", () => {
+      expect(pea(100_000, [mv("WITHDRAWAL", 1_000)])).toBeNull();
+    });
+
+    it("montant ou date illisible", () => {
+      expect(
+        pea(100_000, [deposit, { ...mv("WITHDRAWAL", 1_000), amountEur: d(NaN) }])
+      ).toBeNull();
+      expect(
+        pea(100_000, [
+          deposit,
+          { ...mv("WITHDRAWAL", 1_000), occurredAt: new Date("pas une date") },
+        ])
+      ).toBeNull();
+    });
+
+    it("compte-titres avec retrait : la règle du PEA ne s'y applique pas", () => {
+      expect(
+        peaContributionBase({
+          envelopeType: "CTO",
+          openDate: OPEN,
+          at: AT,
+          liquidationValueEur: d(12_000),
+          movements: [mv("DEPOSIT", 10_000), mv("WITHDRAWAL", 1_000)],
+        })
+      ).toBeNull();
+    });
+
+    it("compte-titres sans retrait : assiette exacte, comme avant", () => {
+      const r = peaContributionBase({
+        envelopeType: "CTO",
+        openDate: OPEN,
+        at: AT,
+        liquidationValueEur: d(12_000),
+        movements: [mv("DEPOSIT", 10_000)],
+      })!;
+      expect(r.status).toBe("EXACT");
+      expect(r.gainEur.toNumber()).toBe(2_000);
+    });
+
+    it("valeur reconstituée nulle ou négative : aucune proportion possible", () => {
+      // Poche d'espèces à découvert au-delà des retraits.
+      expect(
+        pea(-5_000, [deposit, mv("WITHDRAWAL", 1_000, "2025-01-01T00:00:00Z")])
+      ).toBeNull();
+    });
+  });
+});
 
 describe("peaMaturityStatus", () => {
   it("un plan de moins de 5 ans n'est pas mûr", () => {
