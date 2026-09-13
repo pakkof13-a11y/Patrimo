@@ -33,6 +33,7 @@
  *
  * - `brut = listed + immobilier + av + cash + alternatifs + employeeSavings + autre`
  * - `net  = brut − passifs`
+ * - `immobilierNet = immobilier − liabilitiesRealEstate`
  * - `financier = listed + cashInvestissement + fondsEuro + esLiquid`
  * - **V1** : `cashInvestissement =` tout le cash explicite (banques, livrets,
  *   enveloppes). Un sous-ensemble « cash d'investissement » viendra plus tard.
@@ -118,6 +119,24 @@ export type PatrimonyMetrics = {
   esLiquid: Decimal;
   cashInvestissement: Decimal;
   /**
+   * Part de `passifs` adossée à un bien de la poche `immobilier`.
+   *
+   * Sous-champ de `passifs`, jamais un passif de plus : `net` continue de
+   * retrancher `passifs` en entier. Vaut 0 quand l'appelant ne sait pas
+   * l'attribuer — et c'est alors `immobilierNet = immobilier`, ce qui est la
+   * lecture prudente : on n'invente pas une dette immobilière.
+   */
+  liabilitiesRealEstate: Decimal;
+  /**
+   * Immobilier **net** : valeur des biens moins la dette qui les porte.
+   *
+   * Le seul chiffre que l'on doit afficher pour la poche immobilière quand un
+   * total le présente comme « net ». Il n'est pas clampé à zéro : un bien plus
+   * endetté que sa valeur donne un net négatif, qui est un fait. Clamper
+   * effacerait la dette de l'écran, au moment précis où elle compte le plus.
+   */
+  immobilierNet: Decimal;
+  /**
    * Poche du journal pour chaque `id` fourni. Sert les tests d'unicité ;
    * n'est pas sérialisé vers l'API.
    */
@@ -134,6 +153,8 @@ export type PatrimonyMetricsJson = {
   fondsEuro: string;
   esLiquid: string;
   cashInvestissement: string;
+  liabilitiesRealEstate: string;
+  immobilierNet: string;
 };
 
 export type CashMetricsInput = {
@@ -151,12 +172,28 @@ export type EmployeeSavingsMetricsInput = {
   esLiquid?: DecimalInput;
 };
 
+/**
+ * Passifs, avec la part qu'un bien immobilier porte.
+ *
+ * `realEstateBacked` est le capital restant dû des prêts rattachés à un actif
+ * de la poche `immobilier` (lien `Liability.assetId`). Omis ⇒ 0 : le contrat ne
+ * suppose aucune dette immobilière que l'appelant n'a pas démontrée.
+ *
+ * Un prêt immobilier sans bien rattaché reste dans `total` et n'entre pas ici.
+ * Il pèse donc bien sur `net`, mais pas sur `immobilierNet` — l'attribution se
+ * fait sur un lien, jamais sur un libellé.
+ */
+export type LiabilitiesMetricsInput = {
+  total: DecimalInput;
+  realEstateBacked?: DecimalInput;
+};
+
 export type ComputePatrimonyMetricsInput = {
   holdings: ClassifiableHolding[];
   cash: DecimalInput | CashMetricsInput;
   alternatives: DecimalInput;
   employeeSavings: DecimalInput | EmployeeSavingsMetricsInput;
-  liabilities: DecimalInput;
+  liabilities: DecimalInput | LiabilitiesMetricsInput;
   asOf?: Date | string;
 };
 
@@ -192,6 +229,26 @@ function asEmployeeSavings(
     return { total: d(input.total), esLiquid: d(input.esLiquid ?? 0) };
   }
   return { total: d(input), esLiquid: zero() };
+}
+
+function isLiabilitiesInput(
+  v: DecimalInput | LiabilitiesMetricsInput
+): v is LiabilitiesMetricsInput {
+  return typeof v === "object" && v != null && "total" in v;
+}
+
+function asLiabilities(input: DecimalInput | LiabilitiesMetricsInput): {
+  total: Decimal;
+  realEstateBacked: Decimal;
+} {
+  if (isLiabilitiesInput(input)) {
+    return {
+      total: d(input.total),
+      realEstateBacked: d(input.realEstateBacked ?? 0),
+    };
+  }
+  // Un montant nu reste accepté : passifs connus, attribution non fournie.
+  return { total: d(input), realEstateBacked: zero() };
 }
 
 function emptyPockets(): PatrimonyPockets {
@@ -294,10 +351,11 @@ export function computePatrimonyMetrics(
 
   const cash = asCash(input.cash);
   const es = asEmployeeSavings(input.employeeSavings);
+  const liabilities = asLiabilities(input.liabilities);
   pockets.cash = cash.total;
   pockets.alternatifs = d(input.alternatives);
   pockets.employeeSavings = es.total;
-  pockets.passifs = d(input.liabilities);
+  pockets.passifs = liabilities.total;
 
   let brut = zero();
   for (const key of PATRIMONY_ASSET_POCKETS) {
@@ -319,6 +377,8 @@ export function computePatrimonyMetrics(
     fondsEuro,
     esLiquid: es.esLiquid,
     cashInvestissement: cash.investissement,
+    liabilitiesRealEstate: liabilities.realEstateBacked,
+    immobilierNet: pockets.immobilier.minus(liabilities.realEstateBacked),
     holdingPockets,
   };
 }
@@ -341,6 +401,8 @@ export function serializePatrimonyMetrics(
     fondsEuro: toFixed(m.fondsEuro, places),
     esLiquid: toFixed(m.esLiquid, places),
     cashInvestissement: toFixed(m.cashInvestissement, places),
+    liabilitiesRealEstate: toFixed(m.liabilitiesRealEstate, places),
+    immobilierNet: toFixed(m.immobilierNet, places),
   };
 }
 
@@ -359,14 +421,20 @@ export type PatrimonyIdentityCheck = {
   brutVsPockets: Decimal;
   netVsBrutMinusPassifs: Decimal;
   financierMinusBrut: Decimal;
+  immoNetVsImmoMinusDette: Decimal;
+  /** `liabilitiesRealEstate − passifs` : doit rester ≤ 0. */
+  detteImmoMinusPassifs: Decimal;
   ok: boolean;
 };
 
 /**
- * Vérifie les trois identités du contrat, à un centime près.
+ * Vérifie les identités du contrat, à un centime près.
  *
  * `financierMinusBrut` doit rester ≤ 0,01 : Financier est un sous-ensemble
- * du brut, jamais un total parallèle.
+ * du brut, jamais un total parallèle. `detteImmoMinusPassifs` porte la même
+ * exigence sur la dette attribuée : la part immobilière est un sous-ensemble
+ * des passifs, et en annoncer plus que le total signalerait une double
+ * attribution — l'immobilier se lirait net d'une dette que personne ne doit.
  */
 export function checkPatrimonyIdentities(
   m: PatrimonyMetrics
@@ -376,14 +444,22 @@ export function checkPatrimonyIdentities(
     .minus(m.brut.minus(m.pockets.passifs))
     .abs();
   const financierMinusBrut = m.financier.minus(m.brut);
+  const immoNetVsImmoMinusDette = m.immobilierNet
+    .minus(m.pockets.immobilier.minus(m.liabilitiesRealEstate))
+    .abs();
+  const detteImmoMinusPassifs = m.liabilitiesRealEstate.minus(m.pockets.passifs);
   const ok =
     brutVsPockets.lte(CENTIME_EUR) &&
     netVsBrutMinusPassifs.lte(CENTIME_EUR) &&
-    financierMinusBrut.lte(CENTIME_EUR);
+    financierMinusBrut.lte(CENTIME_EUR) &&
+    immoNetVsImmoMinusDette.lte(CENTIME_EUR) &&
+    detteImmoMinusPassifs.lte(CENTIME_EUR);
   return {
     brutVsPockets,
     netVsBrutMinusPassifs,
     financierMinusBrut,
+    immoNetVsImmoMinusDette,
+    detteImmoMinusPassifs,
     ok,
   };
 }
@@ -409,6 +485,8 @@ export function formatPatrimonyPocketTable(m: PatrimonyMetrics): string {
     `  ${"fondsEuro".padEnd(16)} ${eur(m.fondsEuro)}`,
     `  ${"esLiquid".padEnd(16)} ${eur(m.esLiquid)}`,
     `  ${"cashInvest.".padEnd(16)} ${eur(m.cashInvestissement)}`,
+    `  ${"detteImmo".padEnd(16)} ${eur(m.liabilitiesRealEstate)}`,
+    `  ${"immobilierNet".padEnd(16)} ${eur(m.immobilierNet)}`,
   ];
   return lines.join("\n");
 }

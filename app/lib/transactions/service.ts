@@ -14,10 +14,7 @@ import {
 import type { createTransactionSchema } from "../schemas";
 import type { z } from "zod";
 import { Prisma } from "@/app/lib/prisma-client/client";
-import {
-  fxRateToEur as liveFxToEur,
-  fxRateToEurOnDate,
-} from "../market/fx";
+import { fxRateToEurOnDate } from "../market/fx";
 import { resolveWhtRate } from "../tax/withholding";
 import { loadLedgerForUser } from "../portfolio/service";
 
@@ -233,31 +230,43 @@ async function resolveFx(input: CreateTxInput): Promise<CreateTxInput> {
 
   if (provided.eq(1) && currency !== "EUR") {
     /*
-      Devise étrangère sans taux fourni : on demande le taux courant.
+      Devise étrangère sans taux fourni : le taux de la DATE de l'opération.
 
-      `fxRateToEur` applique la politique décidée en B1 — taux du fournisseur,
-      derniers taux réels si la panne est récente, table déclarée au-delà. Ce
-      repli est assumé et reste valide : il décrit une approximation du jour,
-      pas une valeur inventée pour une date passée.
+      Cette branche demandait le taux **courant** (`fxRateToEur`, politique B1 :
+      fournisseur, derniers taux réels, puis table déclarée). Ce repli décrit
+      une approximation d'aujourd'hui — parfaitement valide pour valoriser une
+      position, jamais pour écrire une écriture passée. Un ACHAT de 10 000 USD
+      saisi à la main et daté de 2021 était converti au cours de 2026 : l'écart
+      valait la dérive entre les deux dates, sans borne, et `grossAmountEur`
+      était persisté sans que rien ne le distingue plus d'un montant constaté.
+      Même défaut qu'à l'import CSV (corrigé en amont dans `import/commit.ts`,
+      qui résout déjà la série historique ligne à ligne), autre porte d'entrée.
 
-      Ce qui ne l'était pas, c'est cette branche de secours. Elle rendait
-      `{ ...input, currency }`, donc sans `fxRateToEur`, et la construction des
-      données retombait sur le `Decimal @default(1)` du modèle : un dollar
-      valait un euro, écrit comme un fait, pour la seule raison que le
-      fournisseur n'avait pas répondu. Même doctrine qu'en A1 — un taux
-      inconnu n'est ni zéro, ni un.
+      La règle est donc la même pour tous les types : le taux est celui de la
+      date de la transaction, et il vient de Frankfurter (BCE). Les types
+      revenus passent par la branche ci-dessus, qui retient `paymentDate` quand
+      elle existe — c'est la date où le cash arrive, et le seul formulaire à
+      l'exposer est celui des revenus. Pour ACHAT/VENTE/APPORT/RETRAIT/FRAIS/
+      REWARD/AIRDROP, `paymentDate` n'est pas saisissable (cf. la section
+      « Revenu — fiscalité & calendrier » du formulaire) et vaut `occurredAt`
+      par défaut à l'écriture : c'est donc `occurredAt` qui fait foi, sans
+      détour.
+
+      Taux introuvable : on refuse, comme pour les revenus. Le repli statique de
+      B1 garde tout son sens là où il décrit le jour présent — il n'a plus à
+      décider du montant en euros d'une opération datée. Un appelant qui connaît
+      son taux (relevé, exécution SL/TP, reprise assurance-vie) le fournit et
+      n'emprunte pas ce chemin.
     */
-    let live: string;
-    try {
-      live = await liveFxToEur(currency);
-    } catch {
+    const hist = await fxRateToEurOnDate(currency, input.occurredAt);
+    if (hist == null) {
       throw new AccountingError(
         "FX_RATE_UNKNOWN",
-        `Taux de conversion ${currency}→EUR indisponible : ` +
+        `Taux ${currency}→EUR indisponible pour le ${String(input.occurredAt).slice(0, 10)} : ` +
           "renseignez-le manuellement plutôt que d'enregistrer un montant converti à un taux non constaté."
       );
     }
-    return { ...input, currency, fxRateToEur: live };
+    return { ...input, currency, fxRateToEur: hist };
   }
   return { ...input, currency };
 }

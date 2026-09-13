@@ -1,24 +1,41 @@
 import type { ClassDailyPnl } from "./class-history";
 
 /**
- * Performance d'une classe d'actifs sur une fenêtre, à partir du P&L journalier.
+ * Performance **et** valeur d'une classe d'actifs sur une fenêtre, à partir du
+ * P&L journalier.
  *
- * La vignette du portefeuille traçait jusqu'ici la **valeur de marché** de la
- * classe. Ce n'est pas une courbe de performance : elle monte d'un cran le jour
- * d'un achat et retombe le jour d'une vente, sans qu'aucun cours n'ait bougé.
- * Un versement s'y lisait comme un gain.
+ * Deux séries pour deux usages distincts, pas deux mesures concurrentes de la
+ * même chose :
  *
- * On trace donc le **P&L cumulé** : la somme des P&L journaliers, dont les flux
- * sont déjà neutralisés en amont (`buildClassDailyPnl` retranche les apports et
- * ajoute les revenus). La courbe part de zéro au premier jour de la fenêtre et
- * ne bouge que sous l'effet des cours. Son point d'arrivée est exactement le
- * gain ou la perte de la période — le chiffre affiché à côté d'elle.
+ * - `value` est la valeur de marché de la classe, jour par jour — la même
+ *   grandeur que `totalMarketValue` affiché à côté d'elle dans l'en-tête de
+ *   groupe. C'est elle qui alimente la vignette de tendance : un niveau qui ne
+ *   repart jamais de zéro, exactement comme la colonne « Valeur » des lignes
+ *   d'actifs que le groupe coiffe. Une vignette qui trace `cumulative` (voir
+ *   plus bas) part toujours de 0 : à échelle de vignette, elle semble alors
+ *   « plus basse » que les lignes d'actifs qu'elle surplombe, sans qu'aucun
+ *   axe ni aucune fenêtre ne diffère réellement — ce n'est pas la même
+ *   grandeur. `value` monte d'un cran le jour d'un achat (un apport augmente
+ *   réellement la valeur détenue) : ce n'est pas un défaut pour une vignette
+ *   de niveau, seulement pour une vignette de performance.
+ *
+ * - `cumulative` (et `pnl`/`pct`, son point d'arrivée) est le **P&L cumulé** :
+ *   la somme des P&L journaliers, dont les flux sont déjà neutralisés en
+ *   amont (`buildClassDailyPnl` retranche les apports et ajoute les revenus).
+ *   Cette courbe part de zéro au premier jour de la fenêtre et ne bouge que
+ *   sous l'effet des cours — c'est elle qui alimente le chiffre « Performance
+ *   sur 30 jours » affiché sous le total du groupe, jamais la vignette.
  */
 
 export type ClassPeriodPerformance = {
   /** P&L cumulé jour par jour, en devise de base. Commence à 0. */
   cumulative: number[];
-  /** P&L de la période entière = dernier point de la courbe. */
+  /**
+   * Valeur de marché de la classe, jour par jour, en devise de base — jamais
+   * remise à zéro. Alimente la vignette de tendance de l'en-tête de groupe.
+   */
+  value: number[];
+  /** P&L de la période entière = dernier point de la courbe `cumulative`. */
   pnl: number;
   /**
    * Rendement de la période, en pourcentage du capital engagé.
@@ -98,7 +115,7 @@ export function buildClassPeriodSeries(
     const capital = engagedCapital(values, pnls);
     const pct = capital > 0 ? (pnlTotal / capital) * 100 : null;
 
-    out.set(cls, { cumulative, pnl: pnlTotal, pct });
+    out.set(cls, { cumulative, value: values, pnl: pnlTotal, pct });
   }
 
   return out;

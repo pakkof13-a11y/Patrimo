@@ -76,18 +76,25 @@ describe("transaction en devise non fondée", () => {
     expect(txCreate).not.toHaveBeenCalled();
   });
 
-  it("une devise à repli déclaré reste acceptée", async () => {
+  it("une devise à repli déclaré n'échappe pas au refus (JOU-02)", async () => {
     /*
-      La frontière du chantier : USD dispose d'un repli assumé, la transaction
-      doit donc être créée — à 1/1,08, jamais à 1.
+      La frontière a bougé, et c'est voulu.
+
+      USD dispose d'un repli assumé — 1 EUR = 1,08 USD — et cette transaction
+      était donc créée à 1/1,08. Depuis JOU-02, l'écriture demande le taux de
+      **sa date** (`occurredAt`), jamais celui du jour : le repli du taux
+      courant ne peut plus tenir lieu de taux constaté au 2 février 2026. Le
+      fournisseur muet, rien n'est écrit — pas 1, pas 1/1,08.
+
+      Le repli déclaré n'est pas supprimé pour autant : il vit toujours, et sa
+      frontière est éprouvée par le second bloc de ce fichier, sur la cotation,
+      où il décrit bien le jour présent.
     */
     fetchMock.mockRejectedValue(new Error("FX HTTP 503"));
-    await creer({ ...ACHAT, currency: "USD" });
-
-    expect(txCreate).toHaveBeenCalledTimes(1);
-    const data = txCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
-    expect(Number(data.data.fxRateToEur)).toBeCloseTo(1 / 1.08, 8);
-    expect(Number(data.data.fxRateToEur)).not.toBe(1);
+    await expect(creer({ ...ACHAT, currency: "USD" })).rejects.toMatchObject({
+      code: "FX_RATE_UNKNOWN",
+    });
+    expect(txCreate).not.toHaveBeenCalled();
   });
 
   it("un taux fourni reste prioritaire, même sur une devise non fondée", async () => {

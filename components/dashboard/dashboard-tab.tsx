@@ -464,22 +464,19 @@ export function DashboardTab({
     const titresCroisement = dernierPoint ? titresValueAt(dernierPoint) : null;
     const titres = titresCroisement ?? Math.max(0, listed - crypto);
     /*
-      Immobilier **net** : la valeur des biens moins la dette qui les porte.
+      Immobilier **net** : servi par le moteur (`summary.totalRealEstateNetBase`),
+      seuls les passifs adossés aux biens (`Liability.assetId`) en sont
+      retranchés — jamais tous les passifs du patrimoine (un crédit conso
+      sans rapport les gonflerait à tort).
 
-      Le passif du patrimoine est aujourd'hui constitué des seuls crédits
-      immobiliers — le crédit auto est intégralement amorti, son capital
-      restant dû vaut zéro. Retrancher le total des passifs est donc exact ici,
-      et c'est ce qui fait que la somme des parts retombe sur le patrimoine
-      net. Si une dette non immobilière réapparaissait, cette ligne devrait
-      lire les passifs adossés aux biens plutôt que leur total.
+      `Math.max(0, …)` reste ici : c'est une part de donut, elle ne peut pas
+      être négative — la tuile KPI (`realEstateNetNow`, plus bas) affiche
+      elle le net signé, sans ce plancher.
     */
-    const immobilierBrut = num(
-      summary?.totalRealEstateBase ?? summary?.totalRealEstateEur
+    const immobilier = Math.max(
+      0,
+      num(summary?.totalRealEstateNetBase ?? summary?.totalRealEstateNetEur)
     );
-    const passifs = num(
-      summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur
-    );
-    const immobilier = Math.max(0, immobilierBrut - passifs);
     const av = num(
       summary?.totalLifeInsuranceBase ?? summary?.totalLifeInsuranceEur
     );
@@ -632,10 +629,16 @@ export function DashboardTab({
     const crypto = denseNavSeries(navWindowed, (p) => p.byAssetClass?.CRYPTO);
     const av = denseNavSeries(navWindowed, (p) => p.av);
     /*
-      Immobilier net : valeur des biens moins la dette qui les porte — même
-      recomposition que `patrimonySlices.immobilier` (les seuls passifs
-      actuels sont des crédits immobiliers), pas une seconde formule de
-      valorisation.
+      Mini-courbe de la tuile Immobilier net — hors mandat de ce correctif.
+
+      `realEstateNetNow` (valeur affichée par la tuile, plus bas) lit
+      désormais `summary.totalRealEstateNetBase`, net des seuls passifs
+      adossés aux biens. Cette série, elle, reste `p.immobilier - p.passifs`
+      sur `DailyNavPoint` — TOUS les passifs, faute d'un champ historique
+      « passifs immobiliers » par jour dans le moteur de série. Elle garde
+      donc un biais (creusée par une dette non immobilière) tant que ce champ
+      n'existe pas côté historique ; ce n'est pas la même formule que la
+      valeur ponctuelle qu'elle esquisse.
     */
     const realEstateNet = denseNavSeries(navWindowed, (p) => p.immobilier - p.passifs);
     const alternatives = denseNavSeries(navWindowed, (p) => p.alternatifs);
@@ -690,9 +693,14 @@ export function DashboardTab({
     const titresCroisementNow = lastNavPoint
       ? titresValueAt(lastNavPoint)
       : null;
-    const realEstateNetNow =
-      num(summary?.totalRealEstateBase ?? summary?.totalRealEstateEur) -
-      num(summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur);
+    /*
+      Net signé, servi par le moteur — pas de plancher à zéro ici : un bien
+      sur-endetté doit pouvoir afficher une tuile négative plutôt que de se
+      faire passer pour un net nul.
+    */
+    const realEstateNetNow = num(
+      summary?.totalRealEstateNetBase ?? summary?.totalRealEstateNetEur
+    );
 
     return [
       {

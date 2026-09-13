@@ -65,6 +65,15 @@ const VALUE_COLUMNS = new Set([
  * par classe, qui n'est pas toujours chargé et qui n'existe pas pour une
  * classe sans historique de cours. Leur place est réservée pour que leur
  * arrivée ne fasse pas sauter la ligne.
+ *
+ * `spark` et `periodPnl`/`periodPct` ne sont plus la même courbe qu'avant et
+ * qu'après : `spark` est un **niveau** (valeur de marché de la classe, jour
+ * par jour, jamais remise à zéro — la même nature que la colonne « Valeur »
+ * des lignes qu'il coiffe), `periodPnl`/`periodPct` restent une
+ * **performance** cumulée sur la fenêtre. Les deux se lisent côte à côte,
+ * comme une ligne d'actif affiche sa vignette de tendance (prix) à côté de sa
+ * colonne Variation (P&L) sans qu'aucune des deux ne soit l'arrivée littérale
+ * de l'autre.
  */
 export function PositionGroupHeader({
   label,
@@ -92,9 +101,12 @@ export function PositionGroupHeader({
   totalUnrealizedPnl: number;
   unrealizedPnlPct: number | null;
   weightPct: number | null;
-  /** P&L cumulé de la classe, jour par jour, flux neutralisés. */
+  /**
+   * Valeur de marché de la classe, jour par jour, en devise de base — jamais
+   * remise à zéro. Même nature que `totalMarketValue`, pas un P&L cumulé.
+   */
   spark?: number[];
-  /** P&L de la fenêtre (30 j), en devise de base — arrivée de la courbe. */
+  /** P&L de la fenêtre (30 j), en devise de base — performance, pas l'arrivée littérale de `spark`. */
   periodPnl?: number | null;
   /** Rendement de la fenêtre, en % du capital engagé. */
   periodPct?: number | null;
@@ -204,10 +216,27 @@ export function PositionGroupHeader({
               >
                 <Sparkline
                   values={spark}
+                  /*
+                    Couleur alignée sur la performance (`periodPnl`), pas sur
+                    le sens du niveau tracé : `spark` est une valeur de
+                    marché, elle peut monter sous l'effet d'un versement alors
+                    que la classe perd de l'argent sur la fenêtre. Colorer le
+                    trait sur son propre sens aurait affiché un trait vert à
+                    côté d'un « Performance sur 30 jours » négatif, sous le
+                    même en-tête — deux signaux contradictoires sans qu'aucune
+                    différence de périmètre ne l'explique. Repli sur le sens
+                    du niveau seulement quand `periodPnl` est inconnu (P&L par
+                    classe pas encore chargé) : la vignette garde alors une
+                    couleur plutôt qu'aucune.
+                  */
                   stroke={
-                    spark[spark.length - 1]! >= spark[0]!
-                      ? "var(--chart-positive)"
-                      : "var(--chart-negative)"
+                    periodPnl != null
+                      ? periodUp
+                        ? "var(--chart-positive)"
+                        : "var(--chart-negative)"
+                      : spark[spark.length - 1]! >= spark[0]!
+                        ? "var(--chart-positive)"
+                        : "var(--chart-negative)"
                   }
                   width={96}
                   height={24}
@@ -225,11 +254,14 @@ export function PositionGroupHeader({
               {formatCurrency(totalMarketValue, baseCurrency)}
             </div>
             {/*
-              Performance sur 30 jours, sous le total : c'est exactement le
-              point d'arrivée de la courbe affichée à gauche, montant et
-              pourcentage. Cette place portait la variation de la seule
-              dernière journée — un chiffre qui ne se rattachait à rien de ce
-              qui était tracé.
+              Performance sur 30 jours, sous le total — montant et
+              pourcentage. Cette place portait auparavant la variation de la
+              seule dernière journée, un chiffre qui ne se rattachait à rien
+              de ce qui était tracé. Ce n'est plus le point d'arrivée littéral
+              de la vignette affichée à gauche : celle-ci trace désormais un
+              niveau de valeur (jamais remis à zéro), quand ce chiffre reste
+              un P&L cumulé sur la fenêtre — les deux se lisent côte à côte,
+              pas l'un comme la clé de l'autre.
             */}
             <div
               className={cn(

@@ -1,18 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Taux courant : un dollar ne vaut jamais un euro par défaut.
+ * Écriture en devise sans taux fourni : celui de la date de l'opération.
  *
- * Pour une devise étrangère sans taux fourni, `resolveFx` demandait le taux
- * courant et, en cas d'échec, rendait `{ ...input, currency }` — donc sans
- * `fxRateToEur`. La construction des données retombait alors sur le
- * `Decimal @default(1)` du modèle : la transaction était enregistrée à parité,
- * comme un fait, pour la seule raison que le fournisseur n'avait pas répondu.
+ * Deux corrections successives vivent dans ce fichier.
  *
- * A1 a traité le taux historique. Ce fichier traite le taux du jour, avec la
- * même doctrine — inconnu n'est ni zéro, ni un — et vérifie surtout la
- * frontière : le repli statique décidé en B1 reste une réponse valide pour le
- * taux courant, et ne doit pas être emporté par la correction.
+ * La première : pour une devise étrangère sans taux fourni, `resolveFx` rendait
+ * `{ ...input, currency }` en cas d'échec — donc sans `fxRateToEur`. La
+ * construction des données retombait sur le `Decimal @default(1)` du modèle :
+ * la transaction était enregistrée à parité, comme un fait, pour la seule
+ * raison que le fournisseur n'avait pas répondu. Inconnu n'est ni zéro, ni un.
+ *
+ * La seconde (JOU-02) : le taux demandé était celui **du jour**, y compris pour
+ * une opération datée de plusieurs années. Un ACHAT de 10 000 USD de 2021
+ * valorisé au cours de 2026 — l'écart valant la dérive entre les deux dates,
+ * sans borne, et persisté comme un montant constaté. `resolveFx` résout
+ * désormais le taux de `occurredAt` pour TOUS les types, pas seulement les
+ * revenus. Le repli statique de B1 reste une réponse valide là où il décrit le
+ * jour présent (valorisation, conversion d'affichage) ; il ne décide plus du
+ * montant en euros d'une écriture datée, et ces tests le vérifient.
  */
 
 const txCreate = vi.fn();
@@ -36,6 +42,28 @@ vi.mock("@/app/lib/prisma", () => {
 /** Réponse Frankfurter. */
 function reponse(usd: number) {
   return new Response(JSON.stringify({ rates: { USD: usd } }), { status: 200 });
+}
+
+/** Vrai pour l'endpoint daté de Frankfurter (`/2026-02-02?...`). */
+function estArchive(url: unknown): boolean {
+  return typeof url === "string" && /frankfurter\.app\/\d{4}-\d{2}-\d{2}/.test(url);
+}
+
+/**
+ * Fournisseur qui répond différemment selon la question posée.
+ *
+ * C'est le seul montage qui distingue les deux taux : un test où la même valeur
+ * sert de réponse aux deux endpoints passerait quelle que soit la date retenue.
+ */
+function fournisseur({ archive, jour }: { archive: number | null; jour: number | null }) {
+  return async (url: unknown) => {
+    if (estArchive(url)) {
+      if (archive == null) throw new Error("archives indisponibles");
+      return reponse(archive);
+    }
+    if (jour == null) throw new Error("FX HTTP 503");
+    return reponse(jour);
+  };
 }
 
 /** Un achat en dollars, sans taux fourni — le cas qui déclenche la résolution. */
@@ -111,83 +139,92 @@ describe("taux explicitement fourni", () => {
 });
 
 describe("devise étrangère sans taux fourni", () => {
-  it("fournisseur disponible : son taux est utilisé et persisté", async () => {
-    fetchMock.mockResolvedValue(reponse(1.25));
+  it("le taux retenu est celui de la date de l'opération, pas celui du jour", async () => {
+    fetchMock.mockImplementation(fournisseur({ archive: 1.25, jour: 1.1 }));
     await creer(ACHAT_USD);
+
     expect(tauxEcrit()).toBeCloseTo(1 / 1.25, 8);
+    // Le cours du jour était disponible, et n'a pas servi.
+    expect(tauxEcrit()).not.toBeCloseTo(1 / 1.1, 4);
+  });
+
+  it("la date interrogée est bien celle de la transaction", async () => {
+    fetchMock.mockImplementation(fournisseur({ archive: 1.25, jour: 1.1 }));
+    await creer(ACHAT_USD);
+
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("/2026-02-02"))).toBe(true);
   });
 
   it("vente en devise : même résolution", async () => {
-    fetchMock.mockResolvedValue(reponse(1.25));
+    fetchMock.mockImplementation(fournisseur({ archive: 1.25, jour: 1.1 }));
     await creer({ ...ACHAT_USD, type: "VENTE" });
     expect(tauxEcrit()).toBeCloseTo(1 / 1.25, 8);
   });
 
-  it("fournisseur indisponible : le repli déclaré de B1 s'applique, la transaction existe", async () => {
-    /*
-      Le cas essentiel. B1 a délibérément conservé une table déclarée pour le
-      taux **courant** : 1 EUR = 1,08 USD. C'est une approximation du jour,
-      assumée et documentée, pas une valeur inventée pour une date passée.
-      Cette correction ne doit pas l'emporter.
-    */
-    fetchMock.mockRejectedValue(new Error("FX HTTP 503"));
-    await creer(ACHAT_USD);
-
-    expect(txCreate).toHaveBeenCalledTimes(1);
-    expect(tauxEcrit()).toBeCloseTo(1 / 1.08, 8);
-    // Et surtout : pas 1.
-    expect(tauxEcrit()).not.toBe(1);
+  it("un apport en devise suit la même règle", async () => {
+    fetchMock.mockImplementation(fournisseur({ archive: 1.25, jour: 1.1 }));
+    await creer({
+      ...ACHAT_USD,
+      type: "APPORT",
+      assetId: undefined,
+      quantity: undefined,
+      unitPrice: undefined,
+      cashAmount: "1000",
+    });
+    expect(tauxEcrit()).toBeCloseTo(1 / 1.25, 8);
   });
 });
 
-describe("quand aucun taux courant ne peut être obtenu", () => {
+describe("quand aucun taux n'est démontré pour cette date", () => {
   /*
-    Depuis B1, `fxRateToEur` ne lève pratiquement plus : une panne réseau la
-    fait retomber sur la table déclarée. Pour éprouver le refus lui-même, c'est
-    donc cette fonction qu'on rend incapable de répondre — la situation que la
-    branche de secours prétendait couvrir.
-  */
-  async function creerSansTauxCourant(input: Record<string, unknown>) {
-    vi.resetModules();
-    vi.doMock("@/app/lib/market/fx", async (importOriginal) => {
-      const reel = await importOriginal<typeof import("@/app/lib/market/fx")>();
-      return {
-        ...reel,
-        fxRateToEur: async () => {
-          throw new Error("FX indisponible");
-        },
-      };
-    });
-    const { createTransaction } = await import("@/app/lib/transactions/service");
-    return createTransaction(input as Parameters<typeof createTransaction>[0]);
-  }
+    Le cas qui change de réponse avec JOU-02.
 
-  it("l'écriture est refusée", async () => {
-    await expect(creerSansTauxCourant(ACHAT_USD)).rejects.toMatchObject({
+    B1 a délibérément conservé une table déclarée — 1 EUR = 1,08 USD — pour le
+    taux **courant** : une approximation du jour, assumée, qui garde tout son
+    sens pour valoriser ou convertir un affichage. Elle servait aussi de repli
+    à l'écriture, et c'est ce qui tombe ici : appliquée à une opération datée,
+    elle produit un `grossAmountEur` que rien ne distingue plus d'un montant
+    constaté. Archives muettes, cours du jour parfaitement disponible : on
+    refuse, et le repli statique n'est pas consulté.
+  */
+  it("l'écriture est refusée, même quand le cours du jour est disponible", async () => {
+    fetchMock.mockImplementation(fournisseur({ archive: null, jour: 1.08 }));
+    await expect(creer(ACHAT_USD)).rejects.toMatchObject({
       code: "FX_RATE_UNKNOWN",
     });
   });
 
-  it("le taux 1 du modèle n'est jamais utilisé comme secours", async () => {
-    await expect(creerSansTauxCourant(ACHAT_USD)).rejects.toThrow();
-    // Rien n'est écrit : ni 1, ni aucune autre valeur de substitution.
+  it("ni le taux du jour, ni le repli statique, ni le 1 du modèle ne sont écrits", async () => {
+    fetchMock.mockImplementation(fournisseur({ archive: null, jour: 1.08 }));
+    await expect(creer(ACHAT_USD)).rejects.toThrow();
+    // Rien n'est écrit : aucune valeur de substitution, quelle qu'elle soit.
     expect(txCreate).not.toHaveBeenCalled();
   });
 
-  it("le message nomme la devise et la nature du manque", async () => {
-    await expect(creerSansTauxCourant(ACHAT_USD)).rejects.toThrow(
-      /USD.*indisponible/
-    );
+  it("fournisseur entièrement muet : refus identique", async () => {
+    fetchMock.mockRejectedValue(new Error("réseau"));
+    await expect(creer(ACHAT_USD)).rejects.toMatchObject({
+      code: "FX_RATE_UNKNOWN",
+    });
+    expect(txCreate).not.toHaveBeenCalled();
+  });
+
+  it("le message nomme la devise et la date manquante", async () => {
+    fetchMock.mockRejectedValue(new Error("réseau"));
+    await expect(creer(ACHAT_USD)).rejects.toThrow(/USD.*2026-02-02/);
   });
 
   it("un taux fourni reste accepté même sans fournisseur", async () => {
-    await creerSansTauxCourant({ ...ACHAT_USD, fxRateToEur: "0.82" });
+    fetchMock.mockRejectedValue(new Error("réseau"));
+    await creer({ ...ACHAT_USD, fxRateToEur: "0.82" });
     expect(txCreate).toHaveBeenCalledTimes(1);
     expect(tauxEcrit()).toBeCloseTo(0.82, 10);
   });
 
   it("une transaction en euros passe toujours", async () => {
-    await creerSansTauxCourant({ ...ACHAT_USD, currency: "EUR" });
+    fetchMock.mockRejectedValue(new Error("réseau"));
+    await creer({ ...ACHAT_USD, currency: "EUR" });
     expect(txCreate).toHaveBeenCalledTimes(1);
     expect(tauxEcrit()).toBe(1);
   });

@@ -444,6 +444,19 @@ export function AssetPanel({
               <span className="text-label shrink-0">
                 {quote.nativeCurrency}
               </span>
+              {/*
+                Même garde que la colonne « Cours » du tableau : un cours
+                périmé affiché en gros, sans indication, se lit comme une
+                clôture du jour — ce qu'il n'est pas.
+              */}
+              {quote.status === "STALE" && (
+                <span
+                  className="shrink-0 text-[10px] tracking-wide text-amber-500"
+                  data-testid="asset-panel-stale"
+                >
+                  cours périmé
+                </span>
+              )}
             </p>
             <p className="mt-[var(--space-2)] text-[length:var(--text-xs)] leading-none">
               {mini.changePct != null && mini.change != null ? (
@@ -660,6 +673,11 @@ export function AssetPanel({
                   quote?.lastUpdatedAt
                     ? formatRelativeUpdate(quote.lastUpdatedAt)
                     : "—"
+                }
+                sub={
+                  quote?.status === "STALE" ? (
+                    <span className="text-amber-500">prix périmé</span>
+                  ) : undefined
                 }
               />
             </dl>
