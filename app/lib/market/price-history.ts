@@ -1,7 +1,7 @@
 import YahooFinance from "yahoo-finance2";
 import { prisma } from "../prisma";
 import { d, toFixed } from "../money/decimal";
-import { toYahooSymbol } from "./symbol";
+import { toYahooSymbol, normalizeQuoteCurrency } from "./symbol";
 import { getEurRates, convertToEurSync } from "./fx";
 import { withTimeout } from "../utils/with-timeout";
 import {
@@ -584,6 +584,7 @@ async function fetchYahooBars(
       12_000,
       "yahooFinance.chart"
     )) as {
+      meta?: { currency?: string };
       quotes?: Array<{
         date?: Date;
         open?: number | null;
@@ -599,10 +600,17 @@ async function fetchYahooBars(
     );
     if (quotes.length < 2) return null;
 
+    // `result.meta.currency` est un fait renvoyé par le fournisseur pour cet
+    // appel précis (ex. "GBp" pour un titre LSE coté en pence) — il fait foi
+    // sur le `nativeCurrency` déclaré ailleurs sur l'actif, qui peut être
+    // périmé ou n'avoir jamais porté le signal sous-unité.
+    const { currency: cur, divisor } = normalizeQuoteCurrency(
+      result.meta?.currency || nativeCurrency
+    );
+
     const rates = await getEurRates();
-    const cur = nativeCurrency.toUpperCase();
     const toEur = (v: number) =>
-      cur === "EUR" ? v : Number(convertToEurSync(v, cur, rates));
+      cur === "EUR" ? v / divisor : Number(convertToEurSync(v / divisor, cur, rates));
 
     let points: PriceHistoryPoint[] = [];
     for (const q of quotes) {

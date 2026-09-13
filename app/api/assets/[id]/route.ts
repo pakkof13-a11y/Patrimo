@@ -4,16 +4,24 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { getAssetDetail } from "@/app/lib/portfolio/service";
 import { updateAssetMetadataSchema } from "@/app/lib/schemas";
-import { presentFields, validationErrorResponse } from "@/app/lib/api/validation";
+import {
+  presentFields,
+  requestedBase,
+  validationErrorResponse,
+} from "@/app/lib/api/validation";
 
 /**
  * GET /api/assets/:id?base=EUR
  *
  * `base` suit exactement la convention de `GET /api/holdings` : paramètre
- * explicite, sinon la préférence enregistrée du compte, sinon l'euro. Les deux
- * écrans montrent la même ligne côte à côte — le tableau et la fiche qui
- * s'ouvre par-dessus — et rien ne justifierait qu'ils la convertissent
- * différemment.
+ * validé par `requestedBase`, sinon l'euro. Les deux écrans montrent la même
+ * ligne côte à côte — le tableau et la fiche qui s'ouvre par-dessus — et rien
+ * ne justifierait qu'ils la convertissent différemment.
+ *
+ * Le paramètre partait tel quel vers `convertToEurSync`/`convertFromEurSync`
+ * en aval, qui lève sur tout code sans taux : `?base=ZZZ` rendait un 500 sans
+ * corps là où la demande est simplement invalide. Même garde que
+ * banks/savings/term-deposits/holdings.
  */
 export async function GET(
   req: Request,
@@ -22,12 +30,11 @@ export async function GET(
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
-  const { id } = await ctx.params;
-  const { searchParams } = new URL(req.url);
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  const base = searchParams.get("base") || user?.baseCurrency || "EUR";
+  const demande = requestedBase(req);
+  if ("error" in demande) return demande.error;
 
-  const detail = await getAssetDetail(userId, id, base);
+  const { id } = await ctx.params;
+  const detail = await getAssetDetail(userId, id, demande.base);
   if (!detail) return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });
 
   return NextResponse.json(detail);

@@ -82,7 +82,16 @@ export async function GET() {
 
             contributionsEur: f?.contributionsEur.toFixed(2) ?? "0.00",
             withdrawalsEur: f?.withdrawalsEur.toFixed(2) ?? "0.00",
-            gainEur: f?.gainEur.toFixed(2) ?? "0.00",
+            /*
+              Assiette après retraits et gain : `null` quand le service ne
+              sait pas (`contributionBaseStatus: UNKNOWN`), jamais "0.00" —
+              le simulateur de retrait s'en nourrit, et un zéro fabriqué
+              ferait passer tout le plan pour du gain.
+            */
+            remainingContributionsEur:
+              f?.remainingContributionsEur?.toFixed(2) ?? null,
+            contributionBaseStatus: f?.contributionBaseStatus ?? "UNKNOWN",
+            gainEur: f?.gainEur?.toFixed(2) ?? null,
 
             // Absents sur un compte-titres : ni règle des 5 ans, ni plafond.
             maturity: f?.maturity
@@ -91,6 +100,10 @@ export async function GET() {
                   isMatured: f.maturity.isMatured,
                   ageYears: f.maturity.ageYears,
                   daysToMaturity: f.maturity.daysToMaturity,
+                  // Un retrait avant 5 ans clôture le plan : l'écran doit
+                  // lire cet état avant tout compte à rebours (TIT-06).
+                  planStatus: f.maturity.planStatus,
+                  closedAt: f.maturity.closedAt?.toISOString() ?? null,
                 }
               : null,
             room: f?.room
@@ -104,6 +117,7 @@ export async function GET() {
                   usedPct: f.room.usedPct.toFixed(2),
                   isOverCap: f.room.isOverCap,
                   bindingCap: f.room.bindingCap,
+                  blockedReason: f.room.blockedReason,
                 }
               : null,
             taxStatusLabel: f?.taxStatusLabel ?? null,

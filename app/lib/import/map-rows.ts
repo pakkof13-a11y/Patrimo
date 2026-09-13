@@ -1545,10 +1545,19 @@ export function mapCsvToDrafts(
     }
 
     let currency = (currencyRaw || "EUR").trim().toUpperCase() || "EUR";
-    if (currency.length > 3) currency = currency.slice(0, 3);
-    if (!/^[A-Z]{3}$/.test(currency)) {
-      currency = "EUR";
-      warnings.push("Devise invalide → EUR");
+    /*
+      USDT/USDC ne sont pas des devises à 3 lettres, mais tronquer à "USD"
+      les fait passer pour un dollar réel — la ligne se convertit ensuite au
+      taux BCE du jour, silencieusement, sans qu'aucune trace ne distingue un
+      stablecoin d'un vrai dollar. `resolveRowFxRate` (commit.ts) leur donne
+      une conversion dédiée ; ici on se contente de ne pas effacer le fait.
+    */
+    if (currency !== "USDT" && currency !== "USDC") {
+      if (currency.length > 3) currency = currency.slice(0, 3);
+      if (!/^[A-Z]{3}$/.test(currency)) {
+        currency = "EUR";
+        warnings.push("Devise invalide → EUR");
+      }
     }
 
     const assetClass = guessAssetClass(ticker, name, forcedClass);

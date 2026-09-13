@@ -75,9 +75,19 @@ export type PropertyView = {
   equityEur: number;
   /** Part de la valeur qui vous revient nette de dette, en %. */
   equitySharePct: number | null;
+  /**
+   * Quote-part de détention (fraction, 1 = pleine propriété) — la quantité
+   * de la position, pas un second champ. `costBasisEur` en est déjà réduit ;
+   * `computeRealEstateTotals` s'en sert pour réduire loyer et charges dans
+   * ses propres agrégats (IMM-02).
+   */
+  ownershipShare: number;
   grossYieldPct: number | null;
   netYieldPct: number | null;
-  /** Charges et fiscalité locale annuelles retenues pour le rendement net. */
+  /**
+   * Charges et fiscalité locale annuelles retenues pour le rendement net —
+   * déjà ramenées à la quote-part, comme `costBasisEur` (IMM-02).
+   */
   annualFiscalBurdenEur: number;
   /** Loyer net de charges et de fiscalité locale, par mois. */
   monthlyCashFlowEur: number | null;
@@ -139,6 +149,23 @@ function occupancyFactor(p: PropertyInput): number {
   return effectiveOccupancyPct(occupancyInput(p.occupancyRatePct)) / 100;
 }
 
+/**
+ * Quote-part retenue pour un bien — la quantité de la position, jamais un
+ * champ propre au bien.
+ *
+ * `quantity` porte déjà cette part (`property-service.ts` : 1 = pleine
+ * propriété, 0,5 = moitié) et `costBasisEur` en est la conséquence directe.
+ * Loyer et charges, saisis sur le bien entier, doivent la subir de la même
+ * façon (IMM-02) — sans quoi le numérateur reste plein pendant que le
+ * dénominateur est déjà réduit.
+ *
+ * Sans position rattachée, la part est inconnue : on ne décote pas plutôt
+ * que d'inventer un zéro qui effacerait un loyer réellement perçu.
+ */
+function shareOf(holding: PropertyHolding | undefined): number {
+  return holding ? num(holding.quantity) : 1;
+}
+
 function statusOf(p: PropertyInput): PropertyStatus {
   const usage = (p.usage ?? "").toUpperCase();
   if (usage.includes("PRINCIPAL")) return "PRIMARY";
@@ -159,23 +186,41 @@ export function buildPropertyView(
   const wholeValueEur = num(p.propertyValueEur);
   const isRental = isRentalUsage(p.usage);
 
+  /*
+    IMM-02 — la quote-part au numérateur comme au dénominateur.
+
+    `costBasisEur` ci-dessus est déjà réduit à la part (c'est la position du
+    journal). Loyer, charges et fiscalité locale sont saisis pour le bien
+    entier : un indivisaire à 50 % touchait un rendement net et un cash-flow
+    calculés sur le loyer plein — deux fois trop élevés — pendant que le
+    dénominateur, lui, était déjà le sien. `share` vient du même endroit que
+    `costBasisEur` : la quantité de la position.
+
+    `grossYieldPct` reste volontairement entier/entier : loyer et valeur du
+    bien y sont dans le même référentiel, la quote-part ne changerait pas le
+    taux (cf. `grossRentalYieldPct`).
+  */
+  const share = shareOf(holding);
+
   const grossYieldPct = grossRentalYieldPct({
     monthlyRentEur: num(p.monthlyRentEur) || null,
     occupancyRatePct: p.occupancyRatePct ? num(p.occupancyRatePct) : null,
     propertyValueEur: wholeValueEur || null,
   });
 
-  const annualFiscalBurdenEur = totalAnnualFiscalBurden({
+  const wholeFiscalBurdenEur = totalAnnualFiscalBurden({
     usage: p.usage,
     annualPropertyTaxEur: num(p.annualPropertyTaxEur) || null,
     annualHabitationTaxEur: num(p.annualHabitationTaxEur) || null,
     isCopropriete: p.isCopropriete,
     annualCoproChargesEur: num(p.annualCoproChargesEur) || null,
   });
+  // Votre part de la charge — comme `shareValueEur` et `costBasisEur`.
+  const annualFiscalBurdenEur = wholeFiscalBurdenEur * share;
 
   const netYieldPct = netRentalYieldPct({
-    monthlyRentEur: num(p.monthlyRentEur) || null,
-    monthlyChargesEur: num(p.monthlyChargesEur) || null,
+    monthlyRentEur: (num(p.monthlyRentEur) * share) || null,
+    monthlyChargesEur: (num(p.monthlyChargesEur) * share) || null,
     totalAnnualFiscalBurdenEur: annualFiscalBurdenEur,
     occupancyRatePct: p.occupancyRatePct ? num(p.occupancyRatePct) : null,
     // Rapporté à ce que vous avez engagé sur votre part.
@@ -187,12 +232,16 @@ export function buildPropertyView(
     fiscalité locale ramenée au mois. La mensualité d'emprunt n'en est pas
     déduite — elle n'est pas connue ici, et un cash-flow « avant crédit »
     annoncé comme net serait le chiffre le plus trompeur de l'écran.
+
+    Loyer et charges saisis portent sur le bien entier ; ramenés à la part
+    avant calcul, comme la fiscalité ci-dessus (IMM-02).
   */
   const occupancy = occupancyFactor(p);
-  const rent = num(p.monthlyRentEur);
+  const rent = num(p.monthlyRentEur) * share;
+  const monthlyChargesEur = num(p.monthlyChargesEur) * share;
   const monthlyCashFlowEur =
     isRental && rent > 0
-      ? rent * occupancy - num(p.monthlyChargesEur) - annualFiscalBurdenEur / 12
+      ? rent * occupancy - monthlyChargesEur - annualFiscalBurdenEur / 12
       : null;
 
   const equityEur = shareValueEur - debtEur;
@@ -210,6 +259,7 @@ export function buildPropertyView(
     debtEur,
     equityEur,
     equitySharePct: shareValueEur > 0 ? (equityEur / shareValueEur) * 100 : null,
+    ownershipShare: share,
     grossYieldPct,
     netYieldPct,
     annualFiscalBurdenEur,
@@ -304,8 +354,11 @@ export function computeRealEstateTotals(
     const p = byId.get(v.assetId);
     if (!p || !v.isRental) continue;
     const occupancy = occupancyFactor(p);
-    annualRentEur += num(p.monthlyRentEur) * occupancy * 12;
-    annualChargesEur += num(p.monthlyChargesEur) * 12 + v.annualFiscalBurdenEur;
+    // IMM-02 : le loyer et les charges du parc sont ceux de la part, comme
+    // `v.annualFiscalBurdenEur` l'est déjà.
+    annualRentEur += num(p.monthlyRentEur) * occupancy * 12 * v.ownershipShare;
+    annualChargesEur +=
+      num(p.monthlyChargesEur) * 12 * v.ownershipShare + v.annualFiscalBurdenEur;
   }
 
   const totalValueEur = valueEur + indirectValueEur;

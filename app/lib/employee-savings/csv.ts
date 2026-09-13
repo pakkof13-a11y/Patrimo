@@ -76,22 +76,49 @@ function mapFundCategory(raw: string | undefined): string | null {
     : null;
 }
 
+/**
+ * Source d'un versement déclarée dans le fichier.
+ *
+ * Une valeur ABSENTE (colonne vide) reste un repli légitime vers VOLUNTARY —
+ * la plupart des relevés ne distinguent pas toujours l'origine d'un versement
+ * libre. Une valeur PRÉSENTE mais non reconnue par aucune des regex ci-dessous
+ * est autre chose : une faute de saisie ou un libellé que ce module ne connaît
+ * pas encore, et la faire atterrir sur VOLUNTARY en silence déguiserait un
+ * abondement ou une participation en versement volontaire — deux montants qui
+ * ne se lisent pas de la même façon sur la fiscalité de sortie. Elle lève, et
+ * remonte comme une erreur de ligne au même titre que `manager`/`fund_name`.
+ */
 function mapSource(raw: string): string {
   const s = raw.trim().toUpperCase();
+  if (!s) return "VOLUNTARY";
   if ((EMPLOYEE_SAVINGS_SOURCES as readonly string[]).includes(s)) return s;
   if (/volont|voluntary/i.test(raw)) return "VOLUNTARY";
   if (/int[eé]ress/i.test(raw)) return "INTERESTEMENT";
   if (/particip/i.test(raw)) return "PARTICIPATION";
   if (/abond/i.test(raw) || /match/i.test(raw)) return "ABONDEMENT";
-  return "VOLUNTARY";
+  throw new Error(`source_type : valeur non reconnue (${raw.trim()})`);
 }
 
+/**
+ * Type de plan déclaré dans le fichier.
+ *
+ * PERECO est le successeur du PERCO depuis la loi PACTE (même liquidité
+ * RETIREMENT, cf. `mapUnlockMode` ci-dessous) : "PERECO", "PER COL",
+ * "PERCOL" et "PER Collectif" sont donc classés PERCO, pas seulement
+ * "PERCO" au sens strict.
+ *
+ * Comme pour `mapSource`, seule une colonne VIDE se replie sur PEE ; une
+ * valeur écrite mais non reconnue lève, plutôt que de classer silencieusement
+ * un PER ou un PERCO comme PEE — la fiscalité et la liquidité des trois plans
+ * ne sont pas interchangeables.
+ */
 function mapPlan(raw: string): string {
   const s = raw.trim().toUpperCase();
+  if (!s) return "PEE";
   if ((EMPLOYEE_SAVINGS_PLAN_TYPES as readonly string[]).includes(s)) return s;
-  if (/perco/i.test(raw)) return "PERCO";
+  if (/perco|pereco|per[\s-]?col/i.test(raw)) return "PERCO";
   if (/\bper\b/i.test(raw)) return "PER";
-  return "PEE";
+  throw new Error(`plan_type : valeur non reconnue (${raw.trim()})`);
 }
 
 function mapUnlockMode(raw: string, planType: string): string {
@@ -142,6 +169,28 @@ export function parseEmployeeSavingsCsv(text: string): {
     if (!headerForKey.has(key)) headerForKey.set(key, h);
   }
 
+  /*
+    Colonne introuvable = erreur de FICHIER, avant même de lire une seule
+    ligne. `get()` rend "" aussi bien pour une colonne absente que pour une
+    cellule vide : sans cette garde, un fichier sans `units` (ou sans `nav`)
+    se lisait quand même, chaque ligne héritant silencieusement d'un "0".
+  */
+  const missingColumns: string[] = [];
+  if (!headerForKey.has("units")) missingColumns.push("units");
+  if (!headerForKey.has("nav")) missingColumns.push("nav");
+  if (missingColumns.length > 0) {
+    return {
+      rows: [],
+      errors: [
+        {
+          line: 0,
+          message: `Colonne ${missingColumns.join(" et ")} introuvable dans l'en-tête`,
+        },
+      ],
+      delimiter: parsed.delimiter || ";",
+    };
+  }
+
   const get = (row: Record<string, string>, key: string): string => {
     const header = headerForKey.get(key);
     if (header === undefined) return "";
@@ -164,16 +213,31 @@ export function parseEmployeeSavingsCsv(text: string): {
       errors.push({ line, message: "manager et fund_name requis" });
       return;
     }
-    const planType = mapPlan(get(row, "plan_type") || "PEE");
+
+    // `mapPlan`/`mapSource` lèvent sur une valeur écrite mais non reconnue :
+    // erreur de ligne, comme manager/fund_name ci-dessus, jamais un repli
+    // silencieux vers PEE/VOLUNTARY.
+    let planType: string;
+    let sourceType: string;
+    try {
+      planType = mapPlan(get(row, "plan_type"));
+      sourceType = mapSource(get(row, "source_type"));
+    } catch (e) {
+      errors.push({ line, message: e instanceof Error ? e.message : "Valeur non reconnue" });
+      return;
+    }
+
     rows.push({
       planType,
       manager,
       fundName,
       isin: get(row, "isin") || null,
-      units: get(row, "units") || "0",
-      nav: get(row, "nav") || "0",
+      // Ni "abc" ni une cellule vide ne valent 0 : `requiredDec` (service.ts)
+      // les refuse, ligne par ligne, plutôt que de les convertir en "0" ici.
+      units: get(row, "units"),
+      nav: get(row, "nav"),
       currency: get(row, "currency") || "EUR",
-      sourceType: mapSource(get(row, "source_type") || "VOLUNTARY"),
+      sourceType,
       contributionDate: get(row, "contribution_date") || null,
       contributedAmount: get(row, "contributed_amount") || null,
       fundCategory: mapFundCategory(get(row, "fund_category")),

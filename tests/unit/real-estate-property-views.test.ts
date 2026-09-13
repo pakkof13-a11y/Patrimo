@@ -193,6 +193,66 @@ describe("vue consolidée d'un bien", () => {
   });
 });
 
+/**
+ * IMM-02 — la quote-part au numérateur ET au dénominateur.
+ *
+ * Reproduction de l'audit : bien à 50 %, prix 285 000 €, frais 12 000 €,
+ * loyer 1 250 €/mois (bien entier), charges 180 €, TF 1 420 €/an.
+ * `costBasisEur` de la part = 154 500 € (dénominateur déjà réduit). Avant la
+ * correction, le loyer et les charges entraient pleins au numérateur :
+ * netYield à 7,39 % et cash-flow à 952 € pour un porteur qui n'en touche que
+ * la moitié.
+ */
+describe("IMM-02 — quote-part au numérateur comme au dénominateur", () => {
+  const bienIndivision = property({
+    assetId: "indivision",
+    propertyValueEur: "285000",
+    monthlyRentEur: "1250",
+    monthlyChargesEur: "180",
+    annualPropertyTaxEur: "1420",
+  });
+  const partIndivision = holding({
+    quantity: "0.5",
+    marketValueEur: "142500",
+    costBasisEur: "154500",
+  });
+
+  it("ramène le cash-flow mensuel à la part réellement perçue", () => {
+    const v = buildPropertyView(bienIndivision, partIndivision);
+    // Avant la correction : 952 € (loyer plein). Après : 50 % de ce loyer.
+    expect(v.monthlyCashFlowEur).toBeCloseTo(475.83, 2);
+    expect(v.monthlyCashFlowEur).not.toBeCloseTo(952, 2);
+  });
+
+  it("ramène le rendement net à la part, pas au loyer plein", () => {
+    const v = buildPropertyView(bienIndivision, partIndivision);
+    // Avant la correction : 7,39 % (loyer plein / coût de la part). Après :
+    // le loyer de la part rapporté au même coût, 3,70 %.
+    expect(v.netYieldPct).toBeCloseTo(3.7, 1);
+    expect(v.netYieldPct).not.toBeCloseTo(7.39, 1);
+  });
+
+  it("ne change pas le rendement brut — déjà entier/entier", () => {
+    const v = buildPropertyView(bienIndivision, partIndivision);
+    // grossYieldPct reste sur le bien entier : loyer plein / valeur pleine.
+    expect(v.grossYieldPct).toBeCloseTo((1250 * 12 * 100) / 285000, 6);
+  });
+
+  it("expose la quote-part retenue", () => {
+    const v = buildPropertyView(bienIndivision, partIndivision);
+    expect(v.ownershipShare).toBe(0.5);
+  });
+
+  it("répercute la quote-part sur le loyer et les charges du parc", () => {
+    const t = computeRealEstateTotals(
+      buildPropertyViews([bienIndivision], new Map([["indivision", partIndivision]])),
+      [bienIndivision]
+    );
+    expect(t.annualRentEur).toBeCloseTo(1250 * 12 * 0.5, 6);
+    expect(t.annualChargesEur).toBeCloseTo(180 * 12 * 0.5 + 1420 * 0.5, 6);
+  });
+});
+
 describe("agrégats du parc", () => {
   const views = () =>
     buildPropertyViews(
