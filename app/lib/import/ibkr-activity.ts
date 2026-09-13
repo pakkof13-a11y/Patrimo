@@ -12,7 +12,7 @@
  */
 
 import { parseLine, normalizeHeader, type ParsedCsv } from "./csv-parse";
-import { parseIbkrEasternDateTime } from "./normalize";
+import { parseIbkrEasternDateTime, parseNumber } from "./normalize";
 
 export type IbkrActivityExpandResult = {
   /** true si le fichier est un Activity Statement IBKR */
@@ -269,15 +269,15 @@ export function expandIbkrActivityStatement(
       if (!symbol || !dateRaw || !qtyRaw) continue;
 
       // Quantity signée IBKR : >0 buy, <0 sell
-      const qtyNum = Number(String(qtyRaw).replace(/\s/g, "").replace(",", "."));
-      if (!Number.isFinite(qtyNum) || qtyNum === 0) continue;
+      const qtyNum = parseNumber(qtyRaw, "dot");
+      if (qtyNum === null || qtyNum === 0) continue;
 
       const side = sideFromQty(qtyNum);
       const qtyAbs = String(absQty(qtyNum));
       // Fees souvent négatifs dans IBKR
       const feeAbs = (() => {
-        const n = Number(String(feeRaw).replace(/\s/g, "").replace(",", "."));
-        if (!Number.isFinite(n)) return feeRaw || "0";
+        const n = parseNumber(feeRaw, "dot");
+        if (n === null) return feeRaw || "0";
         return String(Math.abs(n));
       })();
 
@@ -323,8 +323,8 @@ export function expandIbkrActivityStatement(
       const desc = get("Description");
       const amount = get("Amount", "Montant");
       if (!dateRaw || !amount) continue;
-      const amtNum = Number(String(amount).replace(/\s/g, "").replace(",", "."));
-      if (!Number.isFinite(amtNum) || amtNum === 0) continue;
+      const amtNum = parseNumber(amount, "dot");
+      if (amtNum === null || amtNum === 0) continue;
       // Ticker depuis DESCRIPTION : PYPL(US…) ou AAPL(…)
       const tickMatch = desc.match(/^([A-Z0-9.]+)\s*\(/i);
       const ticker = tickMatch?.[1] || null;
@@ -368,8 +368,8 @@ export function expandIbkrActivityStatement(
       const desc = get("Description");
       const amount = get("Amount", "Montant");
       if (!dateRaw || !amount) continue;
-      const amtNum = Number(String(amount).replace(/\s/g, "").replace(",", "."));
-      if (!Number.isFinite(amtNum) || amtNum === 0) continue;
+      const amtNum = parseNumber(amount, "dot");
+      if (amtNum === null || amtNum === 0) continue;
       const isIn = amtNum > 0;
 
       flatRows.push({

@@ -4,7 +4,12 @@ import {
   replayTransactions,
   totalRealizedPnl,
 } from "../accounting";
-import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
+import {
+  convertFromEurSync,
+  convertToEurSync,
+  getEurRates,
+  FxRateUnknownError,
+} from "../market/fx";
 import {
   readLastClosesAsOf,
   resolveLastCloseAsOf,
@@ -340,7 +345,20 @@ export async function getHoldings(
       priceNative = d(asset.priceQuote.priceNative.toString());
     } else if (asset.manualPrice) {
       priceNative = d(asset.manualPrice.toString());
-      priceEur = d(convertToEurSync(priceNative, asset.currency || "EUR", fx));
+      /*
+        Une devise que ni Frankfurter ni le repli ne fondent (ex. SEK pendant
+        une panne) ferait lever `FxRateUnknownError` — sans garde, une seule
+        ligne dans ce cas faisait planter toute la boucle du portefeuille, pas
+        seulement cette position. `priceEur` reste à zéro et rejoint le même
+        filet que « pas de cotation » juste en dessous : le coût de revient
+        tient lieu de valeur, jamais un 0 € implicite.
+      */
+      try {
+        priceEur = d(convertToEurSync(priceNative, asset.currency || "EUR", fx));
+      } catch (e) {
+        if (!(e instanceof FxRateUnknownError)) throw e;
+        priceEur = zero();
+      }
     }
 
     // If no market price, show cost as value so the line is still visible
@@ -708,10 +726,20 @@ export async function getPlatformCashBalances(
     if (a.priceQuote) {
       priceEurByAsset.set(a.id, d(a.priceQuote.priceEur.toString()));
     } else if (a.manualPrice) {
-      priceEurByAsset.set(
-        a.id,
-        d(convertToEurSync(a.manualPrice.toString(), a.currency || "EUR", fx))
-      );
+      /*
+        Devise non fondée (ex. SEK pendant une panne) : l'actif reste absent
+        de `priceEurByAsset`, exactement comme un actif sans priceQuote ni
+        manualPrice l'est déjà — UNKNOWN, pas 0 € — plutôt que de faire
+        échouer cette boucle pour TOUS les actifs de la plateforme.
+      */
+      try {
+        priceEurByAsset.set(
+          a.id,
+          d(convertToEurSync(a.manualPrice.toString(), a.currency || "EUR", fx))
+        );
+      } catch (e) {
+        if (!(e instanceof FxRateUnknownError)) throw e;
+      }
     }
   }
 
@@ -869,7 +897,26 @@ export async function getEmployeeSavingsTotalsEur(
   let liquid = zero();
   for (const r of rows) {
     const mv = d(r.units.toString()).times(d(r.nav.toString()));
-    const eur = d(convertToEurSync(mv.toString(), r.currency || "EUR", fx));
+    /*
+      Distincte de l'erreur de lecture documentée ci-dessus : ici la requête a
+      réussi, seule la devise de cette ligne n'est fondée par aucune source
+      (ex. SEK pendant une panne Frankfurter). Sans garde, `convertToEurSync`
+      ferait échouer la boucle pour TOUTES les lignes déjà lues, y compris
+      celles dont la devise est parfaitement connue — un comportement que
+      cette fonction refuse justement pour une vraie panne de lecture, mais
+      qu'elle n'a aucune raison de s'infliger pour une seule ligne inconnue.
+      La ligne fautive est donc seule écartée du total (UNKNOWN, jamais 0 €).
+    */
+    let eur: ReturnType<typeof d>;
+    try {
+      eur = d(convertToEurSync(mv.toString(), r.currency || "EUR", fx));
+    } catch (e) {
+      if (!(e instanceof FxRateUnknownError)) throw e;
+      console.warn(
+        `[employee-savings] ligne ignorée — ${e.message}`
+      );
+      continue;
+    }
     total = total.plus(eur);
     const unlock = resolveUnlock({
       planType: r.planType,
@@ -968,7 +1015,21 @@ export async function getLiabilityTotalsEur(
       livrets quelques lignes plus haut dans le cash.
     */
     const remaining = remainingAmountAt(l);
-    const eur = d(convertToEurSync(remaining, l.currency, fx));
+    /*
+      Même garde que `getEmployeeSavingsTotalsEur` ci-dessus : une devise non
+      fondée n'est vraie que pour CE passif. Sans elle, un seul prêt en
+      couronnes suédoises pendant une panne Frankfurter ferait échouer la
+      boucle pour toutes les dettes déjà lues — jamais un 0 € implicite non
+      plus, la ligne est simplement écartée du total (UNKNOWN).
+    */
+    let eur: ReturnType<typeof d>;
+    try {
+      eur = d(convertToEurSync(remaining, l.currency, fx));
+    } catch (e) {
+      if (!(e instanceof FxRateUnknownError)) throw e;
+      console.warn(`[liabilities] passif ${l.id} ignoré — ${e.message}`);
+      continue;
+    }
     total = total.plus(eur);
 
     const a = l.asset;
@@ -1870,17 +1931,30 @@ export async function getAssetDetail(
     La branche cotation, elle, n'est pas convertie : `PriceQuote.priceEur` est
     déjà en euros, et la reconvertir diviserait deux fois.
   */
-  const priceEur = asset.priceQuote
-    ? d(asset.priceQuote.priceEur.toString())
-    : asset.manualPrice
-      ? d(
-          convertToEurSync(
-            asset.manualPrice.toString(),
-            asset.currency || "EUR",
-            fx
-          )
+  /*
+    Devise non fondée (ex. SEK pendant une panne Frankfurter) : `priceEur`
+    reste à zéro plutôt que de faire échouer toute la fiche — `custodySlices`
+    sait déjà retomber sur le coût de revient (`mv.gt(0) ? mv : cost` plus
+    bas) quand le prix n'est pas connu, exactement le même filet que pour
+    « pas de cotation ».
+  */
+  let priceEur = zero();
+  if (asset.priceQuote) {
+    priceEur = d(asset.priceQuote.priceEur.toString());
+  } else if (asset.manualPrice) {
+    try {
+      priceEur = d(
+        convertToEurSync(
+          asset.manualPrice.toString(),
+          asset.currency || "EUR",
+          fx
         )
-      : zero();
+      );
+    } catch (e) {
+      if (!(e instanceof FxRateUnknownError)) throw e;
+      priceEur = zero();
+    }
+  }
 
   const custodySlices = siblingAssets.map((s) => {
     let qty = zero();

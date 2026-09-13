@@ -518,11 +518,23 @@ describe("le chargement apporte les constats au moteur", () => {
   });
 
   it("ils sont versés dans le même tableau que ceux des comptes et livrets", () => {
+    /*
+      FX-05 a remplacé le `[...a.map(), ...b.map()]` d'origine par des boucles
+      `for` qui `push`ent dans un `cashEvents` unique — chaque événement dans
+      une devise que ni Frankfurter ni le repli ne fondent doit pouvoir être
+      écarté seul (`continue`), sans faire échouer la lecture des autres.
+      L'assertion porte donc sur le déclaration du tableau et sur la boucle
+      qui y verse les constats d'enveloppe, pas sur la forme `.map()` que ce
+      chantier a délibérément quittée.
+    */
     const code = source();
-    const debut = code.indexOf("const cashEvents = [");
+    const debut = code.indexOf("const cashEvents:");
     expect(debut).toBeGreaterThan(-1);
-    const bloc = code.slice(debut, code.indexOf("];", debut));
-    expect(bloc).toContain("envelopeCashEvents.map");
+    const finDeclaration = code.indexOf("= [];", debut);
+    expect(finDeclaration).toBeGreaterThan(-1);
+    const boucle = code.indexOf("for (const e of envelopeCashEvents)", finDeclaration);
+    expect(boucle).toBeGreaterThan(-1);
+    const bloc = code.slice(boucle, code.indexOf("}", code.indexOf("cashEvents.push", boucle)) + 1);
     expect(bloc).toContain("accountId: e.envelopeCashId");
   });
 
@@ -534,8 +546,9 @@ describe("le chargement apporte les constats au moteur", () => {
       contraire.
     */
     const code = source();
-    const debut = code.indexOf("...envelopeCashEvents.map");
-    const bloc = code.slice(debut, debut + 400);
+    const debut = code.indexOf("for (const e of envelopeCashEvents)");
+    expect(debut).toBeGreaterThan(-1);
+    const bloc = code.slice(debut, debut + 500);
     expect(bloc).toContain('type: "OBSERVED"');
     expect(bloc).not.toContain("INTEREST");
   });
