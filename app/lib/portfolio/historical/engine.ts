@@ -62,10 +62,14 @@ import {
   VALUATION_ASSET_CLASSES,
   VALUATION_ENVELOPES,
   type EnvelopeCapableClass,
+  type SecuritiesEnvelope,
   type ValuationAssetClass,
   type ValuationEnvelope,
 } from "./types";
-import { resolveEnvelopeFromEvents } from "../../securities/envelope-history";
+import {
+  envelopeOfEvent,
+  resolveEnvelopeFromEvents,
+} from "../../securities/envelope-history";
 import {
   OBSERVED_AT_DAY,
   OBSERVED_AT_INSTANT,
@@ -337,6 +341,68 @@ function envelopeBucketOf(
     (e) => e.accountType === "CTO" || e.accountType === "PEA"
   );
   return candidat ? "UNKNOWN" : null;
+}
+
+/** Jour de la première écriture du journal, enveloppe par enveloppe. */
+export type EnvelopeFirstWriteDays = Record<SecuritiesEnvelope, DayKey | null>;
+
+/**
+ * Le jour où chaque enveloppe titres apparaît pour la première fois au journal.
+ *
+ * ## À quoi cette date répond, et à quoi elle ne répond pas
+ *
+ * Elle répond : « à partir de quand cette enveloppe existe-t-elle dans
+ * l'histoire que le dépôt sait raconter ? ». Le journal `AssetEnvelopeEvent`
+ * est la seule source qui date une appartenance ; `Asset.accountType`, mutable
+ * et sans trace, ne le peut pas (cf. `securities/envelope-history.ts`).
+ *
+ * Elle ne répond pas : « quand le compte a-t-il été ouvert chez le teneur ? ».
+ * Personne ne le sait ici, et la question n'est pas celle que la courbe pose.
+ *
+ * ## Pourquoi cette date vaut un zéro, et non une absence
+ *
+ * `envelopeSnapshot` rend `null` sur une enveloppe sans montant démontré dès
+ * qu'une ligne titre reste en suspens : la ligne inconnue *pourrait* s'y
+ * trouver. Avant la première écriture de l'enveloppe, elle ne le peut pas —
+ * l'enveloppe n'a encore rien porté dans l'histoire connue. « Pas encore née »
+ * est un fait daté, pas une ignorance, et `pocket-series` s'en sert pour
+ * compter zéro là où il comptait absent (voir `titresValueAt`).
+ *
+ * `null` sur une enveloppe : aucun événement ne l'a jamais désignée. On ne sait
+ * alors pas la dater, et rien n'autorise à affirmer qu'elle n'est pas née —
+ * l'appelant retombe sur la prudence de `envelopeSnapshot`.
+ *
+ * Pure et exportée pour être éprouvable sans monter un moteur.
+ */
+export function envelopeFirstWriteDays(
+  eventsByAsset: HistoricalInputs["envelopeEventsByAsset"]
+): EnvelopeFirstWriteDays {
+  const out: EnvelopeFirstWriteDays = { PEA: null, CTO: null };
+  for (const events of eventsByAsset.values()) {
+    for (const e of events) {
+      /*
+        `envelopeOfEvent` — la même lecture que la résolution à une date, pas
+        une seconde règle : c'est elle qui range PEA-PME avec PEA et qui fait
+        primer le compte sur la famille fiscale. `UNATTACHED` et `UNKNOWN` ne
+        désignent aucune enveloppe et ne datent donc rien.
+      */
+      const resolu = envelopeOfEvent(e);
+      const env: SecuritiesEnvelope | null =
+        resolu === "PEA" || resolu === "PEA_PME"
+          ? "PEA"
+          : resolu === "CTO"
+            ? "CTO"
+            : null;
+      if (env == null) continue;
+      const day = parisDayKey(e.occurredAt);
+      // `parisDayKey` rend "" sur une date invalide : ne jamais la retenir
+      // comme borne, elle précéderait lexicographiquement tout jour réel.
+      if (day === "") continue;
+      const connu = out[env];
+      if (connu == null || day < connu) out[env] = day;
+    }
+  }
+  return out;
 }
 
 /** Une classe peut-elle être qualifiée par une enveloppe titres ? */
@@ -662,6 +728,18 @@ export class PortfolioValuationEngine {
     now: Date = new Date()
   ): DayKey | null {
     return capEarliestDay(this.uncappedEarliestDayForScope(scope, now), now);
+  }
+
+  /**
+   * Première écriture de chaque enveloppe titres — cf. `envelopeFirstWriteDays`.
+   *
+   * **Non capée** par `historyFloorDay`, contrairement aux bornes de scope : ce
+   * n'est pas une borne de lecture mais un fait daté, et le comparer à un jour
+   * servi doit rester exact. Une enveloppe née avant le cap est née avant tous
+   * les jours de la fenêtre, ce que la comparaison dit déjà.
+   */
+  envelopeFirstWriteDays(): EnvelopeFirstWriteDays {
+    return envelopeFirstWriteDays(this.inputs.envelopeEventsByAsset);
   }
 
   /**

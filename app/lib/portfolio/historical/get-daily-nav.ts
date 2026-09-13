@@ -46,7 +46,10 @@ import {
   type HistoryStep,
 } from "./history-window";
 import { loadHistoricalInputs } from "./load";
-import { PortfolioValuationEngine } from "./engine";
+import {
+  PortfolioValuationEngine,
+  type EnvelopeFirstWriteDays,
+} from "./engine";
 import type { PriceOrigin } from "./price-resolver";
 import type {
   DayKey,
@@ -135,6 +138,25 @@ export type DailyNavPoint = {
     Record<ValuationEnvelope, number | null>
   >;
   /**
+   * Jour de la première écriture de chaque enveloppe titres (cf. `engine.ts`).
+   *
+   * Constant sur toute la série — c'est une propriété du journal, pas du jour —
+   * mais porté par le point parce que c'est le seul objet qui traverse le
+   * fenêtrage, la compression et la frontière HTTP jusqu'aux lecteurs de
+   * poche. Le recopier ne coûte qu'une référence : tous les points partagent
+   * le même objet.
+   *
+   * Deux usages, un seul fait : la série « Titres / Tous » compte zéro pour une
+   * enveloppe dont ce jour est postérieur au point (`titresValueAt`), et un
+   * lecteur d'écran peut y repérer le point qui inaugure une enveloppe absente
+   * la veille.
+   *
+   * Optionnel : un appelant qui ne le fournit pas ne dit rien de plus qu'avant,
+   * et les lecteurs retombent alors sur la prudence de `byAssetClassAndEnvelope`
+   * — jamais sur une affirmation qu'aucune donnée n'étaye.
+   */
+  envelopeFirstWriteDay?: EnvelopeFirstWriteDays;
+  /**
    * Ventilation T-01 par classe — lecture du moteur, pas un recalcul.
    *
    * Les filtres Actions / Immo / Cash du panneau Évolution lisent **ce**
@@ -198,6 +220,12 @@ export type DailyNavResult = {
    * `null` si aucune clôture n'a jamais été collectée.
    */
   fetchedAt: string | null;
+  /**
+   * Première écriture de chaque enveloppe titres — même objet que celui porté
+   * par chaque point, servi ici pour qu'un lecteur qui n'a pas encore de point
+   * (série vide) puisse quand même dater les enveloppes.
+   */
+  envelopeFirstWriteDay?: EnvelopeFirstWriteDays;
 };
 
 /**
@@ -227,7 +255,8 @@ export function navAtScope(
 export function dailyNavFromSeries(
   series: PortfolioValuationPoint[],
   scope: DailyNavScope,
-  step: HistoryStep = "day"
+  step: HistoryStep = "day",
+  envelopeFirstWriteDay?: EnvelopeFirstWriteDays
 ): DailyNavPoint[] {
   return series.map((p) => ({
     day: p.day,
@@ -252,6 +281,7 @@ export function dailyNavFromSeries(
     ledgerCashIncome: p.ledgerCashIncome,
     unrealizedPnl: unrealizedPnlOf(p),
     byAssetClassAndEnvelope: p.byAssetClassAndEnvelope,
+    envelopeFirstWriteDay,
     byAssetClass: p.byAssetClass,
     flowsByAssetClass: p.flowsByAssetClass,
   }));
@@ -306,6 +336,16 @@ export async function getDailyNav(opts: {
     après `to`, ne produit aucun point : une série fantôme serait pire qu'une
     réponse vide.
   */
+  /*
+    La naissance de chaque enveloppe titres, calculée une fois pour la série.
+
+    Elle ne dépend ni du scope ni de la fenêtre : c'est le journal qui la porte.
+    La poser sur les points évite à l'écran de la redemander, et c'est elle qui
+    distingue « enveloppe pas encore née » (zéro, un fait daté) de « enveloppe
+    non démontrée » (absent) — cf. `titresValueAt`.
+  */
+  const envelopeFirstWriteDay = engine.envelopeFirstWriteDays();
+
   const scopeEarliest = engine.earliestDayForScope(opts.scope, now);
   if (scopeEarliest == null || scopeEarliest > to) {
     return {
@@ -316,6 +356,7 @@ export async function getDailyNav(opts: {
       points: [],
       asOfDay: null,
       fetchedAt: null,
+      envelopeFirstWriteDay,
     };
   }
   const from = requestedFrom < scopeEarliest ? scopeEarliest : requestedFrom;
@@ -329,7 +370,7 @@ export async function getDailyNav(opts: {
   */
   const step = historyStepForWindow(from, to);
   const series = engine.buildSeries(from, to, step);
-  const points = dailyNavFromSeries(series, opts.scope, step);
+  const points = dailyNavFromSeries(series, opts.scope, step, envelopeFirstWriteDay);
   const last = points[points.length - 1];
 
   return {
@@ -340,5 +381,6 @@ export async function getDailyNav(opts: {
     points,
     asOfDay: last?.day ?? null,
     fetchedAt: oldestFetchedAt(inputs.lastCloseAsOf?.values()),
+    envelopeFirstWriteDay,
   };
 }
