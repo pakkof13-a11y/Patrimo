@@ -16,7 +16,7 @@
 import Decimal from "decimal.js";
 import { d, toFixed, zero } from "@/app/lib/money/decimal";
 import { prisma } from "@/app/lib/prisma";
-import { convertToEurSync, getEurRates } from "@/app/lib/market/fx";
+import { convertToEurSync, getEurRates, FxRateUnknownError } from "@/app/lib/market/fx";
 import { loadLedgerForUser } from "./service";
 
 export type AssetValue = {
@@ -65,13 +65,26 @@ export async function getAssetValues(
     if (asset.priceQuote) {
       priceEur = d(asset.priceQuote.priceEur.toString());
     } else if (asset.manualPrice) {
-      priceEur = d(
-        convertToEurSync(
-          d(asset.manualPrice.toString()),
-          asset.currency || "EUR",
-          fx
-        )
-      );
+      /*
+        Une devise que ni Frankfurter ni la table de repli ne fondent (ex.
+        SEK pendant une panne) ferait lever `convertToEurSync` — ce qui, sans
+        garde, arrêterait la boucle et perdrait la valeur de TOUS les actifs
+        demandés, pas seulement celui-ci. `priceEur` reste alors à zéro, et
+        rejoint le même filet que « pas de cotation » juste en dessous : le
+        coût de revient tient lieu de valeur plutôt qu'un 0 € implicite.
+      */
+      try {
+        priceEur = d(
+          convertToEurSync(
+            d(asset.manualPrice.toString()),
+            asset.currency || "EUR",
+            fx
+          )
+        );
+      } catch (e) {
+        if (!(e instanceof FxRateUnknownError)) throw e;
+        priceEur = zero();
+      }
     }
     // Sans cotation, le coût de revient tient lieu de valeur — une ligne à 0 €
     // laisserait croire à une perte totale là où le prix est simplement inconnu.

@@ -136,12 +136,18 @@ describe("courbe historique", () => {
       Ce qui manquait n'était pas un calcul mais une requête — si elle
       disparaît, le dernier point de la courbe redevient inférieur à la tuile
       du patrimoine net du montant des CAT.
+
+      FX-05 a remplacé le `.map()` d'origine par une boucle `for` : chaque CAT
+      dans une devise que ni Frankfurter ni le repli ne fondent doit pouvoir
+      être écarté seul de `cashAccounts`, sans faire échouer la lecture des
+      autres. L'assertion structurelle porte donc sur l'itération elle-même,
+      pas sur la forme `.map()` que ce chantier a délibérément quittée.
     */
     const src = readFileSync(
       resolve(process.cwd(), "app/lib/portfolio/historical/load.ts"),
       "utf8"
     );
     expect(src).toContain("prisma.termDeposit.findMany");
-    expect(src).toContain("termDeposits.map");
+    expect(src).toContain("for (const t of termDeposits)");
   });
 });

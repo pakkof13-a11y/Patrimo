@@ -169,6 +169,25 @@ function balanceDateKey(b: {
 }
 
 /**
+ * Première apparition on-chain connue pour ce solde (ISO), ou `undefined`.
+ *
+ * Deux clés essayées : le contrat exact d’abord, le couple ticker/chaîne
+ * ensuite — l’historique Zerion ne porte pas toujours le contrat des deux
+ * côtés.
+ */
+function firstSeenForBalance(
+  b: ZerionBalanceItem,
+  firstSeenByKey?: Map<string, string>
+): string | undefined {
+  return (
+    firstSeenByKey?.get(balanceDateKey(b)) ||
+    firstSeenByKey?.get(
+      balanceDateKey({ ticker: b.ticker, chainId: b.chainId })
+    )
+  );
+}
+
+/**
  * Aligne les soldes Zerion → positions (ACHAT/REWARD/VENTE de réconciliation).
  * @param firstSeenByKey dates on-chain les plus anciennes (depuis l’historique)
  *   pour éviter de dater toute la position à « aujourd’hui ».
@@ -178,16 +197,65 @@ export async function writeZerionBalancesToLedger(
   platformId: string,
   balances: ZerionBalanceItem[],
   firstSeenByKey?: Map<string, string>
-): Promise<ZerionLedgerResult> {
+): Promise<
+  ZerionLedgerResult & {
+    /** Réconciliations refusées faute de taux BCE démontré à leur date. */
+    skippedFxUnknown: number;
+  }
+> {
+  /*
+    Deux dates, deux taux — ils ne partagent plus la même variable.
+
+    `fxUsdToEur` est le taux du jour. Il ne sert qu'aux valorisations « à
+    maintenant » : cotation `PriceQuote`, `manualPrice`, `valueEurApprox`.
+    Pour celles-là c'est le bon taux, la question posée étant « combien vaut
+    cette position aujourd'hui », et le prix Zerion étant lui aussi du jour.
+
+    Les écritures de réconciliation, elles, sont datées `firstSeen` — la
+    première apparition on-chain du token, parfois plusieurs années en
+    arrière. Leur `unitPrice` réclame le taux de CE jour-là (`fxAtEvent` dans
+    la boucle). La même variable servait aux deux usages : l'écart valait
+    toute la dérive EUR/USD accumulée entre `firstSeen` et la sync, inscrite
+    dans le prix de revient du journal.
+  */
   const fxUsdToEur = await fxRateToEur("USD");
   let txsCreated = 0;
   let errors = 0;
+  let skippedFxUnknown = 0;
   const holdings: ZerionLedgerResult["holdings"] = [];
   // Top 50 par valeur (au lieu de 40) — wallets multi-chain denses
   const targets = balances
     .filter((b) => b.amount > 0)
     .sort((a, b) => (b.usdValue ?? 0) - (a.usdValue ?? 0))
     .slice(0, 50);
+
+  /*
+    Pré-résolution FX du lot : un seul appel Frankfurter couvrant
+    [plus ancien `firstSeen` du lot … aujourd'hui], jamais un par solde. Un
+    wallet multi-chain dense monte aux 50 positions plafonnées ci-dessus, et
+    la route de sync a un budget de délai — même contrainte que
+    `writeZerionHistoryToLedger` ci-dessous.
+
+    La plage couvre les deux bornes possibles parce que la date d'une écriture
+    n'est arrêtée qu'au cas par cas dans la boucle : une ouverture de position
+    prend `firstSeen`, un ajustement de re-sync prend aujourd'hui. On ne sait
+    lequel s'applique qu'après avoir lu le ledger, d'où la plage large plutôt
+    qu'une requête par ligne.
+  */
+  let fxUsdRange: FxRangeResult | null = null;
+  if (targets.length > 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    let minDay = today;
+    for (const b of targets) {
+      const day = firstSeenForBalance(b, firstSeenByKey)?.slice(0, 10);
+      if (day && day < minDay) minDay = day;
+    }
+    fxUsdRange = await fxRatesToEurRange(
+      "USD",
+      shiftDay(minDay, -FX_LOOKBACK_DAYS),
+      today
+    );
+  }
 
   for (const b of targets) {
     let assetId: string;
@@ -203,21 +271,27 @@ export async function writeZerionBalancesToLedger(
       continue;
     }
 
-    let unitEur: string | null = null;
-    if (b.priceUsd != null && b.priceUsd >= 0) {
-      unitEur = toFixed(d(b.priceUsd).times(d(fxUsdToEur)), 12);
-    } else if (b.usdValue != null && b.amount > 0) {
-      unitEur = toFixed(
-        d(b.usdValue).div(b.amount).times(d(fxUsdToEur)),
-        12
-      );
-    }
-    if (unitEur) {
+    /*
+      Prix unitaire en USD : le prix spot quand Zerion le donne, sinon déduit
+      de la valeur de la ligne. Dans les deux cas c'est un prix d'AUJOURD'HUI.
+      Il est gardé en USD pour être converti deux fois, à deux taux distincts.
+    */
+    const unitUsd =
+      b.priceUsd != null && b.priceUsd >= 0
+        ? d(b.priceUsd)
+        : b.usdValue != null && b.amount > 0
+          ? d(b.usdValue).div(b.amount)
+          : null;
+
+    // Cotation courante : prix du jour × taux du jour, les deux dates concordent.
+    const unitEurNow =
+      unitUsd != null ? toFixed(unitUsd.times(d(fxUsdToEur)), 12) : null;
+    if (unitEurNow) {
       try {
-        await upsertPriceEur(assetId, Number(unitEur));
+        await upsertPriceEur(assetId, Number(unitEurNow));
         await prisma.asset.update({
           where: { id: assetId },
-          data: { manualPrice: new Prisma.Decimal(unitEur) },
+          data: { manualPrice: new Prisma.Decimal(unitEurNow) },
         });
       } catch {
         /* non bloquant */
@@ -236,20 +310,15 @@ export async function writeZerionBalancesToLedger(
         symbol: b.ticker,
         quantity: toFixed(targetQty, 12),
         valueEurApprox:
-          unitEur != null
-            ? Number(d(b.amount).times(d(unitEur)).toFixed(2))
+          unitEurNow != null
+            ? Number(d(b.amount).times(d(unitEurNow)).toFixed(2))
             : null,
       });
       continue;
     }
 
     // Date : ouverture de position → earliest on-chain ; re-sync delta → maintenant
-    const key = balanceDateKey(b);
-    const firstSeen =
-      firstSeenByKey?.get(key) ||
-      firstSeenByKey?.get(
-        balanceDateKey({ ticker: b.ticker, chainId: b.chainId })
-      );
+    const firstSeen = firstSeenForBalance(b, firstSeenByKey);
     const isOpening = currentQty.lte(0) || currentQty.lt("0.00000001");
     const occurredAt =
       isOpening && firstSeen
@@ -260,20 +329,70 @@ export async function writeZerionBalancesToLedger(
           : // Ajustement de re-sync (qty déjà non nulle)
             new Date().toISOString();
 
+    /*
+      Taux de change de la DATE DE L'ÉCRITURE, arrêtée juste au-dessus :
+      `firstSeen` pour une ouverture de position (2021, parfois), aujourd'hui
+      pour un ajustement de re-sync — cas où les deux taux coïncident d'eux-
+      mêmes, sans traitement particulier.
+
+      Limite assumée, non corrigée ici : `b.priceUsd` reste le prix SPOT du
+      jour. Zerion ne rend pas de prix historique par position, et aucune
+      source de remplacement n'est mandatée. Après ce correctif,
+      `unitPrice = prix(aujourd'hui) × taux(jour de firstSeen)` : la dimension
+      change devient vraie à la date, la dimension prix demeure une
+      approximation de réconciliation — pas un coût historique constaté. Même
+      résiduelle que `solana-ledger-sync.ts::writeSolanaSnapshotToLedger`.
+    */
+    const fxAtEvent = fxRateOnDay(fxUsdRange, occurredAt.slice(0, 10));
+    /*
+      Seule une ligne valorisée a besoin d'un taux. Une quantité reçue sans
+      prix USD (REWARD/AIRDROP) est un fait on-chain qui ne convertit rien :
+      elle reste écrite même taux inconnu.
+    */
+    const needsFx = unitUsd != null && unitUsd.gt(0);
+    if (needsFx && !fxAtEvent) {
+      /*
+        Taux de cette date non démontré → aucune écriture. Ni conversion au
+        taux du jour, ni `fxRateToEur: "1"` : une absence de taux ne devient
+        pas un taux, et un prix de revient inventé se propagerait au P&L puis
+        au calcul fiscal.
+
+        La position reste déclarée dans `holdings` — elle existe on-chain, et
+        sa valorisation courante (taux du jour) est légitime. La quantité
+        rapportée est celle du ledger, inchangée : c'est bien l'écriture de
+        réconciliation qui manque, et `skippedFxUnknown` le dit à l'appelant.
+      */
+      skippedFxUnknown += 1;
+      holdings.push({
+        assetId,
+        symbol: b.ticker,
+        quantity: toFixed(currentQty, 12),
+        valueEurApprox:
+          unitEurNow != null
+            ? Number(currentQty.times(d(unitEurNow)).toFixed(2))
+            : null,
+      });
+      continue;
+    }
+    // Prix unitaire porté au journal : converti au taux de `occurredAt`.
+    const unitEurAtEvent = needsFx
+      ? toFixed(unitUsd!.times(d(fxAtEvent!)), 12)
+      : null;
+
     const note = `${ZERION_SYNC_NOTE_TAG} ${b.ticker} chain=${b.chainId || "?"} target=${toFixed(targetQty, 12)} firstSeen=${firstSeen || "none"} paris=${formatParisDateTime(new Date(occurredAt))}`;
     const cashOk = { allowNegativeCash: true as const };
 
     try {
       if (delta.gt(0)) {
         // Préférer REWARD / AIRDROP si pas de prix fiable (évite ACHAT prix 0 ambigu)
-        if (unitEur != null && d(unitEur).gt(0)) {
+        if (unitEurAtEvent != null && d(unitEurAtEvent).gt(0)) {
           await createTransaction({
             userId,
             type: "ACHAT",
             platformId,
             assetId,
             quantity: toFixed(delta, 12),
-            unitPrice: unitEur,
+            unitPrice: unitEurAtEvent,
             fees: "0",
             currency: "EUR",
             fxRateToEur: "1",
@@ -310,7 +429,8 @@ export async function writeZerionBalancesToLedger(
           platformId,
           assetId,
           quantity: toFixed(delta.abs(), 12),
-          unitPrice: unitEur && d(unitEur).gt(0) ? unitEur : "0",
+          unitPrice:
+            unitEurAtEvent && d(unitEurAtEvent).gt(0) ? unitEurAtEvent : "0",
           fees: "0",
           currency: "EUR",
           fxRateToEur: "1",
@@ -325,8 +445,8 @@ export async function writeZerionBalancesToLedger(
         symbol: b.ticker,
         quantity: toFixed(targetQty, 12),
         valueEurApprox:
-          unitEur != null
-            ? Number(d(b.amount).times(d(unitEur)).toFixed(2))
+          unitEurNow != null
+            ? Number(d(b.amount).times(d(unitEurNow)).toFixed(2))
             : null,
       });
     } catch (e) {
@@ -353,6 +473,7 @@ export async function writeZerionBalancesToLedger(
     historyTxsCreated: 0,
     holdings,
     errors,
+    skippedFxUnknown,
   };
 }
 

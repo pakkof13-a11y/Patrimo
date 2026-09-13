@@ -12,7 +12,7 @@
 
 import { prisma } from "../../prisma";
 import { d, zero, type Decimal } from "../../money/decimal";
-import { convertToEurSync, getEurRates } from "../../market/fx";
+import { convertToEurSync, getEurRates, FxRateUnknownError } from "../../market/fx";
 import { readDailyCloses } from "../../market/daily-closes";
 import {
   resolveLastCloseAsOf,
@@ -35,14 +35,37 @@ import { resolveUnlock } from "../../employee-savings/logic";
 
 type Rates = Record<string, number>;
 
-const eur = (
+/**
+ * Convertit un montant vers l'euro, sans jamais lever.
+ *
+ * Une devise que ni Frankfurter ni la table de repli ne fondent (ex. SEK
+ * pendant une panne) faisait lever `FxRateUnknownError` depuis `eur()` — et
+ * cette fonction reconstruit TOUT l'historique d'un utilisateur en une passe,
+ * si bien qu'une seule ligne dans une devise inconnue faisait échouer la
+ * courbe entière (comptes bancaires, PEA, PE, CAT... tout disparaissait,
+ * pas seulement la ligne fautive).
+ *
+ * Rend `null` — jamais un 0 € implicite — pour que l'appelant écarte cette
+ * seule ligne de son agrégat, exactement comme `buildCrowdlendingSleeve`
+ * écarte déjà une ligne sans date exploitable (`undatable`).
+ */
+function eurOrNull(
   value: { toString(): string } | null | undefined,
   currency: string | null | undefined,
-  rates: Rates
-): Decimal =>
-  value == null
-    ? zero()
-    : d(convertToEurSync(value.toString(), currency || "EUR", rates));
+  rates: Rates,
+  context: string
+): Decimal | null {
+  if (value == null) return zero();
+  try {
+    return d(convertToEurSync(value.toString(), currency || "EUR", rates));
+  } catch (e) {
+    if (e instanceof FxRateUnknownError) {
+      console.warn(`[portfolio-history] ${context} ignoré — ${e.message}`);
+      return null;
+    }
+    throw e;
+  }
+}
 
 /**
  * Charge l'intégralité des sources historiques d'un utilisateur.
@@ -303,7 +326,7 @@ export async function loadHistoricalInputs(
     const priceEur = a.priceQuote
       ? d(a.priceQuote.priceEur.toString())
       : a.manualPrice
-        ? d(convertToEurSync(a.manualPrice.toString(), a.currency || "EUR", rates))
+        ? eurOrNull(a.manualPrice.toString(), a.currency, rates, `prix manuel ${a.id}`)
         : null;
     const quote =
       priceEur && priceEur.gt(0)
@@ -325,110 +348,167 @@ export async function loadHistoricalInputs(
   }
 
   // ── Cash : comptes, livrets, enveloppes ────────────────────────────────────
-  const cashAccounts = [
-    ...banks.map((b) => ({
+  /*
+    Boucles par ligne, pas des `.map()` sur des devises non gardées.
+
+    Chacune de ces sources (comptes, livrets, CAT, enveloppes) peut porter une
+    devise que ni Frankfurter ni le repli ne fondent. Un seul compte dans ce
+    cas ne doit pas faire disparaître toute la courbe des autres comptes : la
+    ligne fautive est simplement écartée de `cashAccounts` (UNKNOWN, jamais un
+    0 € qui la ferait lire comme un compte vidé).
+  */
+  const cashAccounts: Array<{
+    id: string;
+    balanceEur: Decimal;
+    createdAt: Date;
+    knownAt: Date;
+    currentEur?: Decimal;
+  }> = [];
+  for (const b of banks) {
+    const balanceEur = eurOrNull(b.balance, b.currency, rates, `compte bancaire ${b.id}`);
+    if (balanceEur == null) continue;
+    cashAccounts.push({
       id: b.id,
-      balanceEur: eur(b.balance, b.currency, rates),
+      balanceEur,
       createdAt: b.createdAt,
       // Le solde est connu depuis sa dernière écriture, pas depuis l'ouverture
       // du compte : c'est cette date qui borne son application au passé.
       knownAt: b.updatedAt,
-    })),
-    ...savings.map((s) => ({
+    });
+  }
+  for (const s of savings) {
+    const balanceEur = eurOrNull(s.balance, s.currency, rates, `livret ${s.id}`);
+    // Le solde affiché inclut les intérêts courus non encore versés : c'est
+    // ce que la carte du dashboard additionne, donc ce que la courbe doit
+    // rejoindre aujourd'hui.
+    const currentEur = eurOrNull(displayBalanceOf(s), s.currency, rates, `livret ${s.id}`);
+    if (balanceEur == null || currentEur == null) continue;
+    cashAccounts.push({
       id: s.id,
-      balanceEur: eur(s.balance, s.currency, rates),
+      balanceEur,
       createdAt: s.createdAt,
       knownAt: s.updatedAt,
-      // Le solde affiché inclut les intérêts courus non encore versés : c'est
-      // ce que la carte du dashboard additionne, donc ce que la courbe doit
-      // rejoindre aujourd'hui.
-      currentEur: eur(displayBalanceOf(s), s.currency, rates),
-    })),
-    /*
-      Le CAT entre comme un compte sans mouvement.
+      currentEur,
+    });
+  }
+  /*
+    Le CAT entre comme un compte sans mouvement.
 
-      `balanceEur` est le principal réduit à la part personnelle, comme le fait
-      `getExplicitCashTotalEur` : c'est la condition pour que le dernier point
-      et la tuile de patrimoine net portent le même chiffre.
+    `balanceEur` est le principal réduit à la part personnelle, comme le fait
+    `getExplicitCashTotalEur` : c'est la condition pour que le dernier point
+    et la tuile de patrimoine net portent le même chiffre.
 
-      L'ancre est `updatedAt`, pas `openedAt`. La date d'ouverture serait plus
-      flatteuse — le CAT apparaîtrait à sa place dans l'histoire — mais elle
-      appliquerait au passé un principal qui peut avoir été corrigé depuis, et
-      c'est exactement ce que l'ancre des comptes bancaires ci-dessus refuse.
-      Sur une ligne jamais retouchée, les deux dates coïncident de fait.
+    L'ancre est `updatedAt`, pas `openedAt`. La date d'ouverture serait plus
+    flatteuse — le CAT apparaîtrait à sa place dans l'histoire — mais elle
+    appliquerait au passé un principal qui peut avoir été corrigé depuis, et
+    c'est exactement ce que l'ancre des comptes bancaires ci-dessus refuse.
+    Sur une ligne jamais retouchée, les deux dates coïncident de fait.
 
-      Les intérêts d'un CAT ne sont pas portés : ils ne sont ni capitalisés ni
-      versés en base, aucun champ ne les constate, et les inventer ferait
-      monter la courbe d'un montant que personne n'a observé.
-    */
-    ...termDeposits.map((t) => ({
+    Les intérêts d'un CAT ne sont pas portés : ils ne sont ni capitalisés ni
+    versés en base, aucun champ ne les constate, et les inventer ferait
+    monter la courbe d'un montant que personne n'a observé.
+  */
+  for (const t of termDeposits) {
+    const balanceEur = eurOrNull(
+      personalAmountOf(t.principal, t).toString(),
+      t.currency,
+      rates,
+      `dépôt à terme ${t.id}`
+    );
+    if (balanceEur == null) continue;
+    cashAccounts.push({
       id: t.id,
-      balanceEur: eur(
-        personalAmountOf(t.principal, t).toString(),
-        t.currency,
-        rates
-      ),
+      balanceEur,
       createdAt: t.createdAt,
       knownAt: t.updatedAt,
-    })),
-    ...envelopes.map((e) => ({
+    });
+  }
+  for (const e of envelopes) {
+    const balanceEur = eurOrNull(e.balance, e.currency, rates, `enveloppe ${e.id}`);
+    if (balanceEur == null) continue;
+    cashAccounts.push({
       id: e.id,
-      balanceEur: eur(e.balance, e.currency, rates),
+      balanceEur,
       createdAt: e.createdAt,
       knownAt: e.updatedAt,
-    })),
-  ];
+    });
+  }
 
+  const cashEvents: Array<{
+    accountId: string;
+    occurredAt: Date;
+    amountEur: Decimal;
+    balanceAfterEur: Decimal;
+    type: string;
+  }> = [];
+  /*
+    La devise est celle figée sur l'événement, pas celle du compte.
 
-  const cashEvents = [
-    /*
-      La devise est celle figée sur l'événement, pas celle du compte.
+    Elle venait de `bankCurrencyById`, c'est-à-dire de la ligne *aujourd'hui* :
+    un compte passé de l'euro au dollar voyait toute son histoire reconvertie
+    avec le nouveau taux, et sa courbe des mois précédents changer de valeur
+    sans qu'aucun fait ne l'explique. Les constats d'enveloppe portaient déjà
+    leur devise pour cette raison exacte ; les mouvements bancaires aussi
+    désormais.
 
-      Elle venait de `bankCurrencyById`, c'est-à-dire de la ligne *aujourd'hui* :
-      un compte passé de l'euro au dollar voyait toute son histoire reconvertie
-      avec le nouveau taux, et sa courbe des mois précédents changer de valeur
-      sans qu'aucun fait ne l'explique. Les constats d'enveloppe portaient déjà
-      leur devise pour cette raison exacte ; les mouvements bancaires aussi
-      désormais.
+    Les lignes écrites avant la colonne valent `EUR`, son défaut — ce qui est
+    le cas de toutes celles qu'un compte en euros a produites.
 
-      Les lignes écrites avant la colonne valent `EUR`, son défaut — ce qui est
-      le cas de toutes celles qu'un compte en euros a produites.
-    */
-    ...bankEvents.map((e) => ({
+    Même garde qu'au-dessus : un événement dans une devise non fondée est
+    écarté seul, jamais toute la chronologie de trésorerie.
+  */
+  for (const e of bankEvents) {
+    const ctx = `écriture bancaire ${e.id}`;
+    const amountEur = eurOrNull(e.amount, e.currency, rates, ctx);
+    const balanceAfterEur = eurOrNull(e.balanceAfter, e.currency, rates, ctx);
+    if (amountEur == null || balanceAfterEur == null) continue;
+    cashEvents.push({
       accountId: e.bankAccountId,
       occurredAt: e.occurredAt,
-      amountEur: eur(e.amount, e.currency, rates),
-      balanceAfterEur: eur(e.balanceAfter, e.currency, rates),
+      amountEur,
+      balanceAfterEur,
       type: e.type,
-    })),
-    // Même règle que les mouvements bancaires ci-dessus : la devise du fait.
-    ...savingsEvents.map((e) => ({
+    });
+  }
+  // Même règle que les mouvements bancaires ci-dessus : la devise du fait.
+  for (const e of savingsEvents) {
+    const ctx = `écriture livret ${e.id}`;
+    const amountEur = eurOrNull(e.amount, e.currency, rates, ctx);
+    const balanceAfterEur = eurOrNull(e.balanceAfter, e.currency, rates, ctx);
+    if (amountEur == null || balanceAfterEur == null) continue;
+    cashEvents.push({
       accountId: e.savingsAccountId,
       occurredAt: e.occurredAt,
-      amountEur: eur(e.amount, e.currency, rates),
-      balanceAfterEur: eur(e.balanceAfter, e.currency, rates),
+      amountEur,
+      balanceAfterEur,
       type: e.type,
-    })),
-    /*
-      Constats d'enveloppe, dans le même moule.
+    });
+  }
+  /*
+    Constats d'enveloppe, dans le même moule.
 
-      `type` vaut `OBSERVED` et jamais `INTEREST` : l'écart entre deux constats
-      est donc compté comme un flux de capital, exactement comme l'était le
-      solde entier avant ce journal. Rien ne permet de distinguer un versement
-      d'un intérêt — l'API ne demande que le solde — et créditer la performance
-      d'un montant inexpliqué serait le seul choix vraiment faux.
+    `type` vaut `OBSERVED` et jamais `INTEREST` : l'écart entre deux constats
+    est donc compté comme un flux de capital, exactement comme l'était le
+    solde entier avant ce journal. Rien ne permet de distinguer un versement
+    d'un intérêt — l'API ne demande que le solde — et créditer la performance
+    d'un montant inexpliqué serait le seul choix vraiment faux.
 
-      La devise est celle figée sur le constat, pas celle de la ligne : une
-      enveloppe qui change de devise ne doit pas réécrire ses anciens montants.
-    */
-    ...envelopeCashEvents.map((e) => ({
+    La devise est celle figée sur le constat, pas celle de la ligne : une
+    enveloppe qui change de devise ne doit pas réécrire ses anciens montants.
+  */
+  for (const e of envelopeCashEvents) {
+    const ctx = `constat enveloppe ${e.id}`;
+    const amountEur = eurOrNull(e.amount, e.currency, rates, ctx);
+    const balanceAfterEur = eurOrNull(e.balanceAfter, e.currency, rates, ctx);
+    if (amountEur == null || balanceAfterEur == null) continue;
+    cashEvents.push({
       accountId: e.envelopeCashId,
       occurredAt: e.occurredAt,
-      amountEur: eur(e.amount, e.currency, rates),
-      balanceAfterEur: eur(e.balanceAfter, e.currency, rates),
+      amountEur,
+      balanceAfterEur,
       type: "OBSERVED",
-    })),
-  ];
+    });
+  }
 
   /*
     Intérêts courus non encore versés.
@@ -444,14 +524,18 @@ export async function loadHistoricalInputs(
   */
   const nowDate = new Date();
   for (const sv of savings) {
-    const booked = eur(sv.balance, sv.currency, rates);
-    const display = eur(displayBalanceOf(sv), sv.currency, rates);
+    const ctx = `intérêts courus livret ${sv.id}`;
+    const booked = eurOrNull(sv.balance, sv.currency, rates, ctx);
+    const display = eurOrNull(displayBalanceOf(sv), sv.currency, rates, ctx);
+    // Devise non fondée : ni le solde inscrit ni son affichage ne peuvent être
+    // datés en euros, donc pas d'écriture d'intérêts courus pour ce livret.
+    if (booked == null || display == null) continue;
     const accrued = display.minus(booked);
     if (accrued.abs().lte(d("0.005"))) continue;
     const lastBooked = savingsEvents
       .filter((e) => e.savingsAccountId === sv.id)
       .reduce<Decimal | null>(
-        (_, e) => eur(e.balanceAfter, sv.currency, rates),
+        (_, e) => eurOrNull(e.balanceAfter, sv.currency, rates, ctx),
         null
       );
     // Sans événement, le compte est déjà porté par son solde d'affichage.
@@ -465,6 +549,208 @@ export async function loadHistoricalInputs(
     });
   }
 
+  /*
+    Poches alternatives / passif : mêmes gardes, une ligne à la fois.
+
+    Chacune de ces sources était bâtie par `.map()` sur `eur()`, qui lève dès
+    la première devise non fondée — une seule ligne dans ce cas aurait alors
+    fait échouer la reconstruction de TOUTE la courbe, y compris ses autres
+    lignes et les compartiments qui suivent (cash inclus, puisqu'ils
+    partagent le même `return`). Chaque ligne fautive est désormais écartée
+    seule (`continue`), avec un avertissement, jamais une valeur à 0 € qui la
+    ferait lire comme un lot sans valeur.
+  */
+  const metalsOut: NonNullable<ReturnType<typeof buildMetal>>[] = [];
+  function buildMetal(m: (typeof metals)[number]) {
+    const ctx = `métal précieux ${m.id}`;
+    const cost = eurOrNull(
+      d(m.quantity.toString()).times(d(m.purchasePriceUnit.toString())).toString(),
+      m.currency,
+      rates,
+      ctx
+    );
+    const fees = eurOrNull(m.acquisitionFees, m.currency, rates, ctx);
+    const currentValueEur = eurOrNull(m.currentValue, m.currency, rates, ctx);
+    if (cost == null || fees == null || currentValueEur == null) return null;
+    return {
+      id: m.id,
+      acquiredAt: m.acquiredAt,
+      createdAt: m.createdAt,
+      updatedAt: m.updatedAt,
+      // Prix de revient du lot : quantité × PRU, frais d'acquisition compris.
+      costEur: cost.plus(fees),
+      currentValueEur,
+    };
+  }
+  for (const m of metals) {
+    const row = buildMetal(m);
+    if (row) metalsOut.push(row);
+  }
+
+  const privateEquityOut: NonNullable<ReturnType<typeof buildPe>>[] = [];
+  function buildPe(p: (typeof peRows)[number]) {
+    const ctx = `private equity ${p.id}`;
+    // Le capital appelé n'est pas toujours saisi sur les lignes anciennes :
+    // à défaut, `parts × prix d'acquisition` est le prix réellement payé.
+    const calledCapitalEur = d(p.calledCapital.toString()).gt(0)
+      ? eurOrNull(p.calledCapital, p.currency, rates, ctx)
+      : eurOrNull(
+          d(p.shares.toString())
+            .times(d(p.acquisitionPricePerShare.toString()))
+            .toString(),
+          p.currency,
+          rates,
+          ctx
+        );
+    const currentNavEur = eurOrNull(p.currentNav, p.currency, rates, ctx);
+    if (calledCapitalEur == null || currentNavEur == null) return null;
+    const valuations: Array<{ valuedAt: Date; navEur: Decimal }> = [];
+    for (const v of p.valuations) {
+      const navEur = eurOrNull(v.nav, p.currency, rates, ctx);
+      if (navEur == null) continue;
+      valuations.push({ valuedAt: v.valuedAt, navEur });
+    }
+    return {
+      id: p.id,
+      investmentDate: p.investmentDate,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+      calledCapitalEur,
+      currentNavEur,
+      valuations,
+    };
+  }
+  for (const p of peRows) {
+    const row = buildPe(p);
+    if (row) privateEquityOut.push(row);
+  }
+
+  const crowdlendingOut: NonNullable<ReturnType<typeof buildCl>>[] = [];
+  function buildCl(c: (typeof clRows)[number]) {
+    const ctx = `crowdlending ${c.id}`;
+    const capitalInvestedEur = eurOrNull(c.capitalInvested, c.currency, rates, ctx);
+    const remainingCapitalEur = eurOrNull(c.remainingCapital, c.currency, rates, ctx);
+    if (capitalInvestedEur == null || remainingCapitalEur == null) return null;
+    return {
+      id: c.id,
+      startDate: c.startDate,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+      capitalInvestedEur,
+      remainingCapitalEur,
+      status: c.status,
+    };
+  }
+  for (const c of clRows) {
+    const row = buildCl(c);
+    if (row) crowdlendingOut.push(row);
+  }
+
+  const tangiblesOut: NonNullable<ReturnType<typeof buildTangible>>[] = [];
+  function buildTangible(t: (typeof tangibles)[number]) {
+    const ctx = `bien tangible ${t.id}`;
+    const purchasePriceEur = eurOrNull(t.purchasePrice, t.currency, rates, ctx);
+    const feesEur = eurOrNull(t.acquisitionFees, t.currency, rates, ctx);
+    const estimatedValueEur = eurOrNull(t.estimatedValue, t.currency, rates, ctx);
+    if (purchasePriceEur == null || feesEur == null || estimatedValueEur == null) {
+      return null;
+    }
+    return {
+      id: t.id,
+      purchaseDate: t.purchaseDate,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+      costEur: purchasePriceEur.plus(feesEur),
+      estimatedValueEur,
+      valuations: t.valuations.map((v) => ({
+        valuedAt: v.valuedAt,
+        // `TangibleValuation.valueEur` est déjà en euro par construction.
+        valueEur: d(v.valueEur.toString()),
+      })),
+    };
+  }
+  for (const t of tangibles) {
+    const row = buildTangible(t);
+    if (row) tangiblesOut.push(row);
+  }
+
+  const employeeSavingsOut: NonNullable<ReturnType<typeof buildEmployeeSavingsLine>>[] = [];
+  function buildEmployeeSavingsLine(l: (typeof employeeSavings)[number]) {
+    const ctx = `épargne salariale ${l.id}`;
+    const contributedEur =
+      l.contributedAmount == null
+        ? { ok: true as const, value: null }
+        : (() => {
+            const v = eurOrNull(l.contributedAmount, l.currency, rates, ctx);
+            return v == null ? { ok: false as const, value: null } : { ok: true as const, value: v };
+          })();
+    const currentEur = eurOrNull(
+      d(l.units.toString()).times(d(l.nav.toString())).toString(),
+      l.currency,
+      rates,
+      ctx
+    );
+    if (!contributedEur.ok || currentEur == null) return null;
+    const unlock = resolveUnlock({
+      planType: l.planType,
+      unlockMode: l.unlockMode,
+      unlockDate: l.unlockDate,
+      contributionDate: l.contributionDate,
+    });
+    return {
+      id: l.id,
+      contributionDate: l.contributionDate,
+      createdAt: l.createdAt,
+      updatedAt: l.updatedAt,
+      contributedEur: contributedEur.value,
+      currentEur,
+      isLiquid: unlock.liquidityStatus === "AVAILABLE",
+    };
+  }
+  for (const l of employeeSavings) {
+    const row = buildEmployeeSavingsLine(l);
+    if (row) employeeSavingsOut.push(row);
+  }
+
+  const liabilitiesOut: NonNullable<ReturnType<typeof buildLiability>>[] = [];
+  function buildLiability(l: (typeof liabilities)[number]) {
+    const ctx = `passif ${l.id}`;
+    const initialAmountEur = eurOrNull(l.initialAmount, l.currency, rates, ctx);
+    /*
+      Le solde qui ferme la chronologie est projeté à aujourd'hui, comme
+      celui du tableau de bord. Rendre ici le solde stocké ferait terminer la
+      courbe sur une dette que le patrimoine net ne reconnaît plus — les deux
+      moteurs doivent s'accorder à la date du jour.
+    */
+    const remainingAmountEur = eurOrNull(remainingAmountAt(l), l.currency, rates, ctx);
+    if (initialAmountEur == null || remainingAmountEur == null) return null;
+    const events: Array<{ eventDate: Date; remainingAfterEur: Decimal | null }> = [];
+    for (const e of l.events) {
+      if (e.remainingAfter == null) {
+        events.push({ eventDate: e.eventDate, remainingAfterEur: null });
+        continue;
+      }
+      const remainingAfterEur = eurOrNull(e.remainingAfter, l.currency, rates, ctx);
+      // Un événement dont la devise n'est pas fondée est lui aussi écarté —
+      // jamais un solde après-événement à 0 €.
+      if (remainingAfterEur == null) continue;
+      events.push({ eventDate: e.eventDate, remainingAfterEur });
+    }
+    return {
+      id: l.id,
+      startDate: l.startDate,
+      createdAt: l.createdAt,
+      updatedAt: l.updatedAt,
+      initialAmountEur,
+      remainingAmountEur,
+      events,
+    };
+  }
+  for (const l of liabilities) {
+    const row = buildLiability(l);
+    if (row) liabilitiesOut.push(row);
+  }
+
   return {
     transactions,
     assetClassById,
@@ -476,114 +762,12 @@ export async function loadHistoricalInputs(
     closes,
     cashAccounts,
     cashEvents,
-
-    metals: metals.map((m) => ({
-      id: m.id,
-      acquiredAt: m.acquiredAt,
-      createdAt: m.createdAt,
-      updatedAt: m.updatedAt,
-      // Prix de revient du lot : quantité × PRU, frais d'acquisition compris.
-      costEur: eur(
-        d(m.quantity.toString()).times(d(m.purchasePriceUnit.toString())).toString(),
-        m.currency,
-        rates
-      ).plus(eur(m.acquisitionFees, m.currency, rates)),
-      currentValueEur: eur(m.currentValue, m.currency, rates),
-    })),
-
-    privateEquity: peRows.map((p) => ({
-      id: p.id,
-      investmentDate: p.investmentDate,
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-      // Le capital appelé n'est pas toujours saisi sur les lignes anciennes :
-      // à défaut, `parts × prix d'acquisition` est le prix réellement payé.
-      calledCapitalEur: d(p.calledCapital.toString()).gt(0)
-        ? eur(p.calledCapital, p.currency, rates)
-        : eur(
-            d(p.shares.toString())
-              .times(d(p.acquisitionPricePerShare.toString()))
-              .toString(),
-            p.currency,
-            rates
-          ),
-      currentNavEur: eur(p.currentNav, p.currency, rates),
-      valuations: p.valuations.map((v) => ({
-        valuedAt: v.valuedAt,
-        navEur: eur(v.nav, p.currency, rates),
-      })),
-    })),
-
-    crowdlending: clRows.map((c) => ({
-      id: c.id,
-      startDate: c.startDate,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-      capitalInvestedEur: eur(c.capitalInvested, c.currency, rates),
-      remainingCapitalEur: eur(c.remainingCapital, c.currency, rates),
-      status: c.status,
-    })),
-
-    tangibles: tangibles.map((t) => ({
-      id: t.id,
-      purchaseDate: t.purchaseDate,
-      createdAt: t.createdAt,
-      updatedAt: t.updatedAt,
-      costEur: eur(t.purchasePrice, t.currency, rates).plus(
-        eur(t.acquisitionFees, t.currency, rates)
-      ),
-      estimatedValueEur: eur(t.estimatedValue, t.currency, rates),
-      valuations: t.valuations.map((v) => ({
-        valuedAt: v.valuedAt,
-        // `TangibleValuation.valueEur` est déjà en euro par construction.
-        valueEur: d(v.valueEur.toString()),
-      })),
-    })),
-
-    employeeSavings: employeeSavings.map((l) => {
-      const unlock = resolveUnlock({
-        planType: l.planType,
-        unlockMode: l.unlockMode,
-        unlockDate: l.unlockDate,
-        contributionDate: l.contributionDate,
-      });
-      return {
-        id: l.id,
-        contributionDate: l.contributionDate,
-        createdAt: l.createdAt,
-        updatedAt: l.updatedAt,
-        contributedEur:
-          l.contributedAmount == null
-            ? null
-            : eur(l.contributedAmount, l.currency, rates),
-        currentEur: eur(
-          d(l.units.toString()).times(d(l.nav.toString())).toString(),
-          l.currency,
-          rates
-        ),
-        isLiquid: unlock.liquidityStatus === "AVAILABLE",
-      };
-    }),
-
-    liabilities: liabilities.map((l) => ({
-      id: l.id,
-      startDate: l.startDate,
-      createdAt: l.createdAt,
-      updatedAt: l.updatedAt,
-      initialAmountEur: eur(l.initialAmount, l.currency, rates),
-      /*
-        Le solde qui ferme la chronologie est projeté à aujourd'hui, comme
-        celui du tableau de bord. Rendre ici le solde stocké ferait terminer la
-        courbe sur une dette que le patrimoine net ne reconnaît plus — les deux
-        moteurs doivent s'accorder à la date du jour.
-      */
-      remainingAmountEur: eur(remainingAmountAt(l), l.currency, rates),
-      events: l.events.map((e) => ({
-        eventDate: e.eventDate,
-        remainingAfterEur:
-          e.remainingAfter == null ? null : eur(e.remainingAfter, l.currency, rates),
-      })),
-    })),
+    metals: metalsOut,
+    privateEquity: privateEquityOut,
+    crowdlending: crowdlendingOut,
+    tangibles: tangiblesOut,
+    employeeSavings: employeeSavingsOut,
+    liabilities: liabilitiesOut,
   };
 }
 

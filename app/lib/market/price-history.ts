@@ -2,7 +2,7 @@ import YahooFinance from "yahoo-finance2";
 import { prisma } from "../prisma";
 import { d, toFixed } from "../money/decimal";
 import { toYahooSymbol, normalizeQuoteCurrency } from "./symbol";
-import { getEurRates, convertToEurSync } from "./fx";
+import { getEurRates, convertToEurSync, FxRateUnknownError } from "./fx";
 import { withTimeout } from "../utils/with-timeout";
 import {
   coingeckoGet,
@@ -660,7 +660,15 @@ async function fetchYahooBars(
 
     return points.length >= 2 ? points : null;
   } catch (err) {
-    reportProviderError("yahoo", err);
+    /*
+      Une devise que ni Frankfurter ni le repli ne fondent n'est pas un refus
+      Yahoo : `classifyProviderError` n'a pas ce cas et la rangerait par
+      défaut en incident « transport », ce qui accuserait Yahoo à tort dans
+      le rapport de collecte. Elle est déjà atomique (garde le fournisseur,
+      jamais tout le portefeuille) : cette fonction rend `null` pour cet
+      actif dans tous les cas, comme toute autre absence de série.
+    */
+    if (!(err instanceof FxRateUnknownError)) reportProviderError("yahoo", err);
     return null;
   }
 }
@@ -759,6 +767,16 @@ export async function getAssetPriceHistory(
   if (asset.priceQuote) {
     endPrice = Number(asset.priceQuote.priceEur.toString());
   } else if (asset.manualPrice) {
+    /*
+      Devise non fondée : lève délibérément (`FxRateUnknownError`), et ce
+      chemin n'a pas de garde locale — cf. `price-history-manual-price-fx.test.ts`
+      (« échoue bruyamment, pas de zéro silencieux »). `endPrice = 0` ici
+      basculerait cette fonction sur son repli `mock` plus bas, qui fabrique
+      un cours : bien pire qu'un 500 pour CET actif. Distinct de FX-05 :
+      cette fonction ne boucle pas sur le portefeuille (un appel = un actif),
+      et ses appelants qui agrègent plusieurs actifs (`collectDailyCloses`)
+      encapsulent déjà chaque appel dans son propre `try/catch`.
+    */
     const rates = await getEurRates();
     endPrice = Number(
       convertToEurSync(asset.manualPrice.toString(), asset.currency || "EUR", rates)

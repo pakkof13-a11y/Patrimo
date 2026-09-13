@@ -134,6 +134,21 @@ export async function getEurRates(): Promise<Record<string, number>> {
 }
 
 /**
+ * `rates` (déjà servi par `getEurRates()`) vient-il du repli statique ?
+ *
+ * Le cache le sait depuis toujours (`cache.isFallback`), mais rien ne le
+ * transmettait au-delà de ce module : `GET /api/fx` rendait la table figée
+ * avec la même forme qu'un taux BCE réel, sans moyen de les distinguer.
+ *
+ * Lit l'état courant du cache — à appeler juste après un `getEurRates()` dans
+ * la même requête, pour décrire le `rates` qu'il vient de rendre. `false`
+ * quand aucun appel n'a encore eu lieu (rien à qualifier de repli).
+ */
+export function isEurRatesFallback(): boolean {
+  return cache?.isFallback ?? false;
+}
+
+/**
  * Aucun taux fondé n'existe pour cette devise.
  *
  * Distincte d'une panne réseau : le fournisseur peut très bien avoir répondu.
