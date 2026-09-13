@@ -113,6 +113,18 @@ export const VALUATION_ENVELOPES = ["PEA", "CTO", "UNKNOWN"] as const;
 export type ValuationEnvelope = (typeof VALUATION_ENVELOPES)[number];
 
 /**
+ * Les enveloppes qui existent vraiment — `UNKNOWN` n'en est pas une.
+ *
+ * `UNKNOWN` est un seau de mesure, pas un compte : il n'a ni ouverture, ni
+ * première écriture, ni date de naissance. Les grandeurs datées par enveloppe
+ * (cf. `EnvelopeFirstWriteDays`, `engine.ts`) se posent donc sur ce sous-type,
+ * qui ferme la porte à « le jour où l'inconnu a été ouvert ».
+ */
+export const SECURITIES_ENVELOPES = ["PEA", "CTO"] as const;
+
+export type SecuritiesEnvelope = (typeof SECURITIES_ENVELOPES)[number];
+
+/**
  * Les seules classes qu'une enveloppe titres peut qualifier.
  *
  * Croiser « Crypto » et « PEA » n'a pas de sens : la question ne se pose que

@@ -31,6 +31,10 @@ import type {
   DailyNavPoint,
   DailyNavScope,
 } from "./historical/get-daily-nav";
+import {
+  SECURITIES_ENVELOPES,
+  type SecuritiesEnvelope,
+} from "./historical/types";
 
 /** Moins de deux points après clamp : rien à tracer, pas une courbe plate. */
 export const MIN_POCKET_SERIES_POINTS = 2;
@@ -171,6 +175,31 @@ export function windowPocketDailyNav(
 }
 
 /**
+ * Cette enveloppe existait-elle déjà au jour du point ?
+ *
+ * Trois réponses, et elles ne se confondent pas :
+ *
+ * - `true` — le journal l'a déjà écrite à cette date, ou le jour même ;
+ * - `false` — sa première écriture est **postérieure** : l'enveloppe n'était
+ *   pas née, ce qui est un fait daté et non une ignorance ;
+ * - `null` — la série ne porte pas la date (`envelopeFirstWriteDay` absent),
+ *   ou aucun événement n'a jamais désigné cette enveloppe. On ne sait pas, et
+ *   l'appelant doit rester prudent.
+ *
+ * La date vient de `engine.envelopeFirstWriteDays()`, c'est-à-dire du journal
+ * `AssetEnvelopeEvent` — jamais de l'`accountType` courant, qui réécrirait le
+ * passé à chaque reclassement.
+ */
+export function envelopeBornAt(
+  point: DailyNavPoint,
+  envelope: SecuritiesEnvelope
+): boolean | null {
+  const birth = point.envelopeFirstWriteDay?.[envelope];
+  if (birth == null) return null;
+  return point.day >= birth;
+}
+
+/**
  * Valeur Titres à un jour donné — croisement classe × enveloppe, jamais
  * `byAssetClass`.
  *
@@ -182,11 +211,31 @@ export function windowPocketDailyNav(
  * PEA/CTO. `titresUnknownEnvelopeEur` porte cette part à part.
  *
  * Avec enveloppe (PEA ou CTO seule) : la somme des deux classes pour cette
- * seule enveloppe.
+ * seule enveloppe — inchangé, la série d'une enveloppe commence là où cette
+ * enveloppe est démontrée.
  *
- * `null` dès qu'une des briques manque — UNKNOWN ≠ ZERO : une absence de
- * constat n'est pas une valeur nulle, et la sommer comme telle inventerait un
- * point de courbe.
+ * ## « Pas encore née » n'est pas « inconnue »
+ *
+ * `envelopeSnapshot` (engine) rend `null` sur une enveloppe sans montant
+ * démontré dès qu'une ligne titre reste en suspens — la ligne inconnue
+ * *pourrait* s'y trouver. Sommer quatre cases dont une est absente rendait donc
+ * `null`, et `toPocketEvolutionPoints` retirait le point : mesuré sur le compte
+ * de démonstration (2026-09-13, fenêtre « Tout »), la série « Titres / Tous »
+ * commençait au **2023-11-03**, jour du premier achat en CTO, alors que le PEA
+ * était démontré à 38 164 € dès le premier jour servi (2020-09-13). Le total de
+ * deux enveloppes naissait donc avec la **plus tardive** au lieu de la plus
+ * précoce, et deux ans et demi d'historique PEA ne se traçaient nulle part.
+ *
+ * Avant la première écriture d'une enveloppe, la ligne en suspens ne peut pas
+ * s'y trouver : l'enveloppe n'a encore rien porté. Sa contribution au total
+ * vaut donc **zéro**, un fait daté — et jamais `null`, qui reste réservé à ce
+ * qu'on ignore vraiment : une ligne orpheline, dont le journal ne démontre pas
+ * l'enveloppe alors que celle-ci existait déjà.
+ *
+ * `null` subsiste donc dès qu'une case manque sur une enveloppe **déjà née**,
+ * ou quand le croisement lui-même est absent. UNKNOWN ≠ ZERO tient toujours ;
+ * ce qui change est qu'« pas encore ouvert » cesse d'être compté comme un
+ * UNKNOWN.
  */
 export function titresValueAt(
   point: DailyNavPoint,
@@ -201,12 +250,52 @@ export function titresValueAt(
     if (a == null || o == null) return null;
     return a + o;
   }
-  const { PEA: aPea, CTO: aCto } = actions;
-  const { PEA: oPea, CTO: oCto } = obligations;
-  if (aPea == null || aCto == null || oPea == null || oCto == null) {
-    return null;
+  let somme = 0;
+  for (const env of SECURITIES_ENVELOPES) {
+    // Décidé une fois par enveloppe : la naissance ne dépend pas de la classe.
+    const nee = envelopeBornAt(point, env);
+    for (const parClasse of [actions, obligations]) {
+      const v = parClasse[env];
+      if (v != null) {
+        somme += v;
+        continue;
+      }
+      // Pas encore née : elle ne portait rien, et le dire est exact.
+      if (nee === false) continue;
+      // Née — ou indatable : l'absence reste une absence.
+      return null;
+    }
   }
-  return aPea + aCto + oPea + oCto;
+  return somme;
+}
+
+/**
+ * Les points d'une série qui **inaugurent** une enveloppe absente la veille.
+ *
+ * Destiné au marqueur d'écran « le CTO commence ici ». La règle est portée ici,
+ * et non reconstruite côté graphique, pour la même raison que le pas de la
+ * série : deux endroits qui décideraient « où commence une enveloppe »
+ * finiraient par décider deux choses.
+ *
+ * Ce que la fonction rend, précisément : pour chaque enveloppe datée, le
+ * **premier point servi** dont le jour atteint ou dépasse sa première écriture,
+ * à condition qu'un point antérieur existe dans la série. Sans point d'avant,
+ * il n'y a pas de « veille » dans ce qui est affiché : la borne de la fenêtre
+ * n'est pas une naissance, et la signaler comme telle serait faux.
+ *
+ * Une enveloppe sans date (`null`, aucun événement ne l'a jamais désignée) n'y
+ * figure pas : on ne sait pas quand elle commence, donc on ne le montre pas.
+ */
+export function envelopeBirthPoints(
+  points: readonly DailyNavPoint[]
+): Array<{ envelope: SecuritiesEnvelope; day: string }> {
+  const out: Array<{ envelope: SecuritiesEnvelope; day: string }> = [];
+  for (const env of SECURITIES_ENVELOPES) {
+    const index = points.findIndex((p) => envelopeBornAt(p, env) === true);
+    if (index <= 0) continue;
+    out.push({ envelope: env, day: points[index]!.day });
+  }
+  return out;
 }
 
 /**
