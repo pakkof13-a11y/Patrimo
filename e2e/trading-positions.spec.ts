@@ -166,6 +166,17 @@ test.describe("Trading — positions", () => {
       Le chantier n'a ajouté aucun flux : rien ne doit partir vers un
       fournisseur de prix quand on parcourt les positions, et surtout pas une
       requête par ligne.
+
+      Le bandeau de marché global (components/layout/market-ticker.tsx) est un
+      composant partagé, monté sur toute la page — pas seulement sur Trading —
+      et fait sa propre requête `/api/market/quotes` à son montage, sans lien
+      avec les clics testés ici. Cette requête peut encore être en vol quand le
+      test démarre : `beforeEach` attend l'onglet et le squelette, pas ce
+      fetch-là. On laisse donc explicitement ce fetch initial se terminer (ou
+      on renonce au bout d'un délai large, s'il n'a pas lieu), puis on vide le
+      relevé des requêtes déjà captées, avant de commencer à observer ce que
+      déclenchent les clics : seules les requêtes de marché apparues APRÈS ce
+      point sont imputables à l'interaction testée, qui reste vérifiée à zéro.
     */
     const market: string[] = [];
     page.on("request", (r) => {
@@ -178,6 +189,16 @@ test.describe("Trading — positions", () => {
         market.push(u);
       }
     });
+
+    await page
+      .waitForResponse((r) => r.url().includes("/api/market/quotes"), {
+        timeout: 10_000,
+      })
+      .catch(() => {
+        // Le ticker peut ne pas émettre du tout (ex. démo sans cotations) :
+        // dans ce cas rien à purger, on continue.
+      });
+    market.length = 0;
 
     const count = await rows(page).count();
     test.skip(count === 0, "Aucune position");
@@ -328,6 +349,19 @@ test.describe("Trading — positions", () => {
       La position est créée puis supprimée par ce test, pour ne pas toucher
       aux lignes du jeu de démonstration dont d'autres specs dépendent.
     */
+    /*
+      Ce test cumule un aller-retour API, une navigation complète
+      (`openTrading`, jusqu'à 30s + 30s d'attentes explicites) puis une demi-
+      douzaine d'attentes au timeout par défaut (15s) pour le dialogue de
+      confirmation et la ligne créée. En fin de suite complète (300+ tests),
+      mesuré en CI à 1m36 alors que le budget global d'un test est de 90s
+      (`TEST_TIMEOUT_MS` dans playwright.config.ts) : ni une régression du
+      dialogue ni une assertion de valeur violée, seulement une somme
+      d'attentes déjà larges qui dépasse le budget générique sous charge CI en
+      fin de run. On donne à CE test précis une marge double du budget
+      générique plutôt que d'affaiblir l'une de ses attentes.
+    */
+    test.setTimeout(180_000);
     const paire = `ZZTEST${Date.now()}`;
     const cree = await request.post("/api/crypto/futures", {
       data: {

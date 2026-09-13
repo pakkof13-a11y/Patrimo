@@ -95,19 +95,30 @@ test.describe("Tableau de bord", () => {
     });
 
     /*
-      Les sept indicateurs du bandeau. Le moteur historique porte désormais
-      leurs sept grandeurs — le P&L latent et le réalisé sont reconstruits à
-      partir de l'état comptable qu'il rejoue, comme les cinq autres le sont
-      depuis leurs compartiments.
+      Les huit indicateurs à variation propre du bandeau (`dashboard-tab.tsx`,
+      `TerminalKpiRow`) — testids réels vérifiés dans le code au 2026-09-13,
+      pas ceux d'avant D19 (`kpi-listed`, `kpi-latent`, `kpi-realized`
+      n'existent plus). Chacun rend toujours une ligne `kpi-<clé>-change` :
+      `changeAbs`/`changePct` valent `seriesChangeAbs`/`seriesChangePct`, qui
+      répondent `number | null`, jamais `undefined` — la ligne n'est donc
+      jamais démontée pour ces huit tuiles.
+
+      Le P&L (`pnl`) n'en fait pas partie : depuis D19 ce n'est plus deux
+      tuiles séparées latent/réalisé mais une seule tuile à bascule, dont le
+      montant de tête *est* déjà la variation de fenêtre — elle ne porte donc
+      jamais de `kpi-pnl-change` (`changeAbs`/`changePct` y valent
+      littéralement `undefined`). Elle est vérifiée séparément plus bas, sur
+      le même invariant mais appliqué à son propre montant.
     */
     const indicateurs = [
-      "listed",
-      "latent",
-      "cash",
+      "titres",
+      "crypto",
+      "life-insurance",
+      "real-estate",
       "alternatives",
       "employee-savings",
+      "cash",
       "liabilities",
-      "realized",
     ];
 
     /**
@@ -157,6 +168,50 @@ test.describe("Tableau de bord", () => {
       }
     }
 
+    /**
+     * Même invariant, décliné sur la tuile P&L à bascule.
+     *
+     * `kpi-pnl` n'a pas de ligne `-change` séparée : c'est son montant de tête
+     * qui porte la variation de fenêtre (`pnlPeriod`), et sa sparkline
+     * (`pnlSpark`) est construite sur exactement le même tableau —
+     * `latent`/`realized` selon la bascule active (`dashboard-tab.tsx`). Une
+     * courbe visible doit donc toujours s'accompagner d'un montant chiffré,
+     * jamais d'un tiret ; un tiret ne doit jamais s'accompagner d'un tracé.
+     * Vérifié sur les deux positions de la bascule, Latent puis Réalisé —
+     * c'est elle qui remplace les anciennes tuiles séparées.
+     */
+    async function verifierCoherencePnl(periode: string) {
+      const tuile = page.getByTestId("kpi-pnl");
+      await expect(tuile).toBeVisible();
+
+      // Jamais de ligne de variation séparée pour cette tuile — son montant
+      // de tête en tient déjà lieu.
+      await expect(page.getByTestId("kpi-pnl-change")).toHaveCount(0);
+
+      for (const mode of ["latent", "realized"] as const) {
+        const bascule = page.getByTestId(`kpi-pnl-toggle-${mode}`);
+        await bascule.click();
+        await expect(bascule).toHaveAttribute("aria-selected", "true");
+
+        const courbes = await tuile.locator("svg").count();
+        const montant = (
+          await tuile.locator("p.num").first().innerText()
+        ).trim();
+
+        if (courbes > 0) {
+          expect(
+            montant,
+            `pnl (${mode}) sur ${periode} : une courbe sans montant`
+          ).not.toBe("—");
+        } else {
+          expect(
+            montant,
+            `pnl (${mode}) sur ${periode} : un montant sans série`
+          ).toBe("—");
+        }
+      }
+    }
+
     // Période la plus large : c'est là que l'historique a le plus de chances
     // d'exister, donc que les courbes doivent apparaître.
     await page.getByTestId("evolution-range-all").click();
@@ -165,6 +220,7 @@ test.describe("Tableau de bord", () => {
       "all"
     );
     await verifierCoherence("Tout");
+    await verifierCoherencePnl("Tout");
 
     /*
       Période la plus courte : sur un compte récent, sept jours peuvent ne pas
@@ -177,6 +233,7 @@ test.describe("Tableau de bord", () => {
       "7d"
     );
     await verifierCoherence("7J");
+    await verifierCoherencePnl("7J");
   });
 
   test("carte de patrimoine : une seule, Net/Brut, périodes propres", async ({

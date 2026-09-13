@@ -11,7 +11,7 @@ import {
 } from "./logic";
 import { isFundCategory } from "./fund-category";
 import { parseNumber } from "@/app/lib/import/normalize";
-import { d, toFixed } from "@/app/lib/money/decimal";
+import { d, toFixed, zero, type Decimal } from "@/app/lib/money/decimal";
 import { ACCOUNT_CURRENCY_OPTIONS } from "@/app/lib/money/currencies";
 import { convertToEurSync, getEurRates } from "@/app/lib/market/fx";
 import {
@@ -125,6 +125,15 @@ function mapLine(row: {
     Les deux champs sont publiés : `marketValue` reste la valeur dans la devise
     du support (c'est ce que la liste affiche, avec son symbole), `marketValueEur`
     est ce que les totaux additionnent. Un seul des deux pouvait être juste.
+
+    `marketValueEur` porte donc la précision pleine (8 décimales, la convention
+    de `holdings[].marketValueEur`) et non le centime : publier la ligne déjà
+    arrondie faisait sommer des centimes à `summarizeLines`, puis arrondir ce
+    total une seconde fois. Sur les douze lignes du jeu de démonstration (dont
+    des parts à quatre décimales), ce double arrondi creusait −0,0146 € face au
+    patrimoine, qui somme lui en Decimal plein — au-delà du centime toléré
+    entre les deux lecteurs. La valeur dans la devise du support reste au
+    centime : elle n'est additionnée nulle part, seulement affichée.
   */
   const mvEur = d(convertToEurSync(mv, row.currency || "EUR", rates));
 
@@ -148,7 +157,7 @@ function mapLine(row: {
     unlockMode: unlock.unlockMode,
     notes: row.notes,
     marketValue: toFixed(mv, 2),
-    marketValueEur: toFixed(mvEur, 2),
+    marketValueEur: toFixed(mvEur, 8),
     liquidityStatus: unlock.liquidityStatus,
     unlockLabel: unlock.unlockLabel,
   };
@@ -169,13 +178,27 @@ export async function listEmployeeSavings(userId: string): Promise<{
   return { lines, summary: summarizeLines(lines) };
 }
 
+/**
+ * Les totaux du module — sommés en Decimal, arrondis une seule fois, à la fin.
+ *
+ * Les accumulateurs étaient des `number` et chaque ligne était lue déjà
+ * arrondie au centime : le total portait donc la somme des arrondis, puis
+ * subissait le sien. L'écart ne se voyait pas sur une ligne, il s'accumulait —
+ * −0,0146 € sur les douze lignes du jeu de démonstration, assez pour faire
+ * diverger le module du patrimoine au-delà du centime toléré entre eux
+ * (`e2e/coherence-totaux.spec.ts`).
+ *
+ * Le patrimoine (`getEmployeeSavingsTotalsEur`) somme en Decimal plein et
+ * n'arrondit qu'à la sortie ; c'est désormais la même méthode des deux côtés.
+ * Aucune règle métier ne change : seule change la place de l'arrondi.
+ */
 export function summarizeLines(lines: EmployeeSavingsLineDto[]): EmployeeSavingsSummary {
-  let total = 0;
-  let available = 0;
-  let blocked = 0;
-  const byPlan = new Map<string, number>();
-  const byManager = new Map<string, number>();
-  const bySource = new Map<string, number>();
+  let total = zero();
+  let available = zero();
+  let blocked = zero();
+  const byPlan = new Map<string, Decimal>();
+  const byManager = new Map<string, Decimal>();
+  const bySource = new Map<string, Decimal>();
 
   const timelineInput: Array<{
     marketValue: number;
@@ -184,52 +207,74 @@ export function summarizeLines(lines: EmployeeSavingsLineDto[]): EmployeeSavings
     unlockDate: Date | null;
   }> = [];
 
+  const add = (m: Map<string, Decimal>, k: string, v: Decimal) => {
+    m.set(k, (m.get(k) ?? zero()).plus(v));
+  };
+
   for (const l of lines) {
     // Les euros, pas la devise du support : additionner `marketValue` mêlait
     // des CHF à des euros dans un total présenté en euros.
-    const v = Number(l.marketValueEur) || 0;
-    total += v;
-    if (l.liquidityStatus === "AVAILABLE") available += v;
-    else blocked += v;
+    //
+    // Pas de repli à zéro ici : `d()` lève sur une écriture illisible, et c'est
+    // la bonne réponse — une valorisation qu'on ne sait pas lire n'est pas un
+    // zéro (UNKNOWN ≠ ZERO), et l'ancien `|| 0` la faisait disparaître du total
+    // sans trace. `mapLine` ne produit que des chaînes canoniques : aucun cas
+    // légitime ne passe par là.
+    const v = d(l.marketValueEur);
+    total = total.plus(v);
+    if (l.liquidityStatus === "AVAILABLE") available = available.plus(v);
+    else blocked = blocked.plus(v);
 
-    byPlan.set(l.planType, (byPlan.get(l.planType) || 0) + v);
-    byManager.set(l.manager, (byManager.get(l.manager) || 0) + v);
-    bySource.set(l.sourceType, (bySource.get(l.sourceType) || 0) + v);
+    add(byPlan, l.planType, v);
+    add(byManager, l.manager, v);
+    add(bySource, l.sourceType, v);
 
     timelineInput.push({
-      marketValue: v,
+      // La frise reçoit la valeur pleine : elle arrondit par seau, à la fin
+      // (`buildUnlockTimeline`), ce qui est le bon endroit.
+      marketValue: v.toNumber(),
       liquidityStatus: l.liquidityStatus,
       unlockMode: l.unlockMode,
       unlockDate: l.unlockDate ? new Date(l.unlockDate) : null,
     });
   }
 
-  const pct = (part: number) => (total > 0 ? Math.round((part / total) * 1000) / 10 : 0);
+  /*
+    Part d'un total, au dixième de point — même sémantique que l'ancien
+    `Math.round(x * 1000) / 10`, calculée en Decimal et arrondie une seule fois.
+    Un total nul ou négatif ne définit aucune part : 0, jamais une division.
+  */
+  const pct = (part: Decimal) =>
+    total.gt(0) ? Number(toFixed(part.div(total).times(100), 1)) : 0;
+
+  // `EmployeeSavingsSummary` porte des `number` pour les répartitions : on
+  // arrondit au centime au dernier moment, et c'est le seul arrondi du chemin.
+  const cents = (value: Decimal) => Number(toFixed(value, 2));
 
   return {
-    totalValue: total.toFixed(2),
-    availableValue: available.toFixed(2),
-    blockedValue: blocked.toFixed(2),
+    totalValue: toFixed(total, 2),
+    availableValue: toFixed(available, 2),
+    blockedValue: toFixed(blocked, 2),
     availablePct: pct(available),
     blockedPct: pct(blocked),
     byPlanType: [...byPlan.entries()]
       .map(([planType, value]) => ({
         planType,
         name: planLabel(planType),
-        value: Math.round(value * 100) / 100,
+        value: cents(value),
       }))
       .sort((a, b) => b.value - a.value),
     byManager: [...byManager.entries()]
       .map(([name, value]) => ({
         name,
-        value: Math.round(value * 100) / 100,
+        value: cents(value),
       }))
       .sort((a, b) => b.value - a.value),
     bySource: [...bySource.entries()]
       .map(([sourceType, value]) => ({
         sourceType,
         name: sourceLabel(sourceType),
-        value: Math.round(value * 100) / 100,
+        value: cents(value),
       }))
       .sort((a, b) => b.value - a.value),
     unlockTimeline: buildUnlockTimeline(timelineInput),

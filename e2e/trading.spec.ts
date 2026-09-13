@@ -58,6 +58,16 @@ test.describe("Trading", () => {
   });
 
   test("les sous-onglets historiques restent en place", async ({ page }) => {
+    /*
+      Timeout mesuré en CI en fin de suite complète (300+ tests, run de
+      20,8 min) : `trading-sub-journal` n'était pas encore rendu au bout du
+      timeout par défaut de 15s (voir `expect: { timeout: 15_000 }` dans
+      playwright.config.ts), sans qu'aucune assertion de valeur ne soit en
+      cause — le sous-onglet finit par apparaître, juste plus tard sous
+      saturation CI. On donne à ce test et à l'attente du dernier sous-onglet
+      une marge plus large, sans toucher au timeout global de la config.
+    */
+    test.setTimeout(150_000);
     await page.goto("/trading", { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("trading-tab")).toBeVisible({
       timeout: 20_000,
@@ -67,10 +77,18 @@ test.describe("Trading", () => {
     // positions elles-mêmes plutôt qu'un sommaire de modules. Les autres
     // sous-onglets existaient avant ce chantier et ne doivent pas avoir
     // disparu.
-    await expect(page.getByTestId("trading-sub-positions")).toBeVisible();
-    await expect(page.getByTestId("trading-sub-futures")).toBeVisible();
-    await expect(page.getByTestId("trading-sub-cfd")).toBeVisible();
-    await expect(page.getByTestId("trading-sub-journal")).toBeVisible();
+    await expect(page.getByTestId("trading-sub-positions")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("trading-sub-futures")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("trading-sub-cfd")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("trading-sub-journal")).toBeVisible({
+      timeout: 30_000,
+    });
 
     await page.getByTestId("trading-sub-futures").click();
     await expect(page.getByTestId("trading-goto-futures")).toHaveCount(0);
