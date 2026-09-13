@@ -29,7 +29,13 @@ describe("resolveDashboardContentVisibility", () => {
     expect(visibility.showJournal).toBe(true);
   });
 
-  it("n'invente rien en maturité empty — le cockpit porte déjà cet état", () => {
+  it("garde la carte de tête et le journal visibles en maturité empty — CR-vide : le compte peut porter un passif ou une assurance-vie que ces trois compteurs ignorent", () => {
+    // `resolveDashboardMaturity` ne voit que plateformes/transactions/positions.
+    // `DashboardTab` peut pourtant être monté avec ces trois compteurs à zéro :
+    // le cockpit se fie à l'état serveur (`getPatrimonyState`), qui couvre en
+    // plus passifs, assurance-vie, dépôts à terme, comptes-titres, trading…
+    // « empty » ici ne prouve donc plus un compte réellement vierge, et ne
+    // doit plus faire disparaître la carte de tête ni le journal.
     const maturity = resolveDashboardMaturity({
       platformCount: 0,
       transactionCount: 0,
@@ -39,8 +45,8 @@ describe("resolveDashboardContentVisibility", () => {
 
     const blocks = dashboardBlocksFor(maturity);
     const visibility = resolveDashboardContentVisibility(maturity, blocks);
-    expect(visibility.showHeroCard).toBe(false);
-    expect(visibility.showJournal).toBe(false);
+    expect(visibility.showHeroCard).toBe(true);
+    expect(visibility.showJournal).toBe(true);
   });
 
   it("suit les blocs analytiques dès que le compte est actif", () => {

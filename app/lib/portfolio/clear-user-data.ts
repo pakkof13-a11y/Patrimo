@@ -14,6 +14,15 @@ export type ResetUserDataResult = {
   snapshotsDeleted: number;
   /** Identités NFT, collections et curseurs de sync — ne cascadent pas depuis `Asset`. */
   nftIdentitiesDeleted: number;
+  /**
+   * Dépôts à terme, cessions de métaux précieux, comptes-titres (+ leurs
+   * versements, en cascade DB) et marchés DeFi déclaratifs — rattachés à
+   * `User`, pas à `Asset`, donc jamais couverts par `assetDel` ci-dessus.
+   */
+  termDepositsDeleted: number;
+  preciousMetalSalesDeleted: number;
+  securitiesAccountsDeleted: number;
+  defiMarketRefsDeleted: number;
 };
 
 /**
@@ -116,7 +125,30 @@ export async function resetUserData(userId: string): Promise<ResetUserDataResult
       /* models may be missing in older DBs */
     }
 
-    // Platforms after assets/transactions
+    // Dépôts à terme et cessions de métaux précieux : rattachés à `User`
+    // uniquement (onDelete: Cascade côté User, aucune FK vers Platform ou
+    // Asset), donc aucune contrainte d'ordre — mais un wipe « complet » qui
+    // les oubliait laissait des données financières résiduelles (AUTH-02).
+    const termDeposits = await tx.termDeposit.deleteMany({ where: { userId } });
+    const preciousMetalSales = await tx.preciousMetalSale.deleteMany({
+      where: { userId },
+    });
+
+    // Marchés/pools/vaults DeFi déclaratifs : rattachés à `User`, sans enfant
+    // (aucune autre table ne pointe vers `DefiMarketRef`, cf. schéma).
+    const defiMarketRefs = await tx.defiMarketRef.deleteMany({ where: { userId } });
+
+    // Comptes-titres AVANT les plateformes : `SecuritiesAccount.platformId`
+    // est en `onDelete: Restrict` (prisma/schema.prisma) — supprimer les
+    // plateformes d'abord fait échouer toute la transaction avec P2003 dès
+    // qu'un utilisateur détient un PEA/PEA-PME/CTO (AUTH-01/PLA-01/PRI-01).
+    // `SecuritiesAccountContribution` est en Cascade sur ce compte : la
+    // suppression ci-dessous les emporte, pas besoin de les cibler à part.
+    const securitiesAccounts = await tx.securitiesAccount.deleteMany({
+      where: { userId },
+    });
+
+    // Platforms after assets/transactions/securities accounts
     const platforms = await tx.platform.deleteMany({ where: { userId } });
 
     return {
@@ -133,6 +165,10 @@ export async function resetUserData(userId: string): Promise<ResetUserDataResult
       alternativesDeleted: alt,
       snapshotsDeleted: snaps,
       nftIdentitiesDeleted: nftIdentities,
+      termDepositsDeleted: termDeposits.count,
+      preciousMetalSalesDeleted: preciousMetalSales.count,
+      securitiesAccountsDeleted: securitiesAccounts.count,
+      defiMarketRefsDeleted: defiMarketRefs.count,
     };
   });
 }

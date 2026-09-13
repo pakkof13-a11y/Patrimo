@@ -39,7 +39,7 @@ export async function POST(req: Request) {
   } catch (e) {
     const message = clientErrorMessage(e, "Échec de la fusion");
     const status =
-      /introuvable|elle-même/i.test(message) ? 400 : 500;
+      /introuvable|elle-même|Fusion impossible/i.test(message) ? 400 : 500;
     if (status === 500) console.error("[platforms/merge]", e);
     return NextResponse.json({ error: message }, { status });
   }

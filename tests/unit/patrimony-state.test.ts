@@ -18,6 +18,10 @@ const EMPTY: PatrimonyPresence = {
   alternatives: false,
   realEstate: false,
   trading: false,
+  termDeposits: false,
+  preciousMetalSales: false,
+  securitiesAccounts: false,
+  defiStrategies: false,
 };
 
 describe("état patrimonial du compte", () => {
@@ -69,6 +73,21 @@ describe("état patrimonial du compte", () => {
   it("un compte ne portant qu'une plateforme n'est pas vierge", () => {
     // Une plateforme configurée est une donnée saisie, même sans opération.
     expect(patrimonyIsEmpty({ ...EMPTY, platforms: true })).toBe(false);
+  });
+
+  it("un compte ne portant qu'un contrat d'assurance-vie n'est pas vierge", () => {
+    // CR-vide : le cas cité par l'audit, avec `liabilities` ci-dessus.
+    expect(patrimonyIsEmpty({ ...EMPTY, lifeInsurances: true })).toBe(false);
+  });
+
+  it("un compte ne portant qu'un dépôt à terme, une cession de métal précieux, un compte-titres ou une stratégie DeFi n'est pas vierge", () => {
+    // Familles supprimées par `resetUserData` mais absentes du recensement
+    // avant ce correctif (chantier CR-vide) : rattachées à `User`, jamais à
+    // `Asset`, donc invisibles pour `holdings.length`.
+    expect(patrimonyIsEmpty({ ...EMPTY, termDeposits: true })).toBe(false);
+    expect(patrimonyIsEmpty({ ...EMPTY, preciousMetalSales: true })).toBe(false);
+    expect(patrimonyIsEmpty({ ...EMPTY, securitiesAccounts: true })).toBe(false);
+    expect(patrimonyIsEmpty({ ...EMPTY, defiStrategies: true })).toBe(false);
   });
 
   it("après suppression de toutes les données, le compte redevient vierge", () => {
