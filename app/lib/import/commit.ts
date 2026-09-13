@@ -1,5 +1,6 @@
 import { recordEnvelopeEvent } from "@/app/lib/securities/envelope-history";
 import { prisma } from "../prisma";
+import { Prisma } from "@/app/lib/prisma-client/client";
 import { createTransaction, createOwnershipCache } from "../transactions/service";
 import { loadLedgerForUser } from "../portfolio/service";
 import { invalidateLedgerCache } from "../portfolio/ledger-cache";
@@ -63,6 +64,17 @@ export type AnalyzeImportResult = {
   totalSelected: number;
 };
 
+type ResolvedAsset = {
+  id: string | null;
+  /**
+   * Clé de cache pour un Asset TOUT JUSTE créé dans la transaction de la
+   * ligne en cours, encore non confirmée — voir commitImport (IMP-11).
+   * L'appelant ne l'enregistre dans `assetCache` qu'après le commit réussi
+   * de cette transaction, jamais avant.
+   */
+  pendingCacheKey?: string;
+};
+
 async function resolveOrCreateAsset(
   userId: string,
   platformId: string,
@@ -73,15 +85,26 @@ async function resolveOrCreateAsset(
    * tickers sur des centaines de lignes (111 lignes Revolut = 5 tickers) :
    * sans cache, chaque ligne refait les deux findFirst de résolution.
    */
-  assetCache?: Map<string, string>
-): Promise<string | null> {
+  assetCache?: Map<string, string>,
+  /**
+   * Client Prisma optionnel — passer le `tx` de la transaction interactive qui
+   * enveloppe la ligne (voir commitImport, IMP-11) pour que la création
+   * éventuelle de l'Asset et son constat d'enveloppe fassent partie de LA
+   * MÊME transaction que `createTransaction` : si celle-ci échoue ensuite,
+   * Prisma annule aussi l'Asset créé ici — plus d'Asset orphelin en base.
+   * Sans `tx`, repli sur le singleton `prisma` (comportement historique,
+   * inchangé pour tout autre appelant).
+   */
+  tx?: Prisma.TransactionClient
+): Promise<ResolvedAsset> {
+  const db = tx ?? prisma;
   const needsAsset =
     row.type &&
     ["ACHAT", "VENTE", "REWARD", "AIRDROP", "DIVIDENDE", "COUPON", "LOYER"].includes(
       row.type
     );
 
-  if (!needsAsset) return null;
+  if (!needsAsset) return { id: null };
 
   const ticker = row.ticker;
   const name = row.name || ticker || "Actif importé";
@@ -104,22 +127,25 @@ async function resolveOrCreateAsset(
   // Clé = tout ce dont dépend la résolution ci-dessous.
   const cacheKey = `${platformId}|${accountType}|${ticker ?? ""}|${name.toLowerCase()}`;
   const memo = assetCache?.get(cacheKey);
-  if (memo) return memo;
+  if (memo) return { id: memo };
 
+  // Réutilisation d'un Asset déjà en base : la ligne (findFirst) existe
+  // indépendamment du sort de la transaction en cours, donc la mémoriser
+  // immédiatement est sans risque.
   const remember = (id: string) => {
     assetCache?.set(cacheKey, id);
-    return id;
+    return { id };
   };
 
   if (ticker) {
-    const byTicker = await prisma.asset.findFirst({
+    const byTicker = await db.asset.findFirst({
       where: assetReuseByTickerWhere(userId, ticker, accountType),
       orderBy: { createdAt: "asc" },
     });
     if (byTicker) return remember(byTicker.id);
   }
 
-  const byName = await prisma.asset.findFirst({
+  const byName = await db.asset.findFirst({
     where: {
       userId,
       platformId,
@@ -175,8 +201,8 @@ async function resolveOrCreateAsset(
     antérieures à l'import restent inconnues, même si ses opérations sont
     anciennes.
   */
-  const created = await prisma.$transaction(async (tx) => {
-    const asset = await tx.asset.create({
+  const createAssetAndEnvelope = async (client: Prisma.TransactionClient) => {
+    const asset = await client.asset.create({
       data: {
         userId,
         platformId,
@@ -191,7 +217,7 @@ async function resolveOrCreateAsset(
       },
     });
 
-    await recordEnvelopeEvent(tx, {
+    await recordEnvelopeEvent(client, {
       assetId: asset.id,
       userId,
       kind: "OBSERVED",
@@ -204,9 +230,26 @@ async function resolveOrCreateAsset(
     });
 
     return asset;
-  });
+  };
 
-  return remember(created.id);
+  // Un `tx` fourni (ligne du lot, voir commitImport/IMP-11) EST déjà une
+  // transaction interactive : y ouvrir un `prisma.$transaction` imbriqué
+  // n'est pas supporté par Prisma. On écrit alors directement dedans — c'est
+  // déjà atomique avec le `createTransaction` qui suit, dans le même `tx`.
+  // Sans `tx` (autre appelant éventuel), on garde le `prisma.$transaction`
+  // isolé d'origine.
+  const created = tx
+    ? await createAssetAndEnvelope(tx)
+    : await prisma.$transaction(createAssetAndEnvelope);
+
+  // Ne PAS `remember()` ici quand `tx` est fourni : cet Asset n'est validé
+  // qu'au commit de la transaction englobante (voir commitImport, IMP-11) —
+  // si `createTransaction` échoue ensuite et fait tout annuler, un
+  // `assetCache.set` immédiat laisserait un id d'Asset fantôme (rollback) dans
+  // le cache du lot, que la ligne suivante avec le même ticker réutiliserait
+  // à tort. Le cacheKey est rendu à l'appelant, qui ne le mémorise qu'après
+  // succès confirmé de la transaction.
+  return tx ? { id: created.id, pendingCacheKey: cacheKey } : remember(created.id);
 }
 
 async function loadExistingLite(
@@ -646,35 +689,59 @@ export async function commitImportRows(params: {
 
       const rowFxRateToEur = resolveRowFxRate(row, fxByCurrency);
 
-      const assetId = await resolveOrCreateAsset(
-        userId,
-        rowPlatformId,
-        row,
-        params.accountEnvelopeType,
-        assetCache
-      );
-      await createTransaction(
-        {
+      // IMP-11 : `resolveOrCreateAsset` (création d'Asset possible) et
+      // `createTransaction` de CETTE ligne partagent maintenant une seule
+      // transaction Prisma. Si `createTransaction` échoue (ex. FX_RATE_UNKNOWN),
+      // Prisma annule aussi l'Asset créé juste avant — plus d'Asset orphelin.
+      // `ledgerState` reste le cache en mémoire du lot (IMP-04) : passé à
+      // `createTransaction` via `opts.ledgerState`, il prime désormais sur la
+      // présence de `tx` (voir service.ts) et n'est publié dans l'état partagé
+      // qu'après le commit réussi de CETTE ligne — un rollback ne le corrompt
+      // donc pas pour la ligne suivante.
+      let pendingAssetCacheEntry: { key: string; id: string } | undefined;
+      await prisma.$transaction(async (tx) => {
+        const resolved = await resolveOrCreateAsset(
           userId,
-          type: row.type as TxType,
-          platformId: rowPlatformId,
-          assetId: assetId || null,
-          quantity: row.quantity || undefined,
-          unitPrice: row.unitPrice || undefined,
-          cashAmount: row.cashAmount || undefined,
-          fees: row.fees || "0",
-          currency: row.currency || "EUR",
-          fxRateToEur: rowFxRateToEur,
-          occurredAt: row.occurredAt || new Date().toISOString(),
-          notes: row.notes
-            ? `[Import CSV L${row.line}] ${row.notes}`
-            : `[Import CSV L${row.line}]`,
-          autoFundCash: true,
-          allowNegativeCash: true,
-        },
-        undefined,
-        { ledgerState, skipInvalidate: true, ownership }
-      );
+          rowPlatformId,
+          row,
+          params.accountEnvelopeType,
+          assetCache,
+          tx
+        );
+        if (resolved.pendingCacheKey && resolved.id) {
+          pendingAssetCacheEntry = { key: resolved.pendingCacheKey, id: resolved.id };
+        }
+        await createTransaction(
+          {
+            userId,
+            type: row.type as TxType,
+            platformId: rowPlatformId,
+            assetId: resolved.id || null,
+            quantity: row.quantity || undefined,
+            unitPrice: row.unitPrice || undefined,
+            cashAmount: row.cashAmount || undefined,
+            fees: row.fees || "0",
+            currency: row.currency || "EUR",
+            fxRateToEur: rowFxRateToEur,
+            occurredAt: row.occurredAt || new Date().toISOString(),
+            notes: row.notes
+              ? `[Import CSV L${row.line}] ${row.notes}`
+              : `[Import CSV L${row.line}]`,
+            autoFundCash: true,
+            allowNegativeCash: true,
+          },
+          tx,
+          { ledgerState, skipInvalidate: true, ownership }
+        );
+      });
+      // Transaction de la ligne commitée avec succès (aucune exception levée
+      // jusqu'ici) : c'est seulement maintenant qu'un Asset tout juste créé
+      // (voir ResolvedAsset.pendingCacheKey) devient sûr à mémoriser pour les
+      // lignes suivantes du même lot — avant ce point, un rollback l'aurait
+      // rendu fantôme.
+      if (pendingAssetCacheEntry) {
+        assetCache.set(pendingAssetCacheEntry.key, pendingAssetCacheEntry.id);
+      }
       seenStrict.add(sfp);
       created++;
     } catch (e) {

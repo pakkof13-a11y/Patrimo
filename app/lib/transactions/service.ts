@@ -489,11 +489,22 @@ export async function createTransaction(
   // persistée si CET insert échoue.
   let nextState: LedgerState | undefined;
 
-  if (prismaClient) {
-    // Dans une transaction interactive (ex. SL/TP, market/triggers.ts) : lecture
-    // fraîche via `tx` obligatoire pour les garanties d'isolation — ne pas
-    // réutiliser le cache loadLedgerForUser (basé sur le client singleton,
-    // hors de cette transaction, il ne verrait pas les écritures en cours).
+  if (opts?.ledgerState) {
+    // Chemin de lot (import CSV, éventuellement dans un `tx` par ligne pour
+    // IMP-11/IMP-04) : la présence d'un `ledgerState` prime sur celle d'un
+    // `prismaClient` — le cache déjà calculé/mis à jour par ligne (voir plus
+    // bas) reste la source de vérité, même quand l'écriture elle-même passe
+    // par une transaction interactive. Sans cette priorité, un appelant qui
+    // fournit les deux retomberait sur le `findMany` + replay complet
+    // ci-dessous à CHAQUE ligne (régression O(n²), le exact problème que ce
+    // cache existe pour éviter).
+    nextState = validateLedgerIncremental(opts.ledgerState, newTx, allowNeg);
+  } else if (prismaClient) {
+    // Dans une transaction interactive SANS `ledgerState` (ex. SL/TP, voir
+    // market/triggers.ts) : lecture fraîche via `tx` obligatoire pour les
+    // garanties d'isolation — ne pas réutiliser le cache loadLedgerForUser
+    // (basé sur le client singleton, hors de cette transaction, il ne
+    // verrait pas les écritures en cours).
     const existingRows = await client.transaction.findMany({
       where: { userId: input.userId },
       orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
@@ -502,7 +513,7 @@ export async function createTransaction(
   } else {
     // Chemin normal : réutilise le ledger déjà calculé/caché par
     // loadLedgerForUser (fingerprint) au lieu d'un findMany + replay complet.
-    const ledgerState = opts?.ledgerState ?? (await loadLedgerForUser(input.userId));
+    const ledgerState = await loadLedgerForUser(input.userId);
     nextState = validateLedgerIncremental(ledgerState, newTx, allowNeg);
   }
 

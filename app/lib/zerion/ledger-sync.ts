@@ -8,7 +8,11 @@ import { d, toFixed } from "@/app/lib/money/decimal";
 import { positionKey } from "@/app/lib/accounting/types";
 import { loadLedgerForUser } from "@/app/lib/portfolio/service";
 import { createTransaction } from "@/app/lib/transactions/service";
-import { fxRateToEur } from "@/app/lib/market/fx";
+import {
+  fxRateToEur,
+  fxRatesToEurRange,
+  type FxRangeResult,
+} from "@/app/lib/market/fx";
 import { invalidateLedgerCache } from "@/app/lib/portfolio/ledger-cache";
 import type {
   ZerionBalanceItem,
@@ -21,6 +25,42 @@ import { shouldTagAsAirdrop } from "@/app/lib/transactions/nft-filter";
 export const ZERION_SYNC_NOTE_TAG = "[wallet-sync:zerion]";
 export const ZERION_TX_NOTE_PREFIX = "[zerion:";
 export const MONERO_SYNC_NOTE_TAG = "[wallet-sync:monero]";
+
+/**
+ * Jours civils de repli pour trouver le dernier fixing BCE ≤ jour demandé.
+ *
+ * La BCE ne publie ni le week-end ni les jours fériés ; le plus long trou
+ * constaté est Pâques (4 jours). Sept jours couvrent tous les cas observés.
+ * Même valeur et même raison que `app/lib/import/commit.ts::resolveRowFxRate`.
+ */
+const FX_LOOKBACK_DAYS = 7;
+
+/** Jour civil (YYYY-MM-DD) décalé de `deltaDays`, en UTC — jamais une approximation en 365 jours. */
+function shiftDay(day: string, deltaDays: number): string {
+  const dt = new Date(`${day}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Taux USD→EUR du jour `day` dans une série pré-résolue, ou `null`.
+ *
+ * Remonte au plus `FX_LOOKBACK_DAYS` jours pour attraper le dernier fixing
+ * BCE (week-ends, fériés). Ne fabrique jamais de taux : série absente,
+ * fournisseur injoignable ou trou plus long rendent `null`, et c'est à
+ * l'appelant de refuser d'écrire la ligne.
+ */
+function fxRateOnDay(
+  range: FxRangeResult | null,
+  day: string
+): string | null {
+  if (!range || range.status !== "ok") return null;
+  for (let back = 0; back <= FX_LOOKBACK_DAYS; back++) {
+    const rate = range.byDay.get(shiftDay(day, -back));
+    if (rate) return rate;
+  }
+  return null;
+}
 
 export type ZerionLedgerResult = {
   assetsTouched: number;
@@ -441,13 +481,15 @@ export async function writeZerionHistoryToLedger(
   skipped: number;
   errors: number;
   skippedNoDate: number;
+  /** Transfers refusés faute de taux BCE démontré à leur date on-chain. */
+  skippedFxUnknown: number;
   firstSeenByKey: Map<string, string>;
 }> {
-  const fxUsdToEur = await fxRateToEur("USD");
   let historyTxsCreated = 0;
   let skipped = 0;
   let errors = 0;
   let skippedNoDate = 0;
+  let skippedFxUnknown = 0;
 
   const firstSeenByKey = buildZerionFirstSeenMap(transactions);
 
@@ -457,6 +499,37 @@ export async function writeZerionHistoryToLedger(
     .sort(
       (a, b) => (a.timestampUnix ?? 0) - (b.timestampUnix ?? 0)
     );
+
+  /*
+    Pré-résolution FX du lot : un seul appel Frankfurter pour toute la plage
+    [plus ancien mined_at … plus récent], jamais un par transfer. Un historique
+    wallet compte couramment des centaines de fills étalés sur plusieurs
+    années — autant d'allers-retours réseau dépasseraient le budget de la
+    route de sync, même contrainte que l'import CSV (`app/lib/import/commit.ts`).
+
+    Le taux appliqué à un transfer est celui du jour de SON `mined_at`, jamais
+    celui du jour de la sync : `leg.priceUsd` est le prix Zerion à la date de
+    la transaction, le convertir au taux d'aujourd'hui mélangeait deux dates
+    et faussait le prix de revient d'autant que l'EUR/USD avait dérivé depuis.
+  */
+  let fxUsdRange: FxRangeResult | null = null;
+  {
+    let minDay: string | null = null;
+    let maxDay: string | null = null;
+    for (const tx of ordered) {
+      const day = tx.occurredAtIso?.slice(0, 10);
+      if (!day) continue; // refusé ligne par ligne plus bas (skippedNoDate)
+      if (!minDay || day < minDay) minDay = day;
+      if (!maxDay || day > maxDay) maxDay = day;
+    }
+    if (minDay && maxDay) {
+      fxUsdRange = await fxRatesToEurRange(
+        "USD",
+        shiftDay(minDay, -FX_LOOKBACK_DAYS),
+        maxDay
+      );
+    }
+  }
 
   for (const tx of ordered) {
     const hash = tx.hash!;
@@ -486,8 +559,29 @@ export async function writeZerionHistoryToLedger(
       continue;
     }
 
+    // Taux du jour de l'événement on-chain (identique pour tous les transfers
+    // d'une même transaction). `null` = non démontré, cf. boucle ci-dessous.
+    const fxAtEvent = fxRateOnDay(fxUsdRange, occurredAt.slice(0, 10));
+
     for (const leg of legs) {
       try {
+        /*
+          Un transfer valorisé (prix USD connu) exige le taux de sa date : sans
+          lui, la ligne n'est pas créée. Elle n'est ni convertie au taux du
+          jour, ni écrite avec `fxRateToEur: "1"` — une absence de taux ne se
+          remplace pas par un taux supposé.
+
+          Un transfer sans prix USD (REWARD/airdrop) ne convertit rien : la
+          quantité reçue est un fait on-chain qui ne dépend d'aucun taux, il
+          reste donc importé.
+        */
+        const needsFx = leg.priceUsd != null && leg.priceUsd > 0;
+        if (needsFx && !fxAtEvent) {
+          skippedFxUnknown += 1;
+          skipped += 1;
+          continue;
+        }
+
         const balLike: ZerionBalanceItem = {
           ticker: leg.ticker,
           name: leg.name,
@@ -505,10 +599,9 @@ export async function writeZerionHistoryToLedger(
           platformId,
           balLike
         );
-        const unitEur =
-          leg.priceUsd != null && leg.priceUsd > 0
-            ? toFixed(d(leg.priceUsd).times(d(fxUsdToEur)), 12)
-            : null;
+        const unitEur = needsFx
+          ? toFixed(d(leg.priceUsd!).times(d(fxAtEvent!)), 12)
+          : null;
         const qty = toFixed(d(leg.amount), 12);
         const note = `${tag} ${ZERION_SYNC_NOTE_TAG} ${tx.type} ${leg.direction} ${leg.ticker} chain=${tx.chainId || "?"} at=${formatParisDateTime(occurredAt) || occurredAt}`;
 
@@ -578,6 +671,7 @@ export async function writeZerionHistoryToLedger(
     skipped,
     errors,
     skippedNoDate,
+    skippedFxUnknown,
     firstSeenByKey,
   };
 }
