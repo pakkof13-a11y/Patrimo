@@ -346,7 +346,19 @@ export function TransactionModal({
         if (cancelled) return;
 
         const newFx = fxRateToEurFromRates(next, rates);
-        form.setValue("fxRateToEur", newFx, { shouldDirty: true });
+        /*
+          JOU-02 : ce taux est celui du JOUR de la saisie, pas de la date de
+          l'opération — il ne doit jamais atterrir dans le champ persisté,
+          sous peine d'être lu par `resolveFx` comme un taux « fourni » et
+          jamais recalculé. Il ne sert plus qu'à convertir les montants
+          ci-dessous (fonctionnalité distincte, déjà remontée comme
+          approximation à trancher séparément). Le champ `fxRateToEur` est la
+          responsabilité exclusive de l'effet historique plus bas : "1" pour
+          l'EUR, vide sinon, tant qu'il n'a pas résolu la date.
+        */
+        form.setValue("fxRateToEur", next === "EUR" ? "1" : "", {
+          shouldDirty: true,
+        });
         form.setValue("currency", next, { shouldDirty: true });
 
         if (convertAmounts) {
@@ -362,19 +374,19 @@ export function TransactionModal({
             });
           }
           setFxHint(
-            `${prev} → ${next} · taux ${newFx} · montants convertis (équivalent € conservé)`
+            `${prev} → ${next} · taux du jour ${newFx} (conversion) · taux de l'opération à résoudre`
           );
         } else {
           setFxHint(
-            `${prev} → ${next} · taux ${newFx} · montants inchangés (recalcul € à l’enregistrement)`
+            `${prev} → ${next} · montants inchangés · taux de l'opération à résoudre`
           );
         }
         prevCurrencyRef.current = next;
       } catch {
         if (!cancelled) {
-          if (next === "EUR") {
-            form.setValue("fxRateToEur", "1", { shouldDirty: true });
-          }
+          form.setValue("fxRateToEur", next === "EUR" ? "1" : "", {
+            shouldDirty: true,
+          });
           setFxHint("Taux indisponible — saisissez-le manuellement");
           prevCurrencyRef.current = next;
         }
@@ -419,7 +431,19 @@ export function TransactionModal({
   }
 
   useEffect(() => {
-    if (!open || !isIncome) return;
+    /*
+      JOU-02 : ce rechargement au taux historique doit s'appliquer à TOUS les
+      types, pas seulement aux revenus. L'effet de changement de devise
+      ci-dessus (lignes ~318-390) pose un taux du JOUR de la saisie dès que
+      l'utilisateur change la devise — une vraie valeur numérique, jamais
+      "1" — et ce taux traversait `resolveFx` sans être recalculé pour
+      ACHAT/VENTE/APPORT/RETRAIT/FRAIS/REWARD/AIRDROP, puisque ce chemin ne se
+      déclenchait qu'avec `isIncome`. Un ACHAT en USD daté de 2021 se voyait
+      alors enregistré au taux de 2026. `paymentDate` reste vide pour ces
+      types (non saisissable dans ce formulaire) : le repli sur `occurredAt`
+      fait foi, comme côté serveur (`resolveFx`).
+    */
+    if (!open) return;
     const cur = (currency || "EUR").toUpperCase();
     if (cur === "EUR") {
       form.setValue("fxRateToEur", "1", { shouldDirty: false });
@@ -434,7 +458,13 @@ export function TransactionModal({
           `/api/fx?from=${encodeURIComponent(cur)}&date=${encodeURIComponent(day)}`,
           { cache: "no-store" }
         );
-        if (!res.ok || cancelled) return;
+        if (cancelled) return;
+        if (!res.ok) {
+          setFxHint(
+            `Taux historique ${cur}→EUR au ${day} indisponible — saisissez-le pour enregistrer l'opération.`
+          );
+          return;
+        }
         const data = (await res.json()) as { fxRateToEur?: string | null };
         if (cancelled) return;
         if (data.fxRateToEur) {
@@ -452,7 +482,11 @@ export function TransactionModal({
           );
         }
       } catch {
-        /* ignore */
+        if (!cancelled) {
+          setFxHint(
+            `Taux historique ${cur}→EUR au ${day} indisponible — saisissez-le pour enregistrer l'opération.`
+          );
+        }
       }
     })();
     return () => {
