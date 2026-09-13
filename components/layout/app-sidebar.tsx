@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/app/lib/utils";
 import { isPositionsTab, type MainTab } from "@/app/lib/types/ui";
+import { BRAND } from "@/components/branding/brand-assets";
 
 /**
  * Architecture de navigation — quatre familles.
@@ -120,6 +121,45 @@ const SECTION_TABS = new Map<string, Set<MainTab>>(
   NAV_SECTIONS.map((g) => [g.id, new Set(g.items.map((i) => i.id))])
 );
 
+/**
+ * Titre d'onglet navigateur par section (SHELL-03).
+ *
+ * `app/layout.tsx` ne pose qu'un `<title>` statique — cette route est un
+ * catch-all monté une seule fois, les vraies vues sont des changements
+ * d'état client (`tab`), jamais un `generateMetadata` par segment. Sans ce
+ * mapping, l'onglet du navigateur affichait « Aurea — Suivi de patrimoine »
+ * sur tout l'écran, y compris après un changement d'onglet.
+ *
+ * `Record<MainTab, string>` force l'exhaustivité : un `MainTab` oublié ici
+ * est une erreur de compilation, pas un titre générique silencieux.
+ */
+const TAB_TITLES: Record<MainTab, string> = {
+  dashboard: "Tableau de bord",
+  holdings: "Portefeuille",
+  securities: "PEA & CTO",
+  banques: "Banques",
+  "assurance-vie": "Assurance-vie",
+  immobilier: "Immobilier",
+  crypto: "Cryptos",
+  "epargne-salariale": "Épargne salariale",
+  alternatifs: "Actifs alternatifs",
+  liabilities: "Passifs / Crédits",
+  trading: "Trading",
+  transactions: "Transactions",
+  platforms: "Plateformes",
+  fiscal: "Fiscalité",
+  // Vues filtrées du tableau Positions (paramètre `?envelope=`) : mêmes
+  // libellés que le sélecteur d'enveloppe (`ENVELOPE_SELECT_OPTIONS`).
+  av: "Assurance-vie",
+  cfd: "CFD",
+};
+
+/** Fonction pure — testable sans DOM (`vitest`, `environment: "node"`). */
+export function tabTitle(tab: MainTab): string {
+  const label = TAB_TITLES[tab] ?? BRAND.name;
+  return `${label} — ${BRAND.name}`;
+}
+
 type DirectEntry = {
   id: MainTab;
   label: string;
@@ -177,6 +217,32 @@ export function AppSidebar({
   /** Groupe dont le sous-menu est ouvert — un seul à la fois. */
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  // ── SHELL-03 : document.title suit la section affichée ──────────────────
+  useEffect(() => {
+    document.title = tabTitle(tab);
+  }, [tab]);
+
+  /*
+    SHELL-04 : gestion du focus lors d'une navigation interne (SPA).
+
+    Le lien d'évitement existant (`#main-content`, dans `portfolio-app.tsx`)
+    ne couvrait que le tout premier Tab de la page — rien ne redonnait le
+    focus au contenu après un changement d'onglet déclenché par un clic
+    (rail, CTA de tableau de bord, etc.), laissant le focus sur un bouton
+    parfois retiré du DOM. `tab` change pour TOUT changement d'onglet, quelle
+    qu'en soit l'origine (ce composant est le seul à le recevoir en prop à
+    chaque rendu) : on saute le tout premier montage pour ne pas voler le
+    focus au chargement initial de la page.
+  */
+  const isFirstTabRender = useRef(true);
+  useEffect(() => {
+    if (isFirstTabRender.current) {
+      isFirstTabRender.current = false;
+      return;
+    }
+    document.getElementById("main-content")?.focus();
+  }, [tab]);
 
   /*
     `av` et `cfd` sont des vues filtrées du tableau Positions : ce sont des
