@@ -307,26 +307,41 @@ test.describe("Carte de tête — survol de la courbe", () => {
 
     /*
       L'identité, vérifiée à l'écran et pas seulement dans l'utilitaire :
-      variation = marché + flux, aux arrondis d'affichage près.
-    */
-    expect(Math.abs(longue.marche + longue.flux - longue.variation)).toBeLessThan(1);
+      variation = Performance + Capital investi (libellés réels des deux
+      pastilles, `hero-pill-market`/`hero-pill-flow`), à 1 € près — même
+      tolérance que les identités de `coherence-totaux.spec.ts`.
 
-    /*
-      Le décor porte une acquisition immobilière et des apports réguliers : sur
-      tout l'historique, l'essentiel de la hausse vient donc des capitaux
-      apportés, non du marché. C'est précisément ce que la décomposition doit
-      rendre visible — sans elle, la courbe se lirait comme une performance.
+      Décision produit : ce test ne compare plus « flux » à « marché » entre
+      eux. Le décor porte de vrais tickers (LVMH, AAPL, BTC…) valorisés par de
+      vrais fournisseurs de cours EN DIRECT (Yahoo/CoinGecko) — le demo reste
+      un vrai marché, ses cours bougent réellement d'un jour à l'autre. Lequel
+      des deux termes domine dépend donc du marché du jour, pas d'un fait du
+      décor : l'affirmer en dur rendait ce test instable sans lien avec une
+      régression de code. L'identité, elle, est un invariant comptable qui ne
+      dépend d'aucun cours — elle doit tenir quel que soit l'état du marché.
     */
-    expect(longue.flux).toBeGreaterThan(longue.marche);
+    expect(
+      Math.abs(longue.marche + longue.flux - longue.variation)
+    ).toBeLessThanOrEqual(1);
 
     // Changer de période recalcule les trois ensemble.
     await page.getByTestId("hero-range-1m").click();
     await expect(page.getByTestId("hero-window-label")).toHaveText("sur 1 mois");
+    /*
+      Même garde qu'avant la première lecture : les pastilles se remontent au
+      changement de fenêtre, les lire avant qu'elles ne soient prêtes romprait
+      l'identité pour une raison de timing, pas de calcul.
+    */
+    await expect(page.getByTestId("hero-pill-market")).toBeVisible({
+      timeout: 20_000,
+    });
     const courte = await trio();
 
     expect(courte.variation).not.toBe(longue.variation);
     expect(courte.flux).not.toBe(longue.flux);
-    expect(Math.abs(courte.marche + courte.flux - courte.variation)).toBeLessThan(1);
+    expect(
+      Math.abs(courte.marche + courte.flux - courte.variation)
+    ).toBeLessThanOrEqual(1);
   });
 
   test("les repères d'événements restent lisibles, même sur tout l'historique", async ({
