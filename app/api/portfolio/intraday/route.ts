@@ -65,10 +65,13 @@ export async function GET(req: Request) {
 
   const series = await buildIntradaySeries({ userId, from, to, maxPoints });
 
-  return NextResponse.json({
-    from: from.toISOString(),
-    to: to.toISOString(),
-    days,
-    ...series,
-  });
+  return NextResponse.json(
+    {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      days,
+      ...series,
+    },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }

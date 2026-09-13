@@ -222,7 +222,7 @@ export function FilterChip({
                     {o.label}
                   </span>
                   {o.count != null && (
-                    <span className="num shrink-0 text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
+                    <span className="num shrink-0 text-[length:var(--text-2xs)] text-[var(--foreground-secondary)]">
                       {o.count}
                     </span>
                   )}
@@ -237,7 +237,7 @@ export function FilterChip({
               <button
                 key={s.testId}
                 type="button"
-                className="term-chip-option justify-center text-[var(--foreground-faint)]"
+                className="term-chip-option justify-center text-[var(--foreground-secondary)]"
                 data-testid={s.testId}
                 onClick={() => onChange(s.next)}
               >
@@ -249,7 +249,7 @@ export function FilterChip({
           restricting && (
             <button
               type="button"
-              className="term-chip-option mt-[var(--space-1)] justify-center border-t border-[var(--border)] pt-[var(--space-2)] text-[var(--foreground-faint)]"
+              className="term-chip-option mt-[var(--space-1)] justify-center border-t border-[var(--border)] pt-[var(--space-2)] text-[var(--foreground-secondary)]"
               data-testid={`${testId}-clear`}
               onClick={() => onChange([])}
             >

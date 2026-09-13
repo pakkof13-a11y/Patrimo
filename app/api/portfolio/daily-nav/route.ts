@@ -132,10 +132,13 @@ export async function GET(req: Request) {
 
   try {
     const result = await getDailyNav({ userId, scope, from, to });
-    return NextResponse.json({
-      ...result,
-      points: compressDailyNavPoints(result.points),
-    });
+    return NextResponse.json(
+      {
+        ...result,
+        points: compressDailyNavPoints(result.points),
+      },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (e) {
     console.error("[daily-nav]", e);
     return NextResponse.json(

@@ -2233,7 +2233,10 @@ textarea:focus-visible,
   font-weight: var(--weight-medium);
   letter-spacing: var(--tracking-title);
   text-transform: uppercase;
-  color: var(--foreground-faint);
+  /* Nomme la catégorie du filtre (« Plateforme », « Devise ») : c'est de
+     l'information, pas une décoration — `--foreground-faint` tombe sous
+     4,5:1 sur `--surface-sunken` en thème clair (2,65:1). */
+  color: var(--foreground-secondary);
 }
 
 .term-chip[data-filtered="true"] .term-chip-label {
