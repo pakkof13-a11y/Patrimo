@@ -56,7 +56,9 @@ describe("toAllocationByVenueApi — contrat { venues, help, total, asOf }", () 
           }),
         ],
         envelopeCash: [{ envelope: "AV", balanceEur: "0" }],
-        crowdlending: [{ status: "REPAID", capitalInvestedEur: "3000" }],
+        crowdlending: [
+          { status: "REPAID", capitalInvestedEur: "3000", remainingCapitalEur: "0" },
+        ],
         // Position close : equity nulle. La manche reçoit des euros, la
         // conversion ayant lieu au chargement (D29).
         tradingPositions: [{ equityEur: "0" }],

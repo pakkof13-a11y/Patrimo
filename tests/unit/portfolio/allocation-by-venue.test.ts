@@ -369,9 +369,21 @@ describe("mapping D14.0 — enveloppes, or papier, REPAID, cash", () => {
       baseInput({
         privateEquity: [{ currentNavEur: "26700" }],
         crowdlending: [
-          { status: "ACTIVE", capitalInvestedEur: "5000" },
-          { status: "ACTIVE", capitalInvestedEur: "2500" },
-          { status: "REPAID", capitalInvestedEur: "3000" },
+          {
+            status: "ACTIVE",
+            capitalInvestedEur: "5000",
+            remainingCapitalEur: "5000",
+          },
+          {
+            status: "ACTIVE",
+            capitalInvestedEur: "2500",
+            remainingCapitalEur: "2500",
+          },
+          {
+            status: "REPAID",
+            capitalInvestedEur: "3000",
+            remainingCapitalEur: "0",
+          },
         ],
       })
     );
@@ -379,6 +391,48 @@ describe("mapping D14.0 — enveloppes, or papier, REPAID, cash", () => {
     expect(result.slices.some((s) => Math.abs(s.amount - 3000) < 1e-9)).toBe(
       false
     );
+  });
+
+  /*
+    FIN-04 — le donut doit porter la même clé que le sélecteur Compte
+    (`alternatives/portfolio.ts`) et la courbe historique : le capital
+    RESTANT dû, pas le capital investi initial. Avant le correctif, cette
+    ligne ACTIVE partiellement remboursée pesait encore 10 000 € ici pendant
+    que Brut/Net et la courbe comptaient 4 000 € — 6 000 € d'écart qui ne
+    s'annulait dans aucun total.
+  */
+  it("FIN-04 — un prêt ACTIVE partiellement remboursé pèse le capital restant, pas le capital investi", () => {
+    const result = computeAllocationByVenue(
+      baseInput({
+        crowdlending: [
+          {
+            status: "ACTIVE",
+            capitalInvestedEur: "10000",
+            remainingCapitalEur: "4000",
+          },
+        ],
+      })
+    );
+    expect(amountOf(result, "alt")).toBe(4000);
+  });
+
+  it("FIN-04 — un prêt ACTIVE jamais partiellement remboursé (remainingCapital=0 par défaut) retombe sur le capital investi", () => {
+    // `remainingCapital` est un champ récent, à 0 par défaut sur les lignes
+    // jamais retouchées depuis son ajout : un 0 par défaut n'y signifie pas
+    // « soldé », c'est le repli d'`effectiveRemainingCapital` qui s'applique
+    // (cf. app/lib/alternatives/crowdlending.ts).
+    const result = computeAllocationByVenue(
+      baseInput({
+        crowdlending: [
+          {
+            status: "ACTIVE",
+            capitalInvestedEur: "10000",
+            remainingCapitalEur: "0",
+          },
+        ],
+      })
+    );
+    expect(amountOf(result, "alt")).toBe(10000);
   });
 
   it("cash = banques + livrets, hors envelopeCash", () => {
@@ -471,7 +525,9 @@ describe("identité du donut — Σ, Hamilton, parts nulles", () => {
             marketValueEur: "1000",
           }),
         ],
-        crowdlending: [{ status: "REPAID", capitalInvestedEur: "3000" }],
+        crowdlending: [
+          { status: "REPAID", capitalInvestedEur: "3000", remainingCapitalEur: "0" },
+        ],
         tradingPositions: [{ equityEur: 0 }],
       })
     );

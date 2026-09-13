@@ -143,6 +143,11 @@ type PeRow = {
   currentNav: string;
   calledCapital: string;
   investedTotal: string;
+  /** Cumul des distributions perçues — comptées dans le P&L consolidé au
+   * même titre que les intérêts perçus du crowdlending (voir plus bas) :
+   * sans ça, une distribution qui fait baisser la NAV se lit comme une perte
+   * pure alors que l'argent est simplement reparti vers l'investisseur. */
+  distributionsReceived: string;
   currency: string;
 };
 
@@ -162,6 +167,14 @@ export function peToInvestment(
   const investedNative = called > 0 ? called : num(p.investedTotal);
   const investedEur = eur(investedNative, currency, rates);
   const valueEur = eur(num(p.currentNav), currency, rates);
+  // Le P&L consolidé inclut les distributions déjà perçues, au même titre
+  // que le crowdlending compte ses intérêts perçus ci-dessous — sinon une
+  // distribution qui fait baisser la NAV se lirait comme une perte pure.
+  // `unrealizedPnl` (nav − investi strict) reste, lui, inchangé côté service
+  // PE (private-equity.ts) : ce n'est ici qu'un total consolidé toutes
+  // classes confondues.
+  const distributionsEur = eur(num(p.distributionsReceived), currency, rates);
+  const pnlEur = valueEur - investedEur + distributionsEur;
   return {
     id: p.id,
     category: "PRIVATE_EQUITY",
@@ -170,7 +183,8 @@ export function peToInvestment(
     platform: p.vehicleName ?? null,
     valueEur,
     investedEur,
-    ...pnlOf(valueEur, investedEur),
+    pnlEur,
+    pnlPct: investedEur > 0 ? (pnlEur / investedEur) * 100 : null,
     status: "En cours",
     statusIsAlert: false,
     currency,

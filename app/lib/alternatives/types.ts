@@ -374,6 +374,15 @@ export type PrivateEquityDto = {
   moic: string;
   unrealizedPnl: string;
   unrealizedPnlPct: string;
+  /** Performance totale = `unrealizedPnl + distributionsReceived` (NAV −
+   * investi, plus ce qui est déjà sorti vers l'investisseur). Distinct de
+   * `unrealizedPnl` : celui-ci reste le "latent" strict NAV − coût, sans les
+   * distributions, pour ne pas se contredire — une distribution qui fait
+   * baisser la NAV ne doit pas se lire comme une perte alors que l'argent est
+   * simplement sorti. `totalReturn` recompose la vraie variation de valeur
+   * totale (cf. Δ valeur totale = Δ(parts×NAV) + distributions + apports). */
+  totalReturn: string;
+  totalReturnPct: string;
   /** Capital total engagé (commitment), distinct du capital effectivement
    * appelé. Valeur brute, aucun repli. */
   committedCapital: string;
@@ -415,6 +424,10 @@ export type PrivateEquitySummary = {
   totalInvested: string;
   totalNav: string;
   totalPnl: string;
+  /** Performance totale du portefeuille = `totalPnl + totalDistributions`
+   * (voir `PrivateEquityDto.totalReturn` pour la définition ligne à ligne).
+   * `totalPnl` ci-dessus reste le NAV − investi strict, inchangé. */
+  totalReturn: string;
   avgMoic: number;
   lineCount: number;
   /** Somme du capital appelé, repli appliqué ligne à ligne (voir

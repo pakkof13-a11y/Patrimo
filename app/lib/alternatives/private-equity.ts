@@ -102,6 +102,12 @@ export function mapRow(row: Row): PrivateEquityDto {
   );
   const calledN = n(called.toString());
   const distributions = n(row.distributionsReceived.toString());
+  // Performance totale : le latent (nav − investi) plus ce qui est déjà sorti
+  // en distributions — sans quoi une distribution qui fait baisser la NAV se
+  // lirait comme une perte pure, alors que l'argent est simplement reparti
+  // vers l'investisseur (cf. crowdlending, qui compte ses intérêts perçus).
+  const totalReturn = pnl + distributions;
+  const totalReturnPct = invested > 0 ? (totalReturn / invested) * 100 : 0;
   // null plutôt que 0 : sans base de calcul, un ratio à 0 laisserait croire
   // à une performance nulle sur un investissement réel, alors qu'il n'y a
   // simplement rien à diviser.
@@ -125,6 +131,8 @@ export function mapRow(row: Row): PrivateEquityDto {
     moic: (tvpi ?? 0).toFixed(2),
     unrealizedPnl: pnl.toFixed(2),
     unrealizedPnlPct: pnlPct.toFixed(2),
+    totalReturn: totalReturn.toFixed(2),
+    totalReturnPct: totalReturnPct.toFixed(2),
     committedCapital: row.committedCapital.toString(),
     calledCapital: row.calledCapital.toString(),
     calledCapitalIsDerived: !row.calledCapital.gt(0),
@@ -179,6 +187,7 @@ export function summarizePrivateEquity(
     totalInvested: totalInvested.toFixed(2),
     totalNav: totalNav.toFixed(2),
     totalPnl: (totalNav - totalInvested).toFixed(2),
+    totalReturn: (totalNav - totalInvested + totalDistributions).toFixed(2),
     avgMoic,
     lineCount: lines.length,
     totalCalledCapital: totalCalledCapital.toFixed(2),
