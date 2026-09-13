@@ -24,6 +24,14 @@ const PRET = {
   startDate: new Date("2021-09-13T16:05:00.000Z"),
   endDate: new Date("2051-08-17T05:35:00.000Z"),
   lastPaymentAppliedAt: null,
+  /*
+    Veille du départ, à dessein : la ligne n'a pas été réécrite depuis que le
+    prêt existe, donc aucune échéance n'a jamais été constatée et la projection
+    doit bien les rejouer toutes. C'est l'arithmétique testée ici — la borne est
+    désormais explicite (PAS-03) au lieu d'être déduite d'un `null`, mais les
+    montants sont les mêmes.
+  */
+  updatedAt: new Date("2021-09-12T16:05:00.000Z"),
   interestRate: "2.15",
 };
 

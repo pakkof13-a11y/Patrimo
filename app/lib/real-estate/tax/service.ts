@@ -158,6 +158,11 @@ export async function loadPropertyTaxRows(
                 startDate: true,
                 endDate: true,
                 lastPaymentAppliedAt: true,
+                // Borne de repli quand `lastPaymentAppliedAt` manque — sans
+                // elle, la dette déductible repartirait de `startDate` et
+                // l'assiette IFI gonflerait d'autant (voir
+                // `effectivePaymentBaseline`).
+                updatedAt: true,
                 // La devise vient avec le solde : un crédit en CHF pèse sur
                 // l'assiette IFI pour sa contre-valeur en euros, pas à parité.
                 currency: true,

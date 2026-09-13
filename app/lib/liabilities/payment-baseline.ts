@@ -38,7 +38,7 @@
 
 import { prisma } from "../prisma";
 import { owned } from "../db/tenant-scope";
-import { startOfUtcDay } from "./amortization";
+import { effectivePaymentBaseline } from "./amortization";
 import { LIABILITY_EVENT_TYPES } from "./event-types";
 
 /** Les seuls champs dont depend le choix de la borne. */
@@ -53,15 +53,18 @@ export type BaselineLiability = {
  *
  * Pure : elle n'ecrit rien et ne lit pas la base. `lastMonthlyDebitAt` est la
  * date du dernier prelevement mensuel deja inscrit, ou `null`.
+ *
+ * PAS-03 — la regle vit desormais dans `effectivePaymentBaseline`
+ * (`amortization.ts`, module pur), parce que les lecteurs en ont besoin aussi
+ * et qu'ils ne peuvent pas importer ce fichier-ci, qui parle a Prisma. Cette
+ * fonction reste le nom du chemin d'ecriture : c'est lui, et lui seul, qui
+ * affine la borne avec le dernier `MONTHLY_DEBIT`.
  */
 export function paymentBaselineFor(
   liability: BaselineLiability,
   lastMonthlyDebitAt: Date | null
 ): Date {
-  const fromRow = startOfUtcDay(liability.updatedAt);
-  if (!lastMonthlyDebitAt) return fromRow;
-  const fromEvent = startOfUtcDay(lastMonthlyDebitAt);
-  return fromEvent.getTime() > fromRow.getTime() ? fromEvent : fromRow;
+  return effectivePaymentBaseline(liability, lastMonthlyDebitAt);
 }
 
 /**
@@ -69,8 +72,10 @@ export function paymentBaselineFor(
  *
  * Appelee sur le chemin d'ecriture (`applyDuePaymentsForLiability`) avant toute
  * projection : c'est la que le rattrapage massif se serait produit, donc c'est
- * la qu'il faut le couper. Les lecteurs, eux, ne sont pas touches — ils
- * projettent et n'ecrivent rien, comme le veut la doctrine du module.
+ * la qu'il faut le couper. Les lecteurs, eux, n'appellent pas cette fonction —
+ * ils n'ecrivent rien, comme le veut la doctrine du module — mais ils
+ * appliquent la meme regle de borne, via `effectivePaymentBaseline`
+ * (PAS-03) : sceller n'est pas la condition pour afficher juste.
  *
  * Rend la dette rafraichie, ou `null` si elle a disparu entre-temps. Une ligne
  * qui porte deja une borne est rendue telle quelle : la fonction est un

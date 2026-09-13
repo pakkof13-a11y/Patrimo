@@ -70,6 +70,13 @@ function bien(currency: string) {
           startDate: null,
           endDate: null,
           lastPaymentAppliedAt: null,
+          /*
+            Borne de lecture (PAS-03) : sans elle, une dette non bornée
+            repartirait de `startDate` à l'affichage. Le `select` du service la
+            charge désormais, la fixture la porte donc aussi — ici sans effet,
+            faute de mensualité à amortir.
+          */
+          updatedAt: new Date("2026-01-15T00:00:00.000Z"),
           currency,
         },
       ],

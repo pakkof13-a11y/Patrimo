@@ -53,6 +53,11 @@ async function platformImpact(userId: string, id: string) {
         startDate: true,
         endDate: true,
         lastPaymentAppliedAt: true,
+        // Borne de repli quand `lastPaymentAppliedAt` manque — sans elle, la
+        // projection repartirait de `startDate` (voir
+        // `effectivePaymentBaseline`). Colonne de la ligne déjà lue : aucune
+        // requête de plus.
+        updatedAt: true,
         asset: { select: { name: true } },
       },
     }),
@@ -304,6 +309,11 @@ export async function DELETE(req: Request) {
         startDate: true,
         endDate: true,
         lastPaymentAppliedAt: true,
+        // Borne de repli quand `lastPaymentAppliedAt` manque — sans elle, la
+        // projection repartirait de `startDate` (voir
+        // `effectivePaymentBaseline`). Colonne de la ligne déjà lue : aucune
+        // requête de plus.
+        updatedAt: true,
         asset: { select: { name: true } },
       },
     }),
