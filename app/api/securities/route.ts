@@ -100,6 +100,10 @@ export async function GET() {
                   isMatured: f.maturity.isMatured,
                   ageYears: f.maturity.ageYears,
                   daysToMaturity: f.maturity.daysToMaturity,
+                  // Un retrait avant 5 ans clôture le plan : l'écran doit
+                  // lire cet état avant tout compte à rebours (TIT-06).
+                  planStatus: f.maturity.planStatus,
+                  closedAt: f.maturity.closedAt?.toISOString() ?? null,
                 }
               : null,
             room: f?.room
@@ -113,6 +117,7 @@ export async function GET() {
                   usedPct: f.room.usedPct.toFixed(2),
                   isOverCap: f.room.isOverCap,
                   bindingCap: f.room.bindingCap,
+                  blockedReason: f.room.blockedReason,
                 }
               : null,
             taxStatusLabel: f?.taxStatusLabel ?? null,

@@ -25,6 +25,7 @@ import {
 import {
   cashAttributionNotice,
   contributionBaseNotice,
+  planStatusNotice,
   type SecuritiesAccount,
   type SecuritiesRoom,
 } from "@/app/lib/securities/overview";
@@ -108,7 +109,18 @@ const emptyForm = {
  */
 function ContributionGauge({ room }: { room: SecuritiesRoom }) {
   const pct = num(room.usedPct);
-  const alert = room.isOverCap || pct >= 95;
+  /*
+    Plan clos ou d'état indéterminé : la place est nulle par état, pas par
+    plafond. « 0,00 € de versement encore possible » se lirait comme un plan
+    plein ; on nomme la vraie raison (TIT-06).
+  */
+  const blocked =
+    room.blockedReason === "PLAN_CLOSED"
+      ? planStatusNotice("CLOSED")
+      : room.blockedReason === "PLAN_STATUS_UNKNOWN"
+        ? planStatusNotice("UNKNOWN")
+        : null;
+  const alert = room.isOverCap || pct >= 95 || blocked !== null;
   // La barre mesure le plafond qui borne réellement. Quand c'est le plafond
   // commun, le montant affiché doit être celui des deux plans réunis : sinon un
   // PEA-PME vide montrerait « 0 € » au-dessus d'une barre déjà entamée par le
@@ -144,8 +156,13 @@ function ContributionGauge({ room }: { room: SecuritiesRoom }) {
             : "text-[var(--muted-foreground)]"
         )}
         data-testid="securities-room-caption"
+        data-room-blocked={room.blockedReason ?? undefined}
       >
-        {room.isOverCap ? (
+        {blocked ? (
+          <UnknownAmount short={blocked.short} title={blocked.title}>
+            Plus aucun versement possible : {blocked.short}
+          </UnknownAmount>
+        ) : room.isOverCap ? (
           <>Plafond dépassé de {formatCurrency(room.overCapEur, "EUR")}</>
         ) : (
           <>
@@ -153,7 +170,7 @@ function ContributionGauge({ room }: { room: SecuritiesRoom }) {
             possible
           </>
         )}
-        {room.bindingCap === "COMBINED" && (
+        {!blocked && room.bindingCap === "COMBINED" && (
           <> — limité par le plafond commun PEA + PEA-PME de 225 000 €</>
         )}
       </p>
@@ -305,6 +322,34 @@ function WithdrawalSimulator({ account }: { account: AccountRow }) {
   }, [amount, account]);
 
   const baseNotice = contributionBaseNotice(account.contributionBaseStatus);
+
+  /*
+    Pas de simulation sur un plan qui ne reçoit plus de retrait au régime du
+    PEA. Clos, ses avoirs ont quitté l'enveloppe : un retrait simulé ici
+    afficherait un impôt de PEA sur ce qui n'en est plus un, et l'avertissement
+    « ce retrait clôturera le plan » sur un plan déjà clos. Indéterminé, on ne
+    choisit pas un régime à sa place (TIT-06).
+  */
+  const planNotice = account.maturity
+    ? planStatusNotice(account.maturity.planStatus)
+    : null;
+  if (planNotice) {
+    return (
+      <div
+        className="mt-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/20 p-2.5"
+        data-testid="securities-withdrawal-simulator"
+        data-plan-status={account.maturity?.planStatus}
+      >
+        <p className="text-meta">Simuler un retrait (€)</p>
+        <p
+          className="mt-1.5 text-[11px] text-[var(--warning)]"
+          data-testid="securities-withdrawal-unavailable"
+        >
+          Simulation indisponible : {planNotice.short}. {planNotice.title}
+        </p>
+      </div>
+    );
+  }
 
   /*
     Pas de simulation sur une assiette amputée.
@@ -939,25 +984,35 @@ export function SecuritiesTab({ className }: { className?: string }) {
                     </div>
                   </div>
 
-                  {/* Antériorité fiscale — l'information que Positions ne portait pas. */}
+                  {/*
+                    Antériorité fiscale — l'information que Positions ne portait
+                    pas. Quatre états, pas deux : sur un plan clos ou
+                    indéterminé, ni cadenas ouvert ni date à venir — le compte
+                    à rebours d'un plan clos ne court plus (TIT-06).
+                  */}
                   {a.maturity && (
                     <div
                       className={cn(
                         "mt-2 flex items-start gap-1.5 rounded-[var(--radius-md)] border px-2 py-1.5 text-[11px]",
-                        a.maturity.isMatured
+                        a.maturity.planStatus === "MATURED"
                           ? "border-[var(--success)]/40 bg-[var(--success)]/10 text-[var(--success)]"
-                          : "border-[var(--warning)]/40 bg-[var(--warning)]/10 text-[var(--warning)]"
+                          : a.maturity.planStatus === "RUNNING"
+                            ? "border-[var(--warning)]/40 bg-[var(--warning)]/10 text-[var(--warning)]"
+                            : "border-[var(--danger)]/40 bg-[var(--danger)]/10 text-[var(--danger)]"
                       )}
                       data-testid="securities-maturity"
+                      data-plan-status={a.maturity.planStatus}
                     >
-                      {a.maturity.isMatured ? (
+                      {a.maturity.planStatus === "MATURED" ? (
                         <Unlock className="mt-0.5 h-3 w-3 shrink-0" />
-                      ) : (
+                      ) : a.maturity.planStatus === "RUNNING" ? (
                         <Lock className="mt-0.5 h-3 w-3 shrink-0" />
+                      ) : (
+                        <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                       )}
                       <span>
                         {a.taxStatusLabel}
-                        {!a.maturity.isMatured && (
+                        {a.maturity.planStatus === "RUNNING" && (
                           <>
                             {" "}
                             — 5 ans atteints le{" "}
@@ -966,6 +1021,17 @@ export function SecuritiesTab({ className }: { className?: string }) {
                             ).toLocaleDateString("fr-FR")}
                           </>
                         )}
+                        {a.maturity.planStatus === "CLOSED" &&
+                          a.maturity.closedAt && (
+                            <>
+                              {" "}
+                              — retrait du{" "}
+                              {new Date(a.maturity.closedAt).toLocaleDateString(
+                                "fr-FR"
+                              )}
+                              , sauf motif d&apos;exception
+                            </>
+                          )}
                       </span>
                     </div>
                   )}

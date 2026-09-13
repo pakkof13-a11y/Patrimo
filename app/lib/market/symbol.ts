@@ -43,6 +43,33 @@ export function toFinnhubSymbol(
   return t;
 }
 
+/**
+ * Normalise une devise de cotation Yahoo susceptible d'être exprimée en
+ * sous-unité (pence, centimes) plutôt qu'en unité principale.
+ *
+ * Le signal est la casse du suffixe brut — `GBp`/`ZAc`/`ILA` — jamais le
+ * marché ou le suffixe du ticker : beaucoup de lignes LSE cotent en GBP (ou
+ * même en USD), et déduire la sous-unité du seul `.L` produirait de fausses
+ * divisions. La comparaison doit donc se faire AVANT tout `toUpperCase` sur
+ * `raw`, sans quoi le signal casse est perdu.
+ */
+export function normalizeQuoteCurrency(raw: string): {
+  currency: string;
+  divisor: 1 | 100;
+} {
+  const trimmed = (raw || "").trim();
+  if (trimmed === "GBp" || trimmed === "GBX") {
+    return { currency: "GBP", divisor: 100 };
+  }
+  if (trimmed === "ZAc") {
+    return { currency: "ZAR", divisor: 100 };
+  }
+  if (trimmed === "ILA") {
+    return { currency: "ILS", divisor: 100 };
+  }
+  return { currency: trimmed.toUpperCase(), divisor: 1 };
+}
+
 /** Guess quote currency from exchange suffix */
 export function guessQuoteCurrency(symbol: string, assetClass?: string): string {
   const s = symbol.toUpperCase();
