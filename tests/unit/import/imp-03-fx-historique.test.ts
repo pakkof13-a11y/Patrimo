@@ -301,3 +301,63 @@ describe("taux historique applique par ligne", () => {
     expect(Number(input.fxRateToEur)).toBeCloseTo(1 / 1.2125, 9);
   });
 });
+
+/**
+ * USDT/USDC : plus un "USD" silencieux (map-rows.ts ne les tronque plus,
+ * commit.ts leur donne la série USD par une conversion dédiée) — la ligne
+ * conserve son vrai libellé de devise, le taux vient de la même série
+ * Frankfurter que l'USD réel, un seul appel pour les deux.
+ */
+describe("USDT/USDC ne deviennent pas un USD silencieux", () => {
+  it("un achat en USDT conserve sa devise et se convertit via la serie USD", async () => {
+    fetchMock.mockImplementation(async (url: unknown) =>
+      estPlage(url) ? rangeResponse({ "2021-06-15": 1.2125 }) : rangeResponse({})
+    );
+
+    const result = await commit([row({ currency: "USDT" })]);
+
+    expect(result.errors).toEqual([]);
+    expect(result.created).toBe(1);
+    const input = txCreateArgs[0] as { fxRateToEur: string; currency: string };
+    expect(input.currency).toBe("USDT");
+    expect(Number(input.fxRateToEur)).toBeCloseTo(1 / 1.2125, 9);
+  });
+
+  it("USDT et USD dans le meme lot partagent un seul appel Frankfurter", async () => {
+    // Quantités distinctes : `economicKey` (dedupe.ts) tronque aussi la devise
+    // à 3 lettres pour l'empreinte stricte — trois lignes par ailleurs
+    // identiques ne se distingueraient plus par leur seule devise. Effet
+    // préexistant du dédoublonnage (indépendant de ce correctif), pas ce que
+    // ce test vérifie ; les quantités le contournent proprement.
+    let plageAppels = 0;
+    fetchMock.mockImplementation(async (url: unknown) => {
+      if (estPlage(url)) {
+        plageAppels += 1;
+        return rangeResponse({ "2021-06-15": 1.2125 });
+      }
+      return rangeResponse({});
+    });
+
+    const result = await commit([
+      row({ line: 1, currency: "USDT", quantity: "10" }),
+      row({ line: 2, currency: "USDC", quantity: "11" }),
+      row({ line: 3, currency: "USD", quantity: "12" }),
+    ]);
+
+    expect(result.created).toBe(3);
+    expect(plageAppels).toBe(1);
+    for (const input of txCreateArgs as Array<{ fxRateToEur: string }>) {
+      expect(Number(input.fxRateToEur)).toBeCloseTo(1 / 1.2125, 9);
+    }
+  });
+
+  it("USDC sans serie USD disponible rejette la ligne, ne bascule pas sur EUR", async () => {
+    fetchMock.mockImplementation(async () => new Response("panne", { status: 503 }));
+
+    const result = await commit([row({ currency: "USDC" })]);
+
+    expect(result.created).toBe(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]!.message).toMatch(/injoignable/);
+  });
+});

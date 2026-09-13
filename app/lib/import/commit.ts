@@ -290,6 +290,24 @@ function shiftDay(day: string, deltaDays: number): string {
 }
 
 /**
+ * Stablecoins adossés au dollar sans série BCE propre — Frankfurter ne les
+ * connaît pas, et USDT/USDC n'ont vocation qu'à suivre l'USD. La ligne garde
+ * sa devise réelle (`Transaction.currency` reste "USDT"/"USDC", cf.
+ * `map-rows.ts` qui ne les tronque plus en "USD") ; seule la *série* utilisée
+ * pour résoudre un taux est celle du dollar — une conversion dédiée, pas un
+ * dollar déguisé.
+ *
+ * Ce que ceci ne fait PAS : détecter un dépeg (USDC est brièvement tombé sous
+ * 0,88 USD en mars 2023). Aucune source de prix spot n'est disponible dans ce
+ * pipeline d'import synchrone — l'ajouter dépasserait ce correctif ponctuel.
+ * Documenté, pas caché.
+ */
+const FX_SERIES_ALIAS: Record<string, string> = { USDT: "USD", USDC: "USD" };
+function fxSeriesCurrency(cur: string): string {
+  return FX_SERIES_ALIAS[cur] ?? cur;
+}
+
+/**
  * Taux de change à persister pour CETTE ligne d'import.
  *
  * EUR : "1", sans appel. Toute autre devise : cherche dans la série
@@ -316,7 +334,7 @@ function resolveRowFxRate(
     );
   }
 
-  const range = fxByCurrency.get(cur);
+  const range = fxByCurrency.get(fxSeriesCurrency(cur));
   if (!range || range.status === "unsupported") {
     throw new Error(
       `Devise ${cur} : aucune série de taux BCE (Frankfurter) — ligne non importée, aucun taux n'a été supposé. Saisissez cette opération manuellement avec son taux de change.`
@@ -568,9 +586,12 @@ export async function commitImportRows(params: {
       if (cur === "EUR") continue;
       const day = row.occurredAt ? row.occurredAt.slice(0, 10) : null;
       if (!day) continue; // rejeté ligne par ligne dans resolveRowFxRate
-      const bounds = daysByCurrency.get(cur);
+      // USDT/USDC partagent la série USD (`fxSeriesCurrency`) : un seul appel
+      // Frankfurter pour les trois, pas un par devise affichée.
+      const seriesCur = fxSeriesCurrency(cur);
+      const bounds = daysByCurrency.get(seriesCur);
       if (!bounds) {
-        daysByCurrency.set(cur, { min: day, max: day });
+        daysByCurrency.set(seriesCur, { min: day, max: day });
       } else {
         if (day < bounds.min) bounds.min = day;
         if (day > bounds.max) bounds.max = day;

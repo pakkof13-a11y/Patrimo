@@ -130,6 +130,24 @@ export function isWeekendDayKey(dayKey: string): boolean {
   return weekday === 0 || weekday === 6;
 }
 
+/**
+ * Vrai si la classe d'actif cote sept jours sur sept.
+ *
+ * Le week-end n'est pas une propriété du calendrier mais du **marché** : les
+ * places actions/ETF/obligations FR/US et le change ferment samedi et
+ * dimanche, les marchés crypto non — BTC, ETH, SOL, LINK et AVAX ont un cours
+ * le dimanche comme le mercredi. Fonder l'omission des clôtures sur la seule
+ * date reviendrait à retirer au jeu de démonstration deux septièmes de
+ * l'histoire des lignes crypto, sans qu'aucune règle de marché ne le justifie.
+ *
+ * Le prédicat lit `assetClass` et non `category` : c'est `assetClass` que
+ * portent les positions du seed (`Pos`) et sur lequel le reste du fichier
+ * discrimine déjà les cryptos.
+ */
+export function quotesEveryDay(assetClass: string): boolean {
+  return assetClass === "CRYPTO";
+}
+
 /** Recule jusqu'au jour ouvré précédent (inclus si `d` est déjà ouvré). */
 function previousBusinessDay(d: Date): Date {
   const r = new Date(d.getTime());
@@ -456,15 +474,29 @@ export type SeedCloseRow = {
  * séance. Ici le glissement est le bon traitement (et non l'omission comme
  * pour la fenêtre récente) : une seule ligne par an et par actif, donc aucun
  * jour ouvré voisin déjà occupé, donc aucun doublon possible.
+ *
+ * `everyDay` inverse la règle pour les marchés ouverts sept jours sur sept :
+ * le 31 décembre y **est** une séance, donc rien à glisser. Le cas est réel —
+ * `HISTORICAL_PRICES` porte BTC et ETH dès 2017, et le 31/12/2017 est un
+ * dimanche : sans ce paramètre, la clôture annuelle 2017 du Bitcoin serait
+ * datée du vendredi 29, jour où le cours du bitcoin n'était pas celui-là.
  */
-export function historicalCloseDayKey(year: number): string {
-  return dayKeyOf(previousBusinessDay(new Date(Date.UTC(year, 11, 31, 10, 0, 0))));
+export function historicalCloseDayKey(year: number, everyDay = false): string {
+  const dec31 = new Date(Date.UTC(year, 11, 31, 10, 0, 0));
+  return dayKeyOf(everyDay ? dec31 : previousBusinessDay(dec31));
 }
 
 /** Le strict nécessaire d'une position pour en dériver ses clôtures récentes. */
 export type ClosablePosition = {
   id: string;
   ticker: string;
+  /**
+   * Décide du calendrier de cotation de la ligne (`quotesEveryDay`) : une
+   * crypto cote le week-end, une action non. Sans cette information ici, la
+   * fonction ne pourrait trancher que sur la date — c'est-à-dire appliquer le
+   * calendrier d'Euronext au bitcoin.
+   */
+  assetClass: string;
   buyPrice: number;
   marketPrice: number;
   openDaysAgo: number;
@@ -487,25 +519,35 @@ function dayKeyDaysAgo(from: Date, n: number): string {
  * ticker) : deux seeds successifs produisent la même histoire, ce dont les
  * tests e2e dépendent.
  *
- * Les samedis et dimanches ne reçoivent **aucune ligne** : une clôture un jour
- * non ouvré n'existe pas, aucune place FR/US ne l'aurait produite, et tout
- * code qui lit « une clôture = une séance » serait trompé par une telle
- * écriture. Le choix est l'omission et non le glissement au jour ouvré
- * précédent : glisser ferait retomber samedi *et* dimanche sur le vendredi
- * qui porte déjà sa propre clôture, soit trois lignes pour une même clé
- * `(assetId, day)` — que le `skipDuplicates` de l'insertion réduirait
- * silencieusement à la première venue, donc à une valeur choisie par l'ordre
- * de la boucle plutôt que par le calendrier. Le vendredi voisin porte déjà
- * l'information du week-end ; le moteur reporte la dernière clôture connue.
+ * Pour une ligne dont le marché ferme le week-end, les samedis et dimanches ne
+ * reçoivent **aucune ligne** : une clôture un jour non ouvré n'existe pas,
+ * aucune place FR/US ne l'aurait produite, et tout code qui lit « une clôture
+ * = une séance » serait trompé par une telle écriture. Le choix est l'omission
+ * et non le glissement au jour ouvré précédent : glisser ferait retomber
+ * samedi *et* dimanche sur le vendredi qui porte déjà sa propre clôture, soit
+ * trois lignes pour une même clé `(assetId, day)` — que le `skipDuplicates` de
+ * l'insertion réduirait silencieusement à la première venue, donc à une valeur
+ * choisie par l'ordre de la boucle plutôt que par le calendrier. Le vendredi
+ * voisin porte déjà l'information du week-end ; le moteur reporte la dernière
+ * clôture connue.
  *
- * Conséquence sur l'ancrage au cours coté : ce n'est plus `k = 0` mais le
- * dernier jour **ouvré** de la fenêtre qui vaut exactement `marketPrice`. Un
- * réamorçage un dimanche laisse ainsi la série se terminer le vendredi, sur le
- * cours coté — et non sur un point de la marche aléatoire.
+ * Pour une ligne qui cote sept jours sur sept (`quotesEveryDay`, les cryptos),
+ * la règle ne s'applique pas : samedi et dimanche sont des séances pleines et
+ * les omettre amputerait la série de deux points par semaine sans qu'aucun
+ * marché ne l'ait fermée. La fenêtre est alors continue.
  *
- * Le générateur avance en revanche à chaque jour civil, week-ends compris : le
- * retour à la moyenne du `wobble` se mesure en temps calendaire, et sauter les
- * tirages du week-end déformerait la marche sans rien y gagner.
+ * Conséquence sur l'ancrage au cours coté : c'est le dernier jour **de
+ * séance** de la fenêtre qui vaut exactement `marketPrice` — `k = 0` pour une
+ * crypto, le dernier jour ouvré sinon. Un réamorçage un dimanche laisse ainsi
+ * la série d'une action se terminer le vendredi sur le cours coté, et celle
+ * d'une crypto se terminer le dimanche même, sur son propre cours coté — et
+ * non sur un point de la marche aléatoire dans un cas comme dans l'autre.
+ *
+ * Le générateur avance dans tous les cas à chaque jour civil, week-ends
+ * compris : le retour à la moyenne du `wobble` se mesure en temps calendaire,
+ * et sauter les tirages du week-end déformerait la marche sans rien y gagner.
+ * Cela garde aussi les deux calendriers comparables — une action et une crypto
+ * ouvertes le même jour partagent la même horloge de volatilité.
  *
  * @param from Instant de référence — injectable pour rendre les tests
  *   déterministes plutôt que dépendants du jour d'exécution.
@@ -517,12 +559,14 @@ export function recentCloseRows(
 ): SeedCloseRow[] {
   const rows: SeedCloseRow[] = [];
   const days = Math.min(p.openDaysAgo, THREE_YEARS);
+  const everyDay = quotesEveryDay(p.assetClass);
 
-  // Dernier jour ouvré de la fenêtre — au plus deux jours en arrière, et
-  // `-1` si la fenêtre entière est un week-end (position ouverte la veille).
+  // Dernier jour de séance de la fenêtre : `k = 0` pour un marché ouvert 7j/7,
+  // sinon le dernier jour ouvré — au plus deux jours en arrière, et `-1` si la
+  // fenêtre entière est un week-end (position ouverte la veille).
   let lastBusinessK = -1;
   for (let k = 0; k <= days; k++) {
-    if (!isWeekendDayKey(dayKeyDaysAgo(from, k))) {
+    if (everyDay || !isWeekendDayKey(dayKeyDaysAgo(from, k))) {
       lastBusinessK = k;
       break;
     }
@@ -537,7 +581,7 @@ export function recentCloseRows(
     // Retour à la moyenne : l'écart ne dérive pas indéfiniment.
     wobble = wobble * 0.9 + shock;
     const day = dayKeyDaysAgo(from, k);
-    if (isWeekendDayKey(day)) continue;
+    if (!everyDay && isWeekendDayKey(day)) continue;
     const trend = p.buyPrice + drift * (days - k);
     const native =
       k === lastBusinessK ? p.marketPrice : Math.max(trend * (1 + wobble), 0.0001);
@@ -2690,7 +2734,9 @@ export async function seedUserPortfolio(
 
     La marche est déterministe (générateur ensemencé par l'actif) : deux seeds
     successifs produisent la même histoire, ce dont les tests e2e dépendent.
-    Les samedis et dimanches sont omis — voir `recentCloseRows`.
+    Les samedis et dimanches sont omis pour les lignes dont le marché ferme le
+    week-end, et conservés pour les cryptos qui cotent 7j/7 — voir
+    `recentCloseRows` et `quotesEveryDay`.
   */
   const closeRows: SeedCloseRow[] = [];
 
@@ -2707,8 +2753,9 @@ export async function seedUserPortfolio(
     ZERO — mais cela laisse vingt ans de courbe qui ne bougent qu'aux
     transactions, alors que la table de cours **connaît** ces années.
 
-    Une clôture par an et par ligne, au dernier jour ouvré de décembre, à la
-    valeur de la table. Rien n'est interpolé entre deux décembres : le moteur
+    Une clôture par an et par ligne, au dernier jour de séance de décembre (le
+    31 pour une crypto, le dernier jour ouvré sinon), à la valeur de la table.
+    Rien n'est interpolé entre deux décembres : le moteur
     reporte la dernière clôture connue (LOCF, `MARKET_CARRIED`, donc point
     estimé), ce qui est le contraire d'un lissage — la donnée manquante est
     signalée comme telle, pas comblée par une droite.
@@ -2726,7 +2773,7 @@ export async function seedUserPortfolio(
       if (year > 2019) continue;
       histCloseRows.push({
         assetId: p.id,
-        day: historicalCloseDayKey(year),
+        day: historicalCloseDayKey(year, quotesEveryDay(p.assetClass)),
         closeEur: D(prix).mul(D(String(fx))).toDecimalPlaces(2),
         source: "seed-historique",
       });
