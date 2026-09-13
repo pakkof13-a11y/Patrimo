@@ -3,10 +3,12 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { employeeSavingsLineSchema } from "@/app/lib/schemas";
 import { clientErrorMessage } from "@/app/lib/api/error-response";
 import {
+  fxUnavailableResponse,
   presentFields,
   requireBodyId,
   validationErrorResponse,
 } from "@/app/lib/api/validation";
+import { FxRateUnknownError } from "@/app/lib/market/fx";
 import {
   createEmployeeSavingsLine,
   deleteEmployeeSavingsLine,
@@ -23,6 +25,14 @@ export async function GET() {
     const data = await listEmployeeSavings(userId);
     return NextResponse.json(data);
   } catch (e) {
+    /*
+      Une ligne héritée en devise inconnue (SEK, écrite avant la liste blanche
+      de `employeeSavingsLineSchema.currency`) faisait lever `mapLine` sur
+      TOUTE la liste : un 500 générique pour un utilisateur dont la plupart des
+      lignes sont parfaitement lisibles. Même repli qu'`app/api/banks/route.ts`
+      GET : 503 nommé, pas un 500 muet.
+    */
+    if (e instanceof FxRateUnknownError) return fxUnavailableResponse(e.currency);
     console.error("[employee-savings GET]", e);
     return NextResponse.json(
       { error: clientErrorMessage(e, "Erreur") },

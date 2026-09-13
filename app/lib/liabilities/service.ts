@@ -131,6 +131,7 @@ export async function applyDuePaymentsForLiability(
     startDate: liability.startDate,
     endDate: liability.endDate,
     lastPaymentAppliedAt: liability.lastPaymentAppliedAt,
+    interestRate: liability.interestRate?.toString() ?? null,
     now,
   });
 

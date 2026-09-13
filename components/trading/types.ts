@@ -69,14 +69,17 @@ export type TradingPositionRow = {
    * du moteur.
    */
   derived: {
-    notionalEur: string;
-    marginUsedEur: string;
+    /** `null` : notionnel non calculable (TRA-03, COIN-M sans valeur de contrat) — UNKNOWN, pas 0. */
+    notionalEur: string | null;
+    /** `null` : marge non calculable (notionnel inconnu). */
+    marginUsedEur: string | null;
     /** Estimation Aurea, pas le barème contractuel de l'exchange. */
     liquidationPriceEstimated: string | null;
     distanceToLiquidationPct: number | null;
-    unrealizedPnlEur: string;
-    /** + pour un long, − pour un short : sert à l'exposition nette. */
-    signedNotionalEur: string;
+    /** `null` : P&L non calculable (contrat COIN-M sans valeur de contrat). */
+    unrealizedPnlEur: string | null;
+    /** + pour un long, − pour un short : sert à l'exposition nette. `null` si le notionnel est inconnu. */
+    signedNotionalEur: string | null;
     liquidationAlert: boolean;
     fundingAlert: boolean;
   };

@@ -1279,7 +1279,13 @@ export class PortfolioValuationEngine {
         l'activité sur un historique long, quand la boucle, elle, n'a besoin que
         des lots apparus depuis la veille.
       */
-      positionsCostBasis: totalCostBasis(state).toNumber(),
+      /*
+        FIN-01 : même périmètre que la valorisation ci-dessus (`:949`,
+        `:1103`) — `excludedAssetIds` (DeFi/NFT écartés du patrimoine) sort
+        aussi du coût, sans quoi ce point de contrôle sous-évaluerait le P&L
+        latent du coût de positions déjà exclues de `securities`/`crypto`/…
+      */
+      positionsCostBasis: totalCostBasis(state, this.inputs.excludedAssetIds).toNumber(),
       realizedPnl: (realizedPnlEur ?? totalRealizedPnl(state)).toNumber(),
       ledgerCashIncome: state.cashIncomeEur.toNumber(),
       status,

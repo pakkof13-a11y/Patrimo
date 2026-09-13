@@ -47,6 +47,7 @@ async function platformImpact(userId: string, id: string) {
         id: true,
         name: true,
         remainingAmount: true,
+        interestRate: true,
         monthlyPayment: true,
         paymentDay: true,
         startDate: true,
@@ -297,6 +298,7 @@ export async function DELETE(req: Request) {
         // ailleurs. Rendre le solde stocké ferait annoncer ici un montant que
         // le module Crédits n'affiche plus.
         remainingAmount: true,
+        interestRate: true,
         monthlyPayment: true,
         paymentDay: true,
         startDate: true,

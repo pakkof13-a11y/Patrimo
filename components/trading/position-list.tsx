@@ -67,6 +67,16 @@ const pct = (v: number | null) =>
 const price = (v: number | null, currency: string) =>
   v == null ? "—" : formatCurrency(String(v), currency);
 
+/**
+ * Un P&L `null` (TRA-03 : contrat COIN-M sans valeur de contrat connue) n'est
+ * ni positif, ni négatif, ni nul — c'est une inconnue. Aucune classe de
+ * tonalité ne doit s'y appliquer, et surtout aucun repli sur 0.
+ */
+export const PNL_UNKNOWN_LABEL = "P&L non calculable";
+
+const pnl = (v: number | null, currency: string) =>
+  v == null ? PNL_UNKNOWN_LABEL : formatCurrency(String(v), currency);
+
 export function PositionList({
   views,
   selectedId,
@@ -158,12 +168,13 @@ export function PositionList({
                 <span
                   className={cn(
                     "num font-medium",
-                    v.pnlEur > 0 && "val-positive",
-                    v.pnlEur < 0 && "val-negative",
-                    v.pnlEur === 0 && "text-[var(--foreground-faint)]"
+                    v.pnlEur != null && v.pnlEur > 0 && "val-positive",
+                    v.pnlEur != null && v.pnlEur < 0 && "val-negative",
+                    v.pnlEur === 0 && "text-[var(--foreground-faint)]",
+                    v.pnlEur == null && "text-[var(--foreground-faint)] italic"
                   )}
                 >
-                  {formatCurrency(String(v.pnlEur), baseCurrency)}
+                  {pnl(v.pnlEur, baseCurrency)}
                 </span>
                 <span
                   className={cn(

@@ -313,9 +313,25 @@ export function totalCash(state: LedgerState): Decimal {
   return t;
 }
 
-export function totalCostBasis(state: LedgerState): Decimal {
+/**
+ * Coût total du journal.
+ *
+ * `excludeAssetIds` restreint la somme au périmètre patrimonial — une position
+ * DeFi/NFT marquée `isIgnoredInPortfolio` (ou un NFT emprunté) reste au
+ * journal pour l'historique et la fiscalité, mais ne doit peser dans aucun
+ * total affiché : sans ce filtre, `costBasis` couvrirait un périmètre plus
+ * large que `marketValue`, qui l'exclut déjà (`getHoldings`), et sous-évaluerait
+ * le P&L latent du coût de positions qui ne comptent plus nulle part ailleurs.
+ */
+export function totalCostBasis(
+  state: LedgerState,
+  excludeAssetIds?: ReadonlySet<string>
+): Decimal {
   let t = zero();
-  for (const p of state.positions.values()) t = t.plus(p.costBasisEur);
+  for (const p of state.positions.values()) {
+    if (excludeAssetIds?.has(p.assetId)) continue;
+    t = t.plus(p.costBasisEur);
+  }
   return t;
 }
 

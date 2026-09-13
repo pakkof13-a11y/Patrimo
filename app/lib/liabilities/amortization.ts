@@ -168,22 +168,57 @@ export function duePaymentDates(opts: {
 }
 
 /**
- * Apply one monthly debit on remaining capital.
- * Interest is not added to principal (capital-only reduction by full installment),
- * matching a simple "prélèvement de la mensualité sur le capital restant dû" model.
- * Cap at remaining so overpayment zeros the debt.
+ * Taux mensuel en Decimal (pas `monthlyRateFromAnnual`, qui rend un `number` —
+ * cohérence Decimal.js pour un calcul qui écrit en base). Null/0/négatif → 0,
+ * ce qui préserve le comportement linéaire historique quand aucun taux n'est
+ * saisi.
+ */
+function monthlyRateDecimal(annualPercent: DecimalInput | null | undefined) {
+  if (annualPercent == null) return d(0);
+  const annual = d(annualPercent);
+  if (annual.lte(0)) return d(0);
+  return annual.div(100).div(12);
+}
+
+/**
+ * Apply one monthly debit — annuité standard (intérêts d'abord), même formule
+ * que `buildAmortizationSchedule`/`estimateRemainingInterest`/
+ * `principalPaidOfInstallment` : interest = capital restant × taux mensuel,
+ * principal = mensualité − intérêts (plafonné au capital restant). Sans taux
+ * (null/0), l'intérêt est nul et la mensualité entière va au capital —
+ * comportement linéaire inchangé.
+ *
+ * `debited` (le montant réellement prélevé) vaut la mensualité pleine, sauf à
+ * la dernière échéance : elle ne prélève que ce qu'il faut pour solder
+ * (capital restant + intérêts du mois), jamais la mensualité entière si elle
+ * excède la dette — même convention que `estimateRemainingInterest`.
+ *
+ * Si la mensualité ne couvre pas les intérêts, rien n'est prélevé (`debited`
+ * = "0") : même garde que `buildAmortizationSchedule`, pour que l'appelant
+ * (`projectDuePayments`) s'arrête au lieu de faire croître la dette en boucle.
  */
 export function applyMonthlyDebit(
   remaining: DecimalInput,
-  monthlyPayment: DecimalInput
+  monthlyPayment: DecimalInput,
+  annualPercent?: DecimalInput | null
 ): { remaining: string; debited: string } {
   const bal = d(remaining);
   const pay = d(monthlyPayment);
   if (bal.lte(0) || pay.lte(0)) {
     return { remaining: toFixed(bal.gt(0) ? bal : d(0), 8), debited: "0" };
   }
-  const debited = bal.lt(pay) ? bal : pay;
-  const next = bal.minus(debited);
+  const r = monthlyRateDecimal(annualPercent);
+  const interest = r.gt(0) ? bal.times(r) : d(0);
+  let principal = pay.minus(interest);
+  if (principal.lte(0)) {
+    return { remaining: toFixed(bal, 8), debited: "0" };
+  }
+  let debited = pay;
+  if (principal.gte(bal)) {
+    principal = bal;
+    debited = bal.plus(interest);
+  }
+  const next = bal.minus(principal);
   return {
     remaining: toFixed(next.gt(0) ? next : d(0), 8),
     debited: toFixed(debited, 8),
@@ -523,6 +558,7 @@ export function projectDuePayments(input: {
   startDate: Date | null;
   endDate: Date | null;
   lastPaymentAppliedAt: Date | null;
+  interestRate: DecimalInput | null;
   now?: Date;
 }): DuePaymentProjection {
   const remaining0 = toFixed(d(input.remainingAmount), 8);
@@ -554,7 +590,11 @@ export function projectDuePayments(input: {
 
   for (const eventDate of dates) {
     if (d(remaining).lte(0)) break;
-    const { remaining: next, debited } = applyMonthlyDebit(remaining, payment);
+    const { remaining: next, debited } = applyMonthlyDebit(
+      remaining,
+      payment,
+      input.interestRate
+    );
     if (d(debited).lte(0)) break;
     remaining = next;
     lastAppliedAt = eventDate;
@@ -572,6 +612,7 @@ export type AmortizableLiability = {
   startDate: Date | null;
   endDate: Date | null;
   lastPaymentAppliedAt: Date | null;
+  interestRate: DecimalInput | null;
 };
 
 /**

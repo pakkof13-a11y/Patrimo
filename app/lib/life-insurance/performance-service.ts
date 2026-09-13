@@ -514,19 +514,32 @@ export async function getLifeInsurancePerformance(
       };
     }
 
-    const points = buildPerformanceSeries(
-      days
-        // Un jour incomplet n'a pas de valeur publiable : il sort de la série
-        // plutôt que d'y entrer amputé. La série s'arrête au jour publié :
-        // au-delà, il n'y a que des jours amputés — les prolonger ferait
-        // finir la courbe sur une valeur que le total ne reconnaît pas.
-        .filter((day) => day <= refDay && !b.incompleteDays.has(day))
-        .map((day) => ({
-          day,
-          valueEur: b.values.get(day) ?? 0,
-          netFlowEur: b.netFlows.get(day) ?? 0,
-        }))
-    );
+    // Un jour incomplet n'a pas de valeur publiable : il sort de la série
+    // plutôt que d'y entrer amputé. La série s'arrête au jour publié :
+    // au-delà, il n'y a que des jours amputés — les prolonger ferait
+    // finir la courbe sur une valeur que le total ne reconnaît pas.
+    //
+    // Son flux, lui, ne disparaît pas : un versement tombé un jour amputé est
+    // réel, et la valeur qu'il gonfle sera bien celle du prochain jour publié
+    // — seul le point qui l'aurait accueilli ce jour-là est absent. Le flux
+    // est donc reporté sur ce prochain jour complet plutôt que perdu, sous
+    // peine de faire passer un apport pour de la performance.
+    const seriesInput: Array<{ day: DayKey; valueEur: number; netFlowEur: number }> = [];
+    let pendingFlow = 0;
+    for (const day of days) {
+      if (day > refDay) break;
+      if (b.incompleteDays.has(day)) {
+        pendingFlow += b.netFlows.get(day) ?? 0;
+        continue;
+      }
+      seriesInput.push({
+        day,
+        valueEur: b.values.get(day) ?? 0,
+        netFlowEur: (b.netFlows.get(day) ?? 0) + pendingFlow,
+      });
+      pendingFlow = 0;
+    }
+    const points = buildPerformanceSeries(seriesInput);
     const first = points[0];
     const last = points[points.length - 1];
 

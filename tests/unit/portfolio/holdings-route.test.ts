@@ -35,12 +35,6 @@ vi.mock("@/app/lib/portfolio/allocation-by-venue-api", () => ({
   getAllocationByVenueApi: (...a: unknown[]) => getAllocationByVenueApi(...a),
 }));
 
-vi.mock("@/app/lib/prisma", () => ({
-  prisma: {
-    user: { findUnique: vi.fn().mockResolvedValue({ baseCurrency: "EUR" }) },
-  },
-}));
-
 import { GET } from "@/app/api/holdings/route";
 
 beforeEach(() => {
@@ -80,6 +74,18 @@ describe("GET /api/holdings ne calcule plus allocationByVenue", () => {
   it("sert toujours la devise demandée en paramètre", async () => {
     await GET(new Request("https://exemple.test/api/holdings?base=USD"));
     expect(getPortfolioBundle).toHaveBeenCalledWith("u1", "USD");
+  });
+
+  /*
+    `?base=ZZZ` partait tel quel vers `getPortfolioBundle` →
+    `getPlatformCashBalances` → `convertFromEurSync`, qui lève
+    `FxRateUnknownError` : 500 générique là où la demande est simplement
+    invalide. Même garde que banks/savings/term-deposits (`requestedBase`).
+  */
+  it("une devise inconnue répond 400, pas 500", async () => {
+    const res = await GET(new Request("https://exemple.test/api/holdings?base=ZZZ"));
+    expect(res.status).toBe(400);
+    expect(getPortfolioBundle).not.toHaveBeenCalled();
   });
 
   it("le module allocation-by-venue-api n'est plus importé par la route", async () => {

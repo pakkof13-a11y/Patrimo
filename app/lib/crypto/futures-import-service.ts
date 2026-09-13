@@ -12,7 +12,6 @@ import { prisma } from "../prisma";
 import { d } from "../money/decimal";
 import { parseFuturesTimestamp, type FuturesImportRow } from "./futures-csv";
 import type { FuturesImportExchange } from "./futures-constants";
-import { realizedNetPnl } from "./futures";
 
 export type ApplyImportResult = {
   created: number;
@@ -48,16 +47,17 @@ export async function applyFuturesImport(
       const isClosed = row.exitPrice != null;
       const size = d(row.sizeContracts);
       const entry = d(row.entryPrice);
-      const leverage = row.leverage ? d(row.leverage) : d(1);
       const notional = size.times(entry);
 
-      const realized = isClosed
-        ? realizedNetPnl({
-            realizedPnl: row.realizedPnl ? d(row.realizedPnl) : null,
-            fundingPaid: row.fundingPaid ? d(row.fundingPaid) : null,
-            commissionPaid: row.commissionPaid ? d(row.commissionPaid) : null,
-          })
-        : null;
+      /*
+        FIN-03 : `realizedPnl` stocke le montant BRUT rapporté par l'exchange,
+        comme partout ailleurs dans le dépôt (tax.ts, positions-view.ts,
+        clôture manuelle dans futures-service.ts) — `fundingPaid` et
+        `commissionPaid` sont stockés à part et déduits une seule fois, à la
+        lecture (`realizedNetPnl`). Stocker ici un montant déjà net doublerait
+        cette déduction.
+      */
+      const realized = isClosed && row.realizedPnl ? d(row.realizedPnl) : null;
 
       /*
         `new Date(row.closedAt)` lisait un epoch millisecondes en chaîne comme
@@ -75,7 +75,14 @@ export async function applyFuturesImport(
         baseCurrency: base,
         quoteCurrency: quote,
         direction: row.direction,
-        leverage: leverage.toFixed(2),
+        /*
+          TRA-02 : un relevé sans colonne levier ne dit pas « levier 1× » — il
+          ne dit rien, et la colonne est NOT NULL en base : on ne peut ni
+          fabriquer un levier, ni y écrire une absence. `leverage` n'entre
+          donc dans `data` que lorsque le relevé en fournit un réellement (cf.
+          plus bas) ; une position déjà en base garde alors son levier réel
+          au lieu de se le faire écraser par une valeur inventée.
+        */
         sizeContracts: size.toFixed(10),
         notionalUsd: notional.toFixed(2),
         entryPrice: entry.toFixed(8),
@@ -91,6 +98,7 @@ export async function applyFuturesImport(
         isOpen: !isClosed,
         openedAt,
         closedAt: isClosed ? closedAt : null,
+        ...(row.leverage ? { leverage: d(row.leverage).toFixed(2) } : {}),
       };
 
       const existing = await prisma.tradingPosition.findUnique({
@@ -99,14 +107,26 @@ export async function applyFuturesImport(
       });
 
       if (existing) {
+        // Levier absent du relevé : on laisse le levier réel déjà en base
+        // intact plutôt que de l'écraser par une valeur inventée.
         await prisma.tradingPosition.update({
           where: { id: existing.id },
           data,
         });
         updated += 1;
+      } else if (!row.leverage) {
+        // Nouvelle position sans levier fourni : la colonne est NOT NULL et
+        // aucune valeur ne serait honnête ici — la ligne est rejetée plutôt
+        // que créée avec un levier fabriqué (TRA-02).
+        throw new Error("levier manquant dans le relevé");
       } else {
         await prisma.tradingPosition.create({
-          data: { ...data, userId, exchangeTradeId: row.exchangeTradeId },
+          data: {
+            ...data,
+            userId,
+            exchangeTradeId: row.exchangeTradeId,
+            leverage: d(row.leverage).toFixed(2),
+          },
         });
         created += 1;
       }

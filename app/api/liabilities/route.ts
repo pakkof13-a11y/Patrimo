@@ -21,6 +21,7 @@ import {
   listLiabilities,
   recordEarlyRepayment,
 } from "@/app/lib/liabilities/service";
+import { startOfUtcDay } from "@/app/lib/liabilities/amortization";
 
 export async function GET() {
   const userId = await requireUserId();
@@ -158,6 +159,14 @@ export async function POST(req: Request) {
       category: parsed.data.category,
       assetId: parsed.data.assetId || null,
       notes: parsed.data.notes || null,
+      /*
+        Le solde saisi à la création est réputé vrai aujourd'hui : sans
+        `lastPaymentAppliedAt`, la projection rejoue depuis `startDate` sur ce
+        solde et double-compte les échéances déjà honorées avant la saisie
+        (mesuré : jusqu'à −58 800 € selon le prêt). Prospectif uniquement — ne
+        migre aucune ligne existante.
+      */
+      lastPaymentAppliedAt: startOfUtcDay(new Date()),
     },
   });
 
@@ -200,8 +209,16 @@ export async function PUT(req: Request) {
   if (f.name !== undefined) data.name = f.name;
   if (f.initialAmount !== undefined)
     data.initialAmount = new Prisma.Decimal(f.initialAmount || "0");
-  if (f.remainingAmount !== undefined)
+  if (f.remainingAmount !== undefined) {
     data.remainingAmount = new Prisma.Decimal(f.remainingAmount || "0");
+    /*
+      Même raison qu'à la création : un solde resaisi est réputé vrai à la date
+      de la modification, pas à `startDate`. Sans ce marqueur, la prochaine
+      projection rejouerait les échéances passées sur ce nouveau solde et les
+      compterait deux fois.
+    */
+    data.lastPaymentAppliedAt = startOfUtcDay(new Date());
+  }
   if (f.currency !== undefined) data.currency = f.currency;
   if (f.interestRate !== undefined)
     data.interestRate = f.interestRate != null ? new Prisma.Decimal(f.interestRate) : null;

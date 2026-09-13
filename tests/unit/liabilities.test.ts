@@ -13,12 +13,43 @@ import {
 } from "@/app/lib/liabilities/amortization";
 
 describe("liability amortization", () => {
-  it("applies monthly debit capped at remaining", () => {
+  it("applies monthly debit capped at remaining (no rate = linear, unchanged)", () => {
     expect(applyMonthlyDebit("1000", "250")).toEqual({
       remaining: "750.00000000",
       debited: "250.00000000",
     });
     expect(applyMonthlyDebit("100", "250").remaining).toBe("0.00000000");
+  });
+
+  it("applies monthly debit as a standard annuity when a rate is set (interest first)", () => {
+    /*
+      178 500 € à 2,15 %/an, mensualité 980 € : même décomposition que
+      `buildAmortizationSchedule` / `estimateRemainingInterest` /
+      `principalPaidOfInstallment` — intérêt = capital × taux/12, capital =
+      mensualité − intérêt. `applyMonthlyDebit` imputait auparavant la
+      mensualité entière au capital (linéaire) ; ce test documente le calcul
+      corrigé.
+    */
+    const step = applyMonthlyDebit("178500", "980", "2.15");
+    expect(step.debited).toBe("980.00000000"); // mensualité pleine (pas la dernière échéance)
+    expect(step.remaining).toBe("177839.81250000"); // 178500 - (980 - 178500*2.15/100/12)
+  });
+
+  it("caps the last installment on capital + interest, not the full payment", () => {
+    // Une mensualité de 980 € sur un solde de 500 € solderait le prêt : on ne
+    // prélève que ce qu'il faut (capital + intérêts du mois), pas 980 €.
+    const step = applyMonthlyDebit("500", "980", "2.15");
+    expect(step.remaining).toBe("0.00000000");
+    expect(step.debited).toBe("500.89583333"); // 500 + 500*2.15/100/12
+  });
+
+  it("does not debit anything when the payment does not cover interest", () => {
+    // 100 000 € à 12 %/an → intérêt mensuel = 1000 €, mensualité 500 € ne
+    // couvre pas l'intérêt : même garde que `buildAmortizationSchedule`, on
+    // n'avance plus (pour que `projectDuePayments` s'arrête).
+    const step = applyMonthlyDebit("100000", "500", "12");
+    expect(step.debited).toBe("0");
+    expect(step.remaining).toBe("100000.00000000");
   });
 
   it("handles partial and total early repayment", () => {

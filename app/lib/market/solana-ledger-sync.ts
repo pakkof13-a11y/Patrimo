@@ -65,17 +65,25 @@ export async function loadFirstOnchainBlockTimes(
   return map;
 }
 
+/** Signature base58 portée par une écriture journal issue d'une tx on-chain. */
+const OWN_SIGNATURE_RE = /\[onchain:([1-9A-HJ-NP-Za-km-z]{64,88})\]/;
+
 /**
- * Recale les txs journal taguées wallet-sync encore datées « aujourd’hui »
- * (bug snapshot) vers le premier blockTime on-chain du mint / wallet.
+ * Recale une écriture wallet-sync sur le blockTime de SA transaction on-chain
+ * — uniquement si ses notes portent `[onchain:SIG]` et que cette signature a
+ * un blockTime connu.
+ *
+ * Un ajustement de réconciliation (ACHAT/VENTE de delta, clôture
+ * zero-onchain) n'a pas de transaction propre : son `occurredAt` est la date
+ * de réconciliation et le reste. Lui prêter le premier blockTime du mint, du
+ * natif ou du wallet (`__any__`) datait chaque ajustement du tout premier
+ * bloc connu, de façon permanente — et `repairOnchainJournalDates` le
+ * remettait ensuite à sa vraie date, en boucle, pendant 24 h.
  */
 export async function repairWalletSyncJournalDates(
   userId: string,
   platformId: string
 ): Promise<number> {
-  const firstByMint = await loadFirstOnchainBlockTimes(platformId);
-  if (firstByMint.size === 0) return 0;
-
   const rows = await prisma.transaction.findMany({
     where: {
       userId,
@@ -92,29 +100,34 @@ export async function repairWalletSyncJournalDates(
     },
   });
 
-  let repaired = 0;
-  const dayMs = 24 * 60 * 60 * 1000;
+  const sigByRow = new Map<string, string>();
   for (const row of rows) {
-    // Suspect si occurredAt ≈ createdAt (même jour civil) = daté à l’import
-    const sameDay =
-      Math.abs(row.occurredAt.getTime() - row.createdAt.getTime()) < dayMs;
-    if (!sameDay) continue;
+    const sig = row.notes?.match(OWN_SIGNATURE_RE)?.[1];
+    if (sig) sigByRow.set(row.id, sig);
+  }
+  if (sigByRow.size === 0) return 0;
 
-    const prov = row.asset?.providerSymbol || "";
-    let key = "__any__";
-    if (prov === "solana") key = "native";
-    else if (prov.startsWith("sol:")) key = prov.slice(4).toLowerCase();
+  const onchain = await prisma.blockchainOnchainTx.findMany({
+    where: { platformId, signature: { in: [...new Set(sigByRow.values())] } },
+    select: { signature: true, blockTime: true },
+  });
+  const blockBySig = new Map<string, Date>();
+  for (const o of onchain) {
+    if (o.blockTime) blockBySig.set(o.signature, o.blockTime);
+  }
 
-    const hist =
-      firstByMint.get(key) ||
-      firstByMint.get("native") ||
-      firstByMint.get("__any__");
-    if (!hist) continue;
-    if (Math.abs(row.occurredAt.getTime() - hist.getTime()) < 120_000) continue;
+  let repaired = 0;
+  for (const row of rows) {
+    const sig = sigByRow.get(row.id);
+    if (!sig) continue;
+    const own = blockBySig.get(sig);
+    if (!own) continue;
+    // Tolérance 2 min (même seuil que repairOnchainJournalDates)
+    if (Math.abs(row.occurredAt.getTime() - own.getTime()) < 120_000) continue;
 
     await prisma.transaction.update({
       where: { id: row.id },
-      data: { occurredAt: hist },
+      data: { occurredAt: own },
     });
     repaired += 1;
   }

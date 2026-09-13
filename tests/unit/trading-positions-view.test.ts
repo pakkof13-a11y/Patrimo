@@ -125,6 +125,49 @@ describe("direction et P&L", () => {
   });
 });
 
+describe("notionnel inconnu — COIN-M sans valeur de contrat (TRA-03)", () => {
+  it("préserve un notionnel/marge/P&L null plutôt que de les afficher comme 0", () => {
+    const v = buildPositionView(
+      pos({
+        derived: {
+          ...pos().derived,
+          notionalEur: null,
+          marginUsedEur: null,
+          unrealizedPnlEur: null,
+          signedNotionalEur: null,
+        },
+      })
+    );
+    expect(v.notionalEur).toBeNull();
+    expect(v.marginEur).toBeNull();
+    expect(v.pnlEur).toBeNull();
+    // Sans marge connue, le pourcentage ne peut pas non plus être calculé.
+    expect(v.pnlPct).toBeNull();
+  });
+
+  it("écarte ces positions des sommes de la synthèse et les compte à part", () => {
+    const known = buildPositionView(pos());
+    const unknown = buildPositionView(
+      pos({
+        id: "p2",
+        derived: {
+          ...pos().derived,
+          notionalEur: null,
+          marginUsedEur: null,
+          unrealizedPnlEur: null,
+          signedNotionalEur: null,
+        },
+      })
+    );
+    const o = computeTradingOverview([known, unknown]);
+    // Seule la position connue contribue aux sommes.
+    expect(o.grossExposureEur).toBeCloseTo(25704, 2);
+    expect(o.marginEur).toBeCloseTo(5140.8, 2);
+    expect(o.unrealizedPnlEur).toBeCloseTo(957.6, 2);
+    expect(o.unvaluedCount).toBe(1);
+  });
+});
+
 describe("fraîcheur du prix de marque", () => {
   const NOW = new Date("2026-06-01T12:00:00Z");
   const daysAgo = (n: number) =>

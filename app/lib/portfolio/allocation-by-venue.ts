@@ -142,7 +142,14 @@ export type VenueSlice = {
 
 export type AllocationByVenue = {
   slices: VenueSlice[];
-  /** Σ des parts émises (amount > 0). Dénominateur des %. */
+  /**
+   * Σ des parts émises (amount ≠ 0). Dénominateur des %.
+   *
+   * Une venue au total négatif (CR-liq : un découvert qui dépasse le solde
+   * des autres comptes de la même venue) reste émise avec sa vraie valeur,
+   * négative — seule une venue restée à zéro exact, jamais alimentée, est
+   * absente. Négatif ≠ absent.
+   */
   total: number;
   asOf: string;
   /**
@@ -219,6 +226,10 @@ export type VenueTradingPositionInput = {
    * `notionnel / levier`, donc mécaniquement dans cette devise.
    */
   quoteCurrency: string;
+  /** USDT_M | COIN_M | undefined — absent = comportement linéaire historique. */
+  marginType?: string | null;
+  /** Valeur d'un contrat COIN-M (TRA-03). `null` : notionnel/equity non calculables pour cette position. */
+  contractValue?: DecimalInput | null;
 };
 
 export type AllocationByVenueInput = {
@@ -256,10 +267,12 @@ export type AllocationByVenueInput = {
    */
   tradingPositions: readonly { equityEur: DecimalInput }[];
   /**
-   * Positions écartées faute de taux pour leur devise de cotation.
+   * Positions écartées faute de taux pour leur devise de cotation, ou faute
+   * d'une equity calculable (TRA-03 : contrat COIN-M sans valeur de contrat)
+   * — `tradingEquityEur` rend `null` dans les deux cas.
    *
-   * Comptées au chargement (`tradingEquityEur` rend `null`), reportées telles
-   * quelles : la manche est alors incomplète, et le résultat le dit.
+   * Comptées au chargement, reportées telles quelles : la manche est alors
+   * incomplète, et le résultat le dit.
    */
   unconvertedTradingPositions?: number;
   /**
@@ -323,10 +336,16 @@ export function principalPaidOfInstallment(
   return principal;
 }
 
-/** Equity trading d'une position ouverte : marge ± P&L, jamais le notionnel. */
+/**
+ * Equity trading d'une position ouverte : marge ± P&L, jamais le notionnel.
+ *
+ * `null` si la marge ou le P&L latent ne sont pas calculables (TRA-03 :
+ * contrat COIN-M sans valeur de contrat) — une equity fabriquée à partir
+ * d'une hypothèse fausserait le donut plus qu'elle ne l'informerait.
+ */
 export function tradingEquityOf(
   position: VenueTradingPositionInput
-): Decimal {
+): Decimal | null {
   if (!position.isOpen) return zero();
   const view = toFuturesView({
     id: "venue",
@@ -340,7 +359,11 @@ export function tradingEquityOf(
     marginUsed: position.marginUsed == null ? null : d(position.marginUsed),
     fundingPaid: null,
     commissionPaid: null,
+    marginType: position.marginType,
+    contractValue:
+      position.contractValue == null ? null : d(position.contractValue),
   } satisfies FuturesPositionInput);
+  if (view.marginUsed == null || view.unrealizedPnlEur == null) return null;
   return view.marginUsed.plus(view.unrealizedPnlEur);
 }
 
@@ -359,12 +382,18 @@ export function tradingEquityOf(
  * retiré ce repli), et laisser l'exception remonter ferait tomber le donut
  * entier pour une ligne. Reste la troisième : la position n'est pas comptée,
  * et le résultat dit combien il y en a. UNKNOWN n'est ni ZERO ni ERROR.
+ *
+ * `null` aussi quand `tradingEquityOf` ne peut pas fonder l'equity elle-même
+ * (TRA-03, contrat COIN-M sans valeur de contrat) — même traitement, même
+ * compteur : une position sans equity connue n'est pas plus comptable qu'une
+ * position sans taux de change.
  */
 export function tradingEquityEur(
   position: VenueTradingPositionInput,
   rates: Record<string, number>
 ): Decimal | null {
   const equity = tradingEquityOf(position);
+  if (equity == null) return null;
   if (equity.isZero()) return equity;
   try {
     return d(
@@ -545,18 +574,28 @@ export function computeAllocationByVenue(
     venues.trading = venues.trading.plus(d(p.equityEur));
   }
 
-  const positive: { key: VenueKey; amount: Decimal }[] = [];
+  /*
+    CR-liq — un découvert n'efface pas la venue qui le porte.
+
+    `amount.gt(0)` masquait la venue entière dès que la somme de ses comptes
+    tombait à zéro ou en dessous : un compte à −6 000 € et un livret à
+    +5 000 € dans la même venue (−1 000 € au total) faisait disparaître les
+    5 000 € réels du livret avec le découvert. Le plancher à zéro vit
+    ailleurs (`immoNet`, `netOfCrd`) : ici, seule une venue jamais alimentée
+    — restée à zéro exact — doit rester invisible. Négatif ≠ absent.
+  */
+  const included: { key: VenueKey; amount: Decimal }[] = [];
   for (const key of VENUE_KEYS) {
     const amount = venues[key];
-    if (amount.gt(0)) positive.push({ key, amount });
+    if (!amount.isZero()) included.push({ key, amount });
   }
 
-  const weights = positive.map((p) => p.amount.toNumber());
+  const weights = included.map((p) => p.amount.toNumber());
   const percents = allocatePercents(weights, 1);
   let total = zero();
-  for (const p of positive) total = total.plus(p.amount);
+  for (const p of included) total = total.plus(p.amount);
 
-  const slices: VenueSlice[] = positive.map((p, i) => ({
+  const slices: VenueSlice[] = included.map((p, i) => ({
     key: p.key,
     label: VENUE_LABELS[p.key],
     amount: p.amount.toNumber(),
@@ -663,6 +702,13 @@ export async function allocationByVenue(
         markPrice: p.markPrice == null ? null : decStr(p.markPrice),
         marginUsed: p.marginUsed == null ? null : decStr(p.marginUsed),
         quoteCurrency: p.quoteCurrency,
+        marginType: p.marginType,
+        /*
+          Aucune source n'alimente `contractValue` (pas de colonne en base —
+          TRA-03 reste en attente d'une migration) : toujours UNKNOWN pour un
+          contrat COIN-M, jamais une hypothèse.
+        */
+        contractValue: null,
       },
       rates
     );
