@@ -58,15 +58,25 @@ describe("épargne salariale en devise", () => {
     findMany.mockResolvedValue([ligne("CHF", "100", "100")]);
     const { lines } = await listEmployeeSavings("u1");
     expect(lines[0]!.marketValue).toBe("10000.00");
-    // 10 000 / 0,94 = 10 638,30 €
-    expect(lines[0]!.marketValueEur).toBe("10638.30");
+    /*
+      10 000 / 0,94 = 10 638,297872340425531914… €, publié à huit décimales.
+
+      La contre-valeur n'est plus arrondie au centime à la ligne : c'est elle
+      que les totaux additionnent, et sommer des centimes puis arrondir la
+      somme creusait un écart cumulé (cf. `agregation-arrondi.test.ts`). La
+      valeur exacte est affirmée telle quelle, pas comparée à une tolérance :
+      une régression d'arrondi doit se voir ici.
+    */
+    expect(lines[0]!.marketValueEur).toBe("10638.29787234");
   });
 
   it("laisse une ligne en euros identique sur les deux champs", async () => {
     findMany.mockResolvedValue([ligne("EUR", "100", "100")]);
     const { lines } = await listEmployeeSavings("u1");
     expect(lines[0]!.marketValue).toBe("10000.00");
-    expect(lines[0]!.marketValueEur).toBe("10000.00");
+    // Même montant, deux précisions : le centime pour l'affichage dans la
+    // devise du support, la précision pleine pour ce qui s'additionne.
+    expect(lines[0]!.marketValueEur).toBe("10000.00000000");
   });
 
   it("n'additionne que les euros dans le total du plan", async () => {
@@ -75,7 +85,8 @@ describe("épargne salariale en devise", () => {
       ligne("CHF", "100", "100", "l2"),
     ]);
     const { summary } = await listEmployeeSavings("u1");
-    // 10 000 € + 10 638,30 € — et non 20 000 comme avant.
-    expect(Number(summary.totalValue)).toBeCloseTo(20638.3, 2);
+    // 10 000 € + 10 638,297872… € — et non 20 000 comme avant. Le total est la
+    // somme exacte, arrondie une seule fois : 20 638,30 €, au centime près.
+    expect(summary.totalValue).toBe("20638.30");
   });
 });

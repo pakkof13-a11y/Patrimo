@@ -22,6 +22,9 @@ type Point = {
   byAssetClassAndEnvelope: Record<string, Record<string, number | null>>;
 };
 
+/** `PEA: "2008-04-11", CTO: "2023-10-29"` (ou `null`) — cf. `engine.envelopeFirstWriteDays`. */
+type EnvelopeFirstWriteDay = Record<"PEA" | "CTO", string | null>;
+
 /*
   `GET /api/portfolio` ne rend plus `history[]` (la route tombait en 504 en
   préproduction à rejouer le moteur sur toute la profondeur lisible) : la
@@ -41,6 +44,29 @@ async function serie(page: import("@playwright/test").Page): Promise<Point[]> {
     await page.request.get("/api/portfolio/daily-nav?from=2000-01-01")
   ).json();
   return (body.points ?? []) as Point[];
+}
+
+/**
+ * Même appel que `serie`, augmenté de `envelopeFirstWriteDay` — la date de
+ * naissance de chaque enveloppe titres, telle que le moteur la publie
+ * (`engine.envelopeFirstWriteDays`, recopiée par la route sur la réponse et
+ * sur chaque point). Un seul test en a besoin : trouver, à l'exécution, quelle
+ * enveloppe a réellement une transition « inconnue → connue » dans la fenêtre
+ * servie, plutôt que de supposer laquelle.
+ */
+async function serieAvecNaissances(
+  page: import("@playwright/test").Page
+): Promise<{ points: Point[]; envelopeFirstWriteDay: EnvelopeFirstWriteDay }> {
+  const body = await (
+    await page.request.get("/api/portfolio/daily-nav?from=2000-01-01")
+  ).json();
+  return {
+    points: (body.points ?? []) as Point[],
+    envelopeFirstWriteDay: (body.envelopeFirstWriteDay ?? {
+      PEA: null,
+      CTO: null,
+    }) as EnvelopeFirstWriteDay,
+  };
 }
 
 test.describe("Évolution — croisement compte Titres × enveloppe", () => {
@@ -165,13 +191,45 @@ test.describe("Évolution — croisement compte Titres × enveloppe", () => {
       croisement : une action achetée il y a des années mais observée récemment
       ne doit contribuer à aucune enveloppe sur les points antérieurs — et
       l'absence, jamais un zéro, doit le dire.
+
+      Quelle enveloppe porte cette transition n'est PAS fixé en dur : le PEA
+      du décor (P02, ligne dont l'événement d'enveloppe est daté 2008) est né
+      bien avant tout plancher glissant de six ans — il est connu dès le
+      premier point de la fenêtre depuis des années, et le restera puisque sa
+      date est un ancrage calendaire fixe, jamais un « aujourd'hui − N jours ».
+      Une enveloppe déjà connue au premier point ne peut plus servir de décor
+      « avant / après » : ce n'est pas une régression, juste un fait qui ne
+      bouge plus.
+
+      Le CTO, lui, est daté par rapport à l'instant du réamorçage
+      (`daysAgo`), donc sujet au même mécanisme de dérive que documenté pour
+      les autres tests de ce ticket — mais avec une marge bien plus confortable
+      aujourd'hui. Plutôt que de parier sur PEA *ou* CTO, on lit la naissance
+      réelle de chacune (`envelopeFirstWriteDay`, publiée par l'API, jamais
+      recalculée ici) et on choisit à l'exécution celle dont la naissance tombe
+      APRÈS l'ouverture de la fenêtre servie — la seule dont la transition est
+      encore observable. Ancrage qui ne se dégrade plus : il s'adapte à ce que
+      la base contient réellement, aujourd'hui comme dans plusieurs années.
     */
-    const points = await serie(page);
+    const { points, envelopeFirstWriteDay } = await serieAvecNaissances(page);
     const act = (p: Point) => p.byAssetClassAndEnvelope!.ACTIONS!;
 
-    const iConnu = points.findIndex(
-      (p) => Number(act(p).PEA ?? 0) > 0 || Number(act(p).CTO ?? 0) > 0
-    );
+    const ouverture = points[0]?.day;
+    expect(ouverture).toBeTruthy();
+    const enveloppeObservable = (["PEA", "CTO"] as const).find((env) => {
+      const naissance = envelopeFirstWriteDay[env];
+      return typeof naissance === "string" && naissance > ouverture!;
+    });
+    // Sans enveloppe dont la naissance tombe dans la fenêtre servie, le décor
+    // n'existe plus — mieux vaut un échec explicite qu'un test qui ne
+    // prouverait plus rien.
+    expect(
+      enveloppeObservable,
+      "aucune enveloppe titres ne naît dans la fenêtre servie (six ans) : le décor est épuisé, un réamorçage est nécessaire"
+    ).toBeDefined();
+    const env = enveloppeObservable!;
+
+    const iConnu = points.findIndex((p) => Number(act(p)[env] ?? 0) > 0);
     // Sans point connu le test ne vérifierait rien : on exige le décor.
     expect(iConnu).toBeGreaterThan(0);
 
@@ -180,19 +238,15 @@ test.describe("Évolution — croisement compte Titres × enveloppe", () => {
     expect(inconnus.length).toBeGreaterThan(0);
 
     for (const p of inconnus) {
-      expect(act(p).PEA).toBeNull();
-      expect(act(p).CTO).toBeNull();
+      expect(act(p)[env]).toBeNull();
     }
     for (const p of avant) {
-      expect(Number(act(p).PEA ?? 0)).toBe(0);
-      expect(Number(act(p).CTO ?? 0)).toBe(0);
+      expect(Number(act(p)[env] ?? 0)).toBe(0);
     }
 
     // Après l'événement, la bonne enveloppe reçoit la valeur.
     const dernier = points[points.length - 1]!;
-    expect(
-      Number(act(dernier).PEA ?? 0) + Number(act(dernier).CTO ?? 0)
-    ).toBeGreaterThan(0);
+    expect(Number(act(dernier)[env] ?? 0)).toBeGreaterThan(0);
   });
 
   test("l'avertissement couvre la fenêtre, pas seulement son dernier point", async ({

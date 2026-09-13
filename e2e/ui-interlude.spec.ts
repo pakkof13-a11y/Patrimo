@@ -150,14 +150,60 @@ test.describe("Interlude UI", () => {
       "un rachat"
     );
 
+    /*
+      `openManage` (components/life-insurance/assurance-vie-page.tsx) déclenche
+      un `scrollIntoView({ behavior: "smooth" })` après avoir attendu, en
+      requestAnimationFrame, que l'ancre existe dans le DOM. `toBeInViewport`
+      seul course donc avec un scroll fluide en cours : au premier passage de
+      la vérification, le panneau peut être monté (viewport ratio 0) sans que
+      le scroll ne l'ait encore amené à l'écran — signature observée en CI
+      (1ʳᵉ tentative en échec, 2ᵉ verte sans rien y changer).
+
+      Chromium (le navigateur de la suite) émet un événement `scrollend`
+      natif à la fin d'un scroll, fluide ou non — signal DOM fiable plutôt
+      qu'un délai arbitraire. On l'arme juste avant l'action qui déclenche le
+      scroll, puis on attend soit cet événement, soit un délai court en repli
+      si jamais rien ne scrolle (ex. cible déjà dans le viewport, l'événement
+      ne se déclenche alors pas) — dans les deux cas, `toBeInViewport` reste
+      l'assertion qui tranche, inchangée.
+    */
+    async function armerScrollend(page: import("@playwright/test").Page) {
+      await page.evaluate(() => {
+        (window as unknown as { __scrollEnded?: boolean }).__scrollEnded =
+          false;
+        const onEnd = () => {
+          (window as unknown as { __scrollEnded?: boolean }).__scrollEnded =
+            true;
+        };
+        window.addEventListener("scrollend", onEnd, { once: true });
+      });
+    }
+    async function attendreScrollend(page: import("@playwright/test").Page) {
+      await page
+        .waitForFunction(
+          () =>
+            (window as unknown as { __scrollEnded?: boolean })
+              .__scrollEnded === true,
+          { timeout: 5_000 }
+        )
+        .catch(() => {
+          // Rien à défiler (cible déjà en vue) ou navigateur sans
+          // `scrollend` : `toBeInViewport` ci-dessous tranche quand même.
+        });
+    }
+
     // Le repli s'ouvre et la page défile jusqu'à l'encadré visé.
+    await armerScrollend(page);
     await page.getByTestId("av-add-av-contract-form").click();
+    await attendreScrollend(page);
     await expect(page.getByTestId("av-contract-form")).toBeInViewport({
       timeout: 10_000,
     });
 
     await page.getByRole("button", { name: /Ajouter/ }).first().click();
+    await armerScrollend(page);
     await page.getByTestId("av-add-av-redemption-simulator").click();
+    await attendreScrollend(page);
     await expect(page.getByTestId("av-redemption-simulator")).toBeInViewport({
       timeout: 10_000,
     });
