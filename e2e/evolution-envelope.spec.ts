@@ -17,15 +17,30 @@ import { gotoDashboard } from "./helpers";
  */
 
 type Point = {
-  byAssetClassBase?: Record<string, number>;
-  byAssetClassAndEnvelopeBase?: Record<string, Record<string, number | null>>;
+  day: string;
+  byAssetClass: Record<string, number>;
+  byAssetClassAndEnvelope: Record<string, Record<string, number | null>>;
 };
 
+/*
+  `GET /api/portfolio` ne rend plus `history[]` (la route tombait en 504 en
+  préproduction à rejouer le moteur sur toute la profondeur lisible) : la
+  série et son croisement classe × enveloppe vivent désormais dans
+  `GET /api/portfolio/daily-nav`, sous `byAssetClass` / `byAssetClassAndEnvelope`
+  — pas de suffixe `Base`, cette route ne convertit pas les devises. Les deux
+  champs sont non optionnels sur `DailyNavPoint` : plus besoin du filtre qui
+  cherchait les points qui les portaient, ils les portent tous.
+
+  Fenêtre volontairement profonde (`from`) : le défaut de la route est un an,
+  et ces tests cherchent justement la transition « avant le premier
+  événement », qui peut précéder cette fenêtre. `from` est de toute façon
+  ramené sous le cap réel (`capEarliestDay`, six ans).
+*/
 async function serie(page: import("@playwright/test").Page): Promise<Point[]> {
-  const body = await (await page.request.get("/api/portfolio?base=EUR")).json();
-  return ((body.history ?? []) as Point[]).filter(
-    (p) => p.byAssetClassAndEnvelopeBase
-  );
+  const body = await (
+    await page.request.get("/api/portfolio/daily-nav?from=2000-01-01")
+  ).json();
+  return (body.points ?? []) as Point[];
 }
 
 test.describe("Évolution — croisement compte Titres × enveloppe", () => {
@@ -81,7 +96,7 @@ test.describe("Évolution — croisement compte Titres × enveloppe", () => {
   }) => {
     const points = await serie(page);
     const dernier = points[points.length - 1]!;
-    const croise = dernier.byAssetClassAndEnvelopeBase!;
+    const croise = dernier.byAssetClassAndEnvelope!;
 
     // Titres additionne ACTIONS et OBLIGATIONS pour chaque enveloppe.
     const pea =
@@ -89,8 +104,8 @@ test.describe("Évolution — croisement compte Titres × enveloppe", () => {
     const cto =
       Number(croise.ACTIONS?.CTO ?? 0) + Number(croise.OBLIGATIONS?.CTO ?? 0);
     const titres =
-      Number(dernier.byAssetClassBase?.ACTIONS ?? 0) +
-      Number(dernier.byAssetClassBase?.OBLIGATIONS ?? 0);
+      Number(dernier.byAssetClass?.ACTIONS ?? 0) +
+      Number(dernier.byAssetClass?.OBLIGATIONS ?? 0);
 
     // Le décor : chaque enveloppe est une fraction stricte du compte Titres.
     expect(pea).toBeGreaterThan(0);
@@ -121,7 +136,7 @@ test.describe("Évolution — croisement compte Titres × enveloppe", () => {
       confondues.
     */
     const points = await serie(page);
-    const dernier = points[points.length - 1]!.byAssetClassAndEnvelopeBase!;
+    const dernier = points[points.length - 1]!.byAssetClassAndEnvelope!;
     const obliCto = Number(dernier.OBLIGATIONS?.CTO ?? 0);
     // Le décor n'a d'intérêt que s'il existe des obligations en compte-titres.
     expect(obliCto).toBeGreaterThan(0);
@@ -135,7 +150,7 @@ test.describe("Évolution — croisement compte Titres × enveloppe", () => {
   test("aucune classe hors titres ne porte de croisement", async ({ page }) => {
     const points = await serie(page);
     for (const p of points.slice(-5)) {
-      expect(Object.keys(p.byAssetClassAndEnvelopeBase!).sort()).toEqual([
+      expect(Object.keys(p.byAssetClassAndEnvelope!).sort()).toEqual([
         "ACTIONS",
         "OBLIGATIONS",
       ]);
@@ -152,7 +167,7 @@ test.describe("Évolution — croisement compte Titres × enveloppe", () => {
       l'absence, jamais un zéro, doit le dire.
     */
     const points = await serie(page);
-    const act = (p: Point) => p.byAssetClassAndEnvelopeBase!.ACTIONS!;
+    const act = (p: Point) => p.byAssetClassAndEnvelope!.ACTIONS!;
 
     const iConnu = points.findIndex(
       (p) => Number(act(p).PEA ?? 0) > 0 || Number(act(p).CTO ?? 0) > 0
