@@ -661,11 +661,20 @@ export function TerminalHero({
             espace invisible (`&nbsp;`) y maintient la même ligne, la même
             police, donc la même hauteur, sans jamais inventer de valeur ni
             deviner un pixel.
+
+            `overflow-x-auto` seul réintroduisait une variable : en Chromium
+            headless (pas d'overlay scrollbar, comme en CI), une barre de
+            défilement horizontale qui apparaît réserve ~15px de hauteur
+            qu'elle n'occupe pas quand le contenu tient — donc la carte
+            sautait à nouveau, entre une période sans pastilles (rien à
+            défiler) et une période avec (barre visible). `hero-scroll-no-bar`
+            masque l'indicateur, pas le défilement : le contenu qui déborde
+            reste accessible, seule sa réservation de hauteur disparaît.
           */}
           <div className="mt-[var(--space-2)]">
             <p
               className={cn(
-                "flex flex-nowrap items-baseline gap-[var(--space-2)] overflow-x-auto",
+                "flex flex-nowrap items-baseline gap-[var(--space-2)] overflow-x-auto hero-scroll-no-bar",
                 "text-[length:var(--text-sm)] leading-none",
                 /*
                   Cachée pendant le survol, mais jamais démontée.
