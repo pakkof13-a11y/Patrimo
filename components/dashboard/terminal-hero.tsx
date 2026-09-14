@@ -670,6 +670,21 @@ export function TerminalHero({
             défiler) et une période avec (barre visible). `hero-scroll-no-bar`
             masque l'indicateur, pas le défilement : le contenu qui déborde
             reste accessible, seule sa réservation de hauteur disparaît.
+
+            `flex-nowrap` sur la rangée ne suffisait toujours pas : mesuré par
+            rejeu du DOM capturé en CI (`getBoundingClientRect` sur chaque
+            pastille), tous les enfants restent bien sur la même ligne (même
+            `top`), mais chacun peut se comprimer (`flex-shrink` par défaut)
+            et laisser SON PROPRE texte se replier en interne — 12px de
+            hauteur pastille vide, jusqu'à 36px avec « Capital investi
+            +159 866,... » recroquevillé sur deux ou trois lignes dans sa
+            propre boîte, sans jamais faire sauter la rangée elle-même à une
+            deuxième ligne flex. `flex-nowrap` empêche les items de changer de
+            ligne ; il n'empêche pas le texte à l'intérieur d'un item de le
+            faire. `shrink-0` + `whitespace-nowrap` sur `hero-pill-market`,
+            `hero-pill-flow` et `hero-window-label` retire les deux causes à
+            la fois : la pastille ne peut plus rétrécir, et son texte ne peut
+            plus se replier même si elle le pouvait encore.
           */}
           <div className="mt-[var(--space-2)]">
             <p
@@ -739,7 +754,7 @@ export function TerminalHero({
                       : formatSignedPct(windowChange.pct)}
                   </span>
                   <span
-                    className="text-[var(--foreground-secondary)]"
+                    className="shrink-0 whitespace-nowrap text-[var(--foreground-secondary)]"
                     data-testid="hero-window-label"
                   >
                     {periodLabel}
@@ -765,7 +780,7 @@ export function TerminalHero({
                       </span>
                       <span
                         className={cn(
-                          "num rounded-[var(--radius-sm)] px-[var(--space-1)]",
+                          "num shrink-0 whitespace-nowrap rounded-[var(--radius-sm)] px-[var(--space-1)]",
                           "bg-[var(--surface-sunken)]",
                           attribution.market >= 0
                             ? "val-positive"
@@ -781,7 +796,7 @@ export function TerminalHero({
                       </span>
                       <span
                         className={cn(
-                          "num rounded-[var(--radius-sm)] px-[var(--space-1)]",
+                          "num shrink-0 whitespace-nowrap rounded-[var(--radius-sm)] px-[var(--space-1)]",
                           "bg-[var(--surface-sunken)] text-[var(--primary-text)]"
                         )}
                         data-testid="hero-pill-flow"
