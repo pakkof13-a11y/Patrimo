@@ -795,51 +795,63 @@ export function HoldingsSection({
         accessorKey: "quantity",
         id: "quantity",
         header: "Qté",
-        cell: ({ getValue }) => (
-          <span className="font-semibold tabular-nums text-base">
-            {Number(getValue<string>()).toLocaleString("fr-FR", {
-              maximumFractionDigits: 8,
-            })}
-          </span>
-        ),
+        cell: ({ getValue }) => {
+          const formatted = Number(getValue<string>()).toLocaleString("fr-FR", {
+            maximumFractionDigits: 8,
+          });
+          return (
+            <span className="font-semibold tabular-nums text-base" title={formatted}>
+              {formatted}
+            </span>
+          );
+        },
       },
       {
         accessorKey: "avgCostEur",
         id: "avgCostEur",
         header: "PRU",
-        cell: ({ getValue }) => (
-          <span className="tabular-nums" title="Prix de revient unitaire (frais inclus)">
-            {formatCurrency(getValue<string>(), "EUR")}
-          </span>
-        ),
+        cell: ({ getValue }) => {
+          const formatted = formatCurrency(getValue<string>(), "EUR");
+          return (
+            <span
+              className="tabular-nums"
+              title={`Prix de revient unitaire (frais inclus) · ${formatted}`}
+            >
+              {formatted}
+            </span>
+          );
+        },
       },
       {
         accessorKey: "currentPriceNative",
         id: "currentPriceNative",
         header: "Cours",
-        cell: ({ row }) => (
-          <div>
-            <div className="tabular-nums">
-              {formatUnitPrice(
-                row.original.currentPriceNative,
-                row.original.currency,
-                { crypto: row.original.assetClass === "CRYPTO" }
+        cell: ({ row }) => {
+          const formatted = formatUnitPrice(
+            row.original.currentPriceNative,
+            row.original.currency,
+            { crypto: row.original.assetClass === "CRYPTO" }
+          );
+          return (
+            <div>
+              <div className="tabular-nums" title={formatted}>
+                {formatted}
+              </div>
+              {/*
+                La provenance du cours ne s'affiche plus sous chaque ligne : elle
+                répétait « Démo » trente fois pour une information qui n'intéresse
+                que lorsqu'elle cloche. Seul le cas qui cloche reste visible — un
+                cours périmé —, et la ligne entière le signale déjà par
+                `data-stale`. Le détail complet vit dans le panneau de droite.
+              */}
+              {row.original.priceStatus === "STALE" && (
+                <div className="text-[10px] tracking-wide text-amber-500">
+                  cours périmé
+                </div>
               )}
             </div>
-            {/*
-              La provenance du cours ne s'affiche plus sous chaque ligne : elle
-              répétait « Démo » trente fois pour une information qui n'intéresse
-              que lorsqu'elle cloche. Seul le cas qui cloche reste visible — un
-              cours périmé —, et la ligne entière le signale déjà par
-              `data-stale`. Le détail complet vit dans le panneau de droite.
-            */}
-            {row.original.priceStatus === "STALE" && (
-              <div className="text-[10px] tracking-wide text-amber-500">
-                cours périmé
-              </div>
-            )}
-          </div>
-        ),
+          );
+        },
       },
       {
         accessorKey: "marketValueBase",
@@ -847,16 +859,19 @@ export function HoldingsSection({
         // La devise est déjà portée par chaque cellule (« 312 000,00 € ») :
         // la répéter en en-tête ne faisait que le faire tronquer.
         header: "Valeur",
-        cell: ({ row }) => (
-          <div>
-            <span className="font-medium tabular-nums">
-              {formatCurrency(
-                row.original.marketValueBase || row.original.marketValueEur,
-                baseCurrency
-              )}
-            </span>
-          </div>
-        ),
+        cell: ({ row }) => {
+          const formatted = formatCurrency(
+            row.original.marketValueBase || row.original.marketValueEur,
+            baseCurrency
+          );
+          return (
+            <div>
+              <span className="font-medium tabular-nums" title={formatted}>
+                {formatted}
+              </span>
+            </div>
+          );
+        },
       },
       {
         /*

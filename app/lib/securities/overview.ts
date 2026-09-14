@@ -439,6 +439,29 @@ export function unattributedPockets(
     .sort((a, b) => a.label.localeCompare(b.label, "fr"));
 }
 
+/**
+ * Valeur des lignes qui portent l'étiquette d'une enveloppe sans être
+ * rattachées à aucun compte, quel que soit l'état de la carte de compte
+ * affichée à côté.
+ *
+ * Distincte de la poche que `splitByEnvelope` construit pour la même
+ * enveloppe : celle-ci additionne aussi les espèces des comptes réels
+ * (`a.cashEur`) et leurs titres rattachés, si bien qu'un compte PEA réel à
+ * 890 € de liquidités et zéro position rattachée se mêlait déjà à des
+ * dizaines de milliers d'euros de lignes orphelines dans un seul chiffre,
+ * sans qu'on puisse dire lequel des deux le compte réel porte. Celle-ci ne
+ * compte que les positions orphelines — la part qu'aucun compte réel,
+ * fût-il présent, ne peut déjà revendiquer.
+ */
+export function unattachedEnvelopeValueEur(
+  positions: SecuritiesPosition[],
+  envelopeType: string
+): number {
+  return positions
+    .filter((p) => !p.securitiesAccountId && p.accountType === envelopeType)
+    .reduce((sum, p) => sum + num(p.marketValueEur), 0);
+}
+
 /* ── Répartition par enveloppe ────────────────────────────────────── */
 
 export type EnvelopeSplit = {

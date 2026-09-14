@@ -29,6 +29,7 @@ import {
   planStatusNotice,
   positionWeightPct,
   splitByEnvelope,
+  unattachedEnvelopeValueEur,
   unattributedPockets,
   type AccountView,
   type SecuritiesAccount,
@@ -274,43 +275,43 @@ export function SecuritiesOverview({
     [positions, totals]
   );
 
-  /** Le PEA le plus ancien porte le compteur d'antériorité fiscale. */
-  const peaMaturity = useMemo(() => {
-    const withMaturity = accounts
-      .filter((a) => a.maturity)
+  /**
+   * Le PEA réel le plus ancien — indépendamment de l'antériorité qu'on sait
+   * en tirer. `null` seulement si aucun `SecuritiesAccount` de type PEA
+   * n'existe : un compte réel sans compteur d'antériorité (service fiscal
+   * n'ayant pas encore produit `maturity`) reste ici, pour que
+   * `FiscalStatusCard` dise ce qu'il est plutôt que de prétendre qu'il
+   * n'existe pas.
+   */
+  const peaAccount = useMemo(() => {
+    const peaAccounts = accounts
+      .filter((a) => a.envelopeType === "PEA")
       .sort(
         (a, b) =>
           new Date(a.openDate).getTime() - new Date(b.openDate).getTime()
       );
-    return withMaturity[0] ?? null;
+    return peaAccounts[0] ?? null;
   }, [accounts]);
 
   /**
-   * Le PEA existe-t-il comme *compte déclaré*, indépendamment de l'antériorité
-   * qu'on sait en tirer ? `peaMaturity` répond « non » dans deux cas distincts
-   * — aucun `SecuritiesAccount` de type PEA, ou un compte réel dont le service
-   * fiscal n'a pas (encore) produit de compteur — et `FiscalStatusCard` doit
-   * les distinguer : le premier dit « aucun PEA », le second non.
-   */
-  const hasRealPeaAccount = useMemo(
-    () => accounts.some((a) => a.envelopeType === "PEA"),
-    [accounts]
-  );
-
-  /**
-   * Ce que la tuile KPI « PEA » compte alors qu'aucun compte ne le porte.
+   * Ce que la tuile KPI « PEA » compte en plus de ce que porte(nt) le(s)
+   * compte(s) PEA réel(s) — jamais `null` quand ce n'est pas nul, `null`
+   * sinon (silence légitime).
    *
    * `splitByEnvelope` range une ligne orpheline sous l'enveloppe qu'elle
    * déclare elle-même (`Asset.accountType`), faute de compte réel pour
-   * trancher — c'est ce qui peuple la tuile à 310 441 € sans qu'un seul
-   * `SecuritiesAccount` PEA existe. Le message "Aucun PEA déclaré" doit lire
-   * ce même total, sous peine de contredire la tuile juste au-dessus.
+   * trancher : la tuile peut donc afficher un total très supérieur à ce que
+   * montre la carte de compte juste en dessous, avec ou sans compte réel.
+   * Un compte réel qui existe mais ne porte aucune position rattachée
+   * affiche alors une carte quasi vide à côté d'une tuile à cinq chiffres,
+   * sans lien visible entre les deux — la même contradiction que « Aucun PEA
+   * déclaré » à côté d'un montant, sous une autre forme. `FiscalStatusCard`
+   * doit la nommer dans tous les cas, compte présent ou non (H4 v2).
    */
   const unattachedPeaValueEur = useMemo(() => {
-    if (hasRealPeaAccount) return null;
-    const pea = envelopes.find((e) => e.envelopeType === "PEA");
-    return pea && pea.valueEur > 0 ? pea.valueEur : null;
-  }, [hasRealPeaAccount, envelopes]);
+    const value = unattachedEnvelopeValueEur(positions, "PEA");
+    return value > 0 ? value : null;
+  }, [positions]);
 
   if (q.isPending) {
     return (
@@ -608,7 +609,7 @@ export function SecuritiesOverview({
           </section>
 
           <FiscalStatusCard
-            account={peaMaturity}
+            account={peaAccount}
             unattachedPeaValueEur={unattachedPeaValueEur}
           />
 
@@ -929,18 +930,40 @@ function FiscalStatusCard({
   account,
   unattachedPeaValueEur,
 }: {
+  /** Le PEA réel le plus ancien — `null` seulement si aucun n'existe. */
   account: SecuritiesAccount | null;
   /**
-   * Ce que la tuile KPI « PEA » affiche alors qu'aucun `SecuritiesAccount`
-   * PEA n'existe — `null` s'il n'y en a pas (silence légitime) ou si le PEA
-   * "Aucun PEA déclaré" serait alors faux : un compte existe.
-   *
-   * `SecuritiesOverview.unattachedPeaValueEur` le vaut déjà `null` dans ce
-   * second cas.
+   * Valeur des lignes étiquetées PEA qu'aucun compte ne porte — voir
+   * `unattachedEnvelopeValueEur`. Non nul indépendamment de `account` : un
+   * compte PEA réel peut coexister avec des lignes orphelines, et la tuile
+   * KPI « PEA » les additionne déjà toutes les deux.
    */
   unattachedPeaValueEur: number | null;
 }) {
-  if (!account?.maturity) {
+  /*
+    Ce que la tuile KPI « PEA » compte au-delà de ce que cette carte montre.
+    Contrat strict (H4 v2) : jamais de montant affiché à côté d'un message
+    d'absence, sous quelque forme que ce soit — y compris la forme discrète
+    d'une carte de compte réel restée silencieuse sur un total qui la
+    dépasse. Rendu dans tous les cas où `account` existe, quel que soit son
+    état d'antériorité.
+  */
+  const orphanNotice = unattachedPeaValueEur != null && (
+    <p
+      className="text-meta mt-[var(--space-3)] border-t border-[var(--border-subtle)] pt-[var(--space-3)]"
+      data-testid="securities-fiscal-orphan-notice"
+    >
+      <span className="num text-[var(--foreground)]">
+        {formatCurrency(unattachedPeaValueEur, "EUR")}
+      </span>{" "}
+      de titres supplémentaires portent l&apos;étiquette PEA sans être
+      rattachés à un compte : ils entrent dans la tuile «&nbsp;PEA&nbsp;»
+      ci-dessus mais pas dans cette carte, tant qu&apos;ils ne sont pas
+      rattachés à {account?.platformName || account?.envelopeLabel}.
+    </p>
+  );
+
+  if (!account) {
     /*
       Deux affirmations ne peuvent pas cohabiter sans se contredire : « aucun
       PEA déclaré » à côté d'une tuile PEA à 310 441 €. La cause n'est pas un
@@ -977,6 +1000,32 @@ function FiscalStatusCard({
           Aucun PEA déclaré : pas d&apos;antériorité fiscale à suivre. Les
           gains d&apos;un compte-titres sont imposables à chaque cession.
         </p>
+      </section>
+    );
+  }
+
+  if (!account.maturity) {
+    /*
+      Un compte PEA réel existe, mais le service fiscal n'a pas (encore)
+      produit de compteur d'antériorité pour lui. Ce n'est pas la même
+      inconnue qu'« aucun PEA déclaré » — un compte existe, avec sa date
+      d'ouverture réelle — et le dire autrement mentirait sur son existence
+      (H4 v2 : « présent → le dire explicitement »).
+    */
+    return (
+      <section
+        className="panel p-[var(--pad-card)]"
+        data-testid="securities-fiscal"
+        data-pea-maturity-unknown="true"
+      >
+        <h3 className="text-label">Statut fiscal</h3>
+        <p className="text-meta mt-[var(--space-2)]">
+          {account.envelopeLabel} ouvert le{" "}
+          <span className="num">{formatDate(account.openDate)}</span> chez{" "}
+          {account.platformName} : l&apos;antériorité fiscale de ce compte
+          n&apos;a pas pu être calculée.
+        </p>
+        {orphanNotice}
       </section>
     );
   }
@@ -1021,6 +1070,7 @@ function FiscalStatusCard({
           {account.taxStatusLabel}
         </p>
         <p className="text-meta mt-[var(--space-2)]">{planNotice.title}</p>
+        {orphanNotice}
       </section>
     );
   }
@@ -1080,6 +1130,8 @@ function FiscalStatusCard({
           value={pct(SOCIAL_CHARGES_PCT, 1)}
         />
       </dl>
+
+      {orphanNotice}
     </section>
   );
 }

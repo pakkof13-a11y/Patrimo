@@ -563,6 +563,7 @@ export function SecuritiesTab({ className }: { className?: string }) {
       setForm(emptyForm);
       setShowForm(false);
       invalidate();
+      invalidatePortfolioView(qc);
     },
     onError: (e: Error) => toast.error(e.message),
   });
