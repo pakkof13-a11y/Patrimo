@@ -488,7 +488,7 @@ export function TerminalHero({
           retrouvait sous le chiffre, et la carte gagnait 151 pixels. Élastique,
           elle prend ce qui reste et replie son texte plutôt que la mise en page.
         */}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1" data-testid="hero-headline-block">
           <div className="flex flex-wrap items-center gap-[var(--space-2)]">
             {/*
               Le titre reste pour qui lit l'écran sans le voir, mais il ne
@@ -685,6 +685,12 @@ export function TerminalHero({
             `hero-pill-flow` et `hero-window-label` retire les deux causes à
             la fois : la pastille ne peut plus rétrécir, et son texte ne peut
             plus se replier même si elle le pouvait encore.
+
+            Rejoué une seconde fois après ce correctif (même méthode, run CI
+            suivant) : la rangée entière ne bouge plus pour ces trois-là, mais
+            `hero-window-change-pct` (le pourcentage, ex. « +4,1 % ») restait à
+            24px pendant que ses voisines étaient retombées à 12 — laissé de
+            côté du premier passage, même mécanisme, même correctif.
           */}
           <div className="mt-[var(--space-2)]">
             <p
@@ -735,7 +741,7 @@ export function TerminalHero({
                   <span className="text-[var(--foreground-faint)]">·</span>
                   <span
                     className={cn(
-                      "num",
+                      "num shrink-0 whitespace-nowrap",
                       windowChange.pct === null
                         ? "text-[var(--foreground-faint)]"
                         : windowChange.abs >= 0

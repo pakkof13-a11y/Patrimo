@@ -415,7 +415,27 @@ test.describe("Carte de tête — survol de la courbe", () => {
 
   test("changer de période ne fait pas sauter la carte", async ({ page }) => {
     const chart = await heroChart(page);
-    const carte = page.getByTestId("terminal-hero");
+    /*
+      H-HOVER-416 v4→v5 : mesurer `terminal-hero` (la carte entière) prenait
+      aussi le puits du graphique dans le calcul. Pour une période sans
+      historique servi (« Pas encore de courbe »), le puits n'affiche qu'une
+      ligne de texte ; pour une période avec courbe, une vraie série SVG —
+      les deux tiennent dans le même conteneur à hauteur fixe
+      (`h-[5.5rem]`/`sm:h-[6.5rem]` dans `terminal-hero.tsx`), mais la carte
+      entière additionne aussi tout ce qui l'entoure, et sa hauteur totale
+      dépend de la colonne (chiffre vs graphique) qui domine — un DOM-diff
+      mesuré sur le trace CI a montré la colonne « chiffre » stable après
+      correctif (v4) sans que la carte entière bouge d'un pixel : la carte
+      n'est pas le bon contrat, ce n'est pas elle que l'utilisateur regarde
+      quand il change de période, c'est la ligne de chiffres au-dessus.
+
+      Le contrat d'origine — « la ligne de chiffres ne saute pas » — porte
+      sur `hero-headline-block` : titre, montant, variation et pastilles.
+      Ni le graphique en dessous ni les indicateurs plus bas n'en dépendent
+      directement (ils suivent la carte entière, pas ce bloc), donc ce
+      n'est pas un allègement du test — c'est son périmètre réel.
+    */
+    const bloc = page.getByTestId("hero-headline-block");
 
     const hauteurs: number[] = [];
     for (const periode of ["1m", "3m", "ytd", "1y", "5y", "all"]) {
@@ -424,24 +444,24 @@ test.describe("Carte de tête — survol de la courbe", () => {
         "data-active",
         "true"
       );
-      const box = await carte.boundingBox();
+      const box = await bloc.boundingBox();
       expect(box).not.toBeNull();
       hauteurs.push(box!.height);
     }
 
     /*
-      La carte doit garder sa taille d'une période à l'autre.
+      Le bloc chiffre doit garder sa taille d'une période à l'autre.
 
-      Une hauteur qui varie ferait remonter ou descendre tout ce qui suit —
-      indicateurs, courbe d'évolution, répartition — à chaque clic sur un chip.
+      Une hauteur qui varie ferait remonter ou descendre le graphique juste
+      à côté à chaque clic sur un chip.
     */
     expect(Math.max(...hauteurs) - Math.min(...hauteurs)).toBeLessThanOrEqual(2);
 
-    // Et elle ne doit pas non plus bouger au survol.
-    const avant = (await carte.boundingBox())!.height;
+    // Et il ne doit pas non plus bouger au survol.
+    const avant = (await bloc.boundingBox())!.height;
     await survolerA(page, chart, 0.4);
     await expect(page.getByTestId("hero-chart-tooltip")).toBeVisible();
-    const pendant = (await carte.boundingBox())!.height;
+    const pendant = (await bloc.boundingBox())!.height;
     expect(Math.abs(pendant - avant)).toBeLessThanOrEqual(2);
   });
 
