@@ -365,19 +365,73 @@ export function gainsInPartialRedemption(input: {
   gainsInRedemptionEur: string;
   capitalInRedemptionEur: string;
   gainRatio: number;
+  /**
+   * Assiette imposable maximale du contrat : `max(0, valeur − revient)`.
+   *
+   * Ce n'est **pas** la plus-value latente : en moins-value elle vaut 0, là où
+   * `latentPnlEur` est négatif. Les deux s'affichent côte à côte, sous deux
+   * libellés distincts — le premier dit ce que porte la position, le second
+   * ce qu'un rachat peut au plus imposer.
+   */
   latentGainEur: string;
+  /**
+   * Plus-value latente **signée** : `valeur − revient`, négative en
+   * moins-value. C'est le même nombre que les autres écrans (« Plus-value
+   * latente » de la vue contrat) affichent depuis le journal — les supports
+   * ont toujours un `costBasisEur`, la somme de leurs `unrealizedPnlEur` lui est
+   * identique. "0" quand la position est inconnue.
+   */
+  latentPnlEur: string;
+  /**
+   * Le montant réellement rachetable, plafonné à l'encours.
+   *
+   * Il était calculé en interne et jamais rendu : la fonction plafonnait les
+   * gains, répondait `ok: true`, et l'appelant continuait avec sa saisie
+   * d'origine. Un rachat de 200 000 € sur une position de 100 000 € affichait
+   * donc « net perçu 195 060 € » pour un contrat qui n'en détient que la
+   * moitié. L'appelant doit calculer son impôt et son net sur **ce** montant.
+   */
+  cappedRedemptionEur: string;
 } {
   const redemption = parseMoney(input.redemptionEur);
   const value = parseMoney(input.positionValueEur);
   const cost = parseMoney(input.costBasisEur);
+
+  /*
+    Le gain latent, son ratio et le plafond de rachat sont des propriétés de la
+    **position** — `value − cost`, `latent / value`, `value` — pas de la saisie.
+    Ils étaient rendus à « 0 » sur un rachat illisible ou négatif : une saisie
+    de « -1 » sur une position à 20 000 € de plus-value réaffichait « Gain
+    latent 0 € », le défaut que la branche « rachat > encours » avait déjà
+    cessé de produire. Ils ne sont inconnus que si la position l'est.
+  */
+  const positionKnown =
+    value !== null && cost !== null && value >= 0 && cost >= 0;
+  const latentPnl = positionKnown ? (value as number) - (cost as number) : 0;
+  const latentGain = Math.max(0, latentPnl);
+  const gainRatio =
+    positionKnown && (value as number) > MONEY_EPS
+      ? latentGain / (value as number)
+      : 0;
+  const positionFacts = {
+    gainRatio,
+    latentGainEur: formatMoney(roundMoney(latentGain)),
+    latentPnlEur: formatMoney(roundMoney(latentPnl)),
+    // Le maximum rachetable : l'encours lui-même, comme sur un refus pour
+    // dépassement. "0" quand la position est inconnue — l'appelant ne
+    // l'affiche pas comme plafond (il ne le montre que s'il est > 0).
+    cappedRedemptionEur: positionKnown
+      ? formatMoney(roundMoney(value as number))
+      : "0",
+  };
+
   if (redemption === null || value === null || cost === null) {
     return {
       ok: false,
       error: "Montants invalides",
       gainsInRedemptionEur: "0",
       capitalInRedemptionEur: "0",
-      gainRatio: 0,
-      latentGainEur: "0",
+      ...positionFacts,
     };
   }
   if (redemption < 0 || value < 0 || cost < 0) {
@@ -386,13 +440,9 @@ export function gainsInPartialRedemption(input: {
       error: "Les montants ne peuvent pas être négatifs",
       gainsInRedemptionEur: "0",
       capitalInRedemptionEur: "0",
-      gainRatio: 0,
-      latentGainEur: "0",
+      ...positionFacts,
     };
   }
-
-  const latentGain = Math.max(0, value - cost);
-  const gainRatio = value > MONEY_EPS ? latentGain / value : 0;
   const cappedRedemption = Math.min(redemption, value > MONEY_EPS ? value : redemption);
   // Rachat total (ou ≥ valeur) : tout le gain latent. Sinon proportionnel.
   const fullExit = value <= MONEY_EPS || redemption >= value - MONEY_EPS;
@@ -401,11 +451,110 @@ export function gainsInPartialRedemption(input: {
     : Math.min(cappedRedemption, cappedRedemption * gainRatio);
   const capital = Math.max(0, Math.min(redemption, cappedRedemption) - gains);
 
+  /*
+    Un rachat supérieur à l'encours est refusé, pas rogné en silence.
+
+    Le plafonnement existait déjà pour les gains — `cappedRedemption` — mais la
+    fonction répondait `ok: true` sans dire qu'elle avait coupé. Le panneau
+    calculait alors l'impôt et le net sur le montant saisi, et annonçait un net
+    perçu supérieur à ce que le contrat détient : 195 060 € sur une position de
+    100 000 €.
+
+    `ok: false` avec une raison affichable est la seule sortie honnête : on ne
+    peut pas racheter ce qui n'est pas là, et décider que l'utilisateur voulait
+    dire « tout » serait une correction de saisie que rien ne fonde. Le montant
+    plafonné part quand même dans la réponse, pour que l'écran puisse le
+    proposer.
+  */
+  if (redemption > value + MONEY_EPS) {
+    /*
+      « l'encours disponible », pas « l'encours du support » : cette fonction
+      ne sait pas si `positionValueEur` est un support ou la somme de trois. En
+      périmètre « Tout le contrat (agrégat) », le panneau lui passe le total, et
+      l'ancien libellé désignait un support unique qui n'existait pas. Le mot
+      neutre est vrai dans les deux cas ; le montant, lui, l'a toujours été.
+    */
+    return {
+      ok: false,
+      error: `Rachat supérieur à l'encours disponible (${formatMoney(roundMoney(value))} €)`,
+      gainsInRedemptionEur: "0",
+      capitalInRedemptionEur: "0",
+      ...positionFacts,
+      cappedRedemptionEur: formatMoney(roundMoney(value)),
+    };
+  }
+
   return {
     ok: true,
     gainsInRedemptionEur: formatMoney(roundMoney(gains)),
     capitalInRedemptionEur: formatMoney(roundMoney(capital)),
-    gainRatio,
-    latentGainEur: formatMoney(roundMoney(latentGain)),
+    ...positionFacts,
+    cappedRedemptionEur: formatMoney(roundMoney(cappedRedemption)),
+  };
+}
+
+/** Borne qui a retenu une quote-part de gains saisie à la main. */
+export type GainsOverrideClampedBy = "none" | "redemption" | "latentGain";
+
+export type GainsOverrideClamp = {
+  /** Quote-part retenue pour le calcul, après plafonnement. */
+  gainsEur: string;
+  /** Ce que l'utilisateur avait saisi (≥ 0, illisible ⇒ 0). */
+  requestedEur: string;
+  /** Plafond qui a joué, ou "none" si la saisie est passée telle quelle. */
+  clampedBy: GainsOverrideClampedBy;
+  /** Valeur du plafond qui a joué ("0" si aucun). */
+  capEur: string;
+};
+
+/**
+ * Plafonne une quote-part de gains saisie à la main.
+ *
+ * Deux bornes, toutes deux des faits et non des choix :
+ * - le **rachat** : un retrait ne contient pas plus de gains que d'euros ;
+ * - le **gain latent** du contrat (`latentGainEur`) : un rachat, même total,
+ *   n'impose pas plus de gains que la position n'en porte.
+ *
+ * Le panneau ne bornait qu'au rachat. Sur 100 000 € de valeur pour 80 000 €
+ * de revient (20 000 € de gain latent), un rachat de 60 000 € avec « 50 000 »
+ * saisi partait imposer 50 000 € de gains — 7 410 € d'impôt sur 30 000 € de
+ * gain qui n'existent pas.
+ *
+ * `latentGainEur: null` = position inconnue (contrat sans support rattaché au
+ * journal) : seule la borne du rachat joue, puisque c'est précisément pour ce
+ * cas que la saisie manuelle existe. Ne pas confondre avec "0", qui est un
+ * gain latent connu et nul.
+ *
+ * Quand les deux bornes sont dépassées, on nomme la plus basse ; à égalité,
+ * le gain latent — c'est lui qui renseigne sur le contrat.
+ */
+export function clampGainsOverride(input: {
+  overrideEur: string | number;
+  redemptionEur: string | number;
+  latentGainEur: string | number | null;
+}): GainsOverrideClamp {
+  const requested = Math.max(0, parseMoney(input.overrideEur) ?? 0);
+  const redemption = Math.max(0, parseMoney(input.redemptionEur) ?? 0);
+  const latent =
+    input.latentGainEur === null
+      ? null
+      : Math.max(0, parseMoney(input.latentGainEur) ?? 0);
+
+  let gains = Math.min(requested, redemption);
+  if (latent !== null) gains = Math.min(gains, latent);
+
+  let clampedBy: GainsOverrideClampedBy = "none";
+  let cap = 0;
+  if (requested - gains > MONEY_EPS) {
+    const latentBinds = latent !== null && latent <= redemption;
+    clampedBy = latentBinds ? "latentGain" : "redemption";
+    cap = latentBinds ? (latent as number) : redemption;
+  }
+
+  return {
+    gainsEur: formatMoney(roundMoney(gains)),
+    requestedEur: formatMoney(roundMoney(requested)),
+    clampedBy,
+    capEur: formatMoney(roundMoney(cap)),
   };
 }

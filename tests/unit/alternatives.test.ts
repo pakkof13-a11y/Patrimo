@@ -252,6 +252,8 @@ function peLine(overrides: Partial<PrivateEquityDto> = {}): PrivateEquityDto {
     moic: "2.00",
     unrealizedPnl: "1000.00",
     unrealizedPnlPct: "100.00",
+    totalReturn: "1000.00",
+    totalReturnPct: "100.00",
     committedCapital: "0",
     calledCapital: "0",
     calledCapitalIsDerived: true,

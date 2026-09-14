@@ -18,6 +18,8 @@ import { parisDayKey } from "../dates/paris";
 import { toFixed } from "../money/decimal";
 import type { DailyCloseIndex, DayKey } from "../portfolio/class-history";
 import { getAssetPriceHistory } from "./price-history";
+import type { PriceHistoryRange } from "./price-history-types";
+import { sessionGap } from "./last-close-as-of";
 
 /**
  * Fraîcheur exigée du cache pour le jour courant. En deçà, on ne redemande
@@ -30,9 +32,16 @@ const REFRESH_AFTER_MS = 6 * 60 * 60 * 1000;
 const FETCH_CONCURRENCY = 4;
 
 export type DailyCloseCoverage = {
-  /** Actifs pour lesquels au moins une clôture est connue. */
+  /**
+   * Actifs sans aucun jour ouvré manquant récent : la dernière clôture
+   * connue (dans la fenêtre) ne laisse aucune séance de bourse passée entre
+   * elle et `toDay`. Ce n'est pas « au moins un close existe dans la
+   * fenêtre » — un actif dont il ne manque que le week-end (vendredi →
+   * samedi/dimanche) reste couvert, un actif à qui il manque un mardi ou un
+   * mercredi ne l'est pas, même s'il a un point plus ancien dans la fenêtre.
+   */
   covered: string[];
-  /** Actifs sans aucune clôture, malgré une tentative de remplissage. */
+  /** Actifs avec un jour ouvré manquant récent, malgré une tentative de remplissage. */
   missing: string[];
 };
 
@@ -69,10 +78,21 @@ export async function readDailyCloses(
 /**
  * Décide quels actifs méritent un appel fournisseur.
  *
- * Un actif est rafraîchi s'il n'a aucune clôture dans la fenêtre, ou si sa
- * dernière clôture connue est plus ancienne que la fin de fenêtre demandée et
- * que le cache n'a pas été touché récemment. On évite ainsi de retélécharger
- * un historique complet à chaque affichage tout en gardant le jour courant à jour.
+ * Stale ne veut pas dire « il existe un close dans la fenêtre » : un actif
+ * dont la dernière clôture est un lundi et dont `toDay` est un jeudi a trois
+ * jours ouvrés manquants (mar/mer/jeu), même si un close existe quelque part
+ * dans la fenêtre demandée. On compte donc les séances de bourse (lun–ven)
+ * entre la dernière clôture connue et `toDay` via `sessionGap` — le week-end
+ * seul (vendredi → samedi/dimanche) ne compte pour aucune séance manquante.
+ *
+ * Le throttle de fraîcheur (`REFRESH_AFTER_MS`) ne protège plus que le cas où
+ * seule la séance de `toDay` lui-même manque (le jour en cours, pas encore
+ * clôturé côté fournisseur) : `fillDailyCloses` peut y réécrire `fetchedAt`
+ * sans avoir rapporté de nouveau jour, ce qui figeait auparavant le gate
+ * indéfiniment dès qu'au moins un jour ouvré passé manquait aussi. Dès que
+ * plus d'une séance manque (au moins un jour ouvré déjà clos, pas seulement
+ * `toDay`), l'actif est stale indépendamment du throttle : un rattrapage de
+ * jours ouvrés manquants ne doit jamais rester bloqué six heures.
  */
 export async function assetsNeedingFetch(
   assetIds: string[],
@@ -96,6 +116,19 @@ export async function assetsNeedingFetch(
       continue;
     }
     if (seen.day >= toDay) continue;
+
+    const missingSessions = sessionGap(seen.day, toDay);
+    if (missingSessions === 0) continue; // week-end seul entre la dernière clôture et `toDay`.
+    if (missingSessions > 1) {
+      // Au moins un jour ouvré déjà clos manque, pas seulement `toDay` :
+      // rattrapage obligatoire, throttle ignoré.
+      stale.push(assetId);
+      continue;
+    }
+
+    // Une seule séance manquante : celle de `toDay`, encore en cours côté
+    // fournisseur. Le throttle protège ce cas contre un rappel à chaque
+    // affichage tant que rien de neuf n'est attendu.
     const fetchedAt = seen.fetchedAt?.getTime() ?? 0;
     if (now.getTime() - fetchedAt > REFRESH_AFTER_MS) stale.push(assetId);
   }
@@ -117,9 +150,20 @@ export async function fillDailyCloses(
   from: Date,
   now = new Date()
 ): Promise<number> {
-  const result = await getAssetPriceHistory(userId, assetId, "1y", {
+  const spanDays = Math.max(
+    0,
+    (now.getTime() - from.getTime()) / 86_400_000
+  );
+  // `options.from` borne déjà le fetch ; le range n'est qu'un libellé, mais
+  // « all » documente une fenêtre plus longue qu'un an (premier achat).
+  const range: PriceHistoryRange = spanDays > 400 ? "all" : "1y";
+  const floor = new Date(now.getTime());
+  floor.setUTCFullYear(floor.getUTCFullYear() - 30);
+  const fromClamped = from < floor ? floor : from;
+
+  const result = await getAssetPriceHistory(userId, assetId, range, {
     interval: "1d",
-    from,
+    from: fromClamped,
   });
   if (!result || result.source === "mock" || result.points.length === 0) {
     return 0;
@@ -133,28 +177,73 @@ export async function fillDailyCloses(
     // Plusieurs barres sur un même jour civil : la dernière fait la clôture.
     byDay.set(day, point.close);
   }
+  console.info(
+    `[daily-closes] ${assetId} — reçus=${result.points.length} retenus=${byDay.size}`
+  );
   if (byDay.size === 0) return 0;
 
   const source = result.source;
-  await prisma.$transaction(
-    [...byDay].map(([day, close]) =>
-      prisma.assetDailyClose.upsert({
-        where: { assetId_day: { assetId, day } },
-        create: {
-          assetId,
-          day,
-          closeEur: toFixed(close, 12),
-          source,
-        },
-        update: {
-          closeEur: toFixed(close, 12),
-          source,
-          fetchedAt: now,
-        },
-      })
-    )
-  );
+  await writeDailyCloses(assetId, byDay, source, now);
   return byDay.size;
+}
+
+/**
+ * Écrit les clôtures d'un actif sans passer par une transaction interactive.
+ *
+ * `$transaction([...upserts])` chronométrait toute la série dans un budget de
+ * 5 s côté Prisma : un actif détenu depuis des années (des milliers de jours)
+ * n'aboutissait jamais et repartait en rollback intégral (mesuré en preview :
+ * jusqu'à 8,5 s pour une transaction qui expire à 5 s). `createMany` avec
+ * `skipDuplicates` est une seule instruction SQL (`INSERT ... ON CONFLICT DO
+ * NOTHING`), sans transaction interactive, donc sans ce plafond — le motif
+ * déjà utilisé pour le seed (`prisma/seed-portfolio.ts`).
+ *
+ * Deux jours récents sont malgré tout traités en `upsert` :
+ * `skipDuplicates` n'écrase jamais une ligne déjà présente, or le jour
+ * courant (et la veille, pour couvrir un cron qui tourne avant clôture) doit
+ * pouvoir être rafraîchi, et une ligne `source: "seed"` doit pouvoir être
+ * remplacée par une vraie donnée fournisseur.
+ *
+ * Le reste s'écrit **du plus récent au plus ancien**. `needsHistoryBackfill`
+ * ne juge que `minDay`/`maxDay` : si un lot est coupé en cours de route (fin
+ * de budget, exception réseau au lot suivant), `minDay` ne descend jusqu'à la
+ * borne attendue qu'au tout dernier lot. Un actif partiellement écrit garde
+ * donc un `minDay` trop récent, reste jugé incomplet, et sera repris au
+ * passage suivant — jamais oublié en silence.
+ */
+async function writeDailyCloses(
+  assetId: string,
+  byDay: Map<DayKey, number>,
+  source: string,
+  now: Date
+): Promise<void> {
+  const RECENT_UPSERT_DAYS = 2;
+  const BATCH_SIZE = 500;
+
+  const sortedDesc = [...byDay.entries()].sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0));
+  const recent = sortedDesc.slice(0, RECENT_UPSERT_DAYS);
+  const rest = sortedDesc.slice(RECENT_UPSERT_DAYS);
+
+  for (const [day, close] of recent) {
+    await prisma.assetDailyClose.upsert({
+      where: { assetId_day: { assetId, day } },
+      create: { assetId, day, closeEur: toFixed(close, 12), source },
+      update: { closeEur: toFixed(close, 12), source, fetchedAt: now },
+    });
+  }
+
+  for (let i = 0; i < rest.length; i += BATCH_SIZE) {
+    const batch = rest.slice(i, i + BATCH_SIZE);
+    await prisma.assetDailyClose.createMany({
+      data: batch.map(([day, close]) => ({
+        assetId,
+        day,
+        closeEur: toFixed(close, 12),
+        source,
+      })),
+      skipDuplicates: true,
+    });
+  }
 }
 
 /** Exécute `worker` sur `items` avec une concurrence bornée. */
@@ -296,7 +385,16 @@ export async function getDailyCloses(
   const covered: string[] = [];
   const missing: string[] = [];
   for (const assetId of unique) {
-    if ((closes.get(assetId)?.size ?? 0) > 0) covered.push(assetId);
+    const series = closes.get(assetId);
+    let maxDay: DayKey | null = null;
+    if (series) {
+      for (const day of series.keys()) {
+        if (!maxDay || day > maxDay) maxDay = day;
+      }
+    }
+    // Couvert = aucun jour ouvré manquant entre la dernière clôture connue
+    // (dans la fenêtre) et `toDay` — pas « au moins un point existe ».
+    if (maxDay && sessionGap(maxDay, toDay) === 0) covered.push(assetId);
     else missing.push(assetId);
   }
 

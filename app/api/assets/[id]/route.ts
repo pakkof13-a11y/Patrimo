@@ -4,17 +4,37 @@ import { requireUserId } from "@/app/lib/auth-helpers";
 import { prisma } from "@/app/lib/prisma";
 import { getAssetDetail } from "@/app/lib/portfolio/service";
 import { updateAssetMetadataSchema } from "@/app/lib/schemas";
-import { presentFields, validationErrorResponse } from "@/app/lib/api/validation";
+import {
+  presentFields,
+  requestedBase,
+  validationErrorResponse,
+} from "@/app/lib/api/validation";
 
+/**
+ * GET /api/assets/:id?base=EUR
+ *
+ * `base` suit exactement la convention de `GET /api/holdings` : paramètre
+ * validé par `requestedBase`, sinon l'euro. Les deux écrans montrent la même
+ * ligne côte à côte — le tableau et la fiche qui s'ouvre par-dessus — et rien
+ * ne justifierait qu'ils la convertissent différemment.
+ *
+ * Le paramètre partait tel quel vers `convertToEurSync`/`convertFromEurSync`
+ * en aval, qui lève sur tout code sans taux : `?base=ZZZ` rendait un 500 sans
+ * corps là où la demande est simplement invalide. Même garde que
+ * banks/savings/term-deposits/holdings.
+ */
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
+  const demande = requestedBase(req);
+  if ("error" in demande) return demande.error;
+
   const { id } = await ctx.params;
-  const detail = await getAssetDetail(userId, id);
+  const detail = await getAssetDetail(userId, id, demande.base);
   if (!detail) return NextResponse.json({ error: "Actif introuvable" }, { status: 404 });
 
   return NextResponse.json(detail);

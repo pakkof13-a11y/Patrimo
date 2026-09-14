@@ -33,7 +33,7 @@ export async function GET() {
       listSecuritiesPositions(userId),
     ]);
 
-    const fiscalById = new Map(fiscal.map((f) => [f.accountId, f]));
+    const fiscalById = new Map(fiscal.accounts.map((f) => [f.accountId, f]));
 
     return NextResponse.json(
       {
@@ -60,14 +60,38 @@ export async function GET() {
             unrealizedPnlPct: totals.unrealizedPnlPct?.toFixed(2) ?? null,
 
             cashEur: f?.cashEur.toFixed(2) ?? "0.00",
-            // Faux quand la poche de l'enveloppe n'a pas pu être imputée à ce
-            // compte : l'UI doit le dire plutôt que d'afficher 0 € comme un fait.
-            cashAttributed: f?.cashAttributed ?? false,
+            /*
+              Trois états, pas un booléen : « imputée à ce compte », « tenue au
+              niveau de l'enveloppe » et « pas de poche pour cette enveloppe »
+              ne s'affichent pas de la même façon. Voir `CashAttribution`.
+
+              Le repli est `NOT_TRACKED`, et c'est le seul défensible : on ne
+              sait rien de ce compte, et `ATTRIBUTED` aurait affirmé que son
+              `cashEur` à 0,00 € est un relevé. La carte l'aurait affiché
+              comme un solde réel, avec sa part « 0,0 % du compte », et
+              `computeTotals` aurait plié ce zéro fabriqué dans le total de la
+              page — l'inverse exact de la doctrine que tout ce module
+              applique. `NOT_TRACKED` affiche « non suivies ».
+
+              Le cas reste théorique : les deux lectures partent du même
+              `Promise.all` sur la même base. Mais un repli n'a pas à parier
+              sur sa propre improbabilité.
+            */
+            cashAttribution: f?.cashAttribution ?? "NOT_TRACKED",
             liquidationValueEur: f?.liquidationValueEur.toFixed(2) ?? "0.00",
 
             contributionsEur: f?.contributionsEur.toFixed(2) ?? "0.00",
             withdrawalsEur: f?.withdrawalsEur.toFixed(2) ?? "0.00",
-            gainEur: f?.gainEur.toFixed(2) ?? "0.00",
+            /*
+              Assiette après retraits et gain : `null` quand le service ne
+              sait pas (`contributionBaseStatus: UNKNOWN`), jamais "0.00" —
+              le simulateur de retrait s'en nourrit, et un zéro fabriqué
+              ferait passer tout le plan pour du gain.
+            */
+            remainingContributionsEur:
+              f?.remainingContributionsEur?.toFixed(2) ?? null,
+            contributionBaseStatus: f?.contributionBaseStatus ?? "UNKNOWN",
+            gainEur: f?.gainEur?.toFixed(2) ?? null,
 
             // Absents sur un compte-titres : ni règle des 5 ans, ni plafond.
             maturity: f?.maturity
@@ -76,6 +100,10 @@ export async function GET() {
                   isMatured: f.maturity.isMatured,
                   ageYears: f.maturity.ageYears,
                   daysToMaturity: f.maturity.daysToMaturity,
+                  // Un retrait avant 5 ans clôture le plan : l'écran doit
+                  // lire cet état avant tout compte à rebours (TIT-06).
+                  planStatus: f.maturity.planStatus,
+                  closedAt: f.maturity.closedAt?.toISOString() ?? null,
                 }
               : null,
             room: f?.room
@@ -89,6 +117,7 @@ export async function GET() {
                   usedPct: f.room.usedPct.toFixed(2),
                   isOverCap: f.room.isOverCap,
                   bindingCap: f.room.bindingCap,
+                  blockedReason: f.room.blockedReason,
                 }
               : null,
             taxStatusLabel: f?.taxStatusLabel ?? null,
@@ -114,6 +143,22 @@ export async function GET() {
           unrealizedPnlEur: p.unrealizedPnlEur.toFixed(2),
           unrealizedPnlPct: p.unrealizedPnlPct?.toFixed(2) ?? null,
         })),
+
+        /**
+         * Espèces d'enveloppe qu'aucun compte ne porte, par enveloppe.
+         *
+         * Servi à part des comptes parce que la poche l'est aussi :
+         * `EnvelopeCash` est unique par `(userId, envelope)` et ne connaît pas
+         * les comptes. L'écran l'ajoute une fois à son total, la range dans la
+         * bonne enveloppe et la nomme ; la distribuer aux comptes la
+         * compterait deux fois.
+         */
+        unattributedCashByEnvelope: Object.fromEntries(
+          Object.entries(fiscal.unattributedCashByEnvelope).map(([k, v]) => [
+            k,
+            v.toFixed(2),
+          ])
+        ),
 
         summary: (() => {
           const totals = summarizePositions(positions);

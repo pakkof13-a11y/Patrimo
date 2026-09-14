@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import {
   getPortfolioBundle,
-  getPortfolioHistory,
   recordPortfolioSnapshot,
 } from "@/app/lib/portfolio/service";
 import { prisma } from "@/app/lib/prisma";
@@ -44,17 +43,41 @@ export async function GET(req: Request) {
       }
     }
 
-    const [bundle, history] = await Promise.all([
-      getPortfolioBundle(userId, base),
-      getPortfolioHistory(userId, base),
-    ]);
+    /*
+      Cette route ne calcule plus de série.
 
-    return NextResponse.json({
-      summary: bundle.summary,
-      allocation: bundle.allocation,
-      history,
-      baseCurrency: base,
-    });
+      Elle rejouait le moteur historique sur toute la profondeur lisible pour
+      produire `history[]`, et c'est ce rejeu qui la faisait tomber. Le cap de
+      six ans (53b4a47) l'avait ramenée de 9,4 s à 2,8 s **en local** — mais la
+      préproduction est plus lente et coupe bien plus tôt que les soixante
+      secondes du plan : mesuré sur 7d2bc7b, 10 238 ms et un 504, quand
+      `daily-nav` sur la même profondeur répondait 200 en 8,8 s.
+
+      La leçon tenait au budget, pas au volume : réduire la série ne suffisait
+      pas tant qu'un seul appel devait porter l'instantané **et** l'historique.
+      Les deux sont désormais séparés — l'instantané ici, la série dans
+      `daily-nav`, bornée au chip demandé et déjà verte.
+    */
+    /*
+      Vérifié (revue P27) : aucun consommateur ne lit `allocationByVenue`
+      ici — `portfolio-app.tsx` prend `allocationByVenue` depuis
+      `holdingsQ.data`, et `/api/holdings` la sert déjà. Cette route en
+      calculait pourtant une seconde valorisation complète (onze requêtes,
+      cf. `allocation-by-venue.ts`) sur un chemin qui avait justement été
+      allégé pour ne plus tomber en 504 (53b4a47, 25a8265) : la série est
+      sortie, cette lecture morte y était restée. Retirée — voir aussi
+      `HoldingsResponse.allocationByVenue` dans `app/lib/types/ui.ts`.
+    */
+    const bundle = await getPortfolioBundle(userId, base);
+
+    return NextResponse.json(
+      {
+        summary: bundle.summary,
+        allocation: bundle.allocation,
+        baseCurrency: base,
+      },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (e) {
     console.error("GET /api/portfolio", e);
     return NextResponse.json(
@@ -83,5 +106,8 @@ export async function PATCH(req: Request) {
     where: { id: userId },
     data: { baseCurrency },
   });
-  return NextResponse.json({ baseCurrency });
+  return NextResponse.json(
+    { baseCurrency },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }

@@ -9,7 +9,8 @@ import {
   envelopeParamToTab,
   tabToEnvelopeParam,
 } from "@/app/lib/types/nav-groups";
-import { DIRECT_TOP, NAV_SECTIONS } from "@/components/layout/app-sidebar";
+import { DIRECT_TOP, NAV_SECTIONS, tabTitle } from "@/components/layout/app-sidebar";
+import { MAIN_TAB_IDS } from "@/app/lib/types/ui";
 import {
   isUserActivated,
   shouldShowOnboarding,
@@ -119,6 +120,28 @@ describe("navigation", () => {
   it("isMainTab guards storage", () => {
     expect(isMainTab("holdings")).toBe(true);
     expect(isMainTab("nope")).toBe(false);
+  });
+});
+
+describe("tabTitle (SHELL-03 — document.title par section)", () => {
+  it("porte un libellé distinct par onglet, pas un titre générique partout", () => {
+    expect(tabTitle("dashboard")).toBe("Tableau de bord — Aurea");
+    expect(tabTitle("platforms")).toBe("Plateformes — Aurea");
+    expect(tabTitle("fiscal")).toBe("Fiscalité — Aurea");
+    // Deux onglets différents ne doivent jamais partager le même titre.
+    expect(tabTitle("dashboard")).not.toBe(tabTitle("platforms"));
+  });
+
+  it("couvre toute vue filtrée du tableau Positions (av, cfd)", () => {
+    expect(tabTitle("av")).toBe("Assurance-vie — Aurea");
+    expect(tabTitle("cfd")).toBe("CFD — Aurea");
+  });
+
+  it("couvre tout MainTab déclaré — aucun ne retombe sur le nom de marque seul", () => {
+    for (const id of MAIN_TAB_IDS) {
+      expect(tabTitle(id)).toMatch(/ — Aurea$/);
+      expect(tabTitle(id)).not.toBe("Aurea — Aurea");
+    }
   });
 });
 

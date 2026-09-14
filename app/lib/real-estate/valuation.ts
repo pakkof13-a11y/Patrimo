@@ -278,6 +278,14 @@ export async function ensureGeocoded(
 }
 
 /**
+ * Ré-export : la définition vit dans `constants.ts` (module sans aucun
+ * import) pour qu'un composant client puisse l'importer sans embarquer ce
+ * fichier-ci — qui importe `prisma` au niveau module — dans son bundle.
+ * Garde ce point d'entrée pour les appelants serveur déjà en place ici.
+ */
+export { canApplyDvfEstimateDirectly } from "./constants";
+
+/**
  * Réévalue un bien depuis DVF.
  *
  * Ne fait rien en mode manuel — c'est l'engagement central. `force` permet à

@@ -4,6 +4,7 @@
  */
 
 import type { CreateEmployeeSavingsInput } from "./service";
+import { normalizeHeader, parseCsv } from "../import/csv-parse";
 import { FUND_CATEGORIES as EMPLOYEE_SAVINGS_FUND_CATEGORIES } from "./fund-category";
 import {
   EMPLOYEE_SAVINGS_PLAN_TYPES,
@@ -19,46 +20,6 @@ PEE;Amundi;FCPE Actions Monde;FR0010123456;12.5;28.40;EUR;ABONDEMENT;2021-06-15;
 PEE;Amundi;FCPE Monétaire;FR0010654321;50;10.12;EUR;PARTICIPATION;2022-07-01;480;MONETARY;;;
 PER;Natixis Interépargne;FCPE Diversifié;;100;15;EUR;VOLUNTARY;2023-01-10;1400;DIVERSIFIED;;RETIREMENT;PER entreprise
 `;
-
-function detectDelimiter(headerLine: string): string {
-  if (headerLine.includes(";")) return ";";
-  if (headerLine.includes("\t")) return "\t";
-  return ",";
-}
-
-function splitCsvLine(line: string, delim: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-    if (ch === delim && !inQuotes) {
-      out.push(cur.trim());
-      cur = "";
-      continue;
-    }
-    cur += ch;
-  }
-  out.push(cur.trim());
-  return out;
-}
-
-function normHeader(h: string): string {
-  return h
-    .trim()
-    .toLowerCase()
-    .replace(/^\ufeff/, "")
-    .replace(/\s+/g, "_");
-}
 
 const ALIASES: Record<string, string> = {
   plan_type: "plan_type",
@@ -115,22 +76,49 @@ function mapFundCategory(raw: string | undefined): string | null {
     : null;
 }
 
+/**
+ * Source d'un versement déclarée dans le fichier.
+ *
+ * Une valeur ABSENTE (colonne vide) reste un repli légitime vers VOLUNTARY —
+ * la plupart des relevés ne distinguent pas toujours l'origine d'un versement
+ * libre. Une valeur PRÉSENTE mais non reconnue par aucune des regex ci-dessous
+ * est autre chose : une faute de saisie ou un libellé que ce module ne connaît
+ * pas encore, et la faire atterrir sur VOLUNTARY en silence déguiserait un
+ * abondement ou une participation en versement volontaire — deux montants qui
+ * ne se lisent pas de la même façon sur la fiscalité de sortie. Elle lève, et
+ * remonte comme une erreur de ligne au même titre que `manager`/`fund_name`.
+ */
 function mapSource(raw: string): string {
   const s = raw.trim().toUpperCase();
+  if (!s) return "VOLUNTARY";
   if ((EMPLOYEE_SAVINGS_SOURCES as readonly string[]).includes(s)) return s;
   if (/volont|voluntary/i.test(raw)) return "VOLUNTARY";
   if (/int[eé]ress/i.test(raw)) return "INTERESTEMENT";
   if (/particip/i.test(raw)) return "PARTICIPATION";
   if (/abond/i.test(raw) || /match/i.test(raw)) return "ABONDEMENT";
-  return "VOLUNTARY";
+  throw new Error(`source_type : valeur non reconnue (${raw.trim()})`);
 }
 
+/**
+ * Type de plan déclaré dans le fichier.
+ *
+ * PERECO est le successeur du PERCO depuis la loi PACTE (même liquidité
+ * RETIREMENT, cf. `mapUnlockMode` ci-dessous) : "PERECO", "PER COL",
+ * "PERCOL" et "PER Collectif" sont donc classés PERCO, pas seulement
+ * "PERCO" au sens strict.
+ *
+ * Comme pour `mapSource`, seule une colonne VIDE se replie sur PEE ; une
+ * valeur écrite mais non reconnue lève, plutôt que de classer silencieusement
+ * un PER ou un PERCO comme PEE — la fiscalité et la liquidité des trois plans
+ * ne sont pas interchangeables.
+ */
 function mapPlan(raw: string): string {
   const s = raw.trim().toUpperCase();
+  if (!s) return "PEE";
   if ((EMPLOYEE_SAVINGS_PLAN_TYPES as readonly string[]).includes(s)) return s;
-  if (/perco/i.test(raw)) return "PERCO";
+  if (/perco|pereco|per[\s-]?col/i.test(raw)) return "PERCO";
   if (/\bper\b/i.test(raw)) return "PER";
-  return "PEE";
+  throw new Error(`plan_type : valeur non reconnue (${raw.trim()})`);
 }
 
 function mapUnlockMode(raw: string, planType: string): string {
@@ -141,68 +129,123 @@ function mapUnlockMode(raw: string, planType: string): string {
   return planType === "PEE" ? "DATE" : "RETIREMENT";
 }
 
+/**
+ * Lit un fichier d'épargne salariale.
+ *
+ * Le découpage, la détection du séparateur, les en-têtes homonymes et les
+ * lignes qu'Excel a recollées en une seule cellule sont l'affaire de
+ * `app/lib/import/csv-parse.ts` — le même parseur que tous les autres imports.
+ * Ce fichier ne garde que ce qui lui est propre : la correspondance des
+ * colonnes et la traduction des valeurs en champs métier.
+ */
 export function parseEmployeeSavingsCsv(text: string): {
   rows: CreateEmployeeSavingsInput[];
   errors: Array<{ line: number; message: string }>;
   delimiter: string;
 } {
-  const lines = text
-    .replace(/^\ufeff/, "")
+  // Les commentaires restent hors du parseur : sans en-tête ni colonnes, ils
+  // ressortiraient en lignes de données vides, donc en erreurs de lecture.
+  const withoutComments = text
     .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith("#"));
+    .filter((l) => !l.trim().startsWith("#"))
+    .join("\n");
 
-  if (lines.length < 2) {
-    return { rows: [], errors: [{ line: 0, message: "Fichier vide ou sans données" }], delimiter: ";" };
+  const parsed = parseCsv(withoutComments);
+  if (parsed.headers.length === 0 || parsed.rows.length === 0) {
+    return {
+      rows: [],
+      errors: [{ line: 0, message: "Fichier vide ou sans données" }],
+      delimiter: parsed.delimiter || ";",
+    };
   }
 
-  const delim = detectDelimiter(lines[0]);
-  const headers = splitCsvLine(lines[0], delim).map(normHeader);
-  const colIndex = new Map<string, number>();
-  headers.forEach((h, i) => {
-    const key = ALIASES[h] || h;
-    if (!colIndex.has(key)) colIndex.set(key, i);
-  });
+  // Le parseur partagé rend les en-têtes tels qu'écrits (dédoublonnés) et
+  // indexe chaque ligne par ces en-têtes ; la normalisation et les alias se
+  // font donc ici, et le premier en-tête d'une clé l'emporte.
+  const headerForKey = new Map<string, string>();
+  for (const h of parsed.headers) {
+    const norm = normalizeHeader(h);
+    const key = ALIASES[norm] || norm;
+    if (!headerForKey.has(key)) headerForKey.set(key, h);
+  }
 
-  const get = (cells: string[], key: string) => {
-    const i = colIndex.get(key);
-    if (i == null) return "";
-    return cells[i] ?? "";
+  /*
+    Colonne introuvable = erreur de FICHIER, avant même de lire une seule
+    ligne. `get()` rend "" aussi bien pour une colonne absente que pour une
+    cellule vide : sans cette garde, un fichier sans `units` (ou sans `nav`)
+    se lisait quand même, chaque ligne héritant silencieusement d'un "0".
+  */
+  const missingColumns: string[] = [];
+  if (!headerForKey.has("units")) missingColumns.push("units");
+  if (!headerForKey.has("nav")) missingColumns.push("nav");
+  if (missingColumns.length > 0) {
+    return {
+      rows: [],
+      errors: [
+        {
+          line: 0,
+          message: `Colonne ${missingColumns.join(" et ")} introuvable dans l'en-tête`,
+        },
+      ],
+      delimiter: parsed.delimiter || ";",
+    };
+  }
+
+  const get = (row: Record<string, string>, key: string): string => {
+    const header = headerForKey.get(key);
+    if (header === undefined) return "";
+    return (row[header] ?? "").trim();
   };
 
   const rows: CreateEmployeeSavingsInput[] = [];
   const errors: Array<{ line: number; message: string }> = [];
 
-  for (let li = 1; li < lines.length; li++) {
-    const cells = splitCsvLine(lines[li], delim);
-    const manager = get(cells, "manager");
-    const fundName = get(cells, "fund_name");
+  parsed.rows.forEach((row, i) => {
+    // Numérotation relative à l'en-tête : ligne 1 = en-têtes, 2 = 1re donnée.
+    const line = i + 2;
+    const manager = get(row, "manager");
+    const fundName = get(row, "fund_name");
     if (!manager && !fundName) {
-      errors.push({ line: li + 1, message: "Ligne vide ignorée" });
-      continue;
+      errors.push({ line, message: "Ligne vide ignorée" });
+      return;
     }
     if (!manager || !fundName) {
-      errors.push({ line: li + 1, message: "manager et fund_name requis" });
-      continue;
+      errors.push({ line, message: "manager et fund_name requis" });
+      return;
     }
-    const planType = mapPlan(get(cells, "plan_type") || "PEE");
+
+    // `mapPlan`/`mapSource` lèvent sur une valeur écrite mais non reconnue :
+    // erreur de ligne, comme manager/fund_name ci-dessus, jamais un repli
+    // silencieux vers PEE/VOLUNTARY.
+    let planType: string;
+    let sourceType: string;
+    try {
+      planType = mapPlan(get(row, "plan_type"));
+      sourceType = mapSource(get(row, "source_type"));
+    } catch (e) {
+      errors.push({ line, message: e instanceof Error ? e.message : "Valeur non reconnue" });
+      return;
+    }
+
     rows.push({
       planType,
       manager,
       fundName,
-      isin: get(cells, "isin") || null,
-      units: get(cells, "units") || "0",
-      nav: get(cells, "nav") || "0",
-      currency: get(cells, "currency") || "EUR",
-      sourceType: mapSource(get(cells, "source_type") || "VOLUNTARY"),
-      contributionDate: get(cells, "contribution_date") || null,
-      contributedAmount: get(cells, "contributed_amount") || null,
-      fundCategory: mapFundCategory(get(cells, "fund_category")),
-      unlockDate: get(cells, "unlock_date") || null,
-      unlockMode: mapUnlockMode(get(cells, "unlock_mode"), planType),
-      notes: get(cells, "notes") || null,
+      isin: get(row, "isin") || null,
+      // Ni "abc" ni une cellule vide ne valent 0 : `requiredDec` (service.ts)
+      // les refuse, ligne par ligne, plutôt que de les convertir en "0" ici.
+      units: get(row, "units"),
+      nav: get(row, "nav"),
+      currency: get(row, "currency") || "EUR",
+      sourceType,
+      contributionDate: get(row, "contribution_date") || null,
+      contributedAmount: get(row, "contributed_amount") || null,
+      fundCategory: mapFundCategory(get(row, "fund_category")),
+      unlockDate: get(row, "unlock_date") || null,
+      unlockMode: mapUnlockMode(get(row, "unlock_mode"), planType),
+      notes: get(row, "notes") || null,
     });
-  }
+  });
 
-  return { rows, errors, delimiter: delim };
+  return { rows, errors, delimiter: parsed.delimiter };
 }

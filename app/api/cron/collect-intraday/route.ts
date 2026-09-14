@@ -7,8 +7,16 @@ import {
   DEFAULT_INTRADAY_INTERVAL,
   isIntradayInterval,
 } from "@/app/lib/market/intraday-collector";
+import {
+  backfillDailyClosesFromFirstTx,
+  type BackfillDailyClosesReport,
+} from "@/app/lib/market/backfill-closes";
 import { parseBarInterval } from "@/app/lib/market/price-history-types";
 import { readCronCredential } from "@/app/lib/auth/cron-credential";
+import {
+  COLLECT_INTRADAY_JOB,
+  recordCollectionRun,
+} from "@/app/lib/ops/collection-status";
 
 /**
  * Collecte planifiée des données de marché.
@@ -58,6 +66,30 @@ import { readCronCredential } from "@/app/lib/auth/cron-credential";
  */
 
 /**
+ * maxDuration : deux traitements séquentiels sur tous les actifs d'un compte,
+ * avec jusqu'à 12 s de timeout par appel fournisseur. Les dix secondes par
+ * défaut coupaient le passage avant sa fin — sans erreur, la réponse n'étant
+ * jamais rendue. Même plafond que les autres routes de collecte longue
+ * (`wallets/zerion/sync`, `import/commit`).
+ */
+export const maxDuration = 60;
+
+/**
+ * Budget de travail, nettement sous le plafond de la plateforme.
+ *
+ * Le compte est en offre Hobby : une fonction y est coupée à 60 s, et
+ * `maxDuration = 300` n'existe tout simplement pas. Un passage complet du
+ * backfill dépasse ce plafond — mesuré en preview : 504 à 60,1 s, rapport
+ * perdu, alors même que le travail effectué avait bien progressé en base.
+ *
+ * On garde donc quinze secondes de marge : le temps d'un dernier appel
+ * fournisseur déjà engagé, puis de sérialiser la réponse. Une réponse rendue,
+ * même partielle, vaut infiniment mieux qu'un 504 — c'est elle qui porte le
+ * rapport et dit s'il faut relancer. Le découpage remplace l'allongement.
+ */
+const WORK_BUDGET_MS = 45_000;
+
+/**
  * Le proxy laisse passer une requête qui *présente* une créance de cron ; c'est
  * ici qu'elle est réellement vérifiée, en temps constant.
  */
@@ -79,60 +111,207 @@ function intervalOf(req: Request) {
 }
 
 /**
+ * Jours de recul de l'entretien court, quand `?mode=short` est demandé.
+ *
+ * Un backfill profond (première transaction, cap 6 ans) reste coûteux même
+ * séquentialisé : utile pour amorcer un compte, pas pour combler un trou
+ * récent (ex. 7-11 septembre 2026). Ce mode appelle directement l'entretien
+ * court de `collectDailyClosesForAssets`, borné à dix jours civils — un POST
+ * rapide et bon marché, sans toucher au backfill profond.
+ */
+const SHORT_MODE_LOOKBACK_DAYS = 10;
+
+function isShortMode(req: Request): boolean {
+  return new URL(req.url).searchParams.get("mode") === "short";
+}
+
+/**
  * Les deux entretiens d'un passage.
  *
- * L'intraday d'abord — c'est lui qui a une fenêtre fournisseur courte, donc le
- * plus à perdre en cas d'interruption. Les clôtures suivent : leur fenêtre est
- * large et un passage manqué se rattrape.
+ * ## Le backfill d'abord
+ *
+ * L'intraday passait en premier : séquentiel sur tous les actifs, jusqu'à 12 s
+ * de timeout unitaire, il pouvait consommer le budget d'exécution entier et le
+ * backfill n'était alors jamais atteint — silencieusement, puisque rien
+ * n'échouait. C'est ce qui laissait la preview à une couverture partielle.
+ *
+ * L'ordre est donc inversé : les clôtures quotidiennes, qui rendent le passé
+ * reconstructible, sont servies avant les barres intra-séance, dont un passage
+ * manqué ne coûte qu'une journée de finesse.
  *
  * L'échec de l'un ne doit pas emporter l'autre : ils entretiennent deux caches
  * distincts, et perdre les deux parce qu'un fournisseur est muet serait
  * doublement coûteux.
+ *
+ * ## Un budget partagé, et un intraday qu'on ose sauter
+ *
+ * Les deux traitements se partagent `WORK_BUDGET_MS`. Le backfill s'arrête
+ * entre deux actifs dès qu'il l'a consommé et dit combien il en reste ; on
+ * relance alors le POST jusqu'à `remainingAssets: 0`.
+ *
+ * S'il a tout pris, l'intraday n'est **pas** lancé « au cas où » : le démarrer
+ * sans budget, c'est reprendre le 504 qu'on vient de fuir, et perdre du même
+ * coup le rapport de progression du backfill. Un passage d'intraday manqué ne
+ * coûte qu'une journée de finesse ; un rapport perdu coûte la convergence.
  */
 async function collectAll(opts: {
   interval: ReturnType<typeof intervalOf>;
   userId?: string;
+  /** Horloge injectable — les tests n'ont pas à dormir 45 secondes. */
+  clock?: () => number;
+  /**
+   * `mode=short` : saute le backfill profond (première transaction, cap 6
+   * ans) et n'entretient que les dix derniers jours civils, via
+   * `collectDailyClosesForAssets`. Bon marché, utile pour combler un trou de
+   * clôtures récent sans attendre un passage complet.
+   */
+  shortMode?: boolean;
 }) {
+  const clock = opts.clock ?? Date.now;
+  const budget = { deadlineAt: clock() + WORK_BUDGET_MS, clock };
+
+  // Le repli d'entretien court ne connaît pas le budget : il porte donc les
+  // champs de progression à leur valeur neutre — rien de tronqué, rien à
+  // relancer. Le type commun évite qu'une branche muette passe pour complète.
+  let daily: BackfillDailyClosesReport;
+  if (opts.shortMode) {
+    const r = await collectDailyClosesForAssets({
+      ...(opts.userId ? { userId: opts.userId } : {}),
+      lookbackDays: SHORT_MODE_LOOKBACK_DAYS,
+    });
+    daily = {
+      ...r,
+      assetsFromFirstTx: 0,
+      assetsRemaining: 0,
+      stoppedForBudget: false,
+    };
+    const progress = {
+      needsMoreRuns: false,
+      remainingAssets: 0,
+      stoppedBy: "completion" as const,
+    };
+    const intraday = await collectIntradayBars({
+      interval: opts.interval,
+      ...(opts.userId ? { userId: opts.userId } : {}),
+    });
+    return { progress, intraday, intradaySkipped: null, daily };
+  }
+
+  try {
+    // T-04 : depuis le premier achat par ticker, pas seulement 365 jours.
+    // `collectDailyClosesForAssets` reste l'entretien court ; le backfill
+    // couvre la profondeur. Un cache déjà complet est un no-op (fraîcheur).
+    daily = await backfillDailyClosesFromFirstTx({
+      ...(opts.userId ? { userId: opts.userId } : {}),
+      budget,
+    });
+  } catch (e) {
+    try {
+      daily = {
+        ...(await collectDailyClosesForAssets(
+          opts.userId ? { userId: opts.userId } : undefined
+        )),
+        assetsFromFirstTx: 0,
+        assetsRemaining: 0,
+        stoppedForBudget: false,
+      };
+    } catch (e2) {
+      daily = {
+        assetsConsidered: 0,
+        assetsStale: 0,
+        assetsFilled: 0,
+        closesWritten: 0,
+        errors: [
+          {
+            assetId: "-",
+            message: e2 instanceof Error ? e2.message : e instanceof Error ? e.message : "échec",
+          },
+        ],
+        day: "",
+        assetsFromFirstTx: 0,
+        assetsRemaining: 0,
+        stoppedForBudget: false,
+      };
+    }
+  }
+
+  /*
+    Progression, rendue lisible sans avoir à interpréter le rapport détaillé :
+    `needsMoreRuns` dit s'il faut relancer, `remainingAssets` combien il reste.
+    Rien à faire circuler d'un appel à l'autre — la reprise est portée par
+    l'état de la base, que `needsHistoryBackfill` relit à chaque passage.
+  */
+  const progress = {
+    needsMoreRuns: daily.stoppedForBudget,
+    remainingAssets: daily.assetsRemaining,
+    stoppedBy: daily.stoppedForBudget ? ("budget" as const) : ("completion" as const),
+  };
+
+  if (daily.stoppedForBudget) {
+    return {
+      progress,
+      daily,
+      intraday: null,
+      intradaySkipped: "budget" as const,
+    };
+  }
+
   const intraday = await collectIntradayBars({
     interval: opts.interval,
     ...(opts.userId ? { userId: opts.userId } : {}),
   });
 
-  let daily;
-  try {
-    daily = await collectDailyClosesForAssets(
-      opts.userId ? { userId: opts.userId } : undefined
-    );
-  } catch (e) {
-    daily = {
-      assetsConsidered: 0,
-      assetsStale: 0,
-      assetsFilled: 0,
-      closesWritten: 0,
-      errors: [{ assetId: "-", message: e instanceof Error ? e.message : "échec" }],
-      day: "",
-    };
-  }
-
-
-  return { intraday, daily };
+  return { progress, intraday, intradaySkipped: null, daily };
 }
 
+/*
+  NOTIF-01 : un échec ici (fournisseur muet, timeout, exception non prévue
+  par `collectAll`) ne remontait nulle part — seule la réponse HTTP du
+  passage cron le portait, et rien ne la lit. `recordCollectionRun` pose la
+  seule trace consultable (bandeau admin, `/api/admin/collection-status`) ;
+  elle ne change ni le statut ni la forme déjà rendus par cette route.
+*/
 export async function GET(req: Request) {
   if (!isCronRequest(req)) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   }
-  return NextResponse.json({
-    mode: "cron",
-    ...(await collectAll({ interval: intervalOf(req) })),
-  });
+  try {
+    const result = await collectAll({
+      interval: intervalOf(req),
+      shortMode: isShortMode(req),
+    });
+    await recordCollectionRun(COLLECT_INTRADAY_JOB, "ok");
+    return NextResponse.json({ mode: "cron", ...result });
+  } catch (e) {
+    await recordCollectionRun(
+      COLLECT_INTRADAY_JOB,
+      "ko",
+      e instanceof Error ? e.message : "Échec de la collecte"
+    );
+    return NextResponse.json({ error: "Échec de la collecte" }, { status: 500 });
+  }
 }
 
 export async function POST(req: Request) {
   const interval = intervalOf(req);
+  const shortMode = isShortMode(req);
 
   if (isCronRequest(req)) {
-    return NextResponse.json({ mode: "cron", ...(await collectAll({ interval })) });
+    try {
+      const result = await collectAll({ interval, shortMode });
+      await recordCollectionRun(COLLECT_INTRADAY_JOB, "ok");
+      return NextResponse.json({ mode: "cron", ...result });
+    } catch (e) {
+      await recordCollectionRun(
+        COLLECT_INTRADAY_JOB,
+        "ko",
+        e instanceof Error ? e.message : "Échec de la collecte"
+      );
+      return NextResponse.json(
+        { error: "Échec de la collecte" },
+        { status: 500 }
+      );
+    }
   }
 
   const userId = await requireUserId();
@@ -142,6 +321,6 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     mode: "user",
-    ...(await collectAll({ interval, userId })),
+    ...(await collectAll({ interval, userId, shortMode })),
   });
 }

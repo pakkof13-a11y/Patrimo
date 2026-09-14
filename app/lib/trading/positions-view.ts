@@ -65,12 +65,14 @@ export type PositionView = {
   size: number;
   entryPrice: number;
   markPrice: number | null;
-  /** P&L retenu : latent si ouverte, réalisé net si close. */
-  pnlEur: number;
+  /** P&L retenu : latent si ouverte, réalisé net si close. `null` : position ouverte non valorisable (TRA-03). */
+  pnlEur: number | null;
   /** Rapporté à la marge engagée — le capital réellement immobilisé. */
   pnlPct: number | null;
-  notionalEur: number;
-  marginEur: number;
+  /** `null` : notionnel non calculable (TRA-03, COIN-M sans valeur de contrat) — UNKNOWN, pas 0. */
+  notionalEur: number | null;
+  /** `null` : marge non calculable (notionnel inconnu). */
+  marginEur: number | null;
   leverage: number;
 
   markFreshness: MarkFreshness;
@@ -163,11 +165,23 @@ export const MARK_FRESHNESS_LABEL: Record<MarkFreshness, string> = {
 
 /**
  * P&L net d'une position close : réalisé, funding et commissions déduits.
- * Miroir de `realizedNetPnl` du moteur, appliqué aux chaînes du payload.
+ *
+ * `net = realized − fundingPaid(signé) − |commissionPaid|`. Miroir exact de
+ * `realizedNetPnl` / `deductibleCostsOf` du moteur (`app/lib/crypto/futures.ts`,
+ * bloc « Convention de signe » — source de vérité), appliqué aux chaînes du
+ * payload : ce module est lu côté client et n'embarque pas Decimal.
+ *
+ * `fundingPaid` est **signé** — positif = payé (charge), négatif = perçu
+ * (produit) : un `Math.abs()` ici faisait d'un funding encaissé une charge,
+ * tandis que le bucket fiscal de `app/api/trading/route.ts` le sommait signé.
+ * Le même fait économique donnait alors deux montants nets écartés de
+ * 2 × funding. `commissionPaid` garde son `abs()` : une commission n'est jamais
+ * encaissée, et un négatif n'y est qu'un signe de cash-flow (lignes importées
+ * avant normalisation, saisie manuelle).
  */
 export function closedNetPnl(row: TradingPositionRow): number {
   const realized = num(row.realizedPnl);
-  const funding = Math.abs(num(row.fundingPaid));
+  const funding = num(row.fundingPaid);
   const commission = Math.abs(num(row.commissionPaid));
   return realized - funding - commission;
 }
@@ -177,17 +191,21 @@ export function buildPositionView(
   now: Date = new Date()
 ): PositionView {
   const direction = (row.direction === "SHORT" ? "SHORT" : "LONG") as TradeDirection;
-  const marginEur = num(row.derived.marginUsedEur);
-  const pnlEur = row.isOpen
-    ? num(row.derived.unrealizedPnlEur)
+  const marginEur = opt(row.derived.marginUsedEur);
+  const pnlEur: number | null = row.isOpen
+    ? opt(row.derived.unrealizedPnlEur)
     : closedNetPnl(row);
 
   /*
     Le pourcentage se rapporte à la **marge**, pas au notionnel. Sur un levier
     x5, un mouvement de 1 % du sous-jacent fait 5 % du capital engagé : c'est
     ce second chiffre qui informe le trader sur ce qu'il risque réellement.
+    `null` si la marge ou le P&L latent ne sont pas calculables (TRA-03).
   */
-  const pnlPct = marginEur > 0 ? (pnlEur / marginEur) * 100 : null;
+  const pnlPct =
+    marginEur != null && marginEur > 0 && pnlEur != null
+      ? (pnlEur / marginEur) * 100
+      : null;
   const age = markAgeDays(row, now);
 
   return {
@@ -204,7 +222,7 @@ export function buildPositionView(
     markPrice: opt(row.markPrice),
     pnlEur,
     pnlPct,
-    notionalEur: num(row.derived.notionalEur),
+    notionalEur: opt(row.derived.notionalEur),
     marginEur,
     leverage: num(row.leverage),
     markFreshness: markFreshnessOf(row),
@@ -252,6 +270,8 @@ export type TradingOverview = {
    * prix jamais observé, ou observation trop ancienne.
    */
   unmarkedCount: number;
+  /** Positions ouvertes dont le notionnel/P&L est non calculable (TRA-03) — écartées des sommes. */
+  unvaluedCount: number;
   exchangeCount: number;
 };
 
@@ -267,21 +287,24 @@ export function computeTradingOverview(
   let margin = 0;
   let alerts = 0;
   let unmarked = 0;
+  let unvalued = 0;
   const exchanges = new Set<string>();
 
   for (const v of views) {
     exchanges.add(v.exchange);
     if (v.isOpen) {
       openCount += 1;
-      unrealized += v.pnlEur;
-      net += num(v.row.derived.signedNotionalEur);
-      gross += v.notionalEur;
-      margin += v.marginEur;
+      if (v.pnlEur != null) unrealized += v.pnlEur;
+      const signed = opt(v.row.derived.signedNotionalEur);
+      if (signed != null) net += signed;
+      if (v.notionalEur != null) gross += v.notionalEur;
+      if (v.marginEur != null) margin += v.marginEur;
       if (v.liquidationAlert) alerts += 1;
       if (v.markFreshness !== "MARKED" || v.markIsStale) unmarked += 1;
+      if (v.notionalEur == null) unvalued += 1;
     } else {
       closedCount += 1;
-      realized += v.pnlEur;
+      realized += v.pnlEur ?? 0;
     }
   }
 
@@ -295,6 +318,7 @@ export function computeTradingOverview(
     marginEur: margin,
     liquidationAlerts: alerts,
     unmarkedCount: unmarked,
+    unvaluedCount: unvalued,
     exchangeCount: exchanges.size,
   };
 }
@@ -363,7 +387,7 @@ export function sortPositions(
         a.instrument.localeCompare(b.instrument, "fr", { sensitivity: "base" })
       );
     case "exposure":
-      return out.sort((a, b) => b.notionalEur - a.notionalEur);
+      return out.sort((a, b) => (b.notionalEur ?? -1) - (a.notionalEur ?? -1));
     case "date":
       return out.sort((a, b) => {
         const ta = new Date(
@@ -376,6 +400,6 @@ export function sortPositions(
       });
     case "pnl":
     default:
-      return out.sort((a, b) => b.pnlEur - a.pnlEur);
+      return out.sort((a, b) => (b.pnlEur ?? 0) - (a.pnlEur ?? 0));
   }
 }

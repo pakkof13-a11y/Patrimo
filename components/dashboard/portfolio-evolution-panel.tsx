@@ -8,20 +8,31 @@ import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/app/lib/api-client";
+import { useDailyNavQuery } from "@/app/hooks/use-portfolio-queries";
 import {
   buildEvolutionSeries,
-  benchmarkGapPct,
   benchmarkLabel,
   evolutionDeltaSummary,
+  evolutionPnlSummary,
   evolutionIntervalHint,
   evolutionIntervalLabel,
   isEvolutionRangeEnabled,
   startOfRange,
-  toPercentSeries,
-  withBenchmarkSeries,
   type EvolutionRange,
   type IndexClosePoint,
 } from "@/app/lib/portfolio/evolution-aggregate";
+import { parisDayKey } from "@/app/lib/dates/paris";
+import {
+  dailyNavToVsIndexLevels,
+  INDEX_UNAVAILABLE_TITLE,
+  rebaseToCommonBase100,
+  toVsIndexPercentPoints,
+  vsIndexChartKind,
+  vsIndexGapPct,
+  vsIndexHasOverlay,
+  windowVsIndexNav,
+} from "@/app/lib/portfolio/vs-index-series";
+import { EVOLUTION_RANGE_CHIPS as RANGES } from "@/app/lib/ui/evolution-ranges";
 import {
   DEFAULT_EVOLUTION_PREFS,
   loadEvolutionPrefs,
@@ -29,19 +40,42 @@ import {
   saveEvolutionPrefs,
   type EvolutionBenchmark,
   type EvolutionPrefsV5,
-  type EvolutionAssetClass,
-  type EvolutionScope,
+  type EvolutionAccount,
 } from "@/app/lib/portfolio/evolution-prefs";
 import {
   MARKET_INDICES,
   marketIndexLabel,
   type MarketIndexKey,
 } from "@/app/lib/portfolio/market-indices";
+import { heroWindowReference } from "@/app/lib/portfolio/hero-range";
 import {
   PortfolioPercentChart,
   PortfolioValueChart,
+  DailyNavChart,
 } from "@/components/dashboard/portfolio-evolution-charts";
 import { IntradaySection } from "@/components/dashboard/intraday-section";
+import { RangeChips } from "@/components/dashboard/range-chips";
+import type { DailyNavPoint } from "@/app/lib/portfolio/historical/get-daily-nav";
+import {
+  headerFlux,
+  headerMarketDelta,
+  HERO_NAV_SCOPE_LABEL,
+  servedDailyNavFrom,
+  toDailyNavChartPoints,
+  windowDailyNav,
+  type HeroNavScope,
+} from "@/app/lib/portfolio/daily-nav-view";
+import {
+  dailyNavScopeForAccount,
+  pocketChartLineType,
+  pocketEmptyState,
+  pocketFlowsUnreliable,
+  pocketSeriesTooShort,
+  titresUnknownEnvelopeEur,
+  accountsGapEur,
+  toPocketEvolutionPoints,
+  windowPocketDailyNav,
+} from "@/app/lib/portfolio/pocket-series";
 
 const emptySubscribe = () => () => undefined;
 
@@ -49,41 +83,52 @@ function useIsClient() {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
 }
 
-const RANGES: { id: EvolutionRange; label: string }[] = [
-  { id: "7d", label: "7J" },
-  { id: "1m", label: "1M" },
-  { id: "3m", label: "3M" },
-  { id: "6m", label: "6M" },
-  { id: "ytd", label: "YTD" },
-  { id: "1y", label: "1A" },
-  { id: "5y", label: "5A" },
-  { id: "all", label: "Tout" },
-];
-
 /**
- * Classes proposées au sélecteur.
+ * Comptes proposés au sélecteur.
  *
- * Les six valeurs de `Asset.assetClass`, plus « Tout ». Cette taxonomie est la
- * seule reconstructible historiquement : `assetClass` n'a aucun chemin de mise
- * à jour, là où `category` et `accountType` sont mutables sans journal — les
- * utiliser ferait qu'un reclassement d'aujourd'hui réécrirait tout le passé.
+ * « Compte » — où l'argent est déposé — et non « Catégorie » : Titres
+ * additionne PEA et CTO (deux comptes réels), jamais une classe d'actif qui
+ * mélangerait l'assurance-vie avec elle. Chaque entrée correspond à un scope
+ * `getDailyNav` distinct (Titres excepté, qui lit le croisement classe ×
+ * enveloppe) — voir `dailyNavScopeForAccount`.
+ *
+ * Pas de Tangibles ni de Trading : les tangibles sont fusionnés avec métaux,
+ * private equity et crowdlending dans la seule manche Alternatifs du moteur,
+ * et les positions de trading (CFD) vivent dans `TradingPosition`, que le
+ * moteur historique ne charge jamais.
  */
-const CLASS_CHOICES: {
-  id: EvolutionAssetClass | "all";
+const ACCOUNT_CHOICES: {
+  id: EvolutionAccount | "all";
   label: string;
   title: string;
 }[] = [
-  { id: "all", label: "Tout", title: "Patrimoine entier, toutes classes confondues" },
-  { id: "ACTIONS", label: "Actions", title: "Actions et ETF" },
-  { id: "OBLIGATIONS", label: "Obligations", title: "Obligations et fonds obligataires" },
+  { id: "all", label: "Tout", title: "Patrimoine entier, tous comptes confondus" },
+  {
+    id: "TITRES",
+    label: "Titres",
+    title: "Comptes-titres — PEA et CTO, actions et obligations",
+  },
+  {
+    id: "ASSURANCE_VIE",
+    label: "Assurance-vie",
+    title: "Unités de compte et fonds euro, tous contrats confondus",
+  },
   { id: "CRYPTO", label: "Crypto", title: "Toutes les positions crypto détenues à chaque date" },
   { id: "IMMOBILIER", label: "Immobilier", title: "Biens directs et véhicules indirects" },
-  { id: "CASH", label: "Cash", title: "Trésorerie — comptes, livrets, dépôts à terme" },
   {
-    id: "AUTRE",
-    label: "Autre",
-    title:
-      "Alternatifs, épargne salariale et actifs sans classe dédiée dans cette taxonomie",
+    id: "ALTERNATIFS",
+    label: "Alternatifs",
+    title: "Métaux, private equity, crowdlending et tangibles",
+  },
+  {
+    id: "EPARGNE_SALARIALE",
+    label: "Épargne salariale",
+    title: "PEE, PER et PERCO — le moteur ne distingue pas les plans entre eux",
+  },
+  {
+    id: "CASH",
+    label: "Banques / liquidités",
+    title: "Trésorerie — comptes, livrets, dépôts à terme",
   },
 ];
 
@@ -106,7 +151,7 @@ const ENVELOPE_CHOICES: {
   label: string;
   title: string;
 }[] = [
-  { id: "all", label: "Tout", title: "Patrimoine entier, toutes enveloppes confondues" },
+  { id: "all", label: "Tout", title: "Les deux comptes-titres, PEA et CTO, additionnés" },
   {
     id: "PEA",
     label: "PEA",
@@ -119,59 +164,6 @@ const ENVELOPE_CHOICES: {
   },
 ];
 
-const METRIC_CHOICES: {
-  id: "value" | "performance";
-  label: string;
-  title: string;
-}[] = [
-  { id: "value", label: "Valeur", title: "Encours de la classe, apports compris" },
-  {
-    id: "performance",
-    label: "Performance",
-    title:
-      "Résultat cumulé de la classe, mouvements de capitaux retirés — hors revenus encaissés",
-  },
-];
-
-const SCOPE_CHOICES: {
-  id: EvolutionScope;
-  label: string;
-  title: string;
-}[] = [
-  {
-    id: "gross",
-    label: "Portefeuille",
-    title: "Valeur brute des actifs — titres, cash, alternatifs, épargne salariale",
-  },
-  {
-    id: "net",
-    label: "Patrimoine net",
-    title: "Valeur brute des actifs moins le capital restant dû",
-  },
-];
-
-/**
- * Échelle de lecture — quotidienne ou horaire.
- *
- * Proposée sur la seule fenêtre de sept jours : c'est là que l'heure a un sens,
- * et la collecte horaire ne remonte de toute façon pas plus loin. Le choix est
- * volontairement local et non mémorisé — c'est une façon de regarder, pas un
- * réglage de compte, et le mémoriser ferait rouvrir l'écran sur une courbe que
- * l'utilisateur n'a pas demandée.
- *
- * La courbe quotidienne reste le défaut : l'intraday s'ajoute au parcours, il
- * ne le remplace pas.
- */
-type EvolutionScale = "daily" | "intraday";
-
-const SCALE_CHOICES: { id: EvolutionScale; label: string; title: string }[] = [
-  { id: "daily", label: "Jour", title: "Un point par jour — historique complet" },
-  {
-    id: "intraday",
-    label: "Heure",
-    title: "Un point par heure, sur les observations réellement collectées",
-  },
-];
 
 const VERSUS_CHOICES: {
   id: EvolutionBenchmark;
@@ -240,23 +232,129 @@ function Segmented<T extends string>({
 }
 
 /**
+ * Ce que le corps du panneau montre, une fois pour toutes.
+ *
+ * Extraite du JSX pour rester testable sans rendu React (pas de harnais DOM
+ * dans ce dépôt) : une chaîne de `? :` imbriqués ne se rejoue pas dans un
+ * test, une fonction pure si.
+ *
+ * L'ordre des branches **est** la décision — chacune coupe court aux
+ * suivantes, exactement comme le faisait la chaîne de conditions qu'elle
+ * remplace. Deux ajouts par rapport à cette chaîne : `"main-error"` et
+ * `"pocket-error"`, qui distinguent désormais une requête en échec d'une
+ * absence de données (UNKNOWN ≠ ZERO ≠ ERROR) — l'un et l'autre affichaient
+ * auparavant la même carte « rien à voir », alors qu'un échec appelle un
+ * autre message et un bouton, pas un conseil qui ne peut pas aider.
+ */
+export type EvolutionPanelBodyState =
+  | "intraday"
+  | "loading"
+  | "main-error"
+  | "empty"
+  | "pocket-error"
+  | "pocket-empty"
+  | "no-points-envelope-unknown"
+  | "no-points-too-short"
+  | "index-unavailable"
+  | "pocket-curve"
+  | "daily-nav-curve"
+  | "value-curve"
+  | "percent-curve";
+
+export function resolveEvolutionPanelBodyState(input: {
+  showIntraday: boolean;
+  showPanelLoading: boolean;
+  /** `dailyNavQ.isError` côté tableau de bord — jamais `history.length === 0`. */
+  mainError: boolean;
+  /** `!showPanelLoading && !mainError && history.length === 0`. */
+  empty: boolean;
+  wantPocketDailyNav: boolean;
+  /** `pocketNavQ.isError` — une poche dont la requête a échoué, pas un compte vierge. */
+  pocketError: boolean;
+  pocketEmptyKind: "empty" | "too-short" | null;
+  noPoints: boolean;
+  /** `Boolean(envelope) && unknownEnvelopeEur > 0`. */
+  envelopeUnknown: boolean;
+  indexUnavailable: boolean;
+  versusNone: boolean;
+  usePocketCurve: boolean;
+  useDailyNavCurve: boolean;
+  chartKindPercent: boolean;
+}): EvolutionPanelBodyState {
+  if (input.showIntraday) return "intraday";
+  if (input.showPanelLoading) return "loading";
+  if (input.mainError) return "main-error";
+  if (input.empty) return "empty";
+  if (input.wantPocketDailyNav && input.pocketError) return "pocket-error";
+  if (input.wantPocketDailyNav && input.pocketEmptyKind === "empty") {
+    return "pocket-empty";
+  }
+  if (input.noPoints) {
+    return input.envelopeUnknown
+      ? "no-points-envelope-unknown"
+      : "no-points-too-short";
+  }
+  if (input.indexUnavailable) return "index-unavailable";
+  if (input.versusNone && input.usePocketCurve) return "pocket-curve";
+  if (!input.chartKindPercent && input.useDailyNavCurve) {
+    return "daily-nav-curve";
+  }
+  if (!input.chartKindPercent) return "value-curve";
+  return "percent-curve";
+}
+
+/**
  * Module Évolution du portefeuille — refonte « premium » orientée
  * investissement, à deux réglages seulement : la période et la comparaison
- * (« Versus »). Toute la logique d'affichage (numéraire vs pourcentage,
- * rebasage du benchmark) est centralisée ici et dans `evolution-aggregate.ts`
- * — aucun calcul de performance dupliqué ailleurs dans l'app.
+ * (« Versus »). Le vs-indice (T-4.E) rebase NAV et clôtures à 100 à
+ * l'ancre `servedFrom` (`vs-index-series.ts`) — jamais une NAV en euros
+ * à côté d'un indice déjà en %.
  */
 export function PortfolioEvolutionPanel({
   history,
+  dailyNav,
+  navScope,
+  navQueryFrom,
+  navQueryTo,
+  servedNavFrom,
   baseCurrency,
   loading,
+  navError,
+  onRetryNav,
   className,
   range,
   onRangeChange,
+  firstHistoryDate,
 }: {
   history: HistoryPoint[];
+  /** Série dense T-05 — courbe par défaut (Financier / Brut / Net). */
+  dailyNav?: DailyNavPoint[];
+  navScope?: HeroNavScope;
+  /**
+   * Même `from`/`to` que le hero. Un filtre de poche les réutilise : le
+   * clamp `earliestDayForScope` se fait ensuite côté `getDailyNav`.
+   */
+  navQueryFrom?: string;
+  navQueryTo?: string;
+  /**
+   * Borne `from` **servie** par daily-nav — jamais la demandée si clamp.
+   * C'est l'ancre Versus (NAV et indice à 100 le même jour).
+   */
+  servedNavFrom?: string;
   baseCurrency: string;
   loading?: boolean;
+  /**
+   * La requête `getDailyNav` principale (scope hero, jamais celle d'une
+   * poche) a échoué — `dailyNavQ.isError` côté tableau de bord.
+   *
+   * Distinct de `history.length === 0` : une réponse en erreur et une
+   * réponse vide sont deux faits différents, UNKNOWN ≠ ERROR. Confondre les
+   * deux annonçait « Historique encore vide » et proposait d'actualiser les
+   * cours — un geste qui ne peut rien changer à une requête qui a échoué.
+   */
+  navError?: boolean;
+  /** Rejoue la requête principale — bouton « Réessayer » de l'état d'échec. */
+  onRetryNav?: () => void;
   className?: string;
   /**
    * Période affichée — détenue par le tableau de bord, pas par ce panneau.
@@ -268,6 +366,18 @@ export function PortfolioEvolutionPanel({
    */
   range: EvolutionRange;
   onRangeChange: (range: EvolutionRange) => void;
+  /**
+   * Première date lisible, tous scopes confondus — le plancher de six ans
+   * (`historyFloorDay`), jamais `dailyNav?.[0]?.day` ni `history[0]?.date`.
+   *
+   * Ces deux sources sont vides pendant chaque chargement (`useDailyNavQuery`
+   * ne garde plus la réponse précédente, et `history` est désormais toujours
+   * `[]` côté route) : les lire ici éteignait les chips à chaque clic, le
+   * temps de la requête. La carte de tête calcule cette même borne depuis la
+   * même constante (`firstHistoryDate` dans `dashboard-tab.tsx`) — un seul
+   * calcul, passé aux deux rangées, pour qu'elles ne se contredisent jamais.
+   */
+  firstHistoryDate: string | null;
 }) {
   const isClient = useIsClient();
   const [prefs, setPrefs] = useState<EvolutionPrefsV5>(DEFAULT_EVOLUTION_PREFS);
@@ -285,21 +395,134 @@ export function PortfolioEvolutionPanel({
     la valeur qui fait foi à l'écran est celle du tableau de bord, et toute
     écriture la réinjecte (voir `update`).
   */
-  const { versus, indexKey, scope } = prefs;
-  const assetClass = prefs.assetClass ?? null;
-  const classMetric = prefs.classMetric ?? "value";
+  const { versus, indexKey } = prefs;
+  /*
+    Brut seulement.
+
+    Net/Brut vit sur la carte de tête : le reproposer ici faisait deux
+    sélecteurs pour la même question, et le second n'avait rien à dire que
+    le premier n'ait déjà tranché. La courbe d'évolution trace les actifs
+    bruts — c'est ce que « portefeuille » désigne, et ce qui se compare à
+    un indice.
+  */
+  const scope = "gross" as const;
+  const account = prefs.account ?? null;
+  /*
+    Le toggle Valeur / Performance a été retiré (D15.E1) : la série tracée
+    est toujours la valeur, apports compris. `classMetric` reste dans le
+    schéma des préférences stockées (compat v5), mais plus rien à l'écran ne
+    l'écrit ni ne le lit ailleurs qu'ici, en épinglant "value".
+  */
+  const classMetric = "value" as const;
   const envelope = prefs.envelope ?? null;
 
   /*
-    L'échelle n'est pas mémorisée avec les autres préférences : c'est une façon
-    de regarder sur l'instant, pas un réglage de compte. Elle retombe donc sur
-    « Jour » — la courbe de référence — à chaque ouverture.
+    Plus d'échelle horaire sur ce tableau de bord.
+
+    Le sélecteur Jour/Heure basculait sur un second moteur : la vue horaire ne
+    sait produire que les actifs bruts, si bien qu'un clic remplaçait une
+    courbe Financier à −373 € par une courbe brute à +15 000 € — deux
+    périmètres, deux moteurs, aucun avertissement. `getDailyNav` n'a pas de
+    grain horaire, et lui en inventer un pour tenir la comparaison aurait
+    fabriqué de la donnée.
+
+    L'intraday n'est pas démonté pour autant : il garde son sens là où une
+    seule ligne est cotée — sur la fiche d'un actif — et ce chemin-là n'est pas
+    touché. C'est l'agrégat patrimonial qui ne se lit pas à l'heure.
   */
-  const [scale, setScale] = useState<EvolutionScale>("daily");
-  // L'heure n'a de sens que sur la fenêtre courte, la seule que la collecte
-  // horaire couvre. Ailleurs, le choix disparaît et la lecture reste quotidienne.
-  const scaleAvailable = range === "7d";
-  const showIntraday = scaleAvailable && scale === "intraday";
+  const showIntraday = false;
+
+  const activeNavScope: HeroNavScope = navScope ?? "financier";
+  /*
+    Filtre de poche en valeur : même fenêtre que le hero, scope clampé par
+    `earliestDayForScope`. Le vs-indice (T-4.E) lit `servedFrom…to`,
+    les deux séries en base 100 à cette ancre.
+  */
+  const wantPocketDailyNav =
+    Boolean(account) &&
+    versus === "none" &&
+    classMetric === "value" &&
+    !showIntraday &&
+    Boolean(navQueryFrom && navQueryTo);
+  const pocketScope = account
+    ? dailyNavScopeForAccount(account)
+    : "listed";
+  const pocketNavQ = useDailyNavQuery(navQueryFrom ?? "", navQueryTo ?? "", {
+    enabled: wantPocketDailyNav,
+    scope: pocketScope,
+    range,
+  });
+  const pocketServedFrom = servedDailyNavFrom(pocketNavQ.data, {
+    isPlaceholderData: pocketNavQ.isPlaceholderData,
+  });
+  const pocketWindowed = useMemo(() => {
+    const points = pocketNavQ.data?.points;
+    if (!points?.length || !account) return [];
+    const ref =
+      points[points.length - 1]?.day ??
+      dailyNav?.[dailyNav.length - 1]?.day ??
+      "";
+    if (!ref) return [];
+    return windowPocketDailyNav(points, range, ref, pocketServedFrom);
+  }, [pocketNavQ.data?.points, account, range, pocketServedFrom, dailyNav]);
+  const pocketPoints = useMemo(
+    () =>
+      account
+        ? toPocketEvolutionPoints(pocketWindowed, account, envelope)
+        : [],
+    [pocketWindowed, account, envelope]
+  );
+  const pocketLineType = pocketChartLineType(account);
+  /*
+    Une requête en échec n'est pas « prête ».
+
+    TanStack met `isPending: false` dès qu'une requête atterrit sur
+    `status: "error"` — sans le exclure ici, une poche dont l'API a rendu 500
+    se lisait « prête » avec zéro point, et l'écran affirmait « cette poche
+    n'a pas encore de valorisation » à quelqu'un dont la requête avait
+    simplement échoué. `pocketError`, juste en dessous, porte ce troisième
+    état — ni prêt, ni vide, en échec — et le panneau lui donne son propre
+    message plutôt que de le confondre avec une absence.
+  */
+  const pocketReady =
+    wantPocketDailyNav &&
+    !pocketNavQ.isPending &&
+    !pocketNavQ.isPlaceholderData &&
+    !pocketNavQ.isError;
+  const pocketError = wantPocketDailyNav && pocketNavQ.isError;
+  const usePocketCurve =
+    pocketReady && !pocketSeriesTooShort(pocketPoints);
+  const pocketTooShort =
+    pocketReady && pocketSeriesTooShort(pocketPoints);
+
+  const canUseDailyNavSeries =
+    Boolean(dailyNav && dailyNav.length > 1) &&
+    !account &&
+    !showIntraday;
+
+  const navWindowed = useMemo(() => {
+    if (!dailyNav?.length) return [];
+    return windowDailyNav(
+      dailyNav,
+      range,
+      dailyNav[dailyNav.length - 1]!.day
+    );
+  }, [dailyNav, range]);
+
+  const navChart = useMemo(
+    () => toDailyNavChartPoints(navWindowed, activeNavScope),
+    [navWindowed, activeNavScope]
+  );
+
+  const navMarket = useMemo(
+    () => headerMarketDelta(navWindowed, activeNavScope),
+    [navWindowed, activeNavScope]
+  );
+
+  const navFlux = useMemo(
+    () => headerFlux(navWindowed, activeNavScope),
+    [navWindowed, activeNavScope]
+  );
 
   const update = (patch: Partial<EvolutionPrefsV5>) => {
     setPrefs((p) => {
@@ -314,7 +537,7 @@ export function PortfolioEvolutionPanel({
       */
       const next = {
         ...fusion,
-        envelope: normalizeEnvelopeFor(fusion.assetClass, fusion.envelope),
+        envelope: normalizeEnvelopeFor(fusion.account, fusion.envelope),
       };
       /*
         La période partagée est réinjectée à chaque écriture.
@@ -329,8 +552,6 @@ export function PortfolioEvolutionPanel({
     });
   };
 
-  const firstDate = history[0]?.date ?? null;
-
   /*
     Périodes proposées, selon la profondeur de l'historique.
 
@@ -339,14 +560,23 @@ export function PortfolioEvolutionPanel({
     détient l'état. Écrire l'état d'un parent pendant le rendu d'un enfant
     n'est pas permis, et la règle est de toute façon commune aux deux blocs :
     c'est la même fonction qui la tranche des deux côtés.
+
+    La profondeur lue est `firstHistoryDate` — le plancher de six ans,
+    constant, jamais `dailyNav?.[0]?.day` ni `history[0]?.date`. Ces deux
+    séries sont vides pendant chaque chargement (`useDailyNavQuery` sans
+    `keepPreviousData`, `history` toujours `[]` côté route) : les lire ici
+    éteignait les huit chips à chaque clic de période, le temps de la
+    requête, alors que la carte de tête — qui lit déjà le plancher constant —
+    restait pleinement cliquable. Deux rangées pilotant le même état ne
+    doivent jamais se contredire.
   */
   const rangeEnabled = useMemo(() => {
     const map = {} as Record<EvolutionRange, boolean>;
     for (const r of RANGES) {
-      map[r.id] = isEvolutionRangeEnabled(r.id, firstDate);
+      map[r.id] = isEvolutionRangeEnabled(r.id, firstHistoryDate);
     }
     return map;
-  }, [firstDate]);
+  }, [firstHistoryDate]);
 
   /*
     Le périmètre est choisi **avant** l'agrégation, pas après.
@@ -356,10 +586,50 @@ export function PortfolioEvolutionPanel({
     un mouvement de marché. Réécrire le total en amont garantit qu'une seule
     des deux métriques circule dans toute la chaîne d'affichage.
   */
+  /*
+    « Tout » seulement — jamais un compte. `scopeHistory` connaît les six
+    `assetClass` du moteur (ACTIONS, OBLIGATIONS…), pas les comptes de D18 :
+    Titres additionne deux classes par enveloppe, et Assurance-vie/Alternatifs/
+    Épargne salariale n'ont pas de clé dans `byAssetClassBase`. Chaque compte
+    est donc tracé exclusivement via `pocketPoints` (`getDailyNav`), jamais
+    via cette projection — voir `pocketPoints`, `vsIndexSeries` plus bas.
+  */
   const scopedHistory = useMemo(
-    () => scopeHistory(history, { scope, assetClass, envelope, classMetric }),
-    [history, scope, assetClass, classMetric, envelope]
+    () => scopeHistory(history, { scope, assetClass: null, envelope: null, classMetric }),
+    [history, scope, classMetric]
   );
+
+  /**
+   * Part des titres qui n'est ni PEA ni CTO, sur le dernier point de la
+   * fenêtre affichée — CFD non historisé, ou enveloppe pas encore démontrée.
+   *
+   * Lue sur `pocketWindowed` (même requête `getDailyNav` que la courbe), pas
+   * sur `history` : c'est la source qui porte le croisement classe ×
+   * enveloppe pour Titres, jamais `byAssetClass`.
+   */
+  const titresGapEur = useMemo(() => {
+    if (account !== "TITRES") return null;
+    const last = pocketWindowed[pocketWindowed.length - 1];
+    return last ? titresUnknownEnvelopeEur(last) : null;
+  }, [account, pocketWindowed]);
+
+  /**
+   * Ce que « Tout » porte et qu'aucune option du sélecteur ne couvre.
+   *
+   * Le sélecteur partitionne le patrimoine par lieu de dépôt, et la partition
+   * n'est pas complète : les lignes en CFD n'ont pas de compte. Sans cette
+   * ligne, « Tout » afficherait un montant que la somme des options ne
+   * retrouve pas, sans que rien ne le dise.
+   *
+   * Lue sur `dailyNav`, la série que « Tout » trace déjà — pas sur une requête
+   * supplémentaire, et pas sur `rawPoints`, qui a perdu la ventilation par
+   * poche en devenant des points de graphique.
+   */
+  const accountsGap = useMemo(() => {
+    if (account != null) return null;
+    const last = dailyNav?.[dailyNav.length - 1];
+    return last ? accountsGapEur(last) : null;
+  }, [account, dailyNav]);
 
   /**
    * Part des titres dont l'enveloppe n'est pas démontrée, sur toute la fenêtre.
@@ -376,83 +646,260 @@ export function PortfolioEvolutionPanel({
    * c'est la part que la courbe ne démontre pas.
    *
    * `startOfRange` est celle de la série, pour que l'avertissement couvre
-   * exactement ce que l'œil voit.
+   * exactement ce que l'œil voit. Titres seul est concerné — ACTIONS et
+   * OBLIGATIONS sont désormais additionnées dans ce compte.
    */
   const unknownEnvelopeEur = useMemo(() => {
-    if (!assetClass || !envelope) return 0;
-    const from = startOfRange(range);
+    if (account !== "TITRES" || !envelope) return 0;
+    const from = startOfRange(range, heroWindowReference(history));
     const fromT = from ? from.getTime() : -Infinity;
     let max = 0;
     for (const p of history) {
       if (Date.parse(p.date) < fromT) continue;
-      const u = Number(
-        p.byAssetClassAndEnvelopeBase?.[assetClass]?.UNKNOWN ?? 0
+      const uActions = Number(p.byAssetClassAndEnvelopeBase?.ACTIONS?.UNKNOWN ?? 0);
+      const uObligations = Number(
+        p.byAssetClassAndEnvelopeBase?.OBLIGATIONS?.UNKNOWN ?? 0
       );
+      const u = uActions + uObligations;
       if (Number.isFinite(u) && u > max) max = u;
     }
     return max;
-  }, [history, assetClass, envelope, range]);
+  }, [history, account, envelope, range]);
 
   const { points: rawPoints, interval } = useMemo(
-    () => buildEvolutionSeries(scopedHistory, range, "cumul"),
-    [scopedHistory, range]
+    () =>
+      buildEvolutionSeries(
+        scopedHistory,
+        range,
+        "cumul",
+        heroWindowReference(history)
+      ),
+    [scopedHistory, range, history]
   );
 
-  // Mode "index" : récupère les clôtures réelles de l'indice choisi sur la
-  // fenêtre affichée (marge amont pour disposer d'une clôture de base).
+  /*
+    Vs indice : fenêtre servie (clamp getDailyNav), pas la borne demandée.
+    Marge amont de 7 j pour une close ≤ ancre (LOCF vendredi).
+
+    Cette fenêtre ne vaut que pour la NAV **non filtrée** — dailyNav est la
+    série du hero (Brut/Net/Financier), quel que soit le compte actif ici. Un
+    compte filtré compare donc `pocketPoints` (juste au-dessus) plutôt que
+    cette fenêtre-là : l'indice doit suivre la série réellement tracée à
+    l'écran, pas *Tout*.
+  */
+  const isPocketFiltered = Boolean(account);
+  const vsNavWindowed = useMemo(() => {
+    if (isPocketFiltered) return [];
+    if (!dailyNav?.length) return [];
+    return windowVsIndexNav(
+      dailyNav,
+      range,
+      dailyNav[dailyNav.length - 1]!.day,
+      servedNavFrom
+    );
+  }, [dailyNav, range, servedNavFrom, isPocketFiltered]);
+
   const wantIndex = versus === "index";
-  const idxFromKey = rawPoints[0]?.date.slice(0, 10) ?? "";
-  const idxToKey = rawPoints[rawPoints.length - 1]?.date.slice(0, 10) ?? "";
+  /*
+    `from` = ancre servie, jamais `navQueryFrom` (borne demandée, ex. 1998
+    alors que getDailyNav a clampé à 2022). `to` = dernier jour de la
+    fenêtre affichée, pas une date demandée plus large.
+
+    Filtré : l'ancre est le premier jour de `pocketPoints` — la fenêtre que
+    `getDailyNav` sert réellement pour ce compte/enveloppe, pas celle du hero.
+  */
+  const idxFromKey = isPocketFiltered
+    ? (pocketPoints[0] ? parisDayKey(pocketPoints[0].date) : "")
+    : servedNavFrom ??
+      vsNavWindowed[0]?.day ??
+      dailyNav?.[0]?.day ??
+      "";
+  const idxToKey = isPocketFiltered
+    ? (pocketPoints[pocketPoints.length - 1]
+        ? parisDayKey(pocketPoints[pocketPoints.length - 1]!.date)
+        : "")
+    : vsNavWindowed[vsNavWindowed.length - 1]?.day ??
+      dailyNav?.[dailyNav.length - 1]?.day ??
+      navQueryTo ??
+      "";
   const indexQ = useQuery({
-    queryKey: ["evolution-index", indexKey, idxFromKey, idxToKey],
-    enabled: wantIndex && rawPoints.length > 1,
+    queryKey: ["evolution-index", indexKey, range, idxFromKey, idxToKey],
+    enabled:
+      wantIndex &&
+      Boolean(idxFromKey && idxToKey) &&
+      (isPocketFiltered
+        ? pocketPoints.length > 1
+        : vsNavWindowed.length > 1 || rawPoints.length > 1),
     staleTime: 30 * 60_000,
-    queryFn: () => {
-      const fromMs = Date.parse(rawPoints[0]!.date) - 7 * 24 * 60 * 60 * 1000;
+    retry: false,
+    /*
+      Même règle que la série de valeur : changer de période annule la
+      requête d'indice en vol. Sans cela, une réponse lente pour « 1A »
+      pouvait s'installer sous un chip « Tout » déjà actif, et l'overlay
+      comparait deux fenêtres différentes.
+    */
+    queryFn: ({ signal }) => {
+      const fromMs = Date.parse(idxFromKey) - 7 * 24 * 60 * 60 * 1000;
       const from = new Date(fromMs).toISOString();
-      const to = rawPoints[rawPoints.length - 1]!.date;
+      const to = idxToKey;
       const params = new URLSearchParams({ symbol: indexKey, from, to });
       return fetchJson<{ points: IndexClosePoint[] }>(
-        `/api/benchmark?${params.toString()}`
+        `/api/benchmark?${params.toString()}`,
+        { signal }
       );
     },
   });
   const indexCloses = useMemo<IndexClosePoint[]>(
-    () => indexQ.data?.points ?? [],
-    [indexQ.data]
+    () => (indexQ.isError ? [] : indexQ.data?.points ?? []),
+    [indexQ.data, indexQ.isError]
   );
 
-  const points = useMemo(
-    () => withBenchmarkSeries(rawPoints, versus, { indexCloses }),
-    [rawPoints, versus, indexCloses]
-  );
+  const points = isPocketFiltered ? pocketPoints : rawPoints;
 
   /*
-    Trois situations distinctes, et elles ne se disent pas pareil :
-    la période est trop courte, la donnée manque, ou tout va bien.
+    Deux niveaux (NAV hero ou série filtrée, clôture Yahoo), base 100 à
+    l'ancre servie. Overlay absent si 429 / vide / aucune close ≤ ancre —
+    la série portefeuille reste intacte. Pas `toPercentSeries` : sans
+    `growth`, le portefeuille restait à +0 %.
+
+    Filtrée (compte/enveloppe actif) : `pocketPoints` — la série réellement
+    tracée pour ce compte — sert de base 100, jamais la NAV hero non filtrée
+    ni `rawPoints`, qui reste celle du patrimoine entier.
   */
+  const vsIndexSeries = useMemo(() => {
+    if (versus !== "index") return [];
+    const indexLevels = indexCloses.map((c) => ({
+      day: c.date,
+      value: c.close,
+    }));
+    const scopedLevels = (isPocketFiltered ? pocketPoints : rawPoints).map(
+      (p) => ({
+        day: parisDayKey(p.date),
+        value: p.total,
+      })
+    );
+    const portfolioLevels = isPocketFiltered
+      ? scopedLevels
+      : vsNavWindowed.length > 1
+        ? dailyNavToVsIndexLevels(vsNavWindowed, activeNavScope)
+        : scopedLevels;
+    return rebaseToCommonBase100(portfolioLevels, indexLevels);
+  }, [
+    versus,
+    indexCloses,
+    vsNavWindowed,
+    activeNavScope,
+    rawPoints,
+    pocketPoints,
+    isPocketFiltered,
+  ]);
 
   const percentPoints = useMemo(
-    () => (versus === "none" ? [] : toPercentSeries(points)),
-    [points, versus]
+    () => (versus === "none" ? [] : toVsIndexPercentPoints(vsIndexSeries)),
+    [vsIndexSeries, versus]
   );
+  const hasIndexOverlay = vsIndexHasOverlay(percentPoints);
+  const chartKind = vsIndexChartKind({
+    versus,
+    indexError: Boolean(wantIndex && indexQ.isError),
+    hasOverlay: hasIndexOverlay,
+  });
+  /*
+    NAV quotidienne dès que Versus n'a pas d'overlay à tracer : éteint,
+    indice en erreur, ou overlay absent. Interdit dès que le graphe %
+    est légitime — sinon on superposerait deux lectures.
+  */
+  const useDailyNavCurve = canUseDailyNavSeries && chartKind !== "percent";
 
   const gap = useMemo(
-    () => (versus === "none" ? null : benchmarkGapPct(points)),
-    [points, versus]
+    () => (versus === "none" ? null : vsIndexGapPct(vsIndexSeries)),
+    [vsIndexSeries, versus]
   );
 
   const benchmarkDisplayName =
     versus === "index" ? marketIndexLabel(indexKey) : benchmarkLabel(versus);
 
   const summary = useMemo(() => evolutionDeltaSummary(points), [points]);
+  const pnlSummary = useMemo(() => evolutionPnlSummary(points), [points]);
+  const pocketSummary = useMemo(
+    () => (usePocketCurve ? evolutionDeltaSummary(pocketPoints) : null),
+    [usePocketCurve, pocketPoints]
+  );
+  /*
+    Le flux par enveloppe n'est pas reconstructible : `flowsByAssetClass` est
+    forcé à 0 dès qu'on filtre PEA/CTO (`pocket-series.ts`), et il n'existe
+    aucune ventilation flux × classe × enveloppe dans le dépôt. Assurance-vie,
+    alternatifs et épargne salariale n'ont pas non plus de clé de flux dédiée.
+    `pnl = delta` recopierait donc la ligne du dessus — la ligne 2 dit `n/d`
+    plutôt que de prétendre neutraliser un versement qu'on n'a pas su isoler.
+  */
+  const pnlUnreliable = pocketFlowsUnreliable(account, envelope);
+  const pocketPnlSummary = useMemo(
+    () =>
+      usePocketCurve
+        ? evolutionPnlSummary(pocketPoints, {
+            flowsUnreliable: pnlUnreliable,
+          })
+        : null,
+    [usePocketCurve, pocketPoints, pnlUnreliable]
+  );
   const headlinePct =
-    percentPoints.length > 0
+    chartKind === "percent" && percentPoints.length > 0
       ? percentPoints[percentPoints.length - 1]!.portfolioPct
-      : 0;
+      : null;
 
-  const empty = !loading && history.length === 0;
-  const noPoints = !loading && !empty && rawPoints.length === 0;
+  const showPanelLoading = Boolean(
+    loading ||
+      (wantPocketDailyNav && !pocketReady && !pocketNavQ.isError)
+  );
+  /*
+    Une requête principale en échec n'est pas un historique vide.
+
+    `history` (donc `history.length === 0`) ne dit plus rien de la requête
+    elle-même depuis que la route ne calcule plus de série : elle vaut `[]`
+    aussi bien pendant un chargement, après un échec, ou sur un compte
+    réellement vierge. `mainError` sépare le second cas — celui où
+    « Actualisez les cours » ne peut rien changer, la requête ayant déjà
+    échoué avant d'atteindre les cours.
+  */
+  const mainError = Boolean(navError);
+  const empty = !showPanelLoading && !mainError && history.length === 0;
+  const pocketEmpty = pocketReady ? pocketEmptyState(pocketPoints.length) : null;
+  /*
+    « Période trop courte » seulement après clamp : moins de deux points
+    sur la fenêtre servie. Un `from` trop ancien n'est plus une absence.
+    0 point de poche → copie dédiée, pas le générique.
+  */
+  const noPoints =
+    !showPanelLoading &&
+    !empty &&
+    (wantPocketDailyNav
+      ? pocketTooShort
+      : versus === "index"
+        ? chartKind === "percent"
+          ? percentPoints.length < 2
+          : rawPoints.length === 0 && vsNavWindowed.length < 2 && navChart.length < 2
+        : rawPoints.length === 0);
+
+  const bodyState = resolveEvolutionPanelBodyState({
+    showIntraday,
+    showPanelLoading,
+    mainError,
+    empty,
+    wantPocketDailyNav,
+    pocketError,
+    pocketEmptyKind: pocketEmpty?.kind ?? null,
+    noPoints,
+    envelopeUnknown: Boolean(envelope) && unknownEnvelopeEur > 0,
+    indexUnavailable:
+      chartKind === "index-unavailable" &&
+      navChart.length < 2 &&
+      points.length < 2,
+    versusNone: versus === "none",
+    usePocketCurve,
+    useDailyNavCurve,
+    chartKindPercent: chartKind === "percent",
+  });
 
   return (
     <div
@@ -461,18 +908,25 @@ export function PortfolioEvolutionPanel({
         className
       )}
       data-testid="portfolio-evolution-panel"
+      data-nav-scope={activeNavScope}
+      data-pocket-account={account ?? "all"}
+      data-chart-kind={chartKind}
+      data-vs-base-day={versus === "index" ? vsIndexSeries[0]?.day : undefined}
+      data-line-type={
+        usePocketCurve ? pocketLineType : useDailyNavCurve ? "linear" : undefined
+      }
     >
       <PanelHeader
         title="Évolution du portefeuille"
         subtitle={
           <>
-            {assetClass && envelope
-              ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass} en ${envelope} — valeur`
-              : assetClass
-              ? `${CLASS_CHOICES.find((c) => c.id === assetClass)?.label ?? assetClass}${assetClass === "OBLIGATIONS" ? " (CTO)" : ""} — ${classMetric === "performance" ? "performance" : "valeur"}`
-              : scope === "net"
-                ? "Patrimoine net"
-                : "Actifs bruts"}
+            {account && envelope
+              ? `Compte : ${ACCOUNT_CHOICES.find((c) => c.id === account)?.label ?? account} · ${envelope}`
+              : account
+              ? `Compte : ${ACCOUNT_CHOICES.find((c) => c.id === account)?.label ?? account}`
+              : useDailyNavCurve
+              ? `${HERO_NAV_SCOPE_LABEL[activeNavScope]} — NAV quotidienne`
+              : "Actifs bruts"}
             <span className="mx-1 opacity-40">·</span>
             {evolutionIntervalLabel(interval)}
             <span className="sr-only"> ({evolutionIntervalHint(interval)})</span>
@@ -485,42 +939,116 @@ export function PortfolioEvolutionPanel({
           </>
         }
         actions={
-          summary && points.length > 0 ? (
+          useDailyNavCurve && navMarket != null && navChart.length > 1 ? (
             <div className="shrink-0 text-right" data-testid="evolution-headline">
               <div
                 className={cn(
                   "text-lg font-bold tabular-nums sm:text-xl",
-                  (versus === "none" ? summary.delta : headlinePct) >= 0
+                  navMarket >= 0
                     ? "text-[var(--success)]"
                     : "text-[var(--danger)]"
                 )}
+                data-testid="evolution-headline-market"
               >
-                {versus === "none" ? (
-                  <>
-                    {summary.delta >= 0 ? "+" : ""}
-                    {formatCurrency(summary.delta, baseCurrency)}
-                  </>
-                ) : (
-                  <>
-                    {headlinePct >= 0 ? "+" : ""}
-                    {headlinePct.toFixed(1)}&nbsp;%
-                  </>
-                )}
+                {navMarket >= 0 ? "+" : ""}
+                {formatCurrency(navMarket, baseCurrency)}
               </div>
-              <div className="text-[11px] font-medium text-[var(--muted-foreground)]">
+              <div className="text-xs font-medium text-[var(--muted-foreground)]">
+                Performance {HERO_NAV_SCOPE_LABEL[activeNavScope].toLowerCase()}
+                {navFlux != null && navFlux !== 0 ? (
+                  <span data-testid="evolution-headline-flux">
+                    {" · Capital investi "}
+                    {navFlux >= 0 ? "+" : ""}
+                    {formatCurrency(navFlux, baseCurrency)}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : usePocketCurve && pocketSummary && pocketPoints.length > 0 ? (
+            <div className="shrink-0 text-right" data-testid="evolution-headline">
+              <div
+                className={cn(
+                  "text-lg font-bold tabular-nums sm:text-xl",
+                  pocketSummary.delta >= 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--danger)]"
+                )}
+                data-testid="evolution-headline-delta"
+              >
+                {pocketSummary.delta >= 0 ? "+" : ""}
+                {formatCurrency(pocketSummary.delta, baseCurrency)}
+              </div>
+              <div
+                className="text-xs font-medium text-[var(--muted-foreground)]"
+                data-testid="evolution-headline-pnl"
+                title={
+                  pnlUnreliable
+                    ? "Flux non disponibles pour ce compte : le P&L de période ne peut pas être isolé des versements."
+                    : "Ce montant inclut vos versements ; ce P&L ne les compte pas."
+                }
+              >
+                {pocketPnlSummary == null || pocketPnlSummary.pct == null
+                  ? "P&L n/d"
+                  : `P&L ${pocketPnlSummary.pnl >= 0 ? "+" : ""}${formatCurrency(pocketPnlSummary.pnl, baseCurrency)} · ${pocketPnlSummary.pct >= 0 ? "+" : ""}${pocketPnlSummary.pct.toFixed(1)} %`}
+              </div>
+            </div>
+          ) : summary && points.length > 0 && chartKind !== "percent" ? (
+            <div className="shrink-0 text-right" data-testid="evolution-headline">
+              <div
+                className={cn(
+                  "text-lg font-bold tabular-nums sm:text-xl",
+                  summary.delta >= 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--danger)]"
+                )}
+                data-testid="evolution-headline-delta"
+              >
+                {summary.delta >= 0 ? "+" : ""}
+                {formatCurrency(summary.delta, baseCurrency)}
+              </div>
+              <div
+                className="text-xs font-medium text-[var(--muted-foreground)]"
+                data-testid={versus === "none" ? "evolution-headline-pnl" : undefined}
+                title={
+                  versus === "none"
+                    ? "Ce montant inclut vos versements ; ce P&L ne les compte pas."
+                    : undefined
+                }
+              >
                 {versus === "none"
                   ? /*
                        Deux chiffres, deux significations.
 
                        Le montant au-dessus est la variation du patrimoine,
-                       versements compris. Le pourcentage est le rendement des
-                       investissements, versements neutralisés — c'est pourquoi
-                       il ne vaut pas « montant / valeur de départ ». Le dire
-                       explicitement évite de lire l'un comme le ratio de
-                       l'autre.
+                       versements compris. La ligne du dessous est le P&L de la
+                       période — ce même montant moins les versements — et son
+                       pourcentage rapporte ce P&L à un capital moyen pondéré
+                       par le temps. Le dire explicitement évite de lire l'un
+                       comme le ratio de l'autre.
                     */
-                    `${summary.pct >= 0 ? "+" : ""}${summary.pct.toFixed(1)} % de rendement`
-                  : `Vs ${benchmarkDisplayName}`}
+                    pnlSummary == null || pnlSummary.pct == null
+                    ? "P&L n/d"
+                    : `P&L ${pnlSummary.pnl >= 0 ? "+" : ""}${formatCurrency(pnlSummary.pnl, baseCurrency)} · ${pnlSummary.pct >= 0 ? "+" : ""}${pnlSummary.pct.toFixed(1)} %`
+                  : chartKind === "index-unavailable"
+                    ? INDEX_UNAVAILABLE_TITLE
+                    : `Vs ${benchmarkDisplayName}`}
+              </div>
+            </div>
+          ) : summary && points.length > 0 && headlinePct != null ? (
+            <div className="shrink-0 text-right" data-testid="evolution-headline">
+              <div
+                className={cn(
+                  "text-lg font-bold tabular-nums sm:text-xl",
+                  headlinePct >= 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--danger)]"
+                )}
+              >
+                {headlinePct >= 0 ? "+" : ""}
+                {headlinePct.toFixed(1)}&nbsp;%
+              </div>
+              <div className="text-xs font-medium text-[var(--muted-foreground)]">
+                {`Vs ${benchmarkDisplayName}`}
               </div>
             </div>
           ) : null
@@ -529,92 +1057,62 @@ export function PortfolioEvolutionPanel({
 
       {/* Période + Versus — deux réglages, rien d'autre. */}
       <div className="mb-2.5 space-y-2" data-testid="evolution-controls">
-        <div
-          className="flex min-w-0 flex-wrap items-center gap-0.5 sm:gap-1"
-          role="tablist"
-          aria-label="Période"
-        >
-          {RANGES.map((r) => {
-            const enabled = rangeEnabled[r.id] !== false;
-            const selected = range === r.id;
-            return (
-              <button
-                key={r.id}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                aria-disabled={!enabled}
-                disabled={!enabled}
-                title={
-                  enabled
-                    ? undefined
-                    : "Historique trop court pour cette période"
-                }
-                data-testid={`evolution-range-${r.id}`}
-                onClick={() => enabled && onRangeChange(r.id)}
-                className={cn(
-                  "rounded-[var(--radius-sm)] px-2 py-1 text-[11px] font-medium transition",
-                  "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-                  !enabled &&
-                    "cursor-not-allowed bg-[var(--muted)]/40 text-[var(--muted-foreground)] opacity-40",
-                  enabled &&
-                    selected &&
-                    "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[var(--shadow-xs)]",
-                  enabled &&
-                    !selected &&
-                    "bg-[var(--muted)]/70 text-[var(--foreground)] hover:bg-[var(--muted)]"
-                )}
-              >
-                {r.label}
-              </button>
-            );
-          })}
-        </div>
+        <RangeChips
+          range={range}
+          onRangeChange={onRangeChange}
+          rangeEnabled={rangeEnabled}
+          testIdPrefix="evolution-range"
+        />
 
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
-          {scaleAvailable && (
-            <Segmented
-              items={SCALE_CHOICES}
-              value={scale}
-              onChange={setScale}
-              ariaLabel="Échelle de lecture"
-              testIdPrefix="evolution-scale"
-            />
-          )}
           {/*
-            La classe commande, l'enveloppe précise.
+            Le compte commande, l'enveloppe précise.
 
-            Les deux ne sont plus exclusives : « où sont mes actions » est une
-            question qui a un sens, et y répondre demandait de composer les deux
-            filtres. La hiérarchie est celle de la question — on choisit d'abord
-            ce que l'on détient, puis, quand cela s'y prête, où.
+            « Compte » — où l'argent est déposé — remplace la classe d'actif :
+            Actions additionnait PEA + CTO + unités de compte d'assurance-vie,
+            et ni PEA ni CTO ne sont cette somme. Un unique sélecteur — pas une
+            rangée de chips — car les huit comptes ne sont pas des variations
+            d'une même question mais des poches disjointes du patrimoine.
 
-            Changer de classe remet l'enveloppe à « Tout » : garder « PEA » en
+            Changer de compte remet l'enveloppe à « Tout » : garder « PEA » en
             passant sur la crypto laisserait un filtre actif qu'aucun contrôle
             n'affiche plus.
           */}
-          <Segmented
-            items={CLASS_CHOICES}
-            value={assetClass ?? "all"}
-            onChange={(v) =>
-              update({
-                assetClass: v === "all" ? null : (v as EvolutionAssetClass),
-                envelope: null,
-              })
-            }
-            ariaLabel="Classe d'actifs"
-            testIdPrefix="evolution-class"
-          />
+          <label className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--muted-foreground)]">
+            <span className="text-[10px] font-medium uppercase tracking-wide">
+              Compte
+            </span>
+            <select
+              className="input !h-7 w-auto !min-w-0 py-0 pl-2 pr-6 text-[11px]"
+              value={account ?? "all"}
+              onChange={(e) =>
+                update({
+                  account:
+                    e.target.value === "all"
+                      ? null
+                      : (e.target.value as EvolutionAccount),
+                  envelope: null,
+                })
+              }
+              data-testid="evolution-account-select"
+              aria-label="Compte"
+            >
+              {ACCOUNT_CHOICES.map((c) => (
+                <option key={c.id} value={c.id} title={c.title}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
           {/*
-            Le sélecteur d'enveloppe n'existe que là où la question se pose.
+            La sous-rangée d'enveloppe n'existe que là où la question se pose.
 
-            Sur les actions seulement : ce sont les seules lignes dont le
-            portefeuille de démonstration comme le modèle admettent les deux
-            enveloppes. Les obligations reçoivent une indication plutôt qu'un
-            choix — voir le sous-titre — et la crypto, l'immobilier, le cash et
-            « Autre » n'ont aucun rapport avec un compte-titres.
+            Sur Titres seulement : c'est le seul compte que le journal sait
+            recouper avec PEA ou CTO. Assurance-vie, crypto, immobilier,
+            alternatifs, épargne salariale et banques n'ont aucun rapport avec
+            un compte-titres.
           */}
-          {assetClass === "ACTIONS" && (
+          {account === "TITRES" && (
             <Segmented
               items={ENVELOPE_CHOICES}
               value={envelope ?? "all"}
@@ -623,39 +1121,6 @@ export function PortfolioEvolutionPanel({
               }
               ariaLabel="Enveloppe fiscale"
               testIdPrefix="evolution-envelope"
-            />
-          )}
-          {/*
-            Valeur ou performance : la distinction n'a de sens que sur une
-            classe, la courbe globale ayant déjà sa propre lecture.
-
-            Retirée dès qu'une enveloppe est choisie : la performance se calcule
-            en retirant les flux, et aucun flux historique n'est attribuable à
-            une enveloppe — l'enveloppe d'un achat de 2024 est précisément ce
-            que le journal ne dit pas. Proposer le choix produirait un chiffre
-            faux.
-          */}
-          {assetClass && !envelope && (
-            <Segmented
-              items={METRIC_CHOICES}
-              value={classMetric}
-              onChange={(v) => update({ classMetric: v })}
-              ariaLabel="Grandeur tracée"
-              testIdPrefix="evolution-metric"
-            />
-          )}
-          {/*
-            Brut ou net ne se pose que sur le patrimoine entier : les dettes
-            n'appartiennent à aucune classe, et proposer « Crypto nette »
-            n'aurait pas de sens.
-          */}
-          {!assetClass && !envelope && (
-            <Segmented
-              items={SCOPE_CHOICES}
-              value={scope}
-              onChange={(v) => update({ scope: v })}
-              ariaLabel="Périmètre"
-              testIdPrefix="evolution-scope"
             />
           )}
           <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
@@ -699,10 +1164,14 @@ export function PortfolioEvolutionPanel({
             L'intraday court-circuite les états de la courbe quotidienne : il a
             les siens, et « historique encore vide » ne décrirait pas la même
             chose qu'« aucune donnée intraday collectée ».
+
+            Le reste du corps rend `bodyState` — décision prise en amont par
+            `resolveEvolutionPanelBodyState`, pure et testée sans lui, plutôt
+            que redérivée ici branche par branche.
           */}
-          {showIntraday ? (
+          {bodyState === "intraday" ? (
             <IntradaySection baseCurrency={baseCurrency} />
-          ) : loading ? (
+          ) : bodyState === "loading" ? (
             <div
               className="flex h-full flex-col gap-3 px-2 py-2"
               data-testid="evolution-loading-skeleton"
@@ -719,13 +1188,86 @@ export function PortfolioEvolutionPanel({
                 <Skeleton className="h-2 w-12" />
               </div>
             </div>
-          ) : empty ? (
+          ) : bodyState === "main-error" ? (
+            /*
+              Un échec réseau n'est pas une absence de donnée (UNKNOWN ≠
+              ERROR) : « Historique encore vide » invitait à actualiser les
+              cours, un geste qui ne peut rien changer à une requête qui a
+              déjà échoué.
+            */
+            <EmptyPlaceholder
+              compact
+              testId="evolution-main-error"
+              emptyKind="error"
+              title="Échec du chargement de l'historique"
+              description="La requête n'a pas abouti. Réessayez — vos données ne sont pas perdues."
+              action={
+                onRetryNav ? (
+                  <button
+                    type="button"
+                    onClick={onRetryNav}
+                    data-testid="evolution-main-retry"
+                    className={cn(
+                      "rounded-[var(--radius-sm)] bg-[var(--muted)]/70 px-2.5 py-1 text-[11px] font-medium",
+                      "text-[var(--foreground)] transition hover:bg-[var(--muted)]",
+                      "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                    )}
+                  >
+                    Réessayer
+                  </button>
+                ) : undefined
+              }
+            />
+          ) : bodyState === "empty" ? (
             <EmptyPlaceholder
               compact
               title="Historique encore vide"
               description="Actualisez les cours pour enregistrer un premier point de courbe."
             />
-          ) : noPoints ? (
+          ) : bodyState === "pocket-error" ? (
+            /*
+              Même distinction que `main-error`, côté requête de poche : sur
+              une erreur, `pocketReady` (plus haut) n'est plus jamais vrai, et
+              cette branche prend le relais avant que le panneau n'ait la
+              tentation de lire « pas encore de valorisation » sur une requête
+              qui n'a simplement pas abouti.
+            */
+            <EmptyPlaceholder
+              compact
+              testId="evolution-pocket-error"
+              emptyKind="error"
+              title="Échec du chargement de cette poche"
+              description="La requête n'a pas abouti. Réessayez — le reste du patrimoine affiché ailleurs reste valable."
+              action={
+                <button
+                  type="button"
+                  onClick={() => void pocketNavQ.refetch()}
+                  data-testid="evolution-pocket-retry"
+                  className={cn(
+                    "rounded-[var(--radius-sm)] bg-[var(--muted)]/70 px-2.5 py-1 text-[11px] font-medium",
+                    "text-[var(--foreground)] transition hover:bg-[var(--muted)]",
+                    "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                  )}
+                >
+                  Réessayer
+                </button>
+              }
+            />
+          ) : bodyState === "pocket-empty" ? (
+            /*
+              `bodyState === "pocket-empty"` n'est atteignable que si
+              `pocketEmptyKind === "empty"` (voir `resolveEvolutionPanelBodyState`
+              ci-dessus), donc seulement quand `pocketEmpty` est non nul —
+              c'est la même valeur qui a nourri la décision.
+            */
+            <EmptyPlaceholder
+              compact
+              testId="evolution-pocket-empty"
+              emptyKind="pocket"
+              title={pocketEmpty!.title}
+              description={pocketEmpty!.description}
+            />
+          ) : bodyState === "no-points-envelope-unknown" ? (
             /*
               Deux raisons très différentes de n'avoir aucun point, et une seule
               phrase les couvrait. Quand l'enveloppe est inconnue sur toute la
@@ -733,22 +1275,44 @@ export function PortfolioEvolutionPanel({
               ne révélera jamais rien, l'historique manquant étant justement
               plus ancien. On dit donc ce qui manque réellement.
             */
-            envelope && unknownEnvelopeEur > 0 ? (
-              <EmptyPlaceholder
-                compact
-                testId="evolution-envelope-all-unknown"
-                title="Enveloppe inconnue sur cette période"
-                description="Le journal des enveloppes ne remonte pas jusqu'ici : aucune valeur PEA ou CTO n'y est démontrable. Une plage plus récente en montrera la partie connue."
-              />
-            ) : (
-              <EmptyPlaceholder
-                compact
-                title="Période trop courte"
-                description="Choisissez une plage plus large ou attendez davantage d'historique."
-              />
-            )
-          ) : versus === "none" ? (
-            <PortfolioValueChart data={points} baseCurrency={baseCurrency} />
+            <EmptyPlaceholder
+              compact
+              testId="evolution-envelope-all-unknown"
+              title="Enveloppe inconnue sur cette période"
+              description="Le journal des enveloppes ne remonte pas jusqu'ici : aucune valeur PEA ou CTO n'y est démontrable. Une plage plus récente en montrera la partie connue."
+            />
+          ) : bodyState === "no-points-too-short" ? (
+            <EmptyPlaceholder
+              compact
+              testId="evolution-too-short"
+              title="Période trop courte"
+              description="Choisissez une plage plus large ou attendez davantage d'historique."
+            />
+          ) : bodyState === "index-unavailable" ? (
+            <EmptyPlaceholder
+              compact
+              testId="evolution-index-unavailable"
+              emptyKind="index"
+              title={INDEX_UNAVAILABLE_TITLE}
+              description="Le fournisseur d’indice n’a pas répondu. La comparaison est masquée — aucun +0 % inventé."
+            />
+          ) : bodyState === "pocket-curve" ? (
+            <PortfolioValueChart
+              data={pocketPoints}
+              baseCurrency={baseCurrency}
+              lineType={pocketLineType}
+            />
+          ) : bodyState === "daily-nav-curve" ? (
+            <DailyNavChart
+              data={navChart}
+              baseCurrency={baseCurrency}
+            />
+          ) : bodyState === "value-curve" ? (
+            <PortfolioValueChart
+              data={points}
+              baseCurrency={baseCurrency}
+              lineType={pocketChartLineType(account)}
+            />
           ) : (
             <PortfolioPercentChart
               data={percentPoints}
@@ -757,6 +1321,31 @@ export function PortfolioEvolutionPanel({
           )}
         </div>
       </div>
+
+      {account === "TITRES" && envelope && !empty && !mainError && !pocketError && (
+        <p
+          className="text-meta mt-1.5 shrink-0"
+          data-testid="evolution-envelope-reclass"
+        >
+          {/*
+            Ce que la variation d'une enveloppe mesure vraiment.
+
+            Mesuré sur trois mois du compte de démonstration : PEA passe de 0 à
+            40 799,50 € et CTO de 0 à 42 863,90 €, pendant que la poche
+            « inconnu » se vide de 82 397 €. Aucun de ces mouvements n'est du
+            marché — c'est le journal qui commence à démontrer un rattachement,
+            et la valeur change simplement de colonne.
+
+            Lue comme une performance, cette courbe raconte donc n'importe
+            quoi : une enveloppe peut plonger le jour où ses titres sont
+            reconnus ailleurs. La série n'est pas fausse, c'est sa lecture
+            spontanée qui l'est — d'où cette ligne plutôt qu'un correctif de
+            calcul.
+          */}
+          Variation d&apos;enveloppe, hors marché — un titre entre dans cette
+          courbe le jour où le journal démontre son rattachement.
+        </p>
+      )}
 
       {envelope && unknownEnvelopeEur > 0 && !empty && (
         <p
@@ -780,7 +1369,68 @@ export function PortfolioEvolutionPanel({
         </p>
       )}
 
-      {versus !== "none" && !empty && !noPoints && points.length > 0 && (
+      {/*
+        `null` ne s'affiche pas, et zéro non plus — mais pas pour la même
+        raison : l'un dit qu'on ne sait pas, l'autre que tout est rattaché.
+        Aucun des deux ne mérite une ligne, et les confondre ferait afficher
+        « 0 € hors comptes-titres » là où l'enveloppe est simplement inconnue.
+      */}
+      {account === "TITRES" &&
+        !empty &&
+        titresGapEur != null &&
+        Math.abs(titresGapEur) >= 0.01 && (
+        <p
+          className="text-meta mt-1.5 shrink-0"
+          data-testid="evolution-titres-cfd-gap"
+        >
+          {/*
+            La valeur de ligne, pas la marge : un CFD non historisé pèse ici
+            pour l'exposition qu'il porte, pas pour le résultat qu'il dégage —
+            ce sont deux grandeurs distinctes, et la confusion inventerait un
+            écart qui ne correspond à rien de mesuré.
+          */}
+          {formatCurrency(titresGapEur, baseCurrency)} hors comptes-titres —
+          CFD non historisé (valeur de ligne, pas la marge).
+        </p>
+      )}
+
+      {/*
+        Même distinction que sous Titres : `null` ne s'affiche pas, et zéro non
+        plus — l'un dit qu'on ne sait pas, l'autre que la partition est
+        complète. Le libellé nomme les deux natures présentes, CFD et devise,
+        plutôt que de les ranger sous un mot qui n'en couvrirait qu'une.
+      */}
+      {account == null &&
+        !empty &&
+        accountsGap != null &&
+        Math.abs(accountsGap) >= 0.01 && (
+        <p
+          className="text-meta mt-1.5 shrink-0"
+          data-testid="evolution-accounts-gap"
+        >
+          Hors comptes : {formatCurrency(accountsGap, baseCurrency)} (CFD /
+          devises non historisés).
+        </p>
+      )}
+
+      {chartKind === "index-unavailable" &&
+        !empty &&
+        (navChart.length >= 2 || points.length >= 2) && (
+        <p
+          className="text-meta mt-1.5 shrink-0"
+          data-testid="evolution-index-unavailable"
+          data-empty-kind="index"
+        >
+          {INDEX_UNAVAILABLE_TITLE}
+          {" — comparaison masquée, courbe NAV seule."}
+        </p>
+      )}
+
+      {versus !== "none" &&
+        chartKind === "percent" &&
+        !empty &&
+        !noPoints &&
+        (percentPoints.length > 0 || points.length > 0) && (
         <p className="text-meta mt-1.5 shrink-0" data-testid="evolution-vs-note">
           Vs {benchmarkDisplayName}
           {gap ? (
@@ -808,8 +1458,6 @@ export function PortfolioEvolutionPanel({
             </>
           ) : wantIndex && indexQ.isLoading ? (
             " · chargement de l'indice…"
-          ) : wantIndex && indexQ.isError ? (
-            " · indice indisponible"
           ) : (
             ""
           )}

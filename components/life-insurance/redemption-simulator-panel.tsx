@@ -7,6 +7,7 @@ import {
   type TaxHousehold,
 } from "@/app/lib/life-insurance/fiscal";
 import {
+  clampGainsOverride,
   computeRedemptionTax,
   gainsInPartialRedemption,
   PFU_OUTSTANDING_THRESHOLD_EUR,
@@ -34,7 +35,10 @@ export type SimulatorSupport = {
 
 function money(v: string | number | null | undefined): number {
   if (v == null || v === "") return 0;
-  const n = Number(String(v).replace(",", "."));
+  // `\s` couvre aussi l'espace insécable (U+00A0) et l'espace fine insécable
+  // (U+202F) : formatCurrency les utilise comme séparateur de milliers en
+  // fr-FR, et un montant copié depuis l'affichage doit rester saisissable.
+  const n = Number(String(v).replace(/\s/g, "").replace(",", "."));
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -43,14 +47,19 @@ function Row({
   value,
   emphasize,
   muted,
+  "data-testid": testId,
 }: {
   label: string;
   value: string;
   emphasize?: boolean;
   muted?: boolean;
+  "data-testid"?: string;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 text-xs">
+    <div
+      className="flex items-baseline justify-between gap-3 text-xs"
+      data-testid={testId}
+    >
       <span className={cn(muted && "text-[var(--muted-foreground)]")}>
         {label}
       </span>
@@ -153,24 +162,53 @@ export function RedemptionSimulatorPanel({
   const redemptionN = money(redemption);
 
   const splitGains = useMemo(() => {
-    if (gainsOverride.trim() !== "") {
-      const gains = Math.min(Math.max(0, money(gainsOverride)), redemptionN);
-      return {
-        ok: true as const,
-        gainsInRedemptionEur: String(gains),
-        capitalInRedemptionEur: String(Math.max(0, redemptionN - gains)),
-        gainRatio: redemptionN > 0 ? gains / redemptionN : 0,
-        latentGainEur: String(Math.max(0, position.value - position.cost)),
-        fromOverride: true,
-      };
-    }
+    // Le plafond se vérifie d'abord, quelle que soit l'origine des gains :
+    // une quote-part saisie à la main ne rend pas rachetable ce qui n'est pas
+    // là. Sans ce passage, l'override rouvrait la porte que ④ a fermée.
     const r = gainsInPartialRedemption({
       redemptionEur: redemptionN || 0,
       positionValueEur: position.value,
       costBasisEur: position.cost,
     });
+    // Position à 0 = encours inconnu (contrat sans support rattaché au
+    // journal), pas un vrai plafond dépassé : `gainsInPartialRedemption`
+    // refuse alors tout rachat > 0, ce qui fermait la porte à l'override —
+    // précisément le cas pour lequel il existe (cf. commentaire
+    // `policySupports` plus haut). Seul un encours réellement connu et
+    // dépassé continue d'invalider l'override.
+    if (!r.ok && position.value > 0) return { ...r, fromOverride: false };
+    if (gainsOverride.trim() !== "") {
+      // Deux plafonds : le rachat, et le gain latent du contrat — une saisie
+      // de 50 000 sur 20 000 € de plus-value ne rend pas imposable ce que la
+      // position ne porte pas. Encours inconnu (position à 0) : seul le
+      // rachat borne, le gain latent « 0 » n'y est pas un fait.
+      const clamp = clampGainsOverride({
+        overrideEur: gainsOverride,
+        redemptionEur: redemptionN,
+        latentGainEur: position.value > 0 ? r.latentGainEur : null,
+      });
+      const gains = money(clamp.gainsEur);
+      return {
+        ok: true as const,
+        gainsInRedemptionEur: clamp.gainsEur,
+        capitalInRedemptionEur: String(Math.max(0, redemptionN - gains)),
+        gainRatio: redemptionN > 0 ? gains / redemptionN : 0,
+        latentGainEur: r.latentGainEur,
+        latentPnlEur: r.latentPnlEur,
+        cappedRedemptionEur: r.cappedRedemptionEur,
+        fromOverride: true,
+        overrideClamp: clamp,
+      };
+    }
     return { ...r, fromOverride: false };
   }, [gainsOverride, redemptionN, position.value, position.cost]);
+
+  const overrideClamp =
+    "overrideClamp" in splitGains &&
+    splitGains.overrideClamp &&
+    splitGains.overrideClamp.clampedBy !== "none"
+      ? splitGains.overrideClamp
+      : null;
 
   const hasAnteriority = policy?.openDate
     ? contractAge(new Date(policy.openDate)).hasAnteriority
@@ -199,6 +237,21 @@ export function RedemptionSimulatorPanel({
     taxHousehold,
     allowanceUsed,
   ]);
+
+  // Message du bloc Résultat quand aucun calcul n'aboutit. Le refus détaillé
+  // de `splitGains` (montant, encours) a déjà son propre bandeau juste
+  // au-dessus : le répéter ici sous une forme plus vague ("Calcul
+  // impossible.") le contredirait sans rien ajouter. On ne retombe sur un
+  // message générique que si aucune raison plus précise n'existe déjà.
+  const resultMessage =
+    !tax || !tax.ok
+      ? (tax?.error ??
+        (redemptionN <= 0
+          ? "Saisissez un montant de rachat."
+          : splitGains.ok
+            ? "Calcul impossible."
+            : null))
+      : null;
 
   const allowanceCap = annualAllowanceEur(taxHousehold);
   const premiumsAllN =
@@ -318,6 +371,36 @@ export function RedemptionSimulatorPanel({
         </label>
       </div>
 
+      {/*
+        Le refus se lit, il ne se devine pas.
+
+        `gainsInPartialRedemption` plafonnait les gains à l'encours et rendait
+        quand même `ok: true` : le panneau calculait ensuite l'impôt sur le
+        montant saisi et annonçait « net perçu 195 060 € » pour une position de
+        100 000 €. Le refus est explicite désormais, et cette phrase dit
+        pourquoi le résultat n'apparaît pas — sans elle, le bloc disparaîtrait
+        sans un mot.
+      */}
+      {policy && !splitGains.ok && splitGains.error && redemptionN > 0 && (
+        <p
+          className="mt-3 text-[11px] text-[var(--warning)]"
+          role="alert"
+          data-testid="sim-redemption-error"
+        >
+          {splitGains.error}
+          {/*
+            Les autres refus (montant illisible, négatif) rendent
+            `cappedRedemptionEur: "0"` : ce zéro est un vide, pas un plafond.
+            On ne l'affiche que s'il désigne un encours réel. Et « encours
+            connu » plutôt que « maximum » : la valeur de rachat que paiera
+            l'assureur — frais de sortie, pénalité, valeur liquidative du jour —
+            n'est pas dans l'application.
+          */}
+          {money(splitGains.cappedRedemptionEur) > 0 &&
+            ` — encours connu : ${formatCurrency(splitGains.cappedRedemptionEur, "EUR")}.`}
+        </p>
+      )}
+
       {policy && (
         <div
           className="mt-4 grid gap-4 lg:grid-cols-2"
@@ -343,13 +426,53 @@ export function RedemptionSimulatorPanel({
               label="Prix de revient"
               value={formatCurrency(String(position.cost), "EUR")}
             />
+            {/*
+              `gainsInPartialRedemption` rend ces deux valeurs sur toutes ses
+              branches — y compris un refus (rachat > encours) — précisément
+              pour que l'écran puisse encore les afficher : la position porte
+              bien 20 000 € de plus-value latente même quand le montant saisi
+              est refusé. Le gater sur `ok` remplaçait cette valeur connue par
+              un zéro affirmé, à côté du bandeau d'erreur qui dit pourtant le
+              contraire.
+
+              Deux lignes, pas une. « Gain latent » affichait `latentGainEur`,
+              qui vaut max(0, valeur − revient) : en moins-value, « 0 € » ici et
+              « −10 000 € » sur la vue contrat, pour la même position. La
+              première ligne est la plus-value signée, le nombre des autres
+              écrans ; la seconde est ce qu'un rachat peut au plus imposer, et
+              son libellé dit qu'elle est une assiette, pas un P&L.
+            */}
             <Row
-              label="Gain latent"
-              value={formatCurrency(
-                splitGains.ok ? splitGains.latentGainEur : "0",
-                "EUR"
-              )}
+              label="Plus-value latente"
+              value={formatCurrency(splitGains.latentPnlEur, "EUR")}
+              data-testid="sim-latent-pnl"
             />
+            <Row
+              label="Assiette imposable (rachat)"
+              value={formatCurrency(splitGains.latentGainEur, "EUR")}
+              data-testid="sim-latent-gain"
+            />
+            {/*
+              Le plafonnement d'une quote-part saisie se lit, il ne se devine
+              pas : « 50 000 » retenu à 20 000 sans un mot laissait l'utilisateur
+              relire son impôt sans comprendre pourquoi. Il est dit ici, sous
+              l'assiette qui l'explique, avec la borne qui a joué.
+            */}
+            {overrideClamp && (
+              <p
+                className="text-[11px] text-[var(--warning)]"
+                role="status"
+                data-testid="sim-gains-override-clamped"
+              >
+                Quote-part saisie{" "}
+                {formatCurrency(overrideClamp.requestedEur, "EUR")} ramenée à{" "}
+                {formatCurrency(overrideClamp.gainsEur, "EUR")} :{" "}
+                {overrideClamp.clampedBy === "latentGain"
+                  ? "la position ne porte pas plus de gain latent"
+                  : "un rachat ne contient pas plus de gains que son montant"}{" "}
+                ({formatCurrency(overrideClamp.capEur, "EUR")}).
+              </p>
+            )}
             <Row
               label="Encours tous contrats"
               value={formatCurrency(totalOutstandingEur, "EUR")}
@@ -376,12 +499,9 @@ export function RedemptionSimulatorPanel({
           <div className="space-y-1.5 rounded-[var(--radius-md)] border border-[var(--border)] p-3">
             <p className="mb-2 text-xs font-semibold">Résultat</p>
             {!tax || !tax.ok ? (
-              <p className="text-meta">
-                {tax?.error ||
-                  (redemptionN <= 0
-                    ? "Saisissez un montant de rachat."
-                    : "Calcul impossible.")}
-              </p>
+              resultMessage ? (
+                <p className="text-meta">{resultMessage}</p>
+              ) : null
             ) : (
               <>
                 <Row

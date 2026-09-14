@@ -519,3 +519,121 @@ describe("actifs écartés du patrimoine", () => {
     expect(seul.netWorth).toBeCloseTo(sans.netWorth, 6);
   });
 });
+
+describe("earliestDay — un fait observé l'emporte toujours sur un repli non observé", () => {
+  it("un compte de cash sans événement (repli createdAt, observed: false), seul dans le patrimoine, borne quand même — au jour connu, jamais à null", () => {
+    /*
+      D26 point 2 — un patrimoine sans journal.
+
+      Réécrit : avant, l'absence de tout fait *observé* rendait `null`, et
+      `earliestDayForScope`/`getDailyNav` en dérivaient une série vide pour un
+      compte qui a pourtant une trésorerie bien réelle (seulement saisie à la
+      main, sans `CashEvent`). Reproduit isolément dans
+      `earliest-day-without-ledger.test.ts` : `null` n'est acceptable que
+      lorsque *rien* — ni fait observé, ni repli connu — n'existe nulle part.
+      Ici il existe un repli (`createdAt`) : la borne y retombe, cappée par
+      `MAX_HISTORY_YEARS` comme n'importe quelle autre date ancienne.
+    */
+    const e = new PortfolioValuationEngine(
+      inputs({
+        cashAccounts: [
+          { id: "b1", balanceEur: d(1_000), createdAt: DAY("2010-01-01") },
+        ],
+      })
+    );
+    expect(e.earliestDay(DAY("2026-09-07"))).toBe("2020-09-07");
+  });
+
+  it("un patrimoine réellement vide (aucun fait, aucun repli) reste `null`", () => {
+    const e = new PortfolioValuationEngine(inputs());
+    expect(e.earliestDay()).toBeNull();
+  });
+
+  it("un métal acquis (observed: true) reste la borne même sans transaction", () => {
+    const e = new PortfolioValuationEngine(
+      inputs({
+        metals: [
+          {
+            id: "m1",
+            acquiredAt: DAY("1998-06-20"),
+            createdAt: DAY("2024-01-01"),
+            updatedAt: DAY("2024-01-01"),
+            costEur: d(240),
+            currentValueEur: d(1_000),
+          },
+        ],
+        // Repli non observé, plus ancien que le métal si on le laissait
+        // compter : il ne doit pas gagner.
+        cashAccounts: [
+          { id: "b1", balanceEur: d(1_000), createdAt: DAY("1990-01-01") },
+        ],
+      })
+    );
+    // `now` proche des dates du scénario : le cap MAX_HISTORY_YEARS (6 ans)
+    // ne doit pas interférer avec ce que ce test vérifie — quel candidat
+    // l'emporte, pas la profondeur d'historique servie.
+    expect(e.earliestDay(DAY("2001-01-01"))).toBe("1998-06-20");
+  });
+
+  it("un patrimoine sans aucune transaction garde sa borne d'acquisition", () => {
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [],
+        metals: [
+          {
+            id: "m1",
+            acquiredAt: DAY("1998-06-20"),
+            createdAt: DAY("2024-01-01"),
+            updatedAt: DAY("2024-01-01"),
+            costEur: d(240),
+            currentValueEur: d(1_000),
+          },
+        ],
+      })
+    );
+    expect(e.earliestDay(DAY("2001-01-01"))).toBe("1998-06-20");
+  });
+
+  it("une transaction plus récente que l'acquisition observée ne l'emporte pas", () => {
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [buy("t1", "aapl", "2021-09-03", 1, 100)],
+        assetClassById: new Map([["aapl", "ACTIONS"]]),
+        rawAssetClassById: new Map([["aapl", "ACTIONS"]]),
+        metals: [
+          {
+            id: "m1",
+            acquiredAt: DAY("1998-06-20"),
+            createdAt: DAY("2024-01-01"),
+            updatedAt: DAY("2024-01-01"),
+            costEur: d(240),
+            currentValueEur: d(1_000),
+          },
+        ],
+      })
+    );
+    expect(e.earliestDay(DAY("2001-01-01"))).toBe("1998-06-20");
+  });
+
+  it("le cap MAX_HISTORY_YEARS ramène une acquisition ancienne au plancher, sans la faire disparaître", () => {
+    const e = new PortfolioValuationEngine(
+      inputs({
+        transactions: [],
+        metals: [
+          {
+            id: "m1",
+            acquiredAt: DAY("1998-06-20"),
+            createdAt: DAY("2024-01-01"),
+            updatedAt: DAY("2024-01-01"),
+            costEur: d(240),
+            currentValueEur: d(1_000),
+          },
+        ],
+      })
+    );
+    // `now` réel du chantier D19 : 2026-09-06. Le plancher (6 ans) est
+    // 2020-09-06 — la transaction de 1998 reste en base, seule la lecture
+    // s'arrête au plancher.
+    expect(e.earliestDay(DAY("2026-09-06"))).toBe("2020-09-06");
+  });
+});

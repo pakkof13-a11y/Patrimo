@@ -2,32 +2,74 @@ import { test, expect } from "@playwright/test";
 import { gotoDashboard } from "./helpers";
 
 /**
- * Croisement classe × enveloppe fiscale.
+ * Croisement compte Titres × enveloppe fiscale.
  *
- * L'enveloppe n'est plus une alternative à la classe mais une précision à
- * l'intérieur d'elle : « où sont mes actions » est la question posée, et elle
- * n'a de sens que là où un compte-titres peut loger la classe. Le sélecteur
- * n'existe donc que sur les actions.
+ * D18 : l'enveloppe n'est plus une alternative à une classe d'actif mais une
+ * précision à l'intérieur du compte Titres — « où sont mes titres » est la
+ * question posée, et elle n'a de sens que sur ce compte-là. Le sélecteur de
+ * compte est `evolution-account-select` ; la sous-rangée d'enveloppe
+ * (`evolution-envelope-*`) n'apparaît que lorsqu'il vaut `TITRES`.
  *
  * Ce qui mérite un test de bout en bout n'est pas l'existence des contrôles,
  * mais l'honnêteté de ce qu'ils montrent : le journal des enveloppes ne remonte
  * qu'à sa mise en place, et l'écran doit le dire plutôt que de laisser croire
- * que PEA + CTO couvre toutes les actions.
+ * que PEA + CTO couvre tous les titres.
  */
 
 type Point = {
-  byAssetClassBase?: Record<string, number>;
-  byAssetClassAndEnvelopeBase?: Record<string, Record<string, number | null>>;
+  day: string;
+  byAssetClass: Record<string, number>;
+  byAssetClassAndEnvelope: Record<string, Record<string, number | null>>;
 };
 
+/** `PEA: "2008-04-11", CTO: "2023-10-29"` (ou `null`) — cf. `engine.envelopeFirstWriteDays`. */
+type EnvelopeFirstWriteDay = Record<"PEA" | "CTO", string | null>;
+
+/*
+  `GET /api/portfolio` ne rend plus `history[]` (la route tombait en 504 en
+  préproduction à rejouer le moteur sur toute la profondeur lisible) : la
+  série et son croisement classe × enveloppe vivent désormais dans
+  `GET /api/portfolio/daily-nav`, sous `byAssetClass` / `byAssetClassAndEnvelope`
+  — pas de suffixe `Base`, cette route ne convertit pas les devises. Les deux
+  champs sont non optionnels sur `DailyNavPoint` : plus besoin du filtre qui
+  cherchait les points qui les portaient, ils les portent tous.
+
+  Fenêtre volontairement profonde (`from`) : le défaut de la route est un an,
+  et ces tests cherchent justement la transition « avant le premier
+  événement », qui peut précéder cette fenêtre. `from` est de toute façon
+  ramené sous le cap réel (`capEarliestDay`, six ans).
+*/
 async function serie(page: import("@playwright/test").Page): Promise<Point[]> {
-  const body = await (await page.request.get("/api/portfolio?base=EUR")).json();
-  return ((body.history ?? []) as Point[]).filter(
-    (p) => p.byAssetClassAndEnvelopeBase
-  );
+  const body = await (
+    await page.request.get("/api/portfolio/daily-nav?from=2000-01-01")
+  ).json();
+  return (body.points ?? []) as Point[];
 }
 
-test.describe("Évolution — croisement classe × enveloppe", () => {
+/**
+ * Même appel que `serie`, augmenté de `envelopeFirstWriteDay` — la date de
+ * naissance de chaque enveloppe titres, telle que le moteur la publie
+ * (`engine.envelopeFirstWriteDays`, recopiée par la route sur la réponse et
+ * sur chaque point). Un seul test en a besoin : trouver, à l'exécution, quelle
+ * enveloppe a réellement une transition « inconnue → connue » dans la fenêtre
+ * servie, plutôt que de supposer laquelle.
+ */
+async function serieAvecNaissances(
+  page: import("@playwright/test").Page
+): Promise<{ points: Point[]; envelopeFirstWriteDay: EnvelopeFirstWriteDay }> {
+  const body = await (
+    await page.request.get("/api/portfolio/daily-nav?from=2000-01-01")
+  ).json();
+  return {
+    points: (body.points ?? []) as Point[],
+    envelopeFirstWriteDay: (body.envelopeFirstWriteDay ?? {
+      PEA: null,
+      CTO: null,
+    }) as EnvelopeFirstWriteDay,
+  };
+}
+
+test.describe("Évolution — croisement compte Titres × enveloppe", () => {
   test.beforeEach(async ({ page }) => {
     await gotoDashboard(page);
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
@@ -36,17 +78,20 @@ test.describe("Évolution — croisement classe × enveloppe", () => {
     });
   });
 
-  test("sans classe, aucun choix d'enveloppe n'est proposé", async ({ page }) => {
-    // « Tout » ne porte pas de filtre d'enveloppe : la question est par classe.
+  const selectAccount = (page: import("@playwright/test").Page, id: string) =>
+    page.getByTestId("evolution-account-select").selectOption(id);
+
+  test("sans compte, aucun choix d'enveloppe n'est proposé", async ({ page }) => {
+    // « Tout » ne porte pas de filtre d'enveloppe : la question est par compte.
     await expect(page.getByTestId("evolution-envelope-all")).toHaveCount(0);
     await expect(page.getByTestId("evolution-envelope-PEA")).toHaveCount(0);
     await expect(page.getByTestId("evolution-envelope-CTO")).toHaveCount(0);
   });
 
-  test("les actions ouvrent Tout, PEA et CTO — et rien d'autre", async ({
+  test("Titres ouvre Tout, PEA et CTO — et rien d'autre", async ({
     page,
   }) => {
-    await page.getByTestId("evolution-class-ACTIONS").click();
+    await selectAccount(page, "TITRES");
     await expect(page.getByTestId("evolution-envelope-all")).toBeVisible();
     await expect(page.getByTestId("evolution-envelope-PEA")).toBeVisible();
     await expect(page.getByTestId("evolution-envelope-CTO")).toBeVisible();
@@ -54,65 +99,70 @@ test.describe("Évolution — croisement classe × enveloppe", () => {
     await expect(page.getByTestId("evolution-envelope-PEA_PME")).toHaveCount(0);
   });
 
-  test("les classes sans enveloppe n'affichent aucun contrôle", async ({
+  test("les comptes hors Titres n'affichent aucun contrôle d'enveloppe", async ({
     page,
   }) => {
-    /*
-      Obligations comprises : le produit n'en connaît qu'en compte-titres, et
-      leur proposer « PEA » offrirait un choix dont la série serait vide par
-      convention d'interface plutôt que par constat.
-    */
-    for (const cls of ["OBLIGATIONS", "CRYPTO", "IMMOBILIER", "CASH", "AUTRE"]) {
-      await page.getByTestId(`evolution-class-${cls}`).click();
+    for (const acc of [
+      "CRYPTO",
+      "IMMOBILIER",
+      "ASSURANCE_VIE",
+      "ALTERNATIFS",
+      "EPARGNE_SALARIALE",
+      "CASH",
+    ]) {
+      await selectAccount(page, acc);
       await expect(page.getByTestId("evolution-envelope-PEA")).toHaveCount(0);
       await expect(page.getByTestId("evolution-envelope-CTO")).toHaveCount(0);
       await expect(page.getByTestId("evolution-envelope-all")).toHaveCount(0);
     }
   });
 
-  test("les obligations annoncent leur enveloppe sans la proposer", async ({
-    page,
-  }) => {
-    await page.getByTestId("evolution-class-OBLIGATIONS").click();
-    const panel = page.getByTestId("portfolio-evolution-panel");
-    await expect(panel).toContainText("Obligations (CTO)", { timeout: 15_000 });
-  });
-
-  test("Actions + PEA et Actions + CTO tracent le croisement de l'API", async ({
+  test("Titres + PEA et Titres + CTO tracent le croisement de l'API", async ({
     page,
   }) => {
     const points = await serie(page);
     const dernier = points[points.length - 1]!;
-    const croise = dernier.byAssetClassAndEnvelopeBase!;
+    const croise = dernier.byAssetClassAndEnvelope!;
 
-    const pea = Number(croise.ACTIONS?.PEA ?? 0);
-    const cto = Number(croise.ACTIONS?.CTO ?? 0);
-    const actions = Number(dernier.byAssetClassBase?.ACTIONS ?? 0);
+    // Titres additionne ACTIONS et OBLIGATIONS pour chaque enveloppe.
+    const pea =
+      Number(croise.ACTIONS?.PEA ?? 0) + Number(croise.OBLIGATIONS?.PEA ?? 0);
+    const cto =
+      Number(croise.ACTIONS?.CTO ?? 0) + Number(croise.OBLIGATIONS?.CTO ?? 0);
+    const titres =
+      Number(dernier.byAssetClass?.ACTIONS ?? 0) +
+      Number(dernier.byAssetClass?.OBLIGATIONS ?? 0);
 
-    // Le décor : chaque enveloppe est une fraction stricte de la classe.
+    // Le décor : chaque enveloppe est une fraction stricte du compte Titres.
     expect(pea).toBeGreaterThan(0);
     expect(cto).toBeGreaterThan(0);
-    expect(pea + cto).toBeLessThanOrEqual(actions + 1e-6);
+    expect(pea + cto).toBeLessThanOrEqual(titres + 1e-6);
 
     const panel = page.getByTestId("portfolio-evolution-panel");
-    await page.getByTestId("evolution-class-ACTIONS").click();
+    await selectAccount(page, "TITRES");
     await page.getByTestId("evolution-envelope-PEA").click();
-    await expect(panel).toContainText("Actions en PEA", { timeout: 15_000 });
+    await expect(panel).toContainText("Compte : Titres · PEA", {
+      timeout: 15_000,
+    });
 
     await page.getByTestId("evolution-envelope-CTO").click();
-    await expect(panel).toContainText("Actions en CTO", { timeout: 15_000 });
+    await expect(panel).toContainText("Compte : Titres · CTO", {
+      timeout: 15_000,
+    });
   });
 
-  test("le croisement sépare réellement les classes, il ne rejoue pas la globale", async ({
+  test("le croisement sépare réellement les classes qui composent Titres", async ({
     page,
   }) => {
     /*
-      Le cœur du chantier, vérifié numériquement. Une obligation en compte-titres
-      ne doit pas figurer dans « Actions en CTO » : la ventilation globale les
-      additionnait, le croisement les sépare.
+      Le cœur du chantier précédent, toujours vrai ici : une obligation en
+      compte-titres ne doit pas figurer sous le seul nom « Actions en CTO ».
+      Titres l'additionne désormais explicitement — actions et obligations
+      restent deux grandeurs distinctes dans l'API, sommées à l'écran, jamais
+      confondues.
     */
     const points = await serie(page);
-    const dernier = points[points.length - 1]!.byAssetClassAndEnvelopeBase!;
+    const dernier = points[points.length - 1]!.byAssetClassAndEnvelope!;
     const obliCto = Number(dernier.OBLIGATIONS?.CTO ?? 0);
     // Le décor n'a d'intérêt que s'il existe des obligations en compte-titres.
     expect(obliCto).toBeGreaterThan(0);
@@ -126,7 +176,7 @@ test.describe("Évolution — croisement classe × enveloppe", () => {
   test("aucune classe hors titres ne porte de croisement", async ({ page }) => {
     const points = await serie(page);
     for (const p of points.slice(-5)) {
-      expect(Object.keys(p.byAssetClassAndEnvelopeBase!).sort()).toEqual([
+      expect(Object.keys(p.byAssetClassAndEnvelope!).sort()).toEqual([
         "ACTIONS",
         "OBLIGATIONS",
       ]);
@@ -141,13 +191,45 @@ test.describe("Évolution — croisement classe × enveloppe", () => {
       croisement : une action achetée il y a des années mais observée récemment
       ne doit contribuer à aucune enveloppe sur les points antérieurs — et
       l'absence, jamais un zéro, doit le dire.
-    */
-    const points = await serie(page);
-    const act = (p: Point) => p.byAssetClassAndEnvelopeBase!.ACTIONS!;
 
-    const iConnu = points.findIndex(
-      (p) => Number(act(p).PEA ?? 0) > 0 || Number(act(p).CTO ?? 0) > 0
-    );
+      Quelle enveloppe porte cette transition n'est PAS fixé en dur : le PEA
+      du décor (P02, ligne dont l'événement d'enveloppe est daté 2008) est né
+      bien avant tout plancher glissant de six ans — il est connu dès le
+      premier point de la fenêtre depuis des années, et le restera puisque sa
+      date est un ancrage calendaire fixe, jamais un « aujourd'hui − N jours ».
+      Une enveloppe déjà connue au premier point ne peut plus servir de décor
+      « avant / après » : ce n'est pas une régression, juste un fait qui ne
+      bouge plus.
+
+      Le CTO, lui, est daté par rapport à l'instant du réamorçage
+      (`daysAgo`), donc sujet au même mécanisme de dérive que documenté pour
+      les autres tests de ce ticket — mais avec une marge bien plus confortable
+      aujourd'hui. Plutôt que de parier sur PEA *ou* CTO, on lit la naissance
+      réelle de chacune (`envelopeFirstWriteDay`, publiée par l'API, jamais
+      recalculée ici) et on choisit à l'exécution celle dont la naissance tombe
+      APRÈS l'ouverture de la fenêtre servie — la seule dont la transition est
+      encore observable. Ancrage qui ne se dégrade plus : il s'adapte à ce que
+      la base contient réellement, aujourd'hui comme dans plusieurs années.
+    */
+    const { points, envelopeFirstWriteDay } = await serieAvecNaissances(page);
+    const act = (p: Point) => p.byAssetClassAndEnvelope!.ACTIONS!;
+
+    const ouverture = points[0]?.day;
+    expect(ouverture).toBeTruthy();
+    const enveloppeObservable = (["PEA", "CTO"] as const).find((env) => {
+      const naissance = envelopeFirstWriteDay[env];
+      return typeof naissance === "string" && naissance > ouverture!;
+    });
+    // Sans enveloppe dont la naissance tombe dans la fenêtre servie, le décor
+    // n'existe plus — mieux vaut un échec explicite qu'un test qui ne
+    // prouverait plus rien.
+    expect(
+      enveloppeObservable,
+      "aucune enveloppe titres ne naît dans la fenêtre servie (six ans) : le décor est épuisé, un réamorçage est nécessaire"
+    ).toBeDefined();
+    const env = enveloppeObservable!;
+
+    const iConnu = points.findIndex((p) => Number(act(p)[env] ?? 0) > 0);
     // Sans point connu le test ne vérifierait rien : on exige le décor.
     expect(iConnu).toBeGreaterThan(0);
 
@@ -156,19 +238,15 @@ test.describe("Évolution — croisement classe × enveloppe", () => {
     expect(inconnus.length).toBeGreaterThan(0);
 
     for (const p of inconnus) {
-      expect(act(p).PEA).toBeNull();
-      expect(act(p).CTO).toBeNull();
+      expect(act(p)[env]).toBeNull();
     }
     for (const p of avant) {
-      expect(Number(act(p).PEA ?? 0)).toBe(0);
-      expect(Number(act(p).CTO ?? 0)).toBe(0);
+      expect(Number(act(p)[env] ?? 0)).toBe(0);
     }
 
     // Après l'événement, la bonne enveloppe reçoit la valeur.
     const dernier = points[points.length - 1]!;
-    expect(
-      Number(act(dernier).PEA ?? 0) + Number(act(dernier).CTO ?? 0)
-    ).toBeGreaterThan(0);
+    expect(Number(act(dernier)[env] ?? 0)).toBeGreaterThan(0);
   });
 
   test("l'avertissement couvre la fenêtre, pas seulement son dernier point", async ({
@@ -184,8 +262,13 @@ test.describe("Évolution — croisement classe × enveloppe", () => {
       par le test précédent, sur la même réponse d'API. Le revérifier ici
       coûtait un appel de plus dont ce test n'a pas besoin, et c'est cet appel,
       non l'assertion, qui tombait. On s'en tient donc à ce que l'écran montre.
+
+      La période par défaut est 3 mois : trop courte pour que le passé
+      inconnu y figure. « Tout » est la fenêtre dont parle l'assertion.
     */
-    await page.getByTestId("evolution-class-ACTIONS").click();
+    await page.getByTestId("hero-range-all").click();
+    await expect(page.getByTestId("hero-window-label")).toContainText("depuis");
+    await selectAccount(page, "TITRES");
     await page.getByTestId("evolution-envelope-PEA").click();
     const note = page.getByTestId("evolution-envelope-unknown");
     await expect(note).toBeVisible({ timeout: 15_000 });
@@ -194,40 +277,43 @@ test.describe("Évolution — croisement classe × enveloppe", () => {
     await expect(note).toContainText(/\d/);
   });
 
-  test("changer de classe abandonne l'enveloppe et ne la ressuscite pas", async ({
+  test("changer de compte abandonne l'enveloppe et ne la ressuscite pas", async ({
     page,
   }) => {
     const panel = page.getByTestId("portfolio-evolution-panel");
 
-    await page.getByTestId("evolution-class-ACTIONS").click();
+    await selectAccount(page, "TITRES");
     await page.getByTestId("evolution-envelope-PEA").click();
-    await expect(panel).toContainText("Actions en PEA", { timeout: 15_000 });
+    await expect(panel).toContainText("Compte : Titres · PEA", {
+      timeout: 15_000,
+    });
 
     // Passer sur la crypto : le contrôle disparaît, le filtre avec lui.
-    await page.getByTestId("evolution-class-CRYPTO").click();
+    await selectAccount(page, "CRYPTO");
     await expect(page.getByTestId("evolution-envelope-PEA")).toHaveCount(0);
     await expect(panel).toContainText("Crypto", { timeout: 15_000 });
 
-    // Revenir aux actions : « Tout » par défaut, jamais le PEA d'avant.
-    await page.getByTestId("evolution-class-ACTIONS").click();
+    // Revenir sur Titres : « Tout » par défaut, jamais le PEA d'avant.
+    await selectAccount(page, "TITRES");
     await expect(page.getByTestId("evolution-envelope-all")).toHaveAttribute(
       "aria-selected",
       "true"
     );
-    await expect(panel).not.toContainText("Actions en PEA");
+    await expect(panel).not.toContainText("Compte : Titres · PEA");
   });
 
   test("revenir à Tout restaure le patrimoine entier", async ({ page }) => {
     const panel = page.getByTestId("portfolio-evolution-panel");
 
-    await page.getByTestId("evolution-class-ACTIONS").click();
+    await selectAccount(page, "TITRES");
     await page.getByTestId("evolution-envelope-CTO").click();
-    await expect(panel).toContainText("Actions en CTO", { timeout: 15_000 });
+    await expect(panel).toContainText("Compte : Titres · CTO", {
+      timeout: 15_000,
+    });
 
-    await page.getByTestId("evolution-class-all").click();
+    await selectAccount(page, "all");
     await expect(panel).toContainText("Actifs bruts", { timeout: 15_000 });
-    // Le choix brut/net redevient disponible hors classe.
-    await expect(page.getByTestId("evolution-scope-gross")).toBeVisible();
+    await expect(page.getByTestId("evolution-scope-gross")).toHaveCount(0);
   });
 
   test("la performance disparaît dès qu'une enveloppe est choisie", async ({
@@ -238,11 +324,9 @@ test.describe("Évolution — croisement classe × enveloppe", () => {
       achat de 2024 est précisément ce que le journal ne dit pas. Proposer le
       choix produirait un chiffre faux.
     */
-    await page.getByTestId("evolution-class-ACTIONS").click();
-    await expect(page.getByTestId("evolution-metric-performance")).toBeVisible();
+    await selectAccount(page, "TITRES");
 
     await page.getByTestId("evolution-envelope-PEA").click();
-    await expect(page.getByTestId("evolution-metric-performance")).toHaveCount(0);
   });
 
   test("le comparatif avec indice reste disponible", async ({ page }) => {

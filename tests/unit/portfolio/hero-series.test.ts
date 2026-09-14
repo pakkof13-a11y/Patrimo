@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildHeroSeries } from "@/app/lib/portfolio/hero-series";
-import { nearestPointIndex, sparklineGeometry } from "@/app/lib/ui/sparkline-geometry";
+import {
+  nearestPointByFraction,
+  nearestPointIndex,
+  sparklineGeometry,
+  sparklineXFractions,
+} from "@/app/lib/ui/sparkline-geometry";
 import type { HistoryPoint } from "@/app/lib/types/ui";
 
 /**
@@ -80,7 +85,7 @@ describe("buildHeroSeries — décomposition selon le mode", () => {
   });
 
   it("en brut, aucune décomposition : la question ne se pose pas", () => {
-    const series = buildHeroSeries(history, [150, 165], "gross");
+    const series = buildHeroSeries(history, [150, 165], "brut");
     expect(series[1]!.grossAssets).toBeUndefined();
     expect(series[1]!.liabilities).toBeUndefined();
   });
@@ -126,14 +131,98 @@ describe("buildHeroSeries — valeurs reportées", () => {
 });
 
 describe("buildHeroSeries — événement du jour", () => {
-  it("un flux externe non nul est retenu, un flux nul ne l'est pas", () => {
+  it("un flux de transaction non nul est retenu, un flux nul ne l'est pas", () => {
     const history = [
-      point({ netWorthBase: 100, externalFlowsBase: 0 }),
-      point({ netWorthBase: 5100, externalFlowsBase: 5000 }),
+      point({ netWorthBase: 100, transactionFlowBase: 0, externalFlowsBase: 50_000 }),
+      point({ netWorthBase: 5100, transactionFlowBase: 5000, externalFlowsBase: 50_000 }),
     ];
     const series = buildHeroSeries(history, [100, 5100], "net");
     expect(series[0]!.externalFlow).toBeUndefined();
     expect(series[1]!.externalFlow).toBe(5000);
+  });
+
+  it("un flux externe sans transaction ne pose pas de pastille", () => {
+    const history = [
+      point({ netWorthBase: 100, externalFlowsBase: 0 }),
+      point({ netWorthBase: 980_100, externalFlowsBase: 980_000 }),
+    ];
+    const series = buildHeroSeries(history, [100, 980_100], "financier");
+    expect(series[1]!.externalFlow).toBeUndefined();
+  });
+});
+
+describe("buildHeroSeries — Marché / Flux (D3), pas le Δ NAV brut", () => {
+  it("Financier : achat immo n'est pas du flux, Marché = ΔNAV − financierFlows", () => {
+    const history = [
+      point({
+        financierBase: 100_000,
+        financierFlowsBase: 0,
+        externalFlowsBase: 0,
+        transactionFlowBase: 0,
+      }),
+      point({
+        financierBase: 100_000,
+        financierFlowsBase: 0,
+        externalFlowsBase: 980_000,
+        transactionFlowBase: 0,
+      }),
+    ];
+    const series = buildHeroSeries(history, [100_000, 100_000], "financier");
+    expect(series[1]!.deltaAbs).toBe(0);
+    expect(series[1]!.flow).toBe(0);
+    expect(series[1]!.market).toBe(0);
+    expect(series[1]!.externalFlow).toBeUndefined();
+  });
+
+  it("Brut : le même achat est du Flux, Marché reste 0", () => {
+    const history = [
+      point({
+        grossAssetsBase: 100_000,
+        externalFlowsBase: 0,
+        financierFlowsBase: 0,
+      }),
+      point({
+        grossAssetsBase: 1_080_000,
+        externalFlowsBase: 980_000,
+        financierFlowsBase: 0,
+      }),
+    ];
+    const series = buildHeroSeries(history, [100_000, 1_080_000], "brut");
+    expect(series[1]!.deltaAbs).toBe(980_000);
+    expect(series[1]!.flow).toBe(980_000);
+    expect(series[1]!.market).toBe(0);
+  });
+
+  it("flux inconnu : pas de Marché inventé (on ne suppose pas flux = 0)", () => {
+    const history = [
+      point({ financierBase: 100, financierFlowsBase: 0 }),
+      point({ financierBase: 110 }),
+    ];
+    const series = buildHeroSeries(history, [100, 110], "financier");
+    expect(series[1]!.deltaAbs).toBe(10);
+    expect(series[1]!.flow).toBeUndefined();
+    expect(series[1]!.market).toBeUndefined();
+  });
+
+  it("Net : flux = externalFlows − Δpassifs", () => {
+    const history = [
+      point({
+        netWorthBase: 80,
+        grossAssetsBase: 100,
+        liabilitiesBase: 20,
+        externalFlowsBase: 0,
+      }),
+      point({
+        netWorthBase: 90,
+        grossAssetsBase: 130,
+        liabilitiesBase: 40,
+        externalFlowsBase: 30,
+      }),
+    ];
+    const series = buildHeroSeries(history, [80, 90], "net");
+    // ΔNAV = 10 ; flux = 30 − (40−20) = 10 ; Marché = 0
+    expect(series[1]!.flow).toBe(10);
+    expect(series[1]!.market).toBe(0);
   });
 });
 
@@ -169,5 +258,41 @@ describe("géométrie et aimantation", () => {
     expect(nearestPointIndex(5, -0.4)).toBe(0);
     expect(nearestPointIndex(5, 1.8)).toBe(4);
     expect(nearestPointIndex(0, 0.5)).toBe(-1);
+  });
+
+  it("avec des dates, l'abscisse suit le temps et non le rang", () => {
+    const t0 = Date.parse("2026-01-01T00:00:00.000Z");
+    const t1 = Date.parse("2026-06-01T00:00:00.000Z");
+    const t2 = Date.parse("2026-07-01T00:00:00.000Z");
+    const fractions = sparklineXFractions(3, [t0, t1, t2]);
+    expect(fractions[0]).toBe(0);
+    expect(fractions[2]).toBe(1);
+    // Six mois puis un mois : le milieu n'est pas à 0,5.
+    expect(fractions[1]!).toBeGreaterThan(0.7);
+    expect(fractions[1]!).toBeLessThan(0.9);
+
+    const geom = sparklineGeometry(
+      [10, 10, 40],
+      100,
+      20,
+      2,
+      [
+        "2026-01-01T00:00:00.000Z",
+        "2026-06-01T00:00:00.000Z",
+        "2026-07-01T00:00:00.000Z",
+      ]
+    );
+    expect(geom).not.toBeNull();
+    expect(geom!.points[1]!.x).toBeCloseTo(fractions[1]! * 100, 5);
+
+    // À 10 % de largeur on est encore sur le palier de six mois, pas au rang 0.
+    expect(nearestPointByFraction(fractions, 0.1)).toBe(0);
+    expect(nearestPointByFraction(fractions, 0.85)).toBe(1);
+  });
+
+  it("sans dates lisibles, le pas d'indice reste le défaut", () => {
+    expect(sparklineXFractions(4)).toEqual([0, 1 / 3, 2 / 3, 1]);
+    const geom = sparklineGeometry([10, 20, 30], 90, 20, 2);
+    expect(geom!.points.map((p) => p.x)).toEqual([0, 45, 90]);
   });
 });

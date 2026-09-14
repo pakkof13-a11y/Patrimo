@@ -19,6 +19,7 @@ import { Sparkline } from "@/components/ui/sparkline";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import type { ContractView } from "@/app/lib/life-insurance/overview";
 import type { PerformancePoint } from "@/app/lib/life-insurance/performance";
+import { contractAge } from "@/app/lib/life-insurance/fiscal";
 
 type ContractSeries = {
   points?: PerformancePoint[];
@@ -92,14 +93,29 @@ function AllocationBar({ view }: { view: ContractView }) {
   );
 }
 
-/** Repère compact — fiscalité, horizon, nombre de supports. */
+/**
+ * Repère compact — fiscalité, horizon, nombre de supports.
+ *
+ * `title` seul ne s'ouvre pas au clavier et ne se met pas en forme : le
+ * complément est aussi exposé via `aria-label` et une infobulle focusable,
+ * sur le même idiome que `FinanceTip`.
+ */
 function Chip({ children, title }: { children: React.ReactNode; title?: string }) {
   return (
     <span
-      className="rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-sunken)] px-[var(--space-2)] py-[var(--space-px)] text-[length:var(--text-2xs)] text-[var(--foreground-secondary)]"
-      title={title}
+      className="group relative rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-sunken)] px-[var(--space-2)] py-[var(--space-px)] text-[length:var(--text-2xs)] text-[var(--foreground-secondary)]"
+      tabIndex={title ? 0 : undefined}
+      aria-label={title}
     >
       {children}
+      {title ? (
+        <span
+          className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1.5 w-48 -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-left text-[length:var(--text-2xs)] font-normal leading-snug text-[var(--foreground-secondary)] opacity-0 shadow-lg transition group-hover:opacity-100 group-focus:opacity-100 motion-reduce:transition-none"
+          role="tooltip"
+        >
+          {title}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -116,11 +132,29 @@ export function AvContractRow({
   onSelect: (id: string) => void;
 }) {
   const perf = series?.performancePct ?? null;
+  // Indice base 100 (TWR), pas la valeur absolue : `valueEur` saute à chaque
+  // versement, ce qui ferait monter la courbe pendant qu'un `performancePct`
+  // négatif la colore en rouge. Même grandeur que `contract-workspace.tsx`.
   const points = (series?.points ?? [])
-    .map((p) => Number(p.valueEur))
+    .map((p) => Number(p.index))
     .filter((n) => Number.isFinite(n));
 
   const opened = dateFr(view.policy.openDate);
+
+  /*
+    Années pleines depuis l'ouverture, dérivées de la MÊME fonction que le
+    badge d'antériorité (`view.isMature`, calculé via `contractAge` dans
+    `overview.ts`) — jamais du calcul flottant ms/365,25 j (`view.ageYears`),
+    qui arrondit et peut afficher un verdict contraire à celui du badge juste
+    à côté la veille d'un anniversaire (ex. ouvert le 15/01/2018, lu le
+    14/01/2026 : mois pleins → 7 ans révolus, `−8 ans` ; l'arrondi flottant
+    aurait dit « 8 ans »).
+  */
+  const openDate = view.policy.openDate ? new Date(view.policy.openDate) : null;
+  const ageWholeYears =
+    openDate && Number.isFinite(openDate.getTime())
+      ? Math.floor(contractAge(openDate).months / 12)
+      : null;
 
   return (
     <li>
@@ -159,12 +193,9 @@ export function AvContractRow({
                   {view.isMature ? "+8 ans" : "−8 ans"}
                 </Chip>
               )}
-              {view.ageYears != null && (
-                <Chip title="Ancienneté fiscale du contrat">
-                  {view.ageYears.toLocaleString("fr-FR", {
-                    maximumFractionDigits: 1,
-                  })}{" "}
-                  ans
+              {ageWholeYears != null && (
+                <Chip title="Ancienneté fiscale du contrat, en années pleines">
+                  {ageWholeYears} ans
                 </Chip>
               )}
               <Chip title="Supports rattachés à ce contrat">

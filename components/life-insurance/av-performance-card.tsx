@@ -87,6 +87,7 @@ export function AvPerformanceCard({
   onRangeChange,
   performancePct,
   coveragePct,
+  hasContractCoverage,
   loading,
   className,
 }: {
@@ -96,12 +97,27 @@ export function AvPerformanceCard({
   performancePct: number | null;
   /** Part de l'encours couverte par un historique de cours. */
   coveragePct: number;
+  /**
+   * Au moins un contrat de l'enveloppe publie-t-il une série non vide ?
+   *
+   * Le total peut manquer de points publiables (un jour incomplet chez un
+   * seul contrat suffit à amputer l'agrégat) alors qu'un contrat pris seul a
+   * un historique de cours. Sans ce signal, la carte ne peut pas distinguer
+   * « personne n'a de cours » de « le consolidé n'a pas pu être calculé
+   * cette fois » — et le texte de repli affirmerait la première hypothèse à
+   * tort.
+   */
+  hasContractCoverage?: boolean;
   loading?: boolean;
   className?: string;
 }) {
   const up = (performancePct ?? 0) >= 0;
   const stroke = up ? "var(--chart-positive)" : "var(--chart-negative)";
   const hasCurve = points.length >= 2;
+  // `coveragePct` vaut exactement 0 quand le total n'a aucun encours couvert
+  // (voir `performance-service.ts`) : c'est le seul signal fiable de « aucun
+  // support n'a de cours », indépendant du nombre de points publiables.
+  const noCoverageAnywhere = coveragePct <= 0 && !hasContractCoverage;
 
   return (
     <section
@@ -160,13 +176,23 @@ export function AvPerformanceCard({
             <p className="text-[length:var(--text-sm)] text-[var(--foreground-secondary)]">
               Performance non mesurable sur cette période
             </p>
-            <p className="text-meta max-w-[34rem]">
-              Aucun support de l&apos;enveloppe n&apos;a d&apos;historique de
-              cours : un fonds en euros valorisé à la main n&apos;a pas de
-              valeur d&apos;hier, donc pas de rendement d&apos;aujourd&apos;hui.
-              Les unités de compte cotées alimenteront cette courbe dès le
-              premier relevé de cours.
-            </p>
+            {noCoverageAnywhere ? (
+              <p className="text-meta max-w-[34rem]">
+                Aucun support de l&apos;enveloppe n&apos;a d&apos;historique de
+                cours : un fonds en euros valorisé à la main n&apos;a pas de
+                valeur d&apos;hier, donc pas de rendement d&apos;aujourd&apos;hui.
+                Les unités de compte cotées alimenteront cette courbe dès le
+                premier relevé de cours.
+              </p>
+            ) : (
+              <p className="text-meta max-w-[34rem]">
+                La courbe consolidée de l&apos;enveloppe ne peut pas être
+                tracée sur cette période — il manque au moins un jour complet
+                pour l&apos;un des contrats. Des supports ont pourtant un
+                historique de cours : retrouvez leur performance contrat par
+                contrat dans la liste ci-dessous.
+              </p>
+            )}
           </div>
         ) : (
           <>

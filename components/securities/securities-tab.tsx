@@ -23,6 +23,14 @@ import {
   SECURITIES_ENVELOPE_TYPES,
 } from "@/app/lib/securities/constants";
 import {
+  cashAttributionNotice,
+  contributionBaseNotice,
+  planStatusNotice,
+  type SecuritiesAccount,
+  type SecuritiesRoom,
+} from "@/app/lib/securities/overview";
+import { UnknownAmount } from "./unknown-amount";
+import {
   PEA_INCOME_TAX_RATE,
   PEA_SOCIAL_CHARGES_RATE,
   peaWithdrawalTax,
@@ -30,46 +38,24 @@ import {
 import { ratePct } from "@/app/lib/tax/rates";
 import { EnvelopeCashPanel } from "@/components/tabs/envelope-cash-panel";
 
-type RoomRow = {
-  ownCapEur: string;
-  contributionsEur: string;
-  combinedContributionsEur: string;
-  remainingEur: string;
-  overCapEur: string;
-  usedPct: string;
-  isOverCap: boolean;
-  bindingCap: "OWN" | "COMBINED";
-};
+/*
+  Une seule description de ce que sert `GET /api/securities`.
 
-type AccountRow = {
-  id: string;
-  envelopeType: string;
-  envelopeLabel: string;
-  platformId: string;
-  platformName: string;
-  platformLogoUrl: string | null;
-  openDate: string;
+  Cet onglet et la vue d'ensemble redéclaraient les mêmes vingt-trois champs
+  chacun de son côté. Deux copies d'un contrat que ni l'une ni l'autre ne
+  possède : la route peut en changer sans qu'aucune ne bronche, et elles
+  peuvent diverger l'une de l'autre sans qu'une ligne rouge n'apparaisse.
+  C'est déjà arrivé — `cashAttribution` a mis un chantier à traverser les
+  deux fichiers.
+
+  `SecuritiesAccount` et `SecuritiesRoom` vivent dans le module, à côté des
+  fonctions qui les lisent. Cet onglet y ajoute les deux champs qu'il est
+  seul à afficher : le formulaire d'édition les modifie, la vue d'ensemble
+  ne les montre pas.
+*/
+type AccountRow = SecuritiesAccount & {
   iban: string | null;
   notes: string | null;
-  positionCount: number;
-  marketValueEur: string;
-  costBasisEur: string;
-  unrealizedPnlEur: string;
-  unrealizedPnlPct: string | null;
-  cashEur: string;
-  cashAttributed: boolean;
-  liquidationValueEur: string;
-  contributionsEur: string;
-  withdrawalsEur: string;
-  gainEur: string;
-  maturity: {
-    maturityDate: string;
-    isMatured: boolean;
-    ageYears: number;
-    daysToMaturity: number;
-  } | null;
-  room: RoomRow | null;
-  taxStatusLabel: string | null;
 };
 
 type PositionRow = {
@@ -121,9 +107,20 @@ const emptyForm = {
  * limitée à 75 000 € l'est par le plafond commun, pas par le sien, et sans
  * cette phrase le chiffre paraît faux.
  */
-function ContributionGauge({ room }: { room: RoomRow }) {
+function ContributionGauge({ room }: { room: SecuritiesRoom }) {
   const pct = num(room.usedPct);
-  const alert = room.isOverCap || pct >= 95;
+  /*
+    Plan clos ou d'état indéterminé : la place est nulle par état, pas par
+    plafond. « 0,00 € de versement encore possible » se lirait comme un plan
+    plein ; on nomme la vraie raison (TIT-06).
+  */
+  const blocked =
+    room.blockedReason === "PLAN_CLOSED"
+      ? planStatusNotice("CLOSED")
+      : room.blockedReason === "PLAN_STATUS_UNKNOWN"
+        ? planStatusNotice("UNKNOWN")
+        : null;
+  const alert = room.isOverCap || pct >= 95 || blocked !== null;
   // La barre mesure le plafond qui borne réellement. Quand c'est le plafond
   // commun, le montant affiché doit être celui des deux plans réunis : sinon un
   // PEA-PME vide montrerait « 0 € » au-dessus d'une barre déjà entamée par le
@@ -159,8 +156,13 @@ function ContributionGauge({ room }: { room: RoomRow }) {
             : "text-[var(--muted-foreground)]"
         )}
         data-testid="securities-room-caption"
+        data-room-blocked={room.blockedReason ?? undefined}
       >
-        {room.isOverCap ? (
+        {blocked ? (
+          <UnknownAmount short={blocked.short} title={blocked.title}>
+            Plus aucun versement possible : {blocked.short}
+          </UnknownAmount>
+        ) : room.isOverCap ? (
           <>Plafond dépassé de {formatCurrency(room.overCapEur, "EUR")}</>
         ) : (
           <>
@@ -168,7 +170,7 @@ function ContributionGauge({ room }: { room: RoomRow }) {
             possible
           </>
         )}
-        {room.bindingCap === "COMBINED" && (
+        {!blocked && room.bindingCap === "COMBINED" && (
           <> — limité par le plafond commun PEA + PEA-PME de 225 000 €</>
         )}
       </p>
@@ -295,25 +297,148 @@ function ContributionHistory({ accountId }: { accountId: string }) {
  * `peaWithdrawalTax` est une fonction pure sans accès Prisma : la simulation
  * n'a donc pas à faire d'aller-retour serveur, et le résultat suit la saisie
  * immédiatement.
+ *
+ * Il ne s'affiche que si l'assiette est complète — voir ci-dessous.
  */
 function WithdrawalSimulator({ account }: { account: AccountRow }) {
   const [amount, setAmount] = useState("");
 
+  /*
+    L'assiette est `remainingContributionsEur`, pas `contributionsEur` : les
+    versements bruts servent au plafond, mais après un retrait partiel une
+    part en est déjà sortie du plan (BOI-RPPM-RCM-40-50-50). Les laisser dans
+    l'assiette sous-estimait le gain de chaque retrait suivant — jusqu'à un
+    impôt nul là où il ne l'est pas (TIT-01).
+  */
   const result = useMemo(() => {
     if (!amount.trim() || !account.maturity) return null;
+    if (account.remainingContributionsEur === null) return null;
     return peaWithdrawalTax({
       liquidationValueEur: d(account.liquidationValueEur),
-      contributionsEur: d(account.contributionsEur),
+      contributionsEur: d(account.remainingContributionsEur),
       withdrawalAmountEur: d(amount.replace(",", ".")),
       isMatured: account.maturity.isMatured,
     });
   }, [amount, account]);
 
+  const baseNotice = contributionBaseNotice(account.contributionBaseStatus);
+
+  /*
+    Pas de simulation sur un plan qui ne reçoit plus de retrait au régime du
+    PEA. Clos, ses avoirs ont quitté l'enveloppe : un retrait simulé ici
+    afficherait un impôt de PEA sur ce qui n'en est plus un, et l'avertissement
+    « ce retrait clôturera le plan » sur un plan déjà clos. Indéterminé, on ne
+    choisit pas un régime à sa place (TIT-06).
+  */
+  const planNotice = account.maturity
+    ? planStatusNotice(account.maturity.planStatus)
+    : null;
+  if (planNotice) {
+    return (
+      <div
+        className="mt-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/20 p-2.5"
+        data-testid="securities-withdrawal-simulator"
+        data-plan-status={account.maturity?.planStatus}
+      >
+        <p className="text-meta">Simuler un retrait (€)</p>
+        <p
+          className="mt-1.5 text-[11px] text-[var(--warning)]"
+          data-testid="securities-withdrawal-unavailable"
+        >
+          Simulation indisponible : {planNotice.short}. {planNotice.title}
+        </p>
+      </div>
+    );
+  }
+
+  /*
+    Pas de simulation sur une assiette amputée.
+
+    `liquidationValueEur` vaut titres + espèces imputées. Hors `ATTRIBUTED`,
+    la part espèces vaut zéro sans que personne ne l'ait relevée : l'assiette
+    est alors un minorant, et les deux sorties du simulateur sont fausses,
+    pas seulement incomplètes.
+
+    Mesuré sur 20 000 € de titres, 5 000 € d'espèces non suivies et 22 000 €
+    de versements : le gain réel est de +3 000 €, le calcul en trouve −2 000 €,
+    donc un gain imposable ramené à 0 et un impôt nul. Et un retrait de
+    22 000 €, que la trésorerie couvre, est refusé par « Montant supérieur à
+    la valeur du plan » (`pea.ts`).
+
+    Contrairement à ce qu'affirmait le commentaire de D31 sur
+    `liquidationValueEur`, ce cas atteint bien le PEA et le PEA-PME : leur
+    unicité par personne écarte `ENVELOPE_LEVEL`, pas `NOT_TRACKED`.
+
+    Rien n'autorise à deviner la poche manquante. On dit ce qui manque et
+    comment le rendre calculable.
+  */
+  const assietteIncomplete = cashAttributionNotice(account.cashAttribution);
+  if (assietteIncomplete) {
+    return (
+      <div
+        className="mt-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/20 p-2.5"
+        data-testid="securities-withdrawal-simulator"
+        data-cash-attribution={account.cashAttribution}
+      >
+        <p className="text-meta">Simuler un retrait (€)</p>
+        <p
+          className="mt-1.5 text-[11px] text-[var(--warning)]"
+          data-testid="securities-withdrawal-unavailable"
+        >
+          Simulation indisponible : les espèces de ce plan sont{" "}
+          {assietteIncomplete.short}. Le calcul partirait des seuls titres
+          ({formatCurrency(account.marketValueEur, "EUR")}), une assiette
+          incomplète : il sous-estimerait le gain imposable et refuserait un
+          retrait que la trésorerie couvre. Déclarez la poche d&apos;espèces de
+          l&apos;enveloppe pour l&apos;activer.
+        </p>
+      </div>
+    );
+  }
+
+  /*
+    Pas de simulation sur une assiette inconnue. `remainingContributionsEur`
+    est `null` quand un retrait enregistré ne peut pas être réparti — daté
+    avant l'ouverture ou le premier versement, ou hors PEA. Partir des
+    versements bruts, ou de zéro, rendrait un impôt calculé sur une hypothèse.
+  */
+  if (account.remainingContributionsEur === null) {
+    return (
+      <div
+        className="mt-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/20 p-2.5"
+        data-testid="securities-withdrawal-simulator"
+        data-contribution-base={account.contributionBaseStatus}
+      >
+        <p className="text-meta">Simuler un retrait (€)</p>
+        <p
+          className="mt-1.5 text-[11px] text-[var(--warning)]"
+          data-testid="securities-withdrawal-unavailable"
+        >
+          Simulation indisponible : {baseNotice?.title ?? "assiette inconnue."}{" "}
+          Vérifiez les dates des retraits enregistrés.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div
       className="mt-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--muted)]/20 p-2.5"
       data-testid="securities-withdrawal-simulator"
+      data-contribution-base={account.contributionBaseStatus}
     >
+      {baseNotice && (
+        <p
+          className="mb-1.5 text-[11px] text-[var(--muted-foreground)]"
+          data-testid="securities-withdrawal-base-notice"
+        >
+          Assiette de versements :{" "}
+          {formatCurrency(account.remainingContributionsEur, "EUR")} —{" "}
+          <UnknownAmount short={baseNotice.short} title={baseNotice.title}>
+            {baseNotice.short}
+          </UnknownAmount>
+        </p>
+      )}
       <label className="text-meta block">
         Simuler un retrait (€)
         <input
@@ -801,6 +926,14 @@ export function SecuritiesTab({ className }: { className?: string }) {
           <div className="mt-3 grid gap-2 lg:grid-cols-2">
             {accounts.map((a) => {
               const isOpen = openAccountId === a.id;
+              /*
+                En tête de tour, comme dans `AccountCard` de la vue
+                d'ensemble. Cet appel-ci était enfermé dans une fonction
+                anonyme appelée sur place au milieu du JSX : le même calcul
+                que l'autre appelant, écrit d'une seconde façon, et relu
+                deux fois plus lentement pour rien.
+              */
+              const cashNotice = cashAttributionNotice(a.cashAttribution);
               return (
                 <div
                   key={a.id}
@@ -830,6 +963,14 @@ export function SecuritiesTab({ className }: { className?: string }) {
                       <p className="text-sm font-semibold tabular-nums">
                         {formatCurrency(a.liquidationValueEur, "EUR")}
                       </p>
+                      {/* Le même minorant que celui qui coupe la simulation :
+                          hors `ATTRIBUTED`, ce montant ne contient aucune
+                          espèce, et rien ne le disait. */}
+                      {a.cashAttribution !== "ATTRIBUTED" && (
+                        <p className="text-[10px] text-[var(--muted-foreground)]">
+                          titres seuls
+                        </p>
+                      )}
                       <p
                         className={cn(
                           "text-[11px] tabular-nums",
@@ -843,25 +984,35 @@ export function SecuritiesTab({ className }: { className?: string }) {
                     </div>
                   </div>
 
-                  {/* Antériorité fiscale — l'information que Positions ne portait pas. */}
+                  {/*
+                    Antériorité fiscale — l'information que Positions ne portait
+                    pas. Quatre états, pas deux : sur un plan clos ou
+                    indéterminé, ni cadenas ouvert ni date à venir — le compte
+                    à rebours d'un plan clos ne court plus (TIT-06).
+                  */}
                   {a.maturity && (
                     <div
                       className={cn(
                         "mt-2 flex items-start gap-1.5 rounded-[var(--radius-md)] border px-2 py-1.5 text-[11px]",
-                        a.maturity.isMatured
+                        a.maturity.planStatus === "MATURED"
                           ? "border-[var(--success)]/40 bg-[var(--success)]/10 text-[var(--success)]"
-                          : "border-[var(--warning)]/40 bg-[var(--warning)]/10 text-[var(--warning)]"
+                          : a.maturity.planStatus === "RUNNING"
+                            ? "border-[var(--warning)]/40 bg-[var(--warning)]/10 text-[var(--warning)]"
+                            : "border-[var(--danger)]/40 bg-[var(--danger)]/10 text-[var(--danger)]"
                       )}
                       data-testid="securities-maturity"
+                      data-plan-status={a.maturity.planStatus}
                     >
-                      {a.maturity.isMatured ? (
+                      {a.maturity.planStatus === "MATURED" ? (
                         <Unlock className="mt-0.5 h-3 w-3 shrink-0" />
-                      ) : (
+                      ) : a.maturity.planStatus === "RUNNING" ? (
                         <Lock className="mt-0.5 h-3 w-3 shrink-0" />
+                      ) : (
+                        <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                       )}
                       <span>
                         {a.taxStatusLabel}
-                        {!a.maturity.isMatured && (
+                        {a.maturity.planStatus === "RUNNING" && (
                           <>
                             {" "}
                             — 5 ans atteints le{" "}
@@ -870,6 +1021,17 @@ export function SecuritiesTab({ className }: { className?: string }) {
                             ).toLocaleDateString("fr-FR")}
                           </>
                         )}
+                        {a.maturity.planStatus === "CLOSED" &&
+                          a.maturity.closedAt && (
+                            <>
+                              {" "}
+                              — retrait du{" "}
+                              {new Date(a.maturity.closedAt).toLocaleDateString(
+                                "fr-FR"
+                              )}
+                              , sauf motif d&apos;exception
+                            </>
+                          )}
                       </span>
                     </div>
                   )}
@@ -880,17 +1042,26 @@ export function SecuritiesTab({ className }: { className?: string }) {
                     <span className="text-[var(--muted-foreground)]">
                       Espèces
                     </span>
+                    {/*
+                      Trois états, pas deux. « non ventilées » s'affichait aussi
+                      sur un PEA-PME, qui n'a aucune poche à ventiler — le
+                      drapeau disait « pas imputé » là où la vérité est « pas
+                      suivi ». Le libellé vient de `cashAttributionNotice`,
+                      partagé avec la vue d'ensemble : un seul texte pour un
+                      seul état.
+                    */}
                     <span className="tabular-nums">
-                      {a.cashAttributed ? (
-                        formatCurrency(a.cashEur, "EUR")
-                      ) : (
-                        <span
-                          className="text-[var(--muted-foreground)]"
-                          title="La poche d'espèces est tenue par enveloppe et non par compte : elle ne peut pas être ventilée entre plusieurs comptes de même type."
-                          data-testid="securities-cash-unattributed"
+                      {cashNotice ? (
+                        <UnknownAmount
+                          short={cashNotice.short}
+                          title={cashNotice.title}
+                          testId="securities-cash-unattributed"
+                          data-cash-attribution={a.cashAttribution}
                         >
-                          non ventilées
-                        </span>
+                          {cashNotice.short}
+                        </UnknownAmount>
+                      ) : (
+                        formatCurrency(a.cashEur, "EUR")
                       )}
                     </span>
                   </div>

@@ -118,10 +118,66 @@ describe("direction et P&L", () => {
     expect(o.closedCount).toBe(1);
   });
 
-  it("le net d'une position close déduit funding et commissions quel que soit leur signe", () => {
+  it("le net d'une position close ajoute un funding perçu et retranche la commission", () => {
+    /*
+      `fundingPaid` est signé (cf. bloc « Convention de signe » de
+      `app/lib/crypto/futures.ts`) : −30 est un funding **perçu**, un produit.
+      500 + 30 − 10 = 520. L'ancien `Math.abs()` rendait 460 — il traitait
+      l'encaissement comme une charge et divergeait du bucket fiscal de
+      `app/api/trading/route.ts`, qui sommait ce même funding signé.
+    */
     expect(
       closedNetPnl(pos({ realizedPnl: "500", fundingPaid: "-30", commissionPaid: "10" }))
-    ).toBe(460);
+    ).toBe(520);
+  });
+
+  it("retranche une commission même stockée en négatif : un frais n'est jamais encaissé", () => {
+    expect(
+      closedNetPnl(pos({ realizedPnl: "500", fundingPaid: "0", commissionPaid: "-10" }))
+    ).toBe(490);
+  });
+});
+
+describe("notionnel inconnu — COIN-M sans valeur de contrat (TRA-03)", () => {
+  it("préserve un notionnel/marge/P&L null plutôt que de les afficher comme 0", () => {
+    const v = buildPositionView(
+      pos({
+        derived: {
+          ...pos().derived,
+          notionalEur: null,
+          marginUsedEur: null,
+          unrealizedPnlEur: null,
+          signedNotionalEur: null,
+        },
+      })
+    );
+    expect(v.notionalEur).toBeNull();
+    expect(v.marginEur).toBeNull();
+    expect(v.pnlEur).toBeNull();
+    // Sans marge connue, le pourcentage ne peut pas non plus être calculé.
+    expect(v.pnlPct).toBeNull();
+  });
+
+  it("écarte ces positions des sommes de la synthèse et les compte à part", () => {
+    const known = buildPositionView(pos());
+    const unknown = buildPositionView(
+      pos({
+        id: "p2",
+        derived: {
+          ...pos().derived,
+          notionalEur: null,
+          marginUsedEur: null,
+          unrealizedPnlEur: null,
+          signedNotionalEur: null,
+        },
+      })
+    );
+    const o = computeTradingOverview([known, unknown]);
+    // Seule la position connue contribue aux sommes.
+    expect(o.grossExposureEur).toBeCloseTo(25704, 2);
+    expect(o.marginEur).toBeCloseTo(5140.8, 2);
+    expect(o.unrealizedPnlEur).toBeCloseTo(957.6, 2);
+    expect(o.unvaluedCount).toBe(1);
   });
 });
 

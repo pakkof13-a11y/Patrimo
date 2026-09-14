@@ -69,7 +69,15 @@ function finite(v: number | undefined | null): number | undefined {
 
 /** Valeur du point selon le mode, ou `undefined` si l'historique ne la porte pas. */
 function valueAt(p: HistoryPoint, mode: HeroMode): number | undefined {
-  return finite(mode === "net" ? p.netWorthBase : p.grossAssetsBase);
+  if (mode === "net") return finite(p.netWorthBase);
+  if (mode === "financier") return finite(p.financierBase);
+  return finite(p.grossAssetsBase);
+}
+
+/** Flux d'attribution : Financier ignore l'immo (pastilles ≠ Marché/Flux). */
+function flowAt(p: HistoryPoint, mode: HeroMode): number | undefined {
+  if (mode === "financier") return finite(p.financierFlowsBase);
+  return finite(p.externalFlowsBase);
 }
 
 /**
@@ -101,7 +109,7 @@ export function heroAttribution(
 
   let flow = 0;
   for (let i = 1; i < windowed.length; i++) {
-    const f = finite(windowed[i]!.externalFlowsBase);
+    const f = flowAt(windowed[i]!, mode);
     // Un seul point sans flux rend la somme incomplète : on préfère ne rien
     // dire plutôt que d'annoncer un total amputé d'une acquisition.
     if (f === undefined) return null;

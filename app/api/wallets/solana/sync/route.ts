@@ -110,14 +110,6 @@ export async function POST(req: Request) {
     if (!address) {
       address = (platform.walletAddress || "").trim();
     }
-    // Persiste l’adresse fournie si absente en DB
-    if (address && address !== (platform.walletAddress || "").trim()) {
-      await prisma.platform.update({
-        where: { id: platform.id },
-        data: { walletAddress: address },
-      });
-      platform.walletAddress = address;
-    }
     if (!address) {
       return NextResponse.json(
         {
@@ -139,6 +131,16 @@ export async function POST(req: Request) {
       },
       { status: 400 }
     );
+  }
+
+  // Persiste l’adresse fournie uniquement une fois le format validé —
+  // une adresse mal formée ne doit jamais écraser une adresse valide en DB.
+  if (platform && address !== (platform.walletAddress || "").trim()) {
+    await prisma.platform.update({
+      where: { id: platform.id },
+      data: { walletAddress: address },
+    });
+    platform.walletAddress = address;
   }
 
   const hasCustomRpc = Boolean((process.env.SOLANA_RPC_URL || "").trim());

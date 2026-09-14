@@ -2,16 +2,45 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { clientErrorMessage } from "@/app/lib/api/error-response";
 import { prisma } from "@/app/lib/prisma";
-import { d } from "@/app/lib/money/decimal";
+import { d, type Decimal } from "@/app/lib/money/decimal";
+import { convertToEurSync, getEurRates } from "@/app/lib/market/fx";
 import { listTradingAccounts } from "@/app/lib/trading/account-service";
 import { computeTradingAnalytics } from "@/app/lib/trading/analytics";
-import { toFuturesView, type FuturesDirection } from "@/app/lib/crypto/futures";
+import {
+  deductibleCostsOf,
+  toFuturesView,
+  type FuturesDirection,
+} from "@/app/lib/crypto/futures";
 import {
   compareTradingTax,
   computeTradingYear,
   totalCarryForward,
   type CarriedLoss,
 } from "@/app/lib/trading/tax";
+
+/**
+ * Convertit un montant de la devise de cotation vers l'euro (FIN-02).
+ *
+ * `toFuturesView` rend ses montants dans la devise de cotation de
+ * l'instrument (`USDT` sur un perpétuel BTC/USDT) — jamais convertis. Les
+ * sommer tels quels sous une étiquette « Eur » (`computeTradingOverview`)
+ * mélangerait des devises différentes derrière un total qui prétend n'en
+ * être qu'une. `null` si le montant est déjà inconnu (TRA-03) ou si la
+ * devise de cotation n'a pas de taux (USDT, USDC) — jamais une parité
+ * inventée ni un zéro qui ferait disparaître la position des sommes.
+ */
+function toEur(
+  amount: Decimal | null,
+  quoteCurrency: string,
+  rates: Record<string, number>
+): Decimal | null {
+  if (amount == null) return null;
+  try {
+    return d(convertToEurSync(amount, quoteCurrency || "EUR", rates));
+  } catch {
+    return null;
+  }
+}
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -42,12 +71,13 @@ export async function GET(req: Request) {
   const tmi = tmiRaw != null && tmiRaw !== "" ? Number(tmiRaw) : null;
 
   try {
-    const [accounts, positions] = await Promise.all([
+    const [accounts, positions, rates] = await Promise.all([
       listTradingAccounts(userId),
       prisma.tradingPosition.findMany({
         where: { userId },
         orderBy: [{ closedAt: "desc" }, { openedAt: "desc" }],
       }),
+      getEurRates(),
     ]);
 
     // Le journal ne retient que les positions closes : une position ouverte
@@ -61,8 +91,21 @@ export async function GET(req: Request) {
       }))
     );
 
-    // Résultat par exercice, frais de financement et commissions déduits —
-    // ils diminuent bien le résultat imposable.
+    /*
+      Résultat par exercice, frais de financement et commissions déduits —
+      ils diminuent bien le résultat imposable.
+
+      Les frais passent par `deductibleCostsOf`, la même définition que
+      `realizedNetPnl` et `closedNetPnl` : funding **signé** (positif = payé,
+      négatif = perçu) plus commission en valeur absolue (cf. le bloc
+      « Convention de signe » de `app/lib/crypto/futures.ts`). Sommer le
+      funding signé ici pendant que l'écran en prenait la valeur absolue
+      écartait l'assiette imposable du net affiché de 2 × funding.
+
+      Un total de frais négatif est possible et correct : un funding perçu
+      supérieur aux commissions augmente le résultat de l'exercice —
+      `computeTradingYear` soustrait ce total tel quel.
+    */
     type YearBucket = ReturnType<typeof emptyBucket>;
     const byYear = new Map<number, YearBucket>();
 
@@ -73,9 +116,14 @@ export async function GET(req: Request) {
       const bucket = byYear.get(closedYear) ?? emptyBucket();
       if (pnl.gt(0)) bucket.gains = bucket.gains.plus(pnl);
       else if (pnl.lt(0)) bucket.losses = bucket.losses.plus(pnl.abs());
-      bucket.fees = bucket.fees
-        .plus(d(p.fundingPaid?.toString() ?? "0"))
-        .plus(d(p.commissionPaid?.toString() ?? "0"));
+      bucket.fees = bucket.fees.plus(
+        deductibleCostsOf({
+          fundingPaid: p.fundingPaid ? d(p.fundingPaid.toString()) : null,
+          commissionPaid: p.commissionPaid
+            ? d(p.commissionPaid.toString())
+            : null,
+        })
+      );
       byYear.set(closedYear, bucket);
     }
 
@@ -132,6 +180,13 @@ export async function GET(req: Request) {
             commissionPaid: p.commissionPaid
               ? d(p.commissionPaid.toString())
               : null,
+            marginType: p.marginType,
+            /*
+              Aucune source n'alimente `contractValue` (pas de colonne en base
+              — TRA-03 reste en attente d'une migration) : toujours UNKNOWN
+              pour un contrat COIN-M.
+            */
+            contractValue: null,
           });
           return {
           id: p.id,
@@ -169,14 +224,20 @@ export async function GET(req: Request) {
           liquidationPriceReported: p.liquidationPrice?.toString() ?? null,
 
           derived: {
-            notionalEur: view.notionalUsd.toFixed(2),
-            marginUsedEur: view.marginUsed.toFixed(2),
+            notionalEur:
+              toEur(view.notionalUsd, p.quoteCurrency, rates)?.toFixed(2) ?? null,
+            marginUsedEur:
+              toEur(view.marginUsed, p.quoteCurrency, rates)?.toFixed(2) ?? null,
             /** Estimation Aurea — barème de maintenance approché, pas contractuel. */
             liquidationPriceEstimated:
               view.liquidationPrice?.toFixed(8) ?? null,
             distanceToLiquidationPct: view.distanceToLiquidationPct,
-            unrealizedPnlEur: view.unrealizedPnlEur.toFixed(2),
-            signedNotionalEur: view.signedNotional.toFixed(2),
+            unrealizedPnlEur:
+              toEur(view.unrealizedPnlEur, p.quoteCurrency, rates)?.toFixed(2) ??
+              null,
+            signedNotionalEur:
+              toEur(view.signedNotional, p.quoteCurrency, rates)?.toFixed(2) ??
+              null,
             liquidationAlert: view.liquidationAlert,
             fundingAlert: view.fundingAlert,
           },

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TX_TYPES } from "./accounting/types";
 import { LIABILITY_CATEGORIES } from "./constants";
+import { ACCOUNT_CURRENCY_OPTIONS } from "./money/currencies";
 
 export const assetClasses = [
   "ACTIONS",
@@ -52,10 +53,37 @@ export const priceProviders = ["FINNHUB", "YAHOO", "COINGECKO", "MANUAL"] as con
 
 export const transactionTypes = TX_TYPES;
 
+/**
+ * Plafond des montants saisis — mille milliards.
+ *
+ * Toutes les colonnes monétaires sont des `Decimal(28, 12)` : seize chiffres
+ * avant la virgule, pas un de plus. Au-delà, Postgres rejette l'écriture par
+ * un dépassement `numeric` qu'aucune route n'attrape, et la saisie se termine
+ * en 500 muet plutôt qu'en message de validation.
+ *
+ * Mille milliards laisse une marge confortable au yen comme au patrimoine le
+ * plus improbable, tout en attrapant ce que ce garde vise réellement : un
+ * `1e30` collé par erreur, ou le résultat d'un import mal lu.
+ */
+const MONTANT_MAX = 1e12;
+
+/**
+ * Un montant décimal, en chaîne.
+ *
+ * Le refus ne portait que sur `NaN`. `Number("Infinity")` et `Number("1e30")`
+ * n'en sont pas : les deux passaient la validation, survivaient à
+ * `new Prisma.Decimal(...)`, et n'échouaient qu'au contact de la colonne.
+ * Sont désormais refusés : les non-nombres, les infinis, et tout ce qui sort
+ * de ±`MONTANT_MAX`.
+ */
 const decimalString = z
   .union([z.string(), z.number()])
   .transform((v) => String(v).trim().replace(",", "."))
-  .refine((v) => v === "" || !Number.isNaN(Number(v)), "Nombre invalide");
+  .refine((v) => {
+    if (v === "") return true;
+    const n = Number(v);
+    return Number.isFinite(n) && Math.abs(n) <= MONTANT_MAX;
+  }, "Nombre invalide ou hors limites");
 
 export const addAssetSchema = z.object({
   name: z.string().min(2, "Le nom doit contenir au moins 2 caractères"),
@@ -284,7 +312,67 @@ export const liabilitySchema = z.object({
 
 export type LiabilityForm = z.infer<typeof liabilitySchema>;
 
+/**
+ * Un montant décimal **obligatoire**.
+ *
+ * `decimalString` laisse passer la chaîne vide : à la création, un champ non
+ * rempli vaut « non renseigné ». Sur un avenant, il ne peut pas valoir ça.
+ * `String(opts.interestRate || "0")` transformait l'absence en zéro, et
+ * l'avenant écrasait le taux réel du crédit par 0 % — sans erreur, sans trace.
+ * Le refus ici rend une 400 au lieu d'un écrasement silencieux.
+ */
+const requiredDecimalString = decimalString.refine(
+  (v) => v !== "" && Number.isFinite(Number(v)),
+  "Valeur numérique requise"
+);
+
+/** Avenant de taux : le nouveau taux est le seul champ qui ne peut manquer. */
+export const liabilityRateChangeSchema = z.object({
+  interestRate: requiredDecimalString,
+});
+
+/** Avenant de mensualité : idem, le montant ne peut être ni vide ni illisible. */
+export const liabilityPaymentChangeSchema = z.object({
+  monthlyPayment: requiredDecimalString,
+});
+
+/**
+ * Remboursement anticipé : le montant n'est requis que pour un partiel.
+ * Un solde total prend le capital restant dû, il n'a pas de montant à saisir.
+ */
+export const liabilityEarlyRepaymentSchema = z
+  .object({
+    kind: z.enum(["PARTIAL", "TOTAL"]),
+    amount: requiredDecimalString.optional(),
+  })
+  .refine((v) => v.kind === "TOTAL" || v.amount != null, {
+    message: "Montant de remboursement requis",
+    path: ["amount"],
+  });
+
 /** Part détenue sur un compte joint, 0–100. Vide/null = compte individuel. */
+/**
+ * Devise d'un produit : uniquement celles que l'application sait convertir.
+ *
+ * `z.string().min(3).max(3)` acceptait n'importe quel trigramme. Un `"ZZZ"`
+ * écrit une fois en base fait ensuite lever `convertToEurSync` à **chaque**
+ * lecture de la liste : l'écran n'est pas dégradé, il est mort, et il le
+ * reste tant que la ligne existe. Le sélecteur de l'interface ne propose déjà
+ * que ces cinq codes ; le schéma dit maintenant la même chose.
+ *
+ * Ce sont aussi les cinq seules devises que `rateOf` sait replier quand le
+ * fournisseur de taux ne répond pas (`FALLBACK`, `app/lib/market/fx.ts`) :
+ * au-delà, la conversion dépendrait de la disponibilité d'un tiers.
+ */
+const accountCurrency = z
+  .string()
+  .transform((v) => v.toUpperCase())
+  .refine(
+    (v) => (ACCOUNT_CURRENCY_OPTIONS as readonly string[]).includes(v),
+    `Devise inconnue. Attendu : ${ACCOUNT_CURRENCY_OPTIONS.join(", ")}.`
+  )
+  .default("EUR");
+
 const ownershipPctField = z.preprocess(
   (v) => (v === "" || v == null ? null : Number(v)),
   z.number().min(0).max(100).nullable().optional()
@@ -293,7 +381,7 @@ const ownershipPctField = z.preprocess(
 export const bankAccountSchema = z.object({
   bankName: z.string().min(1, "Banque requise"),
   balance: decimalString.default("0"),
-  currency: z.string().min(3).max(3).default("EUR"),
+  currency: accountCurrency,
   isPro: z.boolean().default(false),
   ownershipPct: ownershipPctField,
   notes: z.string().optional().nullable(),
@@ -335,7 +423,7 @@ export const savingsAccountSchema = z.object({
     (v) => (v === "" || v == null ? null : Number(v)),
     z.number().int().min(1).max(12).nullable().optional()
   ),
-  currency: z.string().min(3).max(3).default("EUR"),
+  currency: accountCurrency,
   isPro: z.boolean().default(false),
   ownershipPct: ownershipPctField,
   notes: z.string().optional().nullable(),
@@ -347,7 +435,7 @@ export const termDepositSchema = z.object({
   bankName: z.string().optional().nullable(),
   principal: decimalString,
   ratePercent: decimalString,
-  currency: z.string().min(3).max(3).default("EUR"),
+  currency: accountCurrency,
   openedAt: z.string().min(1, "Date d'ouverture requise"),
   maturityDate: z.string().min(1, "Date d'échéance requise"),
   earlyWithdrawalPenaltyPct: decimalString.optional().nullable(),
@@ -404,7 +492,16 @@ export const employeeSavingsLineSchema = z.object({
   isin: z.string().optional().nullable(),
   units: decimalString.default("0"),
   nav: decimalString.default("0"),
-  currency: z.string().min(3).max(3).default("EUR"),
+  /*
+    Devise libre à l'écriture, 500 à la lecture pour tout le module.
+    `z.string().min(3).max(3)` acceptait n'importe quel trigramme ("SEK"),
+    stocké tel quel ; chaque lecture de la liste levait ensuite en tentant de
+    la convertir en euros (`convertToEurSync`) — pas seulement pour cette
+    ligne, pour tout `GET /api/employee-savings`. Même liste blanche que les
+    autres comptes (`accountCurrency` ci-dessus), pas une quatrième liste de
+    devises.
+  */
+  currency: accountCurrency,
   sourceType: z.enum(employeeSavingsSources).default("VOLUNTARY"),
   contributionDate: z.string().optional().nullable(),
   /** Montant versé — facultatif, et distinct de zéro quand il manque. */
@@ -844,12 +941,43 @@ export const lifeProductUpdateSchema = z.object({
 
 export type LifeProductUpdateForm = z.infer<typeof lifeProductUpdateSchema>;
 
+/**
+ * Enveloppes dont la poche d'espèces ne peut pas être débitrice.
+ *
+ * Ce n'est pas du zèle de validation, c'est la règle de chaque enveloppe :
+ * le compte espèces d'un PEA ne connaît ni découvert, ni crédit, ni SRD — un
+ * ordre est refusé quand les liquidités manquent — et une assurance-vie n'a
+ * pas de poche débitrice, ses rachats et arbitrages étant bornés par
+ * l'encours. L'avance sur contrat existe bien, mais c'est un passif distinct,
+ * hors du périmètre d'`EnvelopeCash`.
+ *
+ * Le CTO en est absent, et délibérément : découvert, appel de marge et
+ * règlement différé y sont des situations réelles. Son solde négatif est un
+ * fait comptable que le patrimoine compte avec son signe (cf. l'en-tête de
+ * `getExplicitCashTotalEur`).
+ */
+const NON_DEBITABLE_ENVELOPES = ["PEA", "AV"] as const;
+
 /** PUT /api/envelopes */
-export const envelopeCashUpdateSchema = z.object({
-  envelope: z.enum(["CTO", "PEA", "AV"]),
-  balance: decimalString.optional(),
-  currency: currencyCode.optional(),
-});
+export const envelopeCashUpdateSchema = z
+  .object({
+    envelope: z.enum(["CTO", "PEA", "AV"]),
+    balance: decimalString.optional(),
+    currency: currencyCode.optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.balance == null || data.balance === "") return;
+    if (!(NON_DEBITABLE_ENVELOPES as readonly string[]).includes(data.envelope)) {
+      return;
+    }
+    if (Number(data.balance) < 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Le solde d'un ${data.envelope} ne peut pas être négatif.`,
+        path: ["balance"],
+      });
+    }
+  });
 
 export type EnvelopeCashUpdateForm = z.infer<typeof envelopeCashUpdateSchema>;
 

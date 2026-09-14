@@ -852,11 +852,15 @@ model BankAccount {
 model BankAccountEvent {
   id            String   @id @default(cuid())
   bankAccountId String
-  /// OPENING | DEPOSIT | WITHDRAWAL
+  /// OPENING | DEPOSIT | WITHDRAWAL | REDENOMINATION
   type          String
-  /// Delta signé — positif pour un dépôt, négatif pour un retrait.
+  /// Delta signé — positif pour un dépôt, négatif pour un retrait. Nul sur REDENOMINATION.
   amount        Decimal  @db.Decimal(28, 12)
   balanceAfter  Decimal  @db.Decimal(28, 12)
+  /// Devise du fait, figée ici : le compte peut changer de devise ensuite.
+  /// Sans elle, le chargeur historique convertissait tout le passé d'un compte
+  /// avec sa devise du jour — cf. EnvelopeCashEvent.currency, même remède.
+  currency      String   @default("EUR")
   occurredAt    DateTime @default(now())
   notes         String?
   createdAt     DateTime @default(now())
@@ -921,10 +925,15 @@ model SavingsAccount {
 model SavingsAccountEvent {
   id               String   @id @default(cuid())
   savingsAccountId String
-  /// OPENING | DEPOSIT | WITHDRAWAL | INTEREST
+  /// OPENING | DEPOSIT | WITHDRAWAL | INTEREST | REDENOMINATION
   type             String
+  /// Delta signé. Nul sur REDENOMINATION : changer d'unité ne fait rien entrer.
   amount           Decimal  @db.Decimal(28, 12)
   balanceAfter     Decimal  @db.Decimal(28, 12)
+  /// Devise du fait, figée ici : le livret peut changer de devise ensuite.
+  /// Cf. BankAccountEvent.currency et EnvelopeCashEvent.currency — sans elle,
+  /// le chargeur reconvertissait tout le passé avec la devise du jour.
+  currency         String   @default("EUR")
   occurredAt       DateTime @default(now())
   notes            String?
   createdAt        DateTime @default(now())
@@ -2457,8 +2466,27 @@ model TradingPosition {
   /// l'écran est recalculée, ce champ ne fait que la doubler si disponible.
   liquidationPrice Decimal? @db.Decimal(20, 8)
 
-  marginUsed     Decimal? @db.Decimal(20, 2)
-  fundingPaid    Decimal? @db.Decimal(20, 2)
+  marginUsed Decimal? @db.Decimal(20, 2)
+
+  /// Funding cumulé, **signé** : positif = funding **payé** (charge), négatif
+  /// = funding **perçu** (produit). Un perpétuel fait circuler le funding dans
+  /// les deux sens selon le sens de la position et le signe du taux ; le
+  /// prendre en valeur absolue à la lecture faisait d'un encaissement une
+  /// charge. L'import CSV retourne le signe des exports (négatif = débit chez
+  /// Binance, Bybit, OKX) pour se ranger à cette convention —
+  /// `app/lib/crypto/futures-csv.ts`.
+  ///
+  /// Convention et formule de référence : bloc « Convention de signe » de
+  /// `app/lib/crypto/futures.ts`. `net = realizedPnl − fundingPaid −
+  /// |commissionPaid|`, appliqué à l'identique par `realizedNetPnl`,
+  /// `closedNetPnl` (`app/lib/trading/positions-view.ts`) et le bucket fiscal
+  /// de `app/api/trading/route.ts`.
+  fundingPaid Decimal? @db.Decimal(20, 2)
+
+  /// Commissions cumulées, **toujours ≥ 0** : une commission n'est jamais
+  /// encaissée. Un négatif éventuel (lignes importées avant la normalisation,
+  /// saisie manuelle) n'est qu'un signe de cash-flow — les lecteurs en
+  /// prennent la valeur absolue.
   commissionPaid Decimal? @db.Decimal(20, 2)
 
   unrealizedPnl Decimal? @db.Decimal(20, 2)

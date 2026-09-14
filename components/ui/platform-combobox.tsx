@@ -58,6 +58,7 @@ type Props = {
   /** data-testid for e2e */
   testId?: string;
   disabled?: boolean;
+  autoFocus?: boolean;
 };
 
 const CREATE_VALUE = "__create_new_platform__";
@@ -92,6 +93,7 @@ export function PlatformCombobox({
   className,
   testId,
   disabled,
+  autoFocus,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -355,6 +357,7 @@ export function PlatformCombobox({
         placeholder={placeholder}
         data-testid={testId}
         autoComplete="off"
+        autoFocus={autoFocus}
         role="combobox"
         aria-expanded={open}
         aria-controls={open ? "platform-combobox-listbox" : undefined}

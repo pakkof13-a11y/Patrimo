@@ -24,18 +24,48 @@ const PRET = {
   startDate: new Date("2021-09-13T16:05:00.000Z"),
   endDate: new Date("2051-08-17T05:35:00.000Z"),
   lastPaymentAppliedAt: null,
+  /*
+    Veille du départ, à dessein : la ligne n'a pas été réécrite depuis que le
+    prêt existe, donc aucune échéance n'a jamais été constatée et la projection
+    doit bien les rejouer toutes. C'est l'arithmétique testée ici — la borne est
+    désormais explicite (PAS-03) au lieu d'être déduite d'un `null`, mais les
+    montants sont les mêmes.
+  */
+  updatedAt: new Date("2021-09-12T16:05:00.000Z"),
+  interestRate: "2.15",
 };
 
 const NOW = new Date("2026-08-25T10:00:00.000Z");
 
 describe("projectDuePayments", () => {
-  it("amortit les échéances dues depuis le début du prêt", () => {
+  it("amortit les échéances dues depuis le début du prêt (annuité, intérêts d'abord)", () => {
     const p = projectDuePayments({ ...PRET, now: NOW });
 
-    // 59 mensualités échues depuis septembre 2021, 980 € chacune.
+    /*
+      59 mensualités échues depuis septembre 2021, 980 € chacune, à 2,15 %/an.
+      `applyMonthlyDebit` impute désormais les intérêts avant le capital,
+      comme `buildAmortizationSchedule` : 137 454,44786515 €, pas
+      178 500 − 59×980 = 120 680 € (linéaire, l'ancien calcul faux).
+    */
     expect(p.payments).toHaveLength(59);
-    expect(p.remaining).toBe("120680.00000000");
+    expect(p.remaining).toBe("137454.44786515");
     expect(p.lastAppliedAt?.toISOString().slice(0, 10)).toBe("2026-08-05");
+  });
+
+  it("mesure PAS-01 : 178 500 €/2,15 %/980 €, 60 échéances → ≈136 720,72 € (annuité, pas 119 700 € linéaire)", () => {
+    const p = projectDuePayments({
+      remainingAmount: "178500",
+      monthlyPayment: "980",
+      paymentDay: 5,
+      startDate: new Date("2021-09-05T00:00:00.000Z"),
+      endDate: null,
+      lastPaymentAppliedAt: null,
+      interestRate: "2.15",
+      now: new Date("2026-08-25T00:00:00.000Z"), // 60e échéance le 5/8/2026 (départ 5/9/2021 inclus)
+    });
+    expect(p.payments).toHaveLength(60);
+    expect(p.remaining).toBe("136720.72041758");
+    expect(Number(p.remaining)).not.toBeCloseTo(119700, 0);
   });
 
   it("ne modifie pas ses arguments", () => {
@@ -77,7 +107,12 @@ describe("projectDuePayments", () => {
       now: NOW,
     });
     expect(p.remaining).toBe("0.00000000");
-    expect(p.payments.at(-1)?.debited).toBe("500.00000000");
+    /*
+      Dernière échéance : ne prélève que ce qu'il faut pour solder (capital +
+      intérêts du mois), pas la mensualité pleine de 980 € — 500 +
+      500×2,15/100/12 = 500,89583333 €, pas 500 € (linéaire).
+    */
+    expect(p.payments.at(-1)?.debited).toBe("500.89583333");
   });
 
   it("ne touche pas une dette déjà soldée", () => {
@@ -122,7 +157,7 @@ describe("projectDuePayments", () => {
     let remaining = PRET.remainingAmount;
     const debits: string[] = [];
     for (const _ of dates) {
-      const step = applyMonthlyDebit(remaining, PRET.monthlyPayment);
+      const step = applyMonthlyDebit(remaining, PRET.monthlyPayment, PRET.interestRate);
       if (Number(step.debited) <= 0) break;
       remaining = step.remaining;
       debits.push(step.debited);
@@ -142,7 +177,7 @@ describe("remainingAmountAt", () => {
     const materialise = remainingAmountAt(
       {
         ...PRET,
-        remainingAmount: "120680",
+        remainingAmount: "137454.44786515",
         lastPaymentAppliedAt: new Date("2026-08-05T00:00:00.000Z"),
       },
       NOW

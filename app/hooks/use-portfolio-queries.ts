@@ -3,7 +3,6 @@
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { fetchJson } from "@/app/lib/api-client";
 import type {
-  HistoryPoint,
   HoldingsResponse,
   PlatformRow,
   TxRow,
@@ -36,10 +35,78 @@ export function usePortfolioHistoryQuery(baseCurrency: string) {
   return useQuery({
     queryKey: ["portfolio-history", baseCurrency],
     queryFn: () =>
-      fetchJson<{ history: HistoryPoint[]; baseCurrency: string }>(
+      fetchJson<{ baseCurrency: string }>(
         `/api/portfolio?base=${encodeURIComponent(baseCurrency)}`
       ),
     staleTime: HISTORY_STALE_MS,
+    refetchOnWindowFocus: false,
+  });
+}
+
+const DAILY_NAV_STALE_MS = 60_000;
+
+export type DailyNavQueryResult =
+  import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavResult;
+export type DailyNavQueryScope = import("@/app/lib/portfolio/historical/get-daily-nav").DailyNavScope;
+
+/**
+ * Série dense T-05 — `GET /api/portfolio/daily-nav`.
+ *
+ * Le hero demande `scope=financier` : chaque point porte déjà brut / net /
+ * financier / listed / poches. Cliquer une carte ne refetch pas.
+ * Un filtre de poche (T-4.F) demande le scope correspondant — même
+ * `from`/`to` que le hero, clamp `earliestDayForScope` côté API.
+ */
+export function useDailyNavQuery(
+  from: string,
+  to: string,
+  options?: {
+    enabled?: boolean;
+    scope?: DailyNavQueryScope;
+    /**
+     * Période demandée. Elle ne construit pas l'URL — `from`/`to` s'en
+     * chargent — mais rend la clé de cache lisible, et garantit que deux
+     * périodes ne partageront jamais une entrée si leurs bornes venaient à
+     * coïncider après un clamp.
+     */
+    range?: string;
+  }
+) {
+  const enabled = options?.enabled ?? true;
+  const scope = options?.scope ?? "financier";
+  const range = options?.range ?? "";
+  return useQuery({
+    queryKey: ["portfolio-daily-nav", scope, range, from, to],
+    /*
+      `signal` est celui de React Query : changer de période annule la requête
+      en vol au lieu de la laisser courir. Une réponse qui arriverait après un
+      autre clic ne peut donc plus s'installer — elle est abandonnée avant
+      d'être lue, et non départagée après coup par un numéro de séquence.
+    */
+    queryFn: ({ signal }) => {
+      const params = new URLSearchParams({ scope, from, to });
+      return fetchJson<DailyNavQueryResult>(
+        `/api/portfolio/daily-nav?${params.toString()}`,
+        { signal }
+      );
+    },
+    enabled: enabled && Boolean(from && to),
+    staleTime: DAILY_NAV_STALE_MS,
+    /*
+      Pas de `keepPreviousData` ici, contrairement aux holdings.
+
+      Il rendait la série précédente pendant le chargement de la nouvelle, et
+      l'écran l'affichait comme si elle était la courante : cliquer « Tout »
+      depuis « 1A » montrait la courbe 1A sous un chip Tout déjà actif, et il
+      fallait un second clic pour voir la bonne. Le libellé de borne servie s'en
+      gardait déjà via `isPlaceholderData` ; la courbe, elle, ne s'en gardait
+      pas.
+
+      Une donnée absente pendant le chargement rend l'erreur impossible, au lieu
+      d'obliger chaque lecteur à s'en méfier : le squelette dit qu'on charge, ce
+      qui est vrai, là où l'ancienne courbe affirmait une période qu'on n'avait
+      pas encore.
+    */
     refetchOnWindowFocus: false,
   });
 }
@@ -159,9 +226,20 @@ export function useTransactionsQuery() {
   return useTransactionsMetaQuery();
 }
 
-export function useAssetDetailQuery(detailAssetId: string | null) {
+/**
+ * Fiche d'un actif, dans la devise d'affichage du compte.
+ *
+ * `baseCurrency` entre dans la clé de cache autant que dans l'URL : deux
+ * devises donnent deux réponses différentes pour le même actif, et les
+ * confondre servirait des dollars étiquetés euros au premier changement de
+ * préférence.
+ */
+export function useAssetDetailQuery(
+  detailAssetId: string | null,
+  baseCurrency = "EUR"
+) {
   return useQuery({
-    queryKey: ["asset-detail", detailAssetId],
+    queryKey: ["asset-detail", detailAssetId, baseCurrency],
     enabled: !!detailAssetId,
     queryFn: () =>
       fetchJson<{
@@ -187,7 +265,11 @@ export function useAssetDetailQuery(detailAssetId: string | null) {
           quantity: string;
           avgCostEur: string;
           marketValueEur: string;
+          marketValueBase: string;
         } | null;
+        baseCurrency: string;
+        /** Unités de `baseCurrency` pour un euro, au taux servi. */
+        fxRateFromEur: string;
         transactions: Array<{
           id: string;
           type: string;
@@ -209,7 +291,9 @@ export function useAssetDetailQuery(detailAssetId: string | null) {
           paymentDate?: string | null;
           exDate?: string | null;
         }>;
-      }>(`/api/assets/${detailAssetId}`),
+      }>(
+        `/api/assets/${detailAssetId}?base=${encodeURIComponent(baseCurrency)}`
+      ),
     staleTime: 15_000,
   });
 }

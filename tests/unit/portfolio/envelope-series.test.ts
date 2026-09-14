@@ -80,10 +80,22 @@ function sell(id: string, assetId: string, jour: string, qty: number, unit: numb
   } as unknown as LedgerTx;
 }
 
-/** Un événement du journal d'enveloppe. */
-function evt(jour: string, accountType: string, compte?: { id: string; envelopeType: string }) {
+/**
+ * Un événement du journal d'enveloppe.
+ *
+ * `createdAt` suit `occurredAt` par défaut : il ne départage que deux
+ * événements du même instant, et aucun cas d'ici n'en construit.
+ */
+function evt(
+  jour: string,
+  accountType: string,
+  compte?: { id: string; envelopeType: string },
+  createdAt?: Date
+) {
+  const occurredAt = new Date(`${jour}T12:00:00.000Z`);
   return {
-    occurredAt: new Date(`${jour}T12:00:00.000Z`),
+    occurredAt,
+    createdAt: createdAt ?? occurredAt,
     accountType,
     securitiesAccountId: compte?.id ?? null,
     envelopeType: compte?.envelopeType ?? null,

@@ -28,22 +28,20 @@ const isSelected = (sel: BankSelection | null, kind: string, id: string) =>
 /**
  * Statut patrimonial d'un produit.
  *
- * Trois états seulement, et le vert est réservé au seul cas positif : un
- * compte qui compte. Un solde nul n'est pas une alerte — c'est une ligne au
- * repos, elle reste grise.
+ * Deux états, et le vert est réservé au seul cas positif : un compte qui
+ * compte. Un solde nul n'est pas une alerte — c'est une ligne au repos, elle
+ * reste grise.
+ *
+ * Une troisième branche testait `countsInNetWorth` sous le titre « Solde à
+ * 0 » : ce champ ne dit plus rien du solde, il dit exactement `!isPro`, que
+ * la branche au-dessus traite déjà. Elle était donc inatteignable, et son
+ * texte faux depuis plus longtemps encore.
  */
 function StatusDot({ product }: { product: BankProduct }) {
   if (product.isPro) {
     return (
       <span className="text-meta" title="Compte professionnel — hors patrimoine personnel">
         Pro
-      </span>
-    );
-  }
-  if (!product.countsInNetWorth) {
-    return (
-      <span className="text-meta" title="Solde à 0 : ignoré du patrimoine net">
-        Hors patrimoine
       </span>
     );
   }

@@ -145,6 +145,38 @@ describe("IBKR Activity Statement", () => {
     );
   });
 
+  it("parses EN thousands separator in Quantity without dividing by 1000 (IMP-02)", () => {
+    const sample = `Statement,Header,Field Name,Field Value
+Statement,Data,BrokerName,Interactive Brokers Ireland Limited
+Statement,Data,Title,Activity Statement
+Trades,Header,DataDiscriminator,Asset Category,Currency,Symbol,Date/Time,Quantity,T. Price,C. Price,Proceeds,Comm/Fee,Basis,Realized P/L,MTM P/L,Code
+Trades,Data,Order,Stocks,USD,IBM,"2025-10-20, 09:30:04","1,000",50,50,-50000,-1,50001,0,0,O
+`;
+    const exp = expandIbkrActivityStatement(sample);
+    expect(exp.tradeCount).toBe(1);
+    const row = exp.csv.rows.find((r) => r.Symbol === "IBM");
+    // Avant le fix : Number("1,000".replace(",", ".")) === 1 (÷1000 silencieux).
+    // Après le fix (parseNumber avec decimalSeparator "dot") : 1000.
+    expect(row?.Quantity).toBe("1000");
+  });
+
+  it("parses EN decimal amount '1,234.5' correctly (IMP-02)", () => {
+    const sample = `Statement,Header,Field Name,Field Value
+Statement,Data,BrokerName,Interactive Brokers Ireland Limited
+Statement,Data,Title,Activity Statement
+Dividends,Header,Currency,Date,Description,Amount
+Dividends,Data,USD,2025-12-10,PYPL(US70450Y1038) Cash Dividend USD 0.14 per Share (Ordinary Dividend),0.7
+Deposits & Withdrawals,Header,Currency,Settle Date,Description,Amount
+Deposits & Withdrawals,Data,EUR,2025-09-02,Electronic Fund Transfer,"1,234.5"
+`;
+    const exp = expandIbkrActivityStatement(sample);
+    // Avant le fix : Number("1,234.5".replace(",", ".")) === NaN → ligne écartée.
+    // Après le fix : parseNumber("1,234.5", "dot") === 1234.5 → ligne conservée.
+    expect(exp.depositCount).toBe(1);
+    const row = exp.csv.rows.find((r) => r["Buy/Sell"] === "DEPOSIT");
+    expect(row?.Proceeds).toBe("1234.5");
+  });
+
   it("imports real download folder CSVs when present", () => {
     const dir = "C:/Users/Pak-M/Downloads/IBKR";
     const files = [

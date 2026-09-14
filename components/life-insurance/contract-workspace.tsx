@@ -250,7 +250,11 @@ function SupportsSection({ view }: { view: ContractView }) {
                 data-testid="av-support-line"
               >
                 <td className="min-w-0 py-[var(--space-2)]">
-                  <div className="truncate text-[var(--foreground)]" title={s.name}>
+                  <div
+                    className="truncate text-[var(--foreground)]"
+                    title={s.name}
+                    aria-label={s.name}
+                  >
                     {s.name}
                   </div>
                   <div className="text-meta">
@@ -604,6 +608,7 @@ export function ContractWorkspace({
               data-active={section === s.id ? "true" : "false"}
               data-backing={s.backing}
               title={s.hint}
+              aria-label={`${s.label} — ${s.hint}`}
               data-testid={`av-workspace-tab-${s.id}`}
               onClick={() => setSection(s.id)}
             >

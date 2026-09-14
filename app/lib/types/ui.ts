@@ -1,4 +1,5 @@
 import type { AccountType } from "@/app/lib/constants";
+import type { PatrimonyMetricsJson } from "@/app/lib/portfolio/patrimony-metrics";
 import type {
   BaseAmount,
   EurAmount,
@@ -69,6 +70,16 @@ export type Holding = {
   priceSource: string | null;
   priceStatus: string | null;
   lastUpdatedAt: string | null;
+  /**
+   * Jour civil Paris de la dernière clôture lue par getDailyNav (Vague2 D4).
+   * Watchlist et dernier point de courbe partagent cette date.
+   */
+  closeDay?: string | null;
+  /**
+   * Collecte de cette clôture (AssetDailyClose.fetchedAt ou PriceQuote).
+   * Badge « cours daté » si > 24 h (Vague2 D11).
+   */
+  fetchedAt?: string | null;
   acquisitionFeesEur?: EurAmount;
   acquisitionFeesBase?: BaseAmount;
   passiveIncomeEur?: EurAmount;
@@ -269,8 +280,23 @@ export type HistoryPoint = {
   /** `grossAssets - liabilities`. */
   netWorthBase?: number;
   liabilitiesBase?: number;
-  /** Capital externe entré (net) ce jour-là — jamais compté en performance. */
+  /**
+   * Capital externe entré (net) ce jour-là — jamais compté en performance.
+   * Sert l'attribution Marché / Flux, **pas** les pastilles de la courbe.
+   */
   externalFlowsBase?: number;
+  /**
+   * Flux du journal coté (ACTIONS + OBLIGATIONS + CRYPTO) ce jour-là.
+   *
+   * Les pastilles de la courbe Financier lisent ce champ. Un achat immobilier
+   * gonfle `externalFlowsBase` sans y figurer.
+   */
+  transactionFlowBase?: number;
+  /**
+   * Flux qui touchent l'agrégat Financier (listed + cash) — Marché/Flux
+   * du hero Financier.
+   */
+  financierFlowsBase?: number;
   /** Résultat du jour, flux neutralisés. */
   investmentPerformanceBase?: number;
 
@@ -310,6 +336,10 @@ export type HistoryPoint = {
   performanceByAssetClassBase?: Record<string, number>;
   securitiesBase?: number;
   cryptoBase?: number;
+  /** Poche T-01 `listed` — ACTIONS+OBLIGATIONS+CRYPTO hors IMMO/AV. */
+  listedBase?: number;
+  /** Agrégat T-01 `financier`. */
+  financierBase?: number;
   realEstateBase?: number;
   lifeInsuranceBase?: number;
   alternativesBase?: number;
@@ -328,6 +358,8 @@ export type HoldingsResponse = {
   holdings: Holding[];
   platforms: PlatformRow[];
   summary: Record<string, string | number>;
+  /** Contrat T-01 — Hero / KPI / allocation lisent cet objet, pas un résidu. */
+  metrics?: PatrimonyMetricsJson;
   allocation: PortfolioAllocation;
   baseCurrency: string;
 };

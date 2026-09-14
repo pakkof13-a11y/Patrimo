@@ -101,11 +101,16 @@ export async function GET() {
                 id: true,
                 name: true,
                 remainingAmount: true,
+                interestRate: true,
                 monthlyPayment: true,
                 paymentDay: true,
                 startDate: true,
                 endDate: true,
                 lastPaymentAppliedAt: true,
+                // Borne de repli quand `lastPaymentAppliedAt` manque — sans
+                // elle, la projection repartirait de `startDate` (voir
+                // `effectivePaymentBaseline`).
+                updatedAt: true,
               },
             },
           },

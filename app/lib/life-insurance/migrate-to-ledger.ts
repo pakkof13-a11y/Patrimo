@@ -36,12 +36,41 @@
  * valorisation du jour de la migration, pas de son versement d'origine — cette
  * information n'a jamais existé dans la table, la migration ne peut pas
  * l'inventer.
+ *
+ * ## Date de la reprise : aujourd'hui, au taux du jour
+ *
+ * La reprise était datée de l'**ouverture du contrat** et convertie au taux de
+ * ce jour-là (`fxRateToEurOnDate`). Le montant repris, lui, est la
+ * valorisation d'aujourd'hui : le prix de revient sortait donc à un taux, la
+ * valeur de marché à un autre, et l'écart des deux s'affichait comme une
+ * plus-value. Mesuré sur un support de 10 000 USD repris au taux du
+ * 02/03/2015 : +362,46 € de plus-value latente le jour même de la reprise,
+ * sans qu'aucun euro ait bougé.
+ *
+ * Une valeur du jour se convertit au taux du jour. La transaction de reprise
+ * est donc datée de l'instant courant — qui appartient par construction au
+ * jour civil Europe/Paris d'aujourd'hui, cf. `app/lib/dates/paris.ts` — et
+ * convertie par `fxRateToEur(devise)`, le même taux que celui dont
+ * `getHoldings` se sert pour valoriser la position. Coût en euros et valeur en
+ * euros partent donc du même produit `montant × taux` : la plus-value latente
+ * d'un support repris vaut zéro au centime près (résidu mesuré : 2,6 × 10⁻⁷ €
+ * sur 10 000 USD, l'arrondi du taux à dix décimales).
+ *
+ * Ce que la migration ne fait plus : inventer une antériorité. Le journal ne
+ * connaît le support que depuis sa reprise, et le dit. L'antériorité fiscale,
+ * elle, reste portée par `LifeInsurance.openDate`, qui ne bouge pas.
+ *
+ * Devise dont aucune source ne fonde le taux : rien n'est écrit, la ligne de
+ * table survit, l'erreur nomme le support. Une relance reprend le support si
+ * le taux redevient disponible.
  */
 
 import { Prisma } from "../prisma-client/client";
 import { prisma } from "../prisma";
 import { d, zero } from "../money/decimal";
 import { createTransaction } from "../transactions/service";
+import { FxRateUnknownError, fxRateToEur } from "../market/fx";
+import { assetClassForKind } from "./constants";
 import {
   euroFundAlreadyTaken,
   isEuroFundName,
@@ -54,15 +83,28 @@ import {
 export const LIFE_INSURANCE_PLATFORM_TYPE = "ASSURANCE_VIE";
 
 /**
- * Classe d'actif d'un support migré.
+ * Classe d'actif d'un support repris, **déduite de son `kind`**.
  *
  * Un fonds euro est adossé à de l'obligataire ; toute autre unité de compte est
  * inconnue à ce stade et rangée en « AUTRE » plutôt que classée à tort en
  * actions. L'utilisateur reclasse ensuite depuis Positions, ce que l'UI permet
- * déjà.
+ * déjà. Cette règle est celle de `assetClassForKind`, et elle n'est pas
+ * réécrite ici.
+ *
+ * Elle l'était : une expression régulière propre, plus étroite que
+ * `isEuroFundName`. Un support « Sécurité Euro » repartait donc avec
+ * `kind = "FONDS_EURO"` et `assetClass = "AUTRE"` — le fonds à capital garanti
+ * atterrissait dans « Autre » dans la répartition par classe, et les positions
+ * dépourvues de fiche (celles reprises avant que la migration n'en écrive une)
+ * se relisaient ensuite en UC par `kindFromAssetClass`, capital annoncé à
+ * risque là où l'assureur le garantit. Deux règles sur la même question
+ * donnaient deux réponses.
+ *
+ * Une seule règle décide désormais : `isEuroFundName` pour le `kind`, et la
+ * classe s'en déduit.
  */
 export function assetClassForSupport(name: string): string {
-  return /fonds\s*(en\s*)?euros?/i.test(name) ? "OBLIGATIONS" : "AUTRE";
+  return assetClassForKind(isEuroFundName(name) ? "FONDS_EURO" : "UC");
 }
 
 export type ContractAudit = {
@@ -108,7 +150,13 @@ type LoadedContract = {
   openDate: Date | null;
   cashEuro: Prisma.Decimal;
   currency: string;
-  products: Array<{ id: string; name: string; currentValue: Prisma.Decimal }>;
+  products: Array<{
+    id: string;
+    name: string;
+    currentValue: Prisma.Decimal;
+    /** Devise de `currentValue` — le modèle la porte, elle était perdue ici. */
+    currency: string;
+  }>;
 };
 
 type Loaded = {
@@ -193,6 +241,7 @@ async function loadContracts(userId: string): Promise<Loaded> {
         id: p.id,
         name: p.name,
         currentValue: p.currentValue,
+        currency: p.currency,
       })),
     })),
   };
@@ -228,6 +277,7 @@ function reconcileAllContracts(loaded: Loaded) {
   const remaining = [...loaded.ledger];
   return loaded.contracts.map((c) => {
     const tableSupports: TableSupport[] = c.products.map((p) => ({
+      currency: p.currency,
       id: p.id,
       name: p.name,
       valueEur: p.currentValue.toString(),
@@ -346,6 +396,30 @@ export async function migrateLifeInsuranceToLedger(
   const loaded = await loadContracts(userId);
   const perContract = reconcileAllContracts(loaded);
 
+  /*
+    Instant de la reprise : maintenant, et le même pour tout le passage.
+
+    `occurredAt` est un instant, pas une clé de jour. Deux instants
+    appartiennent au jour civil parisien d'aujourd'hui — minuit Paris et
+    l'instant courant — et c'est le second qui est écrit, pour trois raisons :
+
+    1. minuit heure de Paris vaut 22 h ou 23 h UTC **la veille**. Tout code qui
+       tire un jour d'une date par `toISOString().slice(0, 10)` — et il y en a,
+       jusque dans `resolveFx` — lirait donc la reprise comme datée d'hier ;
+    2. un versement saisi ce matin à 9 h porte cet horaire. Une reprise estampée
+       à minuit se rangerait avant lui, affirmant qu'elle l'a précédé ;
+    3. `support-service.ts` répond déjà `?? new Date()` à la même question, et
+       refuse de rétrodater un versement à l'ouverture du contrat. Deux règles
+       pour une question, c'est exactement ce que ce fichier corrige ailleurs.
+
+    Rien n'est perdu côté jour civil : `parisDayKey(now)` est aujourd'hui par
+    construction, aucune conversion n'est nécessaire pour l'obtenir.
+
+    Un seul instant pour tous les supports du passage : la reprise est un
+    événement, pas une série d'événements espacés du temps des appels réseau.
+  */
+  const migratedAt = new Date();
+
   for (const { contract: c, duplicates, tableOnly } of perContract) {
     // Le fonds euro du contrat devient un support comme un autre : sans cela,
     // il resterait dans un champ que le patrimoine ne lit plus.
@@ -376,11 +450,71 @@ export async function migrateLifeInsuranceToLedger(
         id: `cash:${c.id}`,
         name: `Fonds euro ${c.insurer}`.slice(0, 120),
         valueEur: cash.toString(),
+        // Le fonds euro du contrat, lui, est bien dans la devise du contrat.
+        currency: c.currency,
       });
     }
 
+    /*
+      Le taux de chaque support, résolu **avant** le branchement à blanc.
+
+      Un support dont le taux n'est pas démontré ne sera pas repris. Compter
+      `pending.length` annonçait donc comme créables des positions que la passe
+      réelle allait refuser, et c'est précisément ce nombre que l'opérateur lit
+      avant de lancer `--apply`. La résolution est une lecture — aucune écriture
+      n'a lieu, et un support en euros ne fait même pas d'appel sortant — donc
+      elle a sa place des deux côtés du branchement.
+
+      Un seul endroit résout le taux : la simulation et la migration ne peuvent
+      pas en donner deux réponses différentes.
+    */
+    const repris: Array<{
+      support: TableSupport;
+      fxRateToEur: string;
+    }> = [];
+    for (const support of pending) {
+      /*
+        Jamais 1 par défaut, et jamais le taux d'une date passée.
+
+        La migration écrivait `currency: c.currency` et `fxRateToEur: "1"`. Or
+        `resolveFx` ne force le taux historique que sur les revenus : un ACHAT
+        en devise avec un taux fourni à 1 le garde. Un produit à 10 000 USD
+        devenait donc une position de 10 000 €, et l'inverse — un produit en
+        euros dans un contrat en dollars — se voyait appliquer un change à un
+        montant qui n'en avait pas besoin.
+
+        Puis le taux est venu de `fxRateToEurOnDate(devise, openDate)`, ce qui
+        n'a corrigé qu'à moitié : un taux d'il y a dix ans appliqué à une
+        valorisation d'aujourd'hui. Le taux est désormais celui du jour, seul
+        cohérent avec le montant qu'il convertit (voir l'en-tête du fichier).
+
+        Taux non fondé : on renonce à ce support et on le dit. Inventer une
+        parité écrirait un `grossAmountEur` que rien ne distinguerait plus d'un
+        montant constaté — la raison pour laquelle `resolveFx` refuse déjà
+        d'écrire dans ce cas.
+      */
+      let taux: string;
+      try {
+        taux = await fxRateToEur(support.currency);
+      } catch (e) {
+        result.errors.push(
+          `${c.insurer} / ${support.name} : taux ${support.currency}→EUR ` +
+            `indisponible (${
+              e instanceof FxRateUnknownError
+                ? "aucune source ne fonde cette devise"
+                : e instanceof Error
+                  ? e.message
+                  : "échec"
+            }), support non repris — ligne conservée, relancez la migration ` +
+            `quand le taux sera disponible`
+        );
+        continue;
+      }
+      repris.push({ support, fxRateToEur: taux });
+    }
+
     if (dryRun) {
-      result.created += pending.length;
+      result.created += repris.length;
       result.duplicatesRemoved += duplicates.length;
       continue;
     }
@@ -400,15 +534,36 @@ export async function migrateLifeInsuranceToLedger(
     // montant sans qu'aucune position ne le porte : le seul cas de perte sèche
     // que la migration pouvait produire.
     let cashMigrated = false;
-    for (const support of pending) {
+    for (const { support, fxRateToEur } of repris) {
       const isCash = support.id.startsWith("cash:");
       try {
         await createSupportPosition(userId, platformId, {
           name: support.name,
           valueEur: support.valueEur,
-          currency: c.currency,
-          // L'ouverture du contrat est la seule date connue ; à défaut, aujourd'hui.
-          occurredAt: c.openDate ?? new Date(),
+          currency: support.currency,
+          fxRateToEur,
+          occurredAt: migratedAt,
+          /*
+            La date d'acquisition, elle, peut être celle du contrat.
+
+            Elle décrit depuis quand la position est détenue ; l'écriture de
+            reprise décrit quand le journal l'a apprise. Les confondre
+            afficherait un support souscrit en 2015 comme acquis ce matin.
+
+            Ce qui interdit de rétrodater la **transaction** ne s'applique pas
+            ici : `Asset.acquisitionDate` ne porte aucun montant, n'entre dans
+            aucun calcul de prix de revient et n'alimente aucune série
+            historique — c'est un attribut descriptif, nullable, qu'aucun total
+            ne lit. Elle peut donc porter la date la plus vraie que la table
+            connaisse sans fabriquer d'historique.
+
+            Bornée à l'instant de reprise : une ouverture postérieure à
+            aujourd'hui est une donnée fausse, pas une acquisition future.
+          */
+          acquisitionDate:
+            c.openDate && c.openDate.getTime() <= migratedAt.getTime()
+              ? c.openDate
+              : migratedAt,
           // Rattachement au contrat dès la reprise : sans lui, la position
           // arriverait « sans contrat » dans l'onglet de saisie et l'encours du
           // contrat resterait à zéro.
@@ -474,8 +629,13 @@ async function createSupportPosition(
   input: {
     name: string;
     valueEur: string;
+    /** Taux 1 unité `currency` → EUR du jour, résolu par l'appelant. */
+    fxRateToEur: string;
     currency: string;
+    /** Instant de l'écriture de reprise — aujourd'hui. */
     occurredAt: Date;
+    /** Depuis quand la position est détenue — l'ouverture du contrat si connue. */
+    acquisitionDate: Date;
     lifeInsuranceId: string;
     kind: string;
   }
@@ -492,7 +652,7 @@ async function createSupportPosition(
         // Pas de cotation publique pour une UC : la valeur est saisie.
         priceProvider: "MANUAL",
         manualPrice: new Prisma.Decimal(input.valueEur),
-        acquisitionDate: input.occurredAt,
+        acquisitionDate: input.acquisitionDate,
       },
       select: { id: true },
     });
@@ -515,7 +675,7 @@ async function createSupportPosition(
         unitPrice: input.valueEur,
         fees: "0",
         currency: input.currency || "EUR",
-        fxRateToEur: "1",
+        fxRateToEur: input.fxRateToEur,
         occurredAt: input.occurredAt.toISOString(),
         allowNegativeCash: true,
         notes: "[av:migration] Reprise du support depuis l'onglet Assurance-vie",

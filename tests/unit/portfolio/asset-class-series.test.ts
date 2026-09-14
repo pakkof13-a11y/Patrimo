@@ -451,15 +451,12 @@ describe("§10 — le statut n'est pas dilué par la ventilation", () => {
     expect(somme).toBeCloseTo(p.grossAssets, 6);
   });
 
-  it("une clôture reportée reste exacte sur un point quotidien", () => {
+  it("une clôture reportée est ESTIMATED (LOCF), pas EXACT", () => {
     /*
-      Convention du moteur, antérieure à ce chantier et délibérée : une clôture
-      quotidienne **est** la valeur exacte d'une journée. Sur un point de
-      14 h 37 elle ne décrirait pas l'instant demandé et vaudrait report ; sur
-      un point quotidien, elle est l'observation.
-
-      La ventilation par classe hérite de cette convention sans la modifier.
-      La valeur reportée reste identique à l'observation — jamais interpolée.
+      Cotés / crypto : qty × close du jour. Sans barre du jour (week-end,
+      férié, trou), on reporte la dernière clôture — même montant, tag
+      ESTIMATED / MARKET_CARRIED. Ce n'est plus « exact » : l'observation
+      n'est pas de ce jour-là.
     */
     const e = new PortfolioValuationEngine(
       inputs({
@@ -473,7 +470,9 @@ describe("§10 — le statut n'est pas dilué par la ventilation", () => {
     const s = e.buildSeries("2024-01-01", "2024-01-03");
 
     expect(at(s, "2024-01-03").byAssetClass.ACTIONS).toBeCloseTo(1_000, 6);
-    expect(at(s, "2024-01-03").status).toBe("EXACT");
+    expect(at(s, "2024-01-03").status).toBe("ESTIMATED");
+    expect(at(s, "2024-01-03").priceOrigins).toContain("MARKET_CARRIED");
+    expect(at(s, "2024-01-01").status).toBe("EXACT");
   });
 });
 

@@ -14,24 +14,43 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { PrismaClient } from "@/app/lib/prisma-client/client";
 import {
   envelopeOfEvent,
   familyOfAccount,
+  resolveEnvelopeAt,
   resolveEnvelopeFromEvents,
   stateAfterAttachment,
   type ResolvedEnvelope,
 } from "@/app/lib/securities/envelope-history";
 
+/**
+ * Un faux lecteur n'implémente que `findMany` — le reste du délégué Prisma
+ * (`create`, `update`…) n'a pas de sens pour une lecture pure. Le cast rend
+ * ce choix explicite plutôt que de faire mine d'implémenter les 30 méthodes
+ * du délégué réel.
+ */
+type FakeReader = Pick<PrismaClient, "assetEnvelopeEvent">;
+
 const J = (iso: string) => new Date(`${iso}T12:00:00.000Z`);
 
-/** Un événement du journal. */
+/**
+ * Un événement du journal.
+ *
+ * `createdAt` — désormais requis par le type de la fonction pure — vaut par
+ * défaut la date métier : les tests qui ne s'intéressent pas au départage
+ * entre deux événements simultanés n'ont pas à s'en soucier. `ecritLe` ne sert
+ * qu'aux tests qui vérifient explicitement ce départage.
+ */
 function evt(
   jour: string,
   accountType: string,
-  compte?: { id: string; envelopeType: string }
+  compte?: { id: string; envelopeType: string },
+  ecritLe?: string
 ) {
   return {
     occurredAt: J(jour),
+    createdAt: ecritLe ? J(ecritLe) : J(jour),
     accountType,
     securitiesAccountId: compte?.id ?? null,
     envelopeType: compte?.envelopeType ?? null,
@@ -271,6 +290,152 @@ describe("aides d'écriture", () => {
         securitiesAccountId: "acc-pme",
         envelopeType: "PEA_PME",
       })
+    ).toBe("PEA_PME");
+  });
+});
+
+describe("resolveEnvelopeAt — périmètre de tenant", () => {
+  /**
+   * Faux lecteur Prisma : reproduit `where` + `orderBy` + `take` en mémoire,
+   * assez fidèlement pour vérifier que la fonction filtre bien par `userId` et
+   * départage comme la base le ferait — sans base réelle.
+   */
+  type Row = {
+    assetId: string;
+    userId: string;
+    occurredAt: Date;
+    createdAt: Date;
+    accountType: string;
+    securitiesAccountId: string | null;
+    envelopeType: string | null;
+  };
+
+  function fakeReader(rows: Row[]) {
+    return {
+      assetEnvelopeEvent: {
+        findMany: async (args: {
+          where: { assetId: string; userId: string; occurredAt: { lte: Date } };
+          orderBy: unknown;
+          take: number;
+        }) => {
+          const { assetId, userId, occurredAt } = args.where;
+          const filtres = rows
+            .filter(
+              (r) =>
+                r.assetId === assetId &&
+                r.userId === userId &&
+                r.occurredAt.getTime() <= occurredAt.lte.getTime()
+            )
+            .sort((a, b) => {
+              const parOccurredAt = b.occurredAt.getTime() - a.occurredAt.getTime();
+              return parOccurredAt !== 0
+                ? parOccurredAt
+                : b.createdAt.getTime() - a.createdAt.getTime();
+            });
+          return filtres.slice(0, args.take);
+        },
+      },
+    } as unknown as FakeReader;
+  }
+
+  const ROW: Row = {
+    assetId: "asset-1",
+    userId: "user-A",
+    occurredAt: J("2024-01-10"),
+    createdAt: J("2024-01-10"),
+    accountType: "PEA",
+    securitiesAccountId: "acc-pea",
+    envelopeType: "PEA",
+  };
+
+  it("rend l'enveloppe au propriétaire de la ligne", async () => {
+    const reader = fakeReader([ROW]);
+    expect(
+      await resolveEnvelopeAt(reader, "asset-1", "user-A", J("2024-06-01"))
+    ).toBe("PEA");
+  });
+
+  it("un assetId d'un autre utilisateur ne rend rien — UNKNOWN, pas une fuite", () => {
+    /*
+      La régression que ce test verrouille : sans filtre `userId` dans la
+      requête, un `assetId` deviné ou fuité par un autre canal rendrait
+      l'enveloppe d'une ligne qui n'appartient pas à l'appelant. Le faux
+      lecteur applique le même filtre que la vraie requête Prisma — c'est donc
+      la fonction elle-même qui est mise en défaut si le filtre disparaît.
+    */
+    const reader = fakeReader([ROW]);
+    return resolveEnvelopeAt(reader, "asset-1", "user-B", J("2024-06-01")).then(
+      (r) => expect(r).toBe("UNKNOWN")
+    );
+  });
+
+  it("un mauvais assetId pour le bon utilisateur ne rend rien non plus", async () => {
+    const reader = fakeReader([ROW]);
+    expect(
+      await resolveEnvelopeAt(reader, "asset-2", "user-A", J("2024-06-01"))
+    ).toBe("UNKNOWN");
+  });
+});
+
+describe("départage à occurredAt égal — même poche, quel que soit l'appelant", () => {
+  /*
+    Les `AssetEnvelopeEvent` du seed ont été créés en lot, donc à des instants
+    `occurredAt` voisins ou identiques. Sans départage explicite sur
+    `createdAt`, `resolveEnvelopeFromEvents` retenait le dernier élément
+    rencontré dans le tableau — donc l'ordre de la requête qui l'a produit,
+    que Postgres ne garantit pas sans clé de tri secondaire.
+  */
+  const MEME_INSTANT = J("2025-06-15");
+
+  // Deux événements au même `occurredAt`, écrits à quelques secondes d'écart.
+  const ecritEnPremier = evt("2025-06-15", "PEA", PEA, "2025-06-15");
+  const ecritEnSecond = {
+    ...evt("2025-06-15", "PEA", PEA_PME),
+    createdAt: new Date(MEME_INSTANT.getTime() + 5_000),
+  };
+
+  it("la fonction pure départage sur createdAt, pas sur la position dans le tableau", () => {
+    const dansLOrdre = [ecritEnPremier, ecritEnSecond];
+    const enDesordre = [ecritEnSecond, ecritEnPremier];
+
+    // Le plus récemment écrit (`ecritEnSecond`, PEA-PME) doit l'emporter dans
+    // les deux sens de lecture du tableau.
+    expect(resolveEnvelopeFromEvents(dansLOrdre, MEME_INSTANT)).toBe("PEA_PME");
+    expect(resolveEnvelopeFromEvents(enDesordre, MEME_INSTANT)).toBe("PEA_PME");
+  });
+
+  it("resolveEnvelopeAt départage pareil, en lisant directement la base", async () => {
+    const rows = [
+      { ...ecritEnPremier, assetId: "asset-1", userId: "user-A" },
+      { ...ecritEnSecond, assetId: "asset-1", userId: "user-A" },
+    ];
+    const reader = {
+      assetEnvelopeEvent: {
+        findMany: async (args: {
+          where: { assetId: string; userId: string; occurredAt: { lte: Date } };
+          take: number;
+        }) => {
+          const { assetId, userId, occurredAt } = args.where;
+          return rows
+            .filter(
+              (r) =>
+                r.assetId === assetId &&
+                r.userId === userId &&
+                r.occurredAt.getTime() <= occurredAt.lte.getTime()
+            )
+            .sort((a, b) => {
+              const parOccurredAt = b.occurredAt.getTime() - a.occurredAt.getTime();
+              return parOccurredAt !== 0
+                ? parOccurredAt
+                : b.createdAt.getTime() - a.createdAt.getTime();
+            })
+            .slice(0, args.take);
+        },
+      },
+    } as unknown as FakeReader;
+
+    expect(
+      await resolveEnvelopeAt(reader, "asset-1", "user-A", MEME_INSTANT)
     ).toBe("PEA_PME");
   });
 });

@@ -26,7 +26,13 @@ import {
 const SPIRICA = "contrat-spirica";
 const GENERALI = "contrat-generali";
 
-const t = (name: string) => ({ id: `t-${name}`, name, valueEur: "15200" });
+/** Un support de table : la devise est l'euro sauf mention contraire. */
+const t = (name: string) => ({
+  id: `t-${name}`,
+  name,
+  valueEur: "15200",
+  currency: "EUR",
+});
 
 describe("euroFundAlreadyTaken", () => {
   it("A. aucun fonds euro nulle part : la reprise doit avoir lieu", () => {
@@ -158,12 +164,12 @@ describe("le compte de démonstration, reconstitué", () => {
     {
       id: GENERALI,
       cash: 5000,
-      produits: [{ id: "p1", name: "ETF World tracker", valueEur: "9200" }],
+      produits: [{ id: "p1", name: "ETF World tracker", valueEur: "9200", currency: "EUR" }],
     },
     {
       id: SPIRICA,
       cash: 15200,
-      produits: [{ id: "p2", name: "UC Carmignac Patrimoine", valueEur: "8400" }],
+      produits: [{ id: "p2", name: "UC Carmignac Patrimoine", valueEur: "8400", currency: "EUR" }],
     },
   ];
 

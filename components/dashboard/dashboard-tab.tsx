@@ -15,7 +15,13 @@ import {
   WatchlistCard,
 } from "@/components/dashboard/terminal-panels";
 import type { DashboardNavTarget } from "@/components/dashboard/dashboard-quick-actions";
-import { getAssetClassLabel, cn } from "@/app/lib/utils";
+import { cn, formatCurrency } from "@/app/lib/utils";
+import {
+  allocationSliceLabel,
+  allocationSlicesForScope,
+} from "@/app/lib/portfolio/allocation-scope";
+import { allocatePercents } from "@/app/lib/ui/allocate-percents";
+import { titresValueAt } from "@/app/lib/portfolio/pocket-series";
 import type {
   Holding,
   HistoryPoint,
@@ -27,9 +33,9 @@ import {
   type DashboardMaturity,
   type DashboardMaturityInput,
 } from "@/app/lib/dashboard/maturity";
+import { resolveDashboardContentVisibility } from "@/components/dashboard/dashboard-content-visibility";
 import {
   isEvolutionRangeEnabled,
-  windowForRange,
   type EvolutionRange,
 } from "@/app/lib/portfolio/evolution-aggregate";
 import {
@@ -37,24 +43,109 @@ import {
   loadEvolutionPrefs,
   saveEvolutionRange,
 } from "@/app/lib/portfolio/evolution-prefs";
+import { seriesChangeAbs, seriesChangePct } from "@/app/lib/portfolio/kpi-series";
+import { useDailyNavQuery } from "@/app/hooks/use-portfolio-queries";
+import { endOfParisDay } from "@/app/lib/dates/paris";
 import {
-  kpiSeries,
-  latentPnlAt,
-  listedValueAt,
-  realizedPlusIncomeAt,
-  seriesChangeAbs,
-  seriesChangePct,
-} from "@/app/lib/portfolio/kpi-series";
+  historyFloorDay,
+  lastCloseDay,
+} from "@/app/lib/portfolio/historical/history-window";
+import {
+  dailyNavQueryWindow,
+  dailyNavToHistoryPoints,
+  servedDailyNavFrom,
+  windowDailyNav,
+  type HeroNavScope,
+} from "@/app/lib/portfolio/daily-nav-view";
+import type { DailyNavPoint } from "@/app/lib/portfolio/historical/get-daily-nav";
+import { heroPeriodLabel } from "@/app/lib/portfolio/hero-range";
+import { quoteStaleBadgeLabel } from "@/app/lib/ui/quote-staleness";
+import { evolutionRangePeriodLabel } from "@/app/lib/ui/evolution-ranges";
+
+/**
+ * Série dense sur une fenêtre `getDailyNav`, ou rien.
+ *
+ * Même règle que `kpiSeries` (UNKNOWN ≠ ZERO), adaptée à `DailyNavPoint` —
+ * `titresValueAt` et le croisement classe × enveloppe rendent `null` plutôt
+ * qu'une valeur inventée, et un seul point manquant invalide toute la série
+ * plutôt que de la combler.
+ */
+function denseNavSeries(
+  points: DailyNavPoint[],
+  pick: (p: DailyNavPoint) => number | null | undefined
+): number[] | undefined {
+  return knownTailSeries(points, pick)?.values;
+}
+
+/**
+ * La plus longue fin de série continûment connue, avec ses dates.
+ *
+ * Rendre `undefined` au premier point manquant était juste — on ne comble pas
+ * une absence — mais trop absolu : mesuré sur « Tout », 825 des 1 876 points
+ * portent une enveloppe titres inconnue, parce que le journal d'enveloppes ne
+ * remonte qu'à l'acquisition de chaque ligne. Toute la courbe Titres
+ * disparaissait donc à cause de ses six premières années, alors que les
+ * dernières sont parfaitement connues.
+ *
+ * On repart donc après le **dernier** point inconnu, jamais avant : un trou au
+ * milieu coupe la série plutôt que d'être enjambé. Ce qui est tracé est
+ * intégralement observé, et ce qui ne l'est pas n'est simplement pas tracé —
+ * la courbe est plus courte, pas inventée.
+ *
+ * Les dates suivent les valeurs : une série tronquée sous l'axe temporel de
+ * ses voisines afficherait ses paliers aux mauvaises dates.
+ */
+function knownTailSeries(
+  points: DailyNavPoint[],
+  pick: (p: DailyNavPoint) => number | null | undefined
+): { values: number[]; dates: string[] } | undefined {
+  let debut = 0;
+  for (let i = 0; i < points.length; i++) {
+    const v = pick(points[i]!);
+    if (v == null || !Number.isFinite(v)) debut = i + 1;
+  }
+  const utiles = points.slice(debut);
+  if (utiles.length < 2) return undefined;
+  return {
+    values: utiles.map((p) => pick(p) as number),
+    dates: utiles.map((p) => endOfParisDay(p.day).toISOString()),
+  };
+}
+
+/**
+ * Le libellé de période affiché sous chaque variation du bandeau KPI (et dans
+ * son panneau de détail) — extrait pour rester testable sans rendre le
+ * tableau de bord.
+ *
+ * « Tout » n'est plus « depuis l'origine » depuis le cap de six ans
+ * (`MAX_HISTORY_YEARS`) : `evolutionRangePeriodLabel("all")` répond
+ * invariablement cette phrase, devenue fausse dès que l'historique réel
+ * dépasse le cap. Cette fonction reprend alors la borne **servie**
+ * (`servedNavFrom`) — la même que celle déjà lue par la tuile P&L — plutôt
+ * que d'affirmer une origine que l'application ne sert plus. Sur les sept
+ * autres périodes, la formule ne dépend pas de la profondeur d'historique et
+ * `evolutionRangePeriodLabel` reste exacte.
+ *
+ * Tant que `servedNavFrom` n'est pas encore posé (chargement, ou requête en
+ * erreur), rend `""` — jamais « depuis l'origine » qui céderait ensuite à
+ * « depuis octobre 2022 » une fois la réponse arrivée.
+ */
+export function kpiPeriodLabelFor(
+  range: EvolutionRange,
+  servedNavFrom: string | undefined
+): string {
+  return range === "all"
+    ? heroPeriodLabel(range, servedNavFrom)
+    : evolutionRangePeriodLabel(range);
+}
+
+/** États basculables de la tuile P&L — cf. AGENTS.md D19 P&L. */
+type PnlTileMode = "latent" | "realized";
 
 const emptySubscribe = () => () => undefined;
 
 function useIsClient() {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
-}
-
-function round2(n: number): number {
-  if (!Number.isFinite(n)) return 0;
-  return Math.round(n * 100) / 100;
 }
 
 function num(v: unknown): number {
@@ -145,13 +236,40 @@ export function DashboardTab({
   }
   const displayAllocation = stableAllocation ?? allocation;
 
+  const [navScope, setNavScope] = useState<HeroNavScope>("net");
+  /**
+   * État de la tuile P&L — Latent par défaut. Ni l'un ni l'autre n'est
+   * persisté : c'est une lecture ponctuelle du même écran, pas une
+   * préférence durable comme la période ou le scope Net/Brut.
+   */
+  const [pnlMode, setPnlMode] = useState<PnlTileMode>("latent");
+
+  /*
+    Les valeurs brutes, sans `round2`.
+
+    Arrondir ici avant que Hamilton ne répartisse les pourcentages faisait
+    somner 100,1 % : chaque part était déjà écornée, puis `formatPct` arrondissait
+    une seconde fois. `AllocationCard` applique `allocatePercents` sur ces
+    montants tels quels.
+
+    Le camembert lit le même périmètre que la carte active : Financier
+    n'inclut pas l'immobilier, Brut/Net le portent, Net le dit « hors passifs ».
+  */
   const classChart = useMemo(
     () =>
-      displayAllocation?.byClass.map((x) => ({
-        name: getAssetClassLabel(x.name),
-        value: round2(num(x.value)),
-      })) ?? [],
-    [displayAllocation?.byClass]
+      allocationSlicesForScope(navScope, {
+        byClass: displayAllocation?.byClass ?? [],
+        holdings,
+        cashInvestissement: num(
+          summary?.cashInvestissementBase ?? summary?.cashInvestissementEur
+        ),
+        fondsEuro: num(summary?.fondsEuroBase ?? summary?.fondsEuroEur),
+        esLiquid: num(summary?.esLiquidBase ?? summary?.esLiquidEur),
+      }).map((x) => ({
+        name: allocationSliceLabel(x.name),
+        value: x.value,
+      })),
+    [displayAllocation?.byClass, holdings, navScope, summary]
   );
 
   const [stableHistory, setStableHistory] = useState<HistoryPoint[]>(history);
@@ -179,6 +297,14 @@ export function DashboardTab({
    *
    * La préférence enregistrée reste celle du panneau (`evolutionPrefs.v5`) :
    * partager l'état ne devait pas créer une seconde période mémorisée.
+   *
+   * Le hero porte lui aussi les huit chips (`RANGES`, définies dans
+   * `portfolio-evolution-panel.tsx` et réutilisées ici pour éviter deux
+   * listes divergentes) : un clic dans la carte de tête appelle le même
+   * `changeRange` que le panneau du bas, donc écrit le même état et la même
+   * préférence — deux endroits pour changer une seule période, jamais deux
+   * périodes. Les fenêtres, elles, s'ouvrent toutes depuis
+   * `heroWindowReference` — la dernière valorisation, pas l'horloge.
    */
   const isClient = useIsClient();
   const [range, setRange] = useState<EvolutionRange>(
@@ -205,7 +331,30 @@ export function DashboardTab({
     historique encore court, pas un choix de l'utilisateur, et l'écraser lui
     ferait perdre sa période dès que la courbe s'allonge.
   */
-  const firstHistoryDate = stableHistory[0]?.date ?? null;
+  /*
+    Les bornes viennent du cap, plus d'une série que la page n'attend plus.
+
+    `GET /api/portfolio` ne calcule plus d'historique : il tombait en 504 avant
+    de le rendre, et les chips restaient grisés non parce que la profondeur
+    manquait, mais parce que la réponse n'arrivait jamais. Lire `history[0]`
+    pour décider ce qui est cliquable revenait à faire dépendre l'écran d'un
+    appel dont il n'a plus besoin.
+
+    La profondeur lisible est une constante — `MAX_HISTORY_YEARS`, six ans,
+    la même qui borne le moteur. Un chip est donc activé parce que la période
+    tient sous le cap, jamais parce qu'un tableau est arrivé rempli.
+
+    Le jour de référence est aujourd'hui. Il ne peut pas être le dernier point
+    servi : c'est lui qui compose la fenêtre demandée à `daily-nav`, dont la
+    réponse fournirait ce point — la boucle se refermerait sur elle-même. Et
+    c'est la fin de la fenêtre, pas son début : elle ne dépend d'aucune
+    profondeur d'historique.
+  */
+  const floorDay = useMemo(() => historyFloorDay(), []);
+  const firstHistoryDate = useMemo(
+    () => endOfParisDay(floorDay).toISOString(),
+    [floorDay]
+  );
   if (
     rangeHydrated &&
     range !== "7d" &&
@@ -213,6 +362,238 @@ export function DashboardTab({
   ) {
     setRange("7d");
   }
+
+  /*
+    La courbe s'arrête à la dernière clôture, pas à aujourd'hui.
+
+    Un point du jour mélange une journée inachevée à une série de journées
+    closes, et les compare comme si elles étaient de même nature : les
+    écritures passées depuis ce matin s'y ajoutent, la valorisation n'est
+    celle d'aucune clôture, et le dernier segment ne raconte pas la même chose
+    que les précédents.
+
+    Le gros chiffre de la carte de tête ne suit pas cette règle et n'a pas à la
+    suivre — c'est un encours daté du jour, et c'est ce qu'on veut savoir
+    maintenant. Ce sont la courbe, les écarts de période et les barres qui
+    s'arrêtent à la veille.
+
+    Une seule borne pour toute la page : ce jour est le `to` demandé à
+    `daily-nav` et la fin de la fenêtre découpée côté client, et il descend au
+    panneau Évolution par ses props. Deux bornes différentes feraient afficher à
+    la carte et au panneau deux derniers points distincts.
+  */
+  const referenceDay = lastCloseDay();
+  const earliestDay = floorDay;
+  /*
+    Fenêtre API : 1A couvre 7J…1A (texture quotidienne identique, recoupe
+    côté client). 5A / Tout élargissent la requête.
+  */
+  const fetchRange: EvolutionRange =
+    range === "5y" || range === "all" ? range : "1y";
+  const navWindow = dailyNavQueryWindow(
+    fetchRange,
+    referenceDay,
+    earliestDay
+  );
+  const dailyNavQ = useDailyNavQuery(navWindow.from, navWindow.to, {
+    range: fetchRange,
+  });
+  const dailyNavPoints = dailyNavQ.data?.points;
+
+  /*
+    Fenêtre du bandeau d'indicateurs — même mécanique que la courbe
+    (`windowDailyNav`, ancre conservée en tête pour le Δ), appliquée à la
+    série brute `getDailyNav` plutôt qu'à sa recomposition `HistoryPoint` :
+    c'est elle qui porte le croisement classe × enveloppe (Titres) et
+    `byAssetClass` (Crypto), que `dailyNavToHistoryPoints` ne transporte pas.
+  */
+  const navWindowed = useMemo(
+    () =>
+      dailyNavPoints && dailyNavPoints.length
+        ? windowDailyNav(dailyNavPoints, range, referenceDay)
+        : [],
+    [dailyNavPoints, range, referenceDay]
+  );
+
+  /*
+    Répartition du patrimoine (D19 P2bis) — sept parts par classe de
+    détention, plus une notice de passifs sous le pavé. Remplace la vue « par
+    endroit » (PEA / CTO / Tangibles) de ce panneau précis.
+
+    Chaque montant reprend un total déjà publié et vérifié ailleurs sur
+    l'écran (les mêmes chiffres que les tuiles KPI) : aucune formule de
+    valorisation n'est recalculée ici, seulement une recomposition d'aire.
+    « Titres » retire la part crypto de `totalListedBase` (ACTIONS +
+    OBLIGATIONS + CRYPTO) via `byClass`, pour isoler PEA + CTO de la crypto —
+    même source, pas un second calcul.
+
+    Pas de part Trading : `TradingPosition` n'est pas chargé par le moteur
+    historique, la série n'existe pas — UNKNOWN ≠ ZERO, donc omise plutôt
+    qu'affichée à zéro.
+
+    Couleurs en hex fixe (pas de jeton `var(--chart-…)`) : elles doivent
+    rester identiques en clair et en sombre, comme les couleurs par endroit
+    (D14.5) dont ce pavé reprend le mécanisme d'affichage.
+  */
+  const patrimonySlices = useMemo(() => {
+    const byClass = displayAllocation?.byClass ?? [];
+    const cryptoValue = byClass.find((s) => s.name === "CRYPTO")?.value ?? 0;
+    const crypto = num(cryptoValue);
+    const listed = num(
+      summary?.totalListedBase ??
+        summary?.totalListedEur ??
+        summary?.totalMarketValueBase ??
+        summary?.totalMarketValueEur
+    );
+    /*
+      « Titres » est PEA + CTO, et se lit au croisement classe × enveloppe.
+
+      `listed − crypto` paraissait équivalent et ne l'est pas : mesuré au
+      2026-09-06, il vaut 1 471 154,16 € contre 1 416 506,17 € pour les deux
+      comptes-titres. Les 54 648 € d'écart sont la ligne NASDAQ 100 en CFD —
+      cotée, donc dans `listed`, mais dans aucun compte. La ranger dans
+      « Titres » contredirait le sélecteur Compte d'E18, qui l'exclut
+      explicitement, et ferait porter à une part un montant qu'aucun compte ne
+      détient. Elle rejoint l'écart annoncé sous le pavé.
+
+      Repli sur `listed − crypto` seulement si le croisement n'est pas encore
+      chargé : une part absente vaut mieux qu'une part fausse, mais un écran
+      vide au premier rendu ne rend service à personne.
+    */
+    const dernierPoint = dailyNavPoints?.[dailyNavPoints.length - 1];
+    const titresCroisement = dernierPoint ? titresValueAt(dernierPoint) : null;
+    const titres = titresCroisement ?? Math.max(0, listed - crypto);
+    /*
+      Immobilier **net** : servi par le moteur (`summary.totalRealEstateNetBase`),
+      seuls les passifs adossés aux biens (`Liability.assetId`) en sont
+      retranchés — jamais tous les passifs du patrimoine (un crédit conso
+      sans rapport les gonflerait à tort).
+
+      `Math.max(0, …)` reste ici : c'est une part de donut, elle ne peut pas
+      être négative — la tuile KPI (`realEstateNetNow`, plus bas) affiche
+      elle le net signé, sans ce plancher.
+    */
+    const immobilier = Math.max(
+      0,
+      num(summary?.totalRealEstateNetBase ?? summary?.totalRealEstateNetEur)
+    );
+    const av = num(
+      summary?.totalLifeInsuranceBase ?? summary?.totalLifeInsuranceEur
+    );
+    const es = num(
+      summary?.totalEmployeeSavingsBase ?? summary?.totalEmployeeSavingsEur
+    );
+    const alt = num(
+      summary?.totalAlternativesBase ?? summary?.totalAlternativesEur
+    );
+    const cash = num(summary?.totalCashBase ?? summary?.totalCashEur);
+
+    const parts = [
+      { key: "titres", label: "Titres", value: titres, color: "#d9a64d" },
+      {
+        key: "immobilier",
+        label: "Immobilier net",
+        value: immobilier,
+        color: "#1f9bb3",
+      },
+      { key: "av", label: "Assurance-vie", value: av, color: "#2e9e63" },
+      { key: "es", label: "Épargne salariale", value: es, color: "#0d6f80" },
+      { key: "crypto", label: "Crypto", value: crypto, color: "#b8860b" },
+      { key: "alt", label: "Alternatifs", value: alt, color: "#7c5cbf" },
+      { key: "liquidites", label: "Liquidités", value: cash, color: "#6b7280" },
+    ].filter((p) => p.value > 0);
+
+    const pcts = allocatePercents(
+      parts.map((p) => p.value),
+      1
+    );
+    return parts.map((p, i) => ({
+      id: p.key,
+      label: p.label,
+      amountEur: p.value,
+      pct: pcts[i] ?? 0,
+      color: p.color,
+    }));
+  }, [displayAllocation?.byClass, summary, dailyNavPoints]);
+
+  const liabilitiesTotal = num(
+    summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur
+  );
+  /*
+    Notice, pas une part : les passifs ne se dessinent ni dans le donut ni
+    dans la mosaïque (cf. Passifs, KPI dédié). Montant négatif — c'est ce
+    qu'ils retranchent du patrimoine net.
+  */
+  /*
+    Ce que la somme des parts ne couvre pas.
+
+    Les parts doivent retomber sur le patrimoine net affiché au hero. Elles n'y
+    retombent pas exactement, et l'écart a une composition connue : les lignes
+    en CFD — NASDAQ 100, EUR/USD, or — sont dans le patrimoine mais
+    n'appartiennent à aucun compte, donc à aucune part. Plutôt que de les
+    diluer dans une part qui ne les détient pas, ou de laisser le lecteur
+    découvrir que le camembert ne fait pas le total, le pavé le dit.
+
+    Calculé, jamais écrit en dur : si une part venait à couvrir ces lignes,
+    l'écart tomberait à zéro et la mention disparaîtrait d'elle-même.
+  */
+  const patrimonyNet = num(summary?.netWorthBase ?? summary?.netWorthEur);
+  const patrimonySum = patrimonySlices.reduce((a, s) => a + s.amountEur, 0);
+  const patrimonyGap = patrimonyNet - patrimonySum;
+
+  const patrimonyFootnote = [
+    liabilitiesTotal > 0
+      ? `dont passifs −${formatCurrency(liabilitiesTotal, baseCurrency)}`
+      : null,
+    Math.abs(patrimonyGap) >= 1
+      ? `hors comptes ${formatCurrency(patrimonyGap, baseCurrency)} (CFD / devises non historisés)`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ") || undefined;
+
+  /*
+    Libellé de période : borne **servie**, jamais celle demandée, jamais
+    le `from` d'une fenêtre 1A encore affichée par `keepPreviousData`.
+  */
+  const servedNavFrom = servedDailyNavFrom(dailyNavQ.data, {
+    isPlaceholderData: dailyNavQ.isPlaceholderData,
+  });
+  const staleQuotesLabel = quoteStaleBadgeLabel(
+    dailyNavQ.isPlaceholderData ? undefined : dailyNavQ.data?.fetchedAt
+  );
+  /*
+    Libellé de période partagé par les tuiles KPI — Δ de chaque tuile et
+    panneau de détail (`TerminalKpiRow`).
+
+    Même décision que celle déjà appliquée juste au-dessus par la tuile P&L
+    (`kpiPeriodLabelFor`, en tête de ce fichier) : la borne réellement servie
+    sur « Tout », jamais « depuis l'origine » sous le cap de six ans. Avant ce
+    partage, huit tuiles rappelaient chacune `evolutionRangePeriodLabel(range)`
+    sans jamais lire `servedNavFrom` — la tuile P&L annonçait « depuis
+    septembre 2020 » à côté de huit voisines annonçant « depuis l'origine »,
+    la seconde affirmation étant fausse dès que l'historique dépasse six ans.
+  */
+  const kpiPeriodLabel = kpiPeriodLabelFor(range, servedNavFrom);
+  const navHistory = useMemo(
+    () =>
+      dailyNavPoints && dailyNavPoints.length >= 2
+        ? dailyNavToHistoryPoints(dailyNavPoints)
+        : [],
+    [dailyNavPoints]
+  );
+  const curveHistory = navHistory.length >= 2 ? navHistory : stableHistory;
+  /*
+    On charge tant que la série de la période demandée n'est pas là.
+
+    `isPending` seul ne suffisait pas : la requête change de clé à chaque chip,
+    et l'écran doit dire qu'il charge plutôt que de laisser la place à ce
+    qu'il affichait avant. Depuis que la série ne conserve plus la précédente,
+    `navHistory` est vide pendant ce temps — la condition tient donc sur ce que
+    l'écran a réellement à tracer, pas sur l'état interne de la requête.
+  */
+  const showNavLoading =
+    showHistoryLoading || (dailyNavQ.isFetching && navHistory.length === 0);
 
   /**
    * Indicateurs — l'ordre du mockup, qui est aussi l'ordre de pilotage :
@@ -230,65 +611,167 @@ export function DashboardTab({
    * soient calculés.
    */
   const kpis = useMemo<TerminalKpi[]>(() => {
-    /*
-      La période choisie, et rien d'autre.
-
-      `windowForRange` est la fonction qu'emploie la courbe d'évolution : même
-      découpe, même point d'ancrage en tête pour la valeur de départ. La
-      variation de chaque tuile porte donc exactement sur la tranche de temps
-      que le graphique dessine juste en dessous.
-
-      La fenêtre glissante de trente points qui régnait ici évitait la variation
-      « depuis l'origine », illisible sur un portefeuille parti de zéro. Ce
-      compromis n'a plus à être arbitré dans le code : l'utilisateur choisit sa
-      période, « Tout » compris, et `seriesChangePct` prend de toute façon pour
-      base la première valeur non nulle.
-    */
-    const h = windowForRange(stableHistory, range);
+    const sparkDates = navWindowed.map((p) => endOfParisDay(p.day).toISOString());
 
     /*
-      Une grandeur absente ne devient pas zéro.
-
-      `kpiSeries` rend `undefined` dès qu'un point ne porte pas le champ
-      demandé, au lieu de le remplacer par zéro pour faire tenir la courbe.
-      Une ligne parfaitement plate à zéro est indiscernable d'un patrimoine
-      réellement stable : c'est précisément la confusion que la doctrine du
-      projet interdit. Un zéro véritable, lui, passe — une poche vide vaut
-      zéro, et la courbe doit le dire.
+      Titres : croisement classe × enveloppe (PEA + CTO), jamais
+      `byAssetClass` — même lecture que la répartition du patrimoine
+      (`patrimonySlices` ci-dessus), pas une seconde formule.
     */
-    const listed = kpiSeries(h, listedValueAt);
-    const cash = kpiSeries(h, (p) => p.cashTotalBase);
-    const alternatives = kpiSeries(h, (p) => p.alternativesBase);
-    const employeeSavings = kpiSeries(h, (p) => p.employeeSavingsBase);
-    const liabilities = kpiSeries(h, (p) => p.liabilitiesBase);
-    const latent = kpiSeries(h, latentPnlAt);
-    const realized = kpiSeries(h, realizedPlusIncomeAt);
+    /*
+      Titres est la seule série dont la profondeur diffère de ses voisines :
+      son enveloppe n'est démontrée qu'à partir de l'acquisition de chaque
+      ligne. Elle porte donc ses propres dates, sans quoi ses paliers se
+      liraient aux dates des autres tuiles.
+    */
+    const titresSerie = knownTailSeries(navWindowed, (p) => titresValueAt(p));
+    const titres = titresSerie?.values;
+    const crypto = denseNavSeries(navWindowed, (p) => p.byAssetClass?.CRYPTO);
+    const av = denseNavSeries(navWindowed, (p) => p.av);
+    /*
+      Mini-courbe de la tuile Immobilier net — hors mandat de ce correctif.
+
+      `realEstateNetNow` (valeur affichée par la tuile, plus bas) lit
+      désormais `summary.totalRealEstateNetBase`, net des seuls passifs
+      adossés aux biens. Cette série, elle, reste `p.immobilier - p.passifs`
+      sur `DailyNavPoint` — TOUS les passifs, faute d'un champ historique
+      « passifs immobiliers » par jour dans le moteur de série. Elle garde
+      donc un biais (creusée par une dette non immobilière) tant que ce champ
+      n'existe pas côté historique ; ce n'est pas la même formule que la
+      valeur ponctuelle qu'elle esquisse.
+    */
+    const realEstateNet = denseNavSeries(navWindowed, (p) => p.immobilier - p.passifs);
+    const alternatives = denseNavSeries(navWindowed, (p) => p.alternatifs);
+    const employeeSavings = denseNavSeries(navWindowed, (p) => p.employeeSavings);
+    const cash = denseNavSeries(navWindowed, (p) => p.cash);
+    const liabilities = denseNavSeries(navWindowed, (p) => p.passifs);
+    const latent = denseNavSeries(navWindowed, (p) => p.unrealizedPnl);
+    // Réalisé pur (cessions), sans les revenus encaissés — cf. AGENTS.md D19 :
+    // le repère de contrôle 3M (+117,08 €) est la seule vente de la période.
+    const realized = denseNavSeries(navWindowed, (p) => p.realizedPnl);
+
+    /*
+      Ni `unrealizedPnl` ni `realizedPnl` ne sont périodiques : ce sont des
+      cumuls à date. La tuile P&L affiche donc toujours un Δ de fenêtre —
+      dernier point moins l'ancre que `windowDailyNav` conserve en tête —
+      jamais le cumul brut, qui ne bougerait pas d'un chip de période à
+      l'autre.
+    */
+    const latentPeriod = seriesChangeAbs(latent);
+    const realizedPeriod = seriesChangeAbs(realized);
+    const pnlPeriod = pnlMode === "latent" ? latentPeriod : realizedPeriod;
+    const pnlSpark = pnlMode === "latent" ? latent : realized;
+    /*
+      « Tout » n'est plus « depuis l'origine » depuis le cap de six ans : son
+      ancre est le plancher servi (`servedNavFrom`), daté explicitement — sinon
+      le chip affirmerait une origine que l'application ne sert plus.
+
+      `kpiPeriodLabel` (calculé plus haut) porte désormais cette même règle
+      pour les huit tuiles voisines — ce n'est plus une phrase propre au P&L.
+    */
+    const pnlLabel =
+      pnlMode === "latent"
+        ? `P&L latent ${kpiPeriodLabel}`
+        : `P&L réalisé ${kpiPeriodLabel}`;
+
+    const cryptoNow = num(
+      displayAllocation?.byClass?.find((s) => s.name === "CRYPTO")?.value ?? 0
+    );
+    const listedNow = num(
+      summary?.totalListedBase ??
+        summary?.totalListedEur ??
+        summary?.totalMarketValueBase ??
+        summary?.totalMarketValueEur
+    );
+    /*
+      Même repli que `patrimonySlices` : croisement classe × enveloppe en
+      priorité, `listed − crypto` seulement s'il n'est pas encore chargé.
+      Pas une seconde formule — la même lecture, appliquée au dernier point
+      de la fenêtre `getDailyNav` plutôt qu'à celui de la répartition.
+    */
+    const lastNavPoint = navWindowed[navWindowed.length - 1];
+    const titresCroisementNow = lastNavPoint
+      ? titresValueAt(lastNavPoint)
+      : null;
+    /*
+      Net signé, servi par le moteur — pas de plancher à zéro ici : un bien
+      sur-endetté doit pouvoir afficher une tuile négative plutôt que de se
+      faire passer pour un net nul.
+    */
+    const realEstateNetNow = num(
+      summary?.totalRealEstateNetBase ?? summary?.totalRealEstateNetEur
+    );
 
     return [
       {
-        key: "listed",
-        label: "Cotés",
-        value: num(summary?.totalMarketValueBase ?? summary?.totalMarketValueEur),
-        spark: listed,
-        changeAbs: seriesChangeAbs(listed),
-        changePct: seriesChangePct(listed),
+        key: "pnl",
+        label: pnlLabel,
+        // UNKNOWN ≠ ZERO : une fenêtre trop courte ne doit pas se lire comme
+        // un P&L nul sur la période.
+        value: pnlPeriod,
+        spark: pnlSpark,
+        sparkDates,
+        changeAbs: undefined,
+        changePct: undefined,
+        tone: pnlPeriod == null ? "neutral" : pnlPeriod >= 0 ? "positive" : "negative",
+        /*
+          Bascule Latent / Réalisé, à l'intérieur de la tuile — la seule à en
+          porter une : les deux grandeurs partagent la même définition (Δ de
+          fenêtre sur un cumul à date), et n'ont donc pas besoin de deux
+          tuiles séparées.
+        */
+        toggle: {
+          active: pnlMode,
+          options: [
+            { id: "latent", label: "Latent" },
+            { id: "realized", label: "Réalisé" },
+          ],
+          onChange: (id) => setPnlMode(id as PnlTileMode),
+        },
+      },
+      {
+        key: "titres",
+        label: "Titres",
+        help: "PEA + CTO (actions, obligations). Hors crypto et hors CFD.",
+        value: num(
+          titresCroisementNow ??
+            Math.max(0, listedNow - cryptoNow)
+        ),
+        spark: titres,
+        sparkDates: titresSerie?.dates ?? sparkDates,
+        changeAbs: seriesChangeAbs(titres),
+        changePct: seriesChangePct(titres),
         tone: "gold",
       },
       {
-        key: "latent",
-        label: "P&L latent",
-        value: num(summary?.unrealizedPnlBase ?? summary?.unrealizedPnlEur),
-        spark: latent,
-        changeAbs: seriesChangeAbs(latent),
-        changePct: seriesChangePct(latent),
+        key: "crypto",
+        label: "Crypto",
+        value: cryptoNow,
+        spark: crypto,
+        sparkDates,
+        changeAbs: seriesChangeAbs(crypto),
+        changePct: seriesChangePct(crypto),
+        tone: "gold",
       },
       {
-        key: "cash",
-        label: "Cash",
-        value: num(summary?.totalCashBase ?? summary?.totalCashEur),
-        spark: cash,
-        changeAbs: seriesChangeAbs(cash),
-        changePct: seriesChangePct(cash),
+        key: "life-insurance",
+        label: "Assurance-vie",
+        value: num(summary?.totalLifeInsuranceBase ?? summary?.totalLifeInsuranceEur),
+        spark: av,
+        sparkDates,
+        changeAbs: seriesChangeAbs(av),
+        changePct: seriesChangePct(av),
+        tone: "neutral",
+      },
+      {
+        key: "real-estate",
+        label: "Immobilier net",
+        help: "Valeur des biens moins la dette qui les porte.",
+        value: realEstateNetNow,
+        spark: realEstateNet,
+        sparkDates,
+        changeAbs: seriesChangeAbs(realEstateNet),
+        changePct: seriesChangePct(realEstateNet),
         tone: "cyan",
       },
       {
@@ -296,6 +779,7 @@ export function DashboardTab({
         label: "Alternatifs",
         value: num(summary?.totalAlternativesBase ?? summary?.totalAlternativesEur),
         spark: alternatives,
+        sparkDates,
         changeAbs: seriesChangeAbs(alternatives),
         changePct: seriesChangePct(alternatives),
         tone: "neutral",
@@ -307,15 +791,43 @@ export function DashboardTab({
           summary?.totalEmployeeSavingsBase ?? summary?.totalEmployeeSavingsEur
         ),
         spark: employeeSavings,
+        sparkDates,
         changeAbs: seriesChangeAbs(employeeSavings),
         changePct: seriesChangePct(employeeSavings),
         tone: "neutral",
+      },
+      {
+        key: "cash",
+        /*
+          « Cash » désignait la poche sans dire ce qu'elle contient, et laissait
+          croire à la seule trésorerie bancaire. Elle porte aussi le disponible
+          des enveloppes d'investissement — mesuré : 11 820,75 € de comptes
+          courants, 53 450,00 € de livrets, et 8 540,50 € en PEA, CTO et AV.
+
+          Les trois enveloppes sont nommées, sans points de suspension :
+          `EnvelopeCash` n'a que ces trois valeurs, et en promettre d'autres
+          annoncerait un périmètre qui n'existe pas.
+
+          Les intérêts de livrets déjà versés restent dans le montant : ils sont
+          capitalisés dans le solde, et les en retirer ferait mentir la tuile.
+        */
+        label: "Liquidités",
+        help:
+          "Comptes courants, livrets et épargne bancaire, plus le cash non " +
+          "investi des comptes d’investissement (PEA, CTO, AV). Pas les titres.",
+        value: num(summary?.totalCashBase ?? summary?.totalCashEur),
+        spark: cash,
+        sparkDates,
+        changeAbs: seriesChangeAbs(cash),
+        changePct: seriesChangePct(cash),
+        tone: "cyan",
       },
       {
         key: "liabilities",
         label: "Passifs",
         value: num(summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur),
         spark: liabilities,
+        sparkDates,
         /*
           Le signe n'est pas retourné : une dette qui baisse affiche bien une
           variation négative. Inverser la convention ici ferait de cette tuile
@@ -325,18 +837,8 @@ export function DashboardTab({
         changePct: seriesChangePct(liabilities),
         tone: "negative",
       },
-      {
-        key: "realized",
-        label: "Réalisé + revenus",
-        value:
-          num(summary?.realizedPnlBase ?? summary?.realizedPnlEur) +
-          num(summary?.cashIncomeBase ?? summary?.cashIncomeEur),
-        spark: realized,
-        changeAbs: seriesChangeAbs(realized),
-        changePct: seriesChangePct(realized),
-      },
     ];
-  }, [summary, stableHistory, range]);
+  }, [summary, navWindowed, pnlMode, displayAllocation?.byClass, kpiPeriodLabel]);
 
   const netWorth = summary
     ? num(summary.netWorthBase ?? summary.netWorthEur)
@@ -344,6 +846,9 @@ export function DashboardTab({
   /** Somme des actifs, sans déduction des passifs — même source que `netWorth`. */
   const grossAssets = summary
     ? num(summary.totalGrossAssetsBase ?? summary.totalGrossAssetsEur)
+    : null;
+  const financier = summary
+    ? num(summary.totalFinancierBase ?? summary.totalFinancierEur)
     : null;
 
   /*
@@ -357,6 +862,16 @@ export function DashboardTab({
   */
   const onboardingAlone = false;
 
+  /*
+    « setup » n'est pas « vide » — cf. dashboard-content-visibility.ts pour le
+    détail : le cockpit a déjà écarté le compte réellement vierge en amont,
+    et la carte de tête / le journal savent dire l'absence sans rien inventer.
+  */
+  const { showHeroCard, showJournal } = resolveDashboardContentVisibility(
+    maturity,
+    blocks
+  );
+
   return (
     <div
       className={cn(
@@ -367,14 +882,52 @@ export function DashboardTab({
       data-maturity={maturity}
     >
       {/* —— 1. Patrimoine (net ou brut, sélecteur dans la carte) —— */}
-      {blocks.showEvolutionChart && (
+      {showHeroCard && (
         <TerminalHero
           netWorth={netWorth}
           grossAssets={grossAssets}
-          history={stableHistory}
+          financier={financier}
+          history={curveHistory}
           baseCurrency={baseCurrency}
-          loading={showHistoryLoading}
+          loading={showNavLoading}
+          scope={navScope}
+          onScopeChange={setNavScope}
+          range={range}
+          onRangeChange={changeRange}
+          firstHistoryDate={firstHistoryDate}
+          servedNavFrom={servedNavFrom}
+          navError={dailyNavQ.isError}
+          onRetryNav={() => void dailyNavQ.refetch()}
         />
+      )}
+
+      {showHeroCard && staleQuotesLabel && (
+          <p
+            className="-mt-[var(--space-2)] px-[var(--space-1)] text-[length:var(--text-2xs)] text-[var(--foreground-secondary)]"
+            data-testid="hero-stale-quotes"
+            role="status"
+          >
+            {staleQuotesLabel}
+          </p>
+        )}
+
+      {/*
+        Ce que la courbe raconte, dit une fois pour toutes.
+
+        La ligne trace la NAV, capital investi compris : un achat la fait monter
+        sans qu'aucune valeur ait progressé. La performance, elle, retire ce
+        capital — elle peut donc être négative le mois où le patrimoine atteint
+        son plus haut. Les deux affirmations sont vraies en même temps, et
+        c'est précisément ce qui déroute sans cette phrase.
+      */}
+      {showHeroCard && (
+        <p
+          className="-mt-[var(--space-2)] px-[var(--space-1)] text-[length:var(--text-2xs)] text-[var(--foreground-faint)]"
+          data-testid="hero-legend"
+        >
+          La courbe inclut le capital investi. La performance peut être négative
+          même si le patrimoine monte.
+        </p>
       )}
 
       {/* —— 2. Indicateurs —— */}
@@ -383,6 +936,7 @@ export function DashboardTab({
           items={kpis}
           baseCurrency={baseCurrency}
           range={range}
+          periodLabel={kpiPeriodLabel}
         />
       )}
 
@@ -399,18 +953,35 @@ export function DashboardTab({
         >
           {blocks.showEvolutionChart && (
             <PortfolioEvolutionPanel
-              history={stableHistory}
+              history={curveHistory}
+              dailyNav={dailyNavPoints ?? []}
+              navScope={navScope}
+              navQueryFrom={navWindow.from}
+              navQueryTo={navWindow.to}
+              servedNavFrom={servedNavFrom}
               baseCurrency={baseCurrency}
-              loading={showHistoryLoading}
+              loading={showNavLoading}
+              navError={dailyNavQ.isError}
+              onRetryNav={() => void dailyNavQ.refetch()}
               className="min-h-[22rem]"
               range={range}
               onRangeChange={changeRange}
+              firstHistoryDate={firstHistoryDate}
             />
           )}
 
           {blocks.showAllocations && (
             <div className="flex min-w-0 flex-col gap-[var(--gap-card)]">
-              <AllocationCard data={classChart} baseCurrency={baseCurrency} />
+              <AllocationCard
+                data={classChart}
+                classSlices={patrimonySlices}
+                footnote={patrimonyFootnote}
+                title="Répartition du patrimoine"
+                periodRange={range}
+                baseCurrency={baseCurrency}
+                scope={navScope}
+                emptyHint="Les classes de détention apparaîtront dès le premier compte alimenté."
+              />
               <WatchlistCard
                 holdings={holdings}
                 onUnwatch={onUnwatch}
@@ -422,7 +993,7 @@ export function DashboardTab({
       )}
 
       {/* —— 5. Activité récente —— */}
-      {blocks.showEvolutionChart && (
+      {showJournal && (
         <RecentActivityCard
           baseCurrency={baseCurrency}
           onOpenJournal={() => handleNav("transactions")}

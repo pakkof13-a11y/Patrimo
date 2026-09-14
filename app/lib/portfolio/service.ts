@@ -1,14 +1,26 @@
 import { prisma } from "../prisma";
-import { d, max, toFixed, zero } from "../money/decimal";
+import { d, max, toFixed, zero, type Decimal } from "../money/decimal";
 import {
   replayTransactions,
-  totalCostBasis,
   totalRealizedPnl,
 } from "../accounting";
-import { convertFromEurSync, convertToEurSync, getEurRates } from "../market/fx";
+import {
+  convertFromEurSync,
+  convertToEurSync,
+  getEurRates,
+  FxRateUnknownError,
+} from "../market/fx";
+import {
+  readLastClosesAsOf,
+  resolveLastCloseAsOf,
+} from "../market/last-close-as-of";
 import { endOfParisDay, parisDayKey, parisDayStart } from "../dates/paris";
 import { PortfolioValuationEngine } from "./historical/engine";
 import { loadHistoricalInputs } from "./historical/load";
+import {
+  financierFlowOf,
+  listedTransactionFlow,
+} from "./historical/get-daily-nav";
 import type {
   HistoricalDataStatus,
   PortfolioValuationPoint,
@@ -28,7 +40,20 @@ import {
 } from "./holdings-platform-slice";
 import { asAccountType } from "../types/account-type";
 import { remainingAmountAt } from "../liabilities/amortization";
-import { isNonOwnedStatus } from "../crypto/nft-taxonomy";
+import {
+  allocationAssetClass,
+  classifyHolding,
+  computePatrimonyMetrics,
+  formatPatrimonyPocketTable,
+  serializePatrimonyMetrics,
+  type ClassifiableHolding,
+} from "./patrimony-metrics";
+import { resolveUnlock } from "../employee-savings/logic";
+import {
+  collectIgnoredAssetIds,
+  isIgnoredInPortfolio,
+  loadIgnoredAssetIds,
+} from "./ignored-assets";
 import {
   asBaseAmount,
   asEurAmount,
@@ -138,6 +163,10 @@ export type HoldingRow = {
   priceSource: string | null;
   priceStatus: string | null;
   lastUpdatedAt: string | null;
+  /** Dernière clôture alignée getDailyNav — Vague2 D4. */
+  closeDay: string | null;
+  /** Collecte de cette clôture — Vague2 D11. */
+  fetchedAt: string | null;
   logoUrl: string | null;
   priceProvider: string;
   /** Fees paid on purchases (EUR, cumulative) */
@@ -170,6 +199,23 @@ export type HoldingRow = {
    */
   hasSecondaryLevels: boolean;
 };
+
+/** Dernière clôture la plus fraîche des deux jambes fusionnées. */
+function preferCloseAsOf(
+  a: Pick<HoldingRow, "closeDay" | "fetchedAt">,
+  b: Pick<HoldingRow, "closeDay" | "fetchedAt">
+): Pick<HoldingRow, "closeDay" | "fetchedAt"> {
+  if (!a.closeDay) return { closeDay: b.closeDay, fetchedAt: b.fetchedAt };
+  if (!b.closeDay) return { closeDay: a.closeDay, fetchedAt: a.fetchedAt };
+  if (a.fetchedAt && b.fetchedAt) {
+    return a.fetchedAt >= b.fetchedAt
+      ? { closeDay: a.closeDay, fetchedAt: a.fetchedAt }
+      : { closeDay: b.closeDay, fetchedAt: b.fetchedAt };
+  }
+  return a.closeDay >= b.closeDay
+    ? { closeDay: a.closeDay, fetchedAt: a.fetchedAt }
+    : { closeDay: b.closeDay, fetchedAt: b.fetchedAt };
+}
 
 /** Helpers locaux — toFixed → montants brandés */
 const qtyS = (v: string) => asQuantityString(v);
@@ -262,6 +308,8 @@ export async function getHoldings(
   }
 
   const assetMap = new Map(assets.map((a) => [a.id, a]));
+  const lastDailyByAsset = await readLastClosesAsOf([...assetMap.keys()]);
+  const closeAsOfToday = parisDayKey(new Date());
   // Also index platforms for positions whose platform differs from asset.home
   const platformIds = new Set<string>();
   for (const pos of ledger.positions.values()) platformIds.add(pos.platformId);
@@ -276,15 +324,14 @@ export async function getHoldings(
     if (pos.quantity.lte(0)) continue;
     const asset = assetMap.get(pos.assetId);
     if (!asset) continue;
-    // Position DeFi explicitement exclue du patrimoine : ses écritures restent
-    // au journal (l'historique et la fiscalité en dépendent), mais elle ne pèse
-    // plus dans aucun total. Une position *fermée* n'a pas besoin de ce test —
-    // son dénouement l'a ramenée à zéro, elle est déjà écartée plus haut.
-    if (asset.defiPosition?.isIgnoredInPortfolio) continue;
-    // Même règle pour les NFT — plus le cas d'un NFT emprunté, présent au
-    // journal mais qui n'appartient pas à l'utilisateur.
-    if (asset.nftItem?.isIgnoredInPortfolio) continue;
-    if (asset.nftItem && isNonOwnedStatus(asset.nftItem.status)) continue;
+    // Position DeFi/NFT explicitement exclue du patrimoine (ou NFT emprunté,
+    // détenu sans être possédé) : ses écritures restent au journal —
+    // l'historique et la fiscalité en dépendent — mais elle ne pèse plus dans
+    // aucun total. Une position *fermée* n'a pas besoin de ce test : son
+    // dénouement l'a ramenée à zéro, elle est déjà écartée plus haut.
+    // Le prédicat est partagé (`ignored-assets.ts`) avec le résumé par
+    // plateforme, la courbe et le réalisé : une seule définition du périmètre.
+    if (isIgnoredInPortfolio(asset)) continue;
 
     const platform =
       platformMap.get(pos.platformId) ||
@@ -298,7 +345,20 @@ export async function getHoldings(
       priceNative = d(asset.priceQuote.priceNative.toString());
     } else if (asset.manualPrice) {
       priceNative = d(asset.manualPrice.toString());
-      priceEur = d(convertToEurSync(priceNative, asset.currency || "EUR", fx));
+      /*
+        Une devise que ni Frankfurter ni le repli ne fondent (ex. SEK pendant
+        une panne) ferait lever `FxRateUnknownError` — sans garde, une seule
+        ligne dans ce cas faisait planter toute la boucle du portefeuille, pas
+        seulement cette position. `priceEur` reste à zéro et rejoint le même
+        filet que « pas de cotation » juste en dessous : le coût de revient
+        tient lieu de valeur, jamais un 0 € implicite.
+      */
+      try {
+        priceEur = d(convertToEurSync(priceNative, asset.currency || "EUR", fx));
+      } catch (e) {
+        if (!(e instanceof FxRateUnknownError)) throw e;
+        priceEur = zero();
+      }
     }
 
     // If no market price, show cost as value so the line is still visible
@@ -306,6 +366,18 @@ export async function getHoldings(
       priceEur = pos.costBasisEur.div(pos.quantity);
       priceNative = priceEur;
     }
+
+    const quoteForAsOf = priceEur.gt(0)
+      ? {
+          priceEur: priceEur.toNumber(),
+          lastUpdatedAt: asset.priceQuote?.lastUpdatedAt ?? null,
+        }
+      : null;
+    const closeAsOf = resolveLastCloseAsOf({
+      today: closeAsOfToday,
+      lastDaily: lastDailyByAsset.get(asset.id) ?? null,
+      quote: quoteForAsOf,
+    });
 
     const marketValue = pos.quantity.times(priceEur);
     const unrealized = marketValue.minus(pos.costBasisEur);
@@ -379,6 +451,8 @@ export async function getHoldings(
       priceSource: asset.priceQuote?.source ?? (asset.manualPrice ? "manual" : "coût"),
       priceStatus: asset.priceQuote?.status ?? (asset.manualPrice ? "OK" : "OK"),
       lastUpdatedAt: asset.priceQuote?.lastUpdatedAt?.toISOString() ?? null,
+      closeDay: closeAsOf?.day ?? null,
+      fetchedAt: closeAsOf?.fetchedAt ?? null,
       logoUrl: assetLogo,
       priceProvider: asset.priceProvider,
       acquisitionFeesEur: eurS(toFixed(fees, 8)),
@@ -538,6 +612,7 @@ export async function getHoldings(
       priceProvider: preferLive.priceProvider || prev.priceProvider,
       priceStatus: preferLive.priceStatus || prev.priceStatus,
       lastUpdatedAt: preferLive.lastUpdatedAt || prev.lastUpdatedAt,
+      ...preferCloseAsOf(prev, row),
       acquisitionFeesEur: eurS(toFixed(fees, 8)),
       acquisitionFeesBase: baseS(toBase(fees)),
       passiveIncomeEur: eurS(toFixed(income, 8)),
@@ -609,6 +684,11 @@ export async function getPlatformCashBalances(
           accountType: true,
           manualPrice: true,
           priceQuote: { select: { priceEur: true } },
+          // Mêmes relations que `getHoldings` (`:242-246`) : sans elles, ce
+          // résumé par plateforme ne peut pas savoir qu'une position
+          // DeFi/NFT a été écartée du patrimoine, et la compte quand même.
+          defiPosition: { select: { isIgnoredInPortfolio: true } },
+          nftItem: { select: { isIgnoredInPortfolio: true, status: true } },
         },
       }),
       getBankPocketCashByNameEur(userId, fx),
@@ -632,6 +712,11 @@ export async function getPlatformCashBalances(
   }
 
   const accountTypeByAsset = new Map<string, string>();
+  // Même règle de périmètre que `getHoldings:322-326` : une position
+  // DeFi/NFT écartée du patrimoine (ou un NFT emprunté, non possédé) ne pèse
+  // dans aucune somme par plateforme — sinon ce résumé contredirait le total
+  // global, qui l'exclut déjà.
+  const ignoredAssetIds = collectIgnoredAssetIds(assetQuotes);
   for (const a of assetQuotes) {
     accountTypeByAsset.set(a.id, a.accountType || "AUTRE");
   }
@@ -641,10 +726,20 @@ export async function getPlatformCashBalances(
     if (a.priceQuote) {
       priceEurByAsset.set(a.id, d(a.priceQuote.priceEur.toString()));
     } else if (a.manualPrice) {
-      priceEurByAsset.set(
-        a.id,
-        d(convertToEurSync(a.manualPrice.toString(), a.currency || "EUR", fx))
-      );
+      /*
+        Devise non fondée (ex. SEK pendant une panne) : l'actif reste absent
+        de `priceEurByAsset`, exactement comme un actif sans priceQuote ni
+        manualPrice l'est déjà — UNKNOWN, pas 0 € — plutôt que de faire
+        échouer cette boucle pour TOUS les actifs de la plateforme.
+      */
+      try {
+        priceEurByAsset.set(
+          a.id,
+          d(convertToEurSync(a.manualPrice.toString(), a.currency || "EUR", fx))
+        );
+      } catch (e) {
+        if (!(e instanceof FxRateUnknownError)) throw e;
+      }
     }
   }
 
@@ -665,6 +760,7 @@ export async function getPlatformCashBalances(
   >();
   for (const pos of led.positions.values()) {
     if (pos.quantity.lte(0)) continue;
+    if (ignoredAssetIds.has(pos.assetId)) continue;
     const platformId = pos.platformId;
     openPositionCountByPlatform.set(
       platformId,
@@ -780,32 +876,134 @@ export async function getPlatformCashBalances(
  * pas de résumé, et la bande d'indicateurs affiche « — € » — son placeholder
  * de montant inconnu. Rien à inventer pour la transporter.
  */
+export async function getEmployeeSavingsTotalsEur(
+  userId: string,
+  rates?: Record<string, number>
+): Promise<{ totalEur: ReturnType<typeof d>; esLiquidEur: ReturnType<typeof d> }> {
+  const fx = rates ?? (await getEurRates());
+  const rows = await prisma.employeeSavingsLine.findMany({
+    where: { userId },
+    select: {
+      units: true,
+      nav: true,
+      currency: true,
+      planType: true,
+      unlockMode: true,
+      unlockDate: true,
+      contributionDate: true,
+    },
+  });
+  let total = zero();
+  let liquid = zero();
+  for (const r of rows) {
+    const mv = d(r.units.toString()).times(d(r.nav.toString()));
+    /*
+      Distincte de l'erreur de lecture documentée ci-dessus : ici la requête a
+      réussi, seule la devise de cette ligne n'est fondée par aucune source
+      (ex. SEK pendant une panne Frankfurter). Sans garde, `convertToEurSync`
+      ferait échouer la boucle pour TOUTES les lignes déjà lues, y compris
+      celles dont la devise est parfaitement connue — un comportement que
+      cette fonction refuse justement pour une vraie panne de lecture, mais
+      qu'elle n'a aucune raison de s'infliger pour une seule ligne inconnue.
+      La ligne fautive est donc seule écartée du total (UNKNOWN, jamais 0 €).
+    */
+    let eur: ReturnType<typeof d>;
+    try {
+      eur = d(convertToEurSync(mv.toString(), r.currency || "EUR", fx));
+    } catch (e) {
+      if (!(e instanceof FxRateUnknownError)) throw e;
+      console.warn(
+        `[employee-savings] ligne ignorée — ${e.message}`
+      );
+      continue;
+    }
+    total = total.plus(eur);
+    const unlock = resolveUnlock({
+      planType: r.planType,
+      unlockMode: r.unlockMode,
+      unlockDate: r.unlockDate,
+      contributionDate: r.contributionDate,
+    });
+    if (unlock.liquidityStatus === "AVAILABLE") liquid = liquid.plus(eur);
+  }
+  return { totalEur: total, esLiquidEur: liquid };
+}
+
 export async function getEmployeeSavingsTotalEur(
   userId: string,
   rates?: Record<string, number>
 ) {
-  const fx = rates ?? (await getEurRates());
-  const rows = await prisma.employeeSavingsLine.findMany({
-    where: { userId },
-    select: { units: true, nav: true, currency: true },
-  });
-  let total = zero();
-  for (const r of rows) {
-    const mv = d(r.units.toString()).times(d(r.nav.toString()));
-    total = total.plus(
-      d(convertToEurSync(mv.toString(), r.currency || "EUR", fx))
-    );
-  }
-  return total;
+  return (await getEmployeeSavingsTotalsEur(userId, rates)).totalEur;
 }
 
-export async function getLiabilitiesTotalEur(
+export async function loadHoldingClassificationFlags(userId: string): Promise<{
+  realEstateAssetIds: Set<string>;
+  indirectRealEstateAssetIds: Set<string>;
+  fondsEuroAssetIds: Set<string>;
+}> {
+  const [direct, indirect, fondsEuro] = await Promise.all([
+    prisma.realEstateDetail.findMany({
+      where: { asset: { userId } },
+      select: { assetId: true },
+    }),
+    prisma.indirectRealEstateDetail.findMany({
+      where: { asset: { userId } },
+      select: { assetId: true },
+    }),
+    prisma.lifeInsuranceSupport.findMany({
+      where: { asset: { userId }, kind: "FONDS_EURO" },
+      select: { assetId: true },
+    }),
+  ]);
+  return {
+    realEstateAssetIds: new Set(direct.map((r) => r.assetId)),
+    indirectRealEstateAssetIds: new Set(indirect.map((r) => r.assetId)),
+    fondsEuroAssetIds: new Set(fondsEuro.map((r) => r.assetId)),
+  };
+}
+
+export type LiabilityTotalsEur = {
+  /** Tous les passifs de l'utilisateur, capital dû projeté à aujourd'hui. */
+  totalEur: Decimal;
+  /**
+   * La part adossée à un bien de la poche `immobilier`.
+   *
+   * L'attribution suit le lien `Liability.assetId` et la classification de
+   * l'actif pointé (`classifyHolding`), pas `Liability.category` : un libellé
+   * « IMMOBILIER » posé sur un prêt sans bien ne dit pas quel bien il porte, et
+   * l'« Immobilier net » a besoin de le savoir pour ne retrancher que ce qui
+   * pèse sur ces biens-là.
+   *
+   * Un prêt immobilier non rattaché reste donc hors de cette part : il pèse sur
+   * le patrimoine net, sans rendre l'immobilier plus endetté qu'on ne peut le
+   * démontrer. C'est ce que fait déjà la page Immobilier, qui somme les prêts
+   * de chaque bien (`real-estate/property-views.ts`) — les deux écrans lisent
+   * enfin la même dette.
+   */
+  realEstateBackedEur: Decimal;
+};
+
+export async function getLiabilityTotalsEur(
   userId: string,
   rates?: Record<string, number>
-) {
+): Promise<LiabilityTotalsEur> {
   const fx = rates ?? (await getEurRates());
-  const items = await prisma.liability.findMany({ where: { userId } });
+  const items = await prisma.liability.findMany({
+    where: { userId },
+    include: {
+      asset: {
+        select: {
+          id: true,
+          assetClass: true,
+          accountType: true,
+          realEstate: { select: { assetId: true } },
+          indirectRealEstate: { select: { assetId: true } },
+        },
+      },
+    },
+  });
   let total = zero();
+  let realEstateBacked = zero();
   for (const l of items) {
     /*
       Capital dû à aujourd'hui, mensualités en retard comprises.
@@ -817,9 +1015,36 @@ export async function getLiabilitiesTotalEur(
       livrets quelques lignes plus haut dans le cash.
     */
     const remaining = remainingAmountAt(l);
-    total = total.plus(d(convertToEurSync(remaining, l.currency, fx)));
+    /*
+      Même garde que `getEmployeeSavingsTotalsEur` ci-dessus : une devise non
+      fondée n'est vraie que pour CE passif. Sans elle, un seul prêt en
+      couronnes suédoises pendant une panne Frankfurter ferait échouer la
+      boucle pour toutes les dettes déjà lues — jamais un 0 € implicite non
+      plus, la ligne est simplement écartée du total (UNKNOWN).
+    */
+    let eur: ReturnType<typeof d>;
+    try {
+      eur = d(convertToEurSync(remaining, l.currency, fx));
+    } catch (e) {
+      if (!(e instanceof FxRateUnknownError)) throw e;
+      console.warn(`[liabilities] passif ${l.id} ignoré — ${e.message}`);
+      continue;
+    }
+    total = total.plus(eur);
+
+    const a = l.asset;
+    if (!a) continue;
+    const pocket = classifyHolding({
+      id: a.id,
+      assetClass: a.assetClass,
+      accountType: a.accountType,
+      marketValueEur: 0,
+      hasRealEstateDetail: a.realEstate != null,
+      hasIndirectRealEstateDetail: a.indirectRealEstate != null,
+    });
+    if (pocket === "immobilier") realEstateBacked = realEstateBacked.plus(eur);
   }
-  return total;
+  return { totalEur: total, realEstateBackedEur: realEstateBacked };
 }
 
 /** Single-pass summary — no double ledger/holdings loads */
@@ -835,11 +1060,19 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
   const { getExplicitCashTotalEur } = await import("../cash/pockets");
   const { getAlternativesPortfolioSlice } = await import("../alternatives/portfolio");
 
-  const [holdings, platforms, liabilitiesEur, explicitCash, alternatives, esEur] =
-    await Promise.all([
+  const [
+    holdings,
+    platforms,
+    liabilities,
+    explicitCash,
+    alternatives,
+    es,
+    flags,
+    ignoredAssetIds,
+  ] = await Promise.all([
       getHoldings(userId, base, rates),
       getPlatformCashBalances(userId, base, rates, ledger),
-      getLiabilitiesTotalEur(userId, rates),
+      getLiabilityTotalsEur(userId, rates),
       getExplicitCashTotalEur(userId),
       /*
         Pas de rattrapage : ce `.catch` rendait un compartiment entièrement à
@@ -851,12 +1084,30 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
         lui inventer une règle propre.
       */
       getAlternativesPortfolioSlice(userId, rates),
-      getEmployeeSavingsTotalEur(userId, rates),
+      getEmployeeSavingsTotalsEur(userId, rates),
+      loadHoldingClassificationFlags(userId),
+      /*
+        FIN-01 : le périmètre d'exclusion, chargé pour lui-même.
+
+        `holdings` ne peut pas le fournir : une ligne soldée (quantité nulle)
+        n'y figure plus, et c'est précisément celle qui porte du réalisé. Sans
+        cette lecture, le réalisé d'une position ignorée puis revendue resterait
+        dans `totalReturn`.
+      */
+      loadIgnoredAssetIds(userId),
     ]);
 
   const marketValue = holdings.reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
-  const costBasis = totalCostBasis(ledger);
-  // Cash pockets: only balances explicitly entered and > 0 (banks, livrets, CTO/PEA/AV)
+  /*
+    FIN-01 : `costBasis` doit couvrir exactement le même périmètre que
+    `marketValue`, celui de `holdings` (positions non ignorées, `getHoldings`
+    l'a déjà filtré à `:322-326`). `totalCostBasis(ledger)` sommait le journal
+    brut, DeFi/NFT écartés compris — le coût d'une position ignorée restait
+    dans `costBasis` alors que sa valeur de marché en était sortie, ce qui
+    sous-évaluait `unrealizedPnlEur` du coût de positions qui ne pèsent plus
+    nulle part ailleurs dans ce résumé.
+  */
+  const costBasis = holdings.reduce((acc, h) => acc.plus(d(h.costBasisEur)), zero());
   const cash = explicitCash.totalEur;
   /*
     Ni `?.` ni `?? 0` : la promesse rend une tranche complète ou échoue. Ce
@@ -864,26 +1115,65 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     derrière le zéro que ce chantier retire.
   */
   const alternativesEur = d(String(alternatives.totalEur));
-  const employeeSavingsEur = esEur;
-  // Sous-totaux informatifs — déjà inclus dans marketValue (holdings), pas
-  // additifs au net worth (contrairement à alternatives/ES qui vivent hors holdings).
-  const realEstateEur = holdings
-    .filter((h) => h.accountType === "IMMOBILIER")
-    .reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
-  const lifeInsuranceEur = holdings
-    .filter((h) => h.accountType === "AV")
-    .reduce((acc, h) => acc.plus(d(h.marketValueEur)), zero());
-  const realized = totalRealizedPnl(ledger);
+
+  const classifiable: ClassifiableHolding[] = holdings.map((row) => ({
+    id: row.assetId,
+    assetClass: row.assetClass,
+    accountType: row.accountType,
+    marketValueEur: row.marketValueEur,
+    name: row.name,
+    hasRealEstateDetail: flags.realEstateAssetIds.has(row.assetId),
+    hasIndirectRealEstateDetail: flags.indirectRealEstateAssetIds.has(row.assetId),
+    isFondsEuro: flags.fondsEuroAssetIds.has(row.assetId),
+  }));
+
+  const metrics = computePatrimonyMetrics({
+    holdings: classifiable,
+    cash: { total: cash },
+    alternatives: alternativesEur,
+    employeeSavings: { total: es.totalEur, esLiquid: es.esLiquidEur },
+    /*
+      Les passifs **et** leur part immobilière.
+
+      `net` retranche toujours le total : rien n'a changé de ce côté. Ce qui
+      s'ajoute est l'attribution, sans laquelle « Immobilier net » ne pouvait
+      être reconstitué que par `immobilier − passifs` — c'est-à-dire en faisant
+      porter aux biens toute dette du patrimoine. Mesuré sur le compte de
+      démonstration (2026-09-13) : 6 200 € de crédit auto retranchés de
+      l'immobilier, quand la page Immobilier annonçait 515 363,34 € d'equity et
+      le tableau de bord 509 163,34 € pour la même poche.
+    */
+    liabilities: {
+      total: liabilities.totalEur,
+      realEstateBacked: liabilities.realEstateBackedEur,
+    },
+  });
+  if (process.env.PATRIMONY_METRICS_DEBUG === "1") {
+    console.info(formatPatrimonyPocketTable(metrics));
+  }
+
+  const realEstateEur = metrics.pockets.immobilier;
+  const lifeInsuranceEur = metrics.pockets.av;
+  const employeeSavingsEur = metrics.pockets.employeeSavings;
+  /*
+    FIN-01 : une ligne ignorée sort partout — MV, coût, latent *et* réalisé.
+    `totalRealizedPnl(ledger)` sommait tous les lots : le gain réalisé d'une
+    position DeFi/NFT écartée du patrimoine restait dans `totalReturn` alors que
+    sa valeur de marché et son coût en étaient déjà sortis. Le total recyclait
+    une ligne « hors patrimoine ».
+  */
+  const realized = totalRealizedPnl(ledger, ignoredAssetIds);
   const unrealized = marketValue.minus(costBasis);
   const cashIncome = ledger.cashIncomeEur;
   const totalReturn = unrealized.plus(realized).plus(cashIncome);
-  // Net worth = cotés + cash + alternatifs + épargne salariale − passifs
-  // Note crowdlending: capital ACTIVE/LATE only (see alternatives/portfolio.ts)
-  const totalAssets = marketValue
-    .plus(cash)
-    .plus(alternativesEur)
-    .plus(employeeSavingsEur);
-  const netWorth = totalAssets.minus(liabilitiesEur);
+  /*
+    Brut / net du contrat PatrimonyMetrics — plus le résidu
+    « toutes les lignes − cash − alt − ES » qui réintroduisait immo et AV
+    dans « Cotés ».
+  */
+  const totalAssets = metrics.brut;
+  const netWorth = metrics.net;
+  const metricsJson = serializePatrimonyMetrics(metrics);
 
   const summary = {
     baseCurrency: base,
@@ -894,17 +1184,71 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     totalAlternativesBase: toBase(alternativesEur),
     totalEmployeeSavingsEur: toFixed(employeeSavingsEur, 8),
     totalEmployeeSavingsBase: toBase(employeeSavingsEur),
-    /** Sous-total holdings accountType=IMMOBILIER — déjà dans totalMarketValueEur */
     totalRealEstateEur: toFixed(realEstateEur, 8),
     totalRealEstateBase: toBase(realEstateEur),
-    /** Sous-total holdings accountType=AV — déjà dans totalMarketValueEur */
+    /*
+      Immobilier net, servi plutôt que recomposé.
+
+      Un consommateur qui veut « Immobilier net » n'a plus à soustraire
+      `totalLiabilitiesEur` de la valeur des biens : cette soustraction fait
+      porter aux biens les dettes qui ne les financent pas (crédit auto,
+      consommation). Les deux champs ci-dessous portent la dette réellement
+      adossée et le net qui en découle — même grandeur que l'« Equity » de la
+      page Immobilier.
+
+      `totalRealEstateEur` reste la valeur **brute** : rien n'est retiré au
+      champ existant, pour que les totaux déjà en place (brut, allocation) ne
+      changent pas de définition.
+    */
+    realEstateLiabilitiesEur: toFixed(metrics.liabilitiesRealEstate, 8),
+    realEstateLiabilitiesBase: toBase(metrics.liabilitiesRealEstate),
+    totalRealEstateNetEur: toFixed(metrics.immobilierNet, 8),
+    totalRealEstateNetBase: toBase(metrics.immobilierNet),
     totalLifeInsuranceEur: toFixed(lifeInsuranceEur, 8),
     totalLifeInsuranceBase: toBase(lifeInsuranceEur),
-    /** Actif brut = cotés + cash + alternatifs + ES */
+    /** Listed du contrat : ACTIONS + OBLIGATIONS + CRYPTO, hors IMMO/AV. */
+    totalListedEur: toFixed(metrics.pockets.listed, 8),
+    totalListedBase: toBase(metrics.pockets.listed),
+    totalAutreEur: toFixed(metrics.pockets.autre, 8),
+    totalAutreBase: toBase(metrics.pockets.autre),
+    totalFinancierEur: toFixed(metrics.financier, 8),
+    totalFinancierBase: toBase(metrics.financier),
+    fondsEuroEur: toFixed(metrics.fondsEuro, 8),
+    fondsEuroBase: toBase(metrics.fondsEuro),
+    esLiquidEur: toFixed(metrics.esLiquid, 8),
+    esLiquidBase: toBase(metrics.esLiquid),
+    cashInvestissementEur: toFixed(metrics.cashInvestissement, 8),
+    cashInvestissementBase: toBase(metrics.cashInvestissement),
+    metricsAsOf: metrics.asOf,
+    /**
+     * Dernier jour de courbe getDailyNav (to = aujourd'hui Paris).
+     * Watchlist.closeDay doit rester à ≤ 1 séance (Vague2 D4).
+     */
+    navAsOfDay: parisDayKey(new Date()),
+    /*
+      Collecte la plus ancienne parmi les lignes détenues, ou `null`.
+
+      Le calcul passait par `oldestFetchedAt`, qui attend des relevés de
+      clôture : il fallait donc fabriquer une ligne complète par actif — avec
+      un `day`, un `closeEur` à zéro et une `source` inventée — dont la
+      fonction ne lit jamais que `fetchedAt`. Ces trois champs ne décrivaient
+      rien ; ils servaient à satisfaire un type.
+
+      Le minimum direct dit ce qu'on cherche. Et l'absence se rend en `null`,
+      comme partout ailleurs dans ce résumé : la chaîne vide passait les
+      vérifications de présence et devenait une date invalide chez l'appelant.
+    */
+    fetchedAt:
+      holdings.reduce<string | null>((plusAncien, h) => {
+        const f = h.fetchedAt;
+        if (!f) return plusAncien;
+        return plusAncien == null || f < plusAncien ? f : plusAncien;
+      }, null),
+    /** Actif brut = Σ poches d'actif (contrat PatrimonyMetrics). */
     portfolioPlusCashEur: toFixed(totalAssets, 8),
     totalGrossAssetsEur: toFixed(totalAssets, 8),
     totalGrossAssetsBase: toBase(totalAssets),
-    totalLiabilitiesEur: toFixed(liabilitiesEur, 8),
+    totalLiabilitiesEur: toFixed(liabilities.totalEur, 8),
     netWorthEur: toFixed(netWorth, 8),
     unrealizedPnlEur: toFixed(unrealized, 8),
     realizedPnlEur: toFixed(realized, 8),
@@ -913,7 +1257,7 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     totalMarketValueBase: toBase(marketValue),
     totalCostBasisBase: toBase(costBasis),
     totalCashBase: toBase(cash),
-    totalLiabilitiesBase: toBase(liabilitiesEur),
+    totalLiabilitiesBase: toBase(liabilities.totalEur),
     netWorthBase: toBase(netWorth),
     unrealizedPnlBase: toBase(unrealized),
     realizedPnlBase: toBase(realized),
@@ -927,21 +1271,29 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
   const byClass: Record<string, number> = {};
   const byPlatform: Record<string, number> = {};
   const byAccountType: Record<string, number> = {};
-  for (const h of holdings) {
-    const v = Number(h.marketValueBase || h.marketValueEur);
-    byClass[h.assetClass] = (byClass[h.assetClass] ?? 0) + v;
-    byPlatform[h.platformName] = (byPlatform[h.platformName] ?? 0) + v;
-    const at = h.accountType;
+  for (let i = 0; i < holdings.length; i++) {
+    const row = holdings[i]!;
+    const classified = classifiable[i]!;
+    const v = Number(row.marketValueBase || row.marketValueEur);
+    const cls = allocationAssetClass(classified);
+    if (cls !== "IMMOBILIER") {
+      byClass[cls] = (byClass[cls] ?? 0) + v;
+    }
+    byPlatform[row.platformName] = (byPlatform[row.platformName] ?? 0) + v;
+    const at = row.accountType;
     byAccountType[at] = (byAccountType[at] ?? 0) + v;
+  }
+  const immoBase = Number(toBase(metrics.pockets.immobilier));
+  if (immoBase > 0 || metrics.pockets.immobilier.gt(0)) {
+    byClass["IMMOBILIER"] = immoBase;
   }
   // Cash (poches banques + ledger) rattaché aux plateformes pour le camembert « par plateforme »
   for (const p of platforms) {
-    const cash = Number(p.cashBase || p.cashEur || 0);
-    if (cash > 0) {
-      byPlatform[p.name] = (byPlatform[p.name] ?? 0) + cash;
+    const platCash = Number(p.cashBase || p.cashEur || 0);
+    if (platCash > 0) {
+      byPlatform[p.name] = (byPlatform[p.name] ?? 0) + platCash;
     }
   }
-  // Classe CASH = total cash patrimoine (poches Banques/Livrets/enveloppes/AV > 0)
   const cashClassBase = Number(summary.totalCashBase || summary.totalCashEur || 0);
   if (cashClassBase > 0) {
     byClass["CASH"] = (byClass["CASH"] ?? 0) + cashClassBase;
@@ -952,6 +1304,7 @@ export async function getPortfolioBundle(userId: string, baseCurrency = "EUR") {
     holdings,
     platforms,
     summary,
+    metrics: metricsJson,
     allocation: {
       byClass: Object.entries(byClass).map(([name, value]) => ({ name, value })),
       byPlatform: Object.entries(byPlatform).map(([name, value]) => ({ name, value })),
@@ -1066,11 +1419,25 @@ export type PortfolioHistoryPoint = {
   liabilitiesBase?: number;
   /** Capital externe entré (net) ce jour-là — jamais compté en performance. */
   externalFlowsBase?: number;
+  /**
+   * Flux du journal coté (ACTIONS + OBLIGATIONS + CRYPTO).
+   * Pastilles de la courbe Financier — un achat immo n'y figure pas.
+   */
+  transactionFlowBase?: number;
+  /**
+   * Flux qui touchent l'agrégat Financier. Sans ce champ, `heroAttribution`
+   * en mode financier rend `null` et les pastilles Marché/Flux disparaissent.
+   */
+  financierFlowsBase?: number;
   /** Résultat du jour, flux neutralisés. */
   investmentPerformanceBase?: number;
 
   securitiesBase?: number;
   cryptoBase?: number;
+  /** Poche T-01 `listed` — ACTIONS+OBLIGATIONS+CRYPTO hors IMMO/AV. */
+  listedBase?: number;
+  /** Agrégat T-01 `financier`. */
+  financierBase?: number;
   realEstateBase?: number;
   lifeInsuranceBase?: number;
   alternativesBase?: number;
@@ -1139,6 +1506,15 @@ function attachIncomeSplit(
 const HISTORY_DISPLAY_POINTS = 900;
 
 /**
+ * Jours récents conservés au jour le jour par `downsampleSeries`.
+ *
+ * 400 > 366 : une fenêtre ≤1A (365, bissextile 366) extraite de la queue
+ * d'un historique long reste quotidienne. En dessous, « 1A » perdrait des
+ * jours civils et la densification T-05 serait une promesse d'écran.
+ */
+export const DAILY_TAIL_DAYS = 400;
+
+/**
  * Réduit une série quotidienne pour l'affichage **sans jamais altérer une
  * valeur**.
  *
@@ -1164,7 +1540,6 @@ export function downsampleSeries<
     lointain, que l'écran ne montre qu'écrasé sur quelques pixels, est
     échantillonné.
   */
-  const DAILY_TAIL_DAYS = 400;
   for (let i = Math.max(0, series.length - DAILY_TAIL_DAYS); i < series.length; i++) {
     keep.add(i);
   }
@@ -1320,6 +1695,8 @@ export async function getPortfolioHistory(
       netWorthBase: toBase(d(p.netWorth)),
       liabilitiesBase: toBase(d(p.liabilities)),
       externalFlowsBase: toBase(d(p.externalFlows)),
+      transactionFlowBase: toBase(d(listedTransactionFlow(p.flowsByAssetClass))),
+      financierFlowsBase: toBase(d(financierFlowOf(p.flowsByAssetClass))),
       investmentPerformanceBase: toBase(d(p.investmentPerformance)),
 
       /*
@@ -1404,6 +1781,8 @@ export async function getPortfolioHistory(
 
       securitiesBase: toBase(d(p.securities)),
       cryptoBase: toBase(d(p.crypto)),
+      listedBase: toBase(d(p.listed)),
+      financierBase: toBase(d(p.financier)),
       realEstateBase: toBase(d(p.realEstate)),
       lifeInsuranceBase: toBase(d(p.lifeInsurance)),
       alternativesBase: toBase(d(p.alternatives)),
@@ -1437,7 +1816,30 @@ export async function getPortfolioValuationToday(
   return engine.calculateAt(parisDayKey(new Date()));
 }
 
-export async function getAssetDetail(userId: string, assetId: string) {
+/**
+ * Fiche d'un actif : identité, position, dépositaires, écritures.
+ *
+ * `baseCurrency` sert la même fonction qu'ici que sur `getPortfolioBundle` — la
+ * position rendue est convertie dans la devise d'affichage de l'utilisateur, et
+ * le taux retenu est publié avec elle.
+ *
+ * Sans ce paramètre, la fiche était calculée en euros pendant que le tableau
+ * l'était dans la devise choisie : base en USD, la ligne du tableau montrait
+ * `marketValueBase` converti en dollars, le panneau ouvert à côté montrait le
+ * montant en euros — et le libellait `$`. Deux chiffres différents pour la même
+ * ligne, tous deux annoncés dans la même devise.
+ *
+ * `fxRateFromEur` est le taux effectivement utilisé, pas une valeur indicative :
+ * le panneau dérive d'autres montants des écritures (dépenses cumulées, frais,
+ * revenus), qui restent libellés en euros dans le payload. Publier le taux lui
+ * évite d'en supposer un — et garantit que ses agrégats et la position servie
+ * ici parlent la même devise au même cours.
+ */
+export async function getAssetDetail(
+  userId: string,
+  assetId: string,
+  baseCurrency = "EUR"
+) {
   const asset = await prisma.asset.findFirst({
     where: { id: assetId, userId },
     include: {
@@ -1499,7 +1901,14 @@ export async function getAssetDetail(userId: string, assetId: string) {
   }
 
   const siblingIds = siblingAssets.map((s) => s.id);
-  const holdings = await getHoldings(userId, "EUR");
+  /*
+    Les taux sont chargés une fois et prêtés à `getHoldings` : la fiche et le
+    taux qu'elle publie plus bas viennent alors du même relevé, pas de deux
+    appels qui pourraient tomber de part et d'autre d'un rafraîchissement.
+  */
+  const base = (baseCurrency || "EUR").toUpperCase();
+  const fx = await getEurRates();
+  const holdings = await getHoldings(userId, base, fx);
   // Ligne agrégée (après merge) ou fallback assetId
   const holding =
     holdings.find((h) => siblingIds.includes(h.assetId)) ??
@@ -1508,11 +1917,44 @@ export async function getAssetDetail(userId: string, assetId: string) {
 
   // Qtés par assetId via ledger (avant merge UI)
   const ledger = await loadLedgerForUser(userId);
-  const priceEur = asset.priceQuote
-    ? d(asset.priceQuote.priceEur.toString())
-    : asset.manualPrice
-      ? d(asset.manualPrice.toString())
-      : zero();
+  /*
+    Le prix retenu, dans le même ordre que `getHoldings` : la cotation, puis le
+    prix manuel, puis rien.
+
+    `manualPrice` est un prix **en devise de l'actif** — c'est ce que
+    `getHoldings` (`:338-340`), `getPlatformCashBalances` (`:697-700`),
+    `asset-values.ts` et `historical/load.ts` en font tous. Il était lu ici
+    comme des euros : un support d'AV en dollars valorisé 10 000 € annonçait
+    10 800 € dans ses tranches de détention, pendant que le tableau Positions
+    de la même ligne montrait 10 000 €.
+
+    La branche cotation, elle, n'est pas convertie : `PriceQuote.priceEur` est
+    déjà en euros, et la reconvertir diviserait deux fois.
+  */
+  /*
+    Devise non fondée (ex. SEK pendant une panne Frankfurter) : `priceEur`
+    reste à zéro plutôt que de faire échouer toute la fiche — `custodySlices`
+    sait déjà retomber sur le coût de revient (`mv.gt(0) ? mv : cost` plus
+    bas) quand le prix n'est pas connu, exactement le même filet que pour
+    « pas de cotation ».
+  */
+  let priceEur = zero();
+  if (asset.priceQuote) {
+    priceEur = d(asset.priceQuote.priceEur.toString());
+  } else if (asset.manualPrice) {
+    try {
+      priceEur = d(
+        convertToEurSync(
+          asset.manualPrice.toString(),
+          asset.currency || "EUR",
+          fx
+        )
+      );
+    } catch (e) {
+      if (!(e instanceof FxRateUnknownError)) throw e;
+      priceEur = zero();
+    }
+  }
 
   const custodySlices = siblingAssets.map((s) => {
     let qty = zero();
@@ -1633,6 +2075,15 @@ export async function getAssetDetail(userId: string, assetId: string) {
         : null,
     },
     holding,
+    /**
+     * Devise d'affichage servie, et son taux depuis l'euro.
+     *
+     * Tout ce que cette fiche rend d'autre — `marketValueEur` des dépositaires,
+     * montants des écritures — reste en euros : c'est la monnaie du journal.
+     * Le client convertit à l'affichage avec ce taux ; il n'en devine aucun.
+     */
+    baseCurrency: base,
+    fxRateFromEur: convertFromEurSync(1, base, fx),
     custodyDistribution,
     platforms: platformsUnique,
     transactions: allTxs.map((t) => ({

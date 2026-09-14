@@ -46,6 +46,7 @@ import { prisma } from "../prisma";
 import { owned } from "../db/tenant-scope";
 import { d, toFixed } from "../money/decimal";
 import { toEurAmount } from "../market/fx";
+import { parseNumber } from "../import/normalize";
 import {
   applyEarlyRepayment,
   estimateRemainingInterest,
@@ -56,16 +57,10 @@ import {
   startOfUtcDay,
 } from "./amortization";
 
-export const LIABILITY_EVENT_TYPES = {
-  MONTHLY_DEBIT: "MONTHLY_DEBIT",
-  EARLY_REPAYMENT_PARTIAL: "EARLY_REPAYMENT_PARTIAL",
-  EARLY_REPAYMENT_TOTAL: "EARLY_REPAYMENT_TOTAL",
-  PAYMENT_CHANGE: "PAYMENT_CHANGE",
-  RATE_CHANGE: "RATE_CHANGE",
-} as const;
-
-export type LiabilityEventType =
-  (typeof LIABILITY_EVENT_TYPES)[keyof typeof LIABILITY_EVENT_TYPES];
+import { LIABILITY_EVENT_TYPES } from "./event-types";
+import { sealPaymentBaseline } from "./payment-baseline";
+export { LIABILITY_EVENT_TYPES };
+export type { LiabilityEventType } from "./event-types";
 
 /**
  * La dette a changé entre sa lecture et l'écriture de sa matérialisation.
@@ -78,6 +73,27 @@ export type LiabilityEventType =
 class LiabilityStateChanged extends Error {}
 
 /**
+ * Un montant saisi devient un nombre, ou rien du tout.
+ *
+ * Les trois mutations lisaient leur montant par `String(x || "0")
+ * .replace(",", ".")`. Deux défauts dans une seule ligne : toute saisie
+ * illisible — vide, `null`, clé absente — devenait un zéro, et le parsing ne
+ * connaissait qu'une virgule (« 1 234,56 » sortait en « 1 234.56 »).
+ *
+ * Le parsing est désormais celui de l'import (`parseNumber` : virgule ou point
+ * décimal, séparateurs de milliers, symboles monétaires), et l'échec lève —
+ * les routes le rendent en 400. Un taux qu'on ne sait pas lire n'est pas 0 %.
+ */
+function parseAmountOrThrow(
+  raw: string | number | null | undefined,
+  message: string
+): string {
+  const n = parseNumber(raw == null ? null : String(raw));
+  if (n == null) throw new Error(message);
+  return String(n);
+}
+
+/**
  * Apply all due monthly debits for one liability (idempotent via lastPaymentAppliedAt).
  * Requires userId — never loads/writes a liability by bare id alone.
  * Returns updated remaining if any debit ran.
@@ -87,9 +103,24 @@ export async function applyDuePaymentsForLiability(
   liabilityId: string,
   now: Date = new Date()
 ) {
-  const liability = await prisma.liability.findFirst({
+  const found = await prisma.liability.findFirst({
     where: owned(liabilityId, userId),
   });
+  if (!found) return null;
+  if (!found.paymentDay || !found.monthlyPayment) return found;
+
+  /*
+    PAS-02 — une dette anterieure a PAS-01 n'a pas de `lastPaymentAppliedAt`, et
+    `duePaymentDates` lit cette absence comme « repartir de `startDate` ». La
+    projection ci-dessous aurait donc materialise, en une fois, toutes les
+    mensualites depuis l'origine du pret : des annees d'ecritures datees jamais
+    constatees, sur un solde deja a jour.
+
+    On pose d'abord la borne — `updatedAt`, la seule date a laquelle
+    `remainingAmount` soit connu vrai — puis on projette a partir d'elle. Seules
+    les echeances reellement dues depuis sont ecrites. Rien n'est reconstitue.
+  */
+  const liability = await sealPaymentBaseline(userId, found);
   if (!liability) return null;
   if (!liability.paymentDay || !liability.monthlyPayment) return liability;
 
@@ -109,6 +140,7 @@ export async function applyDuePaymentsForLiability(
     startDate: liability.startDate,
     endDate: liability.endDate,
     lastPaymentAppliedAt: liability.lastPaymentAppliedAt,
+    interestRate: liability.interestRate?.toString() ?? null,
     now,
   });
 
@@ -346,7 +378,7 @@ export async function recordEarlyRepayment(opts: {
   const total = opts.kind === "TOTAL";
   const amount = total
     ? liability.remainingAmount.toString()
-    : String(opts.amount || "0").replace(",", ".");
+    : parseAmountOrThrow(opts.amount, "Montant de remboursement invalide");
   if (!total && d(amount).lte(0)) throw new Error("Montant de remboursement invalide");
 
   const { remaining, debited } = applyEarlyRepayment(
@@ -415,7 +447,10 @@ export async function changeMonthlyPayment(opts: {
   });
   if (!liability) throw new Error("Passif introuvable");
 
-  const newPayment = String(opts.monthlyPayment || "0").replace(",", ".");
+  const newPayment = parseAmountOrThrow(
+    opts.monthlyPayment,
+    "Nouvelle mensualité invalide"
+  );
   if (d(newPayment).lte(0)) throw new Error("Nouvelle mensualité invalide");
 
   const eventDate = opts.eventDate
@@ -473,7 +508,10 @@ export async function changeInterestRate(opts: {
   });
   if (!liability) throw new Error("Passif introuvable");
 
-  const newRate = String(opts.interestRate || "0").replace(",", ".");
+  const newRate = parseAmountOrThrow(
+    opts.interestRate,
+    "Taux d'intérêt invalide"
+  );
   if (d(newRate).lt(0)) throw new Error("Taux d'intérêt invalide");
 
   const eventDate = opts.eventDate

@@ -1,13 +1,14 @@
 import YahooFinance from "yahoo-finance2";
 import { prisma } from "../prisma";
 import { d, toFixed } from "../money/decimal";
-import { toYahooSymbol } from "./symbol";
-import { getEurRates, convertToEurSync } from "./fx";
+import { toYahooSymbol, normalizeQuoteCurrency } from "./symbol";
+import { getEurRates, convertToEurSync, FxRateUnknownError } from "./fx";
 import { withTimeout } from "../utils/with-timeout";
 import {
   coingeckoGet,
   resolveCoingeckoId,
 } from "./providers/coingecko";
+import { reportProviderError } from "./provider-incidents";
 import type {
   PriceBarInterval,
   PriceHistoryPoint,
@@ -344,21 +345,22 @@ export function toYahooCryptoSymbol(
   return `${base}-${q}`;
 }
 
-/** Mappe une fenêtre en param `days` CoinGecko (market_chart / ohlc). */
-function coingeckoDaysParam(from: Date, to: Date): string | number {
-  const days = Math.min(
+/**
+ * Mappe une fenêtre en param `days` CoinGecko (market_chart / ohlc).
+ *
+ * Un backfill couvre presque toujours plus de 365 jours (premier achat en
+ * 2021, par exemple) : le seau qui retombait sur `"max"` au-delà d'un an
+ * faisait basculer `/ohlc` sur des bougies de plusieurs jours au lieu de
+ * clôtures quotidiennes — mesuré en preview : 18 points espacés sur trois ans
+ * au lieu d'une série journalière. On envoie désormais le nombre de jours
+ * exact couvrant la fenêtre demandée ; CoinGecko accepte tout entier borné à
+ * son historique disponible (plafonné ici à 3650 jours, ~10 ans).
+ */
+export function coingeckoDaysParam(from: Date, to: Date): number {
+  return Math.min(
     3650,
-    Math.ceil(Math.max(1, to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000)) +
-      1
+    Math.ceil(Math.max(1, to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000)) + 1
   );
-  if (days <= 1) return 1;
-  if (days <= 7) return 7;
-  if (days <= 14) return 14;
-  if (days <= 30) return 30;
-  if (days <= 90) return 90;
-  if (days <= 180) return 180;
-  if (days <= 365) return 365;
-  return "max";
 }
 
 /**
@@ -429,7 +431,10 @@ async function fetchCoingeckoOhlcBars(
       );
     }
     return points.length >= 2 ? points : null;
-  } catch {
+  } catch (err) {
+    // Le repli reste silencieux pour l'appelant (un graphique se contente de
+    // la source suivante), mais la cause remonte au rapport de collecte.
+    reportProviderError("coingecko/ohlc", err);
     return null;
   }
 }
@@ -524,7 +529,8 @@ async function fetchCoingeckoBars(
     }
 
     return points.length >= 2 ? points : null;
-  } catch {
+  } catch (err) {
+    reportProviderError("coingecko/market_chart", err);
     return null;
   }
 }
@@ -578,6 +584,7 @@ async function fetchYahooBars(
       12_000,
       "yahooFinance.chart"
     )) as {
+      meta?: { currency?: string };
       quotes?: Array<{
         date?: Date;
         open?: number | null;
@@ -593,10 +600,17 @@ async function fetchYahooBars(
     );
     if (quotes.length < 2) return null;
 
+    // `result.meta.currency` est un fait renvoyé par le fournisseur pour cet
+    // appel précis (ex. "GBp" pour un titre LSE coté en pence) — il fait foi
+    // sur le `nativeCurrency` déclaré ailleurs sur l'actif, qui peut être
+    // périmé ou n'avoir jamais porté le signal sous-unité.
+    const { currency: cur, divisor } = normalizeQuoteCurrency(
+      result.meta?.currency || nativeCurrency
+    );
+
     const rates = await getEurRates();
-    const cur = nativeCurrency.toUpperCase();
     const toEur = (v: number) =>
-      cur === "EUR" ? v : Number(convertToEurSync(v, cur, rates));
+      cur === "EUR" ? v / divisor : Number(convertToEurSync(v / divisor, cur, rates));
 
     let points: PriceHistoryPoint[] = [];
     for (const q of quotes) {
@@ -645,7 +659,16 @@ async function fetchYahooBars(
     }
 
     return points.length >= 2 ? points : null;
-  } catch {
+  } catch (err) {
+    /*
+      Une devise que ni Frankfurter ni le repli ne fondent n'est pas un refus
+      Yahoo : `classifyProviderError` n'a pas ce cas et la rangerait par
+      défaut en incident « transport », ce qui accuserait Yahoo à tort dans
+      le rapport de collecte. Elle est déjà atomique (garde le fournisseur,
+      jamais tout le portefeuille) : cette fonction rend `null` pour cet
+      actif dans tous les cas, comme toute autre absence de série.
+    */
+    if (!(err instanceof FxRateUnknownError)) reportProviderError("yahoo", err);
     return null;
   }
 }
@@ -736,11 +759,29 @@ export async function getAssetPriceHistory(
     to: to.toISOString(),
     extendedToFirstBuy,
   };
-  const endPrice = asset.priceQuote
-    ? Number(asset.priceQuote.priceEur.toString())
-    : asset.manualPrice
-      ? Number(asset.manualPrice.toString())
-      : 0;
+  // `PriceQuote.priceEur` est déjà en euros ; `Asset.manualPrice`, lui, est
+  // exprimé dans `asset.currency` (cf. portfolio/service.ts, asset-values.ts,
+  // historical/load.ts, market/providers/manual.ts). Un seul relevé de taux
+  // pour cet appel, seulement si la conversion est nécessaire.
+  let endPrice = 0;
+  if (asset.priceQuote) {
+    endPrice = Number(asset.priceQuote.priceEur.toString());
+  } else if (asset.manualPrice) {
+    /*
+      Devise non fondée : lève délibérément (`FxRateUnknownError`), et ce
+      chemin n'a pas de garde locale — cf. `price-history-manual-price-fx.test.ts`
+      (« échoue bruyamment, pas de zéro silencieux »). `endPrice = 0` ici
+      basculerait cette fonction sur son repli `mock` plus bas, qui fabrique
+      un cours : bien pire qu'un 500 pour CET actif. Distinct de FX-05 :
+      cette fonction ne boucle pas sur le portefeuille (un appel = un actif),
+      et ses appelants qui agrègent plusieurs actifs (`collectDailyCloses`)
+      encapsulent déjà chaque appel dans son propre `try/catch`.
+    */
+    const rates = await getEurRates();
+    endPrice = Number(
+      convertToEurSync(asset.manualPrice.toString(), asset.currency || "EUR", rates)
+    );
+  }
 
   const native = asset.priceQuote?.nativeCurrency || asset.currency || "EUR";
   const isCrypto =

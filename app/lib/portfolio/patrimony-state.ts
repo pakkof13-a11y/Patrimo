@@ -12,6 +12,24 @@
  * dossier. Une famille ajoutée à la remise à zéro sans l'être ici produirait
  * un compte vidé qui refuserait d'afficher son cockpit, et l'inverse un compte
  * qui l'afficherait en possédant encore des données.
+ *
+ * Correction (chantier CR-vide) : `termDeposits`, `preciousMetalSales`,
+ * `securitiesAccounts` et `defiStrategies` manquaient — `resetUserData` les
+ * supprime déjà (dépôts à terme, cessions de métaux, comptes-titres, marchés
+ * DeFi déclaratifs), mais rien ici ne les recensait. Un compte dont la seule
+ * donnée était par exemple un compte-titres PEA ouvert sans versement encore
+ * saisi était donc déclaré vierge. `trading` couvre désormais aussi
+ * `TradingAccount` (solde déclaratif), pas seulement `TradingPosition`, pour
+ * la même raison.
+ *
+ * Restent volontairement hors de ce recensement les tables purement
+ * techniques que `resetUserData` nettoie aussi mais qui ne portent aucune
+ * donnée patrimoniale par elles-mêmes : `PortfolioSnapshot` (cache dérivé),
+ * `NftCollection`/`NftAsset`/`NftSyncCursor` et `DefiProtocolRef`/
+ * `DefiMarketRef`/`DefiSyncCursor` (identités et curseurs de synchronisation
+ * — une détention NFT ou DeFi réelle reste un `Asset`, déjà couvert par
+ * `assets` ci-dessous). Les y ajouter ferait dépendre le cockpit de résidus
+ * de synchronisation plutôt que d'un patrimoine réel.
  */
 
 import { prisma } from "@/app/lib/prisma";
@@ -33,14 +51,27 @@ export type PatrimonyPresence = {
   alternatives: boolean;
   realEstate: boolean;
   /**
-   * Positions à levier.
+   * Positions à levier **et** comptes de trading déclaratifs (solde saisi,
+   * même sans position ouverte).
    *
-   * Rattachées à `User` et non à `Asset` — un contrat n'est pas un actif
-   * détenu — elles échappaient au recensement : un compte dont c'était la
+   * Rattachés à `User` et non à `Asset` — un contrat n'est pas un actif
+   * détenu — ils échappaient au recensement : un compte dont c'était la
    * seule activité était présenté comme vierge, et le cockpit d'accueil
-   * s'affichait par-dessus des positions bien réelles.
+   * s'affichait par-dessus des positions ou des soldes bien réels.
    */
   trading: boolean;
+  /** Dépôt à terme (CAT) — rattaché à `User`, jamais à un `Asset`. */
+  termDeposits: boolean;
+  /**
+   * Cession de métal précieux. Distincte de `alternatives.metals` : une
+   * position peut avoir été entièrement cédée (donc absente) tout en
+   * laissant une cession déclarée — la vente reste une donnée patrimoniale.
+   */
+  preciousMetalSales: boolean;
+  /** Compte-titres (PEA/PEA-PME/CTO) ouvert, même sans versement saisi. */
+  securitiesAccounts: boolean;
+  /** Regroupement DeFi déclaratif — peut exister avant toute position. */
+  defiStrategies: boolean;
 };
 
 /**
@@ -81,7 +112,7 @@ const some = async (fn: () => Promise<number>): Promise<boolean> => {
 /**
  * Interroge toutes les familles en parallèle.
  *
- * Onze requêtes `count` indexées sur `userId`, lancées ensemble : c'est le prix
+ * Vingt requêtes `count` indexées sur `userId`, lancées ensemble : c'est le prix
  * d'une réponse juste, et elle n'est demandée qu'une fois au chargement de
  * l'application. Chaque `count` s'arrête au premier enregistrement trouvé
  * (`take: 1` via `findFirst`) plutôt que de dénombrer une table entière.
@@ -111,7 +142,12 @@ export async function loadPatrimonyPresence(
     crowdlending,
     tangibles,
     realEstate,
-    trading,
+    tradingPositions,
+    tradingAccounts,
+    termDeposits,
+    preciousMetalSales,
+    securitiesAccounts,
+    defiStrategies,
   ] = await Promise.all([
     exists((a) => prisma.transaction.findFirst(a)),
     exists((a) => prisma.asset.findFirst(a)),
@@ -120,7 +156,29 @@ export async function loadPatrimonyPresence(
     exists((a) => prisma.bankAccount.findFirst(a)),
     exists((a) => prisma.savingsAccount.findFirst(a)),
     exists((a) => prisma.lifeInsurance.findFirst(a)),
-    exists((a) => prisma.envelopeCash.findFirst(a)),
+    /*
+      La poche d'espèces ne compte que si elle porte un montant.
+
+      `listEnvelopeCash` créait les trois poches à la lecture : ouvrir
+      l'onglet Titres suffisait à matérialiser trois lignes à zéro, et leur
+      seule existence déclarait le patrimoine non vide. Le cockpit d'accueil
+      ne revenait alors plus jamais, sur un compte où rien n'avait été saisi.
+
+      Le GET ne crée plus rien, mais les comptes déjà passés par là portent
+      ces lignes : le test se fait donc sur le **montant** et non sur
+      l'existence, ce qui répare aussi l'existant.
+
+      `NOT: { balance: 0 }` et non `gt: 0` : un découvert de compte-titres est
+      une donnée saisie au même titre qu'un solde créditeur.
+    */
+    some(async () =>
+      (await prisma.envelopeCash.findFirst({
+        where: { userId, NOT: { balance: 0 } },
+        select: { id: true },
+      }))
+        ? 1
+        : 0
+    ),
     exists((a) => prisma.employeeSavingsLine.findFirst(a)),
     exists((a) => prisma.preciousMetalPosition.findFirst(a)),
     exists((a) => prisma.privateEquityPosition.findFirst(a)),
@@ -141,6 +199,11 @@ export async function loadPatrimonyPresence(
         : 0
     ),
     exists((a) => prisma.tradingPosition.findFirst(a)),
+    exists((a) => prisma.tradingAccount.findFirst(a)),
+    exists((a) => prisma.termDeposit.findFirst(a)),
+    exists((a) => prisma.preciousMetalSale.findFirst(a)),
+    exists((a) => prisma.securitiesAccount.findFirst(a)),
+    exists((a) => prisma.defiStrategy.findFirst(a)),
   ]);
 
   return {
@@ -155,7 +218,11 @@ export async function loadPatrimonyPresence(
     employeeSavings,
     alternatives: metals || privateEquity || crowdlending || tangibles,
     realEstate,
-    trading,
+    trading: tradingPositions || tradingAccounts,
+    termDeposits,
+    preciousMetalSales,
+    securitiesAccounts,
+    defiStrategies,
   };
 }
 
@@ -175,3 +242,27 @@ export async function getPatrimonyState(
     families: presentFamilies(presence),
   };
 }
+
+export {
+  allocationAssetClass,
+  checkPatrimonyIdentities,
+  classifyHolding,
+  classifyHoldings,
+  computePatrimonyMetrics,
+  formatPatrimonyPocketTable,
+  serializePatrimonyMetrics,
+  CENTIME_EUR,
+  LISTED_ASSET_CLASSES,
+  LISTED_ASSET_CLASS_KEYS,
+  LISTED_EXCLUDED_ACCOUNT_TYPES,
+  PATRIMONY_ASSET_POCKETS,
+  PATRIMONY_POCKETS,
+} from "./patrimony-metrics";
+export type {
+  ClassifiableHolding,
+  HoldingPocket,
+  PatrimonyMetrics,
+  PatrimonyMetricsJson,
+  PatrimonyPocket,
+  PatrimonyPockets,
+} from "./patrimony-metrics";

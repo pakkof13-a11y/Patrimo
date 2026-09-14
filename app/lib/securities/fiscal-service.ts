@@ -20,17 +20,22 @@ import { d } from "../money/decimal";
 import { prisma } from "../prisma";
 import { owned, wroteOne } from "../db/tenant-scope";
 import { getAssetValues } from "../portfolio/asset-values";
+import { convertToEurSync, getEurRates } from "../market/fx";
 import {
   securitiesEnvelopeLabel,
+  type CashAttribution,
   type SecuritiesEnvelopeType,
 } from "./constants";
 import { SecuritiesInputError } from "./account-service";
 import {
+  peaContributionBase,
   peaContributionRoom,
   peaMaturityStatus,
-  peaTaxStatusLabel,
+  peaPlanStatusLabel,
+  type PeaContributionBaseStatus,
   type PeaContributionRoom,
   type PeaMaturityStatus,
+  type PeaMovement,
 } from "./pea";
 
 export const CONTRIBUTION_TYPES = ["DEPOSIT", "WITHDRAWAL"] as const;
@@ -50,32 +55,81 @@ export type AccountFiscalSummary = {
   envelopeLabel: string;
   openDate: Date;
 
-  /** Absent sur un compte-titres : la règle des 5 ans ne le concerne pas. */
+  /**
+   * Absent sur un compte-titres : la règle des 5 ans ne le concerne pas.
+   *
+   * Porte `planStatus` : un retrait enregistré avant maturité rend le plan
+   * `CLOSED` — plus de compte à rebours, plus de versement (TIT-06).
+   */
   maturity: PeaMaturityStatus | null;
-  /** Absent sur un compte-titres : aucun plafond de versement. */
+  /**
+   * Absent sur un compte-titres : aucun plafond de versement. Place nulle,
+   * avec `blockedReason`, sur un plan clos ou d'état indéterminé.
+   */
   room: PeaContributionRoom | null;
   /** Absent sur un compte-titres, dont l'imposition relève de `fiscal-year.ts`. */
   taxStatusLabel: string | null;
 
-  /** Somme des versements déclarés — bruts, les retraits ne les réduisent pas. */
+  /**
+   * Somme des versements déclarés — bruts, les retraits ne les réduisent pas.
+   * C'est la grandeur du **plafond**, pas celle du gain : voir
+   * `remainingContributionsEur`.
+   */
   contributionsEur: Decimal;
-  /** Somme des retraits déclarés, pour information. */
+  /** Somme des retraits déclarés. */
   withdrawalsEur: Decimal;
+  /**
+   * Versements encore dans le plan — l'assiette du gain et du simulateur de
+   * retrait. Un retrait partiel emporte une quote-part de versements
+   * (BOI-RPPM-RCM-40-50-50) ; `peaContributionBase` la répartit au prorata,
+   * faute de valeur liquidative historique en base.
+   *
+   * `null` quand une donnée manque ou se contredit (`contributionBaseStatus`
+   * = `UNKNOWN`) : ce n'est pas zéro, et rien ne doit le lire comme tel.
+   */
+  remainingContributionsEur: Decimal | null;
+  contributionBaseStatus: PeaContributionBaseStatus;
 
   positionsValueEur: Decimal;
   cashEur: Decimal;
   /**
-   * Faux quand les espèces de l'enveloppe n'ont pas pu être imputées à ce
-   * compte en particulier. La poche `EnvelopeCash` est tenue par enveloppe et
-   * non par compte : elle s'impute exactement au PEA, qui est unique, mais
-   * répartir un solde CTO entre plusieurs comptes-titres relèverait de
-   * l'invention. L'UI doit le signaler plutôt que d'afficher un total faux.
+   * D'où vient — ou pourquoi manque — le montant ci-dessus. Voir
+   * `CashAttribution` : hors de `ATTRIBUTED`, `cashEur` vaut zéro et ce zéro
+   * n'est pas un relevé.
    */
-  cashAttributed: boolean;
-  /** Titres + espèces imputées — l'assiette du calcul de retrait. */
+  cashAttribution: CashAttribution;
+  /**
+   * Titres + espèces imputées — l'assiette du calcul de retrait.
+   *
+   * **Complète sous `ATTRIBUTED` seulement.** Dans les deux autres états la
+   * part espèces vaut zéro sans avoir été relevée, et ce montant est un
+   * minorant.
+   *
+   * Le commentaire précédent n'examinait qu'`ENVELOPE_LEVEL` pour conclure que
+   * le PEA était à l'abri. C'était faux d'une moitié. `ENVELOPE_LEVEL` ne
+   * concerne effectivement que le CTO — PEA et PEA-PME sont uniques par
+   * personne (`SINGLE_ACCOUNT_ENVELOPES`, index partiel en base) — mais
+   * `NOT_TRACKED`, lui, les atteint de plein fouet : c'est l'état de tout plan
+   * dont l'utilisateur n'a pas déclaré la poche d'espèces, et le simulateur de
+   * retrait s'y alimente.
+   *
+   * Mesuré : 20 000 € de titres, 5 000 € d'espèces non suivies, 22 000 € de
+   * versements. Gain réel +3 000 €, gain calculé −2 000 €, donc gain imposable
+   * ramené à 0 et impôt nul ; et un retrait de 22 000 € que la trésorerie
+   * couvre est refusé par « Montant supérieur à la valeur du plan »
+   * (`app/lib/securities/pea.ts`).
+   *
+   * Le calcul n'est donc pas seulement incomplet : il est faux. Ce qui l'entoure
+   * doit le savoir — `WithdrawalSimulator` masque la simulation hors
+   * `ATTRIBUTED` et dit pourquoi, plutôt que de rendre ces chiffres-là.
+   */
   liquidationValueEur: Decimal;
-  /** Valeur liquidative − versements. Négatif en cas de moins-value. */
-  gainEur: Decimal;
+  /**
+   * Valeur liquidative − versements **restants**. Négatif en cas de
+   * moins-value. `null` avec `remainingContributionsEur` : pas de gain
+   * calculé sur une assiette inconnue.
+   */
+  gainEur: Decimal | null;
 };
 
 // ─── Versements ───────────────────────────────────────────────────────────────
@@ -167,32 +221,119 @@ export async function deleteContribution(
 
 // ─── Situation par compte ─────────────────────────────────────────────────────
 
+/** Enveloppes titres portant une poche d'espèces. L'AV n'est pas de ce ressort. */
+const CASH_ENVELOPES = ["PEA", "CTO"] as const;
+
 /**
  * Répartit les poches d'espèces entre les comptes.
  *
- * `EnvelopeCash` est tenue par enveloppe (`CTO`, `PEA`, `AV`), pas par compte.
- * L'imputation n'est donc exacte que lorsqu'un seul compte porte l'enveloppe :
- * c'est toujours le cas du PEA, qui est unique par personne, et seulement
- * parfois celui du CTO. Le PEA-PME n'a aucune poche dédiée dans le modèle
- * actuel — lui attribuer celle du PEA fausserait les deux.
+ * `EnvelopeCash` est tenue par enveloppe (`CTO`, `PEA`, `AV`), pas par compte —
+ * elle est même unique par `(userId, envelope)` au schéma. L'imputation n'est
+ * donc exacte que lorsqu'un seul compte porte l'enveloppe : c'est toujours le
+ * cas du PEA, unique par personne, et seulement parfois celui du CTO. Le
+ * PEA-PME n'a aucune poche dédiée dans le modèle actuel — lui attribuer celle
+ * du PEA fausserait les deux.
  *
- * Quand l'imputation est impossible, on renvoie zéro **et** on le signale,
- * plutôt que de répartir arbitrairement.
+ * Quand l'imputation est impossible, ce compte-ci porte zéro et le dit. La
+ * poche n'est pas perdue pour autant : elle ressort sur l'enveloppe, via
+ * `unattributedEnvelopeCash`, et le total de la page l'ajoute une fois.
+ *
+ * Elle n'est **pas** attribuée d'office au premier compte venu : `cashEur`
+ * nourrit `liquidationValueEur`, donc le gain fiscal du compte. Prêter à un
+ * compte-titres les espèces d'un autre fausserait ce gain sur les deux, pour
+ * rendre juste un total qu'on sait rendre juste autrement.
+ *
+ * L'ordre des tests n'est pas indifférent. L'absence de poche se tranche
+ * **avant** le nombre de comptes : deux CTO sans un euro d'espèces n'ont rien
+ * à se partager, et les renvoyer « non ventilés » accusait d'un échec de
+ * ventilation deux comptes qui n'avaient rien à ventiler. C'est exactement le
+ * reproche fait au PEA-PME, sur un cas bien plus courant.
+ *
+ * L'état rendu est le miroir exact de `unattributedEnvelopeCash` :
+ * `ENVELOPE_LEVEL` sur un compte ⟺ son enveloppe figure dans
+ * `unattributedCashByEnvelope`. Les deux fonctions décident sur les mêmes
+ * conditions, dans le même ordre, pour qu'aucune poche ne puisse être
+ * annoncée deux fois ni oubliée par les deux.
  */
 function attributeCash(
   envelopeType: SecuritiesEnvelopeType,
   accountsOfSameEnvelope: number,
   pockets: Map<string, Decimal>
-): { cashEur: Decimal; cashAttributed: boolean } {
+): { cashEur: Decimal; cashAttribution: CashAttribution } {
   if (envelopeType === "PEA_PME") {
-    return { cashEur: d(0), cashAttributed: false };
+    return { cashEur: d(0), cashAttribution: "NOT_TRACKED" };
   }
-  if (accountsOfSameEnvelope !== 1) {
-    return { cashEur: d(0), cashAttributed: false };
-  }
+
   const pocket = pockets.get(envelopeType === "PEA" ? "PEA" : "CTO");
-  return { cashEur: pocket ?? d(0), cashAttributed: true };
+
+  // Pas de poche, ou une poche à zéro : rien à imputer, et rien à signaler.
+  // Le zéro rendu ici est un fait — l'enveloppe est suivie, son solde est nul.
+  if (!pocket || pocket.isZero()) {
+    return { cashEur: d(0), cashAttribution: "ATTRIBUTED" };
+  }
+
+  if (accountsOfSameEnvelope !== 1) {
+    return { cashEur: d(0), cashAttribution: "ENVELOPE_LEVEL" };
+  }
+
+  return { cashEur: pocket, cashAttribution: "ATTRIBUTED" };
 }
+
+/**
+ * Espèces d'enveloppe qu'aucun compte ne peut porter.
+ *
+ * Deux cas : plusieurs comptes se partagent l'enveloppe — on ne sait pas
+ * lequel détient la poche — ou aucun compte titres n'est déclaré alors que la
+ * poche existe, l'état ordinaire d'un début de saisie.
+ *
+ * Ce montant sortait nulle part. Le drapeau censé l'annoncer ne pouvait même
+ * pas s'allumer : le garde de `computeTotals` exigeait
+ * `!cashAttributed && cashEur !== 0`, alors qu'`attributeCash` met justement le
+ * montant à zéro dans les deux branches où il baisse le drapeau. Mesuré : deux
+ * comptes-titres et une poche CTO de 5 000 € — les 5 000 € n'apparaissaient ni
+ * dans le total, ni dans un bandeau.
+ *
+ * Il est compté **une fois par enveloppe**, jamais par compte : le distribuer
+ * aux comptes en doublerait le montant sur la page.
+ *
+ * Le signe ne filtre pas. Une poche négative — découvert, appel de marge,
+ * règlement différé — est un fait comptable au même titre qu'une poche
+ * créditrice, et `attributeCash` ne l'a jamais filtrée : avec un seul compte
+ * de l'enveloppe, un solde de −1 200 € entre dans son `cashEur`, donc dans le
+ * total. La jeter ici faisait dépendre le total de la page du **nombre de
+ * comptes** : 1 200 € d'écart entre un CTO et deux, pour la même dette. Seul
+ * le zéro strict est sauté, parce qu'il n'y a rien à annoncer.
+ */
+function unattributedEnvelopeCash(
+  pockets: Map<string, Decimal>,
+  countByEnvelope: Map<string, number>
+): Record<string, Decimal> {
+  const out: Record<string, Decimal> = {};
+  for (const envelope of CASH_ENVELOPES) {
+    const pocket = pockets.get(envelope);
+    if (!pocket || pocket.isZero()) continue;
+    // Un seul compte de cette enveloppe : la poche lui est imputée, elle
+    // compte déjà dans son `cashEur`.
+    if ((countByEnvelope.get(envelope) ?? 0) === 1) continue;
+    out[envelope] = pocket;
+  }
+  return out;
+}
+
+export type SecuritiesFiscalBundle = {
+  accounts: AccountFiscalSummary[];
+  /**
+   * Espèces d'enveloppe qu'aucun compte ne porte, **par enveloppe**.
+   *
+   * Par enveloppe et non en un seul montant : c'est la maille à laquelle la
+   * poche existe, celle où l'écran doit la ranger — la répartition par
+   * enveloppe en a besoin — et celle que le bandeau doit nommer. « Une partie
+   * des liquidités » n'apprend rien ; « Liquidités CTO : 5 000 € » se vérifie.
+   *
+   * Vide quand tout est imputé. Voir `unattributedEnvelopeCash`.
+   */
+  unattributedCashByEnvelope: Record<string, Decimal>;
+};
 
 /**
  * Situation fiscale de tous les comptes titres de l'utilisateur.
@@ -201,11 +342,15 @@ function attributeCash(
  * la place disponible sur l'un dépend de ce qui a été versé sur l'autre, via le
  * plafond commun (cf. `peaContributionRoom`). Un calcul compte par compte,
  * isolément, donnerait un chiffre trop élevé.
+ *
+ * Aucun compte déclaré ne fait plus sortir tôt : une poche d'enveloppe peut
+ * exister sans compte en face — c'est même l'état ordinaire d'un début de
+ * saisie — et la taire cacherait du capital.
  */
 export async function getSecuritiesFiscalBundle(
   userId: string,
   at: Date = new Date()
-): Promise<AccountFiscalSummary[]> {
+): Promise<SecuritiesFiscalBundle> {
   const accounts = await prisma.securitiesAccount.findMany({
     where: { userId },
     select: {
@@ -213,22 +358,53 @@ export async function getSecuritiesFiscalBundle(
       envelopeType: true,
       openDate: true,
       assets: { select: { id: true } },
-      contributions: { select: { type: true, amountEur: true } },
+      contributions: {
+        select: { type: true, amountEur: true, occurredAt: true },
+      },
     },
+    /*
+      `envelopeType` croissant trie les valeurs stockées `CTO | PEA | PEA_PME`,
+      donc les comptes-titres d'abord. L'ordre de lecture utile est celui du
+      poids fiscal — le PEA en tête — et l'écran le rétablit de son côté
+      (`securities-overview.tsx`). Le commentaire disait l'inverse du code ;
+      c'est le commentaire qui avait tort.
+    */
     orderBy: [{ envelopeType: "asc" }, { openDate: "asc" }],
   });
-  if (accounts.length === 0) return [];
 
   const allAssetIds = accounts.flatMap((a) => a.assets.map((x) => x.id));
-  const [values, envelopeRows] = await Promise.all([
+  const [values, envelopeRows, rates] = await Promise.all([
     allAssetIds.length > 0
       ? getAssetValues(userId, allAssetIds)
       : Promise.resolve(new Map()),
     prisma.envelopeCash.findMany({ where: { userId } }),
+    getEurRates(),
   ]);
 
+  /*
+    La poche se convertit, elle ne se relabellise pas.
+
+    `EnvelopeCash` porte un `balance` **et** une `currency` — le panneau
+    laisse changer celle du CTO et de l'AV. Cette carte ne lisait que le
+    nominal : une poche CTO de 5 000 USD entrait pour 5 000 dans un `cashEur`
+    dont le nom dit l'unité, et de là dans la valeur liquidative du compte,
+    dans l'assiette d'une simulation de retrait, et — depuis que le bandeau
+    nomme chaque poche — à l'écran, en toutes lettres, suivie d'un « € ».
+
+    Les deux consommateurs de cette carte, `attributeCash` et
+    `unattributedEnvelopeCash`, décident sur les mêmes montants : convertir
+    ici les corrige tous les deux d'un coup, et aucun des deux n'a à
+    connaître les taux.
+
+    Une devise sans taux fait remonter `FxRateUnknownError`, et la route rend
+    son 500 : c'est le troisième état. Ni zéro — la poche existe —, ni le
+    nominal étiqueté euro, qui est le défaut qu'on ferme.
+  */
   const pockets = new Map<string, Decimal>(
-    envelopeRows.map((e) => [e.envelope, d(e.balance.toString())])
+    envelopeRows.map((e) => [
+      e.envelope,
+      d(convertToEurSync(e.balance.toString(), e.currency, rates)),
+    ])
   );
 
   const countByEnvelope = new Map<string, number>();
@@ -260,7 +436,7 @@ export async function getSecuritiesFiscalBundle(
       totals.PEA_PME = totals.PEA_PME.plus(deposits);
   }
 
-  return accounts.map((a) => {
+  const summaries = accounts.map((a): AccountFiscalSummary => {
     const envelopeType = a.envelopeType as SecuritiesEnvelopeType;
     const isPea = envelopeType !== "CTO";
 
@@ -270,7 +446,7 @@ export async function getSecuritiesFiscalBundle(
       if (v) positionsValue = positionsValue.plus(v.marketValueEur);
     }
 
-    const { cashEur, cashAttributed } = attributeCash(
+    const { cashEur, cashAttribution } = attributeCash(
       envelopeType,
       countByEnvelope.get(envelopeType) ?? 0,
       pockets
@@ -278,7 +454,36 @@ export async function getSecuritiesFiscalBundle(
     const liquidationValue = positionsValue.plus(cashEur);
 
     const totalsForAccount = contributionsByAccount.get(a.id)!;
-    const maturity = isPea ? peaMaturityStatus(a.openDate, at) : null;
+    const movements: PeaMovement[] = a.contributions.map((c) => ({
+      type: c.type === "WITHDRAWAL" ? "WITHDRAWAL" : "DEPOSIT",
+      amountEur: d(c.amountEur.toString()),
+      occurredAt: c.occurredAt,
+    }));
+
+    /*
+      La maturité lit le journal, pas seulement la date d'ouverture : un
+      retrait avant 5 ans clôture le plan, et la date seule continuait
+      d'annoncer un compte à rebours et une place de versement sur un plan
+      clos (TIT-06). `planStatus` en sort et borne la place ci-dessous.
+    */
+    const maturity = isPea
+      ? peaMaturityStatus(a.openDate, at, movements)
+      : null;
+
+    /*
+      L'assiette du gain n'est plus `deposits` brut : après un retrait
+      partiel, une quote-part de versements est déjà sortie du plan. La
+      laisser dans l'assiette sous-estimait le gain et l'impôt de chaque
+      retrait suivant — mesuré à −6 200 € de prélèvements sociaux sur le cas
+      de l'audit (TIT-01). Le plafond, lui, reste sur le brut.
+    */
+    const base = peaContributionBase({
+      envelopeType,
+      openDate: a.openDate,
+      at,
+      liquidationValueEur: liquidationValue,
+      movements,
+    });
 
     return {
       accountId: a.id,
@@ -286,21 +491,32 @@ export async function getSecuritiesFiscalBundle(
       envelopeLabel: securitiesEnvelopeLabel(envelopeType),
       openDate: a.openDate,
       maturity,
-      room: isPea
+      room: maturity
         ? peaContributionRoom({
             envelopeType,
             peaContributionsEur: totals.PEA,
             peaPmeContributionsEur: totals.PEA_PME,
+            planStatus: maturity.planStatus,
           })
         : null,
-      taxStatusLabel: maturity ? peaTaxStatusLabel(maturity.isMatured) : null,
+      taxStatusLabel: maturity ? peaPlanStatusLabel(maturity) : null,
       contributionsEur: totalsForAccount.deposits,
       withdrawalsEur: totalsForAccount.withdrawals,
+      remainingContributionsEur: base?.remainingContributionsEur ?? null,
+      contributionBaseStatus: base?.status ?? "UNKNOWN",
       positionsValueEur: positionsValue,
       cashEur,
-      cashAttributed,
+      cashAttribution,
       liquidationValueEur: liquidationValue,
-      gainEur: liquidationValue.minus(totalsForAccount.deposits),
+      gainEur: base?.gainEur ?? null,
     };
   });
+
+  return {
+    accounts: summaries,
+    unattributedCashByEnvelope: unattributedEnvelopeCash(
+      pockets,
+      countByEnvelope
+    ),
+  };
 }

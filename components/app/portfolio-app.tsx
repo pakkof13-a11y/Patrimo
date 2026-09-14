@@ -1,5 +1,6 @@
 "use client";
 
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import {
   useCallback,
   useEffect,
@@ -30,7 +31,6 @@ import {
   useHoldingsQuery,
   usePatrimonyStateQuery,
   usePlatformsQuery,
-  usePortfolioHistoryQuery,
   useTransactionsMetaQuery,
 } from "@/app/hooks/use-portfolio-queries";
 import { ShortcutsHelpPanel } from "@/components/layout/shortcuts-help-panel";
@@ -79,7 +79,13 @@ import { TransactionModal } from "@/components/modals/transaction-modal";
 import { PlatformModal } from "@/components/modals/platform-modal";
 import { AssetPanel } from "@/components/holdings/asset-panel";
 import { ImportCsvModal } from "@/components/modals/import-csv-modal";
+import { EditAssetCategoryModal } from "@/components/holdings/edit-asset-category-modal";
 import { QuickPlatformModal } from "@/components/modals/quick-platform-modal";
+import { FirstOperationsModal } from "@/components/modals/first-operations-modal";
+import {
+  shouldOfferFirstOperations,
+  type FirstOperationsPlatformInput,
+} from "@/components/dashboard/first-operations-options";
 import { PropertyModal } from "@/components/modals/property-modal";
 import { RealEstateTab } from "@/components/real-estate/real-estate-tab";
 import { SecuritiesPage } from "@/components/securities/securities-page";
@@ -245,6 +251,14 @@ function PortfolioAppClient({
 
   const [baseCurrency, setBaseCurrency] = useState("EUR");
   const [showTx, setShowTx] = useState(false);
+  /** Actif dont on modifie la sous-catégorie — `null` = modale fermée. */
+  const [editCategoryAsset, setEditCategoryAsset] = useState<{
+    id: string;
+    name: string;
+    ticker: string | null;
+    accountType?: string;
+    category?: string | null;
+  } | null>(null);
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
   const [showPlatform, setShowPlatform] = useState(false);
   const [showQuickPlatform, setShowQuickPlatform] = useState(false);
@@ -262,6 +276,16 @@ function PortfolioAppClient({
   const [newPlatformIds, setNewPlatformIds] = useState<Set<string>>(
     () => new Set()
   );
+  /**
+   * Plateforme à proposer comme point de départ pour « Ajouter vos premières
+   * opérations » (D23) — non nul seulement juste après une création réussie
+   * depuis le chemin dédié, sur un compte sans journal. `null` referme la
+   * fenêtre ; ce n'est jamais un passage forcé.
+   */
+  const [firstOperationsPlatform, setFirstOperationsPlatform] =
+    useState<FirstOperationsPlatformInput | null>(null);
+  /** Plateforme sur laquelle ouvrir directement l'édition (adresse / clé API) en arrivant sur l'onglet Plateformes. */
+  const [focusPlatformId, setFocusPlatformId] = useState<string | null>(null);
   const [detailAssetId, setDetailAssetId] = useState<string | null>(null);
   const [cryptoSub, setCryptoSub] = useState<CryptoSubTab>("DASHBOARD");
   const [assetLabel, setAssetLabel] = useState("");
@@ -435,7 +459,17 @@ function PortfolioAppClient({
   // ─── Data ───────────────────────────────────────────────────────────────────
 
   const holdingsQ = useHoldingsQuery(baseCurrency);
-  const historyQ = usePortfolioHistoryQuery(baseCurrency);
+  /*
+    Plus de requête d'historique au chargement de la page.
+
+    `GET /api/portfolio` n'était appelé que pour son `history[]` : le résumé et
+    l'allocation viennent de `useHoldingsQuery`. Depuis que la route ne calcule
+    plus de série, cet appel ne rapportait plus rien — il bloquait seulement le
+    rendu derrière un 504 mesuré à 10 238 ms en préproduction.
+
+    Les courbes du tableau de bord sont servies par `daily-nav`, bornées au
+    chip demandé, et la profondeur cliquable par la constante du cap.
+  */
   const platformsQ = usePlatformsQuery(baseCurrency);
   /*
     Compte vierge ou compte actif ?
@@ -447,7 +481,7 @@ function PortfolioAppClient({
     rendre un compte actif, même sans la moindre position calculée.
   */
   const patrimonyQ = usePatrimonyStateQuery();
-  const detailQ = useAssetDetailQuery(detailAssetId);
+  const detailQ = useAssetDetailQuery(detailAssetId, baseCurrency);
   /** Compte total léger (maturité dashboard) — pas le journal paginé. */
   const txMetaQ = useTransactionsMetaQuery();
 
@@ -592,7 +626,7 @@ function PortfolioAppClient({
       await qc.invalidateQueries({ queryKey: ["assets"] });
       await qc.invalidateQueries({ queryKey: ["platforms"] });
       await qc.invalidateQueries({ queryKey: ["asset-detail"] });
-      void qc.invalidateQueries({ queryKey: ["portfolio-history"] });
+      invalidatePortfolioView(qc);
       const fresh = await reloadHoldings(qc, baseCurrency);
       const aid = res?.transaction?.assetId;
       const row = aid ? fresh.holdings.find((h: Holding) => h.assetId === aid) : null;
@@ -618,7 +652,7 @@ function PortfolioAppClient({
       toast.success("Transaction supprimée — positions recalculées");
       await qc.invalidateQueries({ queryKey: ["transactions"] });
       await qc.invalidateQueries({ queryKey: ["asset-detail"] });
-      void qc.invalidateQueries({ queryKey: ["portfolio-history"] });
+      invalidatePortfolioView(qc);
       await reloadHoldings(qc, baseCurrency);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -768,7 +802,7 @@ function PortfolioAppClient({
       void qc.invalidateQueries({ queryKey: ["platforms"] });
       void qc.invalidateQueries({ queryKey: ["holdings"] });
       void qc.invalidateQueries({ queryKey: ["transactions"] });
-      void qc.invalidateQueries({ queryKey: ["portfolio-history"] });
+      invalidatePortfolioView(qc);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -856,7 +890,7 @@ function PortfolioAppClient({
     platformCount: platforms.length,
     transactionCount: txCount,
     holdingCount: allHoldings.length,
-    historyPointCount: historyQ.data?.history?.length ?? 0,
+    historyPointCount: 0,
   });
   const dashBlocks = dashboardBlocksFor(dashboardMaturity);
   /**
@@ -1205,7 +1239,6 @@ function PortfolioAppClient({
                 <KpiStrip
                   summary={summary}
                   baseCurrency={baseCurrency}
-                  history={historyQ.data?.history}
                   smartFilter={isDashboard && dashBlocks.kpiSmartFilter}
                   /*
                     Même garde que les modules refondus : `isPending && !data`.
@@ -1276,7 +1309,6 @@ function PortfolioAppClient({
                   <HoldingsSection
                     tab={tab}
                     holdings={holdings}
-                    history={historyQ.data?.history}
                     loading={holdingsQ.isPending && !holdingsQ.data}
                     baseCurrency={baseCurrency}
                     envelopeFilters={envelopeFilters}
@@ -1285,7 +1317,6 @@ function PortfolioAppClient({
                     onTriggerLevelChange={onTriggerLevelChange}
                     onRowDoubleClick={setDetailAssetId}
                     selectedAssetId={detailAssetId}
-                    onCategoryChange={onCategoryChange}
                     onAddTransaction={() => openNewTransaction("ACHAT")}
                     onImport={() => setShowImport(true)}
                   />
@@ -1320,6 +1351,17 @@ function PortfolioAppClient({
                       });
                     }}
                     onClose={() => setDetailAssetId(null)}
+                    onEditCategory={() => {
+                      const a = detailQ.data?.asset;
+                      if (!a) return;
+                      setEditCategoryAsset({
+                        id: a.id,
+                        name: a.name,
+                        ticker: a.ticker,
+                        accountType: (a as { accountType?: string }).accountType,
+                        category: (a as { category?: string | null }).category,
+                      });
+                    }}
                     onEditTx={(t) => {
                       setDetailAssetId(null);
                       openEditTx(t);
@@ -1368,7 +1410,7 @@ function PortfolioAppClient({
                       d.asset.priceQuote?.priceNative || "0"
                     ),
                     marketValueEur: asEurAmount(d.holding?.marketValueEur || "0"),
-                    marketValueBase: asBaseAmount(d.holding?.marketValueEur || "0"),
+                    marketValueBase: asBaseAmount(d.holding?.marketValueBase || "0"),
                     costBasisBase: asBaseAmount("0"),
                     unrealizedPnlEur: asEurAmount("0"),
                     unrealizedPnlBase: asBaseAmount("0"),
@@ -1439,13 +1481,13 @@ function PortfolioAppClient({
                 summary={summary}
                 holdings={allHoldings}
                 allocation={holdingsQ.data?.allocation}
-                history={historyQ.data?.history ?? []}
-                historyLoading={historyQ.isPending && !historyQ.data}
+                history={[]}
+                historyLoading={false}
                 maturityInput={{
                   platformCount: platforms.length,
                   transactionCount: txCount,
                   holdingCount: allHoldings.length,
-                  historyPointCount: historyQ.data?.history?.length ?? 0,
+                  historyPointCount: 0,
                 }}
                 portfolioTickers={portfolioTickers}
                 onAddPlatform={() => {
@@ -1541,6 +1583,8 @@ function PortfolioAppClient({
                   setShowImport(true);
                 }}
                 onViewTransactions={(p) => viewTransactionsForPlatform(p)}
+                focusPlatformId={focusPlatformId}
+                onFocusHandled={() => setFocusPlatformId(null)}
               />
             )}
 
@@ -1622,6 +1666,41 @@ function PortfolioAppClient({
       />
 
       {/*
+        Éditeur de sous-catégorie.
+
+        Il vivait dans `HoldingsSection`, sur un état que rien ne remplissait :
+        `setEditCategoryHolding` n'y était appelé qu'avec `null`. La modale
+        n'avait donc aucun chemin d'ouverture, et `PATCH
+        /api/assets/:id/category` était devenu inatteignable depuis l'interface.
+
+        Il est monté ici parce que c'est ici que vit la fiche qui l'ouvre : le
+        panneau connaît l'actif affiché, l'écran connaît le rechargement à
+        déclencher après écriture.
+      */}
+      {editCategoryAsset && (
+        <EditAssetCategoryModal
+          open
+          assetId={editCategoryAsset.id}
+          assetName={editCategoryAsset.name}
+          ticker={editCategoryAsset.ticker}
+          accountType={editCategoryAsset.accountType}
+          currentCategory={editCategoryAsset.category}
+          onClose={() => setEditCategoryAsset(null)}
+          onSaved={(category) => {
+            const assetId = editCategoryAsset.id;
+            setEditCategoryAsset(null);
+            /*
+              La fiche affiche la sous-catégorie : sans cette invalidation elle
+              garderait l'ancienne sous les yeux de qui vient de la changer.
+              Le tableau, lui, est rechargé par `onCategoryChange`.
+            */
+            void qc.invalidateQueries({ queryKey: ["asset-detail", assetId] });
+            void onCategoryChange(assetId, category);
+          }}
+        />
+      )}
+
+      {/*
         Import d’abord (layer 0), puis QuickPlatform au-dessus (layer 1).
         Quand création depuis import : import.suspended = true.
       */}
@@ -1655,7 +1734,7 @@ function PortfolioAppClient({
           await qc.invalidateQueries({ queryKey: ["transactions"] });
           await qc.invalidateQueries({ queryKey: ["assets"] });
           await qc.invalidateQueries({ queryKey: ["platforms"] });
-          void qc.invalidateQueries({ queryKey: ["portfolio-history"] });
+          invalidatePortfolioView(qc);
           await reloadHoldings(qc, baseCurrency);
         }}
         onViewJournal={() => setTab("holdings")}
@@ -1685,6 +1764,53 @@ function PortfolioAppClient({
               ? `Plateforme « ${p.name} » créée et sélectionnée`
               : `Plateforme « ${p.name} » sélectionnée`
           );
+          /*
+            Deuxième étape : un compte sans journal qui vient de créer sa
+            plateforme (chemin dédié, pas un détour depuis la transaction ou
+            l'import) n'a rien à faire du tableau de bord tant qu'aucune
+            opération n'existe. `txCount` ici est celui d'avant cette
+            création — créer une plateforme n'ajoute aucune transaction.
+          */
+          if (
+            shouldOfferFirstOperations({
+              target: quickPlatformTarget,
+              created: p.created,
+              transactionCountBeforeCreate: txCount,
+            })
+          ) {
+            setFirstOperationsPlatform({
+              id: p.id,
+              name: p.name,
+              type: p.type,
+              logoKey: p.logoKey,
+            });
+          }
+        }}
+      />
+
+      <FirstOperationsModal
+        open={Boolean(firstOperationsPlatform)}
+        platform={firstOperationsPlatform}
+        onClose={() => setFirstOperationsPlatform(null)}
+        onAddTransaction={() => {
+          const target = firstOperationsPlatform;
+          setFirstOperationsPlatform(null);
+          openNewTransaction(
+            "ACHAT",
+            undefined,
+            target ? { id: target.id, name: target.name } : undefined
+          );
+        }}
+        onImportCsv={() => {
+          const target = firstOperationsPlatform;
+          setFirstOperationsPlatform(null);
+          if (target) setImportDefaultPlatform({ id: target.id, name: target.name });
+          setShowImport(true);
+        }}
+        onSync={(syncable) => {
+          setFirstOperationsPlatform(null);
+          setFocusPlatformId(syncable.id);
+          setTab("platforms");
         }}
       />
 

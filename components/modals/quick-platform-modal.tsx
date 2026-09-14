@@ -5,14 +5,21 @@ import { Modal } from "@/components/ui/modal";
 import { Field } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import { PlatformLogo } from "@/components/ui/platform-logo";
-import { findPreset, primaryType } from "@/app/lib/platforms/presets";
+import {
+  findPreset,
+  primaryType,
+  type PlatformPreset,
+} from "@/app/lib/platforms/presets";
 import { fetchJson } from "@/app/lib/api-client";
+import { PlatformCombobox } from "@/components/ui/platform-combobox";
 
 export type CreatedPlatform = {
   id: string;
   name: string;
   type: string;
   logoUrl: string | null;
+  /** Capacité de synchro (D23) : lue depuis la réponse serveur, jamais devinée ici. */
+  logoKey: string | null;
   created: boolean;
 };
 
@@ -45,6 +52,14 @@ export function QuickPlatformModal({
   const [logoUrl, setLogoUrl] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Choix explicite dans le combobox — prioritaire sur la détection
+   * automatique tant qu'il correspond encore au texte affiché (l'utilisateur
+   * n'a pas retapé par-dessus).
+   */
+  const [selectedPreset, setSelectedPreset] = useState<
+    PlatformPreset | undefined
+  >(undefined);
 
   const resetKey = `${open}:${prefillName}`;
   const [prevResetKey, setPrevResetKey] = useState(resetKey);
@@ -55,13 +70,30 @@ export function QuickPlatformModal({
       setLogoUrl("");
       setError(null);
       setPending(false);
+      setSelectedPreset(undefined);
     }
   }
 
   if (!open) return null;
 
-  const preset = name.trim().length >= 2 ? findPreset(name.trim()) : undefined;
+  const trimmedName = name.trim();
+  const preset =
+    selectedPreset &&
+    selectedPreset.name.toLowerCase() === trimmedName.toLowerCase()
+      ? selectedPreset
+      : trimmedName.length >= 2
+        ? findPreset(trimmedName)
+        : undefined;
   const previewLogo = logoUrl.trim() || preset?.logoUrl || null;
+
+  function handleNameChange(text: string) {
+    setName(text);
+    setSelectedPreset((prev) =>
+      prev && prev.name.toLowerCase() === text.trim().toLowerCase()
+        ? prev
+        : undefined
+    );
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -83,6 +115,7 @@ export function QuickPlatformModal({
           name: string;
           type: string;
           logoUrl: string | null;
+          logoKey: string | null;
         };
         created?: boolean;
       }>("/api/platforms", {
@@ -101,6 +134,7 @@ export function QuickPlatformModal({
         name: res.platform.name,
         type: res.platform.type,
         logoUrl: res.platform.logoUrl,
+        logoKey: res.platform.logoKey ?? null,
         created: res.created !== false,
       });
       onClose();
@@ -129,13 +163,27 @@ export function QuickPlatformModal({
         </p>
 
         <Field label="Nom de la plateforme">
-          <input
-            className="input w-full"
+          {/*
+            Combobox catalogue (mêmes options que le reste de l'app, y
+            compris sur un compte sans plateforme — le catalogue est
+            statique, indépendant des données utilisateur) : suggestions et
+            logos dès la saisie, pas seulement une détection après-coup.
+          */}
+          <PlatformCombobox
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onValueChange={handleNameChange}
+            onSelect={(sel) => {
+              if ("preset" in sel && sel.preset) {
+                setName(sel.label);
+                setSelectedPreset(sel.preset);
+              } else if ("label" in sel) {
+                setName(sel.label);
+                setSelectedPreset(undefined);
+              }
+            }}
+            allowCustom={false}
             placeholder="ex. Boursorama, Binance, Trade Republic…"
-            autoComplete="off"
-            data-testid="quick-platform-name"
+            testId="quick-platform-name"
             autoFocus
           />
           {preset && (

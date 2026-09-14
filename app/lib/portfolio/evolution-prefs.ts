@@ -36,21 +36,27 @@ export type EvolutionBenchmark = "none" | "index";
 export type EvolutionScope = "gross" | "net";
 
 /**
- * Classe d'actif tracée, ou `null` pour le patrimoine entier.
+ * Compte tracé, ou `null` pour le patrimoine entier.
  *
- * Séparée de `EvolutionScope` à dessein : « brut ou net » et « quelle classe »
- * sont deux questions indépendantes. On peut vouloir la crypto en valeur brute
- * comme le patrimoine entier en net, et les fondre en une seule liste aurait
- * produit douze choix dont la moitié n'a pas de sens — une classe d'actif n'a
- * pas de version « nette », les dettes n'appartenant à aucune classe.
+ * « Compte » — où l'argent est déposé — jamais « Catégorie » : `ACTIONS`
+ * additionnait PEA + CTO + unités de compte d'assurance-vie, et ni PEA ni CTO
+ * ne sont cette somme. Chaque entrée correspond à un scope `getDailyNav` (ou,
+ * pour `TITRES`, au croisement classe × enveloppe) — jamais à `byAssetClass`,
+ * qui agrège l'`assetClass` brute sans le compte et compterait l'assurance-vie
+ * deux fois (mesuré : 256 126,86 € contre 138 148,74 € de vraie exposition
+ * cotée hors crypto, l'écart étant exactement la poche assurance-vie).
+ *
+ * Pas de `TRADING` : les positions CFD vivent dans `TradingPosition`, un
+ * modèle que le moteur historique ne charge jamais.
  */
-export type EvolutionAssetClass =
-  | "ACTIONS"
-  | "OBLIGATIONS"
+export type EvolutionAccount =
+  | "TITRES"
+  | "ASSURANCE_VIE"
   | "CRYPTO"
   | "IMMOBILIER"
-  | "CASH"
-  | "AUTRE";
+  | "ALTERNATIFS"
+  | "EPARGNE_SALARIALE"
+  | "CASH";
 
 export type EvolutionPrefsV5 = {
   v: 5;
@@ -62,31 +68,36 @@ export type EvolutionPrefsV5 = {
   /** Périmètre tracé : actifs bruts (défaut) ou patrimoine net. */
   scope: EvolutionScope;
   /**
-   * Classe d'actif isolée, ou `null` pour tout le patrimoine.
+   * Compte isolé, ou `null` pour tout le patrimoine.
    *
-   * Arrivée après v5, comme `scope` : une préférence enregistrée avant ne la
-   * porte pas, et retombe donc sur `null` — le comportement d'avant.
+   * D18 remplace le sélecteur de classe d'actif (`assetClass`) par un
+   * sélecteur de compte. Le champ `assetClass` n'existe plus dans ce schéma :
+   * une préférence `v5` enregistrée avant ce chantier ne porte pas `account`,
+   * et `loadEvolutionPrefs` retombe alors sur `null` — « Tout », le
+   * comportement le plus sûr. Son ancien contenu (`ACTIONS`, `AUTRE`…) n'est
+   * jamais relu : la taxonomie a changé de nature, la reconstruire à partir de
+   * valeurs qui ne correspondent plus à des comptes inventerait un choix.
    */
-  assetClass?: EvolutionAssetClass | null;
+  account?: EvolutionAccount | null;
   /**
-   * Ce que la courbe trace pour la classe choisie.
+   * Ce que la courbe trace pour le compte choisi.
    *
    * `value` : l'encours, apports compris. `performance` : ce que le marché a
    * produit, une fois les mouvements de capitaux retirés — jamais l'un
    * présenté comme l'autre.
    *
-   * Sans classe sélectionnée, ce réglage n'a pas d'objet : le patrimoine
+   * Sans compte sélectionné, ce réglage n'a pas d'objet : le patrimoine
    * entier reste en valeur.
    */
   classMetric?: "value" | "performance";
   /**
-   * Enveloppe fiscale, à l'intérieur de la classe choisie.
+   * Enveloppe fiscale, à l'intérieur du compte Titres.
    *
-   * Subordonnée à `assetClass`, et non alternative : une classe décrit **ce
-   * que** l'on détient, une enveloppe **où** — et « mes actions en PEA » est
-   * une question légitime. La composition n'a en revanche de sens que là où une
-   * enveloppe titres peut qualifier la classe : « Crypto en PEA » n'en a aucun,
-   * et `normalizeEnvelopeFor` refuse cette combinaison plutôt que de la stocker.
+   * Subordonnée à `account === "TITRES"`, et non alternative : le compte
+   * décrit **ce qui est déposé où**, l'enveloppe **quelle poche fiscale** —
+   * et « mes titres en PEA » est une question légitime. La composition n'a de
+   * sens que là où une enveloppe titres peut qualifier le compte ; ailleurs,
+   * `normalizeEnvelopeFor` refuse la combinaison plutôt que de la stocker.
    */
   envelope?: "PEA" | "CTO" | null;
 };
@@ -97,7 +108,7 @@ export const DEFAULT_EVOLUTION_PREFS: EvolutionPrefsV5 = {
   versus: "none",
   indexKey: "cac40",
   scope: "gross",
-  assetClass: null,
+  account: null,
   classMetric: "value",
   envelope: null,
 };
@@ -107,42 +118,43 @@ const VERSUS = new Set(["none", "index"]);
 const SCOPES = new Set(["gross", "net"]);
 const METRICS = new Set(["value", "performance"]);
 const ENVELOPES = new Set(["PEA", "CTO"]);
-const CLASSES = new Set([
-  "ACTIONS",
-  "OBLIGATIONS",
+const ACCOUNTS = new Set([
+  "TITRES",
+  "ASSURANCE_VIE",
   "CRYPTO",
   "IMMOBILIER",
+  "ALTERNATIFS",
+  "EPARGNE_SALARIALE",
   "CASH",
-  "AUTRE",
 ]);
 
 /**
- * Les classes pour lesquelles l'écran propose un choix d'enveloppe.
+ * Les comptes pour lesquels l'écran propose un choix d'enveloppe.
  *
- * Les actions seules. Les obligations sont bien des titres, mais le produit
- * n'en connaît qu'en compte-titres : leur proposer « PEA » offrirait un choix
- * dont la série serait vide par convention d'interface plutôt que par constat.
- * Elles reçoivent une indication, pas un contrôle.
+ * Titres seul : c'est le seul compte que le journal sait recouper avec PEA ou
+ * CTO. Assurance-vie, crypto, immobilier, alternatifs, épargne salariale et
+ * banques n'ont aucun rapport avec un compte-titres.
  */
-const CLASSES_AVEC_ENVELOPPE = new Set(["ACTIONS"]);
+const ACCOUNTS_AVEC_ENVELOPPE = new Set(["TITRES"]);
 
 /**
- * Enveloppe compatible avec une classe — `null` dès qu'elle ne l'est pas.
+ * Enveloppe compatible avec un compte — `null` dès qu'elle ne l'est pas.
  *
  * Un état invalide ne doit ni être stocké ni être restauré : une préférence
- * enregistrée quand le sélecteur était global peut porter « Crypto + PEA », et
- * la rejouer telle quelle filtrerait la crypto sur une enveloppe qu'aucun
- * contrôle n'affiche plus — une courbe vide sans explication.
+ * enregistrée quand le compte était Titres peut porter une enveloppe, et la
+ * rejouer telle quelle après un changement de compte filtrerait un autre
+ * compte sur une enveloppe qu'aucun contrôle n'affiche plus — une courbe vide
+ * sans explication.
  *
- * On conserve la classe et on retombe sur « toutes enveloppes » : c'est le
- * choix le moins surprenant, la classe étant le filtre principal.
+ * On conserve le compte et on retombe sur « toutes enveloppes » : c'est le
+ * choix le moins surprenant, le compte étant le filtre principal.
  */
 export function normalizeEnvelopeFor(
-  assetClass: EvolutionAssetClass | null | undefined,
+  account: EvolutionAccount | null | undefined,
   envelope: "PEA" | "CTO" | null | undefined
 ): "PEA" | "CTO" | null {
   if (envelope == null || !ENVELOPES.has(envelope)) return null;
-  if (assetClass == null || !CLASSES_AVEC_ENVELOPPE.has(assetClass)) return null;
+  if (account == null || !ACCOUNTS_AVEC_ENVELOPPE.has(account)) return null;
   return envelope;
 }
 
@@ -159,9 +171,14 @@ function isEvolutionPrefsV5(raw: unknown): raw is EvolutionPrefsV5 {
     return false;
   }
   /*
-    `assetClass` est arrivée encore après. `null` est une valeur porteuse de
-    sens — « tout le patrimoine » — et doit donc être acceptée au même titre
-    qu'une classe, alors qu'`undefined` signale une préférence antérieure.
+    `account` (D18) est arrivé après `assetClass`, lui-même arrivé après v5.
+    `null` est une valeur porteuse de sens — « tout le patrimoine » — et doit
+    donc être acceptée au même titre qu'un compte, alors qu'`undefined` signale
+    une préférence antérieure à ce champ (D17 ou avant, ou D18 elle-même avant
+    ce chantier). L'ancien `assetClass` n'est plus lu ni validé : le rejeter
+    ferait échouer une préférence par ailleurs valide sur un champ qu'on ne
+    consulte plus ; on l'ignore silencieusement, comme n'importe quelle clé
+    obsolète.
   */
   if (
     o.envelope !== undefined &&
@@ -177,9 +194,9 @@ function isEvolutionPrefsV5(raw: unknown): raw is EvolutionPrefsV5 {
     return false;
   }
   if (
-    o.assetClass !== undefined &&
-    o.assetClass !== null &&
-    (typeof o.assetClass !== "string" || !CLASSES.has(o.assetClass))
+    o.account !== undefined &&
+    o.account !== null &&
+    (typeof o.account !== "string" || !ACCOUNTS.has(o.account))
   ) {
     return false;
   }
@@ -194,14 +211,14 @@ function isEvolutionPrefsV5(raw: unknown): raw is EvolutionPrefsV5 {
 export function loadEvolutionPrefs(): EvolutionPrefsV5 {
   const raw = loadUiPref<unknown>(EVOLUTION_PREFS_KEY, null);
   if (isEvolutionPrefsV5(raw)) {
-    const assetClass = raw.assetClass ?? null;
+    const account = raw.account ?? null;
     return {
       ...raw,
       scope: raw.scope ?? "gross",
-      assetClass,
+      account,
       classMetric: raw.classMetric ?? "value",
       // Une combinaison devenue invalide est corrigée à la lecture, pas subie.
-      envelope: normalizeEnvelopeFor(assetClass, raw.envelope),
+      envelope: normalizeEnvelopeFor(account, raw.envelope),
     };
   }
   return { ...DEFAULT_EVOLUTION_PREFS, versus: loadDefaultBenchmark() };
@@ -231,14 +248,14 @@ export function saveEvolutionPrefs(prefs: EvolutionPrefsV5): void {
     versus: VERSUS.has(prefs.versus) ? prefs.versus : "none",
     indexKey: isMarketIndexKey(prefs.indexKey) ? prefs.indexKey : "cac40",
     scope: SCOPES.has(prefs.scope) ? prefs.scope : "gross",
-    assetClass:
-      prefs.assetClass != null && CLASSES.has(prefs.assetClass)
-        ? prefs.assetClass
+    account:
+      prefs.account != null && ACCOUNTS.has(prefs.account)
+        ? prefs.account
         : null,
     classMetric: METRICS.has(prefs.classMetric ?? "") ? prefs.classMetric : "value",
-    // Jamais écrite si elle ne s'accorde pas avec la classe : l'invalide ne
+    // Jamais écrite si elle ne s'accorde pas avec le compte : l'invalide ne
     // doit pas même atteindre le stockage.
-    envelope: normalizeEnvelopeFor(prefs.assetClass, prefs.envelope),
+    envelope: normalizeEnvelopeFor(prefs.account, prefs.envelope),
   };
   saveUiPref(EVOLUTION_PREFS_KEY, payload);
 }

@@ -5,7 +5,8 @@ import {
   clientErrorMessage,
   clientErrorStatus,
 } from "@/app/lib/api/error-response";
-import { d } from "@/app/lib/money/decimal";
+import { d, type Decimal } from "@/app/lib/money/decimal";
+import { convertToEurSync, getEurRates } from "@/app/lib/market/fx";
 import {
   closeFuturesPosition,
   createFuturesPosition,
@@ -24,6 +25,29 @@ import {
   CRYPTO_MARGIN_TYPES,
   FUTURES_CONTRACT_TYPES,
 } from "@/app/lib/crypto/futures-constants";
+
+/**
+ * Convertit un montant de la devise de cotation vers l'euro (FIN-02).
+ *
+ * `summarizeFutures` additionne des montants dans leur devise de cotation
+ * (`USDT` sur un perpétuel BTC/USDT, `USD` sur un CFD) : les exposer sous
+ * `summary.*Eur` sans convertir mélangerait des devises différentes derrière
+ * un total qui prétend n'en être qu'une. `null` si le montant est déjà
+ * inconnu (TRA-03) ou si la devise de cotation n'a pas de taux (USDT, USDC)
+ * — jamais une parité inventée ni un zéro qui ferait disparaître la position.
+ */
+function toEur(
+  amount: Decimal | null,
+  quoteCurrency: string,
+  rates: Record<string, number>
+): Decimal | null {
+  if (amount == null) return null;
+  try {
+    return d(convertToEurSync(amount, quoteCurrency || "EUR", rates));
+  } catch {
+    return null;
+  }
+}
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -47,7 +71,10 @@ export async function GET() {
   }
 
   try {
-    const rows = await listFuturesPositions(userId);
+    const [rows, rates] = await Promise.all([
+      listFuturesPositions(userId),
+      getEurRates(),
+    ]);
     const open = rows.filter((r) => r.isOpen);
     const closed = rows.filter((r) => !r.isOpen);
 
@@ -63,11 +90,33 @@ export async function GET() {
       marginUsed: r.marginUsed ? d(r.marginUsed.toString()) : null,
       fundingPaid: r.fundingPaid ? d(r.fundingPaid.toString()) : null,
       commissionPaid: r.commissionPaid ? d(r.commissionPaid.toString()) : null,
+      marginType: r.marginType,
+      // Aucune source n'alimente `contractValue` (TRA-03, pas de colonne en base).
+      contractValue: null,
     }));
 
     const summary = summarizeFutures(openInputs);
     const views = openInputs.map(toFuturesView);
     const viewById = new Map(views.map((v) => [v.id, v]));
+
+    /*
+      FIN-02 : `summarizeFutures` additionne dans la devise de cotation de
+      chaque position (jamais convertie ailleurs dans ce module) — resommer
+      ici après conversion évite de mélanger USDT, USD et USDC derrière une
+      seule étiquette « Eur ».
+    */
+    let totalMarginEur = d(0);
+    let netExposureEur = d(0);
+    let unrealizedPnlEurTotal = d(0);
+    for (const r of open) {
+      const v = viewById.get(r.id)!;
+      const marginEur = toEur(v.marginUsed, r.quoteCurrency, rates);
+      const pnlEur = toEur(v.unrealizedPnlEur, r.quoteCurrency, rates);
+      const signedEur = toEur(v.signedNotional, r.quoteCurrency, rates);
+      if (marginEur != null) totalMarginEur = totalMarginEur.plus(marginEur);
+      if (pnlEur != null) unrealizedPnlEurTotal = unrealizedPnlEurTotal.plus(pnlEur);
+      if (signedEur != null) netExposureEur = netExposureEur.plus(signedEur);
+    }
 
     return NextResponse.json(
       {
@@ -83,13 +132,13 @@ export async function GET() {
             direction: r.direction,
             leverage: r.leverage.toString(),
             sizeContracts: r.sizeContracts.toString(),
-            notionalUsd: v.notionalUsd.toFixed(2),
+            notionalUsd: v.notionalUsd?.toFixed(2) ?? null,
             entryPrice: r.entryPrice.toString(),
             markPrice: r.markPrice?.toString() ?? null,
-            marginUsed: v.marginUsed.toFixed(2),
+            marginUsed: v.marginUsed?.toFixed(2) ?? null,
             fundingPaid: r.fundingPaid?.toString() ?? null,
             commissionPaid: r.commissionPaid?.toString() ?? null,
-            unrealizedPnlEur: v.unrealizedPnlEur.toFixed(2),
+            unrealizedPnlEur: v.unrealizedPnlEur?.toFixed(2) ?? null,
             liquidationPrice: v.liquidationPrice?.toFixed(2) ?? null,
             distanceToLiquidationPct: v.distanceToLiquidationPct,
             liquidationAlert: v.liquidationAlert,
@@ -114,11 +163,13 @@ export async function GET() {
           closedAt: r.closedAt?.toISOString() ?? null,
         })),
         summary: {
-          totalMarginEur: summary.totalMarginEur.toFixed(2),
-          netExposureEur: summary.netExposureEur.toFixed(2),
-          unrealizedPnlEur: summary.unrealizedPnlEur.toFixed(2),
+          totalMarginEur: totalMarginEur.toFixed(2),
+          netExposureEur: netExposureEur.toFixed(2),
+          unrealizedPnlEur: unrealizedPnlEurTotal.toFixed(2),
           positionCount: summary.positionCount,
           liquidationAlerts: summary.liquidationAlerts,
+          /** Positions dont le notionnel/P&L est non calculable (TRA-03) — écartées des sommes ci-dessus. */
+          unvaluedCount: summary.unvaluedCount,
         },
       },
       { headers: { "Cache-Control": "no-store" } }

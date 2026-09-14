@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  invalidatePortfolioView,
+  PORTFOLIO_VIEW_QUERY_KEYS,
+} from "@/app/lib/ui/invalidate-portfolio";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -100,13 +104,22 @@ export function usePriceAutoRefresh(
       }
 
       if (!data.silent) {
-        void qc.invalidateQueries({ queryKey: ["portfolio-history"] });
+        invalidatePortfolioView(qc);
         void qc.invalidateQueries({ queryKey: ["transactions"] });
       } else {
-        void qc.invalidateQueries({
-          queryKey: ["portfolio-history"],
-          refetchType: "none",
-        });
+        /*
+          Rafraîchissement silencieux : on marque la série périmée sans la
+          recharger, pour que le prochain affichage la redemande. La clé visée
+          était celle de l’historique servi par la route portefeuille, qui ne
+          porte plus la courbe : elle ne périmait donc plus rien. C’est la
+          série dense qu’il faut marquer.
+        */
+        for (const queryKey of PORTFOLIO_VIEW_QUERY_KEYS) {
+          void qc.invalidateQueries({
+            queryKey: [...queryKey],
+            refetchType: "none",
+          });
+        }
       }
 
       const now = new Date();

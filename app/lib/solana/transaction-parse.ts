@@ -3,6 +3,7 @@
  * N’essaie pas de décoder swaps Jupiter/Raydium de façon sémantique complète.
  */
 
+import Decimal from "decimal.js";
 import type { ParsedTransactionWithMeta } from "@solana/web3.js";
 import type { SolanaParsedOnchainTx, SolanaTransferSummary } from "./types";
 
@@ -133,6 +134,43 @@ function extractSolTransfers(
   return out;
 }
 
+type RpcUiTokenAmount = {
+  uiAmount?: number | null;
+  uiAmountString?: string;
+  decimals?: number;
+  amount?: string;
+};
+
+/** Décimales réellement rendues par le RPC, ou `null` — jamais supposées. */
+function readDecimals(a?: RpcUiTokenAmount | null): number | null {
+  const d = a?.decimals;
+  if (typeof d !== "number" || !Number.isInteger(d) || d < 0) return null;
+  return d;
+}
+
+/**
+ * Montant en unité entière d'une balance token, ou `null` si le payload ne
+ * permet pas de le lire.
+ *
+ * Le repli `?? 0` faisait d'une balance illisible un zéro : le delta
+ * pre/post devenait alors la totalité de l'autre côté, soit une jambe de
+ * transaction inventée puis journalisée.
+ */
+function readUiAmount(
+  a: RpcUiTokenAmount | undefined | null,
+  decimals: number
+): Decimal | null {
+  if (!a) return null;
+  const direct =
+    a.uiAmountString ?? (a.uiAmount != null ? String(a.uiAmount) : null);
+  if (direct != null && direct !== "" && Number.isFinite(Number(direct))) {
+    return new Decimal(direct);
+  }
+  const raw = a.amount;
+  if (raw == null || !/^-?\d+$/.test(String(raw).trim())) return null;
+  return new Decimal(String(raw).trim()).div(new Decimal(10).pow(decimals));
+}
+
 function extractSplTransfers(
   raw: ParsedTransactionWithMeta,
   wallet: string
@@ -141,51 +179,82 @@ function extractSplTransfers(
   const pre = raw.meta?.preTokenBalances || [];
   const post = raw.meta?.postTokenBalances || [];
   // index by accountIndex+mint
-  type Key = string;
-  const map = new Map<Key, { mint: string; owner?: string; pre: number; post: number; dec: number }>();
+  type Entry = {
+    mint: string;
+    owner: string;
+    pre: Decimal;
+    post: Decimal;
+    dec: number | null;
+    /** Balance présente dans le payload mais illisible (décimales/montant) */
+    unreadable: boolean;
+  };
+  const map = new Map<string, Entry>();
 
-  for (const b of pre) {
-    const owner = b.owner || "";
-    const mint = b.mint;
-    const k = `${b.accountIndex}:${mint}`;
-    const ui = Number(b.uiTokenAmount?.uiAmountString ?? b.uiTokenAmount?.uiAmount ?? 0);
-    map.set(k, {
-      mint,
-      owner,
-      pre: Number.isFinite(ui) ? ui : 0,
-      post: 0,
-      dec: b.uiTokenAmount?.decimals ?? 0,
-    });
-  }
-  for (const b of post) {
-    const mint = b.mint;
-    const k = `${b.accountIndex}:${mint}`;
-    const ui = Number(b.uiTokenAmount?.uiAmountString ?? b.uiTokenAmount?.uiAmount ?? 0);
-    const cur = map.get(k) || {
-      mint,
-      owner: b.owner || "",
-      pre: 0,
-      post: 0,
-      dec: b.uiTokenAmount?.decimals ?? 0,
-    };
-    cur.post = Number.isFinite(ui) ? ui : 0;
-    cur.owner = b.owner || cur.owner;
-    cur.dec = b.uiTokenAmount?.decimals ?? cur.dec;
-    map.set(k, cur);
-  }
+  /*
+    Un compte absent d'un des deux relevés n'existait pas à cet instant :
+    son zéro est structurel, pas supposé (ATA créée dans la tx, ou fermée).
+    Ce qui n'est jamais admissible, c'est un compte PRÉSENT dont le montant
+    ou les décimales manquent : la jambe est écartée et journalisée.
+  */
+  const touch = (accountIndex: number, mint: string, owner: string): Entry => {
+    const k = `${accountIndex}:${mint}`;
+    let e = map.get(k);
+    if (!e) {
+      e = {
+        mint,
+        owner,
+        pre: new Decimal(0),
+        post: new Decimal(0),
+        dec: null,
+        unreadable: false,
+      };
+      map.set(k, e);
+    }
+    if (owner) e.owner = owner;
+    return e;
+  };
+
+  const readSide = (
+    b: { accountIndex: number; mint: string; owner?: string; uiTokenAmount?: RpcUiTokenAmount },
+    side: "pre" | "post"
+  ) => {
+    const e = touch(b.accountIndex, b.mint, b.owner || "");
+    const dec = readDecimals(b.uiTokenAmount);
+    if (dec == null) {
+      e.unreadable = true;
+      return;
+    }
+    e.dec = dec;
+    const v = readUiAmount(b.uiTokenAmount, dec);
+    if (v == null) {
+      e.unreadable = true;
+      return;
+    }
+    e[side] = v;
+  };
+
+  for (const b of pre) readSide(b, "pre");
+  for (const b of post) readSide(b, "post");
 
   for (const v of map.values()) {
     if (v.owner !== wallet) continue;
-    const delta = v.post - v.pre;
-    if (Math.abs(delta) < 1e-12) continue;
+    if (v.unreadable || v.dec == null) {
+      console.warn(
+        "[solana-rpc] getParsedTransaction : balance token illisible (décimales ou montant absents du payload) — jambe écartée, aucune quantité supposée",
+        { signature: raw.transaction.signatures?.[0] ?? null, mint: v.mint }
+      );
+      continue;
+    }
+    const delta = v.post.minus(v.pre);
+    if (delta.abs().lt(1e-12)) continue;
     out.push({
       kind: "SPL",
-      direction: delta > 0 ? "in" : "out",
+      direction: delta.gt(0) ? "in" : "out",
       mint: v.mint,
-      amount: String(Math.abs(delta)),
+      amount: delta.abs().toFixed(),
       decimals: v.dec,
-      from: delta < 0 ? wallet : null,
-      to: delta > 0 ? wallet : null,
+      from: delta.lt(0) ? wallet : null,
+      to: delta.gt(0) ? wallet : null,
     });
   }
   return out;

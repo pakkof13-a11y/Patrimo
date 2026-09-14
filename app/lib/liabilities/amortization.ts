@@ -113,8 +113,53 @@ export function dateKey(date: Date): string {
 }
 
 /**
+ * Borne de projection effective d'une dette — la date après laquelle une
+ * échéance compte encore.
+ *
+ * `lastPaymentAppliedAt` dit jusqu'où les échéances ont déjà été inscrites.
+ * PAS-01 le pose à la création et à toute resaisie du capital restant dû, mais
+ * seulement en avant : les dettes antérieures l'ont encore à `null`. Or `null`
+ * ne veut pas dire « rien n'a jamais été payé » — il veut dire « on ne sait
+ * pas », et `duePaymentDates`, faute de borne, repart de `startDate`.
+ *
+ * PAS-02 a coupé ce rattrapage sur le chemin d'écriture
+ * (`sealPaymentBaseline`). Les lecteurs, eux, continuaient de passer la ligne
+ * brute : ils rejouaient à l'affichage toutes les mensualités depuis l'origine
+ * du prêt, sur un solde stocké déjà à jour — 41 779 € de moins sur le crédit
+ * immobilier du compte de démonstration, et un crédit conso affiché soldé.
+ *
+ * La seule chose que la base sache vraiment, c'est que `remainingAmount` était
+ * vrai au dernier moment où la ligne a été écrite : `updatedAt`. C'est la borne
+ * de repli, et elle ne reconstitue aucun historique — aucune échéance passée
+ * n'est matérialisée, ni même projetée.
+ *
+ * Pure, et sans requête : `updatedAt` est une colonne de la ligne déjà chargée,
+ * donc aucun lecteur de liste n'y gagne un N+1. Le chemin d'écriture affine
+ * cette borne avec le dernier `MONTHLY_DEBIT` inscrit
+ * (`paymentBaselineFor`, qui délègue ici) : il peut se permettre la requête, et
+ * la borne qu'il scelle est ≥ celle-ci, jamais en dessous.
+ */
+export function effectivePaymentBaseline(
+  liability: { lastPaymentAppliedAt: Date | null; updatedAt: Date },
+  lastMonthlyDebitAt: Date | null = null
+): Date {
+  if (liability.lastPaymentAppliedAt) return liability.lastPaymentAppliedAt;
+  const fromRow = startOfUtcDay(liability.updatedAt);
+  if (!lastMonthlyDebitAt) return fromRow;
+  const fromEvent = startOfUtcDay(lastMonthlyDebitAt);
+  return fromEvent.getTime() > fromRow.getTime() ? fromEvent : fromRow;
+}
+
+/**
  * List payment dates strictly after `afterExclusive` (or on/after start if null)
  * and on/before `now`, for the given payment day.
+ *
+ * Primitive bas niveau : elle prend la borne telle qu'on la lui donne, et `null`
+ * y vaut toujours « repartir de `startDate` » — le module Loyers
+ * (`real-estate/rent-schedule`) en dépend. Un lecteur qui part d'une ligne
+ * `Liability` ne l'appelle donc pas directement : il passe par
+ * `remainingAmountAt` / `projectDuePaymentsForLiability`, qui résolvent la borne
+ * avec `effectivePaymentBaseline`.
  */
 export function duePaymentDates(opts: {
   paymentDay: number;
@@ -168,22 +213,57 @@ export function duePaymentDates(opts: {
 }
 
 /**
- * Apply one monthly debit on remaining capital.
- * Interest is not added to principal (capital-only reduction by full installment),
- * matching a simple "prélèvement de la mensualité sur le capital restant dû" model.
- * Cap at remaining so overpayment zeros the debt.
+ * Taux mensuel en Decimal (pas `monthlyRateFromAnnual`, qui rend un `number` —
+ * cohérence Decimal.js pour un calcul qui écrit en base). Null/0/négatif → 0,
+ * ce qui préserve le comportement linéaire historique quand aucun taux n'est
+ * saisi.
+ */
+function monthlyRateDecimal(annualPercent: DecimalInput | null | undefined) {
+  if (annualPercent == null) return d(0);
+  const annual = d(annualPercent);
+  if (annual.lte(0)) return d(0);
+  return annual.div(100).div(12);
+}
+
+/**
+ * Apply one monthly debit — annuité standard (intérêts d'abord), même formule
+ * que `buildAmortizationSchedule`/`estimateRemainingInterest`/
+ * `principalPaidOfInstallment` : interest = capital restant × taux mensuel,
+ * principal = mensualité − intérêts (plafonné au capital restant). Sans taux
+ * (null/0), l'intérêt est nul et la mensualité entière va au capital —
+ * comportement linéaire inchangé.
+ *
+ * `debited` (le montant réellement prélevé) vaut la mensualité pleine, sauf à
+ * la dernière échéance : elle ne prélève que ce qu'il faut pour solder
+ * (capital restant + intérêts du mois), jamais la mensualité entière si elle
+ * excède la dette — même convention que `estimateRemainingInterest`.
+ *
+ * Si la mensualité ne couvre pas les intérêts, rien n'est prélevé (`debited`
+ * = "0") : même garde que `buildAmortizationSchedule`, pour que l'appelant
+ * (`projectDuePayments`) s'arrête au lieu de faire croître la dette en boucle.
  */
 export function applyMonthlyDebit(
   remaining: DecimalInput,
-  monthlyPayment: DecimalInput
+  monthlyPayment: DecimalInput,
+  annualPercent?: DecimalInput | null
 ): { remaining: string; debited: string } {
   const bal = d(remaining);
   const pay = d(monthlyPayment);
   if (bal.lte(0) || pay.lte(0)) {
     return { remaining: toFixed(bal.gt(0) ? bal : d(0), 8), debited: "0" };
   }
-  const debited = bal.lt(pay) ? bal : pay;
-  const next = bal.minus(debited);
+  const r = monthlyRateDecimal(annualPercent);
+  const interest = r.gt(0) ? bal.times(r) : d(0);
+  let principal = pay.minus(interest);
+  if (principal.lte(0)) {
+    return { remaining: toFixed(bal, 8), debited: "0" };
+  }
+  let debited = pay;
+  if (principal.gte(bal)) {
+    principal = bal;
+    debited = bal.plus(interest);
+  }
+  const next = bal.minus(principal);
   return {
     remaining: toFixed(next.gt(0) ? next : d(0), 8),
     debited: toFixed(debited, 8),
@@ -523,6 +603,7 @@ export function projectDuePayments(input: {
   startDate: Date | null;
   endDate: Date | null;
   lastPaymentAppliedAt: Date | null;
+  interestRate: DecimalInput | null;
   now?: Date;
 }): DuePaymentProjection {
   const remaining0 = toFixed(d(input.remainingAmount), 8);
@@ -554,7 +635,11 @@ export function projectDuePayments(input: {
 
   for (const eventDate of dates) {
     if (d(remaining).lte(0)) break;
-    const { remaining: next, debited } = applyMonthlyDebit(remaining, payment);
+    const { remaining: next, debited } = applyMonthlyDebit(
+      remaining,
+      payment,
+      input.interestRate
+    );
     if (d(debited).lte(0)) break;
     remaining = next;
     lastAppliedAt = eventDate;
@@ -572,18 +657,53 @@ export type AmortizableLiability = {
   startDate: Date | null;
   endDate: Date | null;
   lastPaymentAppliedAt: Date | null;
+  /**
+   * Requis, et non optionnel : c'est la borne de repli des dettes qui n'ont pas
+   * encore de `lastPaymentAppliedAt` (voir `effectivePaymentBaseline`). Le
+   * rendre facultatif rejouerait silencieusement l'amortissement depuis
+   * l'origine du prêt chez le lecteur qui l'oublie — le défaut corrigé. Toute
+   * ligne `Liability` le porte ; les `select` explicites doivent l'inclure.
+   */
+  updatedAt: Date;
+  interestRate: DecimalInput | null;
 };
+
+/**
+ * Projection des échéances dues d'une **ligne** de dette.
+ *
+ * Versant lecture de `projectDuePayments` : elle résout d'abord la borne de la
+ * ligne, là où `projectDuePayments` reçoit la borne déjà arrêtée par son
+ * appelant (le chemin d'écriture, après `sealPaymentBaseline`). Les deux
+ * chemins partagent donc la même règle d'amortissement *et* la même règle de
+ * borne, sans qu'aucun lecteur ait à les rappeler.
+ */
+export function projectDuePaymentsForLiability(
+  liability: AmortizableLiability,
+  now?: Date
+): DuePaymentProjection {
+  return projectDuePayments({
+    remainingAmount: liability.remainingAmount,
+    monthlyPayment: liability.monthlyPayment,
+    paymentDay: liability.paymentDay,
+    startDate: liability.startDate,
+    endDate: liability.endDate,
+    lastPaymentAppliedAt: effectivePaymentBaseline(liability),
+    interestRate: liability.interestRate,
+    now,
+  });
+}
 
 /**
  * Capital restant dû d'une dette à la date de référence.
  *
- * Raccourci de lecture sur `projectDuePayments` pour les appelants qui ne
- * veulent que le montant. C'est la valeur que tout écran doit afficher : elle
- * ne dépend ni de l'ordre de navigation, ni de la dernière matérialisation.
+ * Raccourci de lecture sur `projectDuePaymentsForLiability` pour les appelants
+ * qui ne veulent que le montant. C'est la valeur que tout écran doit afficher :
+ * elle ne dépend ni de l'ordre de navigation, ni de la dernière
+ * matérialisation.
  */
 export function remainingAmountAt(
   liability: AmortizableLiability,
   now?: Date
 ): string {
-  return projectDuePayments({ ...liability, now }).remaining;
+  return projectDuePaymentsForLiability(liability, now).remaining;
 }

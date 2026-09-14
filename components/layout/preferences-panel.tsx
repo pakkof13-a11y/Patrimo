@@ -1,5 +1,6 @@
 "use client";
 
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -210,7 +211,14 @@ export function PreferencesPanel({
         transactionsDeleted: number;
         assetsDeleted: number;
         platformsDeleted?: number;
-      }>("/api/preferences/clear-data", { method: "DELETE" }),
+      }>("/api/preferences/clear-data", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        // Le serveur exige ce mot exact dans le corps — la modale seule ne
+        // suffit pas à protéger la route (voir app/api/preferences/clear-data).
+        // On transmet tel quel le mot que l'utilisateur a saisi dans le champ.
+        body: JSON.stringify({ confirm: confirmText }),
+      }),
     onSuccess: async (data) => {
       toast.success(
         data.message ||
@@ -220,7 +228,7 @@ export function PreferencesPanel({
         qc.invalidateQueries({ queryKey: ["holdings"] }),
         qc.invalidateQueries({ queryKey: ["transactions"] }),
         qc.invalidateQueries({ queryKey: ["assets"] }),
-        qc.invalidateQueries({ queryKey: ["portfolio-history"] }),
+        Promise.resolve(invalidatePortfolioView(qc)),
         qc.invalidateQueries({ queryKey: ["platforms"] }),
         qc.invalidateQueries({ queryKey: ["asset-detail"] }),
         qc.invalidateQueries({ queryKey: ["banks"] }),
@@ -490,8 +498,9 @@ export function PreferencesPanel({
               P&amp;L latent — période
             </p>
             <p className="text-meta mb-2">
-              Période affichée sur l&apos;indicateur P&amp;L latent (bandeau KPI).
-              « Tout » = latent total actuel.
+              Période affichée sur l&apos;indicateur P&amp;L (bandeau KPI).
+              « Tout » remonte à la profondeur servie, six ans au plus — ce
+              n&apos;est plus le cumul depuis l&apos;origine.
             </p>
             <div
               className="flex flex-nowrap gap-0.5 overflow-x-auto pb-0.5"

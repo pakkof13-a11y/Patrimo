@@ -174,3 +174,45 @@ describe("platformSchema partial edit (Mes plateformes)", () => {
     }
   });
 });
+
+/*
+  Les montants saisis ont une borne, et le schéma la pose.
+
+  Le refus ne portait que sur `NaN`. `Number("Infinity")` et `Number("1e30")`
+  n'en sont pas : les deux traversaient la validation, survivaient à
+  `new Prisma.Decimal(...)`, et n'échouaient qu'au contact de la colonne
+  `Decimal(28, 12)` — un dépassement `numeric` qu'aucune route n'attrape, donc
+  un 500 muet là où l'utilisateur attendait un message.
+*/
+describe("bornes des montants décimaux", () => {
+  const accepte = (balance: string) =>
+    bankAccountUpdateSchema.safeParse({ balance }).success;
+
+  it("accepte un montant ordinaire, négatif compris", () => {
+    expect(accepte("1280.20")).toBe(true);
+    expect(accepte("-1200")).toBe(true);
+    // La virgule décimale française est normalisée avant le contrôle.
+    expect(accepte("1280,20")).toBe(true);
+    // Vide = champ laissé tel quel, pas un montant.
+    expect(accepte("")).toBe(true);
+  });
+
+  it("refuse les infinis", () => {
+    expect(accepte("Infinity")).toBe(false);
+    expect(accepte("-Infinity")).toBe(false);
+  });
+
+  it("refuse ce qui déborde la colonne", () => {
+    expect(accepte("1e30")).toBe(false);
+    expect(accepte("1e13")).toBe(false);
+  });
+
+  it("laisse passer le plafond lui-même", () => {
+    expect(accepte("1e12")).toBe(true);
+    expect(accepte("-1e12")).toBe(true);
+  });
+
+  it("refuse toujours ce qui n'est pas un nombre", () => {
+    expect(accepte("abc")).toBe(false);
+  });
+});

@@ -93,7 +93,7 @@ export async function refreshEligiblePrices(userId: string): Promise<{
       userId,
       OR: [
         { priceProvider: { in: ["FINNHUB", "YAHOO", "COINGECKO"] } },
-        { assetClass: { in: ["ACTIONS", "CRYPTO"] } },
+        { assetClass: { in: ["ACTIONS", "OBLIGATIONS", "CRYPTO"] } },
       ],
     },
     include: { priceQuote: true },
@@ -108,7 +108,7 @@ export async function refreshEligiblePrices(userId: string): Promise<{
   for (const asset of assets) {
     if (
       asset.priceProvider === "MANUAL" &&
-      !["ACTIONS", "CRYPTO"].includes(asset.assetClass)
+      !["ACTIONS", "OBLIGATIONS", "CRYPTO"].includes(asset.assetClass)
     ) {
       continue;
     }

@@ -26,6 +26,11 @@ export type EvolutionViewMode = "global" | "decomposed";
 
 export type EvolutionSeriesPoint = {
   date: string;
+  /**
+   * Instant de la barre, en ms. L'axe X du graphique est une échelle de
+   * temps, pas une catégorie : ce champ est ce qu'elle lit.
+   */
+  t?: number;
   label: string;
   periodLabel: string;
   /** Valeur totale (stock) en fin de bucket */
@@ -648,33 +653,18 @@ export function buildEvolutionSeries(
     }
   }
 
-  const interval = resolveEvolutionInterval(range, filtered.length);
+  /*
+    Un point par jour de la fenêtre, déjà échantillonné en amont par
+    `downsampleSeries`. Les seaux hebdo / mensuels + un axe catégoriel
+    produisaient des marches : deux semaines voisines prenaient la même
+    largeur qu'un jour, et un saut de valorisation se lisait comme un
+    escalier. L'axe du graphique est désormais une échelle de temps ; la
+    granularité affichée reste le jour, et `interval` ne sert plus qu'à
+    formater les ticks.
+  */
+  const interval: EvolutionInterval = "day";
 
-  // Bucket : dernière observation du bucket (stock)
-  const buckets = new Map<string, StockAcc>();
-  const order: string[] = [];
-
-  for (const p of filtered) {
-    const key = bucketKey(p.date, interval);
-    const prev = buckets.get(key);
-    if (!prev) {
-      order.push(key);
-      buckets.set(key, { ...p });
-    } else {
-      // Stocks : dernière observation du bucket. Flux : somme du bucket.
-      buckets.set(key, {
-        ...p,
-        flows: prev.flows + p.flows,
-        // Un seul jour estimé suffit à rendre le bucket estimé.
-        status:
-          prev.status === "ESTIMATED" || p.status === "ESTIMATED"
-            ? "ESTIMATED"
-            : (p.status ?? prev.status),
-      });
-    }
-  }
-
-  let stock: StockAcc[] = order.map((k) => buckets.get(k)!);
+  let stock: StockAcc[] = filtered;
 
   // 7J : densifier tous les jours calendaires (report des valeurs manquantes)
   if (range === "7d" && interval === "day" && from) {
@@ -689,15 +679,11 @@ export function buildEvolutionSeries(
     const prev = i > 0 ? stock[i - 1]! : null;
     const dTotal = prev ? s.total - prev.total : 0;
     const chartValue = metric === "cumul" ? s.total : dTotal;
-    // Libellé semaine : ancré sur le lundi ISO (pas sur le jour de la dernière obs.)
-    const labelIso =
-      interval === "week" || interval === "biweek"
-        ? startOfIsoWeekMonday(new Date(s.date)).toISOString()
-        : s.date;
     return {
       date: s.date,
-      label: formatAxisLabel(labelIso, interval),
-      periodLabel: formatPeriodLabel(labelIso, interval),
+      t: Date.parse(s.date),
+      label: formatAxisLabel(s.date, interval),
+      periodLabel: formatPeriodLabel(s.date, interval),
       total: s.total,
       flows: s.flows,
       cash: s.cash,
@@ -785,6 +771,74 @@ export function evolutionDeltaSummary(points: EvolutionSeriesPoint[]): {
 
   const pct = measured ? (factor - 1) * 100 : first > 0 ? (delta / first) * 100 : 0;
   return { first, last, delta, pct, flows };
+}
+
+/**
+ * P&L de période, distinct du Δ de stock affiché juste au-dessus.
+ *
+ * `delta = last − first` inclut les versements ; `pnl = delta − flows` les
+ * neutralise. Le pourcentage rapporte ce P&L au **capital engagé** sur la
+ * fenêtre — `first + flows`, la valeur de départ plus les versements nets,
+ * sans pondération temporelle.
+ *
+ * Le capital moyen pondéré par le temps serait méthodologiquement plus fin, et
+ * il a été essayé : sur une fenêtre longue il rend la ligne inutilisable. Le
+ * commentaire du corps donne les chiffres mesurés qui l'ont fait écarter, et la
+ * raison qui a emporté la décision — le capital engagé se **déduit** des deux
+ * montants affichés juste au-dessus, ce qui est tout l'objet de ce bandeau.
+ *
+ * Rend `null` — jamais un zéro, jamais un pourcentage inventé — dès que la
+ * base est indéfinie : fenêtre à un point, capital de référence non positif,
+ * ou flux déclarés non fiables par l'appelant (poche croisée par enveloppe,
+ * où le flux est forcé à 0 faute de ventilation).
+ */
+export function evolutionPnlSummary(
+  points: EvolutionSeriesPoint[],
+  opts?: { flowsUnreliable?: boolean }
+): {
+  delta: number;
+  flows: number;
+  pnl: number;
+  pct: number | null;
+} | null {
+  const summary = evolutionDeltaSummary(points);
+  if (!summary) return null;
+  const { delta, flows } = summary;
+  const pnl = delta - flows;
+
+  if (opts?.flowsUnreliable) {
+    return { delta, flows, pnl, pct: null };
+  }
+  if (points.length < 2) {
+    return { delta, flows, pnl, pct: null };
+  }
+
+  /*
+    Capital engagé sur la fenêtre : la valeur de départ plus les versements
+    nets, sans pondération temporelle.
+
+    Le capital moyen pondéré par le temps est méthodologiquement plus fin —
+    il tient compte du moment où l'argent arrive. Mesuré sur le compte de
+    démonstration, il rend cette ligne inutilisable dès que la fenêtre est
+    longue : sur « Tout », qui remonte à 1998 alors que les versements datent
+    des trois dernières années, leurs poids `(T − tᵢ)/T` s'effondrent, le
+    dénominateur tombe à quelques milliers d'euros et l'écran annonce
+    « +217 % » sur les actions et « +567 % » sur la crypto. Ces nombres sont
+    exacts au sens de leur définition, et faux au sens où on les lit.
+
+    Le capital engagé donne 15,0 % et 46,7 % sur les mêmes séries — et
+    surtout, il se **déduit** des deux montants affichés juste au-dessus :
+    P&L divisé par ce que l'on a mis. C'est tout l'objet de ce bandeau, où le
+    reproche initial était justement que le pourcentage ne se rattachait à
+    aucun des euros qui l'entouraient.
+  */
+  const refCapital = points[0]!.total + flows;
+
+  if (!(refCapital > 0)) {
+    return { delta, flows, pnl, pct: null };
+  }
+
+  return { delta, flows, pnl, pct: (pnl / refCapital) * 100 };
 }
 
 /** Périodes activables selon profondeur d’historique disponible. */
@@ -900,6 +954,7 @@ export function withBenchmarkSeries(
 
 export type EvolutionPercentPoint = {
   date: string;
+  t?: number;
   label: string;
   periodLabel: string;
   /** Performance du portefeuille depuis le premier point affiché, en %. */
@@ -910,10 +965,12 @@ export type EvolutionPercentPoint = {
 
 /**
  * Reprojette une série déjà rebasée par `withBenchmarkSeries` en performance
- * relative : les deux courbes partent à 0 % au premier point affiché. C'est
- * la seule transformation qui rend portefeuille et benchmark comparables sans
- * mélanger unité monétaire et pourcentage sur le même axe — l'un des deux
- * axes doit céder, jamais un affichage mixte.
+ * relative : les deux courbes partent à 0 % au premier point affiché.
+ *
+ * Le comparatif Versus du tableau de bord (T-4.E) ne passe plus par ici :
+ * la daily-nav n'a pas de `growth`, et y envoyer une NAV en euros à côté
+ * d'un indice déjà en % aplatissait le portefeuille à +0 %. Voir
+ * `vs-index-series.ts` — base 100 à l'ancre `servedFrom`.
  */
 export function toPercentSeries(
   points: EvolutionSeriesPoint[]
@@ -932,6 +989,7 @@ export function toPercentSeries(
   const growthBase = g0 != null && g0 > 0 ? g0 : null;
   return points.map((p) => ({
     date: p.date,
+    t: p.t ?? Date.parse(p.date),
     label: p.label,
     periodLabel: p.periodLabel,
     /*

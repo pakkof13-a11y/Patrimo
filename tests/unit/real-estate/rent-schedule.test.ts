@@ -10,6 +10,7 @@ const detailFindMany = vi.fn();
 const detailFindFirst = vi.fn();
 const detailUpdate = vi.fn();
 const txFindFirst = vi.fn();
+const txFindMany = vi.fn();
 const createTx = vi.fn();
 
 vi.mock("@/app/lib/prisma", () => ({
@@ -21,6 +22,7 @@ vi.mock("@/app/lib/prisma", () => ({
     },
     transaction: {
       findFirst: (...a: unknown[]) => txFindFirst(...a),
+      findMany: (...a: unknown[]) => txFindMany(...a),
     },
   },
 }));
@@ -61,6 +63,7 @@ beforeEach(() => {
   detailFindFirst.mockReset();
   detailUpdate.mockReset().mockResolvedValue({});
   txFindFirst.mockReset().mockResolvedValue(null);
+  txFindMany.mockReset().mockResolvedValue([]);
   createTx.mockReset().mockResolvedValue({ id: "tx-1" });
 });
 
@@ -217,7 +220,11 @@ describe("confirmEntries", () => {
   };
 
   it("écrit un LOYER rattaché au bien et avance le curseur", async () => {
-    detailFindFirst.mockResolvedValue(detail());
+    // Curseur juste avant l'échéance confirmée : mars est la toute première
+    // candidate, donc honorée d'emblée — aucun trou ne bloque l'avancée.
+    detailFindFirst.mockResolvedValue(
+      detail({ lastRentAppliedAt: new Date("2026-02-05T00:00:00.000Z") })
+    );
 
     const res = await confirmEntries(USER, [entry]);
 
@@ -310,4 +317,108 @@ describe("confirmEntries", () => {
     expect(res.created).toBe(1);
     expect(res.errors).toHaveLength(1);
   });
+
+  describe("IMM-03 golden : une échéance décochée reste due après l'avancée du curseur", () => {
+    /**
+     * Reproduction de l'audit : bail commencé il y a ~900 jours, rentDay=5,
+     * loyer 1250€, curseur jamais avancé. L'utilisateur décoche le 5 juillet
+     * (locataire en retard) et confirme tout le reste. Le curseur ne doit
+     * jamais dépasser juin — juillet doit rester proposé, et les échéances
+     * postérieures déjà écrites ne doivent pas redevenir "dues" pour autant.
+     */
+    it("le 5 juillet décoché reste dû après confirmation du reste du lot", async () => {
+      const START = new Date("2024-03-05T00:00:00.000Z"); // > 900 jours avant NOW2
+      const NOW2 = new Date("2026-09-10T10:00:00.000Z");
+
+      let lastRentAppliedAt: Date | null = null;
+      const writtenNotes: string[] = [];
+
+      const buildDetail = () =>
+        detail({
+          rentalStartDate: START,
+          monthlyChargesEur: null,
+          lastRentAppliedAt,
+        });
+
+      detailFindMany.mockImplementation(async () => [buildDetail()]);
+      detailFindFirst.mockImplementation(async () => buildDetail());
+      detailUpdate.mockImplementation(async (args: { data: Record<string, unknown> }) => {
+        if (args.data.lastRentAppliedAt !== undefined) {
+          lastRentAppliedAt = args.data.lastRentAppliedAt as Date;
+        }
+        return {};
+      });
+      createTx.mockImplementation(async (args: { notes: string }) => {
+        writtenNotes.push(args.notes);
+        return { id: `tx-${writtenNotes.length}` };
+      });
+      txFindFirst.mockImplementation(async (args: { where: { notes: { contains: string } } }) => {
+        const needle = args.where.notes.contains;
+        return writtenNotes.some((n) => n.includes(needle)) ? { id: "existing" } : null;
+      });
+      txFindMany.mockImplementation(
+        async (args: {
+          where: { notes: { contains: string }; AND?: Array<{ notes: { contains: string } }> };
+        }) => {
+          const prefix = args.where.notes.contains;
+          const assetNeedle = args.where.AND?.[0]?.notes?.contains;
+          return writtenNotes
+            .filter((n) => n.includes(prefix) && (!assetNeedle || n.includes(assetNeedle)))
+            .map((n) => ({ notes: n }));
+        }
+      );
+
+      // 1) Toutes les échéances de loyer sont dues, y compris le 5 juillet 2026.
+      const firstPending = (await listPendingEntries("u1", { now: NOW2 })).filter(
+        (p) => p.kind === "RENT"
+      );
+      expect(
+        firstPending.some((p) => p.dueDate.slice(0, 10) === "2026-07-05")
+      ).toBe(true);
+
+      // 2) L'utilisateur confirme tout sauf le 5 juillet.
+      const toConfirm = firstPending
+        .filter((p) => p.dueDate.slice(0, 10) !== "2026-07-05")
+        .map((p) => ({ assetId: p.assetId, kind: p.kind, dueDate: p.dueDate }));
+      const res = await confirmEntries("u1", toConfirm, { now: NOW2 });
+      expect(res.created).toBe(toConfirm.length);
+
+      // 3) Le curseur ne doit pas avoir dépassé juin : juillet reste due.
+      expect(lastRentAppliedAt).not.toBeNull();
+      expect(dateKeyOf(lastRentAppliedAt!)).toBe("2026-06-05");
+
+      const secondPending = (await listPendingEntries("u1", { now: NOW2 })).filter(
+        (p) => p.kind === "RENT"
+      );
+      expect(
+        secondPending.some((p) => p.dueDate.slice(0, 10) === "2026-07-05")
+      ).toBe(true);
+      // Les échéances déjà écrites (avant juillet, et après jusqu'à
+      // septembre) ne doivent pas redevenir dues juste parce que le curseur
+      // est resté en arrière du trou.
+      expect(
+        secondPending.filter((p) => p.dueDate.slice(0, 10) !== "2026-07-05")
+      ).toHaveLength(0);
+
+      // 4) L'utilisateur confirme enfin juillet : le curseur peut alors
+      // rattraper tout ce qui a déjà été écrit derrière lui.
+      const julyEntry = secondPending[0]!;
+      const res2 = await confirmEntries(
+        "u1",
+        [{ assetId: julyEntry.assetId, kind: julyEntry.kind, dueDate: julyEntry.dueDate }],
+        { now: NOW2 }
+      );
+      expect(res2.created).toBe(1);
+      expect(dateKeyOf(lastRentAppliedAt!)).toBe("2026-09-05");
+
+      const thirdPending = (await listPendingEntries("u1", { now: NOW2 })).filter(
+        (p) => p.kind === "RENT"
+      );
+      expect(thirdPending).toHaveLength(0);
+    });
+  });
 });
+
+function dateKeyOf(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}

@@ -15,12 +15,15 @@ import {
   VIEW_TYPES,
   WINDOW_QUALITIES,
   formatOwnershipShare,
+  canApplyDvfEstimateDirectly,
   grossRentalYieldPct,
   hasCommitment,
   isDvfEstimable,
   isFurnishedUsage,
   isRentalUsage,
   isSecondaryResidenceUsage,
+} from "@/app/lib/real-estate/constants";
+import {
   netRentalYieldPct,
   totalAnnualFiscalBurden,
   regimesForUsage,
@@ -364,7 +367,20 @@ export function PropertyDetailPanel({
     }
   }
 
-  async function estimate(assetId: string, name: string) {
+  /**
+   * `currentMode` décide si l'estimation peut s'écrire directement.
+   *
+   * Une valeur saisie à la main ne doit jamais être remplacée par un simple
+   * clic : le texte affiché au-dessus du bouton ("Valeur saisie — non
+   * écrasée par l'estimation") ne serait plus vrai. En mode manuel, on
+   * demande donc l'estimation avec `apply: false` — le chiffre est calculé et
+   * montré, rien n'est écrit. Passer réellement en DVF reste une décision
+   * distincte : ressaisir la valeur proposée via « Saisir une valeur », ou
+   * repasser le bien en estimation automatique.
+   */
+  async function estimate(assetId: string, name: string, currentMode: string) {
+    const canApplyDirectly = canApplyDvfEstimateDirectly(currentMode);
+    const isManual = !canApplyDirectly;
     try {
       const out = await fetchJson<{
         kind: string;
@@ -376,9 +392,18 @@ export function PropertyDetailPanel({
       }>(`/api/real-estate/properties/${assetId}/valuation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "dvf", force: true, apply: true }),
+        body: JSON.stringify({ mode: "dvf", force: true, apply: canApplyDirectly }),
       });
       if (out.kind === "updated") {
+        if (isManual) {
+          // Proposition seule : la valeur saisie reste en place, le texte de
+          // l'écran reste vrai.
+          toast.info(
+            `Estimation DVF pour ${name} : ${formatCurrency(out.valueEur ?? "0", "EUR")}` +
+              " — valeur saisie conservée. Utilisez « Saisir une valeur » pour l'adopter."
+          );
+          return;
+        }
         const sourceLabel = out.estimateSource
           ? (ESTIMATE_SOURCE_LABELS[out.estimateSource] ?? out.estimateSource)
           : null;
@@ -881,7 +906,7 @@ export function PropertyDetailPanel({
                       type="button"
                       className="btn btn-ghost text-[11px]"
                       data-testid="property-estimate"
-                      onClick={() => estimate(p.assetId, p.name)}
+                      onClick={() => estimate(p.assetId, p.name, p.valuationMode)}
                     >
                       Estimer depuis les ventes réelles
                     </button>

@@ -1,5 +1,6 @@
 import { recordEnvelopeEvent } from "@/app/lib/securities/envelope-history";
 import { prisma } from "../prisma";
+import { Prisma } from "@/app/lib/prisma-client/client";
 import { createTransaction, createOwnershipCache } from "../transactions/service";
 import { loadLedgerForUser } from "../portfolio/service";
 import { invalidateLedgerCache } from "../portfolio/ledger-cache";
@@ -7,6 +8,7 @@ import { resolveAssetLogo } from "../assets/logos";
 import { assetReuseByTickerWhere } from "../assets/reuse";
 import { detailRequirementError } from "../assets/envelope-requirements";
 import { resolveCoingeckoId } from "../market/providers/coingecko";
+import { fxRatesToEurRange, type FxRangeResult } from "../market/fx";
 import { findOrCreatePlatform } from "../platforms/upsert";
 import { resolvePlatformLogo } from "../platforms/presets";
 import type { ImportDraftRow } from "./map-rows";
@@ -62,6 +64,17 @@ export type AnalyzeImportResult = {
   totalSelected: number;
 };
 
+type ResolvedAsset = {
+  id: string | null;
+  /**
+   * Clé de cache pour un Asset TOUT JUSTE créé dans la transaction de la
+   * ligne en cours, encore non confirmée — voir commitImport (IMP-11).
+   * L'appelant ne l'enregistre dans `assetCache` qu'après le commit réussi
+   * de cette transaction, jamais avant.
+   */
+  pendingCacheKey?: string;
+};
+
 async function resolveOrCreateAsset(
   userId: string,
   platformId: string,
@@ -72,15 +85,26 @@ async function resolveOrCreateAsset(
    * tickers sur des centaines de lignes (111 lignes Revolut = 5 tickers) :
    * sans cache, chaque ligne refait les deux findFirst de résolution.
    */
-  assetCache?: Map<string, string>
-): Promise<string | null> {
+  assetCache?: Map<string, string>,
+  /**
+   * Client Prisma optionnel — passer le `tx` de la transaction interactive qui
+   * enveloppe la ligne (voir commitImport, IMP-11) pour que la création
+   * éventuelle de l'Asset et son constat d'enveloppe fassent partie de LA
+   * MÊME transaction que `createTransaction` : si celle-ci échoue ensuite,
+   * Prisma annule aussi l'Asset créé ici — plus d'Asset orphelin en base.
+   * Sans `tx`, repli sur le singleton `prisma` (comportement historique,
+   * inchangé pour tout autre appelant).
+   */
+  tx?: Prisma.TransactionClient
+): Promise<ResolvedAsset> {
+  const db = tx ?? prisma;
   const needsAsset =
     row.type &&
     ["ACHAT", "VENTE", "REWARD", "AIRDROP", "DIVIDENDE", "COUPON", "LOYER"].includes(
       row.type
     );
 
-  if (!needsAsset) return null;
+  if (!needsAsset) return { id: null };
 
   const ticker = row.ticker;
   const name = row.name || ticker || "Actif importé";
@@ -103,22 +127,25 @@ async function resolveOrCreateAsset(
   // Clé = tout ce dont dépend la résolution ci-dessous.
   const cacheKey = `${platformId}|${accountType}|${ticker ?? ""}|${name.toLowerCase()}`;
   const memo = assetCache?.get(cacheKey);
-  if (memo) return memo;
+  if (memo) return { id: memo };
 
+  // Réutilisation d'un Asset déjà en base : la ligne (findFirst) existe
+  // indépendamment du sort de la transaction en cours, donc la mémoriser
+  // immédiatement est sans risque.
   const remember = (id: string) => {
     assetCache?.set(cacheKey, id);
-    return id;
+    return { id };
   };
 
   if (ticker) {
-    const byTicker = await prisma.asset.findFirst({
+    const byTicker = await db.asset.findFirst({
       where: assetReuseByTickerWhere(userId, ticker, accountType),
       orderBy: { createdAt: "asc" },
     });
     if (byTicker) return remember(byTicker.id);
   }
 
-  const byName = await prisma.asset.findFirst({
+  const byName = await db.asset.findFirst({
     where: {
       userId,
       platformId,
@@ -174,8 +201,8 @@ async function resolveOrCreateAsset(
     antérieures à l'import restent inconnues, même si ses opérations sont
     anciennes.
   */
-  const created = await prisma.$transaction(async (tx) => {
-    const asset = await tx.asset.create({
+  const createAssetAndEnvelope = async (client: Prisma.TransactionClient) => {
+    const asset = await client.asset.create({
       data: {
         userId,
         platformId,
@@ -190,7 +217,7 @@ async function resolveOrCreateAsset(
       },
     });
 
-    await recordEnvelopeEvent(tx, {
+    await recordEnvelopeEvent(client, {
       assetId: asset.id,
       userId,
       kind: "OBSERVED",
@@ -203,9 +230,26 @@ async function resolveOrCreateAsset(
     });
 
     return asset;
-  });
+  };
 
-  return remember(created.id);
+  // Un `tx` fourni (ligne du lot, voir commitImport/IMP-11) EST déjà une
+  // transaction interactive : y ouvrir un `prisma.$transaction` imbriqué
+  // n'est pas supporté par Prisma. On écrit alors directement dedans — c'est
+  // déjà atomique avec le `createTransaction` qui suit, dans le même `tx`.
+  // Sans `tx` (autre appelant éventuel), on garde le `prisma.$transaction`
+  // isolé d'origine.
+  const created = tx
+    ? await createAssetAndEnvelope(tx)
+    : await prisma.$transaction(createAssetAndEnvelope);
+
+  // Ne PAS `remember()` ici quand `tx` est fourni : cet Asset n'est validé
+  // qu'au commit de la transaction englobante (voir commitImport, IMP-11) —
+  // si `createTransaction` échoue ensuite et fait tout annuler, un
+  // `assetCache.set` immédiat laisserait un id d'Asset fantôme (rollback) dans
+  // le cache du lot, que la ligne suivante avec le même ticker réutiliserait
+  // à tort. Le cacheKey est rendu à l'appelant, qui ne le mémorise qu'après
+  // succès confirmé de la transaction.
+  return tx ? { id: created.id, pendingCacheKey: cacheKey } : remember(created.id);
 }
 
 async function loadExistingLite(
@@ -279,6 +323,81 @@ async function resolveRowPlatformId(
     });
   }
   return platform.id;
+}
+
+/** Jour civil (YYYY-MM-DD) décalé de `deltaDays`, en UTC — jamais une approximation en 365 jours. */
+function shiftDay(day: string, deltaDays: number): string {
+  const dt = new Date(`${day}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Stablecoins adossés au dollar sans série BCE propre — Frankfurter ne les
+ * connaît pas, et USDT/USDC n'ont vocation qu'à suivre l'USD. La ligne garde
+ * sa devise réelle (`Transaction.currency` reste "USDT"/"USDC", cf.
+ * `map-rows.ts` qui ne les tronque plus en "USD") ; seule la *série* utilisée
+ * pour résoudre un taux est celle du dollar — une conversion dédiée, pas un
+ * dollar déguisé.
+ *
+ * Ce que ceci ne fait PAS : détecter un dépeg (USDC est brièvement tombé sous
+ * 0,88 USD en mars 2023). Aucune source de prix spot n'est disponible dans ce
+ * pipeline d'import synchrone — l'ajouter dépasserait ce correctif ponctuel.
+ * Documenté, pas caché.
+ */
+const FX_SERIES_ALIAS: Record<string, string> = { USDT: "USD", USDC: "USD" };
+function fxSeriesCurrency(cur: string): string {
+  return FX_SERIES_ALIAS[cur] ?? cur;
+}
+
+/**
+ * Taux de change à persister pour CETTE ligne d'import.
+ *
+ * EUR : "1", sans appel. Toute autre devise : cherche dans la série
+ * pré-résolue pour le lot (`fxByCurrency`, un appel Frankfurter par devise,
+ * jamais par ligne) le dernier jour de fixing BCE ≤ jour de la ligne, en
+ * remontant au plus 7 jours civils (couvre les week-ends et jours fériés
+ * BCE — le plus long trou constaté est Pâques, 4 jours).
+ *
+ * Ne fabrique jamais de taux : date manquante, devise hors série, plage
+ * indisponible ou trou de plus de 7 jours rejettent la ligne (l'appelant
+ * capture l'erreur et l'ajoute à `errors[]`).
+ */
+function resolveRowFxRate(
+  row: ImportDraftRow,
+  fxByCurrency: Map<string, FxRangeResult>
+): string {
+  const cur = (row.currency || "EUR").toUpperCase();
+  if (cur === "EUR") return "1";
+
+  const day = row.occurredAt ? row.occurredAt.slice(0, 10) : null;
+  if (!day) {
+    throw new Error(
+      `Devise ${cur} : date de l'opération manquante — ligne non importée, aucun taux n'a été supposé. Saisissez cette opération manuellement avec son taux de change.`
+    );
+  }
+
+  const range = fxByCurrency.get(fxSeriesCurrency(cur));
+  if (!range || range.status === "unsupported") {
+    throw new Error(
+      `Devise ${cur} : aucune série de taux BCE (Frankfurter) — ligne non importée, aucun taux n'a été supposé. Saisissez cette opération manuellement avec son taux de change.`
+    );
+  }
+  if (range.status === "unavailable") {
+    throw new Error(
+      `Fournisseur de taux (Frankfurter/BCE) injoignable — ligne non importée, aucun taux n'a été supposé. Relancez l'import plus tard.`
+    );
+  }
+
+  for (let back = 0; back <= 7; back++) {
+    const candidate = shiftDay(day, -back);
+    const rate = range.byDay.get(candidate);
+    if (rate) return rate;
+  }
+
+  throw new Error(
+    `Taux ${cur}→EUR du ${day} introuvable dans la série BCE (Frankfurter) — ligne non importée, aucun taux n'a été supposé. Saisissez cette opération manuellement avec son taux de change.`
+  );
 }
 
 function draftToInput(platformId: string, row: ImportDraftRow) {
@@ -496,6 +615,37 @@ export async function commitImportRows(params: {
     return da - db;
   });
 
+  /*
+    Pré-résolution FX du lot : un seul appel Frankfurter par devise étrangère
+    présente dans `toImport`, jamais un par ligne — cf. `maxDuration = 60` sur
+    la route commit, budget que dépasserait un relevé de plusieurs centaines
+    de lignes en appels séquentiels.
+  */
+  const fxByCurrency = new Map<string, FxRangeResult>();
+  {
+    const daysByCurrency = new Map<string, { min: string; max: string }>();
+    for (const row of toImport) {
+      const cur = (row.currency || "EUR").toUpperCase();
+      if (cur === "EUR") continue;
+      const day = row.occurredAt ? row.occurredAt.slice(0, 10) : null;
+      if (!day) continue; // rejeté ligne par ligne dans resolveRowFxRate
+      // USDT/USDC partagent la série USD (`fxSeriesCurrency`) : un seul appel
+      // Frankfurter pour les trois, pas un par devise affichée.
+      const seriesCur = fxSeriesCurrency(cur);
+      const bounds = daysByCurrency.get(seriesCur);
+      if (!bounds) {
+        daysByCurrency.set(seriesCur, { min: day, max: day });
+      } else {
+        if (day < bounds.min) bounds.min = day;
+        if (day > bounds.max) bounds.max = day;
+      }
+    }
+    for (const [cur, bounds] of daysByCurrency) {
+      const fromDay = shiftDay(bounds.min, -7);
+      fxByCurrency.set(cur, await fxRatesToEurRange(cur, fromDay, bounds.max));
+    }
+  }
+
   let created = 0;
   let duplicates = analysis.strictSkipped.length;
   if (requireDecision) {
@@ -537,35 +687,61 @@ export async function commitImportRows(params: {
         continue;
       }
 
-      const assetId = await resolveOrCreateAsset(
-        userId,
-        rowPlatformId,
-        row,
-        params.accountEnvelopeType,
-        assetCache
-      );
-      await createTransaction(
-        {
+      const rowFxRateToEur = resolveRowFxRate(row, fxByCurrency);
+
+      // IMP-11 : `resolveOrCreateAsset` (création d'Asset possible) et
+      // `createTransaction` de CETTE ligne partagent maintenant une seule
+      // transaction Prisma. Si `createTransaction` échoue (ex. FX_RATE_UNKNOWN),
+      // Prisma annule aussi l'Asset créé juste avant — plus d'Asset orphelin.
+      // `ledgerState` reste le cache en mémoire du lot (IMP-04) : passé à
+      // `createTransaction` via `opts.ledgerState`, il prime désormais sur la
+      // présence de `tx` (voir service.ts) et n'est publié dans l'état partagé
+      // qu'après le commit réussi de CETTE ligne — un rollback ne le corrompt
+      // donc pas pour la ligne suivante.
+      let pendingAssetCacheEntry: { key: string; id: string } | undefined;
+      await prisma.$transaction(async (tx) => {
+        const resolved = await resolveOrCreateAsset(
           userId,
-          type: row.type as TxType,
-          platformId: rowPlatformId,
-          assetId: assetId || null,
-          quantity: row.quantity || undefined,
-          unitPrice: row.unitPrice || undefined,
-          cashAmount: row.cashAmount || undefined,
-          fees: row.fees || "0",
-          currency: row.currency || "EUR",
-          fxRateToEur: "1",
-          occurredAt: row.occurredAt || new Date().toISOString(),
-          notes: row.notes
-            ? `[Import CSV L${row.line}] ${row.notes}`
-            : `[Import CSV L${row.line}]`,
-          autoFundCash: true,
-          allowNegativeCash: true,
-        },
-        undefined,
-        { ledgerState, skipInvalidate: true, ownership }
-      );
+          rowPlatformId,
+          row,
+          params.accountEnvelopeType,
+          assetCache,
+          tx
+        );
+        if (resolved.pendingCacheKey && resolved.id) {
+          pendingAssetCacheEntry = { key: resolved.pendingCacheKey, id: resolved.id };
+        }
+        await createTransaction(
+          {
+            userId,
+            type: row.type as TxType,
+            platformId: rowPlatformId,
+            assetId: resolved.id || null,
+            quantity: row.quantity || undefined,
+            unitPrice: row.unitPrice || undefined,
+            cashAmount: row.cashAmount || undefined,
+            fees: row.fees || "0",
+            currency: row.currency || "EUR",
+            fxRateToEur: rowFxRateToEur,
+            occurredAt: row.occurredAt || new Date().toISOString(),
+            notes: row.notes
+              ? `[Import CSV L${row.line}] ${row.notes}`
+              : `[Import CSV L${row.line}]`,
+            autoFundCash: true,
+            allowNegativeCash: true,
+          },
+          tx,
+          { ledgerState, skipInvalidate: true, ownership }
+        );
+      });
+      // Transaction de la ligne commitée avec succès (aucune exception levée
+      // jusqu'ici) : c'est seulement maintenant qu'un Asset tout juste créé
+      // (voir ResolvedAsset.pendingCacheKey) devient sûr à mémoriser pour les
+      // lignes suivantes du même lot — avant ce point, un rollback l'aurait
+      // rendu fantôme.
+      if (pendingAssetCacheEntry) {
+        assetCache.set(pendingAssetCacheEntry.key, pendingAssetCacheEntry.id);
+      }
       seenStrict.add(sfp);
       created++;
     } catch (e) {

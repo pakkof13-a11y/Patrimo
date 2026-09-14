@@ -162,21 +162,63 @@ test.describe("Banques", () => {
   });
 
   test("KPI de synthèse cohérents avec l'API", async ({ page, request }) => {
-    const banksApi = await request.get("/api/banks").then((r) => r.json());
+    /*
+      Les deux appels portent la même devise.
+
+      Ils l'omettaient tous les deux, si bien que ce contrôle ne pouvait pas
+      voir la contradiction que D39 avait ouverte entre le bandeau et la
+      liste : les deux répondaient en euros quoi qu'affiche l'en-tête.
+    */
+    const base = "EUR";
+    const banksApi = await request
+      .get(`/api/banks?base=${base}`)
+      .then((r) => r.json());
     const summaryApi = await request
-      .get("/api/banks/summary")
+      .get(`/api/banks/summary?base=${base}`)
       .then((r) => r.json());
 
-    const expectedChecking = banksApi.accounts
-      .filter((a: { countsInNetWorth: boolean }) => a.countsInNetWorth)
-      .reduce(
-        (s: number, a: { balanceBase: string }) => s + Number(a.balanceBase),
-        0
-      );
+    /*
+      L'invariant est celui de `personalShareOf`, pas `countsInNetWorth` seul.
+
+      Ce contrôle sommait les `balanceBase` entiers des comptes retenus.
+      `summarizeCash` les multiplie par la quote-part depuis D39 : un compte
+      joint à 50 % n'entre que pour la moitié. L'assertion restait verte par
+      vacuité — aucun jeu de démonstration ne pose d'`ownershipPct` — et
+      serait tombée au premier compte détenu en commun, contre un
+      comportement correct.
+
+      La part est recalculée ici depuis les mêmes champs que la règle lit,
+      plutôt qu'importée : ce fichier tourne sous Playwright, contre
+      l'application déployée, et doit pouvoir contredire le serveur.
+    */
+    type CompteApi = {
+      isPro: boolean;
+      ownershipPct: string | null;
+      balanceBase: string;
+    };
+    const part = (a: CompteApi) => {
+      if (a.isPro) return 0;
+      const pct = a.ownershipPct == null ? 100 : Number(a.ownershipPct);
+      return Number.isFinite(pct) && pct >= 0 && pct <= 100 ? pct / 100 : 1;
+    };
+
+    const expectedChecking = (banksApi.accounts as CompteApi[]).reduce(
+      (s: number, a: CompteApi) => s + Number(a.balanceBase) * part(a),
+      0
+    );
     expect(Number(summaryApi.checkingTotalBase)).toBeCloseTo(
       expectedChecking,
       1
     );
+
+    /*
+      Et ce que le bandeau écarte doit correspondre à ce que la liste montre :
+      sans ça, la notice « Totaux hors » pourrait dériver sans être vue.
+    */
+    const attendusPro = (banksApi.accounts as CompteApi[]).filter(
+      (a) => a.isPro
+    ).length;
+    expect(summaryApi.excluded.proCount).toBeGreaterThanOrEqual(attendusPro);
 
     const strip = page.getByTestId("banks-summary-strip");
     await expect(strip).toBeVisible();

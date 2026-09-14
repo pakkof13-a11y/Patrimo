@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const bankFindMany = vi.fn();
 const savingsFindMany = vi.fn();
+const termDepositFindMany = vi.fn();
 const envelopeFindMany = vi.fn();
 const lifeInsuranceFindMany = vi.fn();
 
@@ -18,6 +19,8 @@ vi.mock("@/app/lib/prisma", () => ({
   prisma: {
     bankAccount: { findMany: (...a: unknown[]) => bankFindMany(...a) },
     savingsAccount: { findMany: (...a: unknown[]) => savingsFindMany(...a) },
+    // Quatrième poche lue depuis que les CAT entrent dans le patrimoine net.
+    termDeposit: { findMany: (...a: unknown[]) => termDepositFindMany(...a) },
     envelopeCash: { findMany: (...a: unknown[]) => envelopeFindMany(...a) },
     lifeInsurance: {
       findMany: (...a: unknown[]) => lifeInsuranceFindMany(...a),
@@ -38,6 +41,7 @@ const dec = (v: string) => ({ toString: () => v });
 beforeEach(() => {
   bankFindMany.mockReset().mockResolvedValue([]);
   savingsFindMany.mockReset().mockResolvedValue([]);
+  termDepositFindMany.mockReset().mockResolvedValue([]);
   envelopeFindMany.mockReset().mockResolvedValue([]);
   lifeInsuranceFindMany.mockReset().mockResolvedValue([]);
 });

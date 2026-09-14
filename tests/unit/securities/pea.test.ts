@@ -7,11 +7,163 @@ import {
   PEA_INCOME_TAX_RATE,
   PEA_PME_CAP_EUR,
   PEA_SOCIAL_CHARGES_RATE,
+  peaContributionBase,
   peaContributionRoom,
   peaMaturityStatus,
   peaTaxStatusLabel,
   peaWithdrawalTax,
+  type PeaMovement,
 } from "@/app/lib/securities/pea";
+
+describe("peaContributionBase — assiette après retraits", () => {
+  const OPEN = new Date("2019-03-01T00:00:00Z");
+  const AT = new Date("2026-07-28T00:00:00Z");
+  const mv = (
+    type: PeaMovement["type"],
+    amount: number,
+    date = "2020-06-01T00:00:00Z"
+  ): PeaMovement => ({ type, amountEur: d(amount), occurredAt: new Date(date) });
+  const pea = (liquidationValue: number, movements: PeaMovement[]) =>
+    peaContributionBase({
+      envelopeType: "PEA",
+      openDate: OPEN,
+      at: AT,
+      liquidationValueEur: d(liquidationValue),
+      movements,
+    });
+
+  it("sans retrait : EXACT, assiette = versements", () => {
+    const r = pea(60_000, [mv("DEPOSIT", 50_000)])!;
+    expect(r.status).toBe("EXACT");
+    expect(r.remainingContributionsEur.toNumber()).toBe(50_000);
+    expect(r.withdrawnContributionsEur.toNumber()).toBe(0);
+    expect(r.gainEur.toNumber()).toBe(10_000);
+  });
+
+  // Cas de l'audit TIT-01, où la formule rejoint la doctrine à l'euro près :
+  // sans mouvement de marché, V + W est la valeur du plan au jour du retrait.
+  it("un retrait emporte sa quote-part de versements : 50 000 × 100 000 / 150 000", () => {
+    const r = pea(100_000, [
+      mv("DEPOSIT", 100_000, "2019-03-01T00:00:00Z"),
+      mv("WITHDRAWAL", 50_000, "2025-01-15T00:00:00Z"),
+    ])!;
+    expect(r.status).toBe("PRORATA");
+    expect(r.withdrawnContributionsEur.toNumber()).toBeCloseTo(33_333.33, 2);
+    expect(r.remainingContributionsEur.toNumber()).toBeCloseTo(66_666.67, 2);
+    expect(r.gainEur.toNumber()).toBeCloseTo(33_333.33, 2);
+    // Le brut n'a pas bougé : c'est lui que le plafond lit.
+    expect(r.grossContributionsEur.toNumber()).toBe(100_000);
+  });
+
+  it("l'ordre et le découpage des retraits ne changent rien", () => {
+    const a = pea(100_000, [
+      mv("DEPOSIT", 100_000, "2019-03-01T00:00:00Z"),
+      mv("WITHDRAWAL", 20_000, "2023-01-01T00:00:00Z"),
+      mv("WITHDRAWAL", 30_000, "2025-01-01T00:00:00Z"),
+    ])!;
+    const b = pea(100_000, [
+      mv("WITHDRAWAL", 50_000, "2025-01-01T00:00:00Z"),
+      mv("DEPOSIT", 100_000, "2019-03-01T00:00:00Z"),
+    ])!;
+    expect(a.remainingContributionsEur.toString()).toBe(
+      b.remainingContributionsEur.toString()
+    );
+  });
+
+  it("l'assiette reste entre 0 et les versements, quel que soit le retrait", () => {
+    // Plan quasi vidé : 100 000 versés, 149 000 retirés, 1 000 restant.
+    const r = pea(1_000, [
+      mv("DEPOSIT", 100_000, "2019-03-01T00:00:00Z"),
+      mv("WITHDRAWAL", 149_000, "2025-01-01T00:00:00Z"),
+    ])!;
+    expect(r.remainingContributionsEur.gte(0)).toBe(true);
+    expect(r.remainingContributionsEur.lte(100_000)).toBe(true);
+    // 1 000 × (1 000 + 149 000 − 100 000) / 150 000 = 333,33 de gain.
+    expect(r.gainEur.toNumber()).toBeCloseTo(333.33, 2);
+  });
+
+  it("une moins-value reste une moins-value après retrait", () => {
+    // 100 000 versés, 20 000 retirés, 60 000 restant : le plan a perdu.
+    const r = pea(60_000, [
+      mv("DEPOSIT", 100_000, "2019-03-01T00:00:00Z"),
+      mv("WITHDRAWAL", 20_000, "2025-01-01T00:00:00Z"),
+    ])!;
+    expect(r.gainEur.lt(0)).toBe(true);
+    expect(r.remainingContributionsEur.toNumber()).toBe(75_000);
+  });
+
+  describe("UNKNOWN — null, jamais zéro", () => {
+    const deposit = mv("DEPOSIT", 100_000, "2019-03-01T00:00:00Z");
+
+    it("retrait daté avant l'ouverture du plan", () => {
+      expect(
+        pea(100_000, [deposit, mv("WITHDRAWAL", 1_000, "2018-12-31T00:00:00Z")])
+      ).toBeNull();
+    });
+
+    it("retrait daté avant le premier versement", () => {
+      expect(
+        pea(100_000, [
+          mv("DEPOSIT", 100_000, "2020-01-01T00:00:00Z"),
+          mv("WITHDRAWAL", 1_000, "2019-06-01T00:00:00Z"),
+        ])
+      ).toBeNull();
+    });
+
+    it("retrait daté après la date d'évaluation", () => {
+      expect(
+        pea(100_000, [deposit, mv("WITHDRAWAL", 1_000, "2027-01-01T00:00:00Z")])
+      ).toBeNull();
+    });
+
+    it("retrait sans aucun versement", () => {
+      expect(pea(100_000, [mv("WITHDRAWAL", 1_000)])).toBeNull();
+    });
+
+    it("montant ou date illisible", () => {
+      expect(
+        pea(100_000, [deposit, { ...mv("WITHDRAWAL", 1_000), amountEur: d(NaN) }])
+      ).toBeNull();
+      expect(
+        pea(100_000, [
+          deposit,
+          { ...mv("WITHDRAWAL", 1_000), occurredAt: new Date("pas une date") },
+        ])
+      ).toBeNull();
+    });
+
+    it("compte-titres avec retrait : la règle du PEA ne s'y applique pas", () => {
+      expect(
+        peaContributionBase({
+          envelopeType: "CTO",
+          openDate: OPEN,
+          at: AT,
+          liquidationValueEur: d(12_000),
+          movements: [mv("DEPOSIT", 10_000), mv("WITHDRAWAL", 1_000)],
+        })
+      ).toBeNull();
+    });
+
+    it("compte-titres sans retrait : assiette exacte, comme avant", () => {
+      const r = peaContributionBase({
+        envelopeType: "CTO",
+        openDate: OPEN,
+        at: AT,
+        liquidationValueEur: d(12_000),
+        movements: [mv("DEPOSIT", 10_000)],
+      })!;
+      expect(r.status).toBe("EXACT");
+      expect(r.gainEur.toNumber()).toBe(2_000);
+    });
+
+    it("valeur reconstituée nulle ou négative : aucune proportion possible", () => {
+      // Poche d'espèces à découvert au-delà des retraits.
+      expect(
+        pea(-5_000, [deposit, mv("WITHDRAWAL", 1_000, "2025-01-01T00:00:00Z")])
+      ).toBeNull();
+    });
+  });
+});
 
 describe("peaMaturityStatus", () => {
   it("un plan de moins de 5 ans n'est pas mûr", () => {
@@ -53,6 +205,244 @@ describe("peaMaturityStatus", () => {
     expect(s.isMatured).toBe(false);
     expect(s.daysToMaturity).toBe(1);
   });
+
+  it("un plan ouvert un 29 février mûrit le 28 février, pas le 1er mars", () => {
+    /*
+      Mesuré : `new Date("2020-02-29").setFullYear(2025)` rend le 1er mars
+      2025. 2025 n'est pas bissextile, et `Date.setFullYear` ne plafonne pas —
+      c'est le bug que ce test verrouille.
+    */
+    const s = peaMaturityStatus(new Date("2020-02-29T00:00:00Z"));
+    expect(s.maturityDate.toISOString().slice(0, 10)).toBe("2025-02-28");
+  });
+
+  it("le 28 février 2025, un plan ouvert le 29 février 2020 est déjà mûr", () => {
+    // Conséquence directe du cas précédent : au lieu d'annoncer « 1 jour »
+    // restant, le plan doit être mûr ce jour-là.
+    const s = peaMaturityStatus(
+      new Date("2020-02-29T00:00:00Z"),
+      new Date("2025-02-28T00:00:00Z")
+    );
+    expect(s.isMatured).toBe(true);
+    expect(s.daysToMaturity).toBe(0);
+  });
+
+  it("un plan ouvert le 31 janvier mûrit le 31 janvier, cas ordinaire", () => {
+    // Aucun mois cible traversé par +5 ans n'est plus court que janvier :
+    // le plafonnement ne doit rien changer ici.
+    const s = peaMaturityStatus(new Date("2019-01-31T00:00:00Z"));
+    expect(s.maturityDate.toISOString().slice(0, 10)).toBe("2024-01-31");
+  });
+
+  it("le calcul reste en UTC — pas de glissement d'un jour depuis Prisma", () => {
+    const s = peaMaturityStatus(new Date("2020-02-29T00:00:00.000Z"));
+    expect(s.maturityDate.getUTCFullYear()).toBe(2025);
+    expect(s.maturityDate.getUTCMonth()).toBe(1); // février, 0-indexé
+    expect(s.maturityDate.getUTCDate()).toBe(28);
+    expect(s.maturityDate.getUTCHours()).toBe(0);
+  });
+});
+
+describe("peaMaturityStatus — clôture anticipée (TIT-06)", () => {
+  const OPEN = new Date("2024-01-01T00:00:00Z");
+  const MATURITY = "2029-01-01T00:00:00Z";
+  const mv = (
+    type: PeaMovement["type"],
+    amount: number,
+    date: string
+  ): PeaMovement => ({ type, amountEur: d(amount), occurredAt: new Date(date) });
+  const deposit = mv("DEPOSIT", 10_000, "2024-02-01T00:00:00Z");
+
+  it("sans mouvement, le calcul reste calendaire : RUNNING puis MATURED", () => {
+    const running = peaMaturityStatus(OPEN, new Date("2026-07-28T00:00:00Z"), []);
+    expect(running.planStatus).toBe("RUNNING");
+    expect(running.isMatured).toBe(false);
+    expect(running.closedAt).toBeNull();
+
+    const matured = peaMaturityStatus(OPEN, new Date("2030-01-01T00:00:00Z"), [
+      deposit,
+    ]);
+    expect(matured.planStatus).toBe("MATURED");
+    expect(matured.isMatured).toBe(true);
+    expect(matured.daysToMaturity).toBe(0);
+  });
+
+  it("un retrait avant maturité clôture le plan : plus de compte à rebours", () => {
+    // Le cas de l'audit : PEA ouvert 2024-01-01, retrait en 2025.
+    const s = peaMaturityStatus(OPEN, new Date("2026-07-28T00:00:00Z"), [
+      deposit,
+      mv("WITHDRAWAL", 5_000, "2025-03-15T00:00:00Z"),
+    ]);
+    expect(s.planStatus).toBe("CLOSED");
+    expect(s.closedAt?.toISOString()).toBe("2025-03-15T00:00:00.000Z");
+    expect(s.isMatured).toBe(false);
+    expect(s.daysToMaturity).toBe(0);
+    // L'antériorité s'arrête à la clôture, elle ne continue pas de courir.
+    expect(s.ageYears).toBeCloseTo(1.2, 1);
+  });
+
+  it("un plan clos ne devient pas mûr une fois la date des 5 ans passée", () => {
+    const s = peaMaturityStatus(OPEN, new Date("2031-01-01T00:00:00Z"), [
+      deposit,
+      mv("WITHDRAWAL", 5_000, "2025-03-15T00:00:00Z"),
+    ]);
+    expect(s.planStatus).toBe("CLOSED");
+    expect(s.isMatured).toBe(false);
+  });
+
+  it("retient le premier retrait comme date de clôture, quel que soit l'ordre", () => {
+    const s = peaMaturityStatus(OPEN, new Date("2027-01-01T00:00:00Z"), [
+      mv("WITHDRAWAL", 1_000, "2026-06-01T00:00:00Z"),
+      deposit,
+      mv("WITHDRAWAL", 1_000, "2025-06-01T00:00:00Z"),
+    ]);
+    expect(s.closedAt?.toISOString()).toBe("2025-06-01T00:00:00.000Z");
+  });
+
+  it("un retrait après maturité ne change rien : plan mûr, ouvert, sans clôture", () => {
+    const s = peaMaturityStatus(OPEN, new Date("2030-06-01T00:00:00Z"), [
+      deposit,
+      mv("WITHDRAWAL", 5_000, "2029-06-01T00:00:00Z"),
+    ]);
+    expect(s.planStatus).toBe("MATURED");
+    expect(s.isMatured).toBe(true);
+    expect(s.closedAt).toBeNull();
+  });
+
+  it("le jour même des 5 ans, un retrait ne clôture pas — symétrique de isMatured", () => {
+    const s = peaMaturityStatus(OPEN, new Date("2029-01-01T00:00:00Z"), [
+      deposit,
+      mv("WITHDRAWAL", 5_000, MATURITY),
+    ]);
+    expect(s.planStatus).toBe("MATURED");
+    expect(s.closedAt).toBeNull();
+  });
+
+  it("la veille des 5 ans, il clôture", () => {
+    const s = peaMaturityStatus(OPEN, new Date("2029-01-01T00:00:00Z"), [
+      deposit,
+      mv("WITHDRAWAL", 5_000, "2028-12-31T00:00:00Z"),
+    ]);
+    expect(s.planStatus).toBe("CLOSED");
+  });
+
+  describe("UNKNOWN — jamais présumé ouvert", () => {
+    const AT = new Date("2026-07-28T00:00:00Z");
+
+    it("retrait à date illisible", () => {
+      const s = peaMaturityStatus(OPEN, AT, [
+        deposit,
+        mv("WITHDRAWAL", 1_000, "pas une date"),
+      ]);
+      expect(s.planStatus).toBe("UNKNOWN");
+      expect(s.isMatured).toBe(false);
+      expect(s.daysToMaturity).toBe(0);
+    });
+
+    it("retrait à montant non fini", () => {
+      const s = peaMaturityStatus(OPEN, AT, [
+        deposit,
+        { type: "WITHDRAWAL", amountEur: d(NaN), occurredAt: new Date("2025-01-01T00:00:00Z") },
+      ]);
+      expect(s.planStatus).toBe("UNKNOWN");
+    });
+
+    it("retrait daté avant l'ouverture du plan", () => {
+      const s = peaMaturityStatus(OPEN, AT, [
+        deposit,
+        mv("WITHDRAWAL", 1_000, "2023-12-31T00:00:00Z"),
+      ]);
+      expect(s.planStatus).toBe("UNKNOWN");
+    });
+
+    it("retrait daté après la date d'évaluation", () => {
+      const s = peaMaturityStatus(OPEN, AT, [
+        deposit,
+        mv("WITHDRAWAL", 1_000, "2027-01-01T00:00:00Z"),
+      ]);
+      expect(s.planStatus).toBe("UNKNOWN");
+    });
+
+    it("versement daté après le retrait qui aurait dû clôturer : le journal se contredit", () => {
+      const s = peaMaturityStatus(OPEN, AT, [
+        deposit,
+        mv("WITHDRAWAL", 1_000, "2025-03-15T00:00:00Z"),
+        mv("DEPOSIT", 500, "2025-09-01T00:00:00Z"),
+      ]);
+      expect(s.planStatus).toBe("UNKNOWN");
+      expect(s.closedAt).toBeNull();
+    });
+
+    it("un plan mûr avec un retrait tardif puis un versement reste MATURED — rien ne se contredit", () => {
+      const s = peaMaturityStatus(OPEN, new Date("2030-06-01T00:00:00Z"), [
+        deposit,
+        mv("WITHDRAWAL", 1_000, "2029-03-01T00:00:00Z"),
+        mv("DEPOSIT", 500, "2029-09-01T00:00:00Z"),
+      ]);
+      expect(s.planStatus).toBe("MATURED");
+    });
+
+    it("date d'ouverture illisible", () => {
+      const s = peaMaturityStatus(new Date("n/a"), AT, []);
+      expect(s.planStatus).toBe("UNKNOWN");
+      expect(s.isMatured).toBe(false);
+    });
+  });
+});
+
+describe("peaContributionRoom — plan clos ou indéterminé (TIT-06)", () => {
+  it("un plan clos n'offre plus aucune place, même loin du plafond", () => {
+    const r = peaContributionRoom({
+      envelopeType: "PEA",
+      peaContributionsEur: d(10_000),
+      peaPmeContributionsEur: d(0),
+      planStatus: "CLOSED",
+    })!;
+    expect(r.remainingEur.toNumber()).toBe(0);
+    expect(r.blockedReason).toBe("PLAN_CLOSED");
+    // Les faits du plafond restent rendus tels quels.
+    expect(r.contributionsEur.toNumber()).toBe(10_000);
+    expect(r.isOverCap).toBe(false);
+    expect(r.overCapEur.toNumber()).toBe(0);
+    expect(r.usedPct.toNumber()).toBeCloseTo(6.67, 2);
+  });
+
+  it("un plan d'état indéterminé n'offre pas de place sur une présomption", () => {
+    const r = peaContributionRoom({
+      envelopeType: "PEA_PME",
+      peaContributionsEur: d(0),
+      peaPmeContributionsEur: d(0),
+      planStatus: "UNKNOWN",
+    })!;
+    expect(r.remainingEur.toNumber()).toBe(0);
+    expect(r.blockedReason).toBe("PLAN_STATUS_UNKNOWN");
+  });
+
+  it("un plan ouvert — en cours ou mûr — garde la place du plafond", () => {
+    for (const planStatus of ["RUNNING", "MATURED"] as const) {
+      const r = peaContributionRoom({
+        envelopeType: "PEA",
+        peaContributionsEur: d(10_000),
+        peaPmeContributionsEur: d(0),
+        planStatus,
+      })!;
+      expect(r.remainingEur.toNumber()).toBe(140_000);
+      expect(r.blockedReason).toBeNull();
+    }
+  });
+
+  it("un dépassement reste signalé sur un plan clos", () => {
+    const r = peaContributionRoom({
+      envelopeType: "PEA",
+      peaContributionsEur: d(160_000),
+      peaPmeContributionsEur: d(0),
+      planStatus: "CLOSED",
+    })!;
+    expect(r.isOverCap).toBe(true);
+    expect(r.overCapEur.toNumber()).toBe(10_000);
+    expect(r.remainingEur.toNumber()).toBe(0);
+    expect(r.blockedReason).toBe("PLAN_CLOSED");
+  });
 });
 
 describe("peaContributionRoom — plan isolé", () => {
@@ -63,6 +453,7 @@ describe("peaContributionRoom — plan isolé", () => {
       envelopeType: "PEA",
       peaContributionsEur: zero,
       peaPmeContributionsEur: zero,
+      planStatus: "RUNNING",
     })!;
     expect(r.remainingEur.toString()).toBe(PEA_CAP_EUR);
     expect(r.bindingCap).toBe("OWN");
@@ -74,6 +465,7 @@ describe("peaContributionRoom — plan isolé", () => {
       envelopeType: "PEA_PME",
       peaContributionsEur: zero,
       peaPmeContributionsEur: zero,
+      planStatus: "RUNNING",
     })!;
     expect(r.remainingEur.toString()).toBe(PEA_PME_CAP_EUR);
     expect(r.ownCapEur.toString()).toBe(PEA_PME_CAP_EUR);
@@ -85,6 +477,7 @@ describe("peaContributionRoom — plan isolé", () => {
         envelopeType: "CTO",
         peaContributionsEur: d(999_999),
         peaPmeContributionsEur: zero,
+        planStatus: "RUNNING",
       })
     ).toBeNull();
   });
@@ -96,6 +489,7 @@ describe("peaContributionRoom — plafond croisé", () => {
       envelopeType: "PEA_PME",
       peaContributionsEur: d(150_000),
       peaPmeContributionsEur: d(0),
+      planStatus: "RUNNING",
     })!;
     expect(r.remainingEur.toNumber()).toBe(75_000);
     // Le chiffre vient du plafond commun : c'est bien lui qu'il faut expliquer
@@ -108,6 +502,7 @@ describe("peaContributionRoom — plafond croisé", () => {
       envelopeType: "PEA",
       peaContributionsEur: d(50_000),
       peaPmeContributionsEur: d(0),
+      planStatus: "RUNNING",
     })!;
     expect(r.remainingEur.toNumber()).toBe(100_000);
     expect(r.bindingCap).toBe("OWN");
@@ -120,6 +515,7 @@ describe("peaContributionRoom — plafond croisé", () => {
       envelopeType: "PEA",
       peaContributionsEur: d(20_000),
       peaPmeContributionsEur: d(100_000),
+      planStatus: "RUNNING",
     })!;
     expect(r.remainingEur.toNumber()).toBe(105_000);
     expect(r.bindingCap).toBe("COMBINED");
@@ -130,6 +526,7 @@ describe("peaContributionRoom — plafond croisé", () => {
       envelopeType: "PEA_PME",
       peaContributionsEur: d(150_000),
       peaPmeContributionsEur: d(75_000),
+      planStatus: "RUNNING",
     })!;
     expect(r.remainingEur.toNumber()).toBe(0);
     expect(r.combinedContributionsEur.toString()).toBe(PEA_COMBINED_CAP_EUR);
@@ -142,6 +539,7 @@ describe("peaContributionRoom — dépassement", () => {
       envelopeType: "PEA",
       peaContributionsEur: d(160_000),
       peaPmeContributionsEur: d(0),
+      planStatus: "RUNNING",
     })!;
     expect(r.isOverCap).toBe(true);
     expect(r.overCapEur.toNumber()).toBe(10_000);

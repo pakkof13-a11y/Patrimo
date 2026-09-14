@@ -131,9 +131,13 @@ test.describe("Achat puis vente", () => {
 
     // Le P&L réalisé est un indicateur patrimonial, pas une mesure de
     // position : il vit sur le tableau de bord, plus sur le portefeuille.
+    // La tuile P&L bascule Latent (défaut) / Réalisé — la vente doit se
+    // retrouver dans l'état Réalisé.
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
-    await expect(page.getByTestId("kpi-realized")).toBeVisible({
+    await expect(page.getByTestId("kpi-pnl")).toBeVisible({
       timeout: 30_000,
     });
+    await page.getByTestId("kpi-pnl-toggle-realized").click();
+    await expect(page.getByTestId("kpi-pnl")).toBeVisible();
   });
 });

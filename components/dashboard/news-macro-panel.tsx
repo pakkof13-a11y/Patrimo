@@ -1,5 +1,6 @@
 "use client";
 
+import { parisEventClock, PARIS_CLOCK_NOTE } from "@/app/lib/ui/paris-clock";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -18,12 +19,19 @@ import type {
 import {
   compareActualToConsensus,
   earningsTimingLabel,
+  marketEventStatus,
   newsSourceLogoUrl,
 } from "@/app/lib/news/service";
 import {
   MARKET_RELEASE_FILTERS,
   type MarketReleaseFilter,
 } from "@/app/lib/news/release-filter";
+import {
+  buildReleaseDayWindow,
+  coveredDayRange,
+  isDayCovered,
+  type MarketDay,
+} from "@/app/lib/news/market-days";
 import { CountryFlag } from "@/components/ui/country-flag";
 import { cn } from "@/app/lib/utils";
 import { assetLogoSources } from "@/app/lib/logos/logodev";
@@ -31,8 +39,24 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatDistanceToNow } from "date-fns";
 import { fr } from "date-fns/locale";
 import type { PortfolioTickerProp } from "@/components/dashboard/market-calendar-panel";
+import { parisDayOf } from "@/app/lib/ui/paris-clock";
+import { useServerNow } from "@/app/hooks/use-server-now";
 
 export type { MarketReleaseFilter };
+
+/*
+  Les trois cartes de contexte partagent un plancher de hauteur.
+
+  La grille les étire déjà l'une sur l'autre — mais seulement au-delà de
+  , où elles tiennent sur une même ligne. En deçà, « Résultats » occupe sa
+  propre rangée et se réduisait à son contenu : deux annonces suffisaient à en
+  faire une carte deux fois plus courte que ses voisines, ce qui la faisait
+  passer pour une tuile secondaire alors qu'elle porte la même information.
+
+  Un plancher commun, plutôt qu'une hauteur fixe : une carte bien remplie
+  continue de grandir, aucune ne se recroqueville.
+*/
+const CARTE_CONTEXTE = "min-h-[20rem]";
 
 const IMPACT_LABEL: Record<MacroImpact, string> = {
   low: "Faible",
@@ -56,17 +80,40 @@ function relativeTime(iso: string): string {
   }
 }
 
-function clockTime(iso: string): string {
-  try {
-    return new Intl.DateTimeFormat("fr-FR", {
-      timeZone: "Europe/Paris",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(iso));
-  } catch {
-    return "—";
-  }
+/**
+ * Ancre un jour civil (`YYYY-MM-DD`, Europe/Paris — la clé `MarketDay.key`)
+ * à un instant représentatif, pour servir de référence à `parisEventClock`.
+ *
+ * Midi UTC : jamais à cheval sur un changement d'heure Europe/Paris, dont le
+ * décalage ne dépasse jamais deux heures — même construction que
+ * `parisNoonAnchor` dans `app/lib/news/market-days.ts`, ici locale plutôt que
+ * réexportée pour rester dans le périmètre de ce fichier.
+ *
+ * Sert à faire lire à `parisEventClock` « le jour de la ligne » comme le
+ * jour sélectionné dans la barre plutôt que la date réelle du navigateur :
+ * `macroDayEvents`/`earnDayEvents` filtrent déjà chaque liste sur
+ * `parisDayOf(e.time) === macroDay/earnDay`, donc toute ligne visible partage
+ * par construction le jour de son ancre — l'heure seule (forme courte)
+ * suffit, le jour étant déjà porté par l'onglet actif de la barre, toujours
+ * rendue au-dessus de la liste (jamais masquée quand des lignes s'affichent).
+ * Si un jour incohérent devait un jour s'y glisser, `parisEventClock`
+ * retomberait sur la forme longue plutôt que d'afficher une heure trompeuse.
+ */
+export function dayAnchor(dayKey: string): Date {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  if (!y || !m || !d) return new Date(NaN);
+  return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
 }
+
+/**
+ * Largeur de la cellule d'heure : minimale plutôt que fixe. En régime normal
+ * (voir `dayAnchor`) la forme courte (« 00:45 ») suffit largement aux 2,5rem
+ * historiques ; en `min-w-` plutôt qu'en `w-` fixe, une forme longue qui
+ * s'y glisserait malgré tout repousserait le drapeau/logo suivant au lieu de
+ * déborder dessus (le conteneur est `flex flex-wrap`).
+ */
+const EVENT_CLOCK_CLASS =
+  "min-w-[2.5rem] shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]";
 
 /**
  * Contexte marché — 3 tuiles analytiques (Actualités · Macro · Résultats).
@@ -91,6 +138,30 @@ export function NewsMacroPanel({
     useState<MarketReleaseFilter>("upcoming");
   const [earnFilter, setEarnFilter] =
     useState<MarketReleaseFilter>("upcoming");
+
+  /*
+    Deux modes mutuellement exclusifs, un seul jour affiché à la fois par
+    carte : « À venir » couvre J…J+6, « Publiées » couvre J−6…J. L'ancre
+    temporelle (`mountNow`) est figée une fois au montage — le calendrier ne
+    doit pas sauter de jour sous les pieds de l'utilisateur pendant qu'il
+    consulte le panneau — et sert à calculer `todayKey` ainsi que la barre de
+    chaque carte, recalculée quand son onglet change.
+  */
+  const [mountNow] = useState<Date>(() => new Date());
+  const todayKey = useMemo(
+    () => parisDayOf(mountNow) ?? mountNow.toISOString().slice(0, 10),
+    [mountNow]
+  );
+  const [macroDay, setMacroDay] = useState<string>(todayKey);
+  const [earnDay, setEarnDay] = useState<string>(todayKey);
+  const macroDayWindow = useMemo<MarketDay[]>(
+    () => buildReleaseDayWindow(macroFilter, mountNow),
+    [macroFilter, mountNow]
+  );
+  const earnDayWindow = useMemo<MarketDay[]>(
+    () => buildReleaseDayWindow(earnFilter, mountNow),
+    [earnFilter, mountNow]
+  );
 
   const tickersParam = useMemo(() => {
     return portfolioTickers
@@ -119,10 +190,12 @@ export function NewsMacroPanel({
     queryKey: ["macro-calendar"],
     queryFn: () =>
       fetchJson<{
+        events: MacroEvent[];
         upcoming: MacroEvent[];
         published: MacroEvent[];
         date: string;
-        source?: string;
+        source?: "forexfactory" | "mock";
+        generatedAt?: string;
       }>("/api/macro"),
     staleTime: 5 * 60_000,
     refetchInterval: 10 * 60_000,
@@ -131,32 +204,69 @@ export function NewsMacroPanel({
   const earnQ = useQuery({
     queryKey: ["earnings-calendar", tickersParam],
     queryFn: () => {
-      const q = new URLSearchParams({ limit: "10" });
+      /*
+        Le plafond suit celui de la route (60) : la barre de jours couvre
+        quinze jours et l'univers Finnhub (P4) porte désormais sur la même
+        fenêtre — une limite trop basse tronquerait l'univers avant qu'il
+        n'atteigne les jours les plus éloignés, sans que rien ne le signale.
+      */
+      const q = new URLSearchParams({ limit: "60" });
       if (tickersParam) q.set("tickers", tickersParam);
       return fetchJson<{
+        events: EarningsEvent[];
         upcoming: EarningsEvent[];
         published: EarningsEvent[];
         date: string;
         source?: string;
+        generatedAt?: string;
+        diagnostics?: {
+          universeSource: "finnhub" | "no-key";
+          universeRaw: number;
+          universeKept: number;
+          portfolioTargets: number;
+        };
       }>(`/api/earnings?${q.toString()}`);
     },
     staleTime: 5 * 60_000,
   });
 
+  // Horloge synchronisée sur le serveur : le badge Publié/À venir bascule en
+  // direct plutôt que de rester figé sur l'horaire de la requête.
+  const serverNowMs = useServerNow(
+    macroQ.data?.generatedAt ?? earnQ.data?.generatedAt ?? null
+  );
+
   const newsAll = newsQ.data?.news ?? [];
+
+  const macroEvents = useMemo(() => macroQ.data?.events ?? [], [macroQ.data]);
+  const macroCoverage = useMemo(
+    () => coveredDayRange(macroEvents.map((e) => e.time)),
+    [macroEvents]
+  );
+  const macroDayEvents = useMemo(
+    () => macroEvents.filter((e) => parisDayOf(e.time) === macroDay),
+    [macroEvents, macroDay]
+  );
   const macroAll = useMemo(
     () =>
-      macroFilter === "upcoming"
-        ? macroQ.data?.upcoming ?? []
-        : macroQ.data?.published ?? [],
-    [macroQ.data, macroFilter]
+      macroDayEvents.filter(
+        (e) => marketEventStatus(e.time, serverNowMs) === macroFilter
+      ),
+    [macroDayEvents, macroFilter, serverNowMs]
+  );
+
+  const earnEvents = useMemo(() => earnQ.data?.events ?? [], [earnQ.data]);
+  const earnDiag = earnQ.data?.diagnostics;
+  const earnDayEvents = useMemo(
+    () => earnEvents.filter((e) => parisDayOf(e.time) === earnDay),
+    [earnEvents, earnDay]
   );
   const earnAll = useMemo(
     () =>
-      earnFilter === "upcoming"
-        ? earnQ.data?.upcoming ?? []
-        : earnQ.data?.published ?? [],
-    [earnQ.data, earnFilter]
+      earnDayEvents.filter(
+        (e) => marketEventStatus(e.time, serverNowMs) === earnFilter
+      ),
+    [earnDayEvents, earnFilter, serverNowMs]
   );
 
   // Toujours afficher au moins 5 actus si disponibles
@@ -182,7 +292,7 @@ export function NewsMacroPanel({
       >
         {/* —— Actualités —— */}
         <article
-          className="card flex min-h-0 min-w-0 flex-col p-3.5 sm:p-4"
+          className={cn(CARTE_CONTEXTE, "card flex min-w-0 flex-col p-3.5 sm:p-4")}
           data-testid="market-tile-news"
         >
           <header className="mb-2.5 flex items-start gap-2">
@@ -274,7 +384,7 @@ export function NewsMacroPanel({
 
         {/* —— Macroéconomie —— */}
         <article
-          className="card flex min-h-0 min-w-0 flex-col p-3.5 sm:p-4"
+          className={cn(CARTE_CONTEXTE, "card flex min-w-0 flex-col p-3.5 sm:p-4")}
           data-testid="market-cal-macro"
         >
           <header className="mb-2 flex items-start gap-2">
@@ -285,19 +395,41 @@ export function NewsMacroPanel({
             <div className="min-w-0 flex-1">
               <h3 className="text-title">Macroéconomie</h3>
               <p className="text-meta">
-                {macroQ.data &&
-                "source" in (macroQ.data as { source?: string }) &&
-                (macroQ.data as { source?: string }).source === "forexfactory"
-                  ? "Calendrier du jour (live)"
-                  : "Indicateurs du jour"}
+                {/*
+                  Le fuseau est dit une fois, ici, plutôt que sur chaque ligne.
+
+                  Sans lui, une heure seule laissait le lecteur la rapporter à
+                  son propre fuseau — ou à celui du pays de l'indicateur, ce qui
+                  est le piège d'un calendrier international. La conversion était
+                  juste ; c'est l'écran qui ne disait pas dans quelle unité il
+                  parlait.
+                */}
+                {macroQ.data?.source === "forexfactory"
+                  ? `Calendrier de la semaine (live) · ${PARIS_CLOCK_NOTE}`
+                  : `Indicateurs du jour (exemples) · ${PARIS_CLOCK_NOTE}`}
               </p>
             </div>
           </header>
+
+          <DayBar
+            days={macroDayWindow}
+            coverage={macroCoverage}
+            value={macroDay}
+            onChange={(d) => {
+              setMacroDay(d);
+              setMacroMore(false);
+            }}
+            testId="macro-day"
+          />
 
           <ReleaseFilterBar
             value={macroFilter}
             onChange={(f) => {
               setMacroFilter(f);
+              // Changer d'onglet remet le jour sur J : la barre change de
+              // sens (J…J+6 ↔ J−6…J) et l'ancien jour sélectionné peut ne
+              // plus exister côté nouvel onglet.
+              setMacroDay(todayKey);
               setMacroMore(false);
             }}
             testId="macro-time-filter"
@@ -319,9 +451,19 @@ export function NewsMacroPanel({
               </p>
             ) : macroAll.length === 0 ? (
               <p className="py-6 text-center text-xs text-[var(--muted-foreground)]">
-                {macroFilter === "upcoming"
-                  ? "Aucun indicateur à venir"
-                  : "Aucune publication (24 h)"}
+                {describeEmptyDay({
+                  day: macroDay,
+                  coverage: macroCoverage,
+                  dayHasEvents: macroDayEvents.length > 0,
+                  emptyDayLabel:
+                    macroFilter === "upcoming"
+                      ? "Aucun indicateur à venir ce jour"
+                      : "Aucune publication ce jour",
+                  emptyFilterLabel:
+                    macroFilter === "upcoming"
+                      ? "Tout est déjà publié pour ce jour"
+                      : "Rien n'est encore publié pour ce jour",
+                })}
               </p>
             ) : (
               <ul className="space-y-1.5">
@@ -330,8 +472,8 @@ export function NewsMacroPanel({
                     key={e.id}
                     className="flex flex-wrap items-center gap-1.5 rounded-[var(--radius-md)] px-0.5 py-1 text-xs sm:gap-2"
                   >
-                    <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
-                      {clockTime(e.time)}
+                    <span className={EVENT_CLOCK_CLASS}>
+                      {parisEventClock(e.time, dayAnchor(macroDay))}
                     </span>
                     <CountryFlag code={e.countryCode || e.country} showCode />
                     <span className="min-w-0 flex-1 leading-snug text-[var(--foreground)]">
@@ -371,7 +513,7 @@ export function NewsMacroPanel({
 
         {/* —— Résultats —— */}
         <article
-          className="card flex min-h-0 min-w-0 flex-col p-3.5 sm:p-4 sm:col-span-2 lg:col-span-1"
+          className={cn(CARTE_CONTEXTE, "card flex min-w-0 flex-col p-3.5 sm:p-4 sm:col-span-2 lg:col-span-1")}
           data-testid="market-cal-earnings"
         >
           <header className="mb-2 flex items-start gap-2">
@@ -383,20 +525,46 @@ export function NewsMacroPanel({
               <h3 className="text-title">
                 Résultats des entreprises
               </h3>
-              {/* Le sous-titre dit ce que la liste contient, et rien d'autre :
-                  uniquement les titres détenus. */}
+              {/*
+                Le sous-titre décrivait « Vos titres uniquement » — un
+                périmètre que la carte a quitté : elle porte désormais
+                l'univers du jour sélectionné, le cadre jaune distinguant ce
+                qui est détenu (`inPortfolio`). Le sous-titre dit maintenant
+                d'où vient ce périmètre, `diagnostics` en main plutôt que
+                supposé : sans clé Finnhub, l'univers élargi est réellement
+                absent (mesuré : `FINNHUB_API_KEY` n'existe pas sur cette
+                machine), pas seulement vide.
+              */}
               <p className="text-meta">
-                {portfolioTickers.length > 0
-                  ? "Vos titres uniquement"
-                  : "Aucun titre coté au portefeuille"}
+                {earnDiag?.universeSource === "no-key"
+                  ? "Univers élargi indisponible (clé Finnhub absente) · portefeuille"
+                  : earnDiag?.universeSource === "finnhub"
+                    ? "Univers du jour (Finnhub) + portefeuille"
+                    : portfolioTickers.length > 0
+                      ? "Portefeuille"
+                      : "Aucun titre coté au portefeuille"}
               </p>
             </div>
           </header>
+
+          <DayBar
+            days={earnDayWindow}
+            coverage={null}
+            value={earnDay}
+            onChange={(d) => {
+              setEarnDay(d);
+              setEarnMore(false);
+            }}
+            testId="earn-day"
+          />
 
           <ReleaseFilterBar
             value={earnFilter}
             onChange={(f) => {
               setEarnFilter(f);
+              // Même règle que Macro : l'onglet change le sens de la barre,
+              // le jour sélectionné revient sur J.
+              setEarnDay(todayKey);
               setEarnMore(false);
             }}
             testId="earn-time-filter"
@@ -418,80 +586,90 @@ export function NewsMacroPanel({
               </p>
             ) : earnAll.length === 0 ? (
               /*
-                Vide n'est pas une panne : sur un portefeuille de quelques
-                lignes, il se passe des semaines sans publication. On dit
-                laquelle des deux situations on rencontre — pas de titre coté,
-                ou pas d'annonce — pour que le silence s'explique de lui-même.
+                Vide n'est pas une panne. Trois causes, pas une : aucun titre
+                coté, aucune annonce ce jour-là (portefeuille comme univers),
+                ou univers élargi absent faute de clé — `diagnostics` dit
+                laquelle plutôt que de les fondre dans un même silence.
               */
               <p className="py-6 text-center text-xs text-[var(--muted-foreground)]">
-                {portfolioTickers.length === 0
-                  ? "Aucun titre coté au portefeuille — rien à annoncer"
-                  : earnFilter === "upcoming"
-                    ? "Aucun résultat à venir pour vos titres"
-                    : "Aucun résultat publié pour vos titres (24 h)"}
+                {portfolioTickers.length === 0 &&
+                earnDiag?.universeSource === "no-key"
+                  ? "Aucun titre coté, et l'univers élargi est indisponible (clé Finnhub absente)"
+                  : describeEmptyDay({
+                      day: earnDay,
+                      coverage: null,
+                      dayHasEvents: earnDayEvents.length > 0,
+                      emptyDayLabel:
+                        earnFilter === "upcoming"
+                          ? "Aucun résultat à venir ce jour"
+                          : "Aucun résultat publié ce jour",
+                      emptyFilterLabel:
+                        earnFilter === "upcoming"
+                          ? "Tout est déjà publié pour ce jour"
+                          : "Rien n'est encore publié pour ce jour",
+                    })}
               </p>
             ) : (
+              /*
+                Même gabarit de ligne que la carte Macro juste à côté — mêmes
+                classes de hauteur, de fond et d'interligne (`flex flex-wrap
+                items-center gap-1.5 … px-0.5 py-1 text-xs`, figures sur une
+                ligne pleine largeur en dessous). Le logo 40×40 sur deux
+                lignes de texte séparées produisait des cartes bien plus
+                hautes et plus creuses côté Résultats qu'en Macro ; ici le
+                logo rejoint la taille du drapeau macro et le nom tient sur la
+                même ligne que l'heure.
+              */
               <ul className="space-y-1.5">
                 {earnVisible.map((e) => (
                   <li
                     key={e.id}
                     className={cn(
-                      "rounded-[var(--radius-md)] border border-transparent px-1 py-1.5 text-xs",
+                      "flex flex-wrap items-center gap-1.5 rounded-[var(--radius-md)] border border-transparent px-0.5 py-1 text-xs sm:gap-2",
                       e.inPortfolio &&
                         "border-[var(--primary-soft)] bg-[var(--primary-soft)]/40"
                     )}
                     data-in-portfolio={e.inPortfolio ? "true" : "false"}
                   >
-                    <div className="flex min-w-0 items-start gap-2 mb-1.5">
-                      <span className="w-10 shrink-0 font-mono tabular-nums text-[var(--muted-foreground)]">
-                        {clockTime(e.time)}
+                    <span className={EVENT_CLOCK_CLASS}>
+                      {parisEventClock(e.time, dayAnchor(earnDay))}
+                    </span>
+                    <div className="relative shrink-0">
+                      <CompanyLogo
+                        src={e.logoUrl}
+                        name={e.companyName}
+                        ticker={e.ticker}
+                        sizeClassName="h-5 w-5"
+                        radiusClassName="rounded-md"
+                      />
+                      <div className="absolute -bottom-0.5 -right-0.5">
+                        <CountryFlag
+                          code={e.countryCode || "us"}
+                          showCode={false}
+                          imgClassName="h-2 w-3"
+                          className="px-0.5 py-0 shadow-sm ring-1 ring-white dark:ring-slate-900 bg-white dark:bg-slate-900 text-[8px]"
+                        />
+                      </div>
+                    </div>
+                    <span className="min-w-0 flex-1 truncate leading-snug text-[var(--foreground)]">
+                      {e.companyName}
+                      <span className="ml-1 font-mono text-[10px] text-[var(--muted-foreground)]">
+                        {e.ticker}
                       </span>
-                    </div>
-                    <div className="flex min-w-0 gap-3">
-                      <div className="relative shrink-0">
-                        <CompanyLogo
-                          src={e.logoUrl}
-                          name={e.companyName}
-                          ticker={e.ticker}
-                          sizeClassName="h-10 w-10"
-                          radiusClassName="rounded-lg"
-                        />
-                        <div className="absolute -bottom-0 -right-0">
-                          <CountryFlag
-                            code={e.countryCode || "us"}
-                            showCode={false}
-                            imgClassName="h-3 w-4"
-                            className="px-0.5 py-0.5 shadow-sm ring-1 ring-white dark:ring-slate-900 bg-white dark:bg-slate-900 text-[10px]"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-baseline gap-2 mb-1">
-                          <span className="block truncate font-medium leading-tight text-[var(--foreground)]">
-                            {e.companyName}
-                          </span>
-                          {e.inPortfolio && (
-                            <span className="shrink-0 rounded-full bg-[var(--primary)]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--primary)]">
-                              Portefeuille
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-2 items-center text-[10px]">
-                          <span className="font-mono text-[var(--muted-foreground)]">
-                            {e.ticker}
-                          </span>
-                          <span className="text-[var(--muted-foreground)]">·</span>
-                          <span className="text-[var(--muted-foreground)]">
-                            {earningsTimingLabel(e.timing)}
-                          </span>
-                        </div>
-                        <EarningsFigures
-                          estimate={e.epsEstimate}
-                          actual={e.epsActual}
-                          mode={earnFilter}
-                        />
-                      </div>
-                    </div>
+                    </span>
+                    {e.inPortfolio && (
+                      <span className="shrink-0 rounded-full bg-[var(--primary)]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--primary)]">
+                        Portefeuille
+                      </span>
+                    )}
+                    <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                      {earningsTimingLabel(e.timing)}
+                    </span>
+                    <EarningsFigures
+                      estimate={e.epsEstimate}
+                      actual={e.epsActual}
+                      mode={earnFilter}
+                    />
                   </li>
                 ))}
               </ul>
@@ -691,7 +869,7 @@ function EarningsFigures({
   if (mode === "upcoming") {
     if (!estimate) return null;
     return (
-      <p className="mt-0.5 pl-12 text-[10px] text-[var(--muted-foreground)]">
+      <p className="w-full pl-12 text-[10px] text-[var(--muted-foreground)]">
         <span className="font-medium">Cons.</span> EPS {estimate}
       </p>
     );
@@ -699,13 +877,106 @@ function EarningsFigures({
   if (!actual && !estimate) return null;
   const cmp = compareActualToConsensus(actual, estimate);
   return (
-    <p className="mt-0.5 pl-12 text-[10px] tabular-nums text-[var(--muted-foreground)]">
+    <p className="w-full pl-12 text-[10px] tabular-nums text-[var(--muted-foreground)]">
       <span className="font-medium">Cons.</span> {estimate?.trim() || "—"}
       {" · "}
       <span className="font-medium">Rés.</span>{" "}
       <span className={RESULT_COLOR[cmp]}>{actual?.trim() || "—"}</span>
     </p>
   );
+}
+
+/**
+ * Barre de jours J−7…J+7 (civil Europe/Paris). Un jour sélectionné à la fois ;
+ * les jours hors de l'étendue effectivement couverte par la source (`coverage`
+ * — `null` si sans objet, comme pour les résultats dont la fenêtre serveur
+ * couvre déjà toute la barre) restent cliquables mais sont visuellement
+ * atténués et portent un titre expliquant pourquoi : un jour hors fenêtre
+ * n'est pas un jour sans événement, et ne doit pas se lire comme tel.
+ */
+function DayBar({
+  days,
+  coverage,
+  value,
+  onChange,
+  testId,
+}: {
+  days: MarketDay[];
+  coverage: { min: string; max: string } | null;
+  value: string;
+  onChange: (day: string) => void;
+  testId: string;
+}) {
+  return (
+    <div
+      className="mb-2 flex gap-1 overflow-x-auto pb-1"
+      role="tablist"
+      aria-label="Jour"
+      data-testid={testId}
+    >
+      {days.map((d) => {
+        const selected = d.key === value;
+        const covered = isDayCovered(d.key, coverage);
+        return (
+          <button
+            key={d.key}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            data-testid={`${testId}-${d.key}`}
+            title={
+              covered === false
+                ? "Hors de la fenêtre fournie par la source (semaine courante)"
+                : undefined
+            }
+            onClick={() => onChange(d.key)}
+            className={cn(
+              "shrink-0 whitespace-nowrap rounded-[var(--radius-sm)] px-2 py-1 text-[10px] font-semibold capitalize transition",
+              selected
+                ? "bg-[var(--primary)] text-white shadow-[var(--shadow-xs)]"
+                : covered === false
+                  ? "text-[var(--muted-foreground)]/50 hover:text-[var(--muted-foreground)]"
+                  : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+              d.isToday && !selected && "ring-1 ring-inset ring-[var(--primary)]/40"
+            )}
+          >
+            {d.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Message d'un jour sans résultat visible, qui distingue trois causes plutôt
+ * que de les fondre dans un même « rien à afficher » :
+ * - le jour est hors de l'étendue couverte par la source (`coverage` connu et
+ *   `day` en dehors) ;
+ * - le jour est couvert mais réellement vide (`dayHasEvents` faux) ;
+ * - le jour porte des événements, mais aucun ne correspond à l'onglet
+ *   sélectionné (à venir / publiées).
+ */
+function describeEmptyDay({
+  day,
+  coverage,
+  dayHasEvents,
+  emptyDayLabel,
+  emptyFilterLabel,
+}: {
+  day: string;
+  coverage: { min: string; max: string } | null;
+  dayHasEvents: boolean;
+  emptyDayLabel: string;
+  emptyFilterLabel: string;
+}): string {
+  const covered = isDayCovered(day, coverage);
+  if (covered === false) {
+    return `Hors de la fenêtre fournie par la source (semaine courante${
+      coverage ? ` : ${coverage.min} → ${coverage.max}` : ""
+    })`;
+  }
+  return dayHasEvents ? emptyFilterLabel : emptyDayLabel;
 }
 
 function ReleaseFilterBar({

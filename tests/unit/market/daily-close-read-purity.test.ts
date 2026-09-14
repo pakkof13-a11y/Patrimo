@@ -28,6 +28,7 @@ const LECTEURS = [
   "app/lib/portfolio/intraday/series.ts",
   "app/lib/portfolio/intraday/bar-index.ts",
   "app/lib/market/market-data-repository.ts",
+  "app/lib/market/last-close-as-of.ts",
 ];
 
 const lire = (p: string) => readFileSync(resolve(process.cwd(), p), "utf8");
@@ -55,7 +56,7 @@ describe("le moteur historique lit sans collecter", () => {
 describe("la collecte a un seul endroit", () => {
   it("le cron appelle la collecte quotidienne", () => {
     const code = codeSeul(lire("app/api/cron/collect-intraday/route.ts"));
-    expect(code).toContain("collectDailyClosesForAssets");
+    expect(code).toContain("backfillDailyClosesFromFirstTx");
     expect(code).toContain("collectIntradayBars");
   });
 

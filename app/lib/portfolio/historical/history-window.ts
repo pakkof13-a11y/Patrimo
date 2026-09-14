@@ -1,0 +1,215 @@
+/**
+ * Cap de profondeur d'historique — une seule constante, lue par tout ce qui
+ * décide « depuis quand » une série ou une borne « Tout » démarre.
+ *
+ * Mesuré (2026-09-06, local, utilisateur demo) : `GET /api/portfolio` rejouait
+ * le moteur sur 1998 → 2026, soit 1550 points et ~9,4 s pour le corps de la
+ * route. Les transactions antérieures au cap **restent en base** — ce n'est
+ * pas une purge, seulement une borne de lecture. `MAX_HISTORY_YEARS` est
+ * l'unique endroit où cette profondeur est écrite ; `historyFloorDay` est
+ * l'unique fonction qui la transforme en `DayKey`. Un second endroit qui
+ * recopierait `6` désynchroniserait les chips de la série qu'ils annoncent —
+ * exactement le symptôme que ce cap corrige.
+ */
+
+import { parisDayKey } from "../../dates/paris";
+import { enumerateDays, previousDay } from "./timeline";
+import type { DayKey } from "./types";
+
+export const MAX_HISTORY_YEARS = 6;
+
+/**
+ * Premier jour lisible, tous scopes confondus : `aujourd'hui − MAX_HISTORY_YEARS`.
+ *
+ * Jours civils Europe/Paris, comme le reste du moteur historique.
+ */
+export function historyFloorDay(now: Date = new Date()): DayKey {
+  const floor = new Date(now.getTime());
+  floor.setUTCFullYear(floor.getUTCFullYear() - MAX_HISTORY_YEARS);
+  return parisDayKey(floor);
+}
+
+/**
+ * Dernière clôture calendaire — le jour où la courbe s'arrête.
+ *
+ * Décision produit, et non une correction mesurée : la courbe patrimoniale
+ * trace des **clôtures**. Pas un NAV intra-journalier, pas une valorisation à
+ * seize heures, pas les écritures du jour en cours. Un point d'aujourd'hui
+ * mélange une journée inachevée à une série de journées closes, et les compare
+ * comme si elles étaient de même nature.
+ *
+ * Le gros chiffre de la carte de tête ne suit pas cette règle et n'a pas à la
+ * suivre : c'est un encours, daté « valo au » du jour, et c'est bien ce que
+ * l'on veut savoir maintenant. Ce sont la courbe, les écarts de période et les
+ * barres qui s'arrêtent à la veille.
+ *
+ * Un mur en fin de courbe a été signalé sur le 7 septembre 2026. Le lien avec
+ * cette règle **n'a pas été mesuré** — la machine où ce commit est écrit n'a
+ * pas de base. Si le mur subsiste après ce changement, il est ailleurs, dans le
+ * jeu de données, et il ne faut pas couper un jour de plus pour le cacher.
+ *
+ * « Veille » se calcule dans le calendrier **Paris**, jamais en retirant
+ * vingt-quatre heures d'horloge. L'implémentation précédente décrémentait le
+ * jour UTC de `now` puis relisait le jour parisien de l'instant obtenu ; un
+ * jour UTC dure toujours 24 h, un jour civil Paris 23 h ou 25 h aux deux
+ * bascules d'heure. Mesuré par balayage au quart d'heure (2026-09-13) sur les
+ * deux transitions 2026, deux fenêtres d'une heure divergeaient :
+ *
+ * - avance du 29/03 (le 29 ne dure que 23 h) : entre 00 h 00 et 01 h 00 Paris
+ *   le 30/03, `now − 24 h` retombait dans le 28 → clôture rendue `2026-03-28`
+ *   au lieu de `2026-03-29`, soit un jour de courbe purement et simplement
+ *   effacé ;
+ * - recul du 25/10 (le 25 dure 25 h) : entre 23 h 00 et 24 h 00 Paris le
+ *   25/10, `now − 24 h` restait *dans le 25* → clôture rendue `2026-10-25`,
+ *   c'est-à-dire la **journée en cours** — l'inverse exact de la règle que
+ *   cette fonction porte.
+ *
+ * `parisDayKey` lit le jour civil dans le fuseau (DST-aware), `previousDay`
+ * recule d'un jour dans ce même calendrier de clés : aucun décalage n'est
+ * recodé ici.
+ */
+export function lastCloseDay(now: Date = new Date()): DayKey {
+  const jour = parisDayKey(now);
+  // `parisDayKey` rend "" sur une date invalide ; on propage ce vide plutôt
+  // que de fabriquer une clé absurde à partir de NaN.
+  if (jour === "") return "";
+  return previousDay(jour);
+}
+
+/**
+ * Borne « depuis quand » ramenée sous le cap — jamais avant `historyFloorDay`.
+ *
+ * `null` reste `null` : un scope sans aucune donnée observée n'en acquiert
+ * pas une par l'effet du cap.
+ */
+export function capEarliestDay(
+  day: DayKey | null,
+  now: Date = new Date()
+): DayKey | null {
+  if (day == null) return null;
+  const floor = historyFloorDay(now);
+  return day < floor ? floor : day;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Pas de la série — décidé ici, au même endroit que la fenêtre.
+
+   `historyFloorDay` répond « depuis quand », `historyStepForWindow` répond
+   « tous les combien ». Les deux se lisent au même endroit et pour la même
+   raison : un second module qui écrirait « 5A ⇒ semaine » se désynchroniserait
+   du fenêtrage à la première fenêtre qui n'est pas exactement 5 ans (« Tout »
+   ramené à la première observation du scope, cap à six ans, scope jeune…).
+
+   Le pas ne se déduit donc pas du *libellé* de la période mais de l'**étendue
+   servie**, seule grandeur que le serveur connaisse — et que le client relit
+   ensuite dans `DailyNavResult.step` / `DailyNavPoint.intervalType` au lieu de
+   la recalculer.
+
+   Mesuré (2026-09-07, utilisateur demo, scope financier) : 5A/Tout rejouait
+   2 191 valorisations pour 2 725 ms de route. Le journal, lui, continue d'être
+   rejoué jour par jour — c'est la valorisation qui s'espace, pas la
+   reconstitution comptable.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/** Pas d'échantillonnage d'une série historique. */
+export type HistoryStep = "day" | "week";
+
+/**
+ * Étendue (en jours civils, bornes incluses) à partir de laquelle une série
+ * passe au pas hebdomadaire.
+ *
+ * 401 sépare sans ambiguïté les fenêtres courtes (7J → 1A : au plus 366 jours,
+ * 368 avec le jour d'ancrage) des longues (5A ≈ 1 827 jours, Tout jusqu'au cap
+ * de six ans). Aucune période du tableau de bord ne tombe près de la borne :
+ * la déplacer de quelques jours ne change le pas d'aucune d'entre elles.
+ */
+export const WEEKLY_STEP_MIN_SPAN_DAYS = 401;
+
+/** Nombre de jours civils entre deux `DayKey`, bornes incluses. */
+function spanInDays(from: DayKey, to: DayKey): number {
+  const [y0, m0, d0] = from.split("-").map(Number);
+  const [y1, m1, d1] = to.split("-").map(Number);
+  const a = Date.UTC(y0!, m0! - 1, d0!, 12);
+  const b = Date.UTC(y1!, m1! - 1, d1!, 12);
+  return Math.round((b - a) / 86_400_000) + 1;
+}
+
+/**
+ * Pas d'une série sur la fenêtre **servie** — l'unique décision de granularité.
+ */
+export function historyStepForWindow(from: DayKey, to: DayKey): HistoryStep {
+  if (from > to) return "day";
+  return spanInDays(from, to) >= WEEKLY_STEP_MIN_SPAN_DAYS ? "week" : "day";
+}
+
+/** Dimanche = 0 — jour civil, sans dépendance au fuseau de la machine. */
+function weekdayOf(day: DayKey): number {
+  const [y, m, dd] = day.split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, dd!, 12)).getUTCDay();
+}
+
+/**
+ * Lundi de la semaine civile (lundi → dimanche) qui contient `day`.
+ *
+ * Sert à nommer un point hebdomadaire. Le point lui-même tombe sur un
+ * vendredi — le dernier jour de bourse de la semaine (cf.
+ * `seriesEmissionDays`) — sauf à la borne qui ouvre la fenêtre, la seule qui
+ * reste partielle. Nommer ce point par sa propre date laisserait croire à une
+ * semaine qui commencerait un mardi ; le nommer par son lundi dit l'intervalle
+ * qu'il couvre, ce qui est ce que le lecteur cherche.
+ *
+ * Anciennement `sundayOfWeek` : la semaine était ancrée dimanche → dimanche,
+ * et le point émis tombait sur un dimanche. Un dimanche n'a jamais de
+ * cotation — chaque point hebdomadaire se reportait donc systématiquement
+ * (`MARKET_CARRIED`), et la série entière se déclarait `ESTIMATED` (mesuré :
+ * 314/314 sur `demo`, fenêtre « Tout »). Le jour d'émission a changé
+ * (vendredi), et le jour de nommage suit : le lundi qui ouvre la même
+ * semaine.
+ */
+export function mondayOfWeek(day: DayKey): DayKey {
+  const [y, m, dd] = day.split("-").map(Number);
+  const d = new Date(Date.UTC(y!, m! - 1, dd!, 12));
+  const weekday = d.getUTCDay(); // dimanche = 0 … samedi = 6
+  const recul = (weekday + 6) % 7; // lundi = 0, …, dimanche = 6
+  d.setUTCDate(d.getUTCDate() - recul);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Jours où la série **émet un point**, bornes incluses.
+ *
+ * Pas quotidien : tous les jours civils — contrat T-05 inchangé.
+ *
+ * Pas hebdomadaire : `from`, puis le **dernier jour de bourse de chaque
+ * semaine civile** — lundi à vendredi, en jours Europe/Paris — jamais `to` en
+ * plus, sauf s'il tombe lui-même un vendredi. Aucun calendrier férié : le
+ * moteur n'en tient pas ailleurs (`dailyPriceResolver`), et vendredi est donc
+ * le seul jour retenu, sans chercher le dernier jour ouvré effectif. Le
+ * dernier point émis est le dernier vendredi ≤ `to`, et la semaine en cours
+ * (celle que `to` traverse sans la clore) n'est **pas servie** — exactement
+ * comme le jour en cours a été retiré des séries quotidiennes
+ * (`lastCloseDay`).
+ *
+ * Décision produit tranchée le 2026-09-07 (D26) : l'ancrage dimanche
+ * (retenu le même jour, plus haut dans l'historique de ce fichier) émettait
+ * un point qu'aucune action ne cote jamais, si bien que chaque point
+ * hebdomadaire se reportait (`MARKET_CARRIED`) et que la série entière se
+ * déclarait `ESTIMATED` — `lastObserved` n'était donc plus jamais assigné
+ * dans `buildHeroSeries`. Le regroupement hebdomadaire reste : seul le jour
+ * d'émission change, du dimanche au vendredi.
+ *
+ * Un seul intervalle reste donc plus court que sept jours : celui qui ouvre
+ * la fenêtre (`from` → premier vendredi). Il n'est pas un problème pour
+ * l'identité métier `Δmarché = NAV_t − NAV_{t−1} − flux_t` : celle-ci est
+ * indexée sur les points émis, et les flux sont sommés sur l'intervalle qui
+ * sépare deux points, quelle qu'en soit la durée.
+ */
+export function seriesEmissionDays(
+  from: DayKey,
+  to: DayKey,
+  step: HistoryStep
+): DayKey[] {
+  const days = enumerateDays(from, to);
+  if (step === "day" || days.length === 0) return days;
+  return days.filter((day, i) => i === 0 || weekdayOf(day) === 5);
+}

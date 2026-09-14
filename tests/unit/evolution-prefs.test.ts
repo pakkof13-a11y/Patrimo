@@ -210,14 +210,14 @@ describe("withBenchmarkSeries", () => {
 });
 
 /**
- * Accord entre la classe choisie et l'enveloppe.
+ * Accord entre le compte choisi et l'enveloppe.
  *
- * L'enveloppe est subordonnée à la classe : elle précise « où », dans un « quoi »
+ * L'enveloppe est subordonnée au compte : elle précise « où », dans un « quoi »
  * déjà fixé. Une combinaison qui n'a pas de sens ne doit ni être stockée, ni
  * survivre à un rechargement — sans quoi la courbe se retrouve filtrée sur un
  * critère qu'aucun contrôle n'affiche plus, et paraît vide sans raison.
  */
-describe("classe et enveloppe restent accordées", () => {
+describe("compte et enveloppe restent accordés", () => {
   // Même stub que le bloc précédent : `loadUiPref` lit `window.localStorage`.
   beforeEach(() => {
     const store = new Map<string, string>();
@@ -247,31 +247,28 @@ describe("classe et enveloppe restent accordées", () => {
     delete globalThis.window;
   });
 
-  it("les actions acceptent les deux enveloppes", () => {
-    expect(normalizeEnvelopeFor("ACTIONS", "PEA")).toBe("PEA");
-    expect(normalizeEnvelopeFor("ACTIONS", "CTO")).toBe("CTO");
-    expect(normalizeEnvelopeFor("ACTIONS", null)).toBeNull();
+  it("Titres accepte les deux enveloppes", () => {
+    expect(normalizeEnvelopeFor("TITRES", "PEA")).toBe("PEA");
+    expect(normalizeEnvelopeFor("TITRES", "CTO")).toBe("CTO");
+    expect(normalizeEnvelopeFor("TITRES", null)).toBeNull();
   });
 
-  it("les obligations n'exposent aucun choix d'enveloppe", () => {
-    /*
-      Le produit ne connaît d'obligations qu'en compte-titres. Leur proposer
-      « PEA » offrirait un choix dont la série serait vide par convention
-      d'interface plutôt que par constat.
-    */
-    expect(normalizeEnvelopeFor("OBLIGATIONS", "PEA")).toBeNull();
-    expect(normalizeEnvelopeFor("OBLIGATIONS", "CTO")).toBeNull();
-  });
-
-  it("aucune classe hors titres n'accepte d'enveloppe", () => {
-    for (const cls of ["CRYPTO", "IMMOBILIER", "CASH", "AUTRE"] as const) {
-      expect(normalizeEnvelopeFor(cls, "PEA")).toBeNull();
-      expect(normalizeEnvelopeFor(cls, "CTO")).toBeNull();
+  it("aucun compte hors Titres n'accepte d'enveloppe", () => {
+    for (const acc of [
+      "ASSURANCE_VIE",
+      "CRYPTO",
+      "IMMOBILIER",
+      "ALTERNATIFS",
+      "EPARGNE_SALARIALE",
+      "CASH",
+    ] as const) {
+      expect(normalizeEnvelopeFor(acc, "PEA")).toBeNull();
+      expect(normalizeEnvelopeFor(acc, "CTO")).toBeNull();
     }
   });
 
-  it("sans classe, aucune enveloppe ne s'applique", () => {
-    // « Tout » ne porte pas de filtre d'enveloppe : la question est par classe.
+  it("sans compte, aucune enveloppe ne s'applique", () => {
+    // « Tout » ne porte pas de filtre d'enveloppe : la question est par compte.
     expect(normalizeEnvelopeFor(null, "PEA")).toBeNull();
     expect(normalizeEnvelopeFor(undefined, "CTO")).toBeNull();
   });
@@ -279,21 +276,26 @@ describe("classe et enveloppe restent accordées", () => {
   it("une combinaison invalide n'atteint jamais le stockage", () => {
     saveEvolutionPrefs({
       ...DEFAULT_EVOLUTION_PREFS,
-      assetClass: "CRYPTO",
+      account: "CRYPTO",
       envelope: "PEA",
     });
     const relu = loadEvolutionPrefs();
-    // La classe est conservée — c'est le filtre principal — l'enveloppe tombe.
-    expect(relu.assetClass).toBe("CRYPTO");
+    // Le compte est conservé — c'est le filtre principal — l'enveloppe tombe.
+    expect(relu.account).toBe("CRYPTO");
     expect(relu.envelope).toBeNull();
   });
 
-  it("une préférence héritée devenue invalide est corrigée à la lecture", () => {
-    /*
-      Le sélecteur était global avant ce chantier : « Crypto + PEA » a pu être
-      écrit par une version antérieure. La relire telle quelle filtrerait la
-      crypto sur une enveloppe, et l'écran serait vide sans explication.
-    */
+  /*
+    Migration D18 : le sélecteur de classe d'actif (`assetClass`) devient un
+    sélecteur de compte (`account`). Une préférence `v5` enregistrée avant ce
+    chantier porte `assetClass` mais pas `account` : ce champ inconnu est
+    ignoré, jamais rejeté, et `account` retombe sur `null` — « Tout », le
+    comportement le plus sûr. L'ancienne valeur (« IMMOBILIER ») ne migre pas
+    vers le nouveau compte du même nom : la taxonomie a changé de nature, et
+    la reconstruire à la volée inventerait un choix que l'utilisateur n'a
+    jamais fait dans ce nouvel écran.
+  */
+  it("une préférence v5 antérieure (assetClass) retombe sur « Tout »", () => {
     // `loadUiPref` préfixe ses clés — écrire sans le préfixe ne serait pas relu.
     localStorage.setItem(
       `patrimo.ui.${EVOLUTION_PREFS_KEY}`,
@@ -309,15 +311,17 @@ describe("classe et enveloppe restent accordées", () => {
       })
     );
     const relu = loadEvolutionPrefs();
-    expect(relu.assetClass).toBe("IMMOBILIER");
+    expect(relu.account).toBeNull();
+    // L'enveloppe hérite du même sort : sans compte Titres, elle ne s'accorde
+    // avec rien et ne doit pas survivre à la lecture.
     expect(relu.envelope).toBeNull();
   });
 
-  it("passer des actions en PEA à la crypto abandonne l'enveloppe", () => {
+  it("passer de Titres en PEA à la crypto abandonne l'enveloppe", () => {
     // Le parcours du §12 du chantier, joué sur le normaliseur.
-    expect(normalizeEnvelopeFor("ACTIONS", "PEA")).toBe("PEA");
+    expect(normalizeEnvelopeFor("TITRES", "PEA")).toBe("PEA");
     expect(normalizeEnvelopeFor("CRYPTO", "PEA")).toBeNull();
-    // Et revenir aux actions ne ressuscite pas le filtre abandonné.
-    expect(normalizeEnvelopeFor("ACTIONS", null)).toBeNull();
+    // Et revenir à Titres ne ressuscite pas le filtre abandonné.
+    expect(normalizeEnvelopeFor("TITRES", null)).toBeNull();
   });
 });

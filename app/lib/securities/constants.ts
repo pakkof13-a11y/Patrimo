@@ -16,15 +16,24 @@ export const SECURITIES_ENVELOPE_TYPES = {
 export type SecuritiesEnvelopeType = keyof typeof SECURITIES_ENVELOPE_TYPES;
 
 export function securitiesEnvelopeLabel(value: string): string {
-  return (
-    SECURITIES_ENVELOPE_TYPES[value as SecuritiesEnvelopeType] ?? value
-  );
+  /*
+    `in` — et l'indexation directe qui suivait ici — remontent aussi les clés
+    héritées du prototype (`toString`, `constructor`, `__proto__`…) : mesuré,
+    `"toString" in SECURITIES_ENVELOPE_TYPES` vaut `true`, et
+    `SECURITIES_ENVELOPE_TYPES["toString"]` rend la fonction héritée plutôt que
+    `undefined` — le `??` ne se déclenche donc jamais pour ces clés-là.
+    `isSecuritiesEnvelopeType` (ci-dessous, sur `Object.hasOwn`) garantit qu'on
+    n'indexe l'objet qu'avec une clé qui lui appartient réellement.
+  */
+  return isSecuritiesEnvelopeType(value)
+    ? SECURITIES_ENVELOPE_TYPES[value]
+    : value;
 }
 
 export function isSecuritiesEnvelopeType(
   value: string
 ): value is SecuritiesEnvelopeType {
-  return value in SECURITIES_ENVELOPE_TYPES;
+  return Object.hasOwn(SECURITIES_ENVELOPE_TYPES, value);
 }
 
 /**
@@ -46,6 +55,47 @@ export const SINGLE_ACCOUNT_ENVELOPES: readonly SecuritiesEnvelopeType[] = [
 export function isSingleAccountEnvelope(value: string): boolean {
   return (SINGLE_ACCOUNT_ENVELOPES as readonly string[]).includes(value);
 }
+
+/**
+ * Ce que le compte porte comme espèces, et pourquoi il n'en porte pas.
+ *
+ * Un booléen n'y suffisait pas. `cashAttributed: false` disait à la fois
+ * « une poche existe, on ne sait pas laquelle de ces cartes la détient » et
+ * « aucune poche n'est tenue pour cette enveloppe » — deux situations que
+ * l'écran ne peut pas annoncer de la même façon, et qu'il annonçait pourtant
+ * toutes deux comme un échec de ventilation. Un PEA-PME sans un euro nulle
+ * part affichait « espèces non ventilées » pendant que le bandeau de la page,
+ * lui, restait muet : deux moitiés du même écran se contredisaient.
+ *
+ * C'est la doctrine du dépôt appliquée à la trésorerie : UNKNOWN ≠ ZERO.
+ *
+ * Défini ici et non dans `fiscal-service` : le type traverse l'API jusqu'à
+ * l'écran, et `overview.ts` — pur, sans Prisma — doit pouvoir le nommer sans
+ * importer le service qui en dépend.
+ */
+export type CashAttribution =
+  /**
+   * La poche de l'enveloppe est celle de ce compte, et `cashEur` la porte au
+   * centime. Couvre aussi le solde nul : l'enveloppe est suivie, elle ne
+   * porte rien, et zéro est alors un fait.
+   */
+  | "ATTRIBUTED"
+  /**
+   * Une poche non nulle existe et plusieurs comptes se partagent l'enveloppe.
+   * Son montant est connu à la maille enveloppe — il ressort dans
+   * `unattributedCashByEnvelope` — et inconnu à la maille compte. `cashEur`
+   * vaut zéro ici sans que ce zéro soit un fait : c'est l'absence de réponse.
+   */
+  | "ENVELOPE_LEVEL"
+  /**
+   * Aucune poche n'est tenue pour cette enveloppe : `EnvelopeCash` ne connaît
+   * que `CTO`, `PEA` et `AV`, jamais `PEA_PME`.
+   *
+   * Ce n'est pas « il n'y a pas d'espèces » — un PEA-PME réel a bien un compte
+   * espèces. C'est « nous ne le suivons pas », et l'écran doit le dire ainsi
+   * plutôt que d'afficher un 0,00 € qui passerait pour un relevé.
+   */
+  | "NOT_TRACKED";
 
 /**
  * Enveloppe fiscale (`Asset.accountType`) que porte un compte de ce type.

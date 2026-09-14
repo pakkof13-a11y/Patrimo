@@ -38,6 +38,13 @@ vi.mock("@/app/lib/portfolio/asset-values", () => ({
   getAssetValues: (...a: unknown[]) => getAssetValuesMock(...a),
 }));
 
+// Table de taux figée : les poches se convertissent avec leur devise, et
+// `convertToEurSync` reste l'implémentation réelle — seule la table l'est.
+vi.mock("@/app/lib/market/fx", async (importOriginal) => {
+  const reel = await importOriginal<typeof import("@/app/lib/market/fx")>();
+  return { ...reel, getEurRates: async () => ({ EUR: 1, USD: 1.25 }) };
+});
+
 const {
   getSecuritiesFiscalBundle,
   recordContribution,
@@ -58,8 +65,18 @@ function account(over: Record<string, unknown> = {}) {
   };
 }
 
-function contribution(type: string, amount: string) {
-  return { type, amountEur: { toString: () => amount } };
+// Daté après l'ouverture du compte de `account()` et avant `NOW` : un
+// mouvement ordinaire, que la répartition des retraits n'a pas à refuser.
+function contribution(
+  type: string,
+  amount: string,
+  occurredAt = "2020-06-01T00:00:00Z"
+) {
+  return {
+    type,
+    amountEur: { toString: () => amount },
+    occurredAt: new Date(occurredAt),
+  };
 }
 
 beforeEach(() => {
@@ -72,8 +89,24 @@ beforeEach(() => {
 describe("getSecuritiesFiscalBundle — sans compte", () => {
   it("renvoie une liste vide sans interroger la valorisation", async () => {
     accountFindMany.mockResolvedValue([]);
-    await expect(getSecuritiesFiscalBundle(USER, NOW)).resolves.toEqual([]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(bundle.accounts).toEqual([]);
     expect(getAssetValuesMock).not.toHaveBeenCalled();
+  });
+
+  /*
+    Aucun compte déclaré ne veut pas dire aucune trésorerie. La poche existe
+    dès la première saisie d'espèces, souvent avant que le compte-titres qui
+    la porte n'ait été créé — et sortir tôt la faisait disparaître de l'écran.
+  */
+  it("rend quand même la poche d'enveloppe quand aucun compte n'est déclaré", async () => {
+    accountFindMany.mockResolvedValue([]);
+    envelopeCashFindMany.mockResolvedValue([
+      { envelope: "CTO", balance: { toString: () => "5000" }, currency: "EUR" },
+    ]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(bundle.accounts).toEqual([]);
+    expect(bundle.unattributedCashByEnvelope.CTO?.toNumber()).toBe(5_000);
   });
 });
 
@@ -88,10 +121,136 @@ describe("getSecuritiesFiscalBundle — versements", () => {
         ],
       }),
     ]);
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     // Un retrait ne restaure pas de place sous le plafond.
     expect(s!.contributionsEur.toNumber()).toBe(15_000);
     expect(s!.withdrawalsEur.toNumber()).toBe(3_000);
+  });
+});
+
+describe("getSecuritiesFiscalBundle — assiette après retraits (TIT-01)", () => {
+  /*
+    Le cas de l'audit. PEA mûr, 100 000 € versés, plan monté à 150 000 €,
+    retrait de 50 000 € : il reste 100 000 € de titres. Avant : gain = VL −
+    versements bruts = 0, donc impôt nul sur tout retrait suivant. Doctrine
+    (BOI-RPPM-RCM-40-50-50) : le retrait a emporté 50 000 × 100 000 / 150 000
+    = 33 333,33 € de versements ; il en reste 66 666,67 €, et 33 333,33 € de
+    gain.
+  */
+  it("un retrait réduit l'assiette de versements au prorata, et le gain ressort", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        assets: [{ id: "a1" }],
+        contributions: [
+          contribution("DEPOSIT", "100000", "2019-03-01T00:00:00Z"),
+          contribution("WITHDRAWAL", "50000", "2025-01-15T00:00:00Z"),
+        ],
+      }),
+    ]);
+    getAssetValuesMock.mockResolvedValue(
+      new Map([["a1", { marketValueEur: d(100_000) }]])
+    );
+
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+    // Le plafond reste sur le brut.
+    expect(s!.contributionsEur.toNumber()).toBe(100_000);
+    expect(s!.contributionBaseStatus).toBe("PRORATA");
+    expect(s!.remainingContributionsEur!.toNumber()).toBeCloseTo(66_666.67, 2);
+    expect(s!.gainEur!.toNumber()).toBeCloseTo(33_333.33, 2);
+  });
+
+  it("sans retrait, l'assiette est exacte et vaut les versements", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        assets: [{ id: "a1" }],
+        contributions: [contribution("DEPOSIT", "50000")],
+      }),
+    ]);
+    getAssetValuesMock.mockResolvedValue(
+      new Map([["a1", { marketValueEur: d(60_000) }]])
+    );
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(s!.contributionBaseStatus).toBe("EXACT");
+    expect(s!.remainingContributionsEur!.toNumber()).toBe(50_000);
+    expect(s!.gainEur!.toNumber()).toBe(10_000);
+  });
+
+  it("deux retraits successifs valent un seul retrait de leur somme", async () => {
+    const withValues = async (contributions: unknown[]) => {
+      accountFindMany.mockResolvedValue([
+        account({ assets: [{ id: "a1" }], contributions }),
+      ]);
+      getAssetValuesMock.mockResolvedValue(
+        new Map([["a1", { marketValueEur: d(100_000) }]])
+      );
+      const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+      return s!;
+    };
+
+    const deux = await withValues([
+      contribution("DEPOSIT", "100000", "2019-03-01T00:00:00Z"),
+      contribution("WITHDRAWAL", "25000", "2024-01-15T00:00:00Z"),
+      contribution("WITHDRAWAL", "25000", "2025-01-15T00:00:00Z"),
+    ]);
+    const un = await withValues([
+      contribution("DEPOSIT", "100000", "2019-03-01T00:00:00Z"),
+      contribution("WITHDRAWAL", "50000", "2025-01-15T00:00:00Z"),
+    ]);
+
+    expect(deux.remainingContributionsEur!.toString()).toBe(
+      un.remainingContributionsEur!.toString()
+    );
+    expect(deux.gainEur!.toString()).toBe(un.gainEur!.toString());
+    // Et l'assiette ne descend jamais sous zéro, ni le gain ne change de signe.
+    expect(deux.remainingContributionsEur!.gte(0)).toBe(true);
+    expect(deux.gainEur!.gt(0)).toBe(true);
+  });
+
+  /*
+    UNKNOWN, pas zéro. Un retrait daté avant l'ouverture du plan n'a pas pu
+    emporter de versements : la donnée est illisible, et l'ancien calcul —
+    versements bruts, ou pire zéro — donnerait un impôt sur une hypothèse.
+  */
+  it("un retrait daté avant l'ouverture rend l'assiette et le gain inconnus", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        assets: [{ id: "a1" }],
+        contributions: [
+          contribution("DEPOSIT", "100000", "2019-03-01T00:00:00Z"),
+          contribution("WITHDRAWAL", "50000", "2018-01-15T00:00:00Z"),
+        ],
+      }),
+    ]);
+    getAssetValuesMock.mockResolvedValue(
+      new Map([["a1", { marketValueEur: d(100_000) }]])
+    );
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(s!.contributionBaseStatus).toBe("UNKNOWN");
+    expect(s!.remainingContributionsEur).toBeNull();
+    expect(s!.gainEur).toBeNull();
+    // Les bruts, eux, restent lisibles : le plafond n'en dépend pas.
+    expect(s!.contributionsEur.toNumber()).toBe(100_000);
+    expect(s!.withdrawalsEur.toNumber()).toBe(50_000);
+  });
+
+  it("un compte-titres avec retrait : la règle du PEA ne s'y applique pas → inconnu", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        id: "acc-cto",
+        envelopeType: "CTO",
+        assets: [{ id: "a1" }],
+        contributions: [
+          contribution("DEPOSIT", "10000"),
+          contribution("WITHDRAWAL", "1000", "2021-01-01T00:00:00Z"),
+        ],
+      }),
+    ]);
+    getAssetValuesMock.mockResolvedValue(
+      new Map([["a1", { marketValueEur: d(12_000) }]])
+    );
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(s!.contributionBaseStatus).toBe("UNKNOWN");
+    expect(s!.gainEur).toBeNull();
   });
 });
 
@@ -110,7 +269,7 @@ describe("getSecuritiesFiscalBundle — plafond croisé", () => {
       }),
     ]);
 
-    const summaries = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: summaries } = await getSecuritiesFiscalBundle(USER, NOW);
     const pme = summaries.find((s) => s.accountId === "acc-pme")!;
 
     // Le PEA-PME est vide : isolément il afficherait 225 000 € de place.
@@ -122,7 +281,7 @@ describe("getSecuritiesFiscalBundle — plafond croisé", () => {
     accountFindMany.mockResolvedValue([
       account({ id: "acc-cto", envelopeType: "CTO" }),
     ]);
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.room).toBeNull();
     expect(s!.maturity).toBeNull();
     expect(s!.taxStatusLabel).toBeNull();
@@ -133,11 +292,11 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
   it("le PEA étant unique, sa poche lui est imputée intégralement", async () => {
     accountFindMany.mockResolvedValue([account()]);
     envelopeCashFindMany.mockResolvedValue([
-      { envelope: "PEA", balance: { toString: () => "4000" } },
+      { envelope: "PEA", balance: { toString: () => "4000" }, currency: "EUR" },
     ]);
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.cashEur.toNumber()).toBe(4_000);
-    expect(s!.cashAttributed).toBe(true);
+    expect(s!.cashAttribution).toBe("ATTRIBUTED");
   });
 
   it("avec deux CTO, la poche n'est imputée à aucun — et c'est signalé", async () => {
@@ -146,26 +305,145 @@ describe("getSecuritiesFiscalBundle — imputation des espèces", () => {
       account({ id: "cto-2", envelopeType: "CTO" }),
     ]);
     envelopeCashFindMany.mockResolvedValue([
-      { envelope: "CTO", balance: { toString: () => "9000" } },
+      { envelope: "CTO", balance: { toString: () => "9000" }, currency: "EUR" },
     ]);
-    const summaries = await getSecuritiesFiscalBundle(USER, NOW);
-    for (const s of summaries) {
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    for (const s of bundle.accounts) {
       expect(s.cashEur.toNumber()).toBe(0);
       // Mieux vaut un zéro signalé qu'une répartition inventée.
-      expect(s.cashAttributed).toBe(false);
+      expect(s.cashAttribution).toBe("ENVELOPE_LEVEL");
     }
+    /*
+      Et la poche ressort sur l'enveloppe, une seule fois. Elle ne sortait
+      nulle part : ni sur un compte — le service y met zéro — ni ailleurs, si
+      bien que 9 000 € quittaient l'écran sans un mot. La distribuer aux deux
+      comptes l'aurait comptée deux fois ; l'imputer à l'un des deux aurait
+      faussé son gain fiscal, et le choix aurait basculé d'une carte à l'autre
+      au premier changement de date d'ouverture.
+    */
+    expect(bundle.unattributedCashByEnvelope.CTO?.toNumber()).toBe(9_000);
   });
 
-  it("le PEA-PME n'a pas de poche dédiée : rien ne lui est imputé", async () => {
+  /*
+    Une poche négative — découvert, appel de marge, règlement différé — se
+    traite comme une poche créditrice.
+
+    Elle était jetée (`pocket.lte(0)`) alors qu'`attributeCash` ne l'a jamais
+    filtrée : avec un seul CTO, les −1 200 € entraient dans son `cashEur` et
+    dans le total ; avec deux, ils disparaissaient. Le même découvert déplaçait
+    le total de la page de 1 200 € selon le nombre de comptes déclarés.
+  */
+  it("une poche négative ressort sur l'enveloppe au lieu d'être jetée", async () => {
+    accountFindMany.mockResolvedValue([
+      account({ id: "cto-1", envelopeType: "CTO" }),
+      account({ id: "cto-2", envelopeType: "CTO" }),
+    ]);
+    envelopeCashFindMany.mockResolvedValue([
+      { envelope: "CTO", balance: { toString: () => "-1200" }, currency: "EUR" },
+    ]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    for (const s of bundle.accounts) expect(s.cashEur.toNumber()).toBe(0);
+    expect(bundle.unattributedCashByEnvelope.CTO?.toNumber()).toBe(-1_200);
+  });
+
+  it("le même découvert sur un seul CTO lui est imputé : même montant, autre porteur", async () => {
+    accountFindMany.mockResolvedValue([
+      account({ id: "cto-1", envelopeType: "CTO" }),
+    ]);
+    envelopeCashFindMany.mockResolvedValue([
+      { envelope: "CTO", balance: { toString: () => "-1200" }, currency: "EUR" },
+    ]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(bundle.accounts[0]!.cashEur.toNumber()).toBe(-1_200);
+    // Imputée : elle ne doit pas être comptée une seconde fois sur l'enveloppe.
+    expect(bundle.unattributedCashByEnvelope.CTO).toBeUndefined();
+  });
+
+  // Zéro reste sauté : il n'y a rien à annoncer, et le bandeau n'a pas à
+  // s'allumer sur une poche vide.
+  it("une poche à zéro ne ressort pas", async () => {
+    accountFindMany.mockResolvedValue([
+      account({ id: "cto-1", envelopeType: "CTO" }),
+      account({ id: "cto-2", envelopeType: "CTO" }),
+    ]);
+    envelopeCashFindMany.mockResolvedValue([
+      { envelope: "CTO", balance: { toString: () => "0" }, currency: "EUR" },
+    ]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(bundle.unattributedCashByEnvelope).toEqual({});
+  });
+
+  /*
+    Le PEA-PME ne partage pas la poche du PEA, et n'en a aucune : `NOT_TRACKED`
+    et non `ENVELOPE_LEVEL`. La nuance n'est pas cosmétique — le second fait
+    dire à la carte « on ne sait pas lequel des comptes la détient » sur une
+    enveloppe où aucune poche n'existe.
+  */
+  /*
+    La poche porte une devise, et cette carte ne lisait que le nominal.
+
+    Un CTO de 5 000 USD entrait pour 5 000 dans un `cashEur` dont le nom dit
+    l'unité — puis dans la valeur liquidative, dans l'assiette d'un retrait,
+    et à l'écran suivi d'un « € ». À 1,25 USD pour un euro, la poche vaut
+    4 000 €.
+  */
+  it("convertit la poche avec sa propre devise", async () => {
+    accountFindMany.mockResolvedValue([account({ id: "cto-1", envelopeType: "CTO" })]);
+    envelopeCashFindMany.mockResolvedValue([
+      { envelope: "CTO", balance: { toString: () => "5000" }, currency: "USD" },
+    ]);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(s!.cashEur.toNumber()).toBe(4_000);
+    expect(s!.cashAttribution).toBe("ATTRIBUTED");
+  });
+
+  /*
+    Le même montant sur l'autre sortie : les deux consommateurs de la carte
+    des poches lisent la même valeur convertie, sans quoi le bandeau et la
+    carte de compte se contrediraient.
+  */
+  it("convertit aussi la poche que le bandeau annonce", async () => {
+    accountFindMany.mockResolvedValue([
+      account({ id: "cto-1", envelopeType: "CTO" }),
+      account({ id: "cto-2", envelopeType: "CTO" }),
+    ]);
+    envelopeCashFindMany.mockResolvedValue([
+      { envelope: "CTO", balance: { toString: () => "5000" }, currency: "USD" },
+    ]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(bundle.unattributedCashByEnvelope.CTO?.toNumber()).toBe(4_000);
+  });
+
+  it("le PEA-PME n'a pas de poche dédiée : espèces non suivies", async () => {
     accountFindMany.mockResolvedValue([
       account({ id: "acc-pme", envelopeType: "PEA_PME" }),
     ]);
     envelopeCashFindMany.mockResolvedValue([
-      { envelope: "PEA", balance: { toString: () => "4000" } },
+      { envelope: "PEA", balance: { toString: () => "4000" }, currency: "EUR" },
     ]);
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.cashEur.toNumber()).toBe(0);
-    expect(s!.cashAttributed).toBe(false);
+    expect(s!.cashAttribution).toBe("NOT_TRACKED");
+  });
+
+  /*
+    Deux CTO et aucune poche : il n'y a rien à se partager. L'ancien booléen
+    rendait `false` ici aussi, et la carte accusait d'un défaut de ventilation
+    deux comptes qui n'avaient rien à ventiler — le même reproche que le
+    PEA-PME, sur un cas bien plus courant.
+  */
+  it("deux CTO sans poche : espèces imputées à zéro, rien à signaler", async () => {
+    accountFindMany.mockResolvedValue([
+      account({ id: "cto-1", envelopeType: "CTO" }),
+      account({ id: "cto-2", envelopeType: "CTO" }),
+    ]);
+    envelopeCashFindMany.mockResolvedValue([]);
+    const bundle = await getSecuritiesFiscalBundle(USER, NOW);
+    for (const s of bundle.accounts) {
+      expect(s.cashEur.toNumber()).toBe(0);
+      expect(s.cashAttribution).toBe("ATTRIBUTED");
+    }
+    expect(bundle.unattributedCashByEnvelope).toEqual({});
   });
 });
 
@@ -184,13 +462,13 @@ describe("getSecuritiesFiscalBundle — valeur liquidative et gain", () => {
       ])
     );
     envelopeCashFindMany.mockResolvedValue([
-      { envelope: "PEA", balance: { toString: () => "5000" } },
+      { envelope: "PEA", balance: { toString: () => "5000" }, currency: "EUR" },
     ]);
 
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.positionsValueEur.toNumber()).toBe(55_000);
     expect(s!.liquidationValueEur.toNumber()).toBe(60_000);
-    expect(s!.gainEur.toNumber()).toBe(10_000);
+    expect(s!.gainEur!.toNumber()).toBe(10_000);
   });
 
   it("une moins-value ressort en gain négatif", async () => {
@@ -203,8 +481,8 @@ describe("getSecuritiesFiscalBundle — valeur liquidative et gain", () => {
     getAssetValuesMock.mockResolvedValue(
       new Map([["a1", { marketValueEur: d(38_000) }]])
     );
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
-    expect(s!.gainEur.toNumber()).toBe(-12_000);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+    expect(s!.gainEur!.toNumber()).toBe(-12_000);
   });
 
   it("une position sans valorisation au journal est ignorée, pas comptée à zéro faussement", async () => {
@@ -214,7 +492,7 @@ describe("getSecuritiesFiscalBundle — valeur liquidative et gain", () => {
     getAssetValuesMock.mockResolvedValue(
       new Map([["a1", { marketValueEur: d(1_000) }]])
     );
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.positionsValueEur.toNumber()).toBe(1_000);
   });
 });
@@ -222,7 +500,7 @@ describe("getSecuritiesFiscalBundle — valeur liquidative et gain", () => {
 describe("getSecuritiesFiscalBundle — maturité", () => {
   it("un PEA ouvert en 2019 est mûr en 2026 et le libellé mentionne les PS", async () => {
     accountFindMany.mockResolvedValue([account()]);
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.maturity!.isMatured).toBe(true);
     expect(s!.taxStatusLabel).toMatch(/18,6/);
   });
@@ -231,9 +509,130 @@ describe("getSecuritiesFiscalBundle — maturité", () => {
     accountFindMany.mockResolvedValue([
       account({ openDate: new Date("2024-01-01T00:00:00Z") }),
     ]);
-    const [s] = await getSecuritiesFiscalBundle(USER, NOW);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
     expect(s!.maturity!.isMatured).toBe(false);
+    expect(s!.maturity!.planStatus).toBe("RUNNING");
     expect(s!.taxStatusLabel).toMatch(/12,8/);
+  });
+});
+
+describe("getSecuritiesFiscalBundle — clôture anticipée (TIT-06)", () => {
+  /*
+    Le cas de l'audit : PEA ouvert 2024-01-01, DEPOSIT 10 000, WITHDRAWAL
+    5 000 en 2025. Avant : room.remainingEur = 140 000, maturité en cours vers
+    2029. Le retrait avant 5 ans clôture le plan (art. L221-32 CMF) : plus
+    aucun versement, plus de maturité qui progresse.
+  */
+  it("un retrait avant maturité clôture le plan : place nulle, statut CLOSED", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        openDate: new Date("2024-01-01T00:00:00Z"),
+        contributions: [
+          contribution("DEPOSIT", "10000", "2024-02-01T00:00:00Z"),
+          contribution("WITHDRAWAL", "5000", "2025-03-15T00:00:00Z"),
+        ],
+      }),
+    ]);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+
+    expect(s!.maturity!.planStatus).toBe("CLOSED");
+    expect(s!.maturity!.closedAt?.toISOString()).toBe("2025-03-15T00:00:00.000Z");
+    expect(s!.maturity!.isMatured).toBe(false);
+    expect(s!.maturity!.daysToMaturity).toBe(0);
+
+    expect(s!.room!.remainingEur.toNumber()).toBe(0);
+    expect(s!.room!.blockedReason).toBe("PLAN_CLOSED");
+    // Le plafond reste sur le brut : les 10 000 € versés sont toujours là.
+    expect(s!.room!.contributionsEur.toNumber()).toBe(10_000);
+
+    expect(s!.taxStatusLabel).toMatch(/clos/i);
+    expect(s!.taxStatusLabel).not.toMatch(/exonéré/i);
+  });
+
+  it("un retrait après maturité laisse le plan mûr, ouvert et avec sa place", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        // Ouvert 2019-03-01 : mûr le 2024-03-01. Retrait en 2025, après.
+        contributions: [
+          contribution("DEPOSIT", "10000", "2019-04-01T00:00:00Z"),
+          contribution("WITHDRAWAL", "5000", "2025-01-10T00:00:00Z"),
+        ],
+      }),
+    ]);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+
+    expect(s!.maturity!.planStatus).toBe("MATURED");
+    expect(s!.maturity!.isMatured).toBe(true);
+    expect(s!.maturity!.closedAt).toBeNull();
+    expect(s!.room!.remainingEur.toNumber()).toBe(140_000);
+    expect(s!.room!.blockedReason).toBeNull();
+    expect(s!.taxStatusLabel).toMatch(/IR exonéré/);
+  });
+
+  it("un plan jamais touché par un retrait est inchangé", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        openDate: new Date("2024-01-01T00:00:00Z"),
+        contributions: [contribution("DEPOSIT", "10000", "2024-02-01T00:00:00Z")],
+      }),
+    ]);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+
+    expect(s!.maturity!.planStatus).toBe("RUNNING");
+    expect(s!.maturity!.isMatured).toBe(false);
+    expect(s!.maturity!.daysToMaturity).toBeGreaterThan(0);
+    expect(s!.room!.remainingEur.toNumber()).toBe(140_000);
+    expect(s!.room!.blockedReason).toBeNull();
+  });
+
+  it("un retrait illisible rend l'état indéterminé, jamais ouvert par défaut", async () => {
+    accountFindMany.mockResolvedValue([
+      account({
+        openDate: new Date("2024-01-01T00:00:00Z"),
+        contributions: [
+          contribution("DEPOSIT", "10000", "2024-02-01T00:00:00Z"),
+          // Retrait daté avant l'ouverture : le journal se contredit.
+          contribution("WITHDRAWAL", "5000", "2023-06-01T00:00:00Z"),
+        ],
+      }),
+    ]);
+    const { accounts: [s] } = await getSecuritiesFiscalBundle(USER, NOW);
+
+    expect(s!.maturity!.planStatus).toBe("UNKNOWN");
+    expect(s!.maturity!.isMatured).toBe(false);
+    expect(s!.room!.remainingEur.toNumber()).toBe(0);
+    expect(s!.room!.blockedReason).toBe("PLAN_STATUS_UNKNOWN");
+    expect(s!.taxStatusLabel).toMatch(/indéterminé/i);
+  });
+
+  it("les versements d'un PEA clos continuent de peser sur le plafond commun du PEA-PME", async () => {
+    // Lecture prudente, documentée dans `peaContributionRoom` : la clôture
+    // du PEA ne libère pas de place sur le PEA-PME.
+    accountFindMany.mockResolvedValue([
+      account({
+        id: "acc-pea",
+        envelopeType: "PEA",
+        openDate: new Date("2024-01-01T00:00:00Z"),
+        contributions: [
+          contribution("DEPOSIT", "150000", "2024-02-01T00:00:00Z"),
+          contribution("WITHDRAWAL", "1000", "2025-03-15T00:00:00Z"),
+        ],
+      }),
+      account({
+        id: "acc-pme",
+        envelopeType: "PEA_PME",
+        openDate: new Date("2024-01-01T00:00:00Z"),
+        contributions: [],
+      }),
+    ]);
+    const { accounts: summaries } = await getSecuritiesFiscalBundle(USER, NOW);
+    const pea = summaries.find((s) => s.accountId === "acc-pea")!;
+    const pme = summaries.find((s) => s.accountId === "acc-pme")!;
+
+    expect(pea.room!.blockedReason).toBe("PLAN_CLOSED");
+    expect(pme.maturity!.planStatus).toBe("RUNNING");
+    expect(pme.room!.blockedReason).toBeNull();
+    expect(pme.room!.remainingEur.toNumber()).toBe(75_000);
   });
 });
 

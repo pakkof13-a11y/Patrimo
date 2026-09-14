@@ -37,6 +37,18 @@ export function getLastSolscanError(): string | null {
   return lastSolscanError;
 }
 
+/**
+ * Déclare les lignes dont le montant n'a pas pu être résolu (décimales du
+ * mint absentes du payload). Ces transferts ne sont pas rendus : l'absence
+ * remonte par le même canal que les erreurs fournisseur, elle ne devient pas
+ * un montant.
+ */
+function noteUnresolvedDecimals(count: number): void {
+  if (count <= 0) return;
+  const msg = `Solscan : décimales du mint absentes sur ${count} transfert(s) — montants non résolus, lignes non rendues`;
+  lastSolscanError = lastSolscanError ? `${lastSolscanError} · ${msg}` : msg;
+}
+
 async function solscanGet<T>(
   path: string,
   query?: Record<string, string | number | boolean | undefined>
@@ -189,6 +201,7 @@ export async function solscanAccountTransfers(
   const pageSize = opts?.pageSize ?? 40;
   const maxPages = opts?.maxPages ?? 3;
   const out: SolscanTransfer[] = [];
+  let unresolvedDecimals = 0;
 
   for (let page = 1; page <= maxPages; page++) {
     const body = await solscanGet<{
@@ -211,16 +224,33 @@ export async function solscanAccountTransfers(
       sort_order: "desc",
       exclude_amount_zero: true,
     });
-    if (!body) return out.length > 0 ? out : null;
+    if (!body) {
+      noteUnresolvedDecimals(unresolvedDecimals);
+      return out.length > 0 ? out : null;
+    }
     const rows = body.data || [];
     if (rows.length === 0) break;
     for (const r of rows) {
       const sig = (r.trans_id || "").trim();
       const btSec = r.block_time;
       if (!sig || btSec == null) continue;
-      const dec = typeof r.token_decimals === "number" ? r.token_decimals : 0;
       const rawAmt = Number(r.amount);
       if (!Number.isFinite(rawAmt) || rawAmt === 0) continue;
+      /*
+        `amount` est un montant en unités de base : il n'est lisible qu'avec
+        les décimales du mint. Les supposer nulles quand le payload ne les
+        fournit pas rendait 1 USDC (6 décimales) comme 1 000 000 — un montant
+        faux, muet, et qui part ensuite au journal. Décimales absentes = ligne
+        non résolue : elle est retenue et déclarée, comme une signature ou un
+        block_time manquants. Un `0` explicite, lui, est une vraie valeur
+        (NFT, token sans décimale) et reste traité comme telle.
+      */
+      const decRaw = r.token_decimals;
+      if (typeof decRaw !== "number" || !Number.isInteger(decRaw) || decRaw < 0) {
+        unresolvedDecimals += 1;
+        continue;
+      }
+      const dec = decRaw;
       const amountUi = dec > 0 ? rawAmt / 10 ** dec : rawAmt;
       const flowRaw = (r.flow || "").toLowerCase();
       const flow: SolscanTransfer["flow"] =
@@ -237,6 +267,7 @@ export async function solscanAccountTransfers(
     }
     if (rows.length < pageSize) break;
   }
+  noteUnresolvedDecimals(unresolvedDecimals);
   return out;
 }
 

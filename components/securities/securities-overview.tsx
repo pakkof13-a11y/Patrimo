@@ -18,17 +18,25 @@ import { AllocationCard } from "@/components/dashboard/terminal-panels";
 import { PendingBackend } from "@/components/ui/pending-backend";
 import { assetCategoryLabel } from "@/app/lib/assets/categories";
 import {
+  allocationNotice,
   buildAccountView,
+  cashAttributionNotice,
   computeAllocation,
   computeKeyIndicators,
   computeTotals,
+  isOverviewEmpty,
   num,
+  planStatusNotice,
   positionWeightPct,
   splitByEnvelope,
+  unattributedPockets,
   type AccountView,
   type SecuritiesAccount,
   type SecuritiesPosition,
+  type UnattributedCash,
 } from "@/app/lib/securities/overview";
+import { securitiesEnvelopeLabel } from "@/app/lib/securities/constants";
+import { UnknownAmount } from "./unknown-amount";
 import {
   formatCurrency,
   formatDate,
@@ -39,6 +47,15 @@ import {
 type SecuritiesResponse = {
   accounts: SecuritiesAccount[];
   positions: SecuritiesPosition[];
+  /**
+   * Poches d'enveloppe qu'aucun compte ne porte — comptées une fois au total.
+   *
+   * Obligatoire, et c'est le point : la route l'émet toujours. Le rendre
+   * facultatif faisait retomber la page dans le défaut d'avant D30 — poches
+   * absentes du total, bandeau muet, aucun état d'erreur — dès qu'une réponse
+   * en cache d'avant le déploiement passait par là.
+   */
+  unattributedCashByEnvelope: UnattributedCash;
 };
 
 /** Prélèvements sociaux sur les gains — taux en vigueur, source unique. */
@@ -196,8 +213,30 @@ export function SecuritiesOverview({
   const accounts = useMemo(() => q.data?.accounts ?? [], [q.data]);
   const positions = useMemo(() => q.data?.positions ?? [], [q.data]);
 
-  const totals = useMemo(() => computeTotals(accounts), [accounts]);
-  const envelopes = useMemo(() => splitByEnvelope(accounts), [accounts]);
+  /*
+    Un seul périmètre pour toute la page : toutes les lignes titres,
+    rattachées ou non, plus la poche d'enveloppe non imputable. Le total, le
+    camembert et les indicateurs partagent ainsi le même dénominateur — ils
+    n'en avaient pas deux par choix, mais par accident.
+  */
+  const unattributedCash = useMemo(
+    () => q.data?.unattributedCashByEnvelope ?? {},
+    [q.data]
+  );
+  const totals = useMemo(
+    () => computeTotals(accounts, positions, unattributedCash),
+    [accounts, positions, unattributedCash]
+  );
+
+  /* Une ligne par poche, nommée — voir `unattributedPockets`. */
+  const pochesNonImputees = useMemo(
+    () => unattributedPockets(unattributedCash, securitiesEnvelopeLabel),
+    [unattributedCash]
+  );
+  const envelopes = useMemo(
+    () => splitByEnvelope(accounts, positions, unattributedCash, totals),
+    [accounts, positions, unattributedCash, totals]
+  );
   /**
    * Cartes de compte, PEA en tête : l'enveloppe fiscale se lit avant le
    * compte ordinaire, et l'ordre doit être le même à chaque chargement.
@@ -216,6 +255,19 @@ export function SecuritiesOverview({
   const allocation = useMemo(
     () => computeAllocation(positions, totals, assetCategoryLabel),
     [positions, totals]
+  );
+  /*
+    Ce que l'anneau ne dessine pas.
+
+    L'anneau répartit le brut long ; l'exposition actions, deux pavés plus
+    loin, se rapporte à la valeur totale, découvert déduit. Sans cette phrase,
+    l'écran posait « 100 % » et « 113,6 % » côte à côte sans dire qu'ils ne
+    comptent pas la même chose. Elle porte les trois nombres qui referment
+    l'écart, et le pavé des indicateurs nomme désormais le sien.
+  */
+  const noticeAnneau = useMemo(
+    () => allocationNotice(totals, (v) => formatCurrency(v, "EUR")),
+    [totals]
   );
   const indicators = useMemo(
     () => computeKeyIndicators(positions, totals),
@@ -261,7 +313,8 @@ export function SecuritiesOverview({
     );
   }
 
-  if (accounts.length === 0) {
+  /* L'état vide ne vaut que si rien n'est connu — voir `isOverviewEmpty`. */
+  if (isOverviewEmpty(accounts, positions, totals)) {
     return (
       <section
         className="panel p-[var(--pad-card)]"
@@ -313,16 +366,45 @@ export function SecuritiesOverview({
           label="Investi"
           value={formatCurrency(totals.costBasisEur, "EUR")}
         >
+          {/*
+            Deux périmètres dans la même tuile, et c'est irréductible : le prix
+            de revient se lit sur toutes les lignes titres, les versements sont
+            déclarés compte par compte (`SecuritiesAccountContribution`) et une
+            ligne non rattachée n'en a pas. Le dire vaut mieux que de les
+            laisser se comparer en silence.
+          */}
           <dl className="text-meta num space-y-[var(--space-px)]">
             <div className="flex justify-between gap-[var(--space-2)]">
-              <dt>+ Versements</dt>
+              <dt>+ Versements déclarés</dt>
               <dd>{formatCurrency(totals.contributionsEur, "EUR")}</dd>
             </div>
             <div className="flex justify-between gap-[var(--space-2)]">
-              <dt>− Retraits</dt>
+              <dt>− Retraits déclarés</dt>
               <dd>{formatCurrency(totals.withdrawalsEur, "EUR")}</dd>
             </div>
           </dl>
+          {totals.positionsWithoutAccountCount > 0 && (
+            /* Hors du <dl> : ce n'est ni un <dt> ni un <dd>, et le modèle de
+               contenu d'un <dl> n'admet que dt, dd, div, script et template
+               — un <div> qui ne contiendrait que ce <p> n'y serait pas plus
+               conforme. Le bandeau de la colonne contextuelle, plus bas, est
+               déjà placé après sa </dl> pour la même raison.
+
+               Trois classes restituent ce que la mention tenait de son
+               parent : mt-[var(--space-px)] pour le margin-top que le
+               space-y-[var(--space-px)] du <dl> lui donnait en 3e enfant, la
+               taille et l'interligne pour ce qu'elle héritait de `text-meta`
+               — mesuré : rien ne pose de font-size entre <html> et cette
+               carte, la mention serait donc passée de 11 px aux 16 px du
+               document. Poser `text-meta` ici aurait réglé la taille mais
+               changé la couleur : la règle ne vit dans aucune couche CSS,
+               elle l'emporte sur l'utilitaire text-[var(--foreground-faint)]
+               (même mécanisme que la note de `@layer components`, plus bas
+               dans globals.css). */
+            <p className="mt-[var(--space-px)] pt-[var(--space-1)] text-[length:var(--text-xs)] leading-[var(--leading-normal)] text-[var(--foreground-faint)]">
+              Versements comptés sur les comptes déclarés uniquement.
+            </p>
+          )}
         </KpiCard>
 
         <KpiCard
@@ -340,13 +422,26 @@ export function SecuritiesOverview({
           </p>
         </KpiCard>
 
-        {envelopes.slice(0, 2).map((e) => (
+        {/*
+          Toutes les enveloppes, sans troncature.
+
+          `splitByEnvelope` partitionne le total de la page : chaque composante
+          entre dans exactement une rangée. En tronquer la liste à deux faisait
+          disparaître une enveloppe entière de la bande, sans mention, alors que
+          les parts affichées continuaient de se rapporter au total complet. Un
+          PEA-PME en produit une troisième, et les lignes non rattachées une
+          quatrième.
+
+          Le libellé passe par `securitiesEnvelopeLabel` : le code brut rendait
+          « PEA_PME », souligné compris. Il garde « PEA », et rend
+          « Compte-titres » là où l'ancien commentaire craignait
+          « Compte-Titres Ordinaire ».
+        */}
+        {envelopes.map((e) => (
           <KpiCard
             key={e.envelopeType}
             testId={`skpi-envelope-${e.envelopeType.toLowerCase()}`}
-            /* Sigle en tête de carte : « PEA » et « CTO » se lisent d'un
-               coup d'œil là où « Compte-Titres Ordinaire » remplit la ligne. */
-            label={e.envelopeType}
+            label={securitiesEnvelopeLabel(e.envelopeType)}
             value={formatCurrency(e.valueEur, "EUR")}
           >
             <p className="text-meta">
@@ -386,7 +481,12 @@ export function SecuritiesOverview({
               }))}
               baseCurrency="EUR"
               title="Répartition globale"
-              subtitle="Par classe d'actifs, liquidités comprises"
+              subtitle={
+                noticeAnneau
+                  ? "Par classe d'actifs, titres et liquidités créditrices"
+                  : "Par classe d'actifs, liquidités comprises"
+              }
+              footnote={noticeAnneau ?? undefined}
               showValues
               compact
               toneOf={categoryTone}
@@ -399,6 +499,7 @@ export function SecuritiesOverview({
             <KeyIndicatorsCard
               indicators={indicators}
               accountCount={totals.accountCount}
+              withoutAccountCount={totals.positionsWithoutAccountCount}
             />
           </div>
         </div>
@@ -437,15 +538,45 @@ export function SecuritiesOverview({
                 label="Lignes détenues"
                 value={String(totals.positionCount)}
               />
+              {totals.positionsWithoutAccountCount > 0 && (
+                <SummaryRow
+                  label="dont non rattachées"
+                  value={String(totals.positionsWithoutAccountCount)}
+                />
+              )}
             </dl>
-            {totals.hasUnattributedCash && (
-              <p
+            {/*
+              Une ligne par poche, nommée. D31 avait remplacé « une partie » par
+              le montant ; restait la somme algébrique, qui s'annule : une poche
+              CTO de +5 000 € et une poche PEA de −5 000 € allumaient le drapeau
+              — il se décide poche par poche — pour annoncer « 0,00 € » tout en
+              affirmant que ce montant compte dans le total. Le bandeau se
+              contredisait, et 10 000 € de soldes réels n'étaient nommés nulle
+              part.
+            */}
+            {pochesNonImputees.length > 0 && (
+              <div
                 className="text-meta mt-[var(--space-3)]"
                 data-testid="securities-cash-warning"
               >
-                Une partie des liquidités n&apos;a pas pu être rattachée à un
-                compte précis : elle compte dans le total, pas dans le détail.
-              </p>
+                <p>
+                  Liquidités tenues au niveau de l&apos;enveloppe. Elles comptent
+                  une fois dans le total ci-dessus et n&apos;apparaissent sur
+                  aucune carte de compte — plusieurs comptes se partagent
+                  l&apos;enveloppe, ou aucun n&apos;est encore déclaré.
+                </p>
+                <dl className="num mt-[var(--space-2)] space-y-[var(--space-px)]">
+                  {pochesNonImputees.map((poche) => (
+                    <div
+                      key={poche.envelope}
+                      className="flex justify-between gap-[var(--space-2)]"
+                    >
+                      <dt>{poche.label}</dt>
+                      <dd>{formatCurrency(poche.montantEur, "EUR")}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
             )}
           </section>
 
@@ -492,6 +623,24 @@ function AccountCard({
   onOpenPositions?: (envelopeType: string) => void;
 }) {
   const a = view.account;
+  const cashNotice = cashAttributionNotice(a.cashAttribution);
+
+  /*
+    Le tiret des trois montants que la poche rend inconnus.
+
+    Écrit une fois : ils sont `null` exactement quand `cashNotice` existe,
+    et trois copies de la même bulle divergeraient à la première retouche.
+    L'élément sert de patron — React en instancie un par emplacement, chacun
+    avec son propre `useId` et son propre état d'ouverture.
+
+    Un `title` seul ne s'ouvrait qu'au survol d'une souris : ni le clavier,
+    ni le doigt, ni un lecteur d'écran n'atteignaient la raison du tiret.
+  */
+  const tiret = cashNotice && (
+    <UnknownAmount short={cashNotice.short} title={cashNotice.title}>
+      —
+    </UnknownAmount>
+  );
 
   return (
     <section
@@ -515,9 +664,26 @@ function AccountCard({
       </header>
 
       <div className="grid grid-cols-3 gap-[var(--space-3)] px-[var(--pad-card)]">
+        {/*
+          Un total qui contient une inconnue n'est pas un total.
+
+          Hors `ATTRIBUTED`, la poche vaut « 0 » côté service sans que personne
+          ne l'ait relevée : cette tuile affichait alors la valeur des seuls
+          titres sous l'étiquette « Valeur totale ». Le tiret le dit, et le
+          rappel donne le morceau qui, lui, est connu — la carte reste utile.
+        */}
         <Metric
           label="Valeur totale"
-          value={formatCurrency(view.valueEur, "EUR")}
+          value={
+            view.valueEur == null
+              ? tiret
+              : formatCurrency(view.valueEur, "EUR")
+          }
+          hint={
+            view.valueEur == null
+                ? `Titres ${formatCurrency(view.positionsValueEur, "EUR")} · espèces ${cashNotice?.short ?? "inconnues"}`
+              : undefined
+          }
         />
         <Metric
           label="Investi"
@@ -536,24 +702,45 @@ function AccountCard({
       </div>
 
       <div className="mt-[var(--space-4)] grid grid-cols-2 gap-[var(--space-3)] border-t border-[var(--border-subtle)] px-[var(--pad-card)] pt-[var(--space-3)]">
+        {/* Un tiret, pas un 0,00 € : hors `ATTRIBUTED`, le compte ne porte
+            aucun montant connu, et l'afficher à zéro le ferait passer pour
+            un relevé. Le tiret se décide maintenant sur `view.cashEur`, que
+            `buildAccountView` met à `null` dans ce cas — une poche
+            `ATTRIBUTED` réellement vide garde son 0,00 €, qui est un fait.
+            L'infobulle dit lequel des deux cas d'inconnue c'est. */}
         <Metric
           label="Liquidités"
-          value={formatCurrency(view.cashEur, "EUR")}
+          value={
+            view.cashEur == null
+              ? tiret
+              : formatCurrency(view.cashEur, "EUR")
+          }
           hint={
-            a.cashAttributed
-              ? view.cashSharePct != null
+            view.cashEur == null
+              ? cashNotice?.short
+              : view.cashSharePct != null
                 ? `${pct(view.cashSharePct, 1)} du compte`
                 : undefined
-              : "Poche non rattachée à ce compte"
           }
         />
+        {/* Le pouvoir d'achat d'un compte-titres *est* sa trésorerie : il
+            hérite donc de son inconnue. Annoncer « 0,00 € » à qui a
+            peut-être 5 000 € en caisse, c'est lui interdire d'acheter sur
+            la foi d'un chiffre que personne n'a relevé. Le disponible d'un
+            PEA, lui, vient du plafond : il reste connu et s'affiche. */}
         <Metric
           label={view.investableLabel}
-          value={formatCurrency(view.investableEur, "EUR")}
+          value={
+            view.investableEur == null
+              ? tiret
+              : formatCurrency(view.investableEur, "EUR")
+          }
           hint={
             view.investableIsCapped
               ? "Marge restante sous le plafond réglementaire"
-              : undefined
+              : view.investableEur == null
+                ? cashNotice?.short
+                : undefined
           }
         />
       </div>
@@ -728,6 +915,47 @@ function FiscalStatusCard({
   const m = account.maturity;
   const months = Math.max(0, Math.round(m.daysToMaturity / 30.44));
 
+  /*
+    Plan clos ou indéterminé : ni compte à rebours ni régime d'exonération.
+    `daysToMaturity` vaut 0 dans ces états et afficherait « 0 mois », le
+    contraire de ce qui se passe — un plan clos ne mûrit plus (TIT-06).
+  */
+  const planNotice = planStatusNotice(m.planStatus);
+  if (planNotice) {
+    return (
+      <section
+        className="panel p-[var(--pad-card)]"
+        data-testid="securities-fiscal"
+        data-plan-status={m.planStatus}
+      >
+        <h3 className="text-label">Statut fiscal</h3>
+        <p className="mt-[var(--space-3)] flex items-center gap-[var(--space-2)] text-[length:var(--text-sm)]">
+          <ShieldCheck
+            className="h-3.5 w-3.5 shrink-0 text-[var(--negative)]"
+            aria-hidden
+          />
+          <span className="min-w-0 text-[var(--foreground-secondary)]">
+            {account.envelopeLabel} ouvert le{" "}
+            <span className="num">{formatDate(account.openDate)}</span>
+            {m.closedAt && (
+              <>
+                , retrait avant 5 ans le{" "}
+                <span className="num">{formatDate(m.closedAt)}</span>
+              </>
+            )}
+          </span>
+        </p>
+        <p
+          className="mt-[var(--space-3)] text-[length:var(--text-sm)] font-medium text-[var(--foreground)]"
+          data-testid="securities-plan-status"
+        >
+          {account.taxStatusLabel}
+        </p>
+        <p className="text-meta mt-[var(--space-2)]">{planNotice.title}</p>
+      </section>
+    );
+  }
+
   return (
     <section className="panel p-[var(--pad-card)]" data-testid="securities-fiscal">
       <h3 className="text-label">Statut fiscal</h3>
@@ -810,9 +1038,12 @@ function CumulativePerformance() {
 function KeyIndicatorsCard({
   indicators,
   accountCount,
+  withoutAccountCount,
 }: {
   indicators: ReturnType<typeof computeKeyIndicators>;
   accountCount: number;
+  /** Lignes qu'aucun compte déclaré ne porte — comptées dans `positionCount`. */
+  withoutAccountCount: number;
 }) {
   return (
     <section
@@ -827,13 +1058,40 @@ function KeyIndicatorsCard({
           <div className="num mt-[var(--space-1)] text-[length:var(--text-lg)] font-medium text-[var(--foreground)]">
             {pct(indicators.equityExposurePct, 1)}
           </div>
+          {/*
+            Le rapport, écrit. C'est un levier : il passe 100 % quand un
+            découvert finance des titres, et il ne se lit qu'en connaissant
+            son dénominateur — la valeur totale, découvert déduit, quand
+            l'anneau voisin répartit le brut long. Les deux pourcentages ne
+            se contredisent plus dès lors que chacun dit ce qu'il rapporte à
+            quoi ; la notice sous l'anneau porte l'autre moitié.
+          */}
+          {indicators.equityExposurePct != null && (
+            <p className="text-meta mt-[var(--space-px)]">
+              {formatCurrency(indicators.equityValueEur, "EUR")} de titres sur
+              {" "}
+              {formatCurrency(indicators.exposureBaseEur, "EUR")} de valeur
+              totale
+            </p>
+          )}
           <ShareBar value={indicators.equityExposurePct} />
         </div>
 
+        {/*
+          Le numérateur compte toutes les lignes, rattachées ou non ; le
+          dénominateur ne compte que les comptes déclarés. « 12 lignes · sur
+          0 compte » se lisait comme une erreur. Le reste hors compte est dit
+          plutôt que laissé à deviner.
+        */}
         <Metric
           label="Nombre de lignes"
           value={String(indicators.positionCount)}
-          hint={`Sur ${accountCount} compte${accountCount > 1 ? "s" : ""}`}
+          hint={
+            `Sur ${accountCount} compte${accountCount > 1 ? "s" : ""}` +
+            (withoutAccountCount > 0
+              ? `, dont ${withoutAccountCount} hors compte`
+              : "")
+          }
         />
 
         <Metric

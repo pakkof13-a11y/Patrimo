@@ -105,6 +105,9 @@ export async function applyDueInterestForSavings(
       result.totalInterest,
       result.balance,
       result.periodsCredited,
+      // La devise du livret au moment où les intérêts sont crédités : elle
+      // est figée sur l'événement, le livret peut en changer ensuite.
+      row.currency,
       result.lastPayoutAt ?? now
     );
     return tx.savingsAccount.findFirst({ where: owned(savingsId, userId) });

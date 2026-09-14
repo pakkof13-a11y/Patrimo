@@ -1811,6 +1811,22 @@ textarea:focus-visible,
 }
 
 /*
+  Une barre de défilement qui apparaît ou disparaît selon la largeur du
+  contenu réserve elle-même une hauteur variable en Chromium headless (sans
+  overlay scrollbar) — ~15px mesurés en CI sur la ligne de variation du hero
+  (`hero-window-change`), qui n'a pourtant plus le droit de changer de
+  hauteur d'une période à l'autre. Masquer la barre plutôt que retirer le
+  défilement : rien n'est perdu, seul son indicateur visuel l'est.
+*/
+.hero-scroll-no-bar {
+  scrollbar-width: none;
+}
+
+.hero-scroll-no-bar::-webkit-scrollbar {
+  display: none;
+}
+
+/*
   Défilement continu.
 
   L'animation translate la piste de la moitié de sa largeur : les deux copies
@@ -2233,7 +2249,10 @@ textarea:focus-visible,
   font-weight: var(--weight-medium);
   letter-spacing: var(--tracking-title);
   text-transform: uppercase;
-  color: var(--foreground-faint);
+  /* Nomme la catégorie du filtre (« Plateforme », « Devise ») : c'est de
+     l'information, pas une décoration — `--foreground-faint` tombe sous
+     4,5:1 sur `--surface-sunken` en thème clair (2,65:1). */
+  color: var(--foreground-secondary);
 }
 
 .term-chip[data-filtered="true"] .term-chip-label {

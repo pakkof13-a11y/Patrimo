@@ -67,7 +67,10 @@ export async function GET(req: Request) {
 
   if (requested.length === 0) {
     const today = parisDayKey(new Date());
-    return NextResponse.json({ series: {}, fromDay: today, toDay: today });
+    return NextResponse.json(
+      { series: {}, fromDay: today, toDay: today },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   }
 
   try {
@@ -116,7 +119,10 @@ export async function GET(req: Request) {
       if (closes.length >= MIN_POINTS) series[assetId] = closes;
     }
 
-    return NextResponse.json({ series, fromDay, toDay });
+    return NextResponse.json(
+      { series, fromDay, toDay },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (e) {
     console.error("[portfolio/sparklines]", e);
     return NextResponse.json(

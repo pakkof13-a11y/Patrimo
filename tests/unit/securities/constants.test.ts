@@ -18,6 +18,18 @@ describe("securitiesEnvelopeLabel", () => {
   it("retombe sur la valeur brute si inconnue", () => {
     expect(securitiesEnvelopeLabel("INCONNU")).toBe("INCONNU");
   });
+
+  it("retombe sur la valeur brute pour une clé héritée du prototype", () => {
+    /*
+      Avant correction, `SECURITIES_ENVELOPE_TYPES["toString"] ?? value` ne
+      rendait jamais `value` : l'indexation trouvait la fonction héritée
+      `Object.prototype.toString`, que `??` ne considère pas comme absente.
+      Le label rendu était donc une **fonction**, pas une chaîne.
+    */
+    expect(securitiesEnvelopeLabel("toString")).toBe("toString");
+    expect(securitiesEnvelopeLabel("constructor")).toBe("constructor");
+    expect(securitiesEnvelopeLabel("__proto__")).toBe("__proto__");
+  });
 });
 
 describe("isSecuritiesEnvelopeType", () => {
@@ -26,6 +38,19 @@ describe("isSecuritiesEnvelopeType", () => {
     expect(isSecuritiesEnvelopeType("CTO")).toBe(true);
     expect(isSecuritiesEnvelopeType("AV")).toBe(false);
     expect(isSecuritiesEnvelopeType("")).toBe(false);
+  });
+
+  it("rejette les clés héritées du prototype d'objet", () => {
+    /*
+      `value in SECURITIES_ENVELOPE_TYPES` remontait ces clés — mesuré,
+      `"toString" in { PEA: "PEA" }` vaut `true` bien qu'aucune des trois
+      constantes ne s'appelle ainsi. `Object.hasOwn` ne regarde que les
+      propriétés propres de l'objet.
+    */
+    expect(isSecuritiesEnvelopeType("toString")).toBe(false);
+    expect(isSecuritiesEnvelopeType("constructor")).toBe(false);
+    expect(isSecuritiesEnvelopeType("__proto__")).toBe(false);
+    expect(isSecuritiesEnvelopeType("hasOwnProperty")).toBe(false);
   });
 });
 

@@ -115,6 +115,142 @@ describe("vue consolidée d'un bien", () => {
     );
     expect(v.monthlyCashFlowEur).toBeCloseTo(500, 6);
   });
+
+  it("borne le taux d'occupation à 100 % dans le cash-flow comme dans le rendement", () => {
+    /*
+      Rien dans la validation de la route n'empêche un `1000` : le cash-flow
+      s'en trouvait multiplié par dix (10 000 € pour un loyer de 1 000 €)
+      pendant que `grossYieldPct`, borné dans `constants.ts`, restait calculé à
+      100 %. Les deux grandeurs du même bien doivent lire le même taux.
+    */
+    const abusif = buildPropertyView(
+      property({
+        assetId: "a",
+        monthlyRentEur: "1000",
+        monthlyChargesEur: "0",
+        annualPropertyTaxEur: null,
+        occupancyRatePct: "1000",
+      }),
+      holding()
+    );
+    const plein = buildPropertyView(
+      property({
+        assetId: "a",
+        monthlyRentEur: "1000",
+        monthlyChargesEur: "0",
+        annualPropertyTaxEur: null,
+        occupancyRatePct: "100",
+      }),
+      holding()
+    );
+
+    expect(abusif.monthlyCashFlowEur).toBeCloseTo(1_000, 6);
+    expect(abusif.monthlyCashFlowEur).toBe(plein.monthlyCashFlowEur);
+    expect(abusif.grossYieldPct).toBe(plein.grossYieldPct);
+  });
+
+  it("un taux d'occupation de 0 neutralise le loyer au lieu de valoir 100 %", () => {
+    /*
+      `p.occupancyRatePct ? num(...) : null` traitait tout zéro *falsy* comme
+      une absence de saisie et retombait sur le défaut « loué toute l'année » :
+      un bien déclaré vacant à 0 % encaissait douze mois de loyer.
+
+      Trois écritures du même fait — `"0"`, `0`, et l'absence — doivent se lire
+      pour ce qu'elles sont : les deux premières à 0 %, la dernière à 100 %.
+    */
+    const cashFlow = (occupancyRatePct: PropertyInput["occupancyRatePct"]) =>
+      buildPropertyView(
+        property({
+          assetId: "a",
+          monthlyRentEur: "1000",
+          monthlyChargesEur: "0",
+          annualPropertyTaxEur: null,
+          occupancyRatePct,
+        }),
+        holding()
+      ).monthlyCashFlowEur;
+
+    expect(cashFlow("0")).toBe(0);
+    // Un 0 numérique — la base rend un Decimal, pas toujours une chaîne.
+    expect(cashFlow(0 as unknown as string)).toBe(0);
+    // Non saisi : le défaut documenté reste « loué toute l'année ».
+    expect(cashFlow(null)).toBeCloseTo(1_000, 6);
+  });
+
+  it("borne un taux d'occupation négatif à zéro", () => {
+    const v = buildPropertyView(
+      property({
+        assetId: "a",
+        monthlyRentEur: "1000",
+        monthlyChargesEur: "0",
+        annualPropertyTaxEur: null,
+        occupancyRatePct: "-50",
+      }),
+      holding()
+    );
+    // Aucun loyer encaissé, mais les charges restent dues (ici nulles).
+    expect(v.monthlyCashFlowEur).toBeCloseTo(0, 6);
+  });
+});
+
+/**
+ * IMM-02 — la quote-part au numérateur ET au dénominateur.
+ *
+ * Reproduction de l'audit : bien à 50 %, prix 285 000 €, frais 12 000 €,
+ * loyer 1 250 €/mois (bien entier), charges 180 €, TF 1 420 €/an.
+ * `costBasisEur` de la part = 154 500 € (dénominateur déjà réduit). Avant la
+ * correction, le loyer et les charges entraient pleins au numérateur :
+ * netYield à 7,39 % et cash-flow à 952 € pour un porteur qui n'en touche que
+ * la moitié.
+ */
+describe("IMM-02 — quote-part au numérateur comme au dénominateur", () => {
+  const bienIndivision = property({
+    assetId: "indivision",
+    propertyValueEur: "285000",
+    monthlyRentEur: "1250",
+    monthlyChargesEur: "180",
+    annualPropertyTaxEur: "1420",
+  });
+  const partIndivision = holding({
+    quantity: "0.5",
+    marketValueEur: "142500",
+    costBasisEur: "154500",
+  });
+
+  it("ramène le cash-flow mensuel à la part réellement perçue", () => {
+    const v = buildPropertyView(bienIndivision, partIndivision);
+    // Avant la correction : 952 € (loyer plein). Après : 50 % de ce loyer.
+    expect(v.monthlyCashFlowEur).toBeCloseTo(475.83, 2);
+    expect(v.monthlyCashFlowEur).not.toBeCloseTo(952, 2);
+  });
+
+  it("ramène le rendement net à la part, pas au loyer plein", () => {
+    const v = buildPropertyView(bienIndivision, partIndivision);
+    // Avant la correction : 7,39 % (loyer plein / coût de la part). Après :
+    // le loyer de la part rapporté au même coût, 3,70 %.
+    expect(v.netYieldPct).toBeCloseTo(3.7, 1);
+    expect(v.netYieldPct).not.toBeCloseTo(7.39, 1);
+  });
+
+  it("ne change pas le rendement brut — déjà entier/entier", () => {
+    const v = buildPropertyView(bienIndivision, partIndivision);
+    // grossYieldPct reste sur le bien entier : loyer plein / valeur pleine.
+    expect(v.grossYieldPct).toBeCloseTo((1250 * 12 * 100) / 285000, 6);
+  });
+
+  it("expose la quote-part retenue", () => {
+    const v = buildPropertyView(bienIndivision, partIndivision);
+    expect(v.ownershipShare).toBe(0.5);
+  });
+
+  it("répercute la quote-part sur le loyer et les charges du parc", () => {
+    const t = computeRealEstateTotals(
+      buildPropertyViews([bienIndivision], new Map([["indivision", partIndivision]])),
+      [bienIndivision]
+    );
+    expect(t.annualRentEur).toBeCloseTo(1250 * 12 * 0.5, 6);
+    expect(t.annualChargesEur).toBeCloseTo(180 * 12 * 0.5 + 1420 * 0.5, 6);
+  });
 });
 
 describe("agrégats du parc", () => {
@@ -186,6 +322,27 @@ describe("agrégats du parc", () => {
     const slices = splitByStatus(views());
     expect(slices.map((s) => s.status)).toEqual(["RENTED"]);
     expect(slices[0]!.sharePct).toBeCloseTo(100, 6);
+  });
+
+  it("borne le taux d'occupation dans le loyer annuel du parc", () => {
+    /*
+      Un `1000` saisi donnait 120 000 € de loyers annuels pour un loyer réel de
+      1 000 €/mois. Le plafond à 100 % ramène l'agrégat sur la vraie assiette.
+    */
+    const props = [
+      property({
+        assetId: "a",
+        monthlyRentEur: "1000",
+        monthlyChargesEur: "0",
+        annualPropertyTaxEur: null,
+        occupancyRatePct: "1000",
+      }),
+    ];
+    const t = computeRealEstateTotals(
+      buildPropertyViews(props, new Map([["a", holding()]])),
+      props
+    );
+    expect(t.annualRentEur).toBeCloseTo(12_000, 6);
   });
 
   it("tolère un parc vide", () => {

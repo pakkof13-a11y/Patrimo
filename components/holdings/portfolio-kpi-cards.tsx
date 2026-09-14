@@ -2,13 +2,9 @@
 
 import { useMemo } from "react";
 import { formatCurrency, cn } from "@/app/lib/utils";
-import type { Holding, HistoryPoint } from "@/app/lib/types/ui";
-import { Sparkline } from "@/components/ui/sparkline";
+import type { Holding } from "@/app/lib/types/ui";
 import { formatDateTimeParis } from "@/app/lib/money/format";
 import { formatRelativeUpdate } from "@/components/holdings/holding-table-row";
-
-/** Fenêtre des sparklines : un mois de relevés suffit à donner une pente. */
-const SPARK_POINTS = 30;
 
 function num(v: unknown): number {
   const n = Number(v ?? 0);
@@ -35,8 +31,22 @@ function formatSyncClock(ms: number): string {
 }
 
 /**
- * Une tuile. La zone du graphique est réservée même sans série, sinon les
- * cinq cartes cessent d'avoir la même hauteur dès qu'une donnée manque.
+ * Une tuile.
+ *
+ * Portait autrefois un bandeau sparkline en pied de carte, alimenté par
+ * `history` (prop `HistoryPoint[]`). Cette série venait de `portfolio.history`,
+ * retirée de `GET /api/portfolio` en D20 (la route tombait en 504) : plus
+ * aucun appelant ne fournissait `history` à `HoldingsSection` ni à ce
+ * composant, si bien que le bandeau réservait 1,75 rem de hauteur pour un
+ * graphique qui ne se remplissait jamais. Retiré ici avec toute la plomberie
+ * morte (prop `history`, mémo `series`, props `spark`/`sparkStroke`).
+ * La seule série vivante aujourd'hui est `GET /api/portfolio/daily-nav`, dont
+ * les périmètres (`net`, `brut`, `financier`, `listed`…) ne savent pas
+ * exprimer « le total des lignes actuellement affichées », qui dépend de
+ * l'onglet et des filtres actifs — la brancher ici afficherait une grandeur
+ * différente du chiffre au-dessus. Le bandeau ne doit revenir que si une
+ * série existe pour la MÊME grandeur que la tuile (valeur totale filtrée,
+ * P&L filtré).
  */
 function KpiCard({
   label,
@@ -44,8 +54,6 @@ function KpiCard({
   unit,
   secondary,
   secondaryTone,
-  spark,
-  sparkStroke,
   testId,
 }: {
   label: string;
@@ -53,8 +61,6 @@ function KpiCard({
   unit?: string;
   secondary?: string;
   secondaryTone?: "positive" | "negative" | "muted";
-  spark?: number[];
-  sparkStroke?: string;
   testId: string;
 }) {
   return (
@@ -90,18 +96,6 @@ function KpiCard({
           <span className="text-[var(--foreground-faint)]">&nbsp;</span>
         )}
       </p>
-
-      <div className="mt-auto h-[1.75rem] w-full pt-[var(--space-1)]">
-        {spark && spark.length >= 2 && (
-          <Sparkline
-            values={spark}
-            stroke={sparkStroke ?? "var(--chart-gold)"}
-            width={200}
-            height={28}
-            className="h-full w-full"
-          />
-        )}
-      </div>
     </article>
   );
 }
@@ -112,24 +106,17 @@ function KpiCard({
  * Les cinq mesures du mockup, calculées sur les positions **effectivement
  * affichées** et non sur le portefeuille entier : quand un filtre est actif,
  * un total qui ignorerait ce filtre contredirait le tableau juste en dessous.
- *
- * Les sparklines viennent de l'historique patrimonial global, seule série
- * temporelle réellement disponible ici. Elles sont donc omises dès qu'un
- * filtre restreint la sélection — dessiner la courbe de tout le patrimoine
- * au-dessus d'un sous-ensemble filtré serait un contresens.
  */
 export function PortfolioKpiCards({
   holdings,
-  history,
   baseCurrency,
   filtered,
   className,
 }: {
   /** Positions après filtres — la source des totaux. */
   holdings: Holding[];
-  history?: HistoryPoint[];
   baseCurrency: string;
-  /** true si un filtre restreint la sélection (masque les sparklines). */
+  /** true si un filtre restreint la sélection (ex. mention sur la tuile compteur). */
   filtered: boolean;
   className?: string;
 }) {
@@ -162,16 +149,6 @@ export function PortfolioKpiCards({
     };
   }, [holdings]);
 
-  const series = useMemo(() => {
-    if (filtered || !history?.length) return null;
-    const win = history.slice(-SPARK_POINTS);
-    if (win.length < 2) return null;
-    return {
-      value: win.map((p) => num(p.totalValueBase)),
-      pnl: win.map((p) => num(p.unrealizedPnlBase)),
-    };
-  }, [history, filtered]);
-
   const pnlUp = totals.pnl >= 0;
 
   return (
@@ -187,8 +164,6 @@ export function PortfolioKpiCards({
         testId="pkpi-total"
         label="Valeur totale"
         value={formatCurrency(totals.marketValue, baseCurrency)}
-        spark={series?.value}
-        sparkStroke="var(--chart-gold)"
       />
 
       <KpiCard
@@ -204,10 +179,6 @@ export function PortfolioKpiCards({
         value={`${pnlUp ? "+" : "−"}${formatCurrency(Math.abs(totals.pnl), baseCurrency)}`}
         secondary={totals.pnlPct != null ? formatPct(totals.pnlPct) : undefined}
         secondaryTone={pnlUp ? "positive" : "negative"}
-        spark={series?.pnl}
-        sparkStroke={
-          pnlUp ? "var(--chart-positive)" : "var(--chart-negative)"
-        }
       />
 
       <KpiCard

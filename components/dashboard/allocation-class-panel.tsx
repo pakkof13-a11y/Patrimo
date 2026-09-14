@@ -11,20 +11,9 @@ import {
   SegmentedControl,
   SegmentedItem,
 } from "@/components/ui/panel";
+import { squarify } from "@/app/lib/ui/squarify";
 
 type Slice = { name: string; value: number };
-
-type LaidOutTile = {
-  name: string;
-  value: number;
-  pct: number;
-  amountLabel: string;
-  color: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-};
 
 type Item = {
   name: string;
@@ -39,112 +28,6 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/**
- * Treemap squarifié (aire ∝ poids) — vue mosaïque de l’allocation.
- * Algorithme : Bruls, Huizing, van Wijk (Eurographics 2000).
- */
-function squarify(items: Item[]): LaidOutTile[] {
-  const total = items.reduce((s, i) => s + i.value, 0);
-  if (total <= 0 || items.length === 0) return [];
-
-  const sorted = [...items].sort((a, b) => b.value - a.value);
-  const out: LaidOutTile[] = [];
-
-  // Work in a unit square [0,1]×[0,1]
-  let x = 0;
-  let y = 0;
-  let w = 1;
-  let h = 1;
-  let rest = sorted;
-  let restSum = total;
-
-  // Geometric approach: free rectangle in [0,1]², values map to area via scale = (w*h)/restSum
-  while (rest.length > 0) {
-    const freeArea = w * h;
-    const scale = freeArea / restSum; // value → geometric area
-    const vertical = w >= h; // pack row vertically along the shorter side? 
-    // Convention: if width >= height, create vertical strip on the left (row stacks top→bottom)
-    // else horizontal strip on top (row stacks left→right)
-    const side = vertical ? h : w; // length of the edge we lay the row along
-
-    const row: Item[] = [];
-    let rowValue = 0;
-
-    const aspectWorst = (r: Item[], rVal: number): number => {
-      if (r.length === 0 || rVal <= 0) return Infinity;
-      const rowGeoArea = rVal * scale;
-      const thickness = rowGeoArea / side; // strip thickness
-      if (thickness <= 0) return Infinity;
-      let worstRatio = 0;
-      for (const it of r) {
-        const a = it.value * scale;
-        const len = a / thickness;
-        const ratio = Math.max(len / thickness, thickness / len);
-        if (ratio > worstRatio) worstRatio = ratio;
-      }
-      return worstRatio;
-    };
-
-    while (rest.length > 0) {
-      const candidate = rest[0]!;
-      const nextRow = [...row, candidate];
-      const nextVal = rowValue + candidate.value;
-      if (row.length === 0) {
-        row.push(candidate);
-        rowValue = nextVal;
-        rest = rest.slice(1);
-        continue;
-      }
-      const before = aspectWorst(row, rowValue);
-      const after = aspectWorst(nextRow, nextVal);
-      if (after <= before) {
-        row.push(candidate);
-        rowValue = nextVal;
-        rest = rest.slice(1);
-      } else {
-        break;
-      }
-    }
-
-    // Place the row strip
-    const rowGeoArea = rowValue * scale;
-    if (vertical) {
-      const thickness = rowGeoArea / h;
-      let cy = y;
-      for (const it of row) {
-        const a = it.value * scale;
-        const th = a / thickness;
-        out.push({ ...it, x, y: cy, w: thickness, h: th });
-        cy += th;
-      }
-      x += thickness;
-      w -= thickness;
-    } else {
-      const thickness = rowGeoArea / w;
-      let cx = x;
-      for (const it of row) {
-        const a = it.value * scale;
-        const tw = a / thickness;
-        out.push({ ...it, x: cx, y, w: tw, h: thickness });
-        cx += tw;
-      }
-      y += thickness;
-      h -= thickness;
-    }
-
-    restSum -= rowValue;
-    if (w < 1e-12 || h < 1e-12) break;
-  }
-
-  // Clamp floating-point bleed into the unit square
-  return out.map((t) => ({
-    ...t,
-    x: Math.max(0, t.x),
-    y: Math.max(0, t.y),
-    w: Math.min(t.w, 1 - t.x),
-    h: Math.min(t.h, 1 - t.y),
-  }));
-}
 
 /**
  * Une tuile peut-elle afficher son nom ? Seuil unique, partagé par le rendu des

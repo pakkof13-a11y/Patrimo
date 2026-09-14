@@ -28,6 +28,7 @@
  * utiles.
  */
 
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Plus, RefreshCw } from "lucide-react";
@@ -89,23 +90,46 @@ type ViewId = (typeof VIEWS)[number]["id"];
 export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
   const qc = useQueryClient();
 
+  /*
+    Les quatre requêtes de la page portent la même devise, dans l'URL **et**
+    dans la clé de cache.
+
+    Trois d'entre elles ne l'envoyaient pas : elles rendaient des
+    `balanceBase` en euros, que la liste étiquetait ensuite avec la devise de
+    l'en-tête. D39 avait corrigé la quatrième — le bandeau de synthèse — et
+    créé une contradiction visible : 10 800 $ en tête, « 10 000,00 $ » sur la
+    ligne d'établissement juste en dessous, pour le même compte de 10 000 €.
+    Avant, les deux étaient faux dans le même sens et se rapprochaient.
+
+    La clé doit la porter aussi : sans elle, deux devises se partageraient une
+    entrée de cache et changer de devise ne redemanderait rien. Les
+    invalidations de `refresh()` restent des préfixes, elles couvrent donc
+    toutes les devises déjà en cache.
+  */
+  const devise = encodeURIComponent(baseCurrency);
+
   const banksQ = useQuery({
-    queryKey: ["banks"],
-    queryFn: () => fetchJson<{ accounts: BankAccountRow[] }>("/api/banks"),
+    queryKey: ["banks", baseCurrency],
+    queryFn: () =>
+      fetchJson<{ accounts: BankAccountRow[] }>(`/api/banks?base=${devise}`),
   });
   const savingsQ = useQuery({
-    queryKey: ["savings"],
-    queryFn: () => fetchJson<{ accounts: SavingsRow[] }>("/api/savings"),
+    queryKey: ["savings", baseCurrency],
+    queryFn: () =>
+      fetchJson<{ accounts: SavingsRow[] }>(`/api/savings?base=${devise}`),
     refetchInterval: 60_000,
   });
   const summaryQ = useQuery({
-    queryKey: ["banks-summary"],
-    queryFn: () => fetchJson<BanksSummary>("/api/banks/summary"),
+    queryKey: ["banks-summary", baseCurrency],
+    queryFn: () =>
+      fetchJson<BanksSummary>(`/api/banks/summary?base=${devise}`),
   });
   const termDepositsQ = useQuery({
-    queryKey: ["term-deposits"],
+    queryKey: ["term-deposits", baseCurrency],
     queryFn: () =>
-      fetchJson<{ termDeposits: TermDepositRow[] }>("/api/term-deposits"),
+      fetchJson<{ termDeposits: TermDepositRow[] }>(
+        `/api/term-deposits?base=${devise}`
+      ),
   });
 
   const banks = useMemo(() => banksQ.data?.accounts ?? [], [banksQ.data]);
@@ -130,7 +154,7 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
       qc.invalidateQueries({ queryKey: ["term-deposits"] }),
       qc.invalidateQueries({ queryKey: ["holdings"] }),
       qc.invalidateQueries({ queryKey: ["platforms"] }),
-      qc.invalidateQueries({ queryKey: ["portfolio-history"] }),
+      Promise.resolve(invalidatePortfolioView(qc)),
     ]);
   };
 
@@ -325,6 +349,36 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
     avec de quoi relancer.
   */
   const resumeIndisponible = !totauxConnus && !summaryLoading;
+
+  /*
+    La phrase qui rapproche le bandeau de la liste.
+
+    Les totaux ci-dessus portent le patrimoine personnel ; la liste affiche des
+    soldes entiers. Les deux ont raison, et l'écart se nomme plutôt que de se
+    deviner. `null` quand il n'y a rien à dire — c'est le cas courant.
+
+    « Produit » et non « compte » : les trois familles de la page passent
+    désormais par la règle, dépôts à terme compris, et un CAT n'est pas un
+    compte.
+  */
+  const exclusions = useMemo(() => {
+    const e = summary?.excluded;
+    if (!e) return null;
+    const morceaux: string[] = [];
+    if (e.proCount > 0) {
+      morceaux.push(
+        `${e.proCount} produit${e.proCount > 1 ? "s" : ""} professionnel${e.proCount > 1 ? "s" : ""} exclu${e.proCount > 1 ? "s" : ""} du patrimoine personnel (${formatCurrency(e.proTotalBase, summary.base)})`
+      );
+    }
+    if (e.sharedCount > 0) {
+      morceaux.push(
+        `${e.sharedCount} produit${e.sharedCount > 1 ? "s" : ""} détenu${e.sharedCount > 1 ? "s" : ""} en commun, compté${e.sharedCount > 1 ? "s" : ""} à la part détenue (${formatCurrency(e.sharedNotOwnedBase, summary.base)} laissés à l'autre détenteur)`
+      );
+    }
+    if (morceaux.length === 0) return null;
+    return `Totaux hors : ${morceaux.join(" · ")}. Les listes ci-dessous montrent les soldes entiers.`;
+  }, [summary]);
+
   const nbInstitutions = institutionCount(products);
   const accountCount = products.length;
 
@@ -504,6 +558,25 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
           secondary={`${accountCount} compte${accountCount > 1 ? "s" : ""}`}
         />
       </div>
+
+      {/*
+        Ce que le bandeau ne compte pas, dit sous lui.
+
+        Les totaux portent le patrimoine personnel : un produit professionnel
+        en sort entièrement — compte courant, livret ou dépôt à terme —, un
+        produit détenu en commun pour la part qui revient à l'autre détenteur.
+        La liste, elle, affiche les soldes entiers : c'est ce qu'ils valent.
+        Sans cette phrase, l'écart entre les deux serait un mystère, exactement
+        le défaut que l'en-tête de la route dit vouloir éviter.
+      */}
+      {exclusions && (
+        <p
+          className="text-meta"
+          data-testid="banks-summary-excluded"
+        >
+          {exclusions}
+        </p>
+      )}
 
       {/* Liste + détail côte à côte — même grille que la page Portefeuille. */}
       <div className="grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,1fr)_var(--panel-width)] xl:items-start">

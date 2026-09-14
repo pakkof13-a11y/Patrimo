@@ -31,6 +31,7 @@ type Dette = {
   startDate: Date;
   endDate: Date | null;
   lastPaymentAppliedAt: Date | null;
+  updatedAt: Date;
 };
 
 let magasin: Dette;
@@ -109,7 +110,17 @@ function detteNeuve(over: Partial<Dette> = {}): Dette {
     paymentDay: 10,
     startDate: DEBUT,
     endDate: null,
-    lastPaymentAppliedAt: null,
+    /*
+      PAS-01/02 : une dette porte une borne de paiement. `null` ne veut pas dire
+      « rien n'a jamais été payé » mais « on ne sait pas », et cette ligne-là
+      n'atteint plus la projection — `sealPaymentBaseline` la borne d'abord
+      (mesuré dans `pas-02-backfill-borne-paiement.test.ts`). La fixture porte
+      donc la borne d'une dette ordinaire : ouverte le 10 janvier, rien
+      d'inscrit depuis. Les échéances de février, mars et avril restent dues, et
+      c'est bien la matérialisation concurrente qui est éprouvée ici.
+    */
+    lastPaymentAppliedAt: DEBUT,
+    updatedAt: DEBUT,
     ...over,
   };
 }

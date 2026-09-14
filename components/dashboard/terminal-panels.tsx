@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import {
@@ -8,14 +8,25 @@ import {
   ArrowLeftRight,
   ArrowUpRight,
   Coins,
+  LayoutGrid,
+  PieChart as PieIcon,
   Receipt,
   Star,
   type LucideIcon,
 } from "lucide-react";
+import { HelpCircle } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
 import { AssetLogo } from "@/components/ui/platform-logo";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import type { Holding } from "@/app/lib/types/ui";
+import type { AllocationByVenueApiVenue } from "@/app/lib/portfolio/allocation-by-venue-api";
+import {
+  allocatePercents,
+  capTinyHoldings,
+} from "@/app/lib/ui/allocate-percents";
+import { squarify } from "@/app/lib/ui/squarify";
+import { SegmentedControl, SegmentedItem } from "@/components/ui/panel";
+import type { EvolutionRange } from "@/app/lib/portfolio/evolution-aggregate";
 
 /**
  * Logos du tableau de bord.
@@ -64,6 +75,8 @@ const TONE_BY_CLASS: Record<string, string> = {
   Obligations: "var(--chart-positive)",
   "Liquidités / Cash": "var(--chart-neutral)",
   Autre: "var(--cyan-ink-light)",
+  "Fonds euro": "var(--chart-positive)",
+  "Épargne salariale": "var(--cyan-ink-light)",
 };
 
 export function allocationTone(label: string): string {
@@ -85,12 +98,135 @@ function formatPct1(v: number): string {
   })} %`;
 }
 
+/**
+ * Teinte Coin360 : aire = MV, couleur = performance (vert / rouge).
+ *
+ * L'intensité suit l'amplitude, plafonnée : +2 % et +80 % doivent se
+ * distinguer, sans qu'une tuile disparaisse dans un vert saturé.
+ */
+export function perfTone(pct: number | null | undefined): string {
+  if (pct == null || !Number.isFinite(pct) || pct === 0) {
+    return "var(--chart-neutral)";
+  }
+  const token = pct > 0 ? "var(--chart-positive)" : "var(--chart-negative)";
+  const intensity = Math.min(100, Math.max(32, Math.round(Math.abs(pct) * 2.4)));
+  return `color-mix(in srgb, ${token} ${intensity}%, var(--surface-raised))`;
+}
+
+/**
+ * Luminance relative WCAG d'une couleur hex `#rrggbb` — sert à choisir un
+ * texte clair ou sombre par-dessus une case de mosaïque, sans jamais
+ * recalculer la couleur elle-même (celle-ci vient de l'API, cf.
+ * `allocation-by-venue-api.ts`, ou d'un jeton de ce fichier).
+ */
+export function hexRelativeLuminance(hex: string): number {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex);
+  if (!m) return NaN;
+  const int = parseInt(m[1]!, 16);
+  const channel = (shift: number) => {
+    const c = ((int >> shift) & 0xff) / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const r = channel(16);
+  const g = channel(8);
+  const b = channel(0);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** Contraste WCAG entre deux luminances relatives (1 = blanc, 0 = noir). */
+function contrastRatio(l1: number, l2: number): number {
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/**
+ * Texte clair ou sombre selon le fond de la case.
+ *
+ * Les couleurs de la mosaïque « par endroit » et « par patrimoine » sont des
+ * hex fixes, identiques en clair et en sombre (D14.5, dashboard-tab.tsx) —
+ * leur luminance se calcule directement. Le texte posé dessus doit l'être
+ * tout autant : `var(--foreground)`/`var(--background)` changent de valeur
+ * avec le thème (le premier est l'encre sombre en clair mais l'encre claire
+ * en sombre, et inversement pour le second), alors que la case, elle, ne
+ * change pas. Sur `#d9a64d` (Titres), le jeton retenu par un simple seuil de
+ * luminance tombe à ~1,8:1 dans l'un des deux thèmes selon celui qui est
+ * actif — illisible côté sombre ou côté clair selon le choix. Noir et blanc
+ * sont les deux seules valeurs stables des deux côtés ; on retient celle qui,
+ * mesurée sur ce fond précis, l'emporte réellement — pas une luminance de
+ * fond seule, dont le seuil se déplace d'une teinte à l'autre.
+ *
+ * Celles des mosaïques par classe/valeur (`allocationTone`, `perfTone`)
+ * restent des jetons CSS (`var(--chart-…)`, `color-mix(...)`) qui, eux,
+ * *changent* avec le thème par construction — on ne peut pas les résoudre en
+ * dehors du navigateur, et le repli sur `var(--foreground)`/`var(--background)`
+ * reste correct puisque fond et texte s'adaptent alors ensemble.
+ */
+export function tileTextColor(color: string): string {
+  const luminance = hexRelativeLuminance(color);
+  if (Number.isFinite(luminance)) {
+    return contrastRatio(luminance, 1) >= contrastRatio(luminance, 0)
+      ? "#ffffff"
+      : "#000000";
+  }
+  if (/gold/i.test(color)) return "var(--foreground)";
+  return "var(--background)";
+}
+
+/**
+ * Part de la répartition du patrimoine (D19 P2bis) — même forme que
+ * `AllocationByVenueApiVenue`, mais pas les mêmes clés (`VenueKey` typerait
+ * "par endroit" ; ici la clé est une classe de détention, PEA/CTO fusionnés).
+ * `color` est un hex fixe, choisi côté appelant, identique en clair et en
+ * sombre — même contrat que les couleurs par endroit (D14.5).
+ */
+export type AllocationPatrimonySlice = {
+  id: string;
+  label: string;
+  amountEur: number;
+  pct: number;
+  color: string;
+};
+
+/** Abréviation 2 à 4 lettres pour les cases trop étroites pour le nom entier. */
+const PATRIMONY_ABBR: Record<string, string> = {
+  Titres: "TITR",
+  "Immobilier net": "IMMO",
+  "Assurance-vie": "AV",
+  "Épargne salariale": "ES",
+  Crypto: "CRYP",
+  Alternatifs: "ALT",
+  Liquidités: "LIQ",
+};
+
+function abbreviateLabel(name: string): string {
+  return PATRIMONY_ABBR[name] ?? name.slice(0, 4).toUpperCase();
+}
+
+function holdingValue(h: Holding): number {
+  const v = Number(h.marketValueBase ?? h.marketValueEur);
+  return Number.isFinite(v) ? v : 0;
+}
+
+function holdingPerf(h: Holding): number | null {
+  const v = Number(h.unrealizedPnlPct);
+  return Number.isFinite(v) ? v : null;
+}
+
 export function AllocationCard({
   data,
+  holdings,
+  venueSlices,
+  venueHelp,
+  classSlices,
+  footnote,
+  periodRange,
   baseCurrency,
   className,
   title = "Répartition du portefeuille",
   subtitle,
+  legend,
+  scope,
   showValues = false,
   emptyHint = "Les classes d'actifs apparaîtront dès le premier achat.",
   testId = "allocation-card",
@@ -98,11 +234,53 @@ export function AllocationCard({
   compact = false,
 }: {
   data: { name: string; value: number }[];
+  /**
+   * Lignes détenues — mosaïque Coin360 (aire ∝ MV). Absentes, le second
+   * mode n'est pas proposé : le camembert de classes reste seul.
+   *
+   * Ignoré quand `venueSlices` ou `classSlices` est fourni : la mosaïque suit
+   * alors les mêmes parts que le camembert, pas les lignes détenues (D14.4).
+   */
+  holdings?: Holding[];
+  /**
+   * Répartition par endroit (D14.1/D14.2) — remplace `data` sur ce pavé.
+   *
+   * `percent` et `color` viennent déjà de l'API (`allocation-by-venue.ts` /
+   * `allocation-by-venue-api.ts`) : on ne les recalcule pas ici, deux
+   * arrondis divergeraient. Camembert et mosaïque lisent la même liste.
+   */
+  venueSlices?: AllocationByVenueApiVenue[];
+  /** Texte d'aide du pavé — `ALLOCATION_BY_VENUE_HELP`, exposé tel quel. */
+  venueHelp?: string;
+  /**
+   * Répartition du patrimoine par classe de détention (D19 P2bis) — remplace
+   * `data` et `venueSlices` sur ce pavé quand fournie. Prioritaire sur
+   * `venueSlices` si les deux sont passés (ne devrait pas arriver).
+   */
+  classSlices?: AllocationPatrimonySlice[];
+  /**
+   * Notice sous le pavé, montant déjà signé (ex. « dont passifs −119 947,88
+   * € ») — pas une part du camembert ni de la mosaïque.
+   */
+  footnote?: string;
+  /**
+   * Période partagée du tableau de bord. La mosaïque colore chaque ligne
+   * par son P&L latent (coût → maintenant) : le moteur ne publie pas de
+   * rendement fenêtré par ligne, et en inventer un serait une autre
+   * grandeur. La période reste celle des KPI / de l'évolution.
+   */
+  periodRange?: EvolutionRange;
   baseCurrency: string;
   className?: string;
   /** Le même camembert sert le tableau de bord et la vue PEA & CTO. */
   title?: string;
   subtitle?: string;
+  /**
+   * Légende de périmètre — « hors passifs » en Net, rien en Brut/Financier.
+   */
+  legend?: string;
+  /** Carte active dont le camembert reprend le dénominateur. */
+  scope?: string;
   /** Ajoute le montant à côté du pourcentage dans la légende. */
   showValues?: boolean;
   emptyHint?: string;
@@ -110,118 +288,316 @@ export function AllocationCard({
   /**
    * Teinte d'une part. Le tableau de bord répartit par classe d'actifs, la vue
    * PEA & CTO par sous-catégorie : deux vocabulaires, donc deux palettes, mais
-   * un seul camembert.
+   * un seul camembert. Ignoré en mode `venueSlices` : la couleur vient de
+   * l'API (`slice.color`), en clair comme en sombre (D14.5).
    */
   toneOf?: (label: string) => string;
   /** Anneau resserré : la légende porte alors les montants sans se faire rogner. */
   compact?: boolean;
 }) {
+  const [mode, setMode] = useState<"pie" | "treemap">("pie");
+
+  const overrideSlices = classSlices ?? venueSlices;
+
   const rows = useMemo(() => {
-    const positive = data.filter((d) => d.value > 0);
-    const total = positive.reduce((s, d) => s + d.value, 0) || 1;
-    return positive
-      .sort((a, b) => b.value - a.value)
-      .map((d) => ({
-        ...d,
-        pct: (d.value / total) * 100,
-        tone: toneOf(d.name),
+    if (overrideSlices) {
+      const sorted = [...overrideSlices].sort(
+        (a, b) => b.amountEur - a.amountEur
+      );
+      return sorted.map((s) => ({
+        name: s.label,
+        value: s.amountEur,
+        pct: s.pct,
+        tone: s.color,
       }));
-  }, [data, toneOf]);
+    }
+    const positive = data.filter((d) => d.value > 0);
+    const sorted = [...positive].sort((a, b) => b.value - a.value);
+    const pcts = allocatePercents(sorted.map((d) => d.value), 1);
+    return sorted.map((d, i) => ({
+      ...d,
+      pct: pcts[i] ?? 0,
+      tone: toneOf(d.name),
+    }));
+  }, [data, overrideSlices, toneOf]);
+
+  const mosaic = useMemo(() => {
+    if (overrideSlices) {
+      const items = overrideSlices
+        .filter((s) => s.amountEur > 0)
+        .map((s) => ({
+          name: s.label,
+          value: s.amountEur,
+          pct: s.pct,
+          color: s.color,
+        }));
+      return squarify(items);
+    }
+    if (!holdings?.length) return [];
+    const items = capTinyHoldings(
+      holdings
+        .filter((h) => holdingValue(h) > 0)
+        .map((h) => ({
+          name: h.name,
+          value: holdingValue(h),
+          perfPct: holdingPerf(h),
+        })),
+      { minShare: 0.01, otherLabel: "Autres" }
+    );
+    const pcts = allocatePercents(items.map((it) => it.value), 1);
+    const labeled = items.map((it, i) => ({
+      ...it,
+      pct: pcts[i] ?? 0,
+      color:
+        it.name === "Autres"
+          ? "var(--chart-neutral)"
+          : perfTone(it.perfPct),
+    }));
+    return squarify(labeled);
+  }, [holdings, overrideSlices]);
+
+  const canTreemap = mosaic.length > 0;
+  const legendShowsValues = showValues || Boolean(overrideSlices);
 
   return (
     <section
       className={cn("panel", className)}
       data-testid={testId}
+      data-scope={scope}
       aria-labelledby="allocation-heading"
     >
       <div className="panel-head">
         <div className="min-w-0">
-          <h3 id="allocation-heading" className="text-title">
+          <h3 id="allocation-heading" className="flex items-center gap-[var(--space-1)] text-title">
             {title}
+            {venueHelp && (
+              <span
+                className="group relative inline-flex align-middle text-[var(--foreground-faint)]"
+                tabIndex={0}
+                role="img"
+                aria-label={venueHelp}
+                title={venueHelp}
+                data-testid="allocation-venue-help"
+              >
+                <HelpCircle className="h-3.5 w-3.5 opacity-60 transition group-hover:opacity-100 group-focus:opacity-100" />
+                <span
+                  className="pointer-events-none absolute left-0 top-full z-40 mt-1.5 w-64 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-left text-[length:var(--text-2xs)] font-normal leading-snug text-[var(--foreground-secondary)] opacity-0 shadow-lg transition group-hover:opacity-100 group-focus:opacity-100 motion-reduce:transition-none"
+                  role="tooltip"
+                >
+                  {venueHelp}
+                </span>
+              </span>
+            )}
           </h3>
           {subtitle && <p className="text-meta">{subtitle}</p>}
         </div>
+        {canTreemap && (
+          <SegmentedControl
+            aria-label="Mode de répartition"
+            testId="allocation-mode"
+          >
+            <SegmentedItem
+              selected={mode === "pie"}
+              testId="allocation-mode-pie"
+              onClick={() => setMode("pie")}
+            >
+              <PieIcon className="h-3.5 w-3.5" />
+              <span className="sr-only sm:not-sr-only">Camembert</span>
+            </SegmentedItem>
+            <SegmentedItem
+              selected={mode === "treemap"}
+              testId="allocation-mode-treemap"
+              onClick={() => setMode("treemap")}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              <span className="sr-only sm:not-sr-only">Mosaïque</span>
+            </SegmentedItem>
+          </SegmentedControl>
+        )}
       </div>
 
-      <div className="panel-body">
-        {rows.length === 0 ? (
+      <div className="panel-body" data-period={periodRange}>
+        {rows.length === 0 && mosaic.length === 0 ? (
           <p className="text-meta py-[var(--space-6)] text-center">
             {emptyHint}
           </p>
         ) : (
-          <div
-            className={cn(
-              "flex items-center",
-              compact ? "gap-[var(--space-3)]" : "gap-[var(--space-5)]"
-            )}
-          >
-            <div
-              className={cn(
-                "shrink-0",
-                compact ? "h-[5.5rem] w-[5.5rem]" : "h-[7.5rem] w-[7.5rem]"
-              )}
-            >
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={rows}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius="100%"
-                    innerRadius="62%"
-                    paddingAngle={1.5}
-                    stroke="none"
-                    animationDuration={0}
-                  >
-                    {rows.map((r) => (
-                      <Cell key={r.name} fill={r.tone} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+          /*
+            Même cadre pour les deux vues : hauteur fixe, quel que soit le
+            nombre de lignes de légende du camembert. Sans ça, basculer sur le
+            camembert agrandissait le pavé — et avec lui toute la colonne du
+            tableau de bord — dès que le nombre d'endroits dépassait ce qui
+            tenait en 44/48 unités de hauteur. C'est désormais la légende qui
+            défile à l'intérieur du cadre, pas le cadre qui suit la légende.
+          */
+          <div className="h-44 w-full sm:h-48">
+            {mode === "treemap" && mosaic.length > 0 ? (
+              <div
+                className="relative h-full w-full overflow-hidden rounded-[var(--radius-md)] bg-[var(--surface-sunken)]"
+                data-testid="allocation-treemap"
+                role="img"
+                aria-label={mosaic
+                  .map(
+                    (t) =>
+                      `${t.name} : ${formatPct1(t.pct)}, ${formatCurrency(t.value, baseCurrency)}`
+                  )
+                  .join(". ")}
+              >
+                {mosaic.map((t) => {
+                  // Dimensions approchées du conteneur (192/260 px), pour
+                  // décider ce que la case peut porter sans déborder.
+                  const wPx = t.w * 260;
+                  const hPx = t.h * 192;
+                  const showName = hPx >= 16 && wPx >= 40;
+                  const showPct = hPx >= 22 && wPx >= 48;
+                  // Une case franchement grande porte en plus le montant, et
+                  // son corps grossit avec l'aire — le nom d'une case à 70 %
+                  // doit se lire de loin, celui d'une case à 0,4 % se
+                  // contente d'un seul mot en tout petit.
+                  const roomy = hPx >= 46 && wPx >= 70;
+                  const spacious = hPx >= 70 && wPx >= 110;
+                  const showAmount = spacious;
+                  const textColor = tileTextColor(t.color);
+                  /*
+                    Une case étroite porte une abréviation, pas un nom coupé.
 
-            {/*
-              Légende porteuse des valeurs, et non simple clé de couleurs :
-              c'est elle qui rend le camembert lisible sans survol — donc
-              utilisable au doigt et au lecteur d'écran.
-            */}
-            <ul className="min-w-0 flex-1 space-y-[var(--space-2)]">
-              {rows.map((r) => (
-                <li
-                  key={r.name}
-                  className="flex items-baseline gap-[var(--space-2)] text-[length:var(--text-sm)]"
-                >
-                  <span
-                    className="h-[0.5rem] w-[0.5rem] shrink-0 translate-y-[-1px] rounded-[var(--radius-xs)]"
-                    style={{ backgroundColor: r.tone }}
-                    aria-hidden
-                  />
-                  <span
-                    className="min-w-0 flex-1 truncate text-[var(--foreground-secondary)]"
-                    title={r.name}
-                  >
-                    {r.name}
-                  </span>
-                  {/* `%` et montant ne rétrécissent pas : ce sont les faits.
-                      Seul le libellé s'abrège, et son `title` le rend entier. */}
-                  <span className="num shrink-0 text-[var(--foreground)]">
-                    {formatPct1(r.pct)}
-                  </span>
-                  {showValues && (
-                    <span className="num shrink-0 text-right text-[length:var(--text-xs)] text-[var(--foreground-faint)]">
-                      {formatCurrency(r.value, baseCurrency)}
-                    </span>
+                    « Épargne salariale » tronqué donnait « Épar… », qui ne
+                    désigne rien ; « ES » désigne la part. L'abréviation n'est
+                    utilisée que là où le nom entier ne tient pas — au-dessus,
+                    le mot complet reste préférable.
+                  */
+                  const nomAffiche = roomy ? t.name : abbreviateLabel(t.name);
+                  return (
+                    <div
+                      key={t.name}
+                      title={`${t.name} · ${formatPct1(t.pct)} · ${formatCurrency(t.value, baseCurrency)}`}
+                      className="absolute box-border flex flex-col items-center justify-center overflow-hidden px-1 py-0.5 text-center leading-tight"
+                      style={{
+                        left: `${t.x * 100}%`,
+                        top: `${t.y * 100}%`,
+                        width: `${t.w * 100}%`,
+                        height: `${t.h * 100}%`,
+                        backgroundColor: t.color,
+                        color: textColor,
+                        boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.35)",
+                      }}
+                    >
+                      {showName && (
+                        <div
+                          className={cn(
+                            "w-full truncate font-semibold",
+                            spacious
+                              ? "text-[length:var(--text-base)]"
+                              : roomy
+                                ? "text-[length:var(--text-sm)]"
+                                : "text-[length:var(--text-xs)]"
+                          )}
+                        >
+                          {nomAffiche}
+                        </div>
+                      )}
+                      {showPct && (
+                        <div
+                          className={cn(
+                            "num w-full truncate font-semibold",
+                            spacious
+                              ? "text-[length:var(--text-lg)]"
+                              : roomy
+                                ? "text-[length:var(--text-base)]"
+                                : "text-[length:var(--text-xs)]"
+                          )}
+                        >
+                          {formatPct1(t.pct)}
+                        </div>
+                      )}
+                      {showAmount && (
+                        <div className="num w-full truncate text-[length:var(--text-xs)] opacity-90">
+                          {formatCurrency(t.value, baseCurrency)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div
+                className={cn(
+                  "flex h-full items-center",
+                  compact ? "gap-[var(--space-3)]" : "gap-[var(--space-5)]"
+                )}
+              >
+                <div
+                  className={cn(
+                    "shrink-0",
+                    compact ? "h-[5.5rem] w-[5.5rem]" : "h-[7.5rem] w-[7.5rem]"
                   )}
-                </li>
-              ))}
-            </ul>
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={rows}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius="100%"
+                        innerRadius="62%"
+                        paddingAngle={1.5}
+                        stroke="none"
+                        animationDuration={0}
+                      >
+                        {rows.map((r) => (
+                          <Cell key={r.name} fill={r.tone} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/*
+                  Légende porteuse des valeurs, et non simple clé de
+                  couleurs : c'est elle qui rend le camembert lisible sans
+                  survol — donc utilisable au doigt et au lecteur d'écran.
+                  Elle défile dans le cadre commun plutôt que de l'étirer :
+                  cf. le commentaire au-dessus du conteneur.
+                */}
+                <ul className="min-h-0 min-w-0 flex-1 space-y-[var(--space-2)] overflow-y-auto pr-[var(--space-1)]">
+                  {rows.map((r) => (
+                    <li
+                      key={r.name}
+                      className="flex items-baseline gap-[var(--space-2)] text-[length:var(--text-sm)]"
+                    >
+                      <span
+                        className="h-[0.5rem] w-[0.5rem] shrink-0 translate-y-[-1px] rounded-[var(--radius-xs)]"
+                        style={{ backgroundColor: r.tone }}
+                        aria-hidden
+                      />
+                      <span
+                        className="min-w-0 flex-1 truncate text-[var(--foreground-secondary)]"
+                        title={r.name}
+                      >
+                        {r.name}
+                      </span>
+                      {/* `%` et montant ne rétrécissent pas : ce sont les
+                          faits. Seul le libellé s'abrège, et son `title` le
+                          rend entier. */}
+                      <span className="num shrink-0 text-[var(--foreground)]">
+                        {formatPct1(r.pct)}
+                      </span>
+                      {legendShowsValues && (
+                        <span className="num shrink-0 text-right text-[length:var(--text-xs)] text-[var(--foreground-faint)]">
+                          {formatCurrency(r.value, baseCurrency)}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
-        {rows.length > 0 && (
+        {rows.length > 0 && mode !== "treemap" && (
           <p className="sr-only">
             {rows
               .map(
@@ -232,6 +608,33 @@ export function AllocationCard({
                   )}`
               )
               .join(". ")}
+          </p>
+        )}
+
+        {legend && rows.length > 0 && (
+          <p
+            className="mt-[var(--space-2)] text-[length:var(--text-xs)] text-[var(--foreground-faint)]"
+            data-testid="allocation-scope-legend"
+          >
+            {legend}
+          </p>
+        )}
+
+        {/*
+          Notice, jamais une part.
+
+          Les passifs et les lignes qu'aucun compte ne porte retranchent ou
+          ajoutent au patrimoine sans occuper d'aire : les dessiner dans le
+          camembert reviendrait à leur donner une place dans une partition
+          d'actifs à laquelle ils n'appartiennent pas. Ils se lisent ici, en
+          toutes lettres, sous les parts qu'ils expliquent.
+        */}
+        {footnote && rows.length > 0 && (
+          <p
+            className="mt-[var(--space-2)] text-[length:var(--text-xs)] text-[var(--foreground-faint)]"
+            data-testid="allocation-patrimony-footnote"
+          >
+            {footnote}
           </p>
         )}
       </div>

@@ -30,7 +30,12 @@ import {
   markFreshnessNotice,
   type PositionView,
 } from "@/app/lib/trading/positions-view";
-import { DirectionBadge, StatusDot } from "./position-list";
+import {
+  DirectionBadge,
+  PNL_UNKNOWN_LABEL,
+  StatusDot,
+  amountOrUnknown,
+} from "./position-list";
 
 type Section = "summary" | "risk" | "history";
 
@@ -140,6 +145,13 @@ export function PositionPanel({
   }
 
   const p = view.row;
+  /*
+    Pour une position close, le P&L « gross » affiché ici est le réalisé brut
+    (avant funding/commissions) — distinct de `view.pnlEur`, net. Pour une
+    position ouverte, c'est le P&L latent : `null` quand il n'est pas
+    calculable (TRA-03, COIN-M sans valeur de contrat).
+  */
+  const grossPnl = view.isOpen ? view.pnlEur : Number(p.realizedPnl ?? 0);
   const liqEstimated = num(p.derived.liquidationPriceEstimated);
   const liqReported = num(p.liquidationPriceReported);
   const stop = num(p.stopLoss);
@@ -207,13 +219,16 @@ export function PositionPanel({
         <p
           className={cn(
             "num text-[length:var(--text-2xl)] font-semibold tracking-tight",
-            view.pnlEur > 0 && "val-positive",
-            view.pnlEur < 0 && "val-negative",
-            view.pnlEur === 0 && "text-[var(--foreground)]"
+            view.pnlEur != null && view.pnlEur > 0 && "val-positive",
+            view.pnlEur != null && view.pnlEur < 0 && "val-negative",
+            view.pnlEur === 0 && "text-[var(--foreground)]",
+            view.pnlEur == null && "text-[var(--foreground-faint)]"
           )}
           data-testid="position-panel-pnl"
         >
-          {formatCurrency(String(view.pnlEur), baseCurrency)}
+          {view.pnlEur != null
+            ? formatCurrency(String(view.pnlEur), baseCurrency)
+            : PNL_UNKNOWN_LABEL}
         </p>
         <p className="text-meta">
           {view.isOpen ? "P&L latent" : "Résultat net"}
@@ -297,21 +312,28 @@ export function PositionPanel({
             <Block>
               <Fact
                 label="Notionnel"
-                value={formatCurrency(String(view.notionalEur), baseCurrency)}
+                value={amountOrUnknown(view.notionalEur, baseCurrency)}
+                tone={view.notionalEur == null ? "muted" : undefined}
               />
               <Fact
                 label="Marge engagée"
-                value={formatCurrency(String(view.marginEur), baseCurrency)}
+                value={amountOrUnknown(view.marginEur, baseCurrency)}
+                tone={view.marginEur == null ? "muted" : undefined}
               />
               <Fact
                 label={view.isOpen ? "P&L latent" : "P&L réalisé brut"}
-                value={formatCurrency(
-                  String(
-                    view.isOpen ? view.pnlEur : Number(p.realizedPnl ?? 0)
-                  ),
-                  baseCurrency
-                )}
-                tone={view.pnlEur >= 0 ? "positive" : "negative"}
+                value={
+                  grossPnl != null
+                    ? formatCurrency(String(grossPnl), baseCurrency)
+                    : PNL_UNKNOWN_LABEL
+                }
+                tone={
+                  grossPnl == null
+                    ? "muted"
+                    : grossPnl >= 0
+                      ? "positive"
+                      : "negative"
+                }
               />
             </Block>
 

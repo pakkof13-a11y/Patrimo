@@ -302,6 +302,27 @@ export function formatOwnershipShare(quantity: number | string): string {
 }
 
 /**
+ * Taux d'occupation effectivement retenu pour un calcul, en %.
+ *
+ * Absent, le bien est considéré loué toute l'année (100 %) plutôt que décoté
+ * d'un chiffre inventé. Présent, il est borné à `[0, 100]` : un taux
+ * d'occupation est une fraction d'année, et rien dans la validation de saisie
+ * n'empêche un `1000` qui multiplierait loyer encaissé et cash-flow par dix.
+ *
+ * Une seule implémentation du bornage, partagée par tout ce qui applique un
+ * taux d'occupation — sans quoi le rendement brut se calcule à 100 % pendant
+ * que le cash-flow du même bien se calcule à 1 000 %.
+ */
+export function effectiveOccupancyPct(
+  occupancyRatePct: number | null | undefined
+): number {
+  if (occupancyRatePct == null) return 100;
+  const pct = Number(occupancyRatePct);
+  if (!Number.isFinite(pct)) return 100;
+  return Math.min(100, Math.max(0, pct));
+}
+
+/**
  * Rendement locatif brut : loyers annuels rapportés à la valeur du bien.
  *
  * Calculé sur le bien **entier** — loyer et valeur sont tous deux exprimés à
@@ -325,11 +346,7 @@ export function grossRentalYieldPct(input: {
   if (rent <= 0) return null;
   // Le taux d'occupation ne s'applique qu'en saisonnier ; absent, on considère
   // le bien loué toute l'année plutôt que d'inventer une décote.
-  const occupancy =
-    input.occupancyRatePct == null ? 100 : Number(input.occupancyRatePct);
-  const effective = Number.isFinite(occupancy)
-    ? Math.min(100, Math.max(0, occupancy))
-    : 100;
+  const effective = effectiveOccupancyPct(input.occupancyRatePct);
   return ((rent * 12 * (effective / 100)) / value) * 100;
 }
 
@@ -386,11 +403,7 @@ export function netRentalYieldPct(input: {
   if (!Number.isFinite(rent) || !Number.isFinite(cost) || cost <= 0) return null;
   if (rent <= 0) return null;
 
-  const occupancy =
-    input.occupancyRatePct == null ? 100 : Number(input.occupancyRatePct);
-  const effective = Number.isFinite(occupancy)
-    ? Math.min(100, Math.max(0, occupancy))
-    : 100;
+  const effective = effectiveOccupancyPct(input.occupancyRatePct);
 
   const annualRent = rent * 12 * (effective / 100);
   const annualCharges = Number(input.monthlyChargesEur ?? 0) * 12;
@@ -440,3 +453,23 @@ export const RISK_TYPES = {
 } as const;
 
 export type RiskTypeKey = keyof typeof RISK_TYPES;
+
+/**
+ * Décide si un déclenchement d'estimation DVF peut s'écrire directement.
+ *
+ * Le garde-fou qui protège une valeur saisie (voir `valuation.ts`) ne vit pas
+ * seulement côté serveur : l'appelant doit encore choisir le bon `apply`. Un
+ * écran qui forcerait toujours `apply: true` — y compris sur un bien en mode
+ * manuel — contournerait la protection tout en continuant d'afficher "valeur
+ * saisie, non écrasée". Cette fonction centralise la décision : un bien
+ * manuel ne reçoit qu'une proposition (`apply: false`, rien n'est écrit).
+ *
+ * Vit ici (module sans aucun import) et pas dans `valuation.ts` : ce fichier
+ * importe `prisma` au niveau module — un composant client qui l'importerait
+ * pour cette seule fonction pure embarquerait tout le graphe serveur (Prisma,
+ * `node:module`) dans le bundle navigateur. C'est exactement ce qui a fait
+ * échouer le build (`app/[[...slug]]/layout.tsx`, chunk client).
+ */
+export function canApplyDvfEstimateDirectly(valuationMode: string): boolean {
+  return valuationMode === "DVF_AUTO";
+}

@@ -7,6 +7,7 @@
 
 import type { PriceOrigin } from "./price-resolver";
 import type { Decimal } from "../../money/decimal";
+import type { PatrimonyPocket } from "../patrimony-metrics";
 
 /** Jour civil Europe/Paris, `YYYY-MM-DD` (tri lexicographique = chronologique). */
 export type DayKey = string;
@@ -112,6 +113,18 @@ export const VALUATION_ENVELOPES = ["PEA", "CTO", "UNKNOWN"] as const;
 export type ValuationEnvelope = (typeof VALUATION_ENVELOPES)[number];
 
 /**
+ * Les enveloppes qui existent vraiment — `UNKNOWN` n'en est pas une.
+ *
+ * `UNKNOWN` est un seau de mesure, pas un compte : il n'a ni ouverture, ni
+ * première écriture, ni date de naissance. Les grandeurs datées par enveloppe
+ * (cf. `EnvelopeFirstWriteDays`, `engine.ts`) se posent donc sur ce sous-type,
+ * qui ferme la porte à « le jour où l'inconnu a été ouvert ».
+ */
+export const SECURITIES_ENVELOPES = ["PEA", "CTO"] as const;
+
+export type SecuritiesEnvelope = (typeof SECURITIES_ENVELOPES)[number];
+
+/**
  * Les seules classes qu'une enveloppe titres peut qualifier.
  *
  * Croiser « Crypto » et « PEA » n'a pas de sens : la question ne se pose que
@@ -159,6 +172,34 @@ export type PortfolioValuationPoint = {
   alternatives: number;
   employeeSavings: number;
   otherAssets: number;
+
+  /**
+   * Agrégats T-01 (`computePatrimonyMetrics`) au même instant.
+   *
+   * `listed` / `financier` / `fondsEuro` / `esLiquid` ne sont pas une seconde
+   * formule : ce sont les champs du contrat PatrimonyMetrics, calculés sur les
+   * mêmes positions et les mêmes poches que le point. `getDailyNav` les lit
+   * tels quels — il ne recomposée rien.
+   */
+  listed: number;
+  financier: number;
+  fondsEuro: number;
+  esLiquid: number;
+  /**
+   * Agrégat T-01 `brut` — lecture de `computePatrimonyMetrics`, pas la somme
+   * des compartiments moteur. `getDailyNav({ scope: "brut" })` lit ce champ.
+   */
+  brut: number;
+  /**
+   * Agrégat T-01 `net` — `metrics.net`. `getDailyNav({ scope: "net" })` le lit.
+   */
+  net: number;
+  /**
+   * Poches T-01 au même instant. `getDailyNav` y lit listed / immobilier /
+   * av / cash / alternatifs / employeeSavings / autre — jamais un recalcul.
+   * `passifs` y figure pour la partition, mais n'est pas un scope de courbe.
+   */
+  pockets: Record<PatrimonyPocket, number>;
 
   /**
    * Le même brut, ventilé par classe d'actif.

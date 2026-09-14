@@ -95,19 +95,30 @@ test.describe("Tableau de bord", () => {
     });
 
     /*
-      Les sept indicateurs du bandeau. Le moteur historique porte désormais
-      leurs sept grandeurs — le P&L latent et le réalisé sont reconstruits à
-      partir de l'état comptable qu'il rejoue, comme les cinq autres le sont
-      depuis leurs compartiments.
+      Les huit indicateurs à variation propre du bandeau (`dashboard-tab.tsx`,
+      `TerminalKpiRow`) — testids réels vérifiés dans le code au 2026-09-13,
+      pas ceux d'avant D19 (`kpi-listed`, `kpi-latent`, `kpi-realized`
+      n'existent plus). Chacun rend toujours une ligne `kpi-<clé>-change` :
+      `changeAbs`/`changePct` valent `seriesChangeAbs`/`seriesChangePct`, qui
+      répondent `number | null`, jamais `undefined` — la ligne n'est donc
+      jamais démontée pour ces huit tuiles.
+
+      Le P&L (`pnl`) n'en fait pas partie : depuis D19 ce n'est plus deux
+      tuiles séparées latent/réalisé mais une seule tuile à bascule, dont le
+      montant de tête *est* déjà la variation de fenêtre — elle ne porte donc
+      jamais de `kpi-pnl-change` (`changeAbs`/`changePct` y valent
+      littéralement `undefined`). Elle est vérifiée séparément plus bas, sur
+      le même invariant mais appliqué à son propre montant.
     */
     const indicateurs = [
-      "listed",
-      "latent",
-      "cash",
+      "titres",
+      "crypto",
+      "life-insurance",
+      "real-estate",
       "alternatives",
       "employee-savings",
+      "cash",
       "liabilities",
-      "realized",
     ];
 
     /**
@@ -157,6 +168,50 @@ test.describe("Tableau de bord", () => {
       }
     }
 
+    /**
+     * Même invariant, décliné sur la tuile P&L à bascule.
+     *
+     * `kpi-pnl` n'a pas de ligne `-change` séparée : c'est son montant de tête
+     * qui porte la variation de fenêtre (`pnlPeriod`), et sa sparkline
+     * (`pnlSpark`) est construite sur exactement le même tableau —
+     * `latent`/`realized` selon la bascule active (`dashboard-tab.tsx`). Une
+     * courbe visible doit donc toujours s'accompagner d'un montant chiffré,
+     * jamais d'un tiret ; un tiret ne doit jamais s'accompagner d'un tracé.
+     * Vérifié sur les deux positions de la bascule, Latent puis Réalisé —
+     * c'est elle qui remplace les anciennes tuiles séparées.
+     */
+    async function verifierCoherencePnl(periode: string) {
+      const tuile = page.getByTestId("kpi-pnl");
+      await expect(tuile).toBeVisible();
+
+      // Jamais de ligne de variation séparée pour cette tuile — son montant
+      // de tête en tient déjà lieu.
+      await expect(page.getByTestId("kpi-pnl-change")).toHaveCount(0);
+
+      for (const mode of ["latent", "realized"] as const) {
+        const bascule = page.getByTestId(`kpi-pnl-toggle-${mode}`);
+        await bascule.click();
+        await expect(bascule).toHaveAttribute("aria-selected", "true");
+
+        const courbes = await tuile.locator("svg").count();
+        const montant = (
+          await tuile.locator("p.num").first().innerText()
+        ).trim();
+
+        if (courbes > 0) {
+          expect(
+            montant,
+            `pnl (${mode}) sur ${periode} : une courbe sans montant`
+          ).not.toBe("—");
+        } else {
+          expect(
+            montant,
+            `pnl (${mode}) sur ${periode} : un montant sans série`
+          ).toBe("—");
+        }
+      }
+    }
+
     // Période la plus large : c'est là que l'historique a le plus de chances
     // d'exister, donc que les courbes doivent apparaître.
     await page.getByTestId("evolution-range-all").click();
@@ -165,6 +220,7 @@ test.describe("Tableau de bord", () => {
       "all"
     );
     await verifierCoherence("Tout");
+    await verifierCoherencePnl("Tout");
 
     /*
       Période la plus courte : sur un compte récent, sept jours peuvent ne pas
@@ -177,9 +233,10 @@ test.describe("Tableau de bord", () => {
       "7d"
     );
     await verifierCoherence("7J");
+    await verifierCoherencePnl("7J");
   });
 
-  test("carte Patrimoine total : une seule, Net/Brut, sans période propre", async ({
+  test("carte de patrimoine : une seule, Net/Brut, périodes propres", async ({
     page,
     request,
   }) => {
@@ -191,22 +248,46 @@ test.describe("Tableau de bord", () => {
     // Une seule carte de patrimoine sur l'écran — le doublon d'un chantier
     // précédent ne doit pas revenir par une autre porte.
     await expect(carte).toHaveCount(1);
+    /*
+      Le titre nomme le périmètre affiché, et non plus un « Patrimoine total »
+      qui n'existe plus depuis que la carte a un mode. L'assertion visait ce
+      libellé disparu : elle ne protégeait donc plus rien, et un hero sans titre
+      l'aurait laissée passer. Elle dit désormais ce que l'écran affirme au
+      démarrage — le net.
+
+      Il n'est plus visible à l'écran depuis D20 : la bascule Net / Brut a pris
+      sa place, et le répéter en toutes lettres à côté d'un bouton qui le dit
+      était redondant. Le titre reste dans le document pour qui lit sans voir,
+      d'où `toBeAttached` plutôt que `toBeVisible` — on vérifie qu'il existe et
+      qu'il nomme le bon périmètre, ce qui est ce qu'il doit faire.
+    */
     await expect(
-      page.getByRole("heading", { name: "Patrimoine total" })
-    ).toBeVisible();
+      page.getByRole("heading", { name: "Patrimoine net" })
+    ).toBeAttached();
+    // Ce que l'œil lit à sa place : la pastille du mode actif.
+    await expect(page.getByTestId("hero-mode-net")).toHaveAttribute(
+      "data-active",
+      "true"
+    );
+
+    // Le Financier a quitté l'écran en D19 : deux cartes, pas trois.
+    await expect(page.getByTestId("hero-mode-financier")).toHaveCount(0);
+    await expect(page.getByTestId("hero-mode-net")).toBeVisible();
+    await expect(page.getByTestId("hero-mode-brut")).toBeVisible();
 
     /*
-      La carte a désormais ses propres périodes — six chips, sur la courbe.
-
-      Ce que la séparation d'avec le panneau « Évolution » interdit n'a pas
-      changé pour autant : le sélecteur global n'a rien à faire ici, et la
-      suite de ce test vérifie qu'il ne touche pas au chiffre de tête.
+      La carte et le panneau « Évolution » partagent désormais une seule et
+      même période : huit chips (7J, 1M, 3M, 6M, YTD, 1A, 5A, Tout), portées
+      par la carte de tête. Le test qui suit vérifie que la carte affiche
+      bien ses propres chips `hero-range-*` sans porter aussi celles du
+      panneau `evolution-range-*` — les deux zones restent deux endroits
+      distincts pour changer une même valeur, pas deux périodes séparées.
     */
     // `role="tab"` pour ne compter que les chips : le conteneur porte lui aussi
     // un testid préfixé `hero-range-`.
     await expect(
       carte.locator("[role='tab'][data-testid^='hero-range-']")
-    ).toHaveCount(6);
+    ).toHaveCount(8);
     await expect(
       carte.locator("[data-testid^='evolution-range-']")
     ).toHaveCount(0);
@@ -228,7 +309,13 @@ test.describe("Tableau de bord", () => {
     // (`formatHeadline`) : ne comparer que les chiffres.
     const parseHeadline = (t: string) => Number(t.replace(/[^\d-]/g, ""));
 
-    // Défaut : Net.
+    /*
+      Le défaut de la carte est désormais « Net » (D14.3b, dashboard-tab.tsx).
+      Ce que ce test doit prouver survit à un futur changement de défaut — que
+      Net = Brut − Passifs s'affiche bien quand ce mode est sélectionné — donc
+      on l'active explicitement au lieu de le tenir pour acquis.
+    */
+    await page.getByTestId("hero-mode-net").click();
     await expect(page.getByTestId("hero-mode-net")).toHaveAttribute(
       "data-active",
       "true"
@@ -237,14 +324,18 @@ test.describe("Tableau de bord", () => {
     expect(parseHeadline(netText)).toBe(expectedNet);
 
     // Passage en brut : la valeur suit, le titre ne bouge pas.
-    await page.getByTestId("hero-mode-gross").click();
-    await expect(page.getByTestId("hero-mode-gross")).toHaveAttribute(
+    // Le scope se nomme `brut` (`HERO_NAV_SCOPES`), pas `gross` — un testid
+    // `hero-mode-gross` viserait un bouton qui n'a jamais existé.
+    await page.getByTestId("hero-mode-brut").click();
+    await expect(page.getByTestId("hero-mode-brut")).toHaveAttribute(
       "data-active",
       "true"
     );
+    // Le titre suit le mode : passer en brut le dit, il ne reste pas générique.
+    // Attaché et non visible — la bascule occupe désormais la ligne du titre.
     await expect(
-      page.getByRole("heading", { name: "Patrimoine total" })
-    ).toBeVisible();
+      page.getByRole("heading", { name: "Patrimoine brut" })
+    ).toBeAttached();
     const grossText = await page.getByTestId("hero-net-worth").innerText();
     expect(parseHeadline(grossText)).toBe(expectedGross);
 

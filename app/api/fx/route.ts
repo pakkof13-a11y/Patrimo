@@ -4,6 +4,7 @@ import {
   convertAmount,
   fxRateToEurOnDate,
   fxRateToEur,
+  isEurRatesFallback,
 } from "@/app/lib/market/fx";
 import { requireUserId } from "@/app/lib/auth-helpers";
 import { clientErrorMessage } from "@/app/lib/api/error-response";
@@ -50,18 +51,32 @@ export async function GET(req: Request) {
     }
 
     const rates = await getEurRates();
+    /*
+      Le cache sait depuis toujours si `rates` vient de Frankfurter ou du
+      repli statique (`cache.isFallback`) ; rien ne le transmettait jusqu'ici.
+      La réponse avait donc la même forme qu'un taux BCE réel, qu'elle soit ou
+      non fondée — `isFallback` répare cette omission sur les trois formes de
+      réponse qui portent `rates`. Le chemin `date=` plus haut a déjà son
+      propre `source` et n'est pas concerné.
+    */
+    const isFallback = isEurRatesFallback();
 
     if (from && to && amount) {
       const converted = await convertAmount(amount, from, to);
-      return NextResponse.json({ rates, from, to, amount, converted });
+      return NextResponse.json({ rates, from, to, amount, converted, isFallback });
     }
 
     if (from && !to) {
       const rate = await fxRateToEur(from);
-      return NextResponse.json({ from: from.toUpperCase(), fxRateToEur: rate, rates });
+      return NextResponse.json({
+        from: from.toUpperCase(),
+        fxRateToEur: rate,
+        rates,
+        isFallback,
+      });
     }
 
-    return NextResponse.json({ rates, base: "EUR" });
+    return NextResponse.json({ rates, base: "EUR", isFallback });
   } catch (e) {
     console.error("GET /api/fx", e);
     return NextResponse.json(

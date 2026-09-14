@@ -7,6 +7,20 @@ import { Prisma, PrismaClient } from "@/app/lib/prisma-client/client";
 
 const D = (v: string | number) => new Prisma.Decimal(v);
 
+/**
+ * Instant de référence du réamorçage, figé une fois pour toutes.
+ *
+ * Les patrons historiques parcourent des années civiles entières, dont l'année
+ * en cours qui n'est pas terminée : sans borne, ils dateraient des écritures
+ * après aujourd'hui. La borne est lue ici, hors du bloc des patrons, et pour
+ * deux raisons. La première est de laisser ce bloc entièrement déterministe —
+ * aucune horloge, aucun tirage, c'est ce que ses tests vérifient. La seconde
+ * est qu'un `Date.now()` appelé à chaque écriture avancerait pendant la
+ * génération : deux patrons voisins n'auraient pas tout à fait le même
+ * « aujourd'hui », et la frontière dépendrait de l'ordre d'exécution.
+ */
+const SEED_INSTANT = Date.now();
+
 export function daysAgo(n: number): Date {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -40,6 +54,545 @@ function hashSeed(s: string): number {
     h = Math.imul(h, 16777619);
   }
   return h >>> 0;
+}
+
+// ---------------------------------------------------------------------------
+// Socle temporel absolu (2001-2020) — préparation de l'extension historique.
+//
+// Le fichier vit aujourd'hui sur un seul régime temporel : `daysAgo(n)`,
+// entièrement relatif à `new Date()`. C'est voulu pour la fenêtre récente
+// (les trois écritures K2 de `daysAgo(70)`, `daysAgo(53)`, `daysAgo(27)`
+// doivent rester dans la fenêtre glissante de trois mois quelle que soit la
+// date d'exécution — les figer en dates absolues les ferait sortir de la
+// fenêtre au bout de quelques mois et fausserait la tuile Réalisé).
+//
+// L'historique long (2001-2020) a besoin du régime inverse : des dates
+// d'année civile *ancrées*, identiques d'une exécution à l'autre, pour que
+// `npm run db:seed` produise le même jeu de données à chaque lancement. Les
+// deux régimes coexistent donc délibérément dans ce fichier : `daysAgo` pour
+// le présent glissant, le calendrier ancré ci-dessous pour le passé fixe.
+// Ce socle n'est pas encore branché sur les écritures du seed — c'est
+// l'objet de la passe suivante (les patrons métier de l'historique).
+// ---------------------------------------------------------------------------
+
+/** Générateur de nombres pseudo-aléatoires, déterministe pour une graine donnée. */
+export type Rng = () => number;
+
+/**
+ * mulberry32 — PRNG déterministe et rapide, suffisant pour une démo (pas un
+ * usage cryptographique). Deux instanciations avec la même graine rendent
+ * exactement la même suite de tirages, dans le même ordre.
+ *
+ * Convention de consommation pour un patron métier : quand un patron a
+ * besoin à la fois d'une dérive de date et d'une dérive de montant, il tire
+ * la dérive de date en premier puis la dérive de montant — dans cet ordre,
+ * systématiquement — afin qu'ajouter ou retirer un patron n'inverse jamais
+ * l'usage des tirages des patrons voisins (chaque patron doit recevoir sa
+ * propre instance de `Rng`, dérivée de la graine globale via `deriveRng`,
+ * plutôt que de partager un flux global).
+ */
+export function mulberry32(seed = 25): Rng {
+  let a = seed >>> 0;
+  return function rng(): number {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Dérive un PRNG indépendant pour un patron donné à partir d'une graine
+ * globale et d'un nom de patron stable. Évite qu'un patron consomme les
+ * tirages destinés à un autre : chaque patron a son propre flux, mais tous
+ * restent reproductibles à partir de la même graine globale.
+ */
+export function deriveRng(globalSeed: number, patternName: string): Rng {
+  return mulberry32((globalSeed ^ hashSeed(patternName)) >>> 0);
+}
+
+/** Entier tiré uniformément dans [min, max] (bornes incluses). */
+function nextInt(rng: Rng, min: number, max: number): number {
+  return min + Math.floor(rng() * (max - min + 1));
+}
+
+/**
+ * Vrai si la clé de jour `YYYY-MM-DD` tombe un samedi ou un dimanche.
+ *
+ * Le test porte sur la **clé écrite en base**, pas sur l'instant dont elle est
+ * issue. Les deux ne coïncident pas toujours : `dayKeyOf` projette en heure de
+ * Paris alors qu'un `Date` raisonne dans le fuseau de la machine, et près de
+ * minuit les deux jours diffèrent. Or c'est la clé qui prétend désigner une
+ * séance — c'est donc elle qui doit tomber un jour ouvré.
+ */
+export function isWeekendDayKey(dayKey: string): boolean {
+  const weekday = new Date(`${dayKey}T00:00:00Z`).getUTCDay();
+  return weekday === 0 || weekday === 6;
+}
+
+/**
+ * Vrai si la classe d'actif cote sept jours sur sept.
+ *
+ * Le week-end n'est pas une propriété du calendrier mais du **marché** : les
+ * places actions/ETF/obligations FR/US et le change ferment samedi et
+ * dimanche, les marchés crypto non — BTC, ETH, SOL, LINK et AVAX ont un cours
+ * le dimanche comme le mercredi. Fonder l'omission des clôtures sur la seule
+ * date reviendrait à retirer au jeu de démonstration deux septièmes de
+ * l'histoire des lignes crypto, sans qu'aucune règle de marché ne le justifie.
+ *
+ * Le prédicat lit `assetClass` et non `category` : c'est `assetClass` que
+ * portent les positions du seed (`Pos`) et sur lequel le reste du fichier
+ * discrimine déjà les cryptos.
+ */
+export function quotesEveryDay(assetClass: string): boolean {
+  return assetClass === "CRYPTO";
+}
+
+/** Recule jusqu'au jour ouvré précédent (inclus si `d` est déjà ouvré). */
+function previousBusinessDay(d: Date): Date {
+  const r = new Date(d.getTime());
+  while (isWeekendDayKey(dayKeyOf(r))) {
+    r.setUTCDate(r.getUTCDate() - 1);
+  }
+  return r;
+}
+
+function dateFromDayOfYear(year: number, dayOfYear: number): Date {
+  const d = new Date(Date.UTC(year, 0, 1, 10, 0, 0));
+  d.setUTCDate(d.getUTCDate() + (dayOfYear - 1));
+  return d;
+}
+
+/**
+ * Rend une date ancrée sur une année et un jour-de-l'année, avec un décalage
+ * de ±11 jours tiré du PRNG, recalée sur le jour ouvré précédent si elle
+ * tombe un week-end. `usedDayKeys`, quand fourni, garantit que deux appels
+ * pour un même patron (donc partageant le même Set) ne rendent jamais le
+ * même jour : en cas de collision, on retire un nouveau décalage.
+ */
+export function anchoredDate(
+  rng: Rng,
+  year: number,
+  anchorDayOfYear: number,
+  usedDayKeys?: Set<string>,
+): Date {
+  const maxAttempts = 40;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const offset = nextInt(rng, -11, 11);
+    const candidate = previousBusinessDay(dateFromDayOfYear(year, anchorDayOfYear + offset));
+    const key = dayKeyOf(candidate);
+    if (!usedDayKeys || !usedDayKeys.has(key)) {
+      usedDayKeys?.add(key);
+      return candidate;
+    }
+  }
+  throw new Error(
+    `anchoredDate: aucun jour disponible pour l'année ${year} (ancre ${anchorDayOfYear}) après ${maxAttempts} tirages`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Échelle de vie du patrimoine : s(y) = 1.07^(y - 2001).
+// ---------------------------------------------------------------------------
+
+const LIFE_SCALE_BASE_YEAR = 2001;
+const LIFE_SCALE_GROWTH = D(1.07);
+
+/** Facteur d'échelle appliqué aux montants de l'historique pour l'année `year`. */
+export function lifeScale(year: number): Prisma.Decimal {
+  return LIFE_SCALE_GROWTH.pow(year - LIFE_SCALE_BASE_YEAR);
+}
+
+/**
+ * Applique l'échelle de vie à un montant de base et arrondit selon la règle
+ * imposée par la spec : au multiple de 10 € le plus proche au-dessus de
+ * 1 000 €, au multiple de 1 € en dessous. Toujours en `Decimal` — jamais de
+ * `Math.round` sur un `number` dans ce chemin.
+ */
+export function scaledAmount(baseAmount: number, year: number): Prisma.Decimal {
+  const raw = D(baseAmount).mul(lifeScale(year));
+  const step = raw.abs().greaterThanOrEqualTo(1000) ? 10 : 1;
+  return raw.dividedBy(step).toDecimalPlaces(0).mul(step).toDecimalPlaces(2);
+}
+
+// ---------------------------------------------------------------------------
+// Table de cours historiques (2001-2026) — environ dix tickers cotés.
+//
+// Une année sans prix pour un ticker est une absence assumée, pas une
+// interpolation à venir : `historicalPriceOf` rend `undefined` ("inconnu"),
+// jamais 0 et jamais une valeur lissée entre deux années connues. Les
+// tickers respectent leurs dates d'existence réelles : cryptos pas avant
+// 2017, CW8.PA à partir de 2009, C50.PA à partir de 2008, AIR.PA (Airbus)
+// pas avant 2014 — avant, SU.PA (Schneider Electric) tient lieu de valeur
+// industrielle française sur 2001-2013. TTE.PA est volontairement exclu de
+// cet historique (décision du propriétaire du produit).
+// ---------------------------------------------------------------------------
+
+export const HISTORICAL_PRICES: Readonly<Record<string, Readonly<Record<number, number>>>> = {
+  // ETF monde, réplique MSCI World — dispo depuis 2009 ; creux net 2020 (COVID).
+  "CW8.PA": {
+    2009: 120, 2010: 140, 2011: 135, 2012: 150, 2013: 175, 2014: 195,
+    2015: 210, 2016: 215, 2017: 245, 2018: 235, 2019: 275,
+    2020: 240, // COVID
+    2021: 320, 2022: 300, 2023: 350, 2024: 400, 2025: 430, 2026: 450,
+  },
+  // ETF CAC 40 — dispo depuis 2008 ; creux marqué en 2008 et en 2020.
+  "C50.PA": {
+    2008: 60, // crise financière
+    2009: 75, 2010: 78, 2011: 70, 2012: 76, 2013: 88, 2014: 92,
+    2015: 100, 2016: 98, 2017: 112, 2018: 100,
+    2019: 118,
+    2020: 95, // COVID
+    2021: 135, 2022: 128, 2023: 148, 2024: 160, 2025: 170, 2026: 180,
+  },
+  // Schneider Electric — sert de proxy industriel français 2001-2013
+  // (avant l'existence d'AIR.PA sous ce nom : c'était EADS jusqu'en 2013).
+  "SU.PA": {
+    2001: 35, 2002: 28, 2003: 32, 2004: 45, 2005: 55, 2006: 70,
+    2007: 95,
+    2008: 40, // crise financière : chute nette
+    2009: 55, 2010: 90, 2011: 40, 2012: 50, 2013: 60,
+  },
+  // Airbus — utilisable à partir de 2014 seulement (avant : EADS, hors périmètre).
+  "AIR.PA": {
+    2014: 45, 2015: 60, 2016: 55, 2017: 75, 2018: 95, 2019: 130,
+    2020: 55, // COVID : aviation à l'arrêt
+    2021: 100, 2022: 95, 2023: 130, 2024: 145, 2025: 160, 2026: 170,
+  },
+  // Sanofi — pharma défensive, historique complet 2001-2026.
+  "SAN.PA": {
+    2001: 65, 2002: 55, 2003: 60, 2004: 62, 2005: 70, 2006: 68,
+    2007: 65,
+    2008: 45, // crise financière
+    2009: 50, 2010: 48, 2011: 52, 2012: 65, 2013: 75, 2014: 80,
+    2015: 78, 2016: 70, 2017: 75, 2018: 70, 2019: 85,
+    2020: 82, // COVID : recul modéré, secteur défensif
+    2021: 90, 2022: 88, 2023: 95, 2024: 100, 2025: 105, 2026: 110,
+  },
+  // LVMH — luxe, historique complet 2001-2026.
+  "MC.PA": {
+    2001: 40, 2002: 30, 2003: 38, 2004: 50, 2005: 60, 2006: 75,
+    2007: 90,
+    2008: 45, // crise financière
+    2009: 65, 2010: 105, 2011: 110, 2012: 130, 2013: 135, 2014: 130,
+    2015: 155, 2016: 165, 2017: 235, 2018: 260,
+    2019: 375,
+    2020: 350, // COVID
+    2021: 640, 2022: 700, 2023: 780, 2024: 620, 2025: 650, 2026: 680,
+  },
+  // Société Générale — banque, très exposée 2008 et re-touchée 2020.
+  "GLE.PA": {
+    2001: 65, 2002: 55, 2003: 65, 2004: 75, 2005: 95, 2006: 120,
+    2007: 100,
+    2008: 35, // crise financière : effondrement bancaire
+    2009: 45, 2010: 40, 2011: 20, 2012: 22, 2013: 30, 2014: 35,
+    2015: 38, 2016: 32, 2017: 42, 2018: 30,
+    2019: 27,
+    2020: 13, // COVID : plus bas historique
+    2021: 25, 2022: 24, 2023: 26, 2024: 22, 2025: 24, 2026: 25,
+  },
+  // L'Oréal — historique complet 2001-2026.
+  "OR.PA": {
+    2001: 75, 2002: 65, 2003: 60, 2004: 62, 2005: 65, 2006: 75,
+    2007: 85,
+    2008: 55, // crise financière
+    2009: 65, 2010: 80, 2011: 85, 2012: 100, 2013: 120, 2014: 135,
+    2015: 165, 2016: 155, 2017: 185, 2018: 175,
+    2019: 250,
+    2020: 260, // COVID : impact limité, cosmétique résiliente
+    2021: 385, 2022: 335, 2023: 400, 2024: 420, 2025: 440, 2026: 460,
+  },
+  // Bitcoin (EUR) — pas d'historique avant 2017.
+  BTC: {
+    2017: 12000, 2018: 3500, 2019: 6500,
+    2020: 25000, // portée par la fin d'année 2020, malgré le creux de mars
+    2021: 42000, 2022: 15000, 2023: 40000, 2024: 60000, 2025: 90000, 2026: 95000,
+  },
+  // Ethereum (EUR) — pas d'historique avant 2017.
+  ETH: {
+    2017: 700, 2018: 130, 2019: 130,
+    2020: 600,
+    2021: 3200, 2022: 1100, 2023: 2100, 2024: 3300, 2025: 3800, 2026: 4000,
+  },
+
+  // ── Passe 2 : les tickers que les patrons P01, P02 et P05 exigent ─────────
+  //
+  // Chaque série se termine sur le `marketPrice` que la position porte déjà
+  // dans ce fichier, pour que l'historique rejoigne le portefeuille courant
+  // sans marche à la soudure. Les cours sont exprimés dans la devise native
+  // de la ligne — la conversion est l'affaire du patron, qui écrit son
+  // `currency` et son `fxRateToEur` explicitement.
+  //
+  // 2008 recule partout où le ticker existe : la crise financière n'a épargné
+  // aucune de ces lignes. 2020 se lit autrement, et suit ici l'histoire réelle
+  // plutôt qu'une règle uniforme — les cycliques et défensives européennes
+  // reculent, tandis qu'Apple, Microsoft, ASML et Nvidia montent, portées par
+  // le confinement et par la demande de semi-conducteurs. Une baisse imposée à
+  // ces quatre-là aurait été un creux inventé.
+
+  // Lyxor CAC 40 (EUR) — support de P02, et la ligne que la vente K2 allège.
+  "CAC.PA": {
+    2001: 42, 2002: 32, 2003: 36, 2004: 40, 2005: 46, 2006: 53, 2007: 55,
+    2008: 34, // crise financière
+    2009: 40, 2010: 40, 2011: 34, 2012: 38, 2013: 44, 2014: 45,
+    2015: 48, 2016: 47, 2017: 53, 2018: 48, 2019: 58,
+    2020: 47, // COVID
+    2021: 60, 2022: 56, 2023: 64, 2024: 68, 2025: 71, 2026: 74,
+  },
+  // Hermès (EUR) — luxe, historique complet.
+  "RMS.PA": {
+    2001: 130, 2002: 120, 2003: 135, 2004: 150, 2005: 180, 2006: 200, 2007: 210,
+    2008: 120, // crise financière
+    2009: 160, 2010: 230, 2011: 250, 2012: 280, 2013: 300, 2014: 290,
+    2015: 350, 2016: 370, 2017: 450, 2018: 480, 2019: 660,
+    2020: 590, // COVID
+    2021: 1400, 2022: 1300, 2023: 1900, 2024: 2000, 2025: 2100, 2026: 2200,
+  },
+  // Air Liquide (EUR) — industrielle défensive, historique complet.
+  "AI.PA": {
+    2001: 65, 2002: 58, 2003: 62, 2004: 68, 2005: 75, 2006: 85, 2007: 92,
+    2008: 62, // crise financière
+    2009: 72, 2010: 88, 2011: 85, 2012: 92, 2013: 98, 2014: 100,
+    2015: 112, 2016: 105, 2017: 110, 2018: 108, 2019: 125,
+    2020: 118, // COVID
+    2021: 150, 2022: 132, 2023: 155, 2024: 160, 2025: 164, 2026: 168,
+  },
+  // Apple (USD) — cours ajustés des divisions du nominal ; P05 l'achète à
+  // partir de 2005, la table ne remonte donc pas plus haut.
+  AAPL: {
+    2005: 1.2, 2006: 2.3, 2007: 5.4,
+    2008: 2.6, // crise financière
+    2009: 6.4, 2010: 9.6, 2011: 11.6, 2012: 16.5, 2013: 14.5, 2014: 19.7,
+    2015: 24, 2016: 26, 2017: 39, 2018: 38, 2019: 71,
+    2020: 95, // COVID : la valeur monta, le numérique porté par le confinement
+    2021: 168, 2022: 130, 2023: 190, 2024: 245, 2025: 215, 2026: 198,
+  },
+  // Microsoft (USD) — cours ajustés des divisions du nominal.
+  MSFT: {
+    2005: 20, 2006: 22, 2007: 26,
+    2008: 16, // crise financière
+    2009: 23, 2010: 22, 2011: 21, 2012: 22, 2013: 30, 2014: 41,
+    2015: 48, 2016: 55, 2017: 74, 2018: 90, 2019: 145,
+    2020: 180, // COVID : la valeur monta, le numérique porté par le confinement
+    2021: 300, 2022: 240, 2023: 330, 2024: 400, 2025: 410, 2026: 415,
+  },
+  // Nestlé (CHF) — défensive suisse. La devise n'est pas l'euro : le patron
+  // doit écrire son `fxRateToEur`, la table ne convertit rien.
+  "NESN.SW": {
+    2005: 30, 2006: 34, 2007: 38,
+    2008: 25, // crise financière
+    2009: 33, 2010: 40, 2011: 42, 2012: 50, 2013: 55, 2014: 60,
+    2015: 63, 2016: 62, 2017: 68, 2018: 65, 2019: 90,
+    2020: 84, // COVID
+    2021: 105, 2022: 95, 2023: 92, 2024: 85, 2025: 86, 2026: 88,
+  },
+  // ASML (EUR) — semi-conducteurs.
+  "ASML.AS": {
+    2005: 15, 2006: 18, 2007: 20,
+    2008: 12, // crise financière
+    2009: 18, 2010: 26, 2011: 30, 2012: 40, 2013: 60, 2014: 75,
+    2015: 82, 2016: 95, 2017: 145, 2018: 140, 2019: 240,
+    2020: 330, // COVID : la valeur monta, demande de semi-conducteurs
+    2021: 620, 2022: 480, 2023: 620, 2024: 680, 2025: 700, 2026: 710,
+  },
+  // Nvidia (USD) — cours ajustés des divisions du nominal. La table démarre
+  // en 2010 : avant, le cours ajusté descend sous le centime et une quantité
+  // dérivée d'un montant n'aurait plus aucun sens de lecture.
+  NVDA: {
+    2010: 9, 2011: 10, 2012: 11, 2013: 14, 2014: 18,
+    2015: 24, 2016: 90, 2017: 190, 2018: 150, 2019: 230,
+    2020: 420, // COVID : la valeur monta, demande de semi-conducteurs
+    2021: 590, 2022: 420, 2023: 620, 2024: 780, 2025: 840, 2026: 880,
+  },
+
+  // ── Passe 3 : les trois supports non cotés que les patrons P07 et P12 exigent
+  //
+  // Ces trois séries ne sont pas des cours de bourse et ne prétendent pas
+  // l'être. Ce sont des **prix de souscription**, seuls prix auxquels ces
+  // supports s'achètent réellement, et la règle « quantité dérivée du montant »
+  // en a besoin autant que d'un cours coté : sans eux, P07 et P12 ne peuvent
+  // écrire aucune ligne (prix inconnu → pas de ligne), et l'assurance-vie comme
+  // les SCPI disparaîtraient de l'historique.
+  //
+  // Le fonds euro vaut 1,00 € la part par construction : ce n'est pas une
+  // valeur observée mais une convention de l'enveloppe — un euro versé est une
+  // part. L'inscrire ici plutôt que de coder « 1 » en dur dans le patron garde
+  // une seule porte d'entrée aux prix, et rend l'hypothèse lisible.
+
+  // Fonds euro — part conventionnelle à 1,00 €, sur toute la plage.
+  "FE-LINXEA": {
+    2001: 1, 2002: 1, 2003: 1, 2004: 1, 2005: 1, 2006: 1, 2007: 1, 2008: 1,
+    2009: 1, 2010: 1, 2011: 1, 2012: 1, 2013: 1, 2014: 1, 2015: 1, 2016: 1,
+    2017: 1, 2018: 1, 2019: 1, 2020: 1, 2021: 1, 2022: 1, 2023: 1, 2024: 1,
+    2025: 1, 2026: 1,
+  },
+  // SCPI Primovie — prix de part, révisé par la société de gestion. Une SCPI ne
+  // décroche pas en 2008 ni en 2020 comme une action : le prix de part suit la
+  // valeur d'expertise du parc, avec beaucoup d'inertie et une seule baisse
+  // récente (2023, remontée des taux).
+  PRIMOVIE: {
+    2012: 183, 2013: 187, 2014: 190, 2015: 193, 2016: 196, 2017: 199,
+    2018: 203, 2019: 203, 2020: 203, 2021: 208, 2022: 208,
+    2023: 194, // révision à la baisse du prix de part
+    2024: 190, 2025: 190, 2026: 190,
+  },
+  // SCPI Épargne Pierre — commercialisée à partir de 2013.
+  "EPARGNE-PIERRE": {
+    2013: 183, 2014: 185, 2015: 189, 2016: 194, 2017: 200, 2018: 205,
+    2019: 205, 2020: 205, 2021: 208, 2022: 208, 2023: 208, 2024: 215,
+    2025: 215, 2026: 215,
+  },
+};
+
+/**
+ * Lit le cours d'un ticker pour une année donnée. Rend `undefined` — pas
+ * `0`, pas une valeur interpolée — quand l'année est absente de la table.
+ * UNKNOWN ≠ ZERO : c'est à l'appelant (les patrons de la passe suivante) de
+ * décider comment traiter l'absence (position au coût de revient, point
+ * marqué estimé), jamais à cette fonction de la masquer.
+ */
+export function historicalPriceOf(ticker: string, year: number): Prisma.Decimal | undefined {
+  const series = HISTORICAL_PRICES[ticker];
+  if (!series) return undefined;
+  const price = series[year];
+  if (price === undefined) return undefined;
+  return D(price);
+}
+
+/** Une ligne de `AssetDailyClose` telle que le seed l'écrit. */
+export type SeedCloseRow = {
+  assetId: string;
+  day: string;
+  closeEur: Prisma.Decimal;
+  source: string;
+};
+
+/**
+ * Clé de jour de la clôture annuelle d'une année de l'historique long : le
+ * dernier jour **ouvré** de décembre. Le 31 décembre tombe un samedi ou un
+ * dimanche environ deux années sur sept — y dater une clôture inventerait une
+ * séance. Ici le glissement est le bon traitement (et non l'omission comme
+ * pour la fenêtre récente) : une seule ligne par an et par actif, donc aucun
+ * jour ouvré voisin déjà occupé, donc aucun doublon possible.
+ *
+ * `everyDay` inverse la règle pour les marchés ouverts sept jours sur sept :
+ * le 31 décembre y **est** une séance, donc rien à glisser. Le cas est réel —
+ * `HISTORICAL_PRICES` porte BTC et ETH dès 2017, et le 31/12/2017 est un
+ * dimanche : sans ce paramètre, la clôture annuelle 2017 du Bitcoin serait
+ * datée du vendredi 29, jour où le cours du bitcoin n'était pas celui-là.
+ */
+export function historicalCloseDayKey(year: number, everyDay = false): string {
+  const dec31 = new Date(Date.UTC(year, 11, 31, 10, 0, 0));
+  return dayKeyOf(everyDay ? dec31 : previousBusinessDay(dec31));
+}
+
+/** Le strict nécessaire d'une position pour en dériver ses clôtures récentes. */
+export type ClosablePosition = {
+  id: string;
+  ticker: string;
+  /**
+   * Décide du calendrier de cotation de la ligne (`quotesEveryDay`) : une
+   * crypto cote le week-end, une action non. Sans cette information ici, la
+   * fonction ne pourrait trancher que sur la date — c'est-à-dire appliquer le
+   * calendrier d'Euronext au bitcoin.
+   */
+  assetClass: string;
+  buyPrice: number;
+  marketPrice: number;
+  openDaysAgo: number;
+};
+
+/** Clé de jour de `n` jours avant `from`, selon la convention de `daysAgo`. */
+function dayKeyDaysAgo(from: Date, n: number): string {
+  const d = new Date(from.getTime());
+  d.setDate(d.getDate() - n);
+  d.setHours(10 + (n % 7), n % 50, 0, 0);
+  return dayKeyOf(d);
+}
+
+/**
+ * Clôtures journalières de la fenêtre récente d'une position.
+ *
+ * Interpole la tendance achat → marché et y superpose une volatilité
+ * journalière bornée, de sorte que la dernière clôture retombe exactement sur
+ * le cours coté. La marche est déterministe (générateur ensemencé par le
+ * ticker) : deux seeds successifs produisent la même histoire, ce dont les
+ * tests e2e dépendent.
+ *
+ * Pour une ligne dont le marché ferme le week-end, les samedis et dimanches ne
+ * reçoivent **aucune ligne** : une clôture un jour non ouvré n'existe pas,
+ * aucune place FR/US ne l'aurait produite, et tout code qui lit « une clôture
+ * = une séance » serait trompé par une telle écriture. Le choix est l'omission
+ * et non le glissement au jour ouvré précédent : glisser ferait retomber
+ * samedi *et* dimanche sur le vendredi qui porte déjà sa propre clôture, soit
+ * trois lignes pour une même clé `(assetId, day)` — que le `skipDuplicates` de
+ * l'insertion réduirait silencieusement à la première venue, donc à une valeur
+ * choisie par l'ordre de la boucle plutôt que par le calendrier. Le vendredi
+ * voisin porte déjà l'information du week-end ; le moteur reporte la dernière
+ * clôture connue.
+ *
+ * Pour une ligne qui cote sept jours sur sept (`quotesEveryDay`, les cryptos),
+ * la règle ne s'applique pas : samedi et dimanche sont des séances pleines et
+ * les omettre amputerait la série de deux points par semaine sans qu'aucun
+ * marché ne l'ait fermée. La fenêtre est alors continue.
+ *
+ * Conséquence sur l'ancrage au cours coté : c'est le dernier jour **de
+ * séance** de la fenêtre qui vaut exactement `marketPrice` — `k = 0` pour une
+ * crypto, le dernier jour ouvré sinon. Un réamorçage un dimanche laisse ainsi
+ * la série d'une action se terminer le vendredi sur le cours coté, et celle
+ * d'une crypto se terminer le dimanche même, sur son propre cours coté — et
+ * non sur un point de la marche aléatoire dans un cas comme dans l'autre.
+ *
+ * Le générateur avance dans tous les cas à chaque jour civil, week-ends
+ * compris : le retour à la moyenne du `wobble` se mesure en temps calendaire,
+ * et sauter les tirages du week-end déformerait la marche sans rien y gagner.
+ * Cela garde aussi les deux calendriers comparables — une action et une crypto
+ * ouvertes le même jour partagent la même horloge de volatilité.
+ *
+ * @param from Instant de référence — injectable pour rendre les tests
+ *   déterministes plutôt que dépendants du jour d'exécution.
+ */
+export function recentCloseRows(
+  p: ClosablePosition,
+  fx: number,
+  from: Date = new Date(),
+): SeedCloseRow[] {
+  const rows: SeedCloseRow[] = [];
+  const days = Math.min(p.openDaysAgo, THREE_YEARS);
+  const everyDay = quotesEveryDay(p.assetClass);
+
+  // Dernier jour de séance de la fenêtre : `k = 0` pour un marché ouvert 7j/7,
+  // sinon le dernier jour ouvré — au plus deux jours en arrière, et `-1` si la
+  // fenêtre entière est un week-end (position ouverte la veille).
+  let lastBusinessK = -1;
+  for (let k = 0; k <= days; k++) {
+    if (everyDay || !isWeekendDayKey(dayKeyDaysAgo(from, k))) {
+      lastBusinessK = k;
+      break;
+    }
+  }
+
+  let rnd = hashSeed(p.ticker);
+  const drift = (p.marketPrice - p.buyPrice) / Math.max(days, 1);
+  let wobble = 0;
+  for (let k = days; k >= 0; k--) {
+    rnd = (rnd * 1664525 + 1013904223) >>> 0;
+    const shock = (rnd / 0xffffffff - 0.5) * 0.02;
+    // Retour à la moyenne : l'écart ne dérive pas indéfiniment.
+    wobble = wobble * 0.9 + shock;
+    const day = dayKeyDaysAgo(from, k);
+    if (!everyDay && isWeekendDayKey(day)) continue;
+    const trend = p.buyPrice + drift * (days - k);
+    const native =
+      k === lastBusinessK ? p.marketPrice : Math.max(trend * (1 + wobble), 0.0001);
+    rows.push({
+      assetId: p.id,
+      day,
+      closeEur: D(String(moneyN(native * fx))),
+      source: "seed",
+    });
+  }
+  return rows;
 }
 
 type AssetSeed = {
@@ -662,11 +1215,28 @@ export async function seedUserPortfolio(
         événement pour une ligne AV, CRYPTO ou IMMOBILIER élargirait ce
         périmètre sans que rien ne le demande.
 
-        La date retenue est celle de **création de la ligne**, jamais sa date
-        d'acquisition. `acquisitionDate` remonte à plusieurs années : s'en
-        servir affirmerait que l'enveloppe était connue à cette date, alors que
-        le seed ne l'établit qu'à l'instant présent. Ce serait exactement la
-        rétro-projection que le journal existe pour interdire.
+        La date retenue est celle de l'**acquisition de la ligne**, et c'est un
+        revirement assumé par rapport à la version précédente de ce bloc.
+
+        Elle datait l'événement de la création de l'enregistrement, au motif
+        qu'affirmer l'enveloppe à la date d'achat serait une rétro-projection.
+        L'argument est juste — pour une ligne **importée**. Le journal existe
+        précisément pour ne pas inventer le passé d'une donnée dont on hérite,
+        et cette règle ne bouge pas d'un pouce hors de ce fichier.
+
+        Mais le seed n'hérite de rien : il est l'auteur du fait. C'est lui qui
+        décide que cette ligne fut achetée en PEA il y a six ans ; le dire à la
+        date d'achat n'est pas une conjecture, c'est l'énoncé de ce qu'il vient
+        d'établir. Dater l'événement d'aujourd'hui revenait à faire dire au jeu
+        de démonstration « l'enveloppe n'est connue que depuis ce matin »,
+        c'est-à-dire à rendre `UNKNOWN` toute la profondeur de l'historique.
+
+        Le coût n'était pas théorique : `resolveEnvelopeAt` rendait `null` sur
+        tout le passé, et la courbe d'un compte-titres — PEA, CTO, ou leur
+        somme — se réduisait à un point unique, celui du jour du réamorçage.
+
+        Ce chemin ne s'exécute que pour les portefeuilles semés. Aucun import
+        réel n'y passe, et aucun n'antidate son enveloppe.
 
         Aucun compte titres n'est rattaché : le seed n'en crée aucun, et les
         supprime tous au nettoyage. `securitiesAccountId` à `null` enregistre
@@ -677,7 +1247,7 @@ export async function seedUserPortfolio(
           data: {
             assetId: cree.id,
             userId,
-            occurredAt: cree.createdAt,
+            occurredAt: daysAgo(s.openDaysAgo),
             kind: "OBSERVED",
             accountType: cree.accountType,
             securitiesAccountId: null,
@@ -884,6 +1454,57 @@ export async function seedUserPortfolio(
       notes: note("Transfert crypto → CTO"),
   });
 
+  /*
+    Trois écritures datées dans les trois derniers mois.
+
+    Le KPI « réalisé et revenus » se lit sur une fenêtre glissante, et le
+    journal généré plus bas ne garantit rien à l'intérieur : ses ventes
+    partielles et ses coupons tombent où les calendriers relatifs les placent,
+    et la fenêtre 3M s'était retrouvée sans une seule vente. Une tuile qui
+    affiche zéro parce que le jeu de démonstration est muet n'apprend rien de
+    la tuile.
+
+    Elles sont donc écrites ici, avant le plafond `TARGET_TX` : leur présence
+    ne dépend pas de la place qu'il reste. Les montants sont adossés au seed,
+    pas choisis pour faire un joli chiffre — le cours de vente est le cours de
+    marché de la ligne, le coupon suit la convention du générateur
+    (`qty × 2 % × nominal`).
+  */
+  const cac = positions.find((p) => p.ticker === "CAC.PA")!;
+  const san = positions.find((p) => p.ticker === "SAN.PA")!;
+  const oat = positions.find((p) => p.ticker === "FR0013313582")!;
+
+  pushTx({
+    type: "VENTE",
+    platformId: cac.platformId,
+    assetId: cac.id,
+    quantity: 20,
+    unitPrice: cac.marketPrice,
+    fees: 2.5,
+    currency: cac.currency,
+    occurredAt: daysAgo(70),
+    notes: note("Allègement Lyxor CAC 40 (PEA)"),
+  });
+  qtyLive.set(cac.id, (qtyLive.get(cac.id) ?? cac.qty) - 20);
+  pushTx({
+    type: "DIVIDENDE",
+    platformId: san.platformId,
+    assetId: san.id,
+    cashAmount: 180,
+    currency: san.currency,
+    occurredAt: daysAgo(53),
+    notes: note("Dividende annuel Sanofi (PEA)"),
+  });
+  pushTx({
+    type: "COUPON",
+    platformId: oat.platformId,
+    assetId: oat.id,
+    cashAmount: moneyN(oat.qty * 0.02 * oat.buyPrice),
+    currency: oat.currency,
+    occurredAt: daysAgo(27),
+    notes: note("Coupon OAT 2030"),
+  });
+
   const lastDay = new Map(positions.map((p) => [p.id, p.openDaysAgo]));
   const activityPlan: Array<() => void> = [];
 
@@ -1064,6 +1685,1021 @@ export async function seedUserPortfolio(
     });
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Historique long 2001-2026 — les seize patrons
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // Ce bloc s'exécute **après** le plafond `TARGET_TX` : l'historique ne dépend
+  // pas de la place qu'il reste dans la fenêtre récente, et la fenêtre récente
+  // ne change pas d'un iota parce que l'historique existe. Les trois écritures
+  // K2 (`daysAgo(70)`, `daysAgo(53)`, `daysAgo(27)`) restent intactes, et
+  // aucun patron n'achète CAC.PA : le CUMP de cette ligne est un coût moyen
+  // pondéré *depuis l'origine*, un seul achat historique de plus le déplacerait
+  // et la plus-value figée de la vente K2 (+117,08 €) avec lui. P02 achète donc
+  // un ETF indiciel distinct — voir plus bas.
+  //
+  // Deux régimes temporels cohabitent volontairement : `daysAgo` pour le
+  // présent glissant, le calendrier ancré (`anchoredDate`) pour le passé fixe.
+  //
+  // Écarts assumés par rapport à la table des patrons, tous mesurés :
+  //
+  //  1. **Plateformes.** La table place P01-P04 sur Boursorama et P05-P06 sur
+  //     Fortuneo. Le seed fait l'inverse : ses lignes PEA vivent sur Fortuneo et
+  //     ses lignes CTO sur Boursorama. Or `applyTransaction` indexe les
+  //     positions par `(assetId, platformId)` — acheter une ligne sur une
+  //     plateforme et la vendre sur une autre scinderait le lot en deux et
+  //     casserait le CUMP. Chaque écriture est donc portée par la plateforme qui
+  //     détient réellement l'actif. C'est explicite, jamais inconnu.
+  //  2. **P07.** La table dit « APPORT ». Un APPORT ne crée aucune position :
+  //     il crédite la trésorerie bancaire (`applyTransaction`, cas `APPORT`), et
+  //     l'encours du fonds euro n'existerait pas — P08, qui arbitre 15 % de cet
+  //     encours, n'aurait rien à vendre. Écrire les deux (APPORT + ACHAT le même
+  //     jour) compterait l'argent deux fois, l'apport gonflant le cash pendant
+  //     que l'achat crée la position. Le versement est donc un ACHAT de parts de
+  //     fonds euro à 1,00 € — un euro versé, une part.
+  //  3. **P13.** « 600 → 2 000 € » ne se déduit d'aucune échelle base 2001 :
+  //     `scaledAmount(600, 2026)` vaut 3 260 €, pas 2 000 €. La règle générale
+  //     (« montants en base 2001, à passer par `scaledAmount` ») l'emporte sur
+  //     la borne affichée ; les achats crypto valent donc 1 770 € en 2017 et
+  //     3 260 € en 2026.
+  //  4. **Assureur historique.** Non créé : une plateforme d'assurance
+  //     supplémentaire exigerait de dupliquer le fonds euro et l'UC en actifs
+  //     neufs, que le rattachement `LifeInsuranceSupport` plus bas raccrocherait
+  //     au mauvais contrat. P07 et P08 travaillent sur les supports existants.
+
+  const HIST_SEED = 25;
+  /** Trésorerie par plateforme, telle que le grand livre la voit. */
+  const histCash = new Map<string, Prisma.Decimal>();
+  /** Quantités **acquises par l'historique**, pour la cohérence de stock. */
+  const histQty = new Map<string, Prisma.Decimal>();
+  /** Date du premier achat historique d'une ligne (P03 : la plus ancienne). */
+  const histFirstBuy = new Map<string, Date>();
+
+  /** Devises du seed → euro. Mêmes taux que `fxNum`, en `Decimal`. */
+  const fxDec = (cur: string): Prisma.Decimal =>
+    cur === "USD" ? D("0.92") : cur === "CHF" ? D("1.05") : D("1");
+
+  const histRngs = new Map<string, Rng>();
+  const histDays = new Map<string, Set<string>>();
+  /**
+   * Date ancrée pour un patron : un flux PRNG isolé et un jeu de jours déjà
+   * pris par patron, conformément à la convention de `mulberry32` (dérive de
+   * date d'abord, dérive de montant ensuite).
+   */
+  function histDate(pattern: string, year: number, anchor: number): Date {
+    let rng = histRngs.get(pattern);
+    if (!rng) {
+      rng = deriveRng(HIST_SEED, pattern);
+      histRngs.set(pattern, rng);
+    }
+    let used = histDays.get(pattern);
+    if (!used) {
+      used = new Set<string>();
+      histDays.set(pattern, used);
+    }
+    return anchoredDate(rng, year, anchor, used);
+  }
+  /** Tirage entier propre à un patron, consommé **avant** ses dates. */
+  function histInt(pattern: string, min: number, max: number): number {
+    let rng = histRngs.get(pattern);
+    if (!rng) {
+      rng = deriveRng(HIST_SEED, pattern);
+      histRngs.set(pattern, rng);
+    }
+    return nextInt(rng, min, max);
+  }
+
+  /**
+   * Écriture historique — tout en `Decimal`, aucun `number` en chemin métier.
+   *
+   * Reprend à l'identique les conventions de `pushTx` (brut, net, retenue à la
+   * source) sans passer par son `moneyN` flottant, que la consigne interdit
+   * d'étendre. `platformId`, `currency` et `fxRateToEur` sont toujours
+   * explicites : aucune écriture ne sort d'ici en UNKNOWN.
+   */
+  function pushHistTx(p: {
+    type: string;
+    platformId: string;
+    assetId?: string | null;
+    quantity?: Prisma.Decimal | null;
+    unitPrice?: Prisma.Decimal | null;
+    fees?: Prisma.Decimal;
+    currency?: string;
+    /** Montant en **devise de l'écriture**, opérations de trésorerie. */
+    cashAmount?: Prisma.Decimal | null;
+    occurredAt: Date;
+    notes: string;
+    whtRate?: Prisma.Decimal;
+  }): void {
+    /*
+      Aucune écriture datée après aujourd'hui.
+
+      Les patrons parcourent des années civiles entières : celle en cours n'est
+      pas terminée, et leurs ancres de fin d'année — le loyer agrégé de
+      décembre, le retrait de trésorerie de novembre — tombaient donc dans le
+      futur. Un journal de démonstration qui contient l'achat de la semaine
+      prochaine n'est pas un historique dense, c'est une prévision, et rien à
+      l'écran ne distinguerait les deux.
+
+      Le rejeu comptable, lui, les acceptait sans broncher : c'est la fenêtre
+      glissante qui les révélait, en rangeant une opération de novembre parmi
+      les « trois derniers mois ».
+    */
+    if (p.occurredAt.getTime() > SEED_INSTANT) return;
+
+    const currency = (p.currency ?? "EUR").toUpperCase();
+    const fx = fxDec(currency);
+    const fees = p.fees ?? D(0);
+    const feesEur = fees.mul(fx).toDecimalPlaces(2);
+    const cash = p.cashAmount ?? D(0);
+    let grossEur = D(0);
+    let net = D(0);
+    let whtEur = D(0);
+    if (p.type === "ACHAT" || p.type === "VENTE") {
+      grossEur = (p.quantity ?? D(0))
+        .mul(p.unitPrice ?? D(0))
+        .mul(fx)
+        .toDecimalPlaces(2);
+    } else if (p.type === "APPORT") {
+      grossEur = cash.mul(fx).toDecimalPlaces(2);
+      net = grossEur;
+    } else if (p.type === "RETRAIT" || p.type === "FRAIS") {
+      grossEur = cash.mul(fx).toDecimalPlaces(2);
+      net = grossEur.plus(feesEur).negated();
+    } else if (
+      p.type === "DIVIDENDE" ||
+      p.type === "COUPON" ||
+      p.type === "LOYER" ||
+      p.type === "INTERET"
+    ) {
+      grossEur = cash.mul(fx).toDecimalPlaces(2);
+      whtEur = p.whtRate ? grossEur.mul(p.whtRate).toDecimalPlaces(2) : D(0);
+      net = grossEur.minus(feesEur).minus(whtEur);
+    }
+
+    // Trésorerie de plateforme, pour la règle « un RETRAIT seulement si le
+    // solde reste ≥ 0 ». Les achats et ventes n'y touchent pas — c'est la règle
+    // du grand livre, pas une simplification d'ici.
+    histCash.set(
+      p.platformId,
+      (histCash.get(p.platformId) ?? D(0)).plus(net)
+    );
+
+    txs.push({
+      userId,
+      type: p.type,
+      platformId: p.platformId,
+      toPlatformId: null,
+      assetId: p.assetId ?? null,
+      quantity: p.quantity ?? null,
+      unitPrice: p.unitPrice ?? null,
+      fees,
+      currency,
+      fxRateToEur: fx,
+      grossAmountEur: grossEur,
+      feesEur,
+      netCashImpactEur: net,
+      withholdingTaxEur: whtEur,
+      withholdingTaxRate: p.whtRate ?? null,
+      occurredAt: p.occurredAt,
+      notes: p.notes,
+    });
+  }
+
+  const byTicker = new Map(positions.map((p) => [p.ticker, p]));
+  const posOf = (ticker: string) => {
+    const p = byTicker.get(ticker);
+    if (!p) throw new Error(`seed historique : ticker inconnu ${ticker}`);
+    return p;
+  };
+
+  /** Frais de courtage forfaitaires d'une écriture titres historique. */
+  const HIST_TRADE_FEES = D("2.50");
+
+  /**
+   * Achat historique : la quantité se dérive du **montant**, jamais l'inverse.
+   * Prix inconnu cette année-là → aucune ligne. Pas de repli sur un coût
+   * inventé, pas d'interpolation entre deux années connues.
+   */
+  function histBuy(args: {
+    ticker: string;
+    year: number;
+    when: Date;
+    amountEur: Prisma.Decimal;
+    notes: string;
+    fees?: Prisma.Decimal;
+  }): boolean {
+    const pos = posOf(args.ticker);
+    const price = historicalPriceOf(args.ticker, args.year);
+    if (price === undefined || price.lessThanOrEqualTo(0)) return false;
+    const fx = fxDec(pos.currency);
+    const qty = args.amountEur.div(fx).div(price).toDecimalPlaces(6);
+    if (qty.lessThanOrEqualTo(0)) return false;
+    pushHistTx({
+      type: "ACHAT",
+      platformId: pos.platformId,
+      assetId: pos.id,
+      quantity: qty,
+      unitPrice: price,
+      fees: args.fees ?? HIST_TRADE_FEES,
+      currency: pos.currency,
+      occurredAt: args.when,
+      notes: args.notes,
+    });
+    histQty.set(pos.id, (histQty.get(pos.id) ?? D(0)).plus(qty));
+    if (!histFirstBuy.has(pos.id)) histFirstBuy.set(pos.id, args.when);
+    return true;
+  }
+
+  /**
+   * Vente historique d'une fraction du stock **historiquement détenu**.
+   * Stock nul ou prix inconnu → l'écriture est sautée, jamais rabotée.
+   */
+  function histSell(args: {
+    ticker: string;
+    year: number;
+    when: Date;
+    fraction: Prisma.Decimal;
+    notes: string;
+  }): Prisma.Decimal | null {
+    const pos = posOf(args.ticker);
+    const held = histQty.get(pos.id) ?? D(0);
+    if (held.lessThanOrEqualTo(0)) return null;
+    const price = historicalPriceOf(args.ticker, args.year);
+    if (price === undefined || price.lessThanOrEqualTo(0)) return null;
+    const qty = held.mul(args.fraction).toDecimalPlaces(6);
+    if (qty.lessThanOrEqualTo(0) || qty.greaterThan(held)) return null;
+    const fx = fxDec(pos.currency);
+    pushHistTx({
+      type: "VENTE",
+      platformId: pos.platformId,
+      assetId: pos.id,
+      quantity: qty,
+      unitPrice: price,
+      fees: HIST_TRADE_FEES,
+      currency: pos.currency,
+      occurredAt: args.when,
+      notes: args.notes,
+    });
+    histQty.set(pos.id, held.minus(qty));
+    return qty.mul(price).mul(fx).toDecimalPlaces(2);
+  }
+
+  /**
+   * Premier ticker de la rotation dont le cours est connu cette année-là.
+   *
+   * « Un patron ne s'exécute jamais avant l'ouverture de sa famille : on
+   * décale, on n'anticipe pas. » NVDA n'existe pas avant 2010, AAPL/MSFT pas
+   * avant 2005 : la rotation avance jusqu'au support qui cote, plutôt que de
+   * perdre l'écriture ou d'inventer un cours.
+   */
+  function rotateWithPrice(
+    list: readonly string[],
+    year: number,
+    startIndex: number
+  ): string | null {
+    for (let k = 0; k < list.length; k++) {
+      const t = list[(startIndex + k) % list.length]!;
+      if (historicalPriceOf(t, year) !== undefined) return t;
+    }
+    return null;
+  }
+
+  // ── P02 — la ligne indicielle du PEA ───────────────────────────────────────
+  //
+  // Elle n'existe pas dans `assetSeeds` : le seul ETF indiciel du PEA y est
+  // CAC.PA, et le propriétaire a figé la plus-value de sa vente K2 (+117,08 €)
+  // sur son unique achat de 120 titres à 68 €. Un versement annuel sur cette
+  // ligne porterait le CUMP de 68,0208 à 51,5502 et la plus-value à +446,50 € —
+  // c'est la définition même du coût moyen pondéré, aucune règle de date n'y
+  // change quoi que ce soit. P02 achète donc un ETF distinct, et CAC.PA garde
+  // son achat unique.
+  //
+  // L'événement d'enveloppe est daté du **premier achat**, comme pour toute
+  // ligne PEA ou CTO du seed : sans lui, `resolveEnvelopeAt` rendrait `UNKNOWN`
+  // sur toute la profondeur de la ligne et la courbe Titres retomberait au point
+  // unique que le commit précédent a justement fait disparaître.
+  const P02_FIRST_YEAR = 2008;
+  const p02Open = histDate("P02-ouverture", P02_FIRST_YEAR, 100);
+  const p02Asset = await prisma.$transaction(async (tx) => {
+    const cree = await tx.asset.create({
+      data: {
+        userId,
+        platformId: fortuneo.id,
+        name: "Amundi CAC 40 UCITS ETF (PEA)",
+        ticker: "C50.PA",
+        assetClass: "ACTIONS",
+        category: "ETF",
+        accountType: "PEA",
+        currency: "EUR",
+        priceProvider: "YAHOO",
+        providerSymbol: "C50.PA",
+        acquisitionDate: p02Open,
+        notes: note("Versement indiciel annuel (P02)"),
+      },
+    });
+    await tx.assetEnvelopeEvent.create({
+      data: {
+        assetId: cree.id,
+        userId,
+        occurredAt: p02Open,
+        kind: "OBSERVED",
+        accountType: "PEA",
+        securitiesAccountId: null,
+        envelopeType: null,
+      },
+    });
+    return cree;
+  });
+  const p02Seed: Pos = {
+    id: p02Asset.id,
+    name: "Amundi CAC 40 UCITS ETF (PEA)",
+    ticker: "C50.PA",
+    assetClass: "ACTIONS",
+    category: "ETF",
+    accountType: "PEA",
+    platformId: fortuneo.id,
+    currency: "EUR",
+    priceProvider: "YAHOO",
+    providerSymbol: "C50.PA",
+    qty: 0,
+    buyPrice: 135,
+    marketPrice: 180,
+    openDaysAgo: THREE_YEARS,
+  };
+  positions.push(p02Seed);
+  byTicker.set("C50.PA", p02Seed);
+
+  // ── P01 — achat PEA blue chip, 3/an, 2001-2026 ─────────────────────────────
+  //
+  // SU.PA tient lieu de valeur industrielle française jusqu'en 2013 ; AIR.PA
+  // prend le relais en 2014 (avant, c'était EADS, hors périmètre). La rotation
+  // ne « saute » pas le cinquième support : elle change de titre à la date où
+  // le titre change de nom.
+  const P01_ROTATION = ["AI.PA", "OR.PA", "SAN.PA", "RMS.PA", "SU.PA"] as const;
+  const P01_ANCHORS = [45, 160, 285];
+  const p01Assets = new Set<string>();
+  let p01Index = 0;
+  for (let year = 2001; year <= 2026; year++) {
+    for (const anchor of P01_ANCHORS) {
+      const raw = P01_ROTATION[p01Index % P01_ROTATION.length]!;
+      p01Index++;
+      const ticker = raw === "SU.PA" && year >= 2014 ? "AIR.PA" : raw;
+      const when = histDate("P01", year, anchor);
+      const done = histBuy({
+        ticker,
+        year,
+        when,
+        amountEur: scaledAmount(700, year),
+        notes: note(`P01 versement PEA ${ticker} ${year}`),
+      });
+      if (done) p01Assets.add(posOf(ticker).id);
+    }
+  }
+
+  // ── P02 — achat PEA indiciel, 1/an, 2008-2026 ──────────────────────────────
+  for (let year = P02_FIRST_YEAR; year <= 2026; year++) {
+    const when = year === P02_FIRST_YEAR ? p02Open : histDate("P02", year, 100);
+    histBuy({
+      ticker: "C50.PA",
+      year,
+      when,
+      amountEur: scaledAmount(900, year),
+      notes: note(`P02 versement indiciel PEA ${year}`),
+    });
+  }
+
+  // ── P03 — arbitrage PEA, 1-2/an, 2004-2026 ─────────────────────────────────
+  //
+  // Allège la ligne P01 **la plus anciennement détenue** encore en stock, de
+  // 60 % de sa position. Stock nul ou cours inconnu : l'écriture est sautée.
+  const P03_ANCHORS = [205, 330];
+  for (let year = 2004; year <= 2026; year++) {
+    const count = histInt("P03-cadence", 1, 2);
+    for (let k = 0; k < count; k++) {
+      /*
+        Une ligne déjà allégée cesse d'être la candidate.
+
+        Le critère « la plus anciennement détenue et encore en stock » ne
+        suffit pas : vendre 60 % n'épuise jamais une position, il la divise par
+        2,5. La même ligne restait donc la plus ancienne et se faisait alléger
+        chaque année — 0,26 titre, puis 0,10, puis 0,04 — jusqu'à des ventes de
+        vingt-trois centimes. Une décroissance géométrique, pas un arbitrage.
+
+        Deux règles y répondent ensemble, et l'une sans l'autre ne suffit pas.
+        Un seuil de candidature écarte les lignes qu'il n'y a plus lieu
+        d'arbitrer. Et quand le reliquat passerait sous ce seuil, la ligne est
+        **soldée** au lieu d'être grignotée : elle quitte alors le vivier pour
+        de bon, au lieu d'y rester éternellement comme la plus ancienne.
+
+        Le seuil seul ne réglait rien sur une valeur chère : Hermès à 2 200 €
+        le titre franchissait encore 1 000 € de position avec un demi-titre, et
+        se faisait alléger de 0,028 titre. Ce n'est pas une erreur d'arrondi,
+        c'est la règle de gestion qui manquait.
+      */
+      const P03_SEUIL_EUR = D(1000);
+      const candidates = [...p01Assets]
+        .filter((id) => {
+          const qty = histQty.get(id) ?? D(0);
+          if (!qty.greaterThan(0)) return false;
+          const p = positions.find((x) => x.id === id);
+          const cours = p ? historicalPriceOf(p.ticker, year) : undefined;
+          if (cours === undefined) return false;
+          return qty.mul(cours).greaterThanOrEqualTo(P03_SEUIL_EUR);
+        })
+        .sort((a, b) => {
+          const da = histFirstBuy.get(a)?.getTime() ?? 0;
+          const db = histFirstBuy.get(b)?.getTime() ?? 0;
+          return da - db;
+        });
+      const target = candidates
+        .map((id) => positions.find((p) => p.id === id)!)
+        .find((p) => historicalPriceOf(p.ticker, year) !== undefined);
+      if (!target) continue;
+      const coursCible = historicalPriceOf(target.ticker, year)!;
+      const resteApres = (histQty.get(target.id) ?? D(0))
+        .mul(D(1).minus(D("0.6")))
+        .mul(coursCible);
+      const solde = resteApres.lessThan(P03_SEUIL_EUR);
+      histSell({
+        ticker: target.ticker,
+        year,
+        when: histDate("P03", year, P03_ANCHORS[k]!),
+        fraction: solde ? D(1) : D("0.6"),
+        notes: note(
+          solde
+            ? `P03 solde de la ligne PEA ${target.ticker} ${year}`
+            : `P03 arbitrage PEA ${target.ticker} ${year}`
+        ),
+      });
+    }
+  }
+
+  // ── P04 — dividende PEA, 1/an, 2003-2026 ───────────────────────────────────
+  //
+  // Servi par la ligne PEA la mieux dotée à cette date, valorisée au cours de
+  // l'année. Retenue à la source nulle : un dividende français encaissé dans un
+  // PEA n'en supporte aucune.
+  for (let year = 2003; year <= 2026; year++) {
+    let best: { pos: Pos; value: Prisma.Decimal } | null = null;
+    for (const p of positions) {
+      if (p.accountType !== "PEA") continue;
+      const held = histQty.get(p.id) ?? D(0);
+      if (held.lessThanOrEqualTo(0)) continue;
+      const price = historicalPriceOf(p.ticker, year);
+      if (price === undefined) continue;
+      const value = held.mul(price).mul(fxDec(p.currency));
+      if (!best || value.greaterThan(best.value)) best = { pos: p, value };
+    }
+    if (!best) continue;
+    pushHistTx({
+      type: "DIVIDENDE",
+      platformId: best.pos.platformId,
+      assetId: best.pos.id,
+      cashAmount: scaledAmount(45, year),
+      currency: "EUR",
+      whtRate: D(0),
+      occurredAt: histDate("P04", year, 130),
+      notes: note(`P04 dividende PEA ${best.pos.ticker} ${year}`),
+    });
+  }
+
+  // ── P05 — achat CTO international, 2/an, 2005-2026 ─────────────────────────
+  //
+  // NESN.SW cote en franc suisse, AAPL / MSFT / NVDA en dollar : le montant
+  // visé est en euro, la quantité se dérive donc du montant **converti**, et
+  // chaque écriture porte son `fxRateToEur`. La table de cours ne convertit
+  // rien, et c'est voulu.
+  const P05_ROTATION = ["AAPL", "MSFT", "NESN.SW", "ASML.AS", "NVDA"] as const;
+  const P05_ANCHORS = [75, 250];
+  let p05Index = 0;
+  for (let year = 2005; year <= 2026; year++) {
+    for (const anchor of P05_ANCHORS) {
+      const ticker = rotateWithPrice(P05_ROTATION, year, p05Index);
+      p05Index++;
+      if (!ticker) continue;
+      histBuy({
+        ticker,
+        year,
+        when: histDate("P05", year, anchor),
+        amountEur: scaledAmount(800, year),
+        notes: note(`P05 versement CTO ${ticker} ${year}`),
+      });
+    }
+  }
+
+  // ── P06 — dividende CTO US, 1/an, 2007-2026 ────────────────────────────────
+  //
+  // Retenue à la source américaine de 15 % : le net crédité est le brut moins
+  // la retenue, et le montant est libellé en dollar — d'où la division par le
+  // taux de change, pour que la cible en euro soit tenue.
+  for (let year = 2007; year <= 2026; year++) {
+    const ticker = year % 2 === 1 ? "AAPL" : "MSFT";
+    const pos = posOf(ticker);
+    if ((histQty.get(pos.id) ?? D(0)).lessThanOrEqualTo(0)) continue;
+    const fx = fxDec(pos.currency);
+    pushHistTx({
+      type: "DIVIDENDE",
+      platformId: pos.platformId,
+      assetId: pos.id,
+      cashAmount: scaledAmount(40, year).div(fx).toDecimalPlaces(2),
+      currency: pos.currency,
+      whtRate: D("0.15"),
+      occurredAt: histDate("P06", year, 215),
+      notes: note(`P06 dividende CTO ${ticker} ${year}`),
+    });
+  }
+
+  // ── P07 — versement AV sur le fonds euro, 1/an, 2004-2026 ──────────────────
+  for (let year = 2004; year <= 2026; year++) {
+    histBuy({
+      ticker: "FE-LINXEA",
+      year,
+      when: histDate("P07", year, 20),
+      amountEur: scaledAmount(1200, year),
+      fees: D(0), // Aucun frais d'entrée sur ce contrat (cf. `entryFeePct: 0`).
+      notes: note(`P07 versement AV fonds euro ${year}`),
+    });
+  }
+
+  // ── P08 — arbitrage AV, 1/an, 2009-2026 ────────────────────────────────────
+  //
+  // Vente de 15 % de l'encours fonds euro et achat d'UC le **même jour** : le
+  // produit de la vente finance l'achat, à l'euro près. Si l'encours est nul ou
+  // si CW8.PA ne cote pas encore, rien n'est écrit — ni la vente, ni l'achat.
+  for (let year = 2009; year <= 2026; year++) {
+    if (historicalPriceOf("CW8.PA", year) === undefined) continue;
+    const when = histDate("P08", year, 300);
+    const produit = histSell({
+      ticker: "FE-LINXEA",
+      year,
+      when,
+      fraction: D("0.15"),
+      notes: note(`P08 arbitrage AV — sortie fonds euro ${year}`),
+    });
+    if (produit == null || produit.lessThanOrEqualTo(0)) continue;
+    histBuy({
+      ticker: "CW8.PA",
+      year,
+      when,
+      amountEur: produit,
+      fees: D(0),
+      notes: note(`P08 arbitrage AV — entrée UC ${year}`),
+    });
+  }
+
+  // ── P09 / P10 — acquisition immobilière et son crédit, 2006 ────────────────
+  //
+  // Les frais de notaire ne sont pas une charge : ils entrent dans le prix de
+  // revient du bien, et `applyBuy` les y met. Une écriture `FRAIS` distincte
+  // les aurait sortis du coût d'acquisition et retranchés de la trésorerie.
+  const P09_YEAR = 2006;
+  const p09When = histDate("P09", P09_YEAR, 175);
+  const immo = posOf("IMMO-LYON");
+  pushHistTx({
+    type: "ACHAT",
+    platformId: immo.platformId,
+    assetId: immo.id,
+    quantity: D(1),
+    unitPrice: D(168000),
+    fees: D(12600),
+    currency: "EUR",
+    occurredAt: p09When,
+    notes: note(`P09 acquisition ${immo.name} (${P09_YEAR})`),
+  });
+  histQty.set(immo.id, (histQty.get(immo.id) ?? D(0)).plus(1));
+
+  /*
+    P10 — le prêt de 2006 s'ajoute, il ne remplace rien.
+
+    Le prêt récent (« Crédit immo Lyon », 220 000 € sur 25 ans) reste intact,
+    ses douze échéances aussi. Celui-ci suit la même règle d'amortissement, dans
+    l'autre sens : ici la date d'origine est connue, on amortit donc en avant
+    plutôt qu'à rebours, mais l'ordre des imputations est le même —
+
+        intérêts  = capital_restant × r
+        principal = mensualité − intérêts
+        capital   = capital − principal
+
+    La mensualité couvre d'abord les intérêts, et **seul le solde** réduit le
+    capital. Une mensualité imputée en entier au capital ferait décroître la
+    dette de 833 € par mois, soit 199 920 € remboursés sur 240 mois pour
+    140 000 € empruntés — un prêt qui rapporterait de l'argent à l'emprunteur.
+
+    Une écriture par an, en décembre, portant le capital restant dû **après**
+    la douzième échéance de l'année : le journal des passifs n'a pas besoin de
+    240 lignes pour dessiner un amortissement juste, et `applyMonthlyDebit`
+    n'est pas touché.
+  */
+  const P10_PRINCIPAL = D(140000);
+  const P10_PAYMENT = D(833);
+  const P10_MONTHLY_RATE = D("0.038").div(12);
+  const P10_MONTHS = 240;
+  const pret2006 = await prisma.liability.create({
+    data: {
+      userId,
+      name: "Crédit immo Lyon 2006",
+      initialAmount: P10_PRINCIPAL,
+      remainingAmount: D(0), // recalculé après amortissement
+      currency: "EUR",
+      interestRate: D("3.80"),
+      monthlyPayment: P10_PAYMENT,
+      startDate: p09When,
+      endDate: new Date(
+        Date.UTC(P09_YEAR + 20, p09When.getUTCMonth(), p09When.getUTCDate(), 10)
+      ),
+      // Prêt arrivé à terme : `lastPaymentAppliedAt` au jour de la dernière
+      // échéance, pour qu'aucun débit automatique ne vienne le rejouer.
+      lastPaymentAppliedAt: new Date(
+        Date.UTC(P09_YEAR + 20, p09When.getUTCMonth(), p09When.getUTCDate(), 10)
+      ),
+      paymentDay: 5,
+      bankName: "Crédit Agricole",
+      category: "IMMOBILIER",
+      assetId: immo.id,
+      notes: note("Prêt 20 ans à 3,80 % — acquisition 2006"),
+    },
+  });
+  await prisma.liabilityEvent.create({
+    data: {
+      liabilityId: pret2006.id,
+      type: "OPENING",
+      amount: P10_PRINCIPAL,
+      remainingAfter: P10_PRINCIPAL,
+      eventDate: p09When,
+      notes: note("Déblocage des fonds"),
+    },
+  });
+  const p10End = new Date(
+    Date.UTC(P09_YEAR + 20, p09When.getUTCMonth(), p09When.getUTCDate(), 10)
+  );
+  let p10Crd = P10_PRINCIPAL;
+  let p10Months = 0;
+  for (let year = P09_YEAR; year <= 2026 && p10Months < P10_MONTHS; year++) {
+    const firstMonth = year === P09_YEAR ? p09When.getUTCMonth() + 1 : 0;
+    for (let m = firstMonth; m <= 11 && p10Months < P10_MONTHS; m++) {
+      const interest = p10Crd.mul(P10_MONTHLY_RATE);
+      const principal = P10_PAYMENT.minus(interest);
+      p10Crd = p10Crd.minus(principal);
+      p10Months++;
+      if (p10Crd.lessThan(0)) p10Crd = D(0);
+    }
+    // Aucune échéance datée après la fin du prêt : la dernière écriture est
+    // celle de son terme, portée juste en dessous.
+    const decembre = new Date(Date.UTC(year, 11, 5, 10, 0, 0));
+    if (decembre > p10End) continue;
+    await prisma.liabilityEvent.create({
+      data: {
+        liabilityId: pret2006.id,
+        type: "MONTHLY_DEBIT",
+        amount: P10_PAYMENT,
+        remainingAfter: p10Crd.toDecimalPlaces(2),
+        eventDate: decembre,
+        notes: note(`Échéances ${year} — capital restant dû au 31/12`),
+      },
+    });
+  }
+  await prisma.liabilityEvent.create({
+    data: {
+      liabilityId: pret2006.id,
+      type: "MONTHLY_DEBIT",
+      amount: P10_PAYMENT,
+      remainingAfter: p10Crd.toDecimalPlaces(2),
+      eventDate: p10End,
+      notes: note("Dernière échéance — prêt soldé"),
+    },
+  });
+  await prisma.liability.update({
+    where: { id: pret2006.id },
+    data: { remainingAmount: p10Crd.toDecimalPlaces(2) },
+  });
+
+  // ── P11 — loyers, 1/an agrégé, 2007-2026 ───────────────────────────────────
+  //
+  // 7 200 € en 2007, revalorisés de 1,5 % l'an (indice de référence des
+  // loyers). Montant **absolu** : l'échelle de vie ne s'y applique pas, un
+  // loyer suit son bail et non l'enrichissement du bailleur.
+  for (let year = 2007; year <= 2026; year++) {
+    const loyer = D(7200).mul(D("1.015").pow(year - 2007)).toDecimalPlaces(2);
+    pushHistTx({
+      type: "LOYER",
+      platformId: immo.platformId,
+      assetId: immo.id,
+      cashAmount: loyer,
+      currency: "EUR",
+      occurredAt: histDate("P11", year, 350),
+      notes: note(`P11 loyers ${year} (agrégé)`),
+    });
+  }
+
+  // ── P12 — SCPI, 2012 / 2015 / 2018 / 2021 / 2024 ───────────────────────────
+  //
+  // Épargne Pierre n'est commercialisée qu'à partir de 2013 : la première
+  // souscription va donc à Primovie, les suivantes à Épargne Pierre. Montants
+  // absolus, 5 000 € à 12 000 € par palier.
+  const P12_PLAN: Array<{ year: number; amount: number }> = [
+    { year: 2012, amount: 5000 },
+    { year: 2015, amount: 6750 },
+    { year: 2018, amount: 8500 },
+    { year: 2021, amount: 10250 },
+    { year: 2024, amount: 12000 },
+  ];
+  for (const { year, amount } of P12_PLAN) {
+    const ticker = year >= 2013 ? "EPARGNE-PIERRE" : "PRIMOVIE";
+    histBuy({
+      ticker,
+      year,
+      when: histDate("P12", year, 120),
+      amountEur: D(amount),
+      fees: D(0), // Commission de souscription incluse dans le prix de part.
+      notes: note(`P12 souscription ${ticker} ${year}`),
+    });
+  }
+
+  // ── P13 — crypto, 1-2/an, 2017-2026 ────────────────────────────────────────
+  const P13_ANCHORS = [60, 240];
+  let p13Index = 0;
+  for (let year = 2017; year <= 2026; year++) {
+    const count = histInt("P13-cadence", 1, 2);
+    for (let k = 0; k < count; k++) {
+      const ticker = p13Index % 2 === 0 ? "BTC" : "ETH";
+      p13Index++;
+      histBuy({
+        ticker,
+        year,
+        when: histDate("P13", year, P13_ANCHORS[k]!),
+        amountEur: scaledAmount(600, year),
+        fees: D("1.50"),
+        notes: note(`P13 achat ${ticker} ${year}`),
+      });
+    }
+  }
+
+  // ── P14 — diversifiants non cotés ──────────────────────────────────────────
+  //
+  // Une entrée tous les deux ou trois ans, dans la famille ouverte à cette
+  // date : métaux dès 2001, tangibles dès 2003, private equity dès 2008,
+  // crowdlending dès 2015. Aucune de ces quatre tables ne porte de clé
+  // étrangère vers `Platform` — les plateformes créées ci-dessous existent donc
+  // pour l'écran, et le rattachement se fait par le nom, seul lien que le
+  // modèle offre.
+  const comptoirOr = await prisma.platform.create({
+    data: {
+      userId,
+      name: "Comptoir National de l'Or",
+      type: "AUTRE",
+      notes: note("Achat de métaux physiques — historique 2001+"),
+    },
+  });
+  const platformePe = await prisma.platform.create({
+    data: {
+      userId,
+      name: "Sowefund",
+      type: "AUTRE",
+      notes: note("Capital-investissement — historique 2008+"),
+    },
+  });
+  const platformeCrowd = await prisma.platform.create({
+    data: {
+      userId,
+      name: "WiSEED",
+      type: "AUTRE",
+      notes: note("Crowdlending immobilier — historique 2015+"),
+    },
+  });
+  const nouvellesPlateformes = [comptoirOr, platformePe, platformeCrowd];
+
+  type P14Family = "METAL" | "TANGIBLE" | "PE" | "CROWD";
+  const P14_OPENING: Record<P14Family, number> = {
+    METAL: 2001,
+    TANGIBLE: 2003,
+    PE: 2008,
+    CROWD: 2015,
+  };
+  const P14_ORDER: P14Family[] = ["METAL", "TANGIBLE", "PE", "CROWD"];
+  let p14Index = 0;
+  for (let year = 2001; year <= 2026; ) {
+    const ouvertes = P14_ORDER.filter((f) => year >= P14_OPENING[f]);
+    const family = ouvertes[p14Index % ouvertes.length]!;
+    p14Index++;
+    const when = histDate("P14", year, 210);
+    const montant = scaledAmount(900, year);
+    const anneesDetenues = 2026 - year;
+    if (family === "METAL") {
+      // Prix de l'once d'or en euro, année par année : le poids se dérive du
+      // montant, comme une quantité se dérive d'un montant ailleurs.
+      const prixGramme = D(10).mul(D("1.08").pow(year - 2001)).toDecimalPlaces(2);
+      const poids = montant.div(prixGramme).toDecimalPlaces(3);
+      await prisma.preciousMetalPosition.create({
+        data: {
+          userId,
+          metal: "GOLD",
+          format: "PHYSICAL",
+          productType: "BAR",
+          denomination: `Lingotin ${poids.toFixed(0)} g (${year})`,
+          fineness: D("999.9"),
+          quantity: D(1),
+          unitWeightG: poids,
+          weightUnit: "GRAM",
+          purchasePriceUnit: montant,
+          acquisitionFees: D(0),
+          acquiredAt: when,
+          hasInvoice: true,
+          currentValue: montant
+            .mul(D("1.06").pow(anneesDetenues))
+            .toDecimalPlaces(2),
+          currency: "EUR",
+          storageLocation: comptoirOr.name,
+          notes: note(`P14 métaux ${year}`),
+        },
+      });
+    } else if (family === "TANGIBLE") {
+      await prisma.tangibleAsset.create({
+        data: {
+          userId,
+          category: "WATCHES",
+          brandOrArtist: "Omega",
+          modelName: `Seamaster ${year}`,
+          yearOrVintage: String(year),
+          purchasePrice: montant,
+          estimatedValue: montant
+            .mul(D("1.05").pow(anneesDetenues))
+            .toDecimalPlaces(2),
+          currency: "EUR",
+          hasCertificate: true,
+          purchaseDate: when,
+          isCollectible: true,
+          watchBoxPapers: true,
+          notes: note(`P14 tangible ${year}`),
+        },
+      });
+    } else if (family === "PE") {
+      await prisma.privateEquityPosition.create({
+        data: {
+          userId,
+          companyName: `Participation ${year}`,
+          sector: "TECH",
+          peType: "DIRECT",
+          shares: D(100),
+          acquisitionPricePerShare: montant.div(100).toDecimalPlaces(4),
+          investmentDate: when,
+          currentNav: montant.mul(D("1.09").pow(anneesDetenues)).toDecimalPlaces(2),
+          currency: "EUR",
+          committedCapital: montant,
+          calledCapital: montant,
+          vehicleName: platformePe.name,
+          notes: note(`P14 private equity ${year}`),
+        },
+      });
+    } else {
+      const echu = year <= 2022;
+      await prisma.crowdlendingPosition.create({
+        data: {
+          userId,
+          projectName: `Programme résidentiel ${year}`,
+          platform: platformeCrowd.name,
+          capitalInvested: montant,
+          annualYieldPercent: D("8.5"),
+          durationMonths: 24,
+          repaymentType: "IN_FINE",
+          startDate: when,
+          maturityDate: new Date(
+            Date.UTC(year + 2, when.getUTCMonth(), when.getUTCDate(), 10)
+          ),
+          status: echu ? "REPAID" : "ACTIVE",
+          // Un projet remboursé ne porte plus de capital : le dire à zéro n'est
+          // pas une valeur manquante, c'est le fait.
+          remainingCapital: echu ? D(0) : montant,
+          currency: "EUR",
+          notes: note(`P14 crowdlending ${year}`),
+        },
+      });
+    }
+    year += histInt("P14-cadence", 2, 3);
+  }
+
+  // ── P15 — trésorerie, 2/an, 2001-2026 ──────────────────────────────────────
+  //
+  // Apport en juin, retrait en novembre. Le retrait n'est écrit que si le solde
+  // de la plateforme reste positif : sinon il est **sauté**, jamais raboté.
+  for (let year = 2001; year <= 2026; year++) {
+    pushHistTx({
+      type: "APPORT",
+      platformId: boursorama.id,
+      cashAmount: scaledAmount(2500, year),
+      currency: "EUR",
+      occurredAt: histDate("P15", year, 165),
+      notes: note(`P15 apport de trésorerie ${year}`),
+    });
+    const retrait = scaledAmount(1400, year);
+    if ((histCash.get(boursorama.id) ?? D(0)).greaterThanOrEqualTo(retrait)) {
+      pushHistTx({
+        type: "RETRAIT",
+        platformId: boursorama.id,
+        cashAmount: retrait,
+        currency: "EUR",
+        occurredAt: histDate("P15", year, 315),
+        notes: note(`P15 retrait de trésorerie ${year}`),
+      });
+    }
+  }
+
+  // ── P16 — épargne salariale ────────────────────────────────────────────────
+  //
+  // PEE dès 2001, PERCO dès 2004, PER dès 2019 : un plan ne reçoit rien avant
+  // d'exister. La valeur de part n'est pas un cours de marché — c'est une VL de
+  // fonds, portée ici par une progression annoncée de 5 % l'an depuis le
+  // versement, et non par une interpolation entre deux observations absentes.
+  const P16_YEARS = [2003, 2006, 2009, 2012, 2015, 2018, 2021, 2024];
+  const P16_PLANS = [
+    { planType: "PEE", since: 2001, manager: "Amundi", fundName: "Amundi Label Actions Euro", fundCategory: "EQUITY", sourceType: "ABONDEMENT" },
+    { planType: "PERCO", since: 2004, manager: "AXA", fundName: "AXA Diversifié", fundCategory: "DIVERSIFIED", sourceType: "INTERESSEMENT" },
+    { planType: "PER", since: 2019, manager: "Natixis", fundName: "Natixis Horizon 2040", fundCategory: "DIVERSIFIED", sourceType: "VOLUNTARY" },
+  ];
+  let p16Index = 0;
+  for (const year of P16_YEARS) {
+    const ouverts = P16_PLANS.filter((p) => year >= p.since);
+    const plan = ouverts[p16Index % ouverts.length]!;
+    p16Index++;
+    const when = histDate("P16", year, 90);
+    const verse = scaledAmount(1000, year);
+    const nav = D(10).mul(D("1.05").pow(2026 - year)).toDecimalPlaces(4);
+    await prisma.employeeSavingsLine.create({
+      data: {
+        userId,
+        planType: plan.planType,
+        manager: plan.manager,
+        fundName: plan.fundName,
+        contributedAmount: verse,
+        fundCategory: plan.fundCategory,
+        units: verse.div(10).toDecimalPlaces(4),
+        nav,
+        currency: "EUR",
+        sourceType: plan.sourceType,
+        contributionDate: when,
+        unlockDate:
+          plan.planType === "PER"
+            ? null
+            : new Date(
+                Date.UTC(year + 5, when.getUTCMonth(), when.getUTCDate(), 10)
+              ),
+        unlockMode: plan.planType === "PER" ? "RETIREMENT" : "DATE",
+        notes: note(`P16 abondement ${plan.planType} ${year}`),
+      },
+    });
+  }
+
+  /*
+    Régulateur de volume — la seule pièce qui ne vient pas de la table.
+
+    L'arithmétique des seize patrons ne peut pas tenir la cible « aucune année
+    sous douze écritures » sur ses six premières années : 2001 et 2002 ne
+    connaissent que P01 (trois achats) et P15 (deux mouvements de trésorerie),
+    soit cinq écritures ; 2003 en compte six, et il faut attendre 2007 pour que
+    la somme des patrons ouverts franchisse douze. Aucun réglage de cadence à
+    l'intérieur des bornes annoncées (« 3/an », « 1-2/an », « 1/an ») n'y change
+    rien — c'est une propriété de la table, pas un défaut d'implémentation.
+
+    Plutôt que de forcer un patron hors de sa cadence, le complément est écrit
+    pour ce qu'il est : des mouvements de trésorerie, la seule famille qui court
+    sur toute la plage et dont P15 décrit déjà la mécanique. Ils sont placés
+    dans les **mois vides** de l'année, ce qui sert la même intention que le
+    plancher annuel — resserrer les intervalles sans écriture.
+
+    Le solde ne devient jamais négatif : un retrait qui ne passe pas est
+    remplacé par un apport, jamais raboté.
+  */
+  const REGULATEUR_PLANCHER = 12;
+  const REGULATEUR_PLATEFORMES = [boursorama, fortuneo, avPlatform, notaire];
+  const moisOrdre = [1, 4, 7, 10, 2, 5, 8, 11, 0, 3, 6, 9];
+  const anneeDe = (d: Date) => Number(dayKeyOf(d).slice(0, 4));
+  const moisDe = (d: Date) => Number(dayKeyOf(d).slice(5, 7)) - 1;
+  let regIndex = 0;
+  for (let year = 2001; year <= 2026; year++) {
+    const dansLAnnee = () => txs.filter((t) => anneeDe(t.occurredAt) === year);
+    let garde = 0;
+    while (dansLAnnee().length < REGULATEUR_PLANCHER && garde < 24) {
+      garde++;
+      const occupes = new Set(dansLAnnee().map((t) => moisDe(t.occurredAt)));
+      const mois = moisOrdre.find((m) => !occupes.has(m)) ?? moisOrdre[garde % 12]!;
+      const plateforme =
+        REGULATEUR_PLATEFORMES[regIndex % REGULATEUR_PLATEFORMES.length]!;
+      const apport = regIndex % 2 === 0;
+      regIndex++;
+      const when = histDate("P15-regulateur", year, mois * 30 + 15);
+      const montant = scaledAmount(apport ? 900 : 500, year);
+      const solde = histCash.get(plateforme.id) ?? D(0);
+      pushHistTx({
+        type: apport || solde.lessThan(montant) ? "APPORT" : "RETRAIT",
+        platformId: plateforme.id,
+        cashAmount: montant,
+        currency: "EUR",
+        occurredAt: when,
+        notes: note(`P15 mouvement de trésorerie ${plateforme.name} ${year}`),
+      });
+    }
+  }
+
   txs.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
   const BATCH = 50;
   for (let i = 0; i < txs.length; i += BATCH) {
@@ -1098,38 +2734,52 @@ export async function seedUserPortfolio(
 
     La marche est déterministe (générateur ensemencé par l'actif) : deux seeds
     successifs produisent la même histoire, ce dont les tests e2e dépendent.
+    Les samedis et dimanches sont omis pour les lignes dont le marché ferme le
+    week-end, et conservés pour les cryptos qui cotent 7j/7 — voir
+    `recentCloseRows` et `quotesEveryDay`.
   */
-  const closeRows: Array<{
-    assetId: string;
-    day: string;
-    closeEur: Prisma.Decimal;
-    source: string;
-  }> = [];
+  const closeRows: SeedCloseRow[] = [];
 
   for (const p of positions) {
+    closeRows.push(...recentCloseRows(p, fxNum(p.currency), now));
+  }
+
+  /*
+    Clôtures annuelles de l'historique long (≤ 2019).
+
+    La boucle ci-dessus ne descend qu'à `THREE_YEARS` : avant elle, aucune
+    clôture n'existe et le moteur retient chaque position à son prix de revient
+    (`UNAVAILABLE`, point déclaré estimé). C'est correct — UNKNOWN n'est pas
+    ZERO — mais cela laisse vingt ans de courbe qui ne bougent qu'aux
+    transactions, alors que la table de cours **connaît** ces années.
+
+    Une clôture par an et par ligne, au dernier jour de séance de décembre (le
+    31 pour une crypto, le dernier jour ouvré sinon), à la valeur de la table.
+    Rien n'est interpolé entre deux décembres : le moteur
+    reporte la dernière clôture connue (LOCF, `MARKET_CARRIED`, donc point
+    estimé), ce qui est le contraire d'un lissage — la donnée manquante est
+    signalée comme telle, pas comblée par une droite.
+
+    La borne 2019 évite tout chevauchement avec la fenêtre récente, dont la
+    ligne la plus ancienne remonte à `THREE_YEARS` (soit courant 2020).
+  */
+  const histCloseRows: typeof closeRows = [];
+  for (const p of positions) {
+    const serie = HISTORICAL_PRICES[p.ticker];
+    if (!serie) continue;
     const fx = fxNum(p.currency);
-    const days = Math.min(p.openDaysAgo, THREE_YEARS);
-    // Interpole la tendance achat → marché, puis y superpose une volatilité
-    // journalière bornée : le prix final retombe exactement sur le cours coté.
-    let rnd = hashSeed(p.ticker);
-    const drift = (p.marketPrice - p.buyPrice) / Math.max(days, 1);
-    let wobble = 0;
-    for (let k = days; k >= 0; k--) {
-      rnd = (rnd * 1664525 + 1013904223) >>> 0;
-      const shock = (rnd / 0xffffffff - 0.5) * 0.02;
-      // Retour à la moyenne : l'écart ne dérive pas indéfiniment.
-      wobble = wobble * 0.9 + shock;
-      const trend = p.buyPrice + drift * (days - k);
-      const native = k === 0 ? p.marketPrice : Math.max(trend * (1 + wobble), 0.0001);
-      const dt = daysAgo(k);
-      closeRows.push({
+    for (const [annee, prix] of Object.entries(serie)) {
+      const year = Number(annee);
+      if (year > 2019) continue;
+      histCloseRows.push({
         assetId: p.id,
-        day: dayKeyOf(dt),
-        closeEur: D(String(moneyN(native * fx))),
-        source: "seed",
+        day: historicalCloseDayKey(year, quotesEveryDay(p.assetClass)),
+        closeEur: D(prix).mul(D(String(fx))).toDecimalPlaces(2),
+        source: "seed-historique",
       });
     }
   }
+  closeRows.push(...histCloseRows);
 
   for (let i = 0; i < closeRows.length; i += 500) {
     await prisma.assetDailyClose.createMany({
@@ -1443,17 +3093,56 @@ export async function seedUserPortfolio(
       notes: note("Prêt 25 ans"),
     },
   });
+  /*
+    Douze échéances qui amortissent vraiment.
+
+    La version précédente écrivait `178500 + (12 - m) * 420` : le capital
+    restant dû **montait** de 420 € à chaque mensualité, si bien qu'un débit de
+    980 € alourdissait la dette. Sur la courbe des passifs, cela produisait deux
+    marches ascendantes suivies d'un décrochage au jour du seed — un profil qui
+    ne ressemble à aucun amortissement.
+
+    Les échéances sont donc reconstruites à rebours depuis le capital restant
+    dû courant, avec la règle qui vaut pour un prêt amortissable : la mensualité
+    couvre d'abord les intérêts du mois, et seul le solde réduit le capital.
+
+        capital_avant = (capital_après + mensualité) / (1 + r)
+        intérêts      = capital_avant × r
+        principal     = mensualité − intérêts
+
+    Six premières échéances, à 2,15 % l'an sur 980 € :
+
+        échéance   intérêts   principal   capital après
+        la plus récente  320,99    659,01     178 500,00
+        −1 mois          322,17    657,83     179 159,01
+        −2 mois          323,35    656,65     179 816,83
+        −3 mois          324,52    655,48     180 473,49
+        −4 mois          325,70    654,30     181 128,96
+        −5 mois          326,87    653,13     181 783,27
+
+    L'assurance (28 €/mois) reste hors de ce calcul : c'est une charge, elle ne
+    rembourse rien.
+
+    Rien n'est touché du côté du moteur — `applyMonthlyDebit` impute toujours la
+    mensualité entière au capital, et c'est un défaut distinct. Ici on corrige
+    seulement des données qui décrivaient un prêt impossible.
+  */
+  const MORTGAGE_MONTHLY_RATE = 0.0215 / 12;
+  const MORTGAGE_PAYMENT = 980;
+  let crdAfter = 178500;
   for (let m = 0; m < 12; m++) {
     await prisma.liabilityEvent.create({
       data: {
         liabilityId: mortgage.id,
         type: "MONTHLY_DEBIT",
-        amount: D("980"),
-        remainingAfter: D(String(178500 + (12 - m) * 420)),
+        amount: D(String(MORTGAGE_PAYMENT)),
+        remainingAfter: D(moneyN(crdAfter).toFixed(2)),
         eventDate: daysAgo(30 + m * 30),
         notes: note(`Mensualité #${m + 1}`),
       },
     });
+    // Remontée d'un mois : avant cette échéance, le capital était plus élevé.
+    crdAfter = (crdAfter + MORTGAGE_PAYMENT) / (1 + MORTGAGE_MONTHLY_RATE);
   }
   /*
     Rattachement du prêt au bien qu'il finance.
@@ -2233,7 +3922,7 @@ export async function seedUserPortfolio(
   });
 
   return {
-    platforms: allPlatforms.length,
+    platforms: allPlatforms.length + nouvellesPlateformes.length,
     assets: positions.length,
     transactions: txs.length,
   };

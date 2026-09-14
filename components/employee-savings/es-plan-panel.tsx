@@ -185,7 +185,9 @@ export function EsPlanPanel({
     );
   }
 
-  const totalUnits = plan.lines.reduce((s, l) => s + num(l.marketValue), 0);
+  // En euros : `marketValue` est dans la devise du support, et sommer des
+  // devises différentes donnait un total — et des poids — sans unité.
+  const totalUnits = plan.lines.reduce((s, l) => s + num(l.marketValueEur), 0);
 
   return (
     <aside
@@ -389,7 +391,7 @@ export function EsPlanPanel({
               data-testid="es-panel-supports"
             >
               {plan.lines.map((l) => {
-                const value = num(l.marketValue);
+                const value = num(l.marketValueEur);
                 const weight = totalUnits > 0 ? (value / totalUnits) * 100 : null;
                 return (
                   <li
@@ -513,7 +515,7 @@ export function EsPlanPanel({
                       l.liquidityStatus === "AVAILABLE" && "val-positive"
                     )}
                   >
-                    {formatCurrency(l.marketValue, "EUR")}
+                    {formatCurrency(l.marketValueEur, "EUR")}
                   </span>
                 </li>
               ))}

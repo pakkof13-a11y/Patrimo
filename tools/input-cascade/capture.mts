@@ -22,8 +22,35 @@ if (previous) {
   console.log(formatDiff(diff(previous, snapshot)));
 }
 
-writeFileSync(BASELINE_PATH, `${JSON.stringify(snapshot, null, 2)}\n`);
+/*
+  Fusion, jamais écrasement.
+
+  Une mesure ne connaît que la plateforme qui l'exécute : enregistrer depuis
+  Windows avec un simple `writeFileSync` effacerait les largeurs Linux, que
+  personne ne peut réenregistrer d'ici. Le commun — typographie, remplissages,
+  peau, police — vient de la mesure fraîche ; les largeurs et les conditions
+  de prise des autres plateformes sont conservées telles quelles.
+*/
+const merged: typeof snapshot = {
+  ...snapshot,
+  widths: { ...(previous?.widths ?? {}), ...(snapshot.widths ?? {}) },
+  environments: {
+    ...(previous?.environments ?? {}),
+    ...(snapshot.environments ?? {}),
+  },
+};
+
+writeFileSync(BASELINE_PATH, `${JSON.stringify(merged, null, 2)}\n`);
+
+const ecrite = Object.keys(snapshot.widths ?? {})[0];
+const gardees = Object.keys(merged.widths ?? {}).filter((k) => k !== ecrite);
 console.log(
-  `\nRéférence enregistrée : ${snapshot.combinations.length} combinaisons, ` +
-    `${snapshot.combinations.reduce((n, c) => n + c.count, 0)} occurrences.`
+  `\nRéférence enregistrée : ${merged.combinations.length} combinaisons, ` +
+    `${merged.combinations.reduce((n, c) => n + c.count, 0)} occurrences.`
+);
+console.log(`Largeurs réécrites pour la plateforme : ${ecrite}`);
+console.log(
+  gardees.length
+    ? `Largeurs conservées, non mesurées ici : ${gardees.join(", ")}`
+    : "Aucune autre plateforme enregistrée."
 );

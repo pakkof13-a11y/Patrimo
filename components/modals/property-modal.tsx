@@ -1,5 +1,6 @@
 "use client";
 
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Modal } from "@/components/ui/modal";
 import { fetchJson } from "@/app/lib/api-client";
@@ -69,7 +70,7 @@ export function PropertyModal({
           // qui dérive du journal doit être réinterrogé.
           void qc.invalidateQueries({ queryKey: ["holdings"] });
           void qc.invalidateQueries({ queryKey: ["transactions"] });
-          void qc.invalidateQueries({ queryKey: ["portfolio-history"] });
+          invalidatePortfolioView(qc);
           void qc.invalidateQueries({ queryKey: ["liabilities"] });
           onCreated?.(assetId);
           onClose();

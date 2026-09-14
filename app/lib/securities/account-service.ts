@@ -134,8 +134,16 @@ export async function listAccounts(
 ): Promise<SecuritiesAccountSummary[]> {
   const rows = await prisma.securitiesAccount.findMany({
     where: { userId },
-    // PEA d'abord, puis PEA-PME, puis les CTO : l'ordre de lecture utile est
-    // celui du poids fiscal, pas celui de la création.
+    /*
+      Ordre réel : `CTO`, `PEA`, `PEA_PME` — l'ordre alphabétique des valeurs
+      stockées, puis la date d'ouverture. Le commentaire annonçait l'inverse
+      (« PEA d'abord »), un ordre que ce tri n'a jamais produit.
+
+      On corrige le commentaire plutôt que le tri : l'écran retrie de son côté
+      (`securities-overview.tsx`, PEA en tête), aucun consommateur ne dépend de
+      l'ordre servi ici, et deux tris applicatifs — celui-ci et son jumeau dans
+      `fiscal-service.ts` — coûteraient plus qu'ils ne rapportent.
+    */
     orderBy: [{ envelopeType: "asc" }, { openDate: "asc" }],
     select: accountSelect,
   });

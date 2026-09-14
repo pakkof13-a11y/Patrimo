@@ -216,10 +216,17 @@ export function applyTransaction(
       break;
     }
     case "TRANSFERT_CASH": {
-      if (!tx.toPlatformId) {
-        throw new AccountingError("TO_PLATFORM_REQUIRED", "Plateforme de destination requise");
-      }
-      if (tx.toPlatformId === tx.platformId) {
+      /*
+        `toPlatformId: null` = « sortie » : la plateforme de destination a été
+        force-supprimée après ce transfert (voir `app/api/platforms/route.ts`
+        DELETE force). Le débit sur `platformId` reste l'unique vérité — il a
+        bel et bien quitté cette plateforme, peu importe où il est allé — et on
+        n'audit plus aucun crédit puisqu'on ne sait plus où le porter.
+        Le formulaire de saisie (schemas.ts) interdit ce couple à la création :
+        seul le force-delete produit un `toPlatformId` nul sur ces types.
+      */
+      const isExit = !tx.toPlatformId;
+      if (!isExit && tx.toPlatformId === tx.platformId) {
         throw new AccountingError("SAME_PLATFORM", "Les plateformes source et destination doivent différer");
       }
       const amountEur = toEur(cashAmountOriginal(tx), tx.fxRateToEur);
@@ -232,22 +239,29 @@ export function applyTransaction(
         throw new AccountingError("INSUFFICIENT_CASH", "Cash insuffisant pour le transfert");
       }
       setCash(state, tx.platformId, newCash);
-      addCash(state, tx.toPlatformId, amountEur);
+      if (!isExit) addCash(state, tx.toPlatformId as string, amountEur);
       state.totalFeesPaidEur = state.totalFeesPaidEur.plus(feesEur);
       break;
     }
     case "TRANSFERT_TITRE": {
       const assetId = requireAsset(tx);
-      if (!tx.toPlatformId) {
-        throw new AccountingError("TO_PLATFORM_REQUIRED", "Plateforme de destination requise");
-      }
-      if (tx.toPlatformId === tx.platformId) {
+      // Voir le commentaire équivalent sur TRANSFERT_CASH ci-dessus : même
+      // sémantique de « sortie » quand la destination a été force-supprimée.
+      const isExit = !tx.toPlatformId;
+      if (!isExit && tx.toPlatformId === tx.platformId) {
         throw new AccountingError("SAME_PLATFORM", "Les plateformes source et destination doivent différer");
       }
       const qty = d(tx.quantity ?? 0);
       const { remaining, moved } = applyTransferOut(getPos(state, assetId, tx.platformId), qty);
       setPos(state, assetId, tx.platformId, remaining);
-      setPos(state, assetId, tx.toPlatformId, applyTransferIn(getPos(state, assetId, tx.toPlatformId), moved));
+      if (!isExit) {
+        setPos(
+          state,
+          assetId,
+          tx.toPlatformId as string,
+          applyTransferIn(getPos(state, assetId, tx.toPlatformId as string), moved)
+        );
+      }
       // No cash impact for title transfers
       break;
     }
@@ -303,8 +317,26 @@ export function platformCashAfter(state: LedgerState, platformId: string) {
   return state.cashByPlatform.get(platformId) ?? zero();
 }
 
-export function totalRealizedPnl(state: LedgerState): Decimal {
-  return state.realizedLots.reduce((acc, lot) => acc.plus(lot.realizedPnlEur), zero());
+/**
+ * Réalisé total du journal.
+ *
+ * `excludeAssetIds` : même périmètre et même doctrine que `totalCostBasis`
+ * ci-dessous. Une ligne écartée du patrimoine sort de *tous* les termes du P&L
+ * — valeur de marché, coût, latent et réalisé. Sans ce filtre, le réalisé d'une
+ * position DeFi/NFT ignorée continuait d'alimenter `totalReturn`, qui recyclait
+ * ainsi une ligne dont la valeur et le coût avaient déjà été retirés : un gain
+ * sans contrepartie au bilan.
+ */
+export function totalRealizedPnl(
+  state: LedgerState,
+  excludeAssetIds?: ReadonlySet<string>
+): Decimal {
+  let t = zero();
+  for (const lot of state.realizedLots) {
+    if (excludeAssetIds?.has(lot.assetId)) continue;
+    t = t.plus(lot.realizedPnlEur);
+  }
+  return t;
 }
 
 export function totalCash(state: LedgerState): Decimal {
@@ -313,9 +345,25 @@ export function totalCash(state: LedgerState): Decimal {
   return t;
 }
 
-export function totalCostBasis(state: LedgerState): Decimal {
+/**
+ * Coût total du journal.
+ *
+ * `excludeAssetIds` restreint la somme au périmètre patrimonial — une position
+ * DeFi/NFT marquée `isIgnoredInPortfolio` (ou un NFT emprunté) reste au
+ * journal pour l'historique et la fiscalité, mais ne doit peser dans aucun
+ * total affiché : sans ce filtre, `costBasis` couvrirait un périmètre plus
+ * large que `marketValue`, qui l'exclut déjà (`getHoldings`), et sous-évaluerait
+ * le P&L latent du coût de positions qui ne comptent plus nulle part ailleurs.
+ */
+export function totalCostBasis(
+  state: LedgerState,
+  excludeAssetIds?: ReadonlySet<string>
+): Decimal {
   let t = zero();
-  for (const p of state.positions.values()) t = t.plus(p.costBasisEur);
+  for (const p of state.positions.values()) {
+    if (excludeAssetIds?.has(p.assetId)) continue;
+    t = t.plus(p.costBasisEur);
+  }
   return t;
 }
 

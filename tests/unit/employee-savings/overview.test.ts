@@ -34,6 +34,15 @@ function line(over: Partial<OverviewLine> = {}): OverviewLine {
     unlockDate: "unlockDate" in over ? over.unlockDate! : null,
     unlockMode: over.unlockMode ?? "DATE",
     marketValue: over.marketValue ?? String(Number(units) * Number(nav)),
+    /*
+      Lignes en euros par défaut : `marketValueEur` y vaut `marketValue`. Les
+      agrégats ne somment plus que le champ en euros — une ligne libellée en
+      devise étrangère n'entre plus dans l'encours pour son nombre.
+    */
+    marketValueEur:
+      over.marketValueEur ??
+      over.marketValue ??
+      String(Number(units) * Number(nav)),
     liquidityStatus: over.liquidityStatus ?? "BLOCKED",
     unlockLabel: over.unlockLabel ?? "—",
   };
