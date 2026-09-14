@@ -568,21 +568,42 @@ export function crowdlendingAlertCounts(
 
 /** Alerte courte pour le dashboard Alternatifs — voir `buildAlternativesShortAlerts`. */
 export type AlternativesShortAlert = {
-  type: "cl-late" | "cl-default" | "cl-soon" | "pe-stale-nav";
+  type:
+    | "cl-late"
+    | "cl-default"
+    | "cl-soon"
+    | "pe-stale-nav"
+    | "tangible-undated"
+    | "tangible-insurance"
+    | "tangible-ownership";
   label: string;
   count: number;
   sub: AlternativesSubTab;
 };
 
 /**
- * Vue unifiée des alertes CL/PE, construite à partir des summaries déjà
- * calculés (aucun fetch, aucun champ de saisie supplémentaire). Additive :
+ * Vue unifiée des alertes CL/PE/Tangibles, construite à partir des summaries
+ * déjà calculés (aucun fetch, aucun champ de saisie supplémentaire). Additive :
  * n'affecte pas `crowdlendingAlertCounts` ni les compteurs bruts, qui
  * restent la source de vérité consommée par le widget actuel du dashboard.
+ *
+ * Les métaux précieux n'ont aujourd'hui aucun bandeau d'alerte à l'écran
+ * (`alternatives-metals.tsx`) : rien à agréger pour cette famille tant qu'un
+ * tel bandeau n'existe pas. Le jour où il apparaît, il doit être ajouté ici
+ * au même titre que les autres — le KPI « Alertes » du tableau de bord doit
+ * toujours égaler la somme des bandeaux réellement affichés, jamais moins.
  */
 export function buildAlternativesShortAlerts(
   crowdlending: Pick<CrowdlendingSummary, "byStatus" | "soonCount">,
-  privateEquity: Pick<PrivateEquitySummary, "staleNavCount">
+  privateEquity: Pick<PrivateEquitySummary, "staleNavCount">,
+  tangibles: Pick<
+    TangibleAssetsSummary,
+    | "undatedCount"
+    | "underInsuredCount"
+    | "uninsuredHighValueCount"
+    | "expiringPolicyCount"
+    | "ownershipAlertCount"
+  >
 ): AlternativesShortAlert[] {
   const { lateCount, defaultCount } = crowdlendingAlertCounts(
     crowdlending.byStatus
@@ -618,6 +639,39 @@ export function buildAlternativesShortAlerts(
       label: "Position(s) PE — NAV non mise à jour depuis > 6 mois",
       count: privateEquity.staleNavCount,
       sub: "private-equity",
+    });
+  }
+  // Reprend, un à un, les trois bandeaux affichés sur l'onglet Tangibles
+  // (`alternatives-tangibles.tsx` : undated-warning, insurance-warning,
+  // ownership-warning) — aucun n'était jusqu'ici remonté au KPI consolidé,
+  // qui pouvait donc afficher 0 alerte avec un bandeau rouge visible à
+  // l'écran.
+  if (tangibles.undatedCount > 0) {
+    alerts.push({
+      type: "tangible-undated",
+      label: "Objet(s) sans date d'achat",
+      count: tangibles.undatedCount,
+      sub: "tangibles",
+    });
+  }
+  const insuranceCount =
+    tangibles.underInsuredCount +
+    tangibles.uninsuredHighValueCount +
+    tangibles.expiringPolicyCount;
+  if (insuranceCount > 0) {
+    alerts.push({
+      type: "tangible-insurance",
+      label: "Objet(s) sous-assuré(s) ou non assuré(s)",
+      count: insuranceCount,
+      sub: "tangibles",
+    });
+  }
+  if (tangibles.ownershipAlertCount > 0) {
+    alerts.push({
+      type: "tangible-ownership",
+      label: "Alerte(s) de possession",
+      count: tangibles.ownershipAlertCount,
+      sub: "tangibles",
     });
   }
   return alerts;

@@ -213,14 +213,27 @@ export type AssetRow = {
 };
 
 export type AssetSeries = {
-  /** Variation 24 h en %, `null` si la veille n'est pas cotée. */
-  change24hPct: number | null;
+  /** Clôture d'hier, pour la variation 24 h — `null` si la veille n'est pas cotée. */
+  previousCloseEur: number | null;
   /** Clôtures récentes, du plus ancien au plus récent. */
   closes: number[];
 };
 
 /**
  * Assemble la vue d'un actif : sa carte consolidée, son poids, sa variation.
+ *
+ * ## Définition de la variation 24 h (unique dans l'app)
+ *
+ * `(cotation actuelle − clôture d'hier) / clôture d'hier`, actif par actif. La
+ * cotation actuelle vient de `card.currentPriceEur` (déjà live, la même
+ * valeur qui construit `marketValueEur`) ; la clôture d'hier vient de la série
+ * (cache `AssetDailyClose`, via `getSpotHistory`). Comparer deux clôtures déjà
+ * passées — comme le faisait l'ancienne implémentation, qui retombait sur les
+ * deux derniers jours cotés en cache — produisait une fenêtre différente de
+ * celle du KPI strip crypto (`summary-service.ts`) dès que la clôture du jour
+ * n'était pas encore en cache, avec le même libellé « 24h » pour deux
+ * mouvements différents. Les deux affichages partagent maintenant la même
+ * formule et la même borne (`parisYesterdayKey`).
  *
  * Les séries viennent d'ailleurs (cache de clôtures) et peuvent manquer : un
  * coin sans historique garde sa ligne, sans variation ni courbe. Le faire
@@ -232,7 +245,13 @@ export function buildAssetRows(
 ): AssetRow[] {
   return cards.map((card) => {
     const series = seriesBySymbol[card.symbol];
-    const change24hPct = series?.change24hPct ?? null;
+    const previousCloseEur = series?.previousCloseEur ?? null;
+    const change24hPct =
+      previousCloseEur != null &&
+      previousCloseEur > 0 &&
+      card.currentPriceEur != null
+        ? (card.currentPriceEur / previousCloseEur - 1) * 100
+        : null;
     return {
       card,
       concentration: concentrationOf(card.allocationPct),

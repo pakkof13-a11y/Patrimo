@@ -751,7 +751,10 @@ export function WatchlistCard({
                           size={DASHBOARD_LOGO_SIZE}
                         />
                         <div className="min-w-0">
-                          <div className="truncate text-[length:var(--text-sm)] text-[var(--foreground)]">
+                          <div
+                            className="truncate text-[length:var(--text-sm)] text-[var(--foreground)]"
+                            title={h.name}
+                          >
                             {h.name}
                           </div>
                           <div className="num truncate text-[length:var(--text-2xs)] text-[var(--foreground-faint)]">
@@ -1042,7 +1045,10 @@ export function RecentActivityCard({
                               size={DASHBOARD_LOGO_SIZE}
                             />
                           )}
-                          <span className="truncate text-[var(--foreground)]">
+                          <span
+                            className="truncate text-[var(--foreground)]"
+                            title={tx.asset?.name || tx.asset?.ticker || undefined}
+                          >
                             {tx.asset?.name || tx.asset?.ticker || "—"}
                           </span>
                         </div>

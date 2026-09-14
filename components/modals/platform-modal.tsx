@@ -352,7 +352,10 @@ export function PlatformModal({
               size={40}
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-[var(--foreground)]">
+              <p
+                className="truncate text-sm font-semibold text-[var(--foreground)]"
+                title={previewName}
+              >
                 {previewName}
               </p>
               <p className="text-meta mt-0.5">

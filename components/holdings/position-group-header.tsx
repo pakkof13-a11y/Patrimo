@@ -195,7 +195,10 @@ export function PositionGroupHeader({
               libellé et le tronquait sur les classes au nom long.
             */}
             <span className="min-w-0">
-              <span className="block truncate font-medium text-[var(--foreground)]">
+              <span
+                className="block truncate font-medium text-[var(--foreground)]"
+                title={label}
+              >
                 {label}
               </span>
               <span className="text-label block tabular-nums">

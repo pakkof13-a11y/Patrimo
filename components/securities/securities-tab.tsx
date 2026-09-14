@@ -12,6 +12,7 @@ import {
   Unlock,
 } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -523,6 +524,7 @@ export function SecuritiesTab({ className }: { className?: string }) {
   const [contribDate, setContribDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
+  const [deleteTarget, setDeleteTarget] = useState<AccountRow | null>(null);
 
   const q = useQuery({
     queryKey: ["securities"],
@@ -561,6 +563,37 @@ export function SecuritiesTab({ className }: { className?: string }) {
       setForm(emptyForm);
       setShowForm(false);
       invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  /**
+   * Suppression d'un compte titres — même niveau que Banques.
+   *
+   * Le service ne supprime que le compte : les titres détenus sont détachés
+   * (`securitiesAccountId: null`, journal intact), jamais effacés. Une seule
+   * confirmation suffit donc, pas la double confirmation à cascade des
+   * plateformes.
+   */
+  const deleteAccountMut = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/securities/accounts/${id}`, {
+        method: "DELETE",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error ?? "Suppression impossible");
+      return json as { deleted: boolean; detachedPositions: number };
+    },
+    onSuccess: (result) => {
+      toast.success(
+        result.detachedPositions > 0
+          ? `Compte supprimé — ${result.detachedPositions} ligne(s) détachée(s)`
+          : "Compte supprimé"
+      );
+      if (openAccountId === deleteTarget?.id) setOpenAccountId(null);
+      void qc.invalidateQueries({ queryKey: ["securities-contributions"] });
+      invalidate();
+      invalidatePortfolioView(qc);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -959,28 +992,41 @@ export function SecuritiesTab({ className }: { className?: string }) {
                         {a.positionCount > 0 && ` · ${a.positionCount} ligne(s)`}
                       </p>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-sm font-semibold tabular-nums">
-                        {formatCurrency(a.liquidationValueEur, "EUR")}
-                      </p>
-                      {/* Le même minorant que celui qui coupe la simulation :
-                          hors `ATTRIBUTED`, ce montant ne contient aucune
-                          espèce, et rien ne le disait. */}
-                      {a.cashAttribution !== "ATTRIBUTED" && (
-                        <p className="text-[10px] text-[var(--muted-foreground)]">
-                          titres seuls
+                    <div className="flex shrink-0 items-start gap-1">
+                      <div className="text-right">
+                        <p className="text-sm font-semibold tabular-nums">
+                          {formatCurrency(a.liquidationValueEur, "EUR")}
                         </p>
-                      )}
-                      <p
-                        className={cn(
-                          "text-[11px] tabular-nums",
-                          num(a.unrealizedPnlEur) < 0
-                            ? "text-[var(--danger)]"
-                            : "text-[var(--success)]"
+                        {/* Le même minorant que celui qui coupe la simulation :
+                            hors `ATTRIBUTED`, ce montant ne contient aucune
+                            espèce, et rien ne le disait. */}
+                        {a.cashAttribution !== "ATTRIBUTED" && (
+                          <p className="text-[10px] text-[var(--muted-foreground)]">
+                            titres seuls
+                          </p>
                         )}
+                        <p
+                          className={cn(
+                            "text-[11px] tabular-nums",
+                            num(a.unrealizedPnlEur) < 0
+                              ? "text-[var(--danger)]"
+                              : "text-[var(--success)]"
+                          )}
+                        >
+                          {formatCurrency(a.unrealizedPnlEur, "EUR")} latent
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="!h-6 !w-6 !px-0 text-slate-400 hover:text-red-600"
+                        onClick={() => setDeleteTarget(a)}
+                        aria-label="Supprimer le compte"
+                        data-testid="securities-account-delete"
                       >
-                        {formatCurrency(a.unrealizedPnlEur, "EUR")} latent
-                      </p>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
                   </div>
 
@@ -1261,6 +1307,28 @@ export function SecuritiesTab({ className }: { className?: string }) {
           </p>
         </>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        danger
+        title="Supprimer ce compte ?"
+        message={
+          deleteTarget
+            ? `Le compte ${deleteTarget.envelopeLabel} · ${deleteTarget.platformName} sera supprimé.${
+                deleteTarget.positionCount > 0
+                  ? ` Les ${deleteTarget.positionCount} ligne(s) qu'il porte seront détachées, pas effacées : elles resteront visibles, non rattachées à un compte.`
+                  : ""
+              }`
+            : ""
+        }
+        confirmLabel="Supprimer"
+        testId="securities-account-delete-confirm"
+        onConfirm={() => {
+          if (deleteTarget) deleteAccountMut.mutate(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </section>
   );
 }

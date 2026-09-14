@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatCurrency, cn } from "@/app/lib/utils";
 import { endOfParisDay } from "@/app/lib/dates/paris";
 import { Eye, EyeOff, ChevronDown, ChevronUp } from "lucide-react";
@@ -1100,6 +1100,27 @@ export function TerminalKpiRow({
     typeof window !== "undefined" ? loadUiPref<string[]>(KPI_HIDDEN_KEY, []) : []
   );
   const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Ferme au clic extérieur et à Échap — même convention que ColumnPicker
+  // (components/ui/column-picker.tsx) : sans ça le menu restait ouvert tant
+  // qu'on ne recliquait pas sur le bouton lui-même.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (pickerRef.current?.contains(e.target as Node)) return;
+      setPickerOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setPickerOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [pickerOpen]);
   const knownKeys = items.map((i) => i.key);
   const hidden = hiddenKeys.filter(
     (k) => knownKeys.includes(k) && k !== "pnl"
@@ -1130,7 +1151,7 @@ export function TerminalKpiRow({
       <div className="flex items-center justify-between gap-[var(--space-2)]">
         <p className="text-label hidden sm:block">Indicateurs</p>
 
-        <div className="relative ml-auto">
+        <div className="relative ml-auto" ref={pickerRef}>
           <button
             type="button"
             onClick={() => setPickerOpen((v) => !v)}

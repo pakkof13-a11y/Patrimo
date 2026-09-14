@@ -2,17 +2,25 @@
  * Assemblage du KPI strip Crypto — seule couche de ce module qui touche
  * Prisma.
  *
- * Volontairement bon marché : aucun appel fournisseur n'est déclenché ici. La
- * variation 24h lit uniquement le cache `AssetDailyClose` déjà rempli par le
- * P&L journalier (`class-pnl-service.ts`) — si ce panneau n'a jamais été
- * ouvert, le cache est simplement vide et la variation s'affiche comme
- * indisponible plutôt que de payer un aller-retour fournisseur au chargement
- * de chaque onglet Crypto.
+ * Volontairement bon marché : aucun appel fournisseur n'est déclenché ici.
+ *
+ * ## Définition retenue pour la variation 24h (unique dans l'app)
+ *
+ * `valeur actuelle (cotation live déjà en cache PriceQuote) contre clôture
+ * d'hier (cache AssetDailyClose, rempli par le P&L journalier)`, agrégée en
+ * pondérant par la valeur de chaque position — pas une moyenne des variations
+ * individuelles. C'est la même formule, la même fenêtre (`parisYesterdayKey`)
+ * et le même agrégateur value-weighted que l'onglet Comptant
+ * (`spot-history-service.ts` / `computeSpotChange24h`) : les deux ne peuvent
+ * plus décrire deux mouvements différents sous le même libellé « 24h ». Sous
+ * le seuil de couverture (`MIN_COVERAGE_RATIO`), la variation s'affiche comme
+ * indisponible plutôt qu'un pourcentage calculé sur une fraction non
+ * représentative du portefeuille.
  */
 
 import { prisma } from "../prisma";
 import { d } from "../money/decimal";
-import { parisDayKey } from "../dates/paris";
+import { parisDayKey, parisYesterdayKey } from "../dates/paris";
 import { getAssetValues } from "../portfolio/asset-values";
 import { readDailyCloses } from "../market/daily-closes";
 import { closeAtOrBefore } from "../portfolio/class-history";
@@ -139,10 +147,14 @@ export async function getCryptoKpis(userId: string): Promise<CryptoKpis> {
 
   const totals = summarizeCryptoTotals(inputs);
 
-  // Variation 24h : lecture seule du cache, veille → aujourd'hui (heure de
-  // Paris, cohérent avec le reste des séries journalières de l'app).
-  const today = parisDayKey(new Date());
-  const yesterday = parisDayKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  // Variation 24h : cotation live (`v.priceEur`, déjà lue ci-dessus pour les
+  // totaux) contre la clôture d'hier, lue en cache — jamais deux clôtures
+  // déjà passées. `parisYesterdayKey` est la borne partagée avec l'onglet
+  // Comptant (`spot-history-service.ts`) : voir sa doc pour la définition
+  // unique retenue.
+  const now = new Date();
+  const today = parisDayKey(now);
+  const yesterday = parisYesterdayKey(now);
   const closes = await readDailyCloses(assetIds, yesterday, today);
 
   const varInputs: Variation24hInput[] = inputs
