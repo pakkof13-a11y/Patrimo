@@ -10,6 +10,7 @@ import {
   isOverviewEmpty,
   positionWeightPct,
   splitByEnvelope,
+  unattachedEnvelopeValueEur,
   unattributedPockets,
   type SecuritiesAccount,
   type SecuritiesPosition,
@@ -596,6 +597,35 @@ describe("unattributedPockets", () => {
       securitiesEnvelopeLabel
     );
     expect(poches.map((p) => p.label)).toEqual(["Compte-titres", "PEA", "PEA-PME"]);
+  });
+});
+
+/* ── H4 v2 — un compte réel peut coexister avec des lignes orphelines ── */
+
+describe("unattachedEnvelopeValueEur", () => {
+  /*
+    Le cas de reproduction : un `SecuritiesAccount` PEA réel existe (compte
+    "Pass2-Test-PEA"), zéro position rattachée, et 8 lignes qui portent
+    l'étiquette PEA sans `securitiesAccountId`. La fonction ne doit compter
+    que ces dernières — jamais les positions déjà rattachées à un compte
+    réel, sans quoi la carte de compte et la notice se contrediraient.
+  */
+  it("ne compte que les lignes orphelines de l'enveloppe demandée", () => {
+    const positions = [
+      position({ assetId: "p1", securitiesAccountId: null, accountType: "PEA", marketValueEur: "1000" }),
+      position({ assetId: "p2", securitiesAccountId: null, accountType: "PEA", marketValueEur: "2500" }),
+      position({ assetId: "p3", securitiesAccountId: "a1", accountType: "PEA", marketValueEur: "9000" }),
+      position({ assetId: "p4", securitiesAccountId: null, accountType: "CTO", marketValueEur: "700" }),
+    ];
+    expect(unattachedEnvelopeValueEur(positions, "PEA")).toBe(3500);
+    expect(unattachedEnvelopeValueEur(positions, "CTO")).toBe(700);
+  });
+
+  it("rend zéro, pas une absence, quand rien n'est orphelin", () => {
+    const positions = [
+      position({ assetId: "p1", securitiesAccountId: "a1", accountType: "PEA", marketValueEur: "9000" }),
+    ];
+    expect(unattachedEnvelopeValueEur(positions, "PEA")).toBe(0);
   });
 });
 

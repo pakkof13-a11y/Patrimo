@@ -533,7 +533,10 @@ export function TransactionModal({
                 ))}
               </select>
             </Field>
-            <Field label="Plateforme">
+            <Field
+              label="Plateforme"
+              error={form.formState.errors.platformId?.message as string | undefined}
+            >
               <input type="hidden" {...form.register("platformId")} />
               <PlatformCombobox
                 value={platformLabel}
@@ -542,7 +545,27 @@ export function TransactionModal({
                 showCreateOption
                 placeholder="Boursorama, Binance, Trade Republic…"
                 options={platformOptions}
-                onValueChange={onPlatformLabelChange}
+                onValueChange={(text) => {
+                  onPlatformLabelChange(text);
+                  /*
+                    Toute frappe qui s'écarte de la plateforme actuellement
+                    sélectionnée invalide cette sélection : sans ça, un texte
+                    tapé sans être jamais choisi dans la liste (ni « + Autre »)
+                    soumettait silencieusement l'ancien platformId (ex. le
+                    premier de la liste au chargement) sous un libellé
+                    affiché différent — corruption silencieuse de la
+                    plateforme persistée. La sélection n'est valide que si le
+                    texte affiché correspond exactement à une option choisie
+                    explicitement via onSelect.
+                  */
+                  const currentId = form.getValues("platformId");
+                  const currentOption = platformOptions.find(
+                    (o) => o.value === currentId
+                  );
+                  if (!currentOption || currentOption.label !== text) {
+                    form.setValue("platformId", "", { shouldValidate: false });
+                  }
+                }}
                 onSelect={(sel) => {
                   if ("create" in sel && sel.create) {
                     onRequestCreatePlatform?.(sel.prefill);
