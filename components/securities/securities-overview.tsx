@@ -285,6 +285,33 @@ export function SecuritiesOverview({
     return withMaturity[0] ?? null;
   }, [accounts]);
 
+  /**
+   * Le PEA existe-t-il comme *compte déclaré*, indépendamment de l'antériorité
+   * qu'on sait en tirer ? `peaMaturity` répond « non » dans deux cas distincts
+   * — aucun `SecuritiesAccount` de type PEA, ou un compte réel dont le service
+   * fiscal n'a pas (encore) produit de compteur — et `FiscalStatusCard` doit
+   * les distinguer : le premier dit « aucun PEA », le second non.
+   */
+  const hasRealPeaAccount = useMemo(
+    () => accounts.some((a) => a.envelopeType === "PEA"),
+    [accounts]
+  );
+
+  /**
+   * Ce que la tuile KPI « PEA » compte alors qu'aucun compte ne le porte.
+   *
+   * `splitByEnvelope` range une ligne orpheline sous l'enveloppe qu'elle
+   * déclare elle-même (`Asset.accountType`), faute de compte réel pour
+   * trancher — c'est ce qui peuple la tuile à 310 441 € sans qu'un seul
+   * `SecuritiesAccount` PEA existe. Le message "Aucun PEA déclaré" doit lire
+   * ce même total, sous peine de contredire la tuile juste au-dessus.
+   */
+  const unattachedPeaValueEur = useMemo(() => {
+    if (hasRealPeaAccount) return null;
+    const pea = envelopes.find((e) => e.envelopeType === "PEA");
+    return pea && pea.valueEur > 0 ? pea.valueEur : null;
+  }, [hasRealPeaAccount, envelopes]);
+
   if (q.isPending) {
     return (
       <div
@@ -580,7 +607,10 @@ export function SecuritiesOverview({
             )}
           </section>
 
-          <FiscalStatusCard account={peaMaturity} />
+          <FiscalStatusCard
+            account={peaMaturity}
+            unattachedPeaValueEur={unattachedPeaValueEur}
+          />
 
           <section className="panel p-[var(--pad-card)]">
             <h3 className="text-label">Actions rapides</h3>
@@ -897,10 +927,49 @@ function QuickAction({
  */
 function FiscalStatusCard({
   account,
+  unattachedPeaValueEur,
 }: {
   account: SecuritiesAccount | null;
+  /**
+   * Ce que la tuile KPI « PEA » affiche alors qu'aucun `SecuritiesAccount`
+   * PEA n'existe — `null` s'il n'y en a pas (silence légitime) ou si le PEA
+   * "Aucun PEA déclaré" serait alors faux : un compte existe.
+   *
+   * `SecuritiesOverview.unattachedPeaValueEur` le vaut déjà `null` dans ce
+   * second cas.
+   */
+  unattachedPeaValueEur: number | null;
 }) {
   if (!account?.maturity) {
+    /*
+      Deux affirmations ne peuvent pas cohabiter sans se contredire : « aucun
+      PEA déclaré » à côté d'une tuile PEA à 310 441 €. La cause n'est pas un
+      chiffre faux — `splitByEnvelope` range bien les lignes orphelines sous
+      l'enveloppe qu'elles déclarent elles-mêmes — mais l'absence de tout
+      `SecuritiesAccount` PEA derrière elles. Le dire vaut mieux que de
+      prétendre qu'il n'y a pas de PEA du tout (H4).
+    */
+    if (unattachedPeaValueEur != null) {
+      return (
+        <section
+          className="panel p-[var(--pad-card)]"
+          data-testid="securities-fiscal"
+          data-pea-unattached="true"
+        >
+          <h3 className="text-label">Statut fiscal</h3>
+          <p className="text-meta mt-[var(--space-2)]">
+            Aucun compte PEA déclaré, mais{" "}
+            <span className="num text-[var(--foreground)]">
+              {formatCurrency(unattachedPeaValueEur, "EUR")}
+            </span>{" "}
+            de titres portent l&apos;étiquette PEA sans compte rattaché :
+            leur antériorité fiscale ne peut pas être suivie tant qu&apos;ils
+            ne le sont pas.
+          </p>
+        </section>
+      );
+    }
+
     return (
       <section className="panel p-[var(--pad-card)]" data-testid="securities-fiscal">
         <h3 className="text-label">Statut fiscal</h3>

@@ -128,7 +128,10 @@ function LenderCombobox({
         aria-expanded={open}
         aria-haspopup="listbox"
       >
-        <span className={cn("min-w-0 truncate", !value && "text-slate-400")}>
+        <span
+          className={cn("min-w-0 truncate", !value && "text-slate-400")}
+          title={value ? display : undefined}
+        >
           {display}
         </span>
         <ChevronDown

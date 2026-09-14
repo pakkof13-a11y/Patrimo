@@ -86,3 +86,20 @@ export function parisDayKey(isoOrDate: string | Date): string {
   if (Number.isNaN(date.getTime())) return "";
   return PARIS_DAY.format(date);
 }
+
+/**
+ * Jour civil Paris « il y a 24 h », borne de référence de **la** variation
+ * 24h de la poche crypto.
+ *
+ * Point unique : la valeur courante (cotation live) se compare toujours à la
+ * clôture de ce jour-là, que ce soit pour le KPI strip (`summary-service.ts`)
+ * ou pour l'onglet Comptant (`spot-history-service.ts`). Les deux appelants
+ * partagent cette fonction précisément pour ne plus pouvoir diverger : avant
+ * ce correctif, le premier comparait la cotation live à la clôture de la
+ * veille tandis que le second comparait deux clôtures déjà passées (souvent
+ * avant-veille → veille, faute de clôture du jour encore écrite en cache) —
+ * deux fenêtres différentes présentées sous le même libellé « 24h ».
+ */
+export function parisYesterdayKey(now: Date): string {
+  return parisDayKey(new Date(now.getTime() - 24 * 60 * 60 * 1000));
+}

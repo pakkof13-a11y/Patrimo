@@ -31,7 +31,11 @@ function card(over: Partial<CoinCard> & { symbol: string }): CoinCard {
     unrealizedPnlPct:
       costBasisEur > 0 ? ((marketValueEur - costBasisEur) / costBasisEur) * 100 : null,
     avgCostEur: over.avgCostEur ?? null,
-    currentPriceEur: over.currentPriceEur ?? null,
+    // Quantité par défaut = 1, donc cotation actuelle = valeur de marché sauf
+    // override explicite — cohérent avec `card.marketValueEur`, seule source
+    // de la variation 24h depuis le correctif H3 (cotation live vs clôture
+    // d'hier, plus deux clôtures déjà passées).
+    currentPriceEur: over.currentPriceEur ?? marketValueEur,
     allocationPct: over.allocationPct ?? 0,
     venues: over.venues ?? [],
   };
@@ -140,9 +144,9 @@ describe("buildAssetRows", () => {
   it("attache variation, montant 24 h et sparkline", () => {
     const rows = buildAssetRows(
       [card({ symbol: "BTC", marketValueEur: 110, allocationPct: 60 })],
-      { BTC: { change24hPct: 10, closes: [1, 2, 3] } }
+      { BTC: { previousCloseEur: 100, closes: [1, 2, 3] } }
     );
-    expect(rows[0]!.change24hPct).toBe(10);
+    expect(rows[0]!.change24hPct).toBeCloseTo(10);
     // 110 aujourd'hui après +10 % : 100 la veille, soit +10 €.
     expect(rows[0]!.change24hEur).toBeCloseTo(10);
     expect(rows[0]!.spark).toEqual([1, 2, 3]);
@@ -165,7 +169,10 @@ describe("computeSpotChange24h", () => {
         card({ symbol: "BTC", marketValueEur: 110 }),
         card({ symbol: "ETH", marketValueEur: 90 }),
       ],
-      { BTC: { change24hPct: 10, closes: [] }, ETH: { change24hPct: -10, closes: [] } }
+      {
+        BTC: { previousCloseEur: 100, closes: [] },
+        ETH: { previousCloseEur: 100, closes: [] },
+      }
     );
     const r = computeSpotChange24h(rows);
     expect(r.coveragePct).toBeCloseTo(100);
@@ -179,7 +186,7 @@ describe("computeSpotChange24h", () => {
         card({ symbol: "BTC", marketValueEur: 20 }),
         card({ symbol: "ETH", marketValueEur: 80 }),
       ],
-      { BTC: { change24hPct: 10, closes: [] } }
+      { BTC: { previousCloseEur: 18, closes: [] } }
     );
     const r = computeSpotChange24h(rows);
     expect(r.coveragePct).toBeCloseTo(20);
@@ -200,8 +207,10 @@ describe("bestWorst24h", () => {
         card({ symbol: "DOT", marketValueEur: 100 }),
       ],
       {
-        SOL: { change24hPct: 6.34, closes: [] },
-        XRP: { change24hPct: -1.23, closes: [] },
+        // SOL: 100 aujourd'hui depuis 90 hier, soit +11,1 %.
+        SOL: { previousCloseEur: 90, closes: [] },
+        // XRP: 100 aujourd'hui depuis 110 hier, soit −9,1 %.
+        XRP: { previousCloseEur: 110, closes: [] },
       }
     );
     const { best, worst } = bestWorst24h(rows);
@@ -215,7 +224,9 @@ describe("bestWorst24h", () => {
         card({ symbol: "A", marketValueEur: 10 }),
         card({ symbol: "B", marketValueEur: 500 }),
       ],
-      { A: { change24hPct: 3, closes: [] }, B: { change24hPct: 3, closes: [] } }
+      // Même variation (0 %, cotation actuelle = clôture d'hier) des deux
+      // côtés : seule la valeur détenue doit départager l'égalité.
+      { A: { previousCloseEur: 10, closes: [] }, B: { previousCloseEur: 500, closes: [] } }
     );
     expect(bestWorst24h(rows).best!.card.symbol).toBe("B");
   });

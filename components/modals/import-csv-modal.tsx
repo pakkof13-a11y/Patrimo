@@ -1722,7 +1722,7 @@ export function ImportCsvModal({
                           size={28}
                         />
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">
+                          <p className="truncate text-sm font-medium" title={p.name}>
                             {p.name}
                           </p>
                           <span className="rounded-full bg-teal-500/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-teal-800 dark:text-teal-200">
@@ -2287,7 +2287,7 @@ export function ImportCsvModal({
                                     key={h}
                                     className="whitespace-nowrap px-2 py-1.5 font-medium"
                                   >
-                                    <span className="block max-w-[8rem] truncate">
+                                    <span className="block max-w-[8rem] truncate" title={h}>
                                       {h}
                                     </span>
                                     {manualMap[h] && (

@@ -732,7 +732,9 @@ export function HoldingsSection({
               name={row.original.platformName}
               size={22}
             />
-            <span className="truncate text-sm">{row.original.platformName}</span>
+            <span className="truncate text-sm" title={row.original.platformName}>
+              {row.original.platformName}
+            </span>
           </div>
         ),
       },

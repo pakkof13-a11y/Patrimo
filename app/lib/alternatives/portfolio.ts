@@ -214,7 +214,11 @@ export async function getAlternativesDashboardBundle(
     privateEquity: pe.summary,
     crowdlending: cl.summary,
     tangibles: tangibles.summary,
-    shortAlerts: buildAlternativesShortAlerts(cl.summary, pe.summary),
+    shortAlerts: buildAlternativesShortAlerts(
+      cl.summary,
+      pe.summary,
+      tangibles.summary
+    ),
     /*
       Les quatre listes étaient déjà chargées pour en tirer les summaries, puis
       jetées. Les consolider ici ne coûte aucune requête de plus et donne à la

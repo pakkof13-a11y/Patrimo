@@ -20,7 +20,7 @@
  */
 
 import { prisma } from "../prisma";
-import { parisDayKey } from "../dates/paris";
+import { parisDayKey, parisYesterdayKey } from "../dates/paris";
 import { getDailyCloses } from "../market/daily-closes";
 import { valueHeldAtDay } from "../market/daily-valuation";
 import {
@@ -45,8 +45,21 @@ export type SpotValuePoint = {
 };
 
 export type SpotAssetSeries = {
-  /** Variation entre l'avant-dernière et la dernière clôture, en %. */
-  change24hPct: number | null;
+  /**
+   * Clôture d'hier (`parisYesterdayKey`), pour la variation 24h.
+   *
+   * `null` sans clôture connue à moins de `MAX_STALE_DAYS` d'hier. La
+   * variation elle-même ne se calcule **pas** ici : ce module ne connaît que
+   * des clôtures passées, or la définition retenue (voir
+   * `summary-service.ts`) compare la valeur **actuelle** — cotation live,
+   * connue de l'appelant via `CoinCard.currentPriceEur` — à cette clôture.
+   * La calculer ici comparerait deux clôtures déjà passées (souvent
+   * avant-veille → veille tant que la clôture du jour n'est pas encore en
+   * cache) au lieu d'une vraie fenêtre de 24h se terminant maintenant — c'est
+   * précisément l'écart qui faisait diverger le KPI strip et l'onglet
+   * Comptant.
+   */
+  previousCloseEur: number | null;
   /** Jusqu'à 30 clôtures, du plus ancien au plus récent. */
   closes: number[];
 };
@@ -85,34 +98,33 @@ function symbolOf(a: { ticker: string | null; name: string }): string {
 }
 
 /**
- * Deux dernières clôtures cotées d'un actif, si elles sont assez rapprochées.
+ * Clôture d'un actif à la date la plus proche d'`yesterday`, sans la dépasser.
  *
- * `MAX_STALE_DAYS` borne la fraîcheur : au-delà, l'écart entre deux clôtures
- * n'est plus une variation « 24 h » mais celle d'une semaine, et l'annoncer
- * comme telle serait faux. On rend alors `null`, que l'écran sait dire.
+ * `MAX_STALE_DAYS` borne la fraîcheur : au-delà, la clôture trouvée décrit une
+ * autre journée qu'« hier » (week-end + jour férié consécutifs, fournisseur
+ * muet…), et la présenter comme la veille pour une variation « 24 h » serait
+ * faux. On rend alors `null`, que l'écran sait dire.
  */
 const MAX_STALE_DAYS = 3;
 
-function quotedPair(
+function previousCloseNear(
   index: Map<DayKey, number>,
-  toDay: DayKey
-): { last: number; previous: number } | null {
-  const days = [...index.keys()].filter((d) => d <= toDay).sort();
-  if (days.length < 2) return null;
+  yesterday: DayKey
+): number | null {
+  let bestDay = "";
+  let bestValue: number | null = null;
+  for (const [day, value] of index) {
+    if (day <= yesterday && day > bestDay) {
+      bestDay = day;
+      bestValue = value;
+    }
+  }
+  if (bestValue == null || bestValue <= 0) return null;
 
-  const lastDay = days[days.length - 1]!;
-  const previousDay = days[days.length - 2]!;
-
-  const ageDays =
-    (Date.parse(`${toDay}T00:00:00Z`) - Date.parse(`${lastDay}T00:00:00Z`)) /
-    (24 * 3600 * 1000);
   const gapDays =
-    (Date.parse(`${lastDay}T00:00:00Z`) -
-      Date.parse(`${previousDay}T00:00:00Z`)) /
+    (Date.parse(`${yesterday}T00:00:00Z`) - Date.parse(`${bestDay}T00:00:00Z`)) /
     (24 * 3600 * 1000);
-  if (ageDays > MAX_STALE_DAYS || gapDays > MAX_STALE_DAYS) return null;
-
-  return { last: index.get(lastDay)!, previous: index.get(previousDay)! };
+  return gapDays <= MAX_STALE_DAYS ? bestValue : null;
 }
 
 export async function getSpotHistory(
@@ -121,6 +133,9 @@ export async function getSpotHistory(
   now = new Date()
 ): Promise<SpotHistory> {
   const toDay = parisDayKey(now);
+  // Borne partagée avec le KPI strip (`summary-service.ts`) : voir la doctrine
+  // de `parisYesterdayKey` pour la définition unique de la variation 24h.
+  const yesterday = parisYesterdayKey(now);
 
   // Comptant = actif crypto sans fiche DeFi ni fiche NFT. Le filtre est posé
   // ici plutôt qu'après coup : une position DeFi entrée dans le rejeu du
@@ -245,17 +260,18 @@ export async function getSpotHistory(
     if (series.length === 0) continue;
 
     /*
-      La variation 24 h se lit sur deux clôtures **réellement cotées**, et non
-      sur la série ci-dessus : celle-ci reporte la dernière clôture connue pour
-      dessiner une courbe continue, si bien qu'un cache périmé afficherait
-      « 0,00 % » — « stable » là où la bonne réponse est « on ne sait pas ».
+      La clôture de la veille se lit sur une clôture **réellement cotée**, et
+      non sur la série ci-dessus : celle-ci reporte la dernière clôture connue
+      pour dessiner une courbe continue, si bien qu'un cache périmé
+      afficherait « stable » là où la bonne réponse est « on ne sait pas ».
 
-      On prend les deux derniers jours cotés plutôt que strictement hier et
-      aujourd'hui : la clôture du jour n'est écrite qu'en fin de journée, et
-      exiger sa présence rendrait la mesure indisponible toute la matinée alors
-      que les deux veilles sont connues.
+      La variation elle-même n'est pas calculée ici : voir la doc de
+      `previousCloseEur` sur `SpotAssetSeries` — c'est l'appelant
+      (`buildAssetRows`, `spot-overview.ts`) qui la rapporte à la cotation
+      **actuelle** (`CoinCard.currentPriceEur`), pas à une seconde clôture déjà
+      passée.
     */
-    const quoted = quotedPair(index, toDay);
+    const previousCloseEur = previousCloseNear(index, yesterday);
 
     // Deux coins peuvent partager un symbole (même jeton sur deux réseaux) :
     // la première série connue fait foi, plutôt que d'en moyenner deux qui
@@ -263,10 +279,7 @@ export async function getSpotHistory(
     if (bySymbol[symbol]) continue;
 
     bySymbol[symbol] = {
-      change24hPct:
-        quoted && quoted.previous > 0
-          ? (quoted.last / quoted.previous - 1) * 100
-          : null,
+      previousCloseEur,
       closes: series.slice(-SPARK_DAYS),
     };
   }

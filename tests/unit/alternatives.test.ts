@@ -403,10 +403,21 @@ describe("summarizePrivateEquity — staleNavCount", () => {
 describe("buildAlternativesShortAlerts", () => {
   const clSummaryBase = { byStatus: [], soonCount: 0 };
   const peSummaryBase = { staleNavCount: 0 };
+  const tangiblesSummaryBase = {
+    undatedCount: 0,
+    underInsuredCount: 0,
+    uninsuredHighValueCount: 0,
+    expiringPolicyCount: 0,
+    ownershipAlertCount: 0,
+  };
 
   it("tableau vide quand aucune alerte", () => {
     expect(
-      buildAlternativesShortAlerts(clSummaryBase, peSummaryBase)
+      buildAlternativesShortAlerts(
+        clSummaryBase,
+        peSummaryBase,
+        tangiblesSummaryBase
+      )
     ).toEqual([]);
   });
 
@@ -419,7 +430,8 @@ describe("buildAlternativesShortAlerts", () => {
         ],
         soonCount: 3,
       },
-      { staleNavCount: 4 }
+      { staleNavCount: 4 },
+      tangiblesSummaryBase
     );
     expect(alerts).toEqual([
       { type: "cl-late", label: "Prêt(s) en retard", count: 2, sub: "crowdlending" },
@@ -442,7 +454,8 @@ describe("buildAlternativesShortAlerts", () => {
   it("ne renvoie que les types réellement en alerte", () => {
     const alerts = buildAlternativesShortAlerts(
       { byStatus: [], soonCount: 1 },
-      { staleNavCount: 0 }
+      { staleNavCount: 0 },
+      tangiblesSummaryBase
     );
     expect(alerts).toEqual([
       {
@@ -450,6 +463,52 @@ describe("buildAlternativesShortAlerts", () => {
         label: "Prêt(s) à échéance ≤ 3 mois",
         count: 1,
         sub: "crowdlending",
+      },
+    ]);
+  });
+
+  it("inclut les trois bandeaux Tangibles quand ils sont affichés à l'écran (IMM/H2)", () => {
+    // Reproduit le jeu de données constaté : 9 objets en possession, 8
+    // alertes de possession, 2 non assurés de plus de 5000€, 1 sous-assuré,
+    // 1 police échue/expirant — les trois bandeaux de
+    // `alternatives-tangibles.tsx` sont visibles, le KPI ne doit donc jamais
+    // rester à 0.
+    const alerts = buildAlternativesShortAlerts(clSummaryBase, peSummaryBase, {
+      undatedCount: 0,
+      underInsuredCount: 1,
+      uninsuredHighValueCount: 2,
+      expiringPolicyCount: 1,
+      ownershipAlertCount: 8,
+    });
+    expect(alerts).toEqual([
+      {
+        type: "tangible-insurance",
+        label: "Objet(s) sous-assuré(s) ou non assuré(s)",
+        count: 4,
+        sub: "tangibles",
+      },
+      {
+        type: "tangible-ownership",
+        label: "Alerte(s) de possession",
+        count: 8,
+        sub: "tangibles",
+      },
+    ]);
+    // 0 alerte est interdit tant qu'un bandeau est visible.
+    expect(alerts.reduce((s, a) => s + a.count, 0)).toBeGreaterThan(0);
+  });
+
+  it("tangible-undated apparaît quand des objets n'ont pas de date d'achat", () => {
+    const alerts = buildAlternativesShortAlerts(clSummaryBase, peSummaryBase, {
+      ...tangiblesSummaryBase,
+      undatedCount: 3,
+    });
+    expect(alerts).toEqual([
+      {
+        type: "tangible-undated",
+        label: "Objet(s) sans date d'achat",
+        count: 3,
+        sub: "tangibles",
       },
     ]);
   });

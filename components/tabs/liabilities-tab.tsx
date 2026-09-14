@@ -17,6 +17,7 @@ import {
   LIABILITY_LENDER_OPTIONS,
 } from "@/app/lib/constants";
 import { formatCurrency } from "@/app/lib/utils";
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 
 import {
   buildLiabilityViews,
@@ -162,9 +163,14 @@ export function LiabilitiesTab({
   // (pas de fausse alerte sur les crédits soldés — jamais dans activeRows).
   // Diff en jours calendaires UTC, cohérent avec nextPaymentDueDate /
   // startOfUtcDay déjà utilisés par le module d'amortissement.
+  // Un passif entre dans le patrimoine net (portfolio-daily-nav,
+  // portfolio-history) sans jamais apparaître dans ["holdings"] : la liste des
+  // crédits se rafraîchissait bien, mais le résumé patrimoine restait sur son
+  // dernier calcul en cache jusqu'à un F5 manuel.
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["liabilities"] });
     await qc.invalidateQueries({ queryKey: ["holdings"] });
+    invalidatePortfolioView(qc);
   };
 
   const createMut = useMutation({

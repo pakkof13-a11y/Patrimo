@@ -305,7 +305,9 @@ export function PlatformCombobox({
                 <PlatformLogo src={o.logoUrl} name={o.label} size={24} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 truncate">
-                    <span className="truncate font-medium">{o.label}</span>
+                    <span className="truncate font-medium" title={o.label}>
+                      {o.label}
+                    </span>
                     {o.isNew && (
                       <span className="shrink-0 rounded-full bg-teal-500/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-teal-800 dark:text-teal-200">
                         Nouvelle

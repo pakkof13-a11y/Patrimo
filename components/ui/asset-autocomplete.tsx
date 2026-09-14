@@ -247,7 +247,7 @@ export function AssetAutocomplete({
                 size={22}
               />
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">
+                <div className="truncate font-medium" title={h.name}>
                   {h.name}
                   {h.ticker ? (
                     <span className="ml-1 text-xs font-normal text-slate-500">

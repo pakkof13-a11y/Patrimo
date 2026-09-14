@@ -97,6 +97,7 @@ export function KpiBandTile({
             tone === "negative" && "val-negative",
             !tone && "text-[var(--foreground)]"
           )}
+          title={value}
         >
           {value}
         </p>

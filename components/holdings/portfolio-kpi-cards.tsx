@@ -73,7 +73,10 @@ function KpiCard({
       </h3>
 
       <p className="flex items-baseline gap-[var(--space-2)] leading-none">
-        <span className="num truncate text-[length:var(--text-xl)] font-semibold text-[var(--foreground)]">
+        <span
+          className="num truncate text-[length:var(--text-xl)] font-semibold text-[var(--foreground)]"
+          title={value}
+        >
           {value}
         </span>
         {unit && <span className="text-label shrink-0">{unit}</span>}

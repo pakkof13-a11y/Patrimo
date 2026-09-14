@@ -421,7 +421,10 @@ export function AssetPanel({
             size={36}
           />
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-[length:var(--text-base)] font-semibold text-[var(--foreground)]">
+            <h2
+              className="truncate text-[length:var(--text-base)] font-semibold text-[var(--foreground)]"
+              title={asset?.name || undefined}
+            >
               {asset?.name || (loading ? "Chargement…" : "Actif")}
             </h2>
             {/* « BTC · CRYPTO » : le ticker identifie, la classe situe. Le
