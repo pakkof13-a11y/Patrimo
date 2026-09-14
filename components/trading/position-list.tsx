@@ -68,6 +68,24 @@ const price = (v: number | null, currency: string) =>
   v == null ? "—" : formatCurrency(String(v), currency);
 
 /**
+ * Montant, ou l'inconnue dite comme telle.
+ *
+ * `String(null)` rend la chaîne « null », et cette chaîne-là n'est pas une
+ * absence pour `d()` : elle ne vaut ni `null`, ni `undefined`, ni `""`, donc
+ * elle file nue jusqu'à `new Decimal("null")`, qui lève
+ * `[DecimalError] Invalid argument: null`. L'exception traverse le rendu de
+ * la table et l'ErrorBoundary global remplace **toute** l'application par son
+ * écran d'erreur — c'est ce qui se produisait dès qu'une position ouverte
+ * portait un notionnel non calculable (TRA-03 : couple de devises sans taux,
+ * COIN-M sans valeur de contrat).
+ *
+ * Un notionnel ou une marge non calculables sont des inconnues, pas des
+ * zéros : ils s'affichent comme tels et ne se replient jamais sur 0.
+ */
+export const amountOrUnknown = (v: number | null, currency: string) =>
+  v == null ? "—" : formatCurrency(String(v), currency);
+
+/**
  * Un P&L `null` (TRA-03 : contrat COIN-M sans valeur de contrat connue) n'est
  * ni positif, ni négatif, ni nul — c'est une inconnue. Aucune classe de
  * tonalité ne doit s'y appliquer, et surtout aucun repli sur 0.
@@ -187,9 +205,9 @@ export function PositionList({
                 </span>
               </td>
               <td className="num text-right text-[var(--foreground-secondary)]">
-                {formatCurrency(String(v.notionalEur), baseCurrency)}
+                {amountOrUnknown(v.notionalEur, baseCurrency)}
                 <span className="text-meta block">
-                  marge {formatCurrency(String(v.marginEur), baseCurrency)}
+                  marge {amountOrUnknown(v.marginEur, baseCurrency)}
                 </span>
               </td>
               <td>

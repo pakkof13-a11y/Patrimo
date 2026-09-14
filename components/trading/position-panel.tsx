@@ -30,7 +30,12 @@ import {
   markFreshnessNotice,
   type PositionView,
 } from "@/app/lib/trading/positions-view";
-import { DirectionBadge, PNL_UNKNOWN_LABEL, StatusDot } from "./position-list";
+import {
+  DirectionBadge,
+  PNL_UNKNOWN_LABEL,
+  StatusDot,
+  amountOrUnknown,
+} from "./position-list";
 
 type Section = "summary" | "risk" | "history";
 
@@ -307,11 +312,13 @@ export function PositionPanel({
             <Block>
               <Fact
                 label="Notionnel"
-                value={formatCurrency(String(view.notionalEur), baseCurrency)}
+                value={amountOrUnknown(view.notionalEur, baseCurrency)}
+                tone={view.notionalEur == null ? "muted" : undefined}
               />
               <Fact
                 label="Marge engagée"
-                value={formatCurrency(String(view.marginEur), baseCurrency)}
+                value={amountOrUnknown(view.marginEur, baseCurrency)}
+                tone={view.marginEur == null ? "muted" : undefined}
               />
               <Fact
                 label={view.isOpen ? "P&L latent" : "P&L réalisé brut"}
