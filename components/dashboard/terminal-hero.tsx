@@ -804,38 +804,64 @@ export function TerminalHero({
             complet — laquelle ne dépend pas de la période choisie.
 
             Le libellé du mode n'y figure plus : le repère « ? » au-dessus le
-            porte désormais, et la ligne doit tenir sur une seule ligne pour ne
-            pas faire grandir la carte.
+            porte désormais.
+
+            H-HOVER-416 v3 : les trois morceaux (`hero-date`, `hero-liabilities`,
+            `hero-history-start`) sont chacun montés ou non selon la période —
+            `dateLabel`/`liabilitiesNow` retombent à `null`/`undefined` tant
+            que la série n'a pas de dernier point (ex. « Tout » sans historique
+            encore servi, cf. `dateLabel` ci-dessus), et `servedNavFrom` idem.
+            Un `<p>` sans aucun enfant ne génère pas de boîte de ligne — sa
+            hauteur retombe à zéro — alors qu'une période qui a les trois
+            occupe une vraie ligne de texte : la carte sautait entre les deux,
+            indépendamment de tout ce qui se passe sur la ligne du dessus.
+            `&nbsp;` en repli garantit toujours une boîte de ligne, jamais un
+            montage qui retire le flux ; `whitespace-nowrap` + défilement sans
+            barre visible empêche un repli sur deux lignes quand les trois
+            morceaux sont présents en même temps.
           */}
           <p
-            className="mt-[var(--space-2)] text-[length:var(--text-xs)] leading-none text-[var(--foreground-secondary)]"
+            className={cn(
+              "mt-[var(--space-2)] whitespace-nowrap overflow-x-auto hero-scroll-no-bar",
+              "text-[length:var(--text-xs)] leading-none text-[var(--foreground-secondary)]"
+            )}
             data-testid="hero-scope"
           >
-            {dateLabel && <span data-testid="hero-date">{dateLabel}</span>}
-            {liabilitiesNow !== undefined && (
+            {dateLabel ||
+            liabilitiesNow !== undefined ||
+            (servedNavFrom && periodOriginIso) ? (
               <>
-                <span className="mx-[var(--space-2)] text-[var(--foreground-faint)]">
-                  ·
-                </span>
-                <span data-testid="hero-liabilities">
-                  dont passifs{" "}
-                  <span className="num">{money(liabilitiesNow)}</span>
-                </span>
+                {dateLabel && (
+                  <span data-testid="hero-date">{dateLabel}</span>
+                )}
+                {liabilitiesNow !== undefined && (
+                  <>
+                    <span className="mx-[var(--space-2)] text-[var(--foreground-faint)]">
+                      ·
+                    </span>
+                    <span data-testid="hero-liabilities">
+                      dont passifs{" "}
+                      <span className="num">{money(liabilitiesNow)}</span>
+                    </span>
+                  </>
+                )}
+                {servedNavFrom && periodOriginIso && (
+                  <>
+                    <span className="mx-[var(--space-2)] text-[var(--foreground-faint)]">
+                      ·
+                    </span>
+                    <span
+                      className="text-[var(--foreground-faint)]"
+                      data-testid="hero-history-start"
+                      data-from={servedNavFrom}
+                    >
+                      depuis {formatShortDateParis(periodOriginIso)}
+                    </span>
+                  </>
+                )}
               </>
-            )}
-            {servedNavFrom && periodOriginIso && (
-              <>
-                <span className="mx-[var(--space-2)] text-[var(--foreground-faint)]">
-                  ·
-                </span>
-                <span
-                  className="text-[var(--foreground-faint)]"
-                  data-testid="hero-history-start"
-                  data-from={servedNavFrom}
-                >
-                  depuis {formatShortDateParis(periodOriginIso)}
-                </span>
-              </>
+            ) : (
+              <span aria-hidden="true">&nbsp;</span>
             )}
           </p>
         </div>
