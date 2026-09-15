@@ -125,6 +125,19 @@ export function PlatformCombobox({
     value.trim().length > 0 &&
     !filtered.some((o) => o.label.toLowerCase() === value.trim().toLowerCase());
 
+  // Quand l'utilisateur a tapé un nom qui ne correspond à aucune option
+  // affichée, l'entrée « créer » doit le dire explicitement — un libellé
+  // générique (« ＋ Autre / Nouvelle plateforme ») ne se lit pas comme une
+  // proposition de créer précisément ce qui vient d'être tapé.
+  const typedText = value.trim();
+  const hasExactMatch = filtered.some(
+    (o) => o.label.toLowerCase() === typedText.toLowerCase()
+  );
+  const dynamicCreateLabel =
+    typedText.length > 0 && !hasExactMatch
+      ? `＋ Créer « ${typedText} »`
+      : createOptionLabel;
+
   const items: Array<
     | { kind: "option"; option: PlatformComboboxOption }
     | { kind: "custom"; label: string }
@@ -133,7 +146,7 @@ export function PlatformCombobox({
     ...filtered.map((option) => ({ kind: "option" as const, option })),
     ...(showCustom ? [{ kind: "custom" as const, label: value.trim() }] : []),
     ...(showCreateOption
-      ? [{ kind: "create" as const, label: createOptionLabel }]
+      ? [{ kind: "create" as const, label: dynamicCreateLabel }]
       : []),
   ];
 

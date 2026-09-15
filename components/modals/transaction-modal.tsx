@@ -508,10 +508,30 @@ export function TransactionModal({
     >
       <form
         className="space-y-3"
-        onSubmit={form.handleSubmit((values) => {
-          const assetId = values.assetId || form.getValues("assetId") || "";
-          onSubmit({ ...values, assetId });
-        })}
+        onSubmit={(e) => {
+          /*
+            Un texte tapé dans le champ Plateforme qui ne correspond à
+            aucune sélection explicite laisse `platformId` vide : la
+            validation Zod bloque alors sur « Plateforme requise » sans
+            offrir d'issue. Plutôt que de coincer l'utilisateur ou de
+            resoumettre sous un ancien platformId (l'ancien bug, cf. plus
+            bas), le clic sur Enregistrer route vers le même chemin de
+            création que « ＋ Créer » : find-or-create par nom
+            (POST /api/platforms upsert=true), jamais un fallback vers une
+            autre plateforme.
+          */
+          const currentId = form.getValues("platformId");
+          const label = platformLabel.trim();
+          if (!currentId && label) {
+            e.preventDefault();
+            onRequestCreatePlatform?.(label);
+            return;
+          }
+          return form.handleSubmit((values) => {
+            const assetId = values.assetId || form.getValues("assetId") || "";
+            onSubmit({ ...values, assetId });
+          })(e);
+        }}
         data-testid="tx-form"
       >
         {/* ── 1. Identité ── */}

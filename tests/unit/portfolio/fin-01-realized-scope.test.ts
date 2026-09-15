@@ -62,6 +62,9 @@ const { db, fakePrisma, reset } = vi.hoisted(() => {
     indirectRealEstateDetail: { findMany: async () => [] as Row[] },
     lifeInsuranceSupport: { findMany: async () => [] as Row[] },
     liability: { findMany: async () => [] as Row[] },
+    // Aucune clôture de la veille : `dayChangePct` reste `null` (UNKNOWN),
+    // ce qui n'entre pas dans le périmètre de ce test (réalisé, pas séance).
+    assetDailyClose: { findMany: async () => [] as Row[] },
   };
 
   const reset = () => {

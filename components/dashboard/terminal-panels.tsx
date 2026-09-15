@@ -735,7 +735,12 @@ export function WatchlistCard({
             </thead>
             <tbody>
               {rows.map((h) => {
-                const pct = Number(h.unrealizedPnlPct);
+                // Variation de séance (cours actuel vs clôture d'hier) — pas
+                // le P&L latent depuis l'achat (`unrealizedPnlPct`), qui peut
+                // valoir plusieurs centaines de % sur une ligne ancienne et
+                // n'a rien à voir avec un mouvement de marché du jour.
+                const pct =
+                  h.dayChangePct != null ? Number(h.dayChangePct) : NaN;
                 const known = Number.isFinite(pct);
                 const up = known && pct >= 0;
                 return (

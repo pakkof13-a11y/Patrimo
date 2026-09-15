@@ -4,10 +4,13 @@ import { useMemo, useState } from "react";
 import { PanelHeader } from "@/components/ui/panel";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import {
-  computeCapitalGain,
   irAbatementRate,
   socialAbatementRate,
 } from "@/app/lib/real-estate/tax/capital-gain";
+import {
+  parseAmountInput,
+  simulateCapitalGain,
+} from "@/app/lib/real-estate/tax/simulation-input";
 
 type PropertyOption = {
   assetId: string;
@@ -20,9 +23,14 @@ type PropertyOption = {
   isPrimaryResidence: boolean;
 };
 
-function num(v: string | null | undefined): number {
-  const n = Number(v ?? 0);
-  return Number.isFinite(n) ? n : 0;
+/**
+ * Valeur d'amorçage du champ « prix de cession » : la valeur actuelle de la
+ * quote-part, quand elle est lisible. Ne sert qu'à pré-remplir le formulaire,
+ * jamais à compléter une saisie effacée par l'utilisateur.
+ */
+function initialSalePrice(shareValueEur: string | null | undefined): string {
+  const v = parseAmountInput(shareValueEur);
+  return v == null ? "" : String(Math.round(v));
 }
 
 /**
@@ -48,7 +56,7 @@ export function CapitalGainSimulator({
   const selected = properties.find((p) => p.assetId === assetId) ?? properties[0];
 
   const [salePrice, setSalePrice] = useState<string>(
-    selected ? String(Math.round(num(selected.shareValueEur))) : ""
+    selected ? initialSalePrice(selected.shareValueEur) : ""
   );
   const [saleDate, setSaleDate] = useState<string>(
     new Date().toISOString().slice(0, 10)
@@ -60,28 +68,29 @@ export function CapitalGainSimulator({
   const [useFlatFees, setUseFlatFees] = useState(false);
   const [useFlatWorks, setUseFlatWorks] = useState(false);
 
-  const result = useMemo(() => {
-    if (!selected?.purchaseDate) return null;
-    const purchase = num(selected.purchasePriceEur);
-    if (purchase <= 0) return null;
-
-    return computeCapitalGain({
-      salePriceEur: num(salePrice),
-      purchasePriceEur: purchase,
-      useFlatAcquisitionFees: useFlatFees,
-      useFlatWorks,
-      purchaseDate: new Date(selected.purchaseDate),
-      saleDate: new Date(saleDate),
-      isPrimaryResidence: selected.isPrimaryResidence,
-    });
-  }, [selected, salePrice, saleDate, useFlatFees, useFlatWorks]);
+  // Un champ vide n'est pas un prix de 0 € : la garde d'entrée refuse de
+  // calculer plutôt que d'afficher une moins-value égale au prix de revient.
+  const simulation = useMemo(
+    () =>
+      simulateCapitalGain({
+        salePriceRaw: salePrice,
+        purchasePriceEur: selected?.purchasePriceEur,
+        purchaseDate: selected?.purchaseDate,
+        useFlatAcquisitionFees: useFlatFees,
+        useFlatWorks,
+        saleDate: new Date(saleDate),
+        isPrimaryResidence: selected?.isPrimaryResidence,
+      }),
+    [selected, salePrice, saleDate, useFlatFees, useFlatWorks]
+  );
+  const result = simulation.result;
 
   if (properties.length === 0) return null;
 
   const onSelect = (id: string) => {
     setAssetId(id);
     const p = properties.find((x) => x.assetId === id);
-    if (p) setSalePrice(String(Math.round(num(p.shareValueEur))));
+    if (p) setSalePrice(initialSalePrice(p.shareValueEur));
   };
 
   return (
@@ -153,10 +162,14 @@ export function CapitalGainSimulator({
         </div>
       </div>
 
-      {!selected?.purchaseDate || num(selected?.purchasePriceEur) <= 0 ? (
+      {simulation.status === "MISSING_ACQUISITION" ? (
         <p className="text-meta mt-3">
           Ce bien n&apos;a ni date ni prix d&apos;acquisition dans le journal —
           la plus-value ne peut pas être calculée.
+        </p>
+      ) : simulation.status === "MISSING_SALE_PRICE" ? (
+        <p className="text-meta mt-3" data-testid="re-pv-no-price">
+          Saisissez un prix de cession pour estimer la plus-value.
         </p>
       ) : result ? (
         <div className="mt-3">

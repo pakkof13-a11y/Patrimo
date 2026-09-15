@@ -307,7 +307,7 @@ export function FuturesPanel({ className }: { className?: string }) {
             <label className="text-meta block">
               Paire
               <input
-                className="input mt-1 w-full"
+                className="input mt-1 w-full placeholder:text-[var(--foreground-faint)]"
                 placeholder="BTC/USDT-PERP"
                 value={form.pair}
                 onChange={(e) => set("pair", e.target.value)}
@@ -318,7 +318,7 @@ export function FuturesPanel({ className }: { className?: string }) {
             <label className="text-meta block">
               Devise de base
               <input
-                className="input mt-1 w-full"
+                className="input mt-1 w-full placeholder:text-[var(--foreground-faint)]"
                 placeholder="BTC"
                 value={form.baseCurrency}
                 onChange={(e) => set("baseCurrency", e.target.value)}
@@ -358,7 +358,7 @@ export function FuturesPanel({ className }: { className?: string }) {
               Levier
               <input
                 inputMode="decimal"
-                className="input mt-1 w-full"
+                className="input mt-1 w-full placeholder:text-[var(--foreground-faint)]"
                 placeholder="10"
                 value={form.leverage}
                 onChange={(e) => set("leverage", e.target.value)}

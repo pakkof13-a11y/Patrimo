@@ -67,6 +67,14 @@ export type Holding = {
   unrealizedPnlEur: EurAmount;
   unrealizedPnlBase: BaseAmount;
   unrealizedPnlPct: PercentString;
+  /**
+   * Variation de séance (cours actuel vs clôture d'hier) — distincte du P&L
+   * latent depuis l'achat (`unrealizedPnlPct`). `null` si la clôture de la
+   * veille n'est pas couverte.
+   */
+  dayChangePct?: PercentString | null;
+  /** Valeur de marché à la clôture d'hier — sert à l'agrégation, pas à l'affichage. */
+  prevCloseValueEur?: EurAmount | null;
   priceSource: string | null;
   priceStatus: string | null;
   lastUpdatedAt: string | null;
