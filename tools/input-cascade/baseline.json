@@ -326,7 +326,7 @@
     },
     {
       "classes": "input mt-1 w-full",
-      "count": 163,
+      "count": 160,
       "computed": {
         "light.fontSize": "13px",
         "light.lineHeight": "18.2px",
@@ -357,6 +357,24 @@
         "dark.paddingTop": "0px",
         "dark.paddingRight": "11.2px",
         "dark.paddingBottom": "0px",
+        "dark.paddingLeft": "11.2px"
+      }
+    },
+    {
+      "classes": "input mt-1 w-full placeholder:text-[var(--foreground-faint)]",
+      "count": 3,
+      "computed": {
+        "light.fontSize": "13px",
+        "light.lineHeight": "18.2px",
+        "light.paddingTop": "7.2px",
+        "light.paddingRight": "11.2px",
+        "light.paddingBottom": "7.2px",
+        "light.paddingLeft": "11.2px",
+        "dark.fontSize": "13px",
+        "dark.lineHeight": "18.2px",
+        "dark.paddingTop": "7.2px",
+        "dark.paddingRight": "11.2px",
+        "dark.paddingBottom": "7.2px",
         "dark.paddingLeft": "11.2px"
       }
     },
@@ -1189,6 +1207,10 @@
         "light.width": "600px",
         "dark.width": "600px"
       },
+      "input mt-1 w-full placeholder:text-[var(--foreground-faint)]": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
       "input mt-1 w-full sm:w-64": {
         "light.width": "256px",
         "dark.width": "256px"
@@ -1415,6 +1437,10 @@
         "light.width": "600px",
         "dark.width": "600px"
       },
+      "input mt-1 w-full placeholder:text-[var(--foreground-faint)]": {
+        "light.width": "600px",
+        "dark.width": "600px"
+      },
       "input mt-1 w-full sm:w-64": {
         "light.width": "256px",
         "dark.width": "256px"
@@ -1566,14 +1592,14 @@
       "engine": "149.0.7827.55",
       "platform": "win32",
       "arch": "x64",
-      "recordedAt": "2026-09-09T09:56:19.205Z",
+      "recordedAt": "2026-09-15T20:44:07.555Z",
       "note": "Police servie par Google Fonts via next/font, et non celle publiée par IBM. Sur un <input> vide, Google rend 149 px à 13 px là où @ibm/plex-sans@1.1.0 et @ibm/plex-sans-variable@0.2.0 rendent 153 px. L'écart est proportionnel à la taille (4 px à 13 px, 8 px à 26 px, 32 px à 104 px) et les chasses de glyphes sont identiques (78,000 px pour 0123456789). Prendre un fichier d'IBM ferait donc mesurer une largeur que l'application n'affiche jamais. Voir tools/input-cascade/fonts/README.md."
     },
     "linux": {
       "engine": "149.0.7827.55",
       "platform": "linux",
       "arch": "x64",
-      "recordedAt": "2026-09-09T10:01:21.000Z",
+      "recordedAt": "2026-09-15T20:51:21.000Z",
       "note": "Police servie par Google Fonts via next/font, et non celle publiée par IBM. Sur un <input> vide, Google rend 149 px à 13 px là où @ibm/plex-sans@1.1.0 et @ibm/plex-sans-variable@0.2.0 rendent 153 px. L'écart est proportionnel à la taille (4 px à 13 px, 8 px à 26 px, 32 px à 104 px) et les chasses de glyphes sont identiques (78,000 px pour 0123456789). Prendre un fichier d'IBM ferait donc mesurer une largeur que l'application n'affiche jamais. Voir tools/input-cascade/fonts/README.md."
     }
   },

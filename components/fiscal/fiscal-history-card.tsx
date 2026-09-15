@@ -121,14 +121,14 @@ export function FiscalHistoryCard({
               <Bar
                 dataKey="realizedPnlEur"
                 stackId="base"
-                fill="var(--chart-1)"
+                fill="var(--chart-gold)"
                 radius={[0, 0, 0, 0]}
                 name="Plus-values"
               />
               <Bar
                 dataKey="dividendsNetEur"
                 stackId="base"
-                fill="var(--chart-2)"
+                fill="var(--chart-cyan)"
                 radius={[3, 3, 0, 0]}
                 name="Revenus"
               />

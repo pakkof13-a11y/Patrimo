@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { d } from "@/app/lib/money/decimal";
 import { computeTradingAnalytics } from "@/app/lib/trading/analytics";
+import { deductibleCostsOf, realizedNetPnl } from "@/app/lib/crypto/futures";
 
 function trade(pnl: number, closed?: string, opened?: string) {
   return {
@@ -139,5 +140,53 @@ describe("computeTradingAnalytics — extrêmes et durée", () => {
 
   it("aucune date exploitable : la durée moyenne est absente", () => {
     expect(computeTradingAnalytics([trade(100)]).averageHoldingDays).toBeNull();
+  });
+});
+
+describe("computeTradingAnalytics — P1.1 tuile « Résultat net » vs détail fiscal", () => {
+  /*
+    `ClosedTrade.realizedPnlEur` est documenté comme le résultat NET de
+    l'opération. Lui donner le `realizedPnl` brut stocké en base (comme le
+    faisait autrefois `app/api/trading/route.ts`) fait afficher un brut sous
+    l'étiquette « Résultat net », en désaccord avec le détail fiscal qui, lui,
+    déduit toujours `deductibleCostsOf` (funding signé + |commission|).
+
+    Ce cas reproduit l'écart observé en production : une position clôturée
+    avec un funding payé et une commission, brut 752.38 € / net 722.78 €.
+  */
+  const realizedPnl = d("759.68");
+  const fundingPaid = d("5"); // funding payé (charge)
+  const commissionPaid = d("31.90");
+
+  it("reproduit l'écart brut ≠ net (752.38 vs 722.78) sur une position avec funding + commission", () => {
+    const costs = deductibleCostsOf({ fundingPaid, commissionPaid });
+    const net = realizedNetPnl({ realizedPnl, fundingPaid, commissionPaid });
+
+    expect(realizedPnl.toFixed(2)).toBe("759.68");
+    // Le brut seul (ancien comportement fautif de la tuile) ne vaut pas le net.
+    expect(realizedPnl.toFixed(2)).not.toBe(net.toFixed(2));
+    expect(costs.toFixed(2)).toBe("36.90");
+    expect(net.toFixed(2)).toBe("722.78");
+  });
+
+  it("la tuile (computeTradingAnalytics.netPnlEur) converge avec le détail fiscal (deductibleCostsOf) quand on lui passe le net", () => {
+    // Reproduit exactement le mapping de app/api/trading/route.ts : le champ
+    // `realizedPnlEur` fourni à computeTradingAnalytics doit être le net,
+    // pas p.realizedPnl brut.
+    const netTrade = {
+      realizedPnlEur: realizedNetPnl({ realizedPnl, fundingPaid, commissionPaid }),
+      openedAt: new Date("2026-01-01"),
+      closedAt: new Date("2026-01-10"),
+    };
+
+    const analytics = computeTradingAnalytics([netTrade]);
+
+    // La tuile affiche désormais le même montant que le détail fiscal
+    // (« Résultat avant report » = gains bruts − pertes brutes − frais).
+    const netBeforeCarry = realizedPnl.minus(
+      deductibleCostsOf({ fundingPaid, commissionPaid })
+    );
+    expect(analytics.netPnlEur.toFixed(2)).toBe(netBeforeCarry.toFixed(2));
+    expect(analytics.netPnlEur.toFixed(2)).toBe("722.78");
   });
 });

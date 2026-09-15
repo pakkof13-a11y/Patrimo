@@ -14,7 +14,13 @@ import {
   readLastClosesAsOf,
   resolveLastCloseAsOf,
 } from "../market/last-close-as-of";
-import { endOfParisDay, parisDayKey, parisDayStart } from "../dates/paris";
+import { readDailyCloses } from "../market/daily-closes";
+import {
+  endOfParisDay,
+  parisDayKey,
+  parisDayStart,
+  parisYesterdayKey,
+} from "../dates/paris";
 import { PortfolioValuationEngine } from "./historical/engine";
 import { loadHistoricalInputs } from "./historical/load";
 import {
@@ -160,6 +166,21 @@ export type HoldingRow = {
   unrealizedPnlEur: EurAmount;
   unrealizedPnlBase: BaseAmount;
   unrealizedPnlPct: PercentString;
+  /**
+   * Variation de séance (cours actuel vs clôture d'hier, `AssetDailyClose`
+   * sur `parisYesterdayKey`) — même définition que le KPI crypto 24h
+   * (`summary-service.ts`). `null` si la clôture de la veille n'est pas
+   * couverte : jamais de repli sur `unrealizedPnlPct` (P&L depuis l'achat),
+   * qui n'a rien à voir avec un mouvement de marché du jour.
+   */
+  dayChangePct: PercentString | null;
+  /**
+   * Valeur de marché de la ligne évaluée à la clôture d'hier — sert
+   * uniquement à agréger `dayChangePct` pondéré par valeur lors de la fusion
+   * multi-plateforme (`merged.set`). `null` tant que la clôture de la veille
+   * manque, pour ne jamais fabriquer une variation sur une base inventée.
+   */
+  prevCloseValueEur: EurAmount | null;
   priceSource: string | null;
   priceStatus: string | null;
   lastUpdatedAt: string | null;
@@ -310,6 +331,15 @@ export async function getHoldings(
   const assetMap = new Map(assets.map((a) => [a.id, a]));
   const lastDailyByAsset = await readLastClosesAsOf([...assetMap.keys()]);
   const closeAsOfToday = parisDayKey(new Date());
+  // Clôture de la veille (Paris) pour la variation de séance de la watchlist
+  // — même fenêtre que le KPI crypto 24h. Lecture seule, aucun appel
+  // fournisseur : un trou reste un trou (`dayChangePct` à `null`).
+  const yesterdayKey = parisYesterdayKey(new Date());
+  const yesterdayCloseIndex = await readDailyCloses(
+    [...assetMap.keys()],
+    yesterdayKey,
+    yesterdayKey
+  );
   // Also index platforms for positions whose platform differs from asset.home
   const platformIds = new Set<string>();
   for (const pos of ledger.positions.values()) platformIds.add(pos.platformId);
@@ -383,6 +413,18 @@ export async function getHoldings(
     const unrealized = marketValue.minus(pos.costBasisEur);
     const pct = pos.costBasisEur.gt(0) ? unrealized.div(pos.costBasisEur).times(100) : zero();
     const avg = pos.quantity.gt(0) ? pos.costBasisEur.div(pos.quantity) : zero();
+
+    // Variation de séance : cours actuel vs clôture d'hier — jamais le P&L
+    // depuis l'achat (`pct` ci-dessus), qui vit ailleurs (`unrealizedPnlPct`).
+    const yesterdayCloseEur = yesterdayCloseIndex.get(pos.assetId)?.get(yesterdayKey) ?? null;
+    const dayChangePct =
+      yesterdayCloseEur != null && yesterdayCloseEur > 0 && priceEur.gt(0)
+        ? priceEur.minus(yesterdayCloseEur).div(yesterdayCloseEur).times(100)
+        : null;
+    const prevCloseValueEur =
+      yesterdayCloseEur != null && yesterdayCloseEur > 0
+        ? pos.quantity.times(yesterdayCloseEur)
+        : null;
     const fees = feesByAsset.get(pos.assetId) || zero();
     const income = incomeByAsset.get(pos.assetId) || zero();
     const incomeGross = incomeGrossByAsset.get(pos.assetId) || zero();
@@ -448,6 +490,8 @@ export async function getHoldings(
       unrealizedPnlEur: eurS(toFixed(unrealized, 8)),
       unrealizedPnlBase: baseS(toBase(unrealized)),
       unrealizedPnlPct: pctS(toFixed(pct, 4)),
+      dayChangePct: dayChangePct != null ? pctS(toFixed(dayChangePct, 4)) : null,
+      prevCloseValueEur: prevCloseValueEur != null ? eurS(toFixed(prevCloseValueEur, 8)) : null,
       priceSource: asset.priceQuote?.source ?? (asset.manualPrice ? "manual" : "coût"),
       priceStatus: asset.priceQuote?.status ?? (asset.manualPrice ? "OK" : "OK"),
       lastUpdatedAt: asset.priceQuote?.lastUpdatedAt?.toISOString() ?? null,
@@ -515,6 +559,17 @@ export async function getHoldings(
     const unreal = mv.minus(cost);
     const avg = qty.gt(0) ? cost.div(qty) : zero();
     const pct = cost.gt(0) ? unreal.div(cost).times(100) : zero();
+    // Agrégation value-weighted de la variation de séance : si l'une des deux
+    // jambes n'a pas de clôture de la veille couverte, la ligne fusionnée
+    // reste `null` plutôt que de fabriquer une base partielle.
+    const prevCloseValueEur =
+      prev.prevCloseValueEur != null && row.prevCloseValueEur != null
+        ? d(prev.prevCloseValueEur).plus(d(row.prevCloseValueEur))
+        : null;
+    const dayChangePct =
+      prevCloseValueEur != null && prevCloseValueEur.gt(0)
+        ? mv.minus(prevCloseValueEur).div(prevCloseValueEur).times(100)
+        : null;
     const platforms =
       prev.platformName === row.platformName
         ? prev.platformName
@@ -608,6 +663,9 @@ export async function getHoldings(
         toFixed(d(prev.unrealizedPnlBase).plus(d(row.unrealizedPnlBase)), 8)
       ),
       unrealizedPnlPct: pctS(toFixed(pct, 4)),
+      dayChangePct: dayChangePct != null ? pctS(toFixed(dayChangePct, 4)) : null,
+      prevCloseValueEur:
+        prevCloseValueEur != null ? eurS(toFixed(prevCloseValueEur, 8)) : null,
       priceSource: preferLive.priceSource || prev.priceSource,
       priceProvider: preferLive.priceProvider || prev.priceProvider,
       priceStatus: preferLive.priceStatus || prev.priceStatus,

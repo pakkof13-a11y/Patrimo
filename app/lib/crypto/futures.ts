@@ -296,12 +296,13 @@ export function summarizeFutures(positions: FuturesPositionInput[]): FuturesSumm
 /**
  * ═══ Convention de signe de `fundingPaid` / `commissionPaid` ══════════════
  *
- * **Source de vérité du dépôt.** Les trois lecteurs de ces deux colonnes
+ * **Source de vérité du dépôt.** Les quatre lecteurs de ces deux colonnes
  * (`realizedNetPnl` ici, `closedNetPnl` dans `trading/positions-view.ts`,
- * bucket fiscal de `app/api/trading/route.ts`) doivent tous passer par
- * `deductibleCostsOf`, et l'import CSV (`futures-csv.ts`) normalise le signe
- * de l'exchange vers cette convention. Cf. aussi `prisma/schema.prisma`,
- * modèle `TradingPosition`.
+ * bucket fiscal de `app/api/trading/route.ts`, et le `realizedPnlEur` passé
+ * à `computeTradingAnalytics` dans cette même route pour la tuile « Résultat
+ * net ») doivent tous passer par `deductibleCostsOf`, et l'import CSV
+ * (`futures-csv.ts`) normalise le signe de l'exchange vers cette convention.
+ * Cf. aussi `prisma/schema.prisma`, modèle `TradingPosition`.
  *
  * - `fundingPaid` est **signé** : **positif = funding payé** (une charge),
  *   **négatif = funding perçu** (un produit). Un perpétuel fait circuler le

@@ -8,6 +8,7 @@ import { listTradingAccounts } from "@/app/lib/trading/account-service";
 import { computeTradingAnalytics } from "@/app/lib/trading/analytics";
 import {
   deductibleCostsOf,
+  realizedNetPnl,
   toFuturesView,
   type FuturesDirection,
 } from "@/app/lib/crypto/futures";
@@ -83,9 +84,26 @@ export async function GET(req: Request) {
     // Le journal ne retient que les positions closes : une position ouverte
     // n'a pas de résultat, seulement un latent qui peut encore s'inverser.
     const closed = positions.filter((p) => !p.isOpen);
+    /*
+      `ClosedTrade.realizedPnlEur` est documenté comme le « résultat net de
+      l'opération » (app/lib/trading/analytics.ts) — mais `p.realizedPnl`
+      stocké en base est **brut** (FIN-03, cf. futures.ts). Lui donner le
+      brut sans déduire funding + commission faisait mentir la tuile
+      « Résultat net » face au détail fiscal juste en dessous, qui lui
+      applique `deductibleCostsOf`. `realizedNetPnl` est le quatrième
+      lecteur de cette même définition (les trois autres sont listés dans
+      le bloc « Convention de signe » de futures.ts) : une seule formule du
+      net pour la tuile, le détail fiscal et le fiscal par exercice.
+    */
     const analytics = computeTradingAnalytics(
       closed.map((p) => ({
-        realizedPnlEur: d(p.realizedPnl?.toString() ?? "0"),
+        realizedPnlEur: realizedNetPnl({
+          realizedPnl: p.realizedPnl ? d(p.realizedPnl.toString()) : null,
+          fundingPaid: p.fundingPaid ? d(p.fundingPaid.toString()) : null,
+          commissionPaid: p.commissionPaid
+            ? d(p.commissionPaid.toString())
+            : null,
+        }),
         openedAt: p.openedAt,
         closedAt: p.closedAt,
       }))
