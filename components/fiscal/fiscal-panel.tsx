@@ -383,19 +383,24 @@ export function FiscalPanel({
     );
   }
 
-  const bucket =
-    line.kind === "ENVELOPE"
-      ? (report?.byEnvelope.find(
-          (b) => `envelope:${b.accountType}` === line.id
-        ) ?? null)
-      : null;
+  /*
+    Résolution par identifiant, pas par catégorie : l'enveloppe Immobilier du
+    journal est classée RENTAL (revenus fonciers) tout en restant un bucket
+    `envelope:`. Tester `kind` ici l'aurait envoyée vers le comparateur de
+    régimes locatifs — et sa fiche aurait montré la location meublée.
+  */
+  const bucket = line.id.startsWith("envelope:")
+    ? (report?.byEnvelope.find(
+        (b) => `envelope:${b.accountType}` === line.id
+      ) ?? null)
+    : null;
 
   const rentalSection =
-    line.kind === "RENTAL" && realEstate
-      ? line.id === "rental:bare"
-        ? realEstate.rental.bare
-        : realEstate.rental.furnished
-      : null;
+    realEstate && line.id === "rental:bare"
+      ? realEstate.rental.bare
+      : realEstate && line.id === "rental:furnished"
+        ? realEstate.rental.furnished
+        : null;
 
   const schemeRow =
     line.kind === "SCHEME" && realEstate

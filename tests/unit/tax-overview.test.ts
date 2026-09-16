@@ -149,6 +149,43 @@ describe("lignes fiscales", () => {
     expect(cto.taxEur).toBeCloseTo(1200 * 0.314, 6);
   });
 
+  it("les loyers de l'enveloppe Immobilier sont des revenus fonciers, pas des valeurs mobilieres", () => {
+    /*
+      Cas mesure sur le jeu de demo, annee 2026 : le bucket IMMOBILIER ne porte
+      que 6 loyers SCPI (168 EUR nets, 0 vente). Classe ENVELOPE, il figurait
+      dans la vue « Valeurs mobilieres » et pas dans la vue « Immobilier ».
+    */
+    const lines = buildFiscalLines(
+      report({}, [
+        ...byEnvelope,
+        {
+          accountType: "IMMOBILIER",
+          label: "Immobilier",
+          realizedPnlEur: 0,
+          dividendsNetEur: 168,
+          dividendsGrossEur: 168,
+          withholdingTaxEur: 0,
+          sellCount: 0,
+          incomeCount: 6,
+          unresolvedSellCount: 0,
+        },
+      ] as never),
+      null
+    );
+    const immo = lines.find((l) => l.id === "envelope:IMMOBILIER")!;
+    expect(immo.kind).toBe("RENTAL");
+    expect(immo.regimeLabel).toBe("Revenus fonciers");
+    // Aucun montant ne change : pas de PFU sur des loyers, seulement le suivi.
+    expect(immo.taxEur).toBeNull();
+    expect(immo.baseEur).toBeNull();
+    expect(immo.detail).toBe("0 vente · 6 revenus");
+    // Les vraies enveloppes titres gardent leur categorie.
+    expect(lines.filter((l) => l.kind === "ENVELOPE").map((l) => l.id)).toEqual([
+      "envelope:CTO",
+      "envelope:PEA",
+    ]);
+  });
+
   it("une reduction d'impot porte un signe negatif", () => {
     const b = bundle({
       schemes: {
