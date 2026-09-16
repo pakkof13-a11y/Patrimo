@@ -659,7 +659,10 @@ export function TransactionModal({
             title="Actif"
             hint="Recherchez un titre existant ou corrigez le ticker."
           >
-            <Field label="Actif (recherche)">
+            <Field
+              label="Actif (recherche)"
+              error={form.formState.errors.assetId?.message as string | undefined}
+            >
               <input type="hidden" {...form.register("assetId")} />
               <AssetAutocomplete
                 platformId={form.watch("platformId") || ""}
@@ -721,7 +724,10 @@ export function TransactionModal({
         >
           <div className="grid grid-cols-2 gap-3">
             {vis.quantity && (
-              <Field label={vis.quantityLabel}>
+              <Field
+                label={vis.quantityLabel}
+                error={form.formState.errors.quantity?.message as string | undefined}
+              >
                 <input
                   className="input w-full"
                   data-testid="tx-qty"
@@ -733,7 +739,10 @@ export function TransactionModal({
               </Field>
             )}
             {vis.unitPrice && (
-              <Field label="Prix unitaire">
+              <Field
+                label="Prix unitaire"
+                error={form.formState.errors.unitPrice?.message as string | undefined}
+              >
                 <input
                   className="input w-full"
                   data-testid="tx-price"
@@ -746,6 +755,7 @@ export function TransactionModal({
                 label={
                   isIncome ? "Montant cash (brut)" : "Montant cash"
                 }
+                error={form.formState.errors.cashAmount?.message as string | undefined}
               >
                 <input
                   className="input w-full"
@@ -871,7 +881,10 @@ export function TransactionModal({
 
         {/* ── 4. Dates & notes ── */}
         <Section title="Date & notes">
-          <Field label={isIncome ? "Date (compta / défaut)" : "Date"}>
+          <Field
+            label={isIncome ? "Date (compta / défaut)" : "Date"}
+            error={form.formState.errors.occurredAt?.message as string | undefined}
+          >
             <input
               type="datetime-local"
               className="input w-full"
@@ -949,6 +962,30 @@ export function TransactionModal({
           <strong>Cash banques</strong> = uniquement Apport / Retrait. Les
           achats et ventes de titres n&apos;impactent pas ce solde.
         </p>
+
+        {/*
+          Les combobox Plateforme/Actif ne sont pas de vrais <input> registrés
+          (pas de ref DOM native) : `shouldFocusError` de RHF ne peut donc pas
+          y ramener le focus après un clic sur Enregistrer invalide. Sans
+          repère, un Achat vide semble ne rien faire (le POST est bloqué en
+          silence par le schéma Zod). Ce résumé, affiché seulement après une
+          tentative de soumission, donne un point d'atterrissage au clavier
+          et au lecteur d'écran en listant les champs encore en erreur.
+        */}
+        {form.formState.submitCount > 0 &&
+          Object.keys(form.formState.errors).length > 0 && (
+            <p
+              role="alert"
+              data-testid="tx-form-errors"
+              className="rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-3 py-2 text-[11px] font-medium leading-snug text-[var(--danger)]"
+            >
+              Champs requis manquants :{" "}
+              {Object.values(form.formState.errors)
+                .map((err) => err?.message)
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
 
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="outline" onClick={onClose}>
