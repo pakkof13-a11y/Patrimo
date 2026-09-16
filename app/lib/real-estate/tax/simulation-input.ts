@@ -23,6 +23,8 @@ export type CapitalGainSimulationStatus =
   | "OK"
   /** Prix de cession absent ou illisible : rien à afficher, pas même un zéro. */
   | "MISSING_SALE_PRICE"
+  /** Date de cession absente ou illisible (champ `type="date"` effacé). */
+  | "MISSING_SALE_DATE"
   /** Le journal ne porte ni date ni prix d'acquisition pour ce bien. */
   | "MISSING_ACQUISITION";
 
@@ -49,7 +51,7 @@ export function parseAmountInput(raw: string | number | null | undefined): numbe
 
 export type CapitalGainSimulationInput = Omit<
   CapitalGainInput,
-  "salePriceEur" | "purchasePriceEur" | "purchaseDate"
+  "salePriceEur" | "purchasePriceEur" | "purchaseDate" | "saleDate"
 > & {
   /** Saisie brute du champ « prix de cession », telle quelle. */
   salePriceRaw: string | number | null | undefined;
@@ -57,6 +59,8 @@ export type CapitalGainSimulationInput = Omit<
   purchasePriceEur: string | number | null | undefined;
   /** Date d'acquisition issue du journal. */
   purchaseDate: Date | string | null | undefined;
+  /** Saisie brute du champ « date de cession », telle quelle. */
+  saleDate: Date | string | null | undefined;
 };
 
 /**
@@ -68,7 +72,7 @@ export type CapitalGainSimulationInput = Omit<
 export function simulateCapitalGain(
   input: CapitalGainSimulationInput
 ): CapitalGainSimulation {
-  const { salePriceRaw, purchasePriceEur, purchaseDate, ...rest } = input;
+  const { salePriceRaw, purchasePriceEur, purchaseDate, saleDate, ...rest } = input;
 
   const purchasePrice = parseAmountInput(purchasePriceEur);
   const purchaseAt = purchaseDate == null ? null : new Date(purchaseDate);
@@ -84,6 +88,15 @@ export function simulateCapitalGain(
   const salePrice = parseAmountInput(salePriceRaw);
   if (salePrice == null) return { status: "MISSING_SALE_PRICE", result: null };
 
+  // Même garde que le prix : une date de cession effacée redevient `Invalid
+  // Date` via `new Date("")`, qui traverserait `holdingYearsBetween` en
+  // `NaN` sans jamais lever d'erreur. Pas de date par défaut (« aujourd'hui »
+  // ne comble pas une saisie inconnue) : on refuse de calculer.
+  const saleAt = saleDate == null ? null : new Date(saleDate);
+  if (saleAt == null || Number.isNaN(saleAt.getTime())) {
+    return { status: "MISSING_SALE_DATE", result: null };
+  }
+
   return {
     status: "OK",
     result: computeCapitalGain({
@@ -91,6 +104,7 @@ export function simulateCapitalGain(
       salePriceEur: salePrice,
       purchasePriceEur: purchasePrice,
       purchaseDate: purchaseAt,
+      saleDate: saleAt,
     }),
   };
 }

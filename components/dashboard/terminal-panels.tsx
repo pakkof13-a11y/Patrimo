@@ -769,7 +769,12 @@ export function WatchlistCard({
                       </div>
                     </td>
                     <td className="col-num text-[var(--foreground)]">
-                      {formatCurrency(h.currentPriceEur, h.currency)}
+                      {/* Devise native, comme la fiche (`asset-panel.tsx` —
+                          `priceNative` + `nativeCurrency`) : `h.currency` est
+                          déjà la devise native de l'actif, pas l'EUR. La
+                          coller à `currentPriceEur` affichait un montant EUR
+                          sous une étiquette dollar/livre/etc. */}
+                      {formatCurrency(h.currentPriceNative, h.currency)}
                     </td>
                     <td
                       className={cn(

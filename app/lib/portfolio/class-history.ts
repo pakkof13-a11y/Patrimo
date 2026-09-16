@@ -138,6 +138,44 @@ export function closeAtOrBefore(
 }
 
 /**
+ * Tolérance de fraîcheur pour une clôture « de la veille » utilisée dans une
+ * variation 24h : au-delà, la clôture trouvée décrit une autre journée
+ * qu'« hier » (week-end + jour férié consécutifs, collecte en retard…), et la
+ * présenter comme la veille serait faux.
+ *
+ * Définition partagée avec `spot-history-service.ts` (`previousCloseNear`) —
+ * la variation crypto 24h et la variation de séance de la watchlist doivent
+ * appliquer la même garde, pas deux tolérances qui divergent en silence.
+ */
+export const MAX_STALE_DAYS = 3;
+
+/**
+ * `closeAtOrBefore` borné en fraîcheur : la dernière clôture connue au plus
+ * `day`, mais seulement si elle n'est pas plus vieille que `maxStaleDays`.
+ * `null` au-delà — jamais une clôture trop ancienne présentée comme récente.
+ */
+export function closeWithinStaleDays(
+  closes: Map<DayKey, number> | undefined,
+  day: DayKey,
+  maxStaleDays: number = MAX_STALE_DAYS
+): number | null {
+  if (!closes || closes.size === 0) return null;
+  let best: number | null = null;
+  let bestDay = "";
+  for (const [k, v] of closes) {
+    if (k <= day && k > bestDay && Number.isFinite(v)) {
+      best = v;
+      bestDay = k;
+    }
+  }
+  if (best == null) return null;
+  const gapDays =
+    (Date.parse(`${day}T00:00:00Z`) - Date.parse(`${bestDay}T00:00:00Z`)) /
+    (24 * 3600 * 1000);
+  return gapDays <= maxStaleDays ? best : null;
+}
+
+/**
  * Construit la série journalière de valeur de marché et de P&L par classe.
  *
  * `days` doit être trié par ordre chronologique croissant ; le premier jour
