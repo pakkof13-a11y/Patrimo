@@ -11,6 +11,8 @@
  */
 
 import {
+  accountTypeForEnvelope,
+  isSecuritiesEnvelopeType,
   securitiesEnvelopeLabel,
   type CashAttribution,
 } from "./constants";
@@ -460,6 +462,59 @@ export function unattachedEnvelopeValueEur(
   return positions
     .filter((p) => !p.securitiesAccountId && p.accountType === envelopeType)
     .reduce((sum, p) => sum + num(p.marketValueEur), 0);
+}
+
+export type OrphanEnvelopeMatch = {
+  /** Lignes orphelines de la même famille fiscale que ce compte. */
+  count: number;
+  valueEur: number;
+  /**
+   * Famille fiscale retenue pour le filtre (`accountTypeForEnvelope`) —
+   * "PEA" ou "CTO" — à afficher sans dupliquer cette correspondance côté
+   * écran. `null` seulement si `account.envelopeType` n'est pas une
+   * enveloppe connue (donnée serveur incohérente).
+   */
+  family: "PEA" | "CTO" | null;
+};
+
+/**
+ * Ce qu'une carte de compte peut rattacher : les lignes orphelines de sa
+ * famille fiscale, avant toute décision de destination.
+ *
+ * Une carte de compte vide (`AccountView.positions` à zéro) ne veut pas dire
+ * qu'aucune position ne lui correspond — un PEA réel sans ligne rattachée
+ * peut coexister avec des lignes qui portent la même étiquette fiscale sans
+ * être rattachées à aucun compte (`securitiesAccountId: null`). « Aucune
+ * position rattachée à ce compte », dit seul, était vrai au sens strict mais
+ * taisait que 84 407,40 € de lignes PEA existaient juste à côté, dans un
+ * onglet séparé.
+ *
+ * PEA et PEA-PME partagent `Asset.accountType: "PEA"` (voir
+ * `accountTypeForEnvelope`, faute d'une valeur d'`accountType` propre au
+ * PEA-PME) : une ligne PEA orpheline concerne donc aussi un compte PEA-PME.
+ *
+ * Ne tranche pas la destination — deux comptes de la même famille (deux CTO,
+ * ou un PEA et un PEA-PME) la rendent ambiguë, et cette fonction ne choisit
+ * pas à la place de l'utilisateur. C'est `eligibleAccounts` qui le dit ; la
+ * carte propose alors la gestion des comptes plutôt qu'un rattachement
+ * automatique.
+ */
+export function orphanEnvelopeMatch(
+  positions: SecuritiesPosition[],
+  account: SecuritiesAccount
+): OrphanEnvelopeMatch {
+  if (!isSecuritiesEnvelopeType(account.envelopeType)) {
+    return { count: 0, valueEur: 0, family: null };
+  }
+  const family = accountTypeForEnvelope(account.envelopeType);
+  const orphans = positions.filter(
+    (p) => !p.securitiesAccountId && p.accountType === family
+  );
+  return {
+    count: orphans.length,
+    valueEur: orphans.reduce((sum, p) => sum + num(p.marketValueEur), 0),
+    family,
+  };
 }
 
 /* ── Répartition par enveloppe ────────────────────────────────────── */

@@ -8,6 +8,7 @@ import {
   computeKeyIndicators,
   computeTotals,
   isOverviewEmpty,
+  orphanEnvelopeMatch,
   positionWeightPct,
   splitByEnvelope,
   unattachedEnvelopeValueEur,
@@ -626,6 +627,68 @@ describe("unattachedEnvelopeValueEur", () => {
       position({ assetId: "p1", securitiesAccountId: "a1", accountType: "PEA", marketValueEur: "9000" }),
     ];
     expect(unattachedEnvelopeValueEur(positions, "PEA")).toBe(0);
+  });
+});
+
+/*
+  Ticket : la carte du compte « Caisse d'Épargne » (PEA, fixture
+  "Pass2-Test-PEA") dit « Aucune position rattachée » alors que 8 lignes PEA
+  existent, orphelines, dans le même portefeuille. `orphanEnvelopeMatch` est
+  ce que la carte lit désormais pour ne plus se taire sur ce cas.
+*/
+describe("orphanEnvelopeMatch", () => {
+  it("compte les 8 lignes PEA orphelines mesurées en démo, et leur valeur", () => {
+    const positions = [
+      position({ assetId: "p1", securitiesAccountId: null, accountType: "PEA", marketValueEur: "1000" }),
+      position({ assetId: "p2", securitiesAccountId: null, accountType: "PEA", marketValueEur: "2000" }),
+      position({ assetId: "p3", securitiesAccountId: null, accountType: "PEA", marketValueEur: "3000" }),
+      position({ assetId: "p4", securitiesAccountId: null, accountType: "PEA", marketValueEur: "4000" }),
+      position({ assetId: "p5", securitiesAccountId: null, accountType: "PEA", marketValueEur: "5000" }),
+      position({ assetId: "p6", securitiesAccountId: null, accountType: "PEA", marketValueEur: "6000" }),
+      position({ assetId: "p7", securitiesAccountId: null, accountType: "PEA", marketValueEur: "7000" }),
+      position({ assetId: "p8", securitiesAccountId: null, accountType: "PEA", marketValueEur: "8000" }),
+    ];
+    const caisseDEpargne = account({
+      id: "cmu170mmn000068he2acqtwbl",
+      envelopeType: "PEA",
+      platformName: "Caisse d'Épargne",
+    });
+    const m = orphanEnvelopeMatch(positions, caisseDEpargne);
+    expect(m.count).toBe(8);
+    expect(m.valueEur).toBe(36000);
+    expect(m.family).toBe("PEA");
+  });
+
+  it("rend zéro sans le confondre avec une absence, quand rien n'est orphelin", () => {
+    const positions = [
+      position({ assetId: "p1", securitiesAccountId: "a1", accountType: "PEA", marketValueEur: "9000" }),
+    ];
+    const m = orphanEnvelopeMatch(positions, account({ id: "a1" }));
+    expect(m.count).toBe(0);
+    expect(m.valueEur).toBe(0);
+    expect(m.family).toBe("PEA");
+  });
+
+  it("rattache un PEA-PME aux lignes orphelines PEA, faute d'accountType propre au PEA-PME", () => {
+    const positions = [
+      position({ assetId: "p1", securitiesAccountId: null, accountType: "PEA", marketValueEur: "500" }),
+    ];
+    const peaPme = account({ id: "a1", envelopeType: "PEA_PME" });
+    const m = orphanEnvelopeMatch(positions, peaPme);
+    expect(m.count).toBe(1);
+    expect(m.family).toBe("PEA");
+  });
+
+  it("ne mélange pas les familles fiscales : un CTO ne voit pas les orphelines PEA", () => {
+    const positions = [
+      position({ assetId: "p1", securitiesAccountId: null, accountType: "PEA", marketValueEur: "500" }),
+      position({ assetId: "p2", securitiesAccountId: null, accountType: "CTO", marketValueEur: "300" }),
+    ];
+    const cto = account({ id: "a1", envelopeType: "CTO" });
+    const m = orphanEnvelopeMatch(positions, cto);
+    expect(m.count).toBe(1);
+    expect(m.valueEur).toBe(300);
+    expect(m.family).toBe("CTO");
   });
 });
 
