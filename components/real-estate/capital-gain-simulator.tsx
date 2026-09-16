@@ -78,7 +78,10 @@ export function CapitalGainSimulator({
         purchaseDate: selected?.purchaseDate,
         useFlatAcquisitionFees: useFlatFees,
         useFlatWorks,
-        saleDate: new Date(saleDate),
+        // Un champ date vidé rend `saleDate === ""` : la garde d'entrée le
+        // reconnaît (comme le prix vide) plutôt que de laisser passer un
+        // `Invalid Date` jusqu'au moteur.
+        saleDate,
         isPrimaryResidence: selected?.isPrimaryResidence,
       }),
     [selected, salePrice, saleDate, useFlatFees, useFlatWorks]
@@ -170,6 +173,10 @@ export function CapitalGainSimulator({
       ) : simulation.status === "MISSING_SALE_PRICE" ? (
         <p className="text-meta mt-3" data-testid="re-pv-no-price">
           Saisissez un prix de cession pour estimer la plus-value.
+        </p>
+      ) : simulation.status === "MISSING_SALE_DATE" ? (
+        <p className="text-meta mt-3" data-testid="re-pv-no-date">
+          Saisissez une date de cession pour estimer la plus-value.
         </p>
       ) : result ? (
         <div className="mt-3">

@@ -15,6 +15,7 @@ import {
   resolveLastCloseAsOf,
 } from "../market/last-close-as-of";
 import { readDailyCloses } from "../market/daily-closes";
+import { closeWithinStaleDays, MAX_STALE_DAYS } from "./class-history";
 import {
   endOfParisDay,
   parisDayKey,
@@ -168,17 +169,21 @@ export type HoldingRow = {
   unrealizedPnlPct: PercentString;
   /**
    * Variation de séance (cours actuel vs clôture d'hier, `AssetDailyClose`
-   * sur `parisYesterdayKey`) — même définition que le KPI crypto 24h
-   * (`summary-service.ts`). `null` si la clôture de la veille n'est pas
-   * couverte : jamais de repli sur `unrealizedPnlPct` (P&L depuis l'achat),
-   * qui n'a rien à voir avec un mouvement de marché du jour.
+   * sur `parisYesterdayKey`, tolérante jusqu'à `MAX_STALE_DAYS` jours de
+   * retard via `closeWithinStaleDays`) — même définition et même garde de
+   * fraîcheur que le KPI crypto 24h (`summary-service.ts`) et l'onglet
+   * Comptant (`spot-history-service.ts`). `null` si aucune clôture assez
+   * récente n'est couverte : jamais de repli sur `unrealizedPnlPct` (P&L
+   * depuis l'achat), qui n'a rien à voir avec un mouvement de marché du jour.
    */
   dayChangePct: PercentString | null;
   /**
-   * Valeur de marché de la ligne évaluée à la clôture d'hier — sert
+   * Valeur de marché de la ligne évaluée à la clôture d'hier (ou à la
+   * dernière clôture couverte dans la tolérance de fraîcheur) — sert
    * uniquement à agréger `dayChangePct` pondéré par valeur lors de la fusion
-   * multi-plateforme (`merged.set`). `null` tant que la clôture de la veille
-   * manque, pour ne jamais fabriquer une variation sur une base inventée.
+   * multi-plateforme (`merged.set`). `null` tant qu'aucune clôture assez
+   * récente n'est disponible, pour ne jamais fabriquer une variation sur une
+   * base inventée.
    */
   prevCloseValueEur: EurAmount | null;
   priceSource: string | null;
@@ -332,12 +337,20 @@ export async function getHoldings(
   const lastDailyByAsset = await readLastClosesAsOf([...assetMap.keys()]);
   const closeAsOfToday = parisDayKey(new Date());
   // Clôture de la veille (Paris) pour la variation de séance de la watchlist
-  // — même fenêtre que le KPI crypto 24h. Lecture seule, aucun appel
-  // fournisseur : un trou reste un trou (`dayChangePct` à `null`).
+  // — même définition que le KPI crypto 24h (`closeAtOrBefore`) et la même
+  // tolérance que l'onglet Comptant (`previousCloseNear`, `MAX_STALE_DAYS`
+  // jours) : un week-end, un jour férié ou un cycle de collecte pas encore
+  // repassé ne doit pas faire disparaître une variation qui reste
+  // représentative. Au-delà de cette tolérance, `closeWithinStaleDays` rend
+  // `null` plutôt que de présenter une clôture trop ancienne comme celle
+  // d'hier — un trou reste un trou (`dayChangePct` à `null`).
   const yesterdayKey = parisYesterdayKey(new Date());
+  const staleFloor = parisDayKey(
+    new Date(Date.parse(`${yesterdayKey}T00:00:00Z`) - MAX_STALE_DAYS * 86_400_000)
+  );
   const yesterdayCloseIndex = await readDailyCloses(
     [...assetMap.keys()],
-    yesterdayKey,
+    staleFloor,
     yesterdayKey
   );
   // Also index platforms for positions whose platform differs from asset.home
@@ -416,7 +429,10 @@ export async function getHoldings(
 
     // Variation de séance : cours actuel vs clôture d'hier — jamais le P&L
     // depuis l'achat (`pct` ci-dessus), qui vit ailleurs (`unrealizedPnlPct`).
-    const yesterdayCloseEur = yesterdayCloseIndex.get(pos.assetId)?.get(yesterdayKey) ?? null;
+    const yesterdayCloseEur = closeWithinStaleDays(
+      yesterdayCloseIndex.get(pos.assetId),
+      yesterdayKey
+    );
     const dayChangePct =
       yesterdayCloseEur != null && yesterdayCloseEur > 0 && priceEur.gt(0)
         ? priceEur.minus(yesterdayCloseEur).div(yesterdayCloseEur).times(100)

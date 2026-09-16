@@ -73,6 +73,52 @@ describe("simulateCapitalGain — prix de cession vide", () => {
   });
 });
 
+describe("simulateCapitalGain — date de cession vide", () => {
+  it("ne produit aucun chiffre quand la date est invalide (champ effacé)", () => {
+    const sim = simulateCapitalGain({
+      salePriceRaw: "650000",
+      purchasePriceEur: DEMO.purchasePriceEur,
+      purchaseDate: DEMO.purchaseDate,
+      saleDate: new Date(""),
+    });
+    expect(sim.status).toBe("MISSING_SALE_DATE");
+    expect(sim.result).toBeNull();
+  });
+
+  it("ne produit aucun chiffre quand la date est absente", () => {
+    const sim = simulateCapitalGain({
+      salePriceRaw: "650000",
+      purchasePriceEur: DEMO.purchasePriceEur,
+      purchaseDate: DEMO.purchaseDate,
+      saleDate: null as unknown as Date,
+    });
+    expect(sim.status).toBe("MISSING_SALE_DATE");
+    expect(sim.result).toBeNull();
+  });
+
+  it("signale l'acquisition manquante avant la date de cession manquante", () => {
+    expect(
+      simulateCapitalGain({
+        salePriceRaw: "650000",
+        purchasePriceEur: null,
+        purchaseDate: DEMO.purchaseDate,
+        saleDate: new Date(""),
+      }).status
+    ).toBe("MISSING_ACQUISITION");
+  });
+
+  it("signale le prix de cession manquant avant la date de cession manquante", () => {
+    expect(
+      simulateCapitalGain({
+        salePriceRaw: "",
+        purchasePriceEur: DEMO.purchasePriceEur,
+        purchaseDate: DEMO.purchaseDate,
+        saleDate: new Date(""),
+      }).status
+    ).toBe("MISSING_SALE_PRICE");
+  });
+});
+
 describe("simulateCapitalGain — non-régression à 650 000 €", () => {
   it("conserve la plus-value brute et l'impôt total au centime", () => {
     const sim = simulateCapitalGain({ salePriceRaw: "650000", ...DEMO });
