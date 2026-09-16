@@ -248,7 +248,14 @@ export function buildFiscalLines(
 
     lines.push({
       id: `envelope:${b.accountType}`,
-      kind: "ENVELOPE",
+      /*
+        L'enveloppe « IMMOBILIER » du journal ne porte que des loyers (SCPI,
+        biens en direct) : c'est un revenu foncier, pas une valeur mobilière.
+        La laisser en ENVELOPE la faisait apparaître dans la vue « Valeurs
+        mobilières » et disparaître de la vue « Immobilier ». L'identifiant
+        reste `envelope:` — le panneau retrouve le bucket par id, pas par kind.
+      */
+      kind: k === "IMMOBILIER" ? "RENTAL" : "ENVELOPE",
       label: b.label,
       regimeLabel: envelopeRegimeLabel(b.accountType),
       baseEur: inPfu ? base : null,
