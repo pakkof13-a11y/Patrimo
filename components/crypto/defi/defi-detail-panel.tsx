@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchJson } from "@/app/lib/api-client";
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
@@ -106,6 +107,10 @@ export function DefiDetailPanel({
     // Cf. `defi-panel.tsx` : exclure/clôturer une position change le total
     // crypto de l'en-tête, qui vit dans une autre requête.
     void qc.invalidateQueries({ queryKey: ["crypto-summary"] });
+    // Clôturer ou liquider écrit une sortie au journal : la vue patrimoniale
+    // change. Nommée ici plutôt que déléguée au seul `onChanged` du parent —
+    // la mutation ne dépend ainsi pas de ce que ce rappel fait ou oublie.
+    invalidatePortfolioView(qc);
     onChanged();
   };
 

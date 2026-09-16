@@ -9,6 +9,7 @@ import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { invalidateTradingView } from "@/components/trading/invalidate-trading-view";
 import { cn, formatCurrency } from "@/app/lib/utils";
 import {
   CRYPTO_EXCHANGES,
@@ -121,7 +122,12 @@ export function FuturesPanel({ className }: { className?: string }) {
     queryFn: () => fetchJson<FuturesResponse>("/api/crypto/futures"),
   });
 
-  const invalidate = () => void qc.invalidateQueries({ queryKey: ["crypto-futures"] });
+  /*
+    Pas seulement `crypto-futures` : la liste du sous-onglet Positions lit
+    `trading-bundle`, et sa requête reste montée pendant qu'on saisit ici —
+    sans invalidation, elle gardait la liste d'avant jusqu'au rechargement.
+  */
+  const invalidate = () => invalidateTradingView(qc);
 
   const create = useMutation({
     mutationFn: async () => {

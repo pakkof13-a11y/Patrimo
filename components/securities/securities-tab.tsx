@@ -613,7 +613,18 @@ export function SecuritiesTab({ className }: { className?: string }) {
       if (!res.ok) throw new Error(json?.error ?? "Rattachement impossible");
       return json;
     },
-    onSuccess: () => invalidate(),
+    /*
+      `invalidate()` seul laissait `portfolio-daily-nav`, `portfolio-history`
+      et `transactions` sur leur état d'avant le rattachement : une ligne
+      détachée du patrimoine (elle comptait déjà dans le total global) qui
+      rejoint un compte ne change pas la valeur totale, mais change ce que
+      chaque écran qui lit ces clés peut désormais dire d'elle — le rapport
+      fiscal du PEA, notamment, qui ne suit que les lignes rattachées.
+    */
+    onSuccess: () => {
+      invalidate();
+      invalidatePortfolioView(qc);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -647,7 +658,11 @@ export function SecuritiesTab({ className }: { className?: string }) {
           ? `${attached} ligne(s) rattachée(s)`
           : `${attached} ligne(s) sur ${total} rattachée(s)`
       );
+      // Même raison que `attachPosition` ci-dessus : un rattachement groupé
+      // change ce que le rapport fiscal et l'historique patrimonial peuvent
+      // dire de ces lignes, pas seulement leur compte d'affichage.
       invalidate();
+      invalidatePortfolioView(qc);
     },
     onError: (e: Error) => toast.error(e.message),
   });

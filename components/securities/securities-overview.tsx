@@ -26,6 +26,7 @@ import {
   computeTotals,
   isOverviewEmpty,
   num,
+  orphanEnvelopeMatch,
   planStatusNotice,
   positionWeightPct,
   splitByEnvelope,
@@ -493,7 +494,9 @@ export function SecuritiesOverview({
               <AccountCard
                 key={v.account.id}
                 view={v}
+                orphanMatch={orphanEnvelopeMatch(positions, v.account)}
                 onOpenPositions={onOpenPositions}
+                onManageAccounts={onManageAccounts}
               />
             ))}
           </div>
@@ -648,10 +651,16 @@ export function SecuritiesOverview({
 
 function AccountCard({
   view,
+  orphanMatch,
   onOpenPositions,
+  onManageAccounts,
 }: {
   view: AccountView;
+  /** Lignes orphelines de la même famille fiscale — voir `orphanEnvelopeMatch`. */
+  orphanMatch: ReturnType<typeof orphanEnvelopeMatch>;
   onOpenPositions?: (envelopeType: string) => void;
+  /** Ouvre la gestion des comptes — où vivent `attachAll` et `attachPosition`. */
+  onManageAccounts?: () => void;
 }) {
   const a = view.account;
   const cashNotice = cashAttributionNotice(a.cashAttribution);
@@ -779,9 +788,54 @@ function AccountCard({
       <div className="mt-[var(--space-4)] min-w-0 flex-1 px-[var(--pad-card)]">
         <h4 className="text-label">Principales positions</h4>
         {view.positions.length === 0 ? (
-          <p className="text-meta mt-[var(--space-2)]">
-            Aucune position rattachée à ce compte.
-          </p>
+          orphanMatch.count > 0 ? (
+            /*
+              Pas « Aucune position rattachée » tout court : ce compte est
+              vide, mais des lignes de la même famille fiscale existent bel
+              et bien, non rattachées à aucun compte — l'onglet Comptes les
+              affiche déjà dans son bandeau (`securities-unattached-banner`)
+              avec le rattachement groupé. Cette carte n'a pas accès à ce
+              mécanisme (options de destination, mutation, invalidation) ;
+              elle renvoie vers lui plutôt que de le dupliquer, pour ne
+              jamais attacher quoi que ce soit elle-même.
+            */
+            <div
+              className="mt-[var(--space-2)]"
+              data-testid="securities-account-orphan-positions"
+            >
+              <p className="text-meta">
+                <span className="num text-[var(--foreground)]">
+                  {orphanMatch.count}
+                </span>{" "}
+                ligne(s){" "}
+                {orphanMatch.family
+                  ? securitiesEnvelopeLabel(orphanMatch.family)
+                  : ""}{" "}
+                pour{" "}
+                <span className="num text-[var(--foreground)]">
+                  {formatCurrency(orphanMatch.valueEur, "EUR")}
+                </span>{" "}
+                ne sont rattachées à aucun compte et n&apos;apparaissent pas
+                ici.
+              </p>
+              {onManageAccounts && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-[var(--space-2)]"
+                  onClick={onManageAccounts}
+                  data-testid="securities-account-attach-orphans"
+                >
+                  Rattacher ces positions
+                </Button>
+              )}
+            </div>
+          ) : (
+            <p className="text-meta mt-[var(--space-2)]">
+              Aucune position rattachée à ce compte.
+            </p>
+          )
         ) : (
           <table className="mt-[var(--space-2)] w-full text-[length:var(--text-sm)]">
             <thead>

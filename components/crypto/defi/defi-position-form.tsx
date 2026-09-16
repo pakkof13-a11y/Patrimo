@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchJson } from "@/app/lib/api-client";
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FormWizard, type WizardStep } from "@/components/ui/form-wizard";
@@ -316,9 +317,19 @@ export function DefiPositionForm({
     },
     onSuccess: () => {
       toast.success("Position enregistrée");
+      // La liste du panneau DeFi lit cette clé — c'est elle qui fait apparaître
+      // la ligne sans rechargement.
       void qc.invalidateQueries({ queryKey: ["crypto-defi-portfolio"] });
-      void qc.invalidateQueries({ queryKey: ["holdings"] });
-      void qc.invalidateQueries({ queryKey: ["portfolio"] });
+      /*
+        Une position créée ici écrit une opération au journal : le patrimoine
+        change. Les clés étaient énumérées à la main — `["portfolio"]` n'est lue
+        par aucune requête (retirée) et `transactions` / `portfolio-daily-nav` /
+        `portfolio-history` manquaient, laissant le journal et la courbe sur
+        leur état d'avant. `holdings` est couvert par la liste commune.
+      */
+      invalidatePortfolioView(qc);
+      // Total de la poche crypto (comptant + DeFi + NFT), propre au module.
+      void qc.invalidateQueries({ queryKey: ["crypto-summary"] });
       onCreated();
     },
     onError: (e: Error) => toast.error(e.message),

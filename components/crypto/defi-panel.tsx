@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus, RefreshCw, ShieldAlert, Upload } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import { PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -97,12 +98,22 @@ export function DefiPanel({ className }: { className?: string }) {
   );
 
   const invalidate = () => {
+    // La liste de ce panneau : c'est cette requête-là que `DefiTable` lit.
     void qc.invalidateQueries({ queryKey: ["crypto-defi-portfolio"] });
-    void qc.invalidateQueries({ queryKey: ["holdings"] });
-    void qc.invalidateQueries({ queryKey: ["portfolio"] });
+    /*
+      Créer ou clôturer une position DeFi écrit au journal (`createTransaction`
+      dans `defi-manual-service`) : c'est le patrimoine lui-même qui change, pas
+      seulement ce panneau. La liste était énumérée ici à la main — d'où
+      `["portfolio"]`, une clé qu'aucune requête ne lit (retirée), et l'oubli de
+      `transactions`, `portfolio-daily-nav`, `portfolio-history` : le journal et
+      la courbe gardaient leur état d'avant l'ajout. `holdings` est dans la
+      liste commune, il n'a plus à être nommé ici.
+    */
+    invalidatePortfolioView(qc);
     // « Total poche crypto » de l'en-tête : agrège comptant + DeFi + NFT, il
     // bouge donc dès qu'une position DeFi change. Sans cette invalidation il
-    // restait figé jusqu'au rechargement.
+    // restait figé jusqu'au rechargement. Propre au module crypto, il ne fait
+    // pas partie de la vue patrimoniale commune.
     void qc.invalidateQueries({ queryKey: ["crypto-summary"] });
   };
 

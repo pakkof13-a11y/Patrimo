@@ -7,7 +7,9 @@ import { fetchJson } from "@/app/lib/api-client";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn, formatCurrency } from "@/app/lib/utils";
+import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import {
   INDIRECT_VEHICLES,
   TAX_TRANSPARENCY,
@@ -71,6 +73,17 @@ export function IndirectPanel({ className }: { className?: string }) {
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  /*
+    « Retirer » supprimait au clic, sans rien demander. La suppression
+    efface l'actif et ses écritures au journal — pas seulement une fiche :
+    la position disparaît du patrimoine. Même dialogue que la suppression
+    d'une position Trading, et le message dit ce qui part.
+  */
+  const [retraitCible, setRetraitCible] = useState<{
+    assetId: string;
+    label: string;
+    vehicle: string;
+  } | null>(null);
 
   const q = useQuery({
     queryKey: ["real-estate-indirect"],
@@ -86,8 +99,13 @@ export function IndirectPanel({ className }: { className?: string }) {
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["real-estate-indirect"] });
     void qc.invalidateQueries({ queryKey: ["real-estate-tax"] });
-    // Le véhicule pèse au patrimoine : la vue Positions doit suivre.
-    void qc.invalidateQueries({ queryKey: ["holdings"] });
+    /*
+      Souscrire ou retirer un véhicule écrit au journal : la position, la
+      série NAV et le journal changent, pas seulement `holdings`. Une seule
+      fonction connaît ces clés — la nommer une par une ici est ce qui avait
+      laissé la courbe figée ailleurs.
+    */
+    invalidatePortfolioView(qc);
   };
 
   const create = useMutation({
@@ -477,8 +495,17 @@ export function IndirectPanel({ className }: { className?: string }) {
                         <button
                           type="button"
                           className="text-[10px] text-[var(--muted-foreground)] underline hover:text-[var(--danger)]"
-                          onClick={() => remove.mutate(r.assetId)}
+                          onClick={() =>
+                            setRetraitCible({
+                              assetId: r.assetId,
+                              label: r.label,
+                              vehicle:
+                                INDIRECT_VEHICLES[r.vehicle as IndirectVehicle] ??
+                                r.vehicle,
+                            })
+                          }
                           disabled={remove.isPending}
+                          data-testid={`re-ind-remove-${r.assetId}`}
                         >
                           Retirer
                         </button>
@@ -497,6 +524,25 @@ export function IndirectPanel({ className }: { className?: string }) {
           </p>
         </>
       )}
+
+      <ConfirmDialog
+        open={retraitCible != null}
+        danger
+        title="Retirer le véhicule"
+        message={
+          retraitCible
+            ? `${retraitCible.label} · ${retraitCible.vehicle}. La position et ses écritures au journal sont retirées du patrimoine ; cette action est définitive.`
+            : ""
+        }
+        confirmLabel="Retirer"
+        testId="re-ind-delete-confirm"
+        onCancel={() => setRetraitCible(null)}
+        onConfirm={() => {
+          const cible = retraitCible;
+          setRetraitCible(null);
+          if (cible) remove.mutate(cible.assetId);
+        }}
+      />
     </section>
   );
 }

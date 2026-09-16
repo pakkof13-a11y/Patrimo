@@ -49,6 +49,7 @@ import {
   type RegulatedProductType,
 } from "@/app/lib/cash/regulated-products";
 import { InstitutionList, ProductTable } from "@/components/banks/bank-lists";
+import { visibleBankProducts, visibleBankTotal } from "@/components/banks/visible-total";
 import {
   BankDetailPanel,
   type BankPanelTarget,
@@ -382,13 +383,20 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
   const nbInstitutions = institutionCount(products);
   const accountCount = products.length;
 
-  const visibleProducts = useMemo(() => {
-    if (view === "checking") return products.filter((p) => p.kind === "CHECKING");
-    if (view === "savings") return products.filter((p) => p.kind === "SAVINGS");
-    if (view === "term")
-      return products.filter((p) => p.kind === "TERM_DEPOSIT");
-    return products;
-  }, [products, view]);
+  const visibleProducts = useMemo(
+    () => visibleBankProducts(products, view),
+    [products, view]
+  );
+  /*
+    Le total de la barre des sous-onglets suit la vue : sous « Comptes », un
+    « Total » à 67 181,47 € au-dessus d'une liste qui somme 11 610,75 €
+    contredisait la liste. Même filtre que `visibleProducts`, même addition
+    que l'en-tête (voir `visible-total.ts`).
+  */
+  const totalVisible = useMemo(
+    () => visibleBankTotal(products, view),
+    [products, view]
+  );
 
   const confirmDelete = () => {
     if (!deleteTarget || deleteTarget.kind === "INSTITUTION") return;
@@ -602,14 +610,9 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
                 </button>
               ))}
             </div>
-            <span className="text-meta num">
-              Total{" "}
-              {formatCurrency(
-                String(
-                  institutions.reduce((acc, i) => acc + i.totalBase, 0)
-                ),
-                baseCurrency
-              )}
+            <span className="text-meta num" data-testid="banks-visible-total">
+              {totalVisible.label}{" "}
+              {formatCurrency(String(totalVisible.totalBase), baseCurrency)}
             </span>
           </div>
 
