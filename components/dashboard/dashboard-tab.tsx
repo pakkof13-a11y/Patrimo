@@ -677,6 +677,15 @@ export function DashboardTab({
     const cryptoNow = num(
       displayAllocation?.byClass?.find((s) => s.name === "CRYPTO")?.value ?? 0
     );
+    /*
+      UNKNOWN ≠ ZERO (P2) : `cryptoNow` reste un nombre pour la formule de
+      repli de Titres ci-dessous (`listedNow - cryptoNow`), qui accepte déjà
+      une imprécision documentée. La tuile Crypto, elle, ne doit pas afficher
+      0 € tant que `displayAllocation` (et donc `byClass`) n'est pas encore
+      arrivé — c'est la même distinction que `netWorth`/`grossAssets` plus
+      bas : `summary ? num(...) : null`.
+    */
+    const cryptoLoaded = displayAllocation !== undefined;
     const listedNow = num(
       summary?.totalListedBase ??
         summary?.totalListedEur ??
@@ -698,9 +707,9 @@ export function DashboardTab({
       sur-endetté doit pouvoir afficher une tuile négative plutôt que de se
       faire passer pour un net nul.
     */
-    const realEstateNetNow = num(
-      summary?.totalRealEstateNetBase ?? summary?.totalRealEstateNetEur
-    );
+    const realEstateNetNow = summary
+      ? num(summary.totalRealEstateNetBase ?? summary.totalRealEstateNetEur)
+      : undefined;
 
     return [
       {
@@ -733,10 +742,15 @@ export function DashboardTab({
         key: "titres",
         label: "Titres",
         help: "PEA + CTO (actions, obligations). Hors crypto et hors CFD.",
-        value: num(
-          titresCroisementNow ??
-            Math.max(0, listedNow - cryptoNow)
-        ),
+        // UNKNOWN ≠ ZERO : sans croisement ni `summary`, le repli
+        // `listed − crypto` vaudrait 0 − 0 et se lirait comme un portefeuille
+        // vide pendant l'hydratation.
+        value:
+          titresCroisementNow != null
+            ? num(titresCroisementNow)
+            : summary
+              ? Math.max(0, listedNow - cryptoNow)
+              : undefined,
         spark: titres,
         sparkDates: titresSerie?.dates ?? sparkDates,
         changeAbs: seriesChangeAbs(titres),
@@ -746,7 +760,9 @@ export function DashboardTab({
       {
         key: "crypto",
         label: "Crypto",
-        value: cryptoNow,
+        // UNKNOWN ≠ ZERO : `displayAllocation` pas encore arrivé (F5) ne
+        // doit pas se lire comme une position crypto nulle.
+        value: cryptoLoaded ? cryptoNow : undefined,
         spark: crypto,
         sparkDates,
         changeAbs: seriesChangeAbs(crypto),
@@ -756,7 +772,13 @@ export function DashboardTab({
       {
         key: "life-insurance",
         label: "Assurance-vie",
-        value: num(summary?.totalLifeInsuranceBase ?? summary?.totalLifeInsuranceEur),
+        // UNKNOWN ≠ ZERO : `summary` pas encore arrivé (F5) ne doit pas se
+        // lire comme un encours nul — même garde que `netWorth`/`grossAssets`
+        // plus bas, appliquée à toute tuile nourrie par `summary` pour que la
+        // rangée n'affiche pas « — » ici et « 0,00 € » à côté au même instant.
+        value: summary
+          ? num(summary.totalLifeInsuranceBase ?? summary.totalLifeInsuranceEur)
+          : undefined,
         spark: av,
         sparkDates,
         changeAbs: seriesChangeAbs(av),
@@ -777,7 +799,9 @@ export function DashboardTab({
       {
         key: "alternatives",
         label: "Alternatifs",
-        value: num(summary?.totalAlternativesBase ?? summary?.totalAlternativesEur),
+        value: summary
+          ? num(summary.totalAlternativesBase ?? summary.totalAlternativesEur)
+          : undefined,
         spark: alternatives,
         sparkDates,
         changeAbs: seriesChangeAbs(alternatives),
@@ -787,9 +811,9 @@ export function DashboardTab({
       {
         key: "employee-savings",
         label: "Épargne salariale",
-        value: num(
-          summary?.totalEmployeeSavingsBase ?? summary?.totalEmployeeSavingsEur
-        ),
+        value: summary
+          ? num(summary.totalEmployeeSavingsBase ?? summary.totalEmployeeSavingsEur)
+          : undefined,
         spark: employeeSavings,
         sparkDates,
         changeAbs: seriesChangeAbs(employeeSavings),
@@ -815,7 +839,7 @@ export function DashboardTab({
         help:
           "Comptes courants, livrets et épargne bancaire, plus le cash non " +
           "investi des comptes d’investissement (PEA, CTO, AV). Pas les titres.",
-        value: num(summary?.totalCashBase ?? summary?.totalCashEur),
+        value: summary ? num(summary.totalCashBase ?? summary.totalCashEur) : undefined,
         spark: cash,
         sparkDates,
         changeAbs: seriesChangeAbs(cash),
@@ -825,7 +849,9 @@ export function DashboardTab({
       {
         key: "liabilities",
         label: "Passifs",
-        value: num(summary?.totalLiabilitiesBase ?? summary?.totalLiabilitiesEur),
+        value: summary
+          ? num(summary.totalLiabilitiesBase ?? summary.totalLiabilitiesEur)
+          : undefined,
         spark: liabilities,
         sparkDates,
         /*
@@ -838,7 +864,7 @@ export function DashboardTab({
         tone: "negative",
       },
     ];
-  }, [summary, navWindowed, pnlMode, displayAllocation?.byClass, kpiPeriodLabel]);
+  }, [summary, navWindowed, pnlMode, displayAllocation, kpiPeriodLabel]);
 
   const netWorth = summary
     ? num(summary.netWorthBase ?? summary.netWorthEur)
