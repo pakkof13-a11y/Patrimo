@@ -170,26 +170,40 @@ async function collectAll(opts: {
   const clock = opts.clock ?? Date.now;
   const budget = { deadlineAt: clock() + WORK_BUDGET_MS, clock };
 
-  // Le repli d'entretien court ne connaît pas le budget : il porte donc les
-  // champs de progression à leur valeur neutre — rien de tronqué, rien à
-  // relancer. Le type commun évite qu'une branche muette passe pour complète.
+  /*
+    Le repli d'entretien court partage désormais le même budget que le chemin
+    profond (D28) : il appelait `collectDailyClosesForAssets` sans échéance,
+    et sur un compte à N actions périmées un 504 au milieu perdait le
+    rapport — les lignes écrites restaient, mais rien ne disait où reprendre.
+    Le collecteur s'arrête entre deux actifs et dit combien il en reste ; la
+    progression reflète cette vérité au lieu d'une valeur neutre.
+  */
   let daily: BackfillDailyClosesReport;
   if (opts.shortMode) {
     const r = await collectDailyClosesForAssets({
       ...(opts.userId ? { userId: opts.userId } : {}),
       lookbackDays: SHORT_MODE_LOOKBACK_DAYS,
+      budget,
     });
+    const shortStoppedForBudget = r.stoppedBy === "budget";
     daily = {
       ...r,
       assetsFromFirstTx: 0,
-      assetsRemaining: 0,
-      stoppedForBudget: false,
+      assetsRemaining: r.remainingAssets ?? 0,
+      stoppedForBudget: shortStoppedForBudget,
     };
     const progress = {
-      needsMoreRuns: false,
-      remainingAssets: 0,
-      stoppedBy: "completion" as const,
+      needsMoreRuns: shortStoppedForBudget,
+      remainingAssets: r.remainingAssets ?? 0,
+      stoppedBy: shortStoppedForBudget
+        ? ("budget" as const)
+        : ("completion" as const),
     };
+    if (shortStoppedForBudget) {
+      // Même politique que le chemin profond : un intraday lancé sans budget
+      // reprendrait le 504 qu'on vient de fuir.
+      return { progress, daily, intraday: null, intradaySkipped: "budget" as const };
+    }
     const intraday = await collectIntradayBars({
       interval: opts.interval,
       ...(opts.userId ? { userId: opts.userId } : {}),
