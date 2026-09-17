@@ -33,7 +33,7 @@ import {
 } from "@/app/lib/life-insurance/fiscal";
 import { CouponSchedulePanel } from "@/components/life-insurance/coupon-schedule-panel";
 import { RedemptionSimulatorPanel } from "@/components/life-insurance/redemption-simulator-panel";
-import { cn, formatCurrency, formatDate } from "@/app/lib/utils";
+import { cn, formatCurrency, formatDate, MONTANT_INCONNU } from "@/app/lib/utils";
 
 /* ─── Types API ─────────────────────────────────────────────────────── */
 
@@ -1120,7 +1120,15 @@ export function AssuranceVieManagement() {
           </Field>
           <p className="text-meta" data-testid="av-total-outstanding">
             Encours tous contrats :{" "}
-            {formatCurrency(totalOutstandingEur, "EUR")}
+            {/*
+              `totalOutstandingEur` vaut "0" tant que la route n'a pas répondu
+              (repli `?? 0`, conservé pour le simulateur) : à l'ouverture sur
+              `#gestion`, la ligne disait « 0,00 € » avant la réponse. UNKNOWN
+              ≠ ZERO — inconnu se rend « — € », zéro réel reste « 0,00 € ».
+            */}
+            {policiesQ.data
+              ? formatCurrency(totalOutstandingEur, "EUR")
+              : MONTANT_INCONNU}
           </p>
           {totalLegacyOutstandingEur > 0 && (
             /*

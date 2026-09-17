@@ -26,6 +26,7 @@ import { CHART_COLORS } from "@/app/lib/types/ui";
 import { DefiPanel } from "@/components/crypto/defi-panel";
 import { NftPanel } from "@/components/crypto/nft-panel";
 import { SpotOverviewPage } from "@/components/crypto/spot-overview-page";
+import { etatPoche } from "@/components/crypto/spot-known";
 import { AltDashKpi, pnlTone } from "@/components/tabs/alternatives-shell";
 import type { CoinCardHolding } from "@/app/lib/crypto/coin-cards";
 
@@ -193,6 +194,14 @@ export function CryptosTab({
   );
 
   const hasAny = total !== 0 || pieData.length > 0;
+  /*
+    Trois états ici aussi, pour la carte de droite : « Démarrer la poche
+    crypto » et ses fiches de prise en main ne s'adressent qu'à un compte
+    réellement vide. Tant que le résumé n'a pas répondu, `hasAny` est faux
+    faute de données, et l'écran proposait de démarrer une poche qui vaut
+    208 937,70 €.
+  */
+  const poche = etatPoche(donneesConnues, hasAny);
 
   return (
     <div className={cn("space-y-5", className)} data-testid="cryptos-tab">
@@ -214,7 +223,14 @@ export function CryptosTab({
             className="text-xl font-semibold tabular-nums tracking-tight text-teal-700 dark:text-teal-300"
             data-testid="crypto-total"
           >
-            {formatCurrency(String(total), baseCurrency)}
+            {/*
+              Même règle que les quatre tuiles juste en dessous : le total de
+              la poche restait, lui, en `?? 0` et affichait « 0,00 € » au
+              premier rendu comme après un résumé en échec.
+            */}
+            {donneesConnues
+              ? formatCurrency(String(total), baseCurrency)
+              : MONTANT_INCONNU}
           </div>
           {variation != null && (
             <div
@@ -342,7 +358,17 @@ export function CryptosTab({
               <p className="mb-3 text-[11px] text-[var(--muted-foreground)]">
                 Poids du comptant, de la DeFi et des NFTs
               </p>
-              {pieData.length === 0 ? (
+              {/*
+                Un camembert vide ne veut pas dire « rien à répartir » tant que
+                le résumé n'a pas répondu : l'invitation à « enregistrer un
+                achat » s'adressait à des poches déjà garnies.
+              */}
+              {!donneesConnues ? (
+                <div
+                  className="min-h-[14rem] w-full animate-pulse rounded-[var(--radius-md)] bg-[var(--muted)]/40"
+                  aria-busy="true"
+                />
+              ) : pieData.length === 0 ? (
                 <div className="flex min-h-[14rem] flex-col items-center justify-center gap-2 px-2 py-6 text-center">
                   <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--muted)] text-[var(--muted-foreground)]">
                     <PieChartIcon className="h-4 w-4" />
@@ -385,15 +411,24 @@ export function CryptosTab({
 
             <div className="card p-4">
               <h2 className="mb-0.5 text-sm font-semibold">
-                {hasAny ? "Détail par module" : "Démarrer la poche crypto"}
+                {poche === "vide" ? "Démarrer la poche crypto" : "Détail par module"}
               </h2>
               <p className="mb-3 text-[11px] leading-relaxed text-[var(--muted-foreground)]">
-                {hasAny
-                  ? "Total intégré au patrimoine net global. Cliquez une carte ou un module pour explorer."
-                  : "Choisissez la nature d’actif à consulter. Les positions viennent du journal — saisissez une opération ou synchronisez un wallet."}
+                {poche === "vide"
+                  ? "Choisissez la nature d’actif à consulter. Les positions viennent du journal — saisissez une opération ou synchronisez un wallet."
+                  : "Total intégré au patrimoine net global. Cliquez une carte ou un module pour explorer."}
               </p>
 
-              {hasAny ? (
+              {poche === "inconnu" ? (
+                <div className="space-y-2" aria-busy="true">
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="h-8 animate-pulse rounded-[var(--radius-md)] bg-[var(--muted)]/40"
+                    />
+                  ))}
+                </div>
+              ) : poche === "garni" ? (
                 <ul className="space-y-2 text-sm">
                   {pieData.map((s) => {
                     const pct =

@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
 import { fetchJson } from "@/app/lib/api-client";
+import { useHoldingsQuery } from "@/app/hooks/use-portfolio-queries";
+import { compteActifs } from "@/components/crypto/spot-known";
 import { SpotKpiCards } from "@/components/crypto/spot-kpi-cards";
 import { SpotEvolutionCard } from "@/components/crypto/spot-evolution-card";
 import { SpotAllocationCard } from "@/components/crypto/spot-allocation-card";
@@ -86,6 +88,22 @@ export function SpotOverviewPage({
 }) {
   const [range, setRange] = useState<SpotRange>("ytd");
 
+  /*
+    Les positions arrivent en prop, mais leur *état* manque.
+
+    `holdings` vaut `[]` aussi bien parce que le portefeuille est vide que
+    parce que `/api/holdings` n'a pas encore répondu — et au premier rendu
+    c'est toujours le second cas. L'écran annonçait donc 0,00 €, « 0 actif »
+    et « Aucune crypto en comptant » avant d'afficher la vraie poche.
+
+    On relit ici la requête d'origine, pas pour ses données mais pour savoir
+    si elle a répondu. Même clé (`["holdings", baseCurrency]`), donc la même
+    entrée de cache que le shell : aucune requête supplémentaire, aucune
+    seconde source de vérité — les montants continuent de venir de `holdings`.
+  */
+  const holdingsQuery = useHoldingsQuery(baseCurrency);
+  const positionsConnues = holdingsQuery.data !== undefined;
+
   const history = useQuery({
     queryKey: ["crypto-spot-history", range],
     queryFn: () =>
@@ -155,7 +173,7 @@ export function SpotOverviewPage({
               className="num rounded-full border border-[var(--border)] px-[var(--space-2)] py-[0.1rem] text-[length:var(--text-xs)] text-[var(--foreground-secondary)]"
               data-testid="spot-asset-count"
             >
-              {totals.assetCount} actif{totals.assetCount > 1 ? "s" : ""}
+              {compteActifs(positionsConnues, totals.assetCount)}
             </span>
           </div>
           <p className="text-meta mt-[var(--space-1)] max-w-[46rem]">
@@ -183,6 +201,7 @@ export function SpotOverviewPage({
         change24hPct={change24h.pct}
         change24hCoveragePct={change24h.coveragePct}
         spark={spark}
+        known={positionsConnues}
       />
 
       <div className="mt-[var(--gap-card)] grid min-w-0 gap-[var(--gap-card)] xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
@@ -195,11 +214,18 @@ export function SpotOverviewPage({
               onRangeChange={setRange}
               coveragePct={history.data?.coveragePct ?? 0}
               hasAssets={cards.length > 0}
-              loading={history.isLoading}
+              /*
+                Sans positions connues, « il n'y a encore aucune position en
+                comptant à suivre » serait une conclusion tirée d'une absence :
+                le squelette tient jusqu'à ce que les deux requêtes aient
+                répondu.
+              */
+              loading={history.isLoading || !positionsConnues}
             />
             <SpotAllocationCard
               slices={allocation}
               logoBySymbol={logoBySymbol}
+              loading={!positionsConnues}
             />
           </div>
 
@@ -207,6 +233,7 @@ export function SpotOverviewPage({
             rows={rows}
             baseCurrency={baseCurrency}
             onOpenAsset={onOpenPositions ? () => onOpenPositions() : undefined}
+            loading={!positionsConnues}
           />
         </div>
 
@@ -218,6 +245,9 @@ export function SpotOverviewPage({
           worst={extremes.worst}
           stable={stable}
           operations={operations}
+          known={positionsConnues}
+          /* Autre requête, même règle : pas de « aucune opération » avant réponse. */
+          operationsKnown={operationsQuery.data !== undefined}
           onAddOperation={onAddOperation}
           onOpenPositions={onOpenPositions}
           onOpenPlatforms={onOpenPlatforms}

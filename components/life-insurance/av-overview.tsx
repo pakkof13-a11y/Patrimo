@@ -24,7 +24,7 @@ import type { PerfRange } from "@/app/lib/life-insurance/performance";
 import type { LifeInsurancePerformance } from "@/app/lib/life-insurance/performance-service";
 import type { TaxHousehold } from "@/app/lib/life-insurance/fiscal";
 import type { TxRow } from "@/app/lib/types/ui";
-import { formatCurrency, cn } from "@/app/lib/utils";
+import { formatCurrency, cn, MONTANT_INCONNU } from "@/app/lib/utils";
 
 /**
  * Vue d'ensemble de l'assurance-vie.
@@ -399,6 +399,25 @@ export function AvOverview({ className }: { className?: string }) {
   const taxHousehold: TaxHousehold = policiesQ.data?.taxHousehold ?? "SINGLE";
   const matureCount = views.filter((v) => v.isMature === true).length;
   const loading = policiesQ.isLoading || supportsQ.isLoading;
+  /*
+    UNKNOWN ≠ ZERO. `computeTotals([], [])` rend des zéros légitimes pour un
+    compte sans contrat — mais `policies` et `supports` valent aussi `[]` tant
+    que leurs requêtes n'ont pas répondu, et l'écran écrivait alors « 0,00 € »
+    et « 0 contrat · 0 assureur » avant la réponse, puis la vraie valeur. Les
+    tuiles KPI tenaient déjà un squelette via `loading` ; le sous-titre, la
+    barre segmentée, l'en-tête de la liste, la colonne de contexte et les vues
+    secondaires dérivent des mêmes totaux et doivent tenir la même règle.
+
+    `loading` ne couvre que le premier chargement : après un échec il retombe
+    à faux et les totaux restent à zéro. D'où une seconde garde sur la
+    présence des réponses — inconnu se rend « — », zéro réel reste zéro, et
+    un échec se dit au lieu de passer pour « Aucun contrat déclaré ».
+  */
+  const encoursConnu = policiesQ.data != null && supportsQ.data != null;
+  const relancerEncours = () => {
+    void policiesQ.refetch();
+    void supportsQ.refetch();
+  };
 
   /** Assureurs distincts — deux contrats chez le même n'en font qu'un. */
   const insurerCount = useMemo(
@@ -447,7 +466,11 @@ export function AvOverview({ className }: { className?: string }) {
         <KpiBandTile
           testId="av-kpi-value"
           label="Valeur totale"
-          value={formatCurrency(totals.totalValueEur, "EUR")}
+          value={
+            encoursConnu
+              ? formatCurrency(totals.totalValueEur, "EUR")
+              : MONTANT_INCONNU
+          }
           secondary="Encours au marché"
           loading={loading}
         >
@@ -465,16 +488,31 @@ export function AvOverview({ className }: { className?: string }) {
         <KpiBandTile
           testId="av-kpi-premiums"
           label="Versements nets"
-          value={formatCurrency(totals.totalPremiumsEur, "EUR")}
+          value={
+            encoursConnu
+              ? formatCurrency(totals.totalPremiumsEur, "EUR")
+              : MONTANT_INCONNU
+          }
           secondary="Primes déclarées"
           loading={loading}
         />
         <KpiBandTile
           testId="av-kpi-gain"
           label="Gain latent"
-          value={formatCurrency(totals.unrealizedGainEur, "EUR")}
+          value={
+            encoursConnu
+              ? formatCurrency(totals.unrealizedGainEur, "EUR")
+              : MONTANT_INCONNU
+          }
           secondary="Supports au marché"
-          tone={totals.unrealizedGainEur >= 0 ? "positive" : "negative"}
+          // Pas de tonalité sur un gain inconnu : ce serait affirmer un signe.
+          tone={
+            encoursConnu
+              ? totals.unrealizedGainEur >= 0
+                ? "positive"
+                : "negative"
+              : undefined
+          }
           loading={loading}
         />
         <KpiBandTile
@@ -494,15 +532,23 @@ export function AvOverview({ className }: { className?: string }) {
         <KpiBandTile
           testId="av-kpi-contracts"
           label="Contrats"
-          value={String(totals.contractCount)}
-          secondary={`${totals.supportCount} support${totals.supportCount > 1 ? "s" : ""}`}
+          value={encoursConnu ? String(totals.contractCount) : "—"}
+          secondary={
+            encoursConnu
+              ? `${totals.supportCount} support${totals.supportCount > 1 ? "s" : ""}`
+              : "—"
+          }
           loading={loading}
         />
         <KpiBandTile
           testId="av-kpi-insurers"
           label="Assureurs"
-          value={String(insurerCount)}
-          secondary={`${matureCount} contrat${matureCount > 1 ? "s" : ""} +8 ans`}
+          value={encoursConnu ? String(insurerCount) : "—"}
+          secondary={
+            encoursConnu
+              ? `${matureCount} contrat${matureCount > 1 ? "s" : ""} +8 ans`
+              : "—"
+          }
           loading={loading}
         />
       </div>
@@ -529,8 +575,9 @@ export function AvOverview({ className }: { className?: string }) {
           ))}
         </div>
         <span className="text-meta">
-          {views.length} contrat{views.length > 1 ? "s" : ""} ·{" "}
-          {insurerCount} assureur{insurerCount > 1 ? "s" : ""}
+          {encoursConnu
+            ? `${views.length} contrat${views.length > 1 ? "s" : ""} · ${insurerCount} assureur${insurerCount > 1 ? "s" : ""}`
+            : "—"}
         </span>
       </div>
 
@@ -549,7 +596,13 @@ export function AvOverview({ className }: { className?: string }) {
             />
           )}
 
-          {view === "allocation" && (
+          {/*
+            Les vues secondaires attendent des totaux connus : sans cela,
+            « Encours réparti : 0,00 € », « 0,00 € au total » et « Aucun
+            versement déclaré » s'affirmeraient sur rien. La liste juste
+            dessous porte déjà le squelette ou l'échec.
+          */}
+          {view === "allocation" && encoursConnu && (
             <AllocationView
               totals={totals}
               allocation={allocation}
@@ -557,11 +610,11 @@ export function AvOverview({ className }: { className?: string }) {
             />
           )}
 
-          {view === "premiums" && (
+          {view === "premiums" && encoursConnu && (
             <PremiumsView totals={totals} views={views} />
           )}
 
-          {view === "fees" && <FeesView views={views} />}
+          {view === "fees" && encoursConnu && <FeesView views={views} />}
 
           {/*
             La liste des contrats reste sous chaque vue.
@@ -575,7 +628,9 @@ export function AvOverview({ className }: { className?: string }) {
             <div className="flex flex-wrap items-baseline justify-between gap-[var(--space-2)] border-b border-[var(--border)] px-[var(--space-4)] py-[var(--space-3)]">
               <h2 className="text-label">Contrats</h2>
               <span className="text-meta num">
-                {formatCurrency(totals.totalValueEur, "EUR")}
+                {encoursConnu
+                  ? formatCurrency(totals.totalValueEur, "EUR")
+                  : MONTANT_INCONNU}
               </span>
             </div>
 
@@ -584,6 +639,21 @@ export function AvOverview({ className }: { className?: string }) {
                 <Skeleton className="h-12 w-full" />
                 <Skeleton className="h-12 w-full" />
               </div>
+            ) : !encoursConnu ? (
+              // Échec : ni squelette ni « Aucun contrat déclaré » — le dire.
+              <p
+                className="p-[var(--space-4)] text-[length:var(--text-xs)] text-[var(--danger)]"
+                data-testid="av-contracts-error"
+              >
+                Impossible de charger les contrats —{" "}
+                <button
+                  type="button"
+                  className="font-medium underline underline-offset-2"
+                  onClick={relancerEncours}
+                >
+                  réessayer
+                </button>
+              </p>
             ) : views.length === 0 ? (
               <div className="p-[var(--space-4)]" data-testid="av-no-contract">
                 <p className="text-[length:var(--text-sm)] text-[var(--foreground-secondary)]">
@@ -622,6 +692,7 @@ export function AvOverview({ className }: { className?: string }) {
           {view === "overview" && (
             <AvContextColumn
               totals={totals}
+              totalsKnown={encoursConnu}
               taxHousehold={taxHousehold}
               matureCount={matureCount}
               operations={transactions}

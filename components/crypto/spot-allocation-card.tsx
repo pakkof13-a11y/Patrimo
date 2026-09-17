@@ -35,11 +35,19 @@ function toneOf(slice: AllocationSlice, rank: number): string {
 export function SpotAllocationCard({
   slices,
   logoBySymbol,
+  loading,
   className,
 }: {
   slices: AllocationSlice[];
   /** Logos des coins, pour que la légende reste reconnaissable d'un coup d'œil. */
   logoBySymbol?: Record<string, string | null | undefined>;
+  /**
+   * Positions pas encore lues.
+   *
+   * Sans cette distinction, l'anneau vide de l'attente disait « dès la première
+   * position en comptant » à un portefeuille qui en compte cinq.
+   */
+  loading?: boolean;
   className?: string;
 }) {
   const drawable = slices.filter((s) => s.valueEur > 0);
@@ -57,7 +65,12 @@ export function SpotAllocationCard({
       </div>
 
       <div className="panel-body flex flex-1 items-center">
-        {drawable.length === 0 ? (
+        {loading ? (
+          <div
+            className="h-[9.5rem] w-full animate-pulse rounded-[var(--radius-md)] bg-[var(--surface-raised)]"
+            aria-busy="true"
+          />
+        ) : drawable.length === 0 ? (
           <p className="text-meta w-full py-[var(--space-8)] text-center">
             La répartition apparaîtra dès la première position en comptant.
           </p>

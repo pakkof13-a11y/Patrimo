@@ -304,6 +304,41 @@ export function resolveEvolutionPanelBodyState(input: {
 }
 
 /**
+ * Ce que le sous-titre nomme comme périmètre — indépendamment de Versus.
+ *
+ * Extraite pour une raison précise : avant ce correctif, la branche de repli
+ * était gardée par `useDailyNavCurve` (`canUseDailyNavSeries && chartKind
+ * !== "percent"`), qui devient `false` dès que Versus bascule sur « Indice »
+ * avec un overlay valide — Versus ne fait alors que rebaser la même NAV en
+ * pourcentage, `activeNavScope` compris (voir `vsIndexSeries` : la branche
+ * `dailyNavToVsIndexLevels(vsNavWindowed, activeNavScope)` s'applique
+ * identiquement, Versus actif ou non). Le sous-titre retombait pourtant sur
+ * « Actifs bruts » — le nom du seul **autre** pipeline, celui qui trace
+ * `history` figée sur `scope = "gross"` quand `getDailyNav` n'a pas assez de
+ * points. Deux pipelines distincts partageaient une seule condition, fausse
+ * pour l'un des deux. Le bon signal est `canUseDailyNavSeries` seul : il ne
+ * regarde que la disponibilité de la NAV quotidienne, jamais le mode
+ * d'affichage (valeur € ou % vs indice) que Versus choisit par-dessus.
+ */
+export function resolveEvolutionScopeSubtitle(input: {
+  account: string | null;
+  accountLabel: string | null;
+  envelope: "PEA" | "CTO" | null;
+  canUseDailyNavSeries: boolean;
+  navScopeLabel: string;
+}): string {
+  if (input.account && input.envelope) {
+    return `Compte : ${input.accountLabel ?? input.account} · ${input.envelope}`;
+  }
+  if (input.account) {
+    return `Compte : ${input.accountLabel ?? input.account}`;
+  }
+  return input.canUseDailyNavSeries
+    ? `${input.navScopeLabel} — NAV quotidienne`
+    : "Actifs bruts";
+}
+
+/**
  * Module Évolution du portefeuille — refonte « premium » orientée
  * investissement, à deux réglages seulement : la période et la comparaison
  * (« Versus »). Le vs-indice (T-4.E) rebase NAV et clôtures à 100 à
@@ -920,13 +955,15 @@ export function PortfolioEvolutionPanel({
         title="Évolution du portefeuille"
         subtitle={
           <>
-            {account && envelope
-              ? `Compte : ${ACCOUNT_CHOICES.find((c) => c.id === account)?.label ?? account} · ${envelope}`
-              : account
-              ? `Compte : ${ACCOUNT_CHOICES.find((c) => c.id === account)?.label ?? account}`
-              : useDailyNavCurve
-              ? `${HERO_NAV_SCOPE_LABEL[activeNavScope]} — NAV quotidienne`
-              : "Actifs bruts"}
+            {resolveEvolutionScopeSubtitle({
+              account,
+              accountLabel: account
+                ? ACCOUNT_CHOICES.find((c) => c.id === account)?.label ?? account
+                : null,
+              envelope,
+              canUseDailyNavSeries,
+              navScopeLabel: HERO_NAV_SCOPE_LABEL[activeNavScope],
+            })}
             <span className="mx-1 opacity-40">·</span>
             {evolutionIntervalLabel(interval)}
             <span className="sr-only"> ({evolutionIntervalHint(interval)})</span>

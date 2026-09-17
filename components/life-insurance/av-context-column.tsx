@@ -2,7 +2,7 @@
 
 import { Shield } from "lucide-react";
 import { PendingControl } from "@/components/ui/pending-backend";
-import { cn, formatCurrency, formatDate } from "@/app/lib/utils";
+import { cn, formatCurrency, formatDate, MONTANT_INCONNU } from "@/app/lib/utils";
 import type { OverviewTotals } from "@/app/lib/life-insurance/overview";
 import {
   annualAllowanceEur,
@@ -70,6 +70,7 @@ function Line({
 
 export function AvContextColumn({
   totals,
+  totalsKnown,
   taxHousehold,
   matureCount,
   operations,
@@ -77,6 +78,12 @@ export function AvContextColumn({
   className,
 }: {
   totals: OverviewTotals;
+  /**
+   * Faux tant que contrats et supports n'ont pas répondu (ou ont échoué) :
+   * `totals` porte alors des zéros qui ne décrivent rien. UNKNOWN ≠ ZERO —
+   * la colonne écrit « — » plutôt que « 0,00 € » et « 0 contrat ».
+   */
+  totalsKnown: boolean;
   taxHousehold: TaxHousehold;
   /** Contrats ayant dépassé huit ans. */
   matureCount: number;
@@ -87,6 +94,9 @@ export function AvContextColumn({
   const premiums = totals.totalPremiumsEur;
   const thresholdUsedPct =
     premiums > 0 ? (premiums / PFU_OUTSTANDING_THRESHOLD_EUR) * 100 : 0;
+  const montant = (n: number) =>
+    totalsKnown ? formatCurrency(n, "EUR") : MONTANT_INCONNU;
+  const compte = (n: number) => (totalsKnown ? `${n}` : "—");
 
   return (
     <aside
@@ -95,19 +105,23 @@ export function AvContextColumn({
       aria-label="Contexte de l'assurance-vie"
     >
       <Panel title="Synthèse" testId="av-context-summary">
-        <Line
-          label="Encours"
-          value={formatCurrency(totals.totalValueEur, "EUR")}
-        />
-        <Line
-          label="Contrats"
-          value={`${totals.contractCount}`}
-        />
-        <Line label="Supports" value={`${totals.supportCount}`} />
+        <Line label="Encours" value={montant(totals.totalValueEur)} />
+        <Line label="Contrats" value={compte(totals.contractCount)} />
+        <Line label="Supports" value={compte(totals.supportCount)} />
         <Line
           label="Plus-value latente"
-          value={`${totals.unrealizedGainEur >= 0 ? "+" : "−"}${formatCurrency(Math.abs(totals.unrealizedGainEur), "EUR")}`}
-          tone={totals.unrealizedGainEur >= 0 ? "positive" : "negative"}
+          value={
+            totalsKnown
+              ? `${totals.unrealizedGainEur >= 0 ? "+" : "−"}${formatCurrency(Math.abs(totals.unrealizedGainEur), "EUR")}`
+              : MONTANT_INCONNU
+          }
+          tone={
+            totalsKnown
+              ? totals.unrealizedGainEur >= 0
+                ? "positive"
+                : "negative"
+              : undefined
+          }
         />
         {totals.unattachedSupportCount > 0 && (
           <p
@@ -140,10 +154,11 @@ export function AvContextColumn({
         />
         <Line
           label="Contrats de plus de 8 ans"
-          value={`${matureCount} / ${totals.contractCount}`}
+          value={totalsKnown ? `${matureCount} / ${totals.contractCount}` : "—"}
         />
 
-        {premiums > 0 ? (
+        {/* Totaux inconnus : ni jauge ni « Aucun versement déclaré ». */}
+        {!totalsKnown ? null : premiums > 0 ? (
           <div className="mt-[var(--space-3)]">
             <div className="text-meta mb-[var(--space-1)] flex justify-between">
               <span>Versements / seuil des 150 000 €</span>

@@ -1,7 +1,7 @@
 "use client";
 
 import { Sparkline } from "@/components/ui/sparkline";
-import { cn, formatCurrency } from "@/app/lib/utils";
+import { cn, formatCurrency, MONTANT_INCONNU } from "@/app/lib/utils";
 import type { SpotTotals } from "@/app/lib/crypto/spot-overview";
 
 /**
@@ -124,6 +124,7 @@ export function SpotKpiCards({
   change24hPct,
   change24hCoveragePct,
   spark,
+  known = true,
   className,
 }: {
   totals: SpotTotals;
@@ -132,6 +133,15 @@ export function SpotKpiCards({
   change24hCoveragePct: number;
   /** Valeur de la poche jour par jour — la courbe de la première tuile. */
   spark?: number[];
+  /**
+   * Les positions ont-elles été lues ?
+   *
+   * `totals` est calculé sur un tableau vide tant que `/api/holdings` n'a pas
+   * répondu : les quatre tuiles valaient alors 0,00 € et « 0 actif · 0
+   * plateforme », ce qui se lit comme un portefeuille vide. À faux, elles
+   * affichent « — » — la même distinction que les tuiles du tableau de bord.
+   */
+  known?: boolean;
   className?: string;
 }) {
   const hasSpark = Boolean(spark && spark.length >= 2);
@@ -151,18 +161,29 @@ export function SpotKpiCards({
       <KpiCard
         testId="spotkpi-value"
         label="Valeur totale"
-        value={formatCurrency(totals.totalValueEur, "EUR")}
+        value={known ? formatCurrency(totals.totalValueEur, "EUR") : MONTANT_INCONNU}
         tertiary={
-          totals.btcEquivalent != null
+          known && totals.btcEquivalent != null
             ? formatBtc(totals.btcEquivalent)
             : undefined
         }
-        secondary={`${totals.assetCount} actif${totals.assetCount > 1 ? "s" : ""} · ${totals.venueCount} plateforme${totals.venueCount > 1 ? "s" : ""}`}
+        secondary={
+          known
+            ? `${totals.assetCount} actif${totals.assetCount > 1 ? "s" : ""} · ${totals.venueCount} plateforme${totals.venueCount > 1 ? "s" : ""}`
+            : undefined
+        }
         spark={spark}
         sparkStroke="var(--chart-gold)"
         reserveSpark={hasSpark}
       />
 
+      {/*
+        Cette tuile n'a pas besoin de `known` : sans positions lues, la
+        variation vaut déjà `null` et la tuile affiche « — ». Aucun zéro
+        inventé n'en sort — seule la raison affichée reste approximative
+        pendant le chargement, et `e2e/crypto-spot.spec.ts` exige qu'un « — »
+        soit toujours accompagné de son explication.
+      */}
       <KpiCard
         testId="spotkpi-change24h"
         label="Performance (24 h)"
@@ -181,14 +202,18 @@ export function SpotKpiCards({
       <KpiCard
         testId="spotkpi-pnl"
         label="Gains non réalisés"
-        value={formatSignedCurrency(totals.unrealizedPnlEur)}
+        value={
+          known ? formatSignedCurrency(totals.unrealizedPnlEur) : MONTANT_INCONNU
+        }
         secondary={
-          totals.unrealizedPnlPct != null
-            ? formatSignedPct(totals.unrealizedPnlPct)
-            : "Sans prix de revient, aucun pourcentage"
+          !known
+            ? undefined
+            : totals.unrealizedPnlPct != null
+              ? formatSignedPct(totals.unrealizedPnlPct)
+              : "Sans prix de revient, aucun pourcentage"
         }
         tone={
-          totals.unrealizedPnlPct == null
+          !known || totals.unrealizedPnlPct == null
             ? "muted"
             : pnlUp
               ? "positive"
@@ -200,7 +225,7 @@ export function SpotKpiCards({
       <KpiCard
         testId="spotkpi-invested"
         label="Investi total"
-        value={formatCurrency(totals.costBasisEur, "EUR")}
+        value={known ? formatCurrency(totals.costBasisEur, "EUR") : MONTANT_INCONNU}
         secondary="Depuis le début, frais inclus"
         reserveSpark={hasSpark}
       />
