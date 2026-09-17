@@ -38,7 +38,9 @@ import { prisma } from "../prisma";
 import { parisDayKey } from "../dates/paris";
 import { getAssetPriceHistory } from "./price-history";
 import {
+  assetsNeedingFetch,
   collectDailyCloses,
+  type DailyCloseBudget,
   type DailyCloseCollectionReport,
 } from "./daily-closes";
 import type {
@@ -229,14 +231,33 @@ export const DAILY_LOOKBACK_DAYS = 365;
  * `collectDailyCloses` est la fonction que `getDailyCloses` utilise déjà. Le
  * cron ne fait qu'appeler la même chose avec le même périmètre d'actifs que
  * l'intraday — relu à chaque passage, jamais figé.
+ *
+ * ## Budget, par utilisateur puis par actif
+ *
+ * `collectDailyCloses` n'avait aucun budget : sur un compte à N actions
+ * périmées, un 504 au milieu du passage laissait un rapport perdu — les
+ * lignes déjà écrites restaient (idempotent), mais rien ne disait combien il
+ * en restait ni où reprendre. Le budget optionnel se propage ici comme dans
+ * `backfill-closes.ts` : dès qu'il est épuisé, les comptes suivants ne
+ * lancent plus aucun appel fournisseur — seul un décompte borné à la base
+ * (`assetsNeedingFetch`) dit combien il leur reste, sans qu'aucun curseur
+ * n'ait à circuler entre deux appels.
  */
 export async function collectDailyClosesForAssets(opts?: {
   userId?: string;
   now?: Date;
   lookbackDays?: number;
+  /** Échéance d'exécution — voir `DailyCloseBudget`. Absent = comportement historique. */
+  budget?: DailyCloseBudget;
+  /** Actifs à ne jamais interroger (ex. classés « pas de fournisseur » par un audit). */
+  excludeAssetIds?: string[];
 }): Promise<DailyCloseCollectionReport & { day: string }> {
   const now = opts?.now ?? new Date();
   const lookback = opts?.lookbackDays ?? DAILY_LOOKBACK_DAYS;
+  const clock = opts?.budget?.clock ?? Date.now;
+  const deadlineAt = opts?.budget?.deadlineAt;
+  const outOfBudget = () => deadlineAt !== undefined && clock() >= deadlineAt;
+  const excludeAssetIds = opts?.excludeAssetIds;
 
   const assets = await listCollectableAssets(opts?.userId);
   /*
@@ -266,15 +287,50 @@ export async function collectDailyClosesForAssets(opts?: {
     assetsFilled: 0,
     closesWritten: 0,
     errors: [],
+    remainingAssets: 0,
+    stoppedBy: "done",
+    skipped: [],
   };
 
   for (const [userId, assetIds] of byUser) {
-    const r = await collectDailyCloses({ userId, assetIds, fromDay, toDay, now });
+    const uniqueForUser = [...new Set(assetIds)].filter(
+      (id) => !excludeAssetIds?.includes(id)
+    );
+
+    if (outOfBudget()) {
+      /*
+        Budget déjà consommé par un compte précédent : plus aucun appel
+        fournisseur, mais le décompte de ce qui reste est exact — c'est le
+        prix d'un rapport qui dit vraiment combien il reste à faire, sans
+        curseur à faire circuler.
+      */
+      total.assetsConsidered += uniqueForUser.length;
+      const stale = await assetsNeedingFetch(uniqueForUser, toDay, now);
+      total.assetsStale += stale.length;
+      total.remainingAssets = (total.remainingAssets ?? 0) + stale.length;
+      total.stoppedBy = "budget";
+      continue;
+    }
+
+    const r = await collectDailyCloses({
+      userId,
+      assetIds,
+      fromDay,
+      toDay,
+      now,
+      ...(opts?.budget ? { budget: opts.budget } : {}),
+      ...(excludeAssetIds ? { excludeAssetIds } : {}),
+    });
     total.assetsConsidered += r.assetsConsidered;
     total.assetsStale += r.assetsStale;
     total.assetsFilled += r.assetsFilled;
     total.closesWritten += r.closesWritten;
     total.errors.push(...r.errors);
+    total.skipped!.push(...(r.skipped ?? []));
+    if (r.stoppedBy === "budget") {
+      total.stoppedBy = "budget";
+      total.remainingAssets = (total.remainingAssets ?? 0) + (r.remainingAssets ?? 0);
+    }
   }
 
   return { ...total, day: toDay };

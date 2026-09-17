@@ -246,20 +246,32 @@ async function writeDailyCloses(
   }
 }
 
-/** Exécute `worker` sur `items` avec une concurrence bornée. */
+/**
+ * Exécute `worker` sur `items` avec une concurrence bornée, et rend le nombre
+ * d'éléments réellement démarrés.
+ *
+ * `shouldStop` est consulté **avant** de prendre un élément de plus — jamais
+ * pendant. Un actif pris va toujours au bout de son écriture (`fillDailyCloses`
+ * ne s'interrompt pas en cours de série) : à budget épuisé, la frontière tombe
+ * entre deux actifs, jamais au milieu d'un actif. Même contrat que
+ * `backfill-closes.ts::mapWithConcurrency`, dont c'est le patron.
+ */
 async function mapWithConcurrency<T>(
   items: T[],
   limit: number,
-  worker: (item: T) => Promise<void>
-): Promise<void> {
+  worker: (item: T) => Promise<void>,
+  shouldStop?: () => boolean
+): Promise<number> {
   let cursor = 0;
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (cursor < items.length) {
+      if (shouldStop?.()) return;
       const item = items[cursor++]!;
       await worker(item);
     }
   });
   await Promise.all(runners);
+  return cursor;
 }
 
 /**
@@ -282,6 +294,39 @@ export type DailyCloseCollectionReport = {
   /** Clôtures écrites ou rafraîchies. */
   closesWritten: number;
   errors: Array<{ assetId: string; message: string }>;
+  /**
+   * Actifs périmés reconnus mais jamais démarrés, faute de budget.
+   *
+   * Optionnel : absent (ou 0) tant qu'aucun budget n'est fourni — le
+   * comportement historique, sans budget, reste inchangé pour les appelants
+   * qui ne le lisent pas (`getDailyCloses`).
+   */
+  remainingAssets?: number;
+  /**
+   * Pourquoi le passage s'est arrêté.
+   *
+   * - `"done"` : tous les actifs périmés ont été traités (budget suffisant,
+   *   ou aucun budget fourni).
+   * - `"budget"` : l'échéance a coupé la prise de nouveaux actifs entre deux
+   *   d'entre eux — jamais au milieu d'un actif.
+   * - `"errors"` : réservé à un futur coupe-circuit (ex. trop d'échecs
+   *   fournisseur consécutifs). Non atteint aujourd'hui : un refus
+   *   fournisseur reste dans `errors[]` et n'interrompt jamais le passage.
+   */
+  stoppedBy?: "done" | "budget" | "errors";
+  /** Actifs explicitement exclus (`excludeAssetIds`) — jamais interrogés, jamais en erreur. */
+  skipped?: Array<{ assetId: string; reason: "exclu" }>;
+};
+
+/**
+ * Budget d'exécution optionnel, même contrat que `BackfillBudget`
+ * (`backfill-closes.ts`) : une échéance absolue sur une horloge injectable,
+ * pour partager un budget entre plusieurs traitements sans qu'aucun test
+ * n'ait à dormir.
+ */
+export type DailyCloseBudget = {
+  deadlineAt: number;
+  clock?: () => number;
 };
 
 /**
@@ -313,15 +358,32 @@ export async function collectDailyCloses(opts: {
   fromDay: DayKey;
   toDay: DayKey;
   now?: Date;
+  /** Échéance d'exécution — voir `DailyCloseBudget`. Absent = comportement historique. */
+  budget?: DailyCloseBudget;
+  /**
+   * Actifs à ne jamais interroger (ex. classés « pas de fournisseur » par un
+   * audit). Ils sortent du périmètre sans jamais figurer dans `errors[]` : une
+   * exclusion assumée n'est pas un refus fournisseur.
+   */
+  excludeAssetIds?: string[];
 }): Promise<DailyCloseCollectionReport> {
   const now = opts.now ?? new Date();
-  const unique = [...new Set(opts.assetIds)].filter(Boolean);
+  const excluded = new Set(opts.excludeAssetIds ?? []);
+  const uniqueAll = [...new Set(opts.assetIds)].filter(Boolean);
+  const unique = uniqueAll.filter((id) => !excluded.has(id));
+  const skipped: Array<{ assetId: string; reason: "exclu" }> = uniqueAll
+    .filter((id) => excluded.has(id))
+    .map((assetId) => ({ assetId, reason: "exclu" as const }));
+
   const report: DailyCloseCollectionReport = {
     assetsConsidered: unique.length,
     assetsStale: 0,
     assetsFilled: 0,
     closesWritten: 0,
     errors: [],
+    remainingAssets: 0,
+    stoppedBy: "done",
+    skipped,
   };
   if (unique.length === 0) return report;
 
@@ -329,20 +391,42 @@ export async function collectDailyCloses(opts: {
   report.assetsStale = stale.length;
   if (stale.length === 0) return report;
 
+  const clock = opts.budget?.clock ?? Date.now;
+  const deadlineAt = opts.budget?.deadlineAt;
+  const outOfBudget = () => deadlineAt !== undefined && clock() >= deadlineAt;
+
+  // Budget déjà épuisé avant même de démarrer ce lot : aucun appel
+  // fournisseur, mais le décompte reste exact (borné à la base).
+  if (outOfBudget()) {
+    report.stoppedBy = "budget";
+    report.remainingAssets = stale.length;
+    return report;
+  }
+
   const from = new Date(`${opts.fromDay}T00:00:00Z`);
-  await mapWithConcurrency(stale, FETCH_CONCURRENCY, async (assetId) => {
-    try {
-      const written = await fillDailyCloses(opts.userId, assetId, from, now);
-      if (written > 0) {
-        report.assetsFilled++;
-        report.closesWritten += written;
+  const processed = await mapWithConcurrency(
+    stale,
+    FETCH_CONCURRENCY,
+    async (assetId) => {
+      try {
+        const written = await fillDailyCloses(opts.userId, assetId, from, now);
+        if (written > 0) {
+          report.assetsFilled++;
+          report.closesWritten += written;
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "échec fournisseur";
+        report.errors.push({ assetId, message });
+        console.error(`[daily-closes] remplissage impossible pour ${assetId}:`, err);
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "échec fournisseur";
-      report.errors.push({ assetId, message });
-      console.error(`[daily-closes] remplissage impossible pour ${assetId}:`, err);
-    }
-  });
+    },
+    outOfBudget
+  );
+
+  if (processed < stale.length) {
+    report.stoppedBy = "budget";
+    report.remainingAssets = stale.length - processed;
+  }
 
   return report;
 }
