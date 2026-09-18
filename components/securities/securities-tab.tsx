@@ -14,6 +14,7 @@ import {
 import { fetchJson } from "@/app/lib/api-client";
 import { invalidatePortfolioView } from "@/app/lib/ui/invalidate-portfolio";
 import { EmptyPlaceholder, PanelHeader } from "@/components/ui/panel";
+import { Field } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -795,13 +796,30 @@ export function SecuritiesTab({ className }: { className?: string }) {
               </select>
             </label>
 
-            <label className="text-meta block">
-              Courtier
+            <Field
+              label="Courtier"
+              htmlFor="securities-platform"
+              className="block"
+              /*
+                Le bouton Enregistrer est déjà `disabled` tant que
+                `form.platformId` est vide (aucun POST possible) — mais un
+                bouton grisé sans explication reproduit le silence de la PR
+                #70 : rien à l'écran ne dit pourquoi. L'erreur suit
+                exactement la même condition que le `disabled` du bouton,
+                jamais une autre — elle disparaît dès que le courtier est
+                choisi, avant toute tentative de soumission.
+              */
+              error={!form.platformId ? "Courtier requis" : undefined}
+            >
               <select
+                id="securities-platform"
                 className="input mt-1 w-full"
                 value={form.platformId}
                 onChange={(e) => set("platformId", e.target.value)}
                 data-testid="securities-platform"
+                aria-describedby={
+                  form.platformId ? undefined : "securities-platform-error"
+                }
               >
                 <option value="">— choisir —</option>
                 {(platformsQ.data?.platforms ?? []).map((p) => (
@@ -810,7 +828,7 @@ export function SecuritiesTab({ className }: { className?: string }) {
                   </option>
                 ))}
               </select>
-            </label>
+            </Field>
 
             <label className="text-meta block">
               Date d&apos;ouverture

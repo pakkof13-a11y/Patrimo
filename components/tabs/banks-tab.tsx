@@ -49,6 +49,7 @@ import {
   type RegulatedProductType,
 } from "@/app/lib/cash/regulated-products";
 import { InstitutionList, ProductTable } from "@/components/banks/bank-lists";
+import { resolveLoadState } from "@/components/banks/load-state";
 import { visibleBankProducts, visibleBankTotal } from "@/components/banks/visible-total";
 import {
   BankDetailPanel,
@@ -383,6 +384,26 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
   const nbInstitutions = institutionCount(products);
   const accountCount = products.length;
 
+  /*
+    Même règle que le bandeau de synthèse, pour ce qui dérive des trois listes.
+
+    `products` vaut `[]` tant que `banksQ`, `savingsQ` ou `termDepositsQ` n'a
+    pas répondu : la tuile « Établissements » affichait « 0 » / « 0 compte »
+    et la barre des sous-onglets « Total banques 0,00 € » au premier rendu,
+    puis la vraie valeur — la liste, elle, avait déjà son squelette. UNKNOWN ≠
+    ZERO : inconnu se rend squelette ou « — », un vrai zéro reste un zéro.
+    L'échec est le troisième état : `products` y reste `[]` sans plus rien en
+    attente, et « Aucun compte enregistré » y serait un mensonge.
+  */
+  const produitsEtat = resolveLoadState([banksQ, savingsQ, termDepositsQ]);
+  const produitsEnChargement = produitsEtat === "loading";
+  const produitsConnus = produitsEtat === "known";
+  const relancerProduits = () => {
+    void banksQ.refetch();
+    void savingsQ.refetch();
+    void termDepositsQ.refetch();
+  };
+
   const visibleProducts = useMemo(
     () => visibleBankProducts(products, view),
     [products, view]
@@ -562,8 +583,13 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
         />
         <KpiBandTile
           label="Établissements"
-          value={String(nbInstitutions)}
-          secondary={`${accountCount} compte${accountCount > 1 ? "s" : ""}`}
+          value={produitsConnus ? String(nbInstitutions) : "—"}
+          secondary={
+            produitsConnus
+              ? `${accountCount} compte${accountCount > 1 ? "s" : ""}`
+              : "—"
+          }
+          loading={produitsEnChargement}
         />
       </div>
 
@@ -612,16 +638,33 @@ export function BanksTab({ baseCurrency }: { baseCurrency: string }) {
             </div>
             <span className="text-meta num" data-testid="banks-visible-total">
               {totalVisible.label}{" "}
-              {formatCurrency(String(totalVisible.totalBase), baseCurrency)}
+              {produitsConnus
+                ? formatCurrency(String(totalVisible.totalBase), baseCurrency)
+                : MONTANT_INCONNU}
             </span>
           </div>
 
-          {banksQ.isPending || savingsQ.isPending || termDepositsQ.isPending ? (
+          {produitsEnChargement ? (
             <div className="space-y-[var(--space-2)] p-[var(--space-4)]">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
             </div>
+          ) : !produitsConnus ? (
+            // Échec : ni squelette ni « Aucun compte enregistré » — le dire.
+            <p
+              className="p-[var(--space-4)] text-[length:var(--text-xs)] text-[var(--danger)]"
+              data-testid="banks-products-error"
+            >
+              Impossible de charger les comptes —{" "}
+              <button
+                type="button"
+                className="font-medium underline underline-offset-2"
+                onClick={relancerProduits}
+              >
+                réessayer
+              </button>
+            </p>
           ) : view === "overview" ? (
             <InstitutionList
               institutions={institutions}

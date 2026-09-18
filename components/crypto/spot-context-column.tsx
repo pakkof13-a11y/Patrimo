@@ -8,7 +8,8 @@ import {
   Repeat,
   Wallet,
 } from "lucide-react";
-import { cn, formatCurrency, formatDate } from "@/app/lib/utils";
+import { cn, formatCurrency, formatDate, MONTANT_INCONNU } from "@/app/lib/utils";
+import { montantAffiche } from "@/components/crypto/spot-known";
 import type {
   AssetRow,
   SpotTotals,
@@ -118,6 +119,8 @@ export function SpotContextColumn({
   worst,
   stable,
   operations,
+  known = true,
+  operationsKnown = true,
   onAddOperation,
   onOpenPositions,
   onOpenPlatforms,
@@ -129,6 +132,14 @@ export function SpotContextColumn({
   worst: AssetRow | null;
   stable: StableSplit;
   operations: SpotOperation[];
+  /**
+   * Positions lues ? À faux, les montants valent zéro par défaut et la
+   * répartition stable/volatil paraît « vide » : la colonne dirait alors d'une
+   * poche garnie qu'elle n'a rien.
+   */
+  known?: boolean;
+  /** Idem pour les dernières opérations, qui viennent d'une autre requête. */
+  operationsKnown?: boolean;
   onAddOperation?: () => void;
   onOpenPositions?: () => void;
   onOpenPlatforms?: () => void;
@@ -145,7 +156,7 @@ export function SpotContextColumn({
       <Panel title="Aperçu rapide" testId="spot-context-overview">
         <Line
           label="Valeur totale"
-          value={formatCurrency(totals.totalValueEur, "EUR")}
+          value={montantAffiche(known, totals.totalValueEur)}
         />
         <Line
           label="Performance (24 h)"
@@ -160,8 +171,18 @@ export function SpotContextColumn({
         />
         <Line
           label="Gains non réalisés"
-          value={`${totals.unrealizedPnlEur >= 0 ? "+" : "−"}${formatCurrency(Math.abs(totals.unrealizedPnlEur), "EUR")}`}
-          tone={totals.unrealizedPnlEur >= 0 ? "positive" : "negative"}
+          value={
+            known
+              ? `${totals.unrealizedPnlEur >= 0 ? "+" : "−"}${formatCurrency(Math.abs(totals.unrealizedPnlEur), "EUR")}`
+              : MONTANT_INCONNU
+          }
+          tone={
+            !known
+              ? undefined
+              : totals.unrealizedPnlEur >= 0
+                ? "positive"
+                : "negative"
+          }
         />
 
         {/* Meilleure et moins bonne ligne du jour : le détail que la mesure
@@ -183,7 +204,12 @@ export function SpotContextColumn({
       </Panel>
 
       <Panel title="Stable et volatil" testId="spot-context-stable">
-        {stablePct == null ? (
+        {!known ? (
+          <div
+            className="h-[3.5rem] w-full animate-pulse rounded-[var(--radius-md)] bg-[var(--surface-raised)]"
+            aria-busy="true"
+          />
+        ) : stablePct == null ? (
           <p className="text-meta">
             La répartition apparaîtra dès la première position détenue.
           </p>
@@ -217,7 +243,12 @@ export function SpotContextColumn({
       </Panel>
 
       <Panel title="Dernières opérations" testId="spot-context-operations">
-        {operations.length === 0 ? (
+        {!operationsKnown ? (
+          <div
+            className="h-[3.5rem] w-full animate-pulse rounded-[var(--radius-md)] bg-[var(--surface-raised)]"
+            aria-busy="true"
+          />
+        ) : operations.length === 0 ? (
           <p className="text-meta">
             Aucune opération crypto enregistrée pour l&apos;instant.
           </p>
